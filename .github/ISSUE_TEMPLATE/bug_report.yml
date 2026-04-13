@@ -2,6 +2,20 @@ name: Bug Report
 description: Report a bug in career-ops
 labels: ["bug"]
 body:
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/santifer/career-ops/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues and this hasn't been reported yet
+          required: true
   - type: textarea
     id: description
     attributes:
@@ -22,12 +36,18 @@ body:
       label: Expected behavior
       description: What should have happened?
   - type: input
+    id: cli
+    attributes:
+      label: CLI tool
+      placeholder: "e.g., Claude Code, OpenCode, Codex"
+  - type: input
     id: os
     attributes:
-      label: OS
-      placeholder: "e.g., macOS 15, Ubuntu 24.04, Windows 11"
-  - type: markdown
+      label: OS and Node.js version
+      placeholder: "e.g., macOS 15 / Node 20.11"
+  - type: textarea
+    id: doctor
     attributes:
-      value: |
-        ---
-        Built by [santifer](https://santifer.io) — need direct help? [Open a discussion](https://github.com/santifer/career-ops/discussions) or reach out at [santifer.io](https://santifer.io).
+      label: Output of npm run doctor
+      description: Paste the output here (helps us diagnose setup issues)
+      render: shell

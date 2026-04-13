@@ -2,11 +2,25 @@ name: Feature Request
 description: Suggest a new feature or improvement
 labels: ["enhancement"]
 body:
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/santifer/career-ops/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched existing issues and this hasn't been requested yet
+          required: true
   - type: textarea
     id: problem
     attributes:
       label: Problem
-      description: What problem does this solve?
+      description: What problem does this solve? Why do you need this?
     validations:
       required: true
   - type: textarea
@@ -16,8 +30,18 @@ body:
       description: How would you like this to work?
     validations:
       required: true
-  - type: markdown
+  - type: dropdown
+    id: area
     attributes:
-      value: |
-        ---
-        Built by [santifer](https://santifer.io) — see the [architecture docs](docs/ARCHITECTURE.md) for how the system works.
+      label: Area
+      options:
+        - Evaluation / Scoring
+        - PDF Generation
+        - Portal Scanner
+        - Dashboard TUI
+        - Batch Processing
+        - Language / i18n
+        - Documentation
+        - Other
+    validations:
+      required: true

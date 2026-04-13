@@ -16,11 +16,12 @@ Si el input es una **URL** (no texto de JD pegado), seguir esta estrategia para 
 
 **Si el input es texto de JD** (no URL): usar directamente, sin necesidad de fetch.
 
-## Paso 1 — Evaluación A-F
-Ejecutar exactamente igual que el modo `oferta` (leer `modes/oferta.md` para todos los bloques A-F).
+## Paso 1 — Evaluación A-G
+Ejecutar exactamente igual que el modo `oferta` (leer `modes/oferta.md` para todos los bloques A-F + Block G Posting Legitimacy).
 
 ## Paso 2 — Guardar Report .md
 Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` (ver formato en `modes/oferta.md`).
+Include Block G in the saved report. Add `**Legitimacy:** {tier}` to the report header.
 
 ## Paso 3 — Generar PDF
 Ejecutar el pipeline completo de `pdf` (leer `modes/pdf.md`).
@@ -31,7 +32,7 @@ Si el score final es >= 4.5, generar borrador de respuestas para el formulario d
 
 1. **Extraer preguntas del formulario**: Usar Playwright para navegar al formulario y hacer snapshot. Si no se pueden extraer, usar las preguntas genéricas.
 2. **Generar respuestas** siguiendo el tono (ver abajo).
-3. **Guardar en el report** como sección `## G) Draft Application Answers`.
+3. **Guardar en el report** como sección `## H) Draft Application Answers`.
 
 ### Preguntas genéricas (usar si no se pueden extraer del formulario)
 

@@ -2,7 +2,7 @@
 
 Eres un worker de evaluación de ofertas de empleo for the candidate (read name from config/profile.yml). Recibes una oferta (URL + JD text) y produces:
 
-1. Evaluación completa A-F (report .md)
+1. Evaluación completa A-G (report .md)
 2. PDF personalizado ATS-optimizado
 3. Línea de tracker para merge posterior
 
@@ -47,7 +47,7 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 2. Si el archivo está vacío o no existe, intenta obtener el JD desde `{{URL}}` con WebFetch
 3. Si ambos fallan, reporta error y termina
 
-### Paso 2 — Evaluación A-F
+### Paso 2 — Evaluación A-G
 
 Read `cv.md`. Ejecuta TODOS los bloques:
 
@@ -138,6 +138,22 @@ Top 5 cambios al CV + Top 5 cambios a LinkedIn.
 - 1 case study recomendado (cuál proyecto presentar y cómo)
 - Preguntas red-flag y cómo responderlas
 
+#### Bloque G — Posting Legitimacy
+
+Analyze posting signals to assess whether this is a real, active opening.
+
+**Batch mode limitations:** Playwright is not available, so posting freshness signals (exact days posted, apply button state) cannot be directly verified. Mark these as "unverified (batch mode)."
+
+**What IS available in batch mode:**
+1. **Description quality analysis** -- Full JD text is available. Analyze specificity, requirements realism, salary transparency, boilerplate ratio.
+2. **Company hiring signals** -- WebSearch queries for layoff/freeze news (combine with Block D comp research).
+3. **Reposting detection** -- Read `data/scan-history.tsv` to check for prior appearances.
+4. **Role market context** -- Qualitative assessment from JD content.
+
+**Output format:** Same as interactive mode (Assessment tier + Signals table + Context Notes), but with a note that posting freshness is unverified.
+
+**Assessment:** Apply the same three tiers (High Confidence / Proceed with Caution / Suspicious), weighting available signals more heavily. If insufficient signals are available to make a determination, default to "Proceed with Caution" with a note about limited data.
+
 #### Score Global
 
 | Dimensión | Score |
@@ -166,6 +182,7 @@ Donde `{company-slug}` es el nombre de empresa en lowercase, sin espacios, con g
 **Fecha:** {{DATE}}
 **Arquetipo:** {detectado}
 **Score:** {X/5}
+**Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **URL:** {URL de la oferta original}
 **PDF:** career-ops/output/cv-candidate-{company-slug}-{{DATE}}.pdf
 **Batch ID:** {{ID}}
@@ -188,6 +205,9 @@ Donde `{company-slug}` es el nombre de empresa en lowercase, sin espacios, con g
 (contenido completo)
 
 ## F) Plan de Entrevistas
+(contenido completo)
+
+## G) Posting Legitimacy
 (contenido completo)
 
 ---
@@ -314,6 +334,7 @@ Al terminar, imprime por stdout un resumen JSON para que el orquestador lo parse
   "company": "{empresa}",
   "role": "{rol}",
   "score": {score_num},
+  "legitimacy": "{High Confidence|Proceed with Caution|Suspicious}",
   "pdf": "{ruta_pdf}",
   "report": "{ruta_report}",
   "error": null

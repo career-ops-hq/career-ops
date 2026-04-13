@@ -1,0 +1,33 @@
+name: Welcome
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-message: |
+            Welcome to career-ops, @${{ github.actor }}! Thanks for your first PR.
+
+            A few things to know:
+            - Tests will run automatically — check the status below
+            - Make sure you've linked a related issue (required for features)
+            - Read [CONTRIBUTING.md](https://github.com/santifer/career-ops/blob/main/CONTRIBUTING.md) if you haven't
+
+            We'll review your PR soon. Join our [Discord](https://discord.gg/8pRpHETxa4) if you have questions.
+          issue-message: |
+            Thanks for opening your first issue, @${{ github.actor }}! We'll take a look soon.
+
+            In the meantime:
+            - Check [SUPPORT.md](https://github.com/santifer/career-ops/blob/main/SUPPORT.md) for setup help
+            - Join our [Discord](https://discord.gg/8pRpHETxa4) for quick answers
