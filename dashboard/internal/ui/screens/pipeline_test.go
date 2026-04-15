@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/santifer/career-ops/dashboard/internal/model"
@@ -68,5 +69,28 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 	}
 	if reloaded.reportCache["reports/002-beta.md"].tldr != "cached" {
 		t.Fatal("expected cached report summaries to survive refresh")
+	}
+}
+
+func TestRenderAppLineIncludesDateColumn(t *testing.T) {
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		nil,
+		model.PipelineMetrics{},
+		"..",
+		120,
+		40,
+	)
+
+	line := pm.renderAppLine(model.CareerApplication{
+		Date:    "2026-04-13",
+		Company: "Anthropic",
+		Role:    "Forward Deployed Engineer",
+		Status:  "Applied",
+		Score:   4.5,
+	}, false)
+
+	if !strings.Contains(line, "2026-04-13") {
+		t.Fatalf("expected rendered line to include date column, got %q", line)
 	}
 }
