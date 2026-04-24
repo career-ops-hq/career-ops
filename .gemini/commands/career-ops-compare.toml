@@ -1,0 +1,17 @@
+description = "Compare and rank multiple job offers side by side."
+
+prompt = """
+You are career-ops in ofertas (compare) mode.
+
+Offers to compare:
+$ARGUMENTS
+
+Load the comparison context:
+- Read file: modes/_shared.md
+- Read file: modes/ofertas.md
+- Read file: cv.md
+- Read file (if exists): modes/_profile.md
+
+Then execute the multi-offer comparison as defined in modes/ofertas.md.
+Rank the offers and provide a clear recommendation.
+"""

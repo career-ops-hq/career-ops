@@ -1,0 +1,15 @@
+description = "Deep research mode: comprehensive company analysis including culture, funding, growth, and red flags."
+
+prompt = """
+You are career-ops in deep (company research) mode.
+
+Company to research:
+$ARGUMENTS
+
+Load the research context:
+- Read file: modes/deep.md
+- Read file (if exists): modes/_profile.md
+
+Then execute the deep research mode as defined in modes/deep.md.
+Provide a comprehensive company analysis.
+"""

@@ -9,7 +9,7 @@
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -19,6 +19,9 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const DRY_RUN = process.argv.includes('--dry-run');
+
+// Ensure required directories exist (fresh setup)
+mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 
 // Status advancement order (higher = more advanced in pipeline)
 // Aplicado > Rechazado because active application > terminal state
@@ -62,11 +65,34 @@ function normalizeRole(role) {
     .trim();
 }
 
+const ROLE_STOPWORDS = new Set([
+  'senior', 'junior', 'lead', 'staff', 'principal', 'head', 'chief',
+  'manager', 'director', 'associate', 'intern', 'contractor',
+  'remote', 'hybrid', 'onsite',
+  'engineer', 'engineering',
+]);
+
+const LOCATION_STOPWORDS = new Set([
+  'tokyo', 'japan', 'london', 'berlin', 'paris', 'singapore',
+  'york', 'francisco', 'angeles', 'seattle', 'austin', 'boston',
+  'chicago', 'denver', 'toronto', 'amsterdam', 'dublin', 'sydney',
+  'remote', 'global', 'emea', 'apac', 'latam',
+]);
+
 function roleMatch(a, b) {
-  const wordsA = normalizeRole(a).split(/\s+/).filter(w => w.length > 3);
-  const wordsB = normalizeRole(b).split(/\s+/).filter(w => w.length > 3);
-  const overlap = wordsA.filter(w => wordsB.some(wb => wb.includes(w) || w.includes(wb)));
-  return overlap.length >= 2;
+  const filterStopwords = (words) =>
+    words.filter(w => !ROLE_STOPWORDS.has(w) && !LOCATION_STOPWORDS.has(w));
+
+  const wordsA = filterStopwords(normalizeRole(a).split(/\s+/).filter(w => w.length > 2));
+  const wordsB = filterStopwords(normalizeRole(b).split(/\s+/).filter(w => w.length > 2));
+
+  if (wordsA.length === 0 || wordsB.length === 0) return false;
+
+  const overlap = wordsA.filter(w => wordsB.some(wb => wb === w));
+  const smaller = Math.min(wordsA.length, wordsB.length);
+  const ratio = overlap.length / smaller;
+
+  return overlap.length >= 2 && ratio >= 0.6;
 }
 
 function parseScore(s) {

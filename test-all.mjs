@@ -11,10 +11,10 @@
  *   node test-all.mjs --quick   # Skip dashboard build (faster)
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -28,8 +28,11 @@ function pass(msg) { console.log(`  ✅ ${msg}`); passed++; }
 function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
 function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
-function run(cmd, opts = {}) {
+function run(cmd, args = [], opts = {}) {
   try {
+    if (Array.isArray(args) && args.length > 0) {
+      return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    }
     return execSync(cmd, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
     return null;
@@ -47,7 +50,7 @@ console.log('1. Syntax checks');
 
 const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
 for (const f of mjsFiles) {
-  const result = run(`node --check ${f}`);
+  const result = run('node', ['--check', f]);
   if (result !== null) {
     pass(`${f} syntax OK`);
   } else {
@@ -69,7 +72,7 @@ const scripts = [
 ];
 
 for (const { name, allowFail } of scripts) {
-  const result = run(`node ${name} 2>&1`);
+  const result = run('node', name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
   if (result !== null) {
     pass(`${name} runs OK`);
   } else if (allowFail) {
@@ -79,10 +82,46 @@ for (const { name, allowFail } of scripts) {
   }
 }
 
-// ── 3. DASHBOARD BUILD ──────────────────────────────────────────
+// ── 3. LIVENESS CLASSIFICATION ──────────────────────────────────
+
+console.log('\n3. Liveness classification');
+
+try {
+  const { classifyLiveness } = await import(pathToFileURL(join(ROOT, 'liveness-core.mjs')).href);
+
+  const expiredChromeApply = classifyLiveness({
+    finalUrl: 'https://example.com/jobs/closed-role',
+    bodyText: 'Company Careers\nApply\nThe job you are looking for is no longer open.',
+    applyControls: [],
+  });
+  if (expiredChromeApply.result === 'expired') {
+    pass('Expired pages are not revived by nav/footer "Apply" text');
+  } else {
+    fail(`Expired page misclassified as ${expiredChromeApply.result}`);
+  }
+
+  const activeWorkdayPage = classifyLiveness({
+    finalUrl: 'https://example.workday.com/job/123',
+    bodyText: [
+      '663 JOBS FOUND',
+      'Senior AI Engineer',
+      'Join our applied AI team to ship production systems, partner with customers, and own delivery across evaluation, deployment, and reliability.',
+    ].join('\n'),
+    applyControls: ['Apply for this Job'],
+  });
+  if (activeWorkdayPage.result === 'active') {
+    pass('Visible apply controls still keep real job pages active');
+  } else {
+    fail(`Active job page misclassified as ${activeWorkdayPage.result}`);
+  }
+} catch (e) {
+  fail(`Liveness classification tests crashed: ${e.message}`);
+}
+
+// ── 4. DASHBOARD BUILD ──────────────────────────────────────────
 
 if (!QUICK) {
-  console.log('\n3. Dashboard build');
+  console.log('\n4. Dashboard build');
   const goBuild = run('cd dashboard && go build -o /tmp/career-dashboard-test . 2>&1');
   if (goBuild !== null) {
     pass('Dashboard compiles');
@@ -90,12 +129,12 @@ if (!QUICK) {
     fail('Dashboard build failed');
   }
 } else {
-  console.log('\n3. Dashboard build (skipped --quick)');
+  console.log('\n4. Dashboard build (skipped --quick)');
 }
 
-// ── 4. DATA CONTRACT ────────────────────────────────────────────
+// ── 5. DATA CONTRACT ────────────────────────────────────────────
 
-console.log('\n4. Data contract validation');
+console.log('\n5. Data contract validation');
 
 // Check system files exist
 const systemFiles = [
@@ -119,7 +158,7 @@ const userFiles = [
   'config/profile.yml', 'modes/_profile.md', 'portals.yml',
 ];
 for (const f of userFiles) {
-  const tracked = run(`git ls-files ${f}`);
+  const tracked = run('git', ['ls-files', f]);
   if (tracked === '') {
     pass(`User file gitignored: ${f}`);
   } else if (tracked === null) {
@@ -129,9 +168,9 @@ for (const f of userFiles) {
   }
 }
 
-// ── 5. PERSONAL DATA LEAK CHECK ─────────────────────────────────
+// ── 6. PERSONAL DATA LEAK CHECK ─────────────────────────────────
 
-console.log('\n5. Personal data leak check');
+console.log('\n6. Personal data leak check');
 
 const leakPatterns = [
   'Santiago', 'santifer.io', 'Santifer iRepair', 'Zinkee', 'ALMAS',
@@ -139,18 +178,35 @@ const leakPatterns = [
 ];
 
 const scanExtensions = ['md', 'yml', 'html', 'mjs', 'sh', 'go', 'json'];
-const excludeDirs = ['node_modules', '.git', 'dashboard/go.sum'];
-const allowedFiles = ['README.md', 'LICENSE', 'CITATION.cff', 'CONTRIBUTING.md',
-  'package.json', '.github/FUNDING.yml', 'CLAUDE.md', 'go.mod', 'test-all.mjs'];
+const allowedFiles = [
+  // English README + localized translations (all legitimately credit Santiago)
+  'README.md', 'README.es.md', 'README.ja.md', 'README.ko-KR.md',
+  'README.pt-BR.md', 'README.ru.md',
+  // Standard project files
+  'LICENSE', 'CITATION.cff', 'CONTRIBUTING.md',
+  'package.json', '.github/FUNDING.yml', 'CLAUDE.md', 'go.mod', 'test-all.mjs',
+  // Community / governance files (added in v1.3.0, all legitimately reference the maintainer)
+  'CODE_OF_CONDUCT.md', 'GOVERNANCE.md', 'SECURITY.md', 'SUPPORT.md',
+  '.github/SECURITY.md',
+  // Dashboard credit string
+  'dashboard/internal/ui/screens/pipeline.go',
+];
+
+// Build pathspec for git grep — only scan tracked files matching these
+// extensions. This is what `grep -rn` was trying to do, but git-aware:
+// untracked files (debate artifacts, AI tool scratch, local plans/) and
+// gitignored files can't trigger false positives because they were never
+// going to reach a commit anyway.
+const grepPathspec = scanExtensions.map(e => `'*.${e}'`).join(' ');
 
 let leakFound = false;
 for (const pattern of leakPatterns) {
   const result = run(
-    `grep -rn "${pattern}" --include="*.{${scanExtensions.join(',')}}" . 2>/dev/null | grep -v node_modules | grep -v ".git/" | grep -v go.sum`
+    `git grep -n "${pattern}" -- ${grepPathspec} 2>/dev/null`
   );
   if (result) {
     for (const line of result.split('\n')) {
-      const file = line.split(':')[0].replace('./', '');
+      const file = line.split(':')[0];
       if (allowedFiles.some(a => file.includes(a))) continue;
       if (file.includes('dashboard/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
@@ -162,12 +218,14 @@ if (!leakFound) {
   pass('No personal data leaks outside allowed files');
 }
 
-// ── 6. ABSOLUTE PATH CHECK ──────────────────────────────────────
+// ── 7. ABSOLUTE PATH CHECK ──────────────────────────────────────
 
-console.log('\n6. Absolute path check');
+console.log('\n7. Absolute path check');
 
+// Same git grep approach: only scans tracked files. Untracked AI tool
+// outputs, local debate artifacts, etc. can't false-positive here.
 const absPathResult = run(
-  `grep -rn "/Users/" --include="*.mjs" --include="*.sh" --include="*.md" --include="*.go" --include="*.yml" . 2>/dev/null | grep -v node_modules | grep -v ".git/" | grep -v README.md | grep -v LICENSE | grep -v go.sum | grep -v CLAUDE.md | grep -v test-all.mjs`
+  `git grep -n "/Users/" -- '*.mjs' '*.sh' '*.md' '*.go' '*.yml' 2>/dev/null | grep -v README.md | grep -v LICENSE | grep -v CLAUDE.md | grep -v test-all.mjs`
 );
 if (!absPathResult) {
   pass('No absolute paths in code files');
@@ -177,9 +235,9 @@ if (!absPathResult) {
   }
 }
 
-// ── 7. MODE FILE INTEGRITY ──────────────────────────────────────
+// ── 8. MODE FILE INTEGRITY ──────────────────────────────────────
 
-console.log('\n7. Mode file integrity');
+console.log('\n8. Mode file integrity');
 
 const expectedModes = [
   '_shared.md', '_profile.template.md', 'oferta.md', 'pdf.md', 'scan.md',
@@ -203,9 +261,9 @@ if (shared.includes('_profile.md')) {
   fail('_shared.md does NOT reference _profile.md');
 }
 
-// ── 8. CLAUDE.md INTEGRITY ──────────────────────────────────────
+// ── 9. CLAUDE.md INTEGRITY ──────────────────────────────────────
 
-console.log('\n8. CLAUDE.md integrity');
+console.log('\n9. CLAUDE.md integrity');
 
 const claude = readFile('CLAUDE.md');
 const requiredSections = [
@@ -222,9 +280,9 @@ for (const section of requiredSections) {
   }
 }
 
-// ── 9. VERSION FILE ─────────────────────────────────────────────
+// ── 10. VERSION FILE ─────────────────────────────────────────────
 
-console.log('\n9. Version file');
+console.log('\n10. Version file');
 
 if (fileExists('VERSION')) {
   const version = readFile('VERSION').trim();

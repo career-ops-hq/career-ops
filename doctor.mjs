@@ -187,6 +187,8 @@ async function main() {
     process.exit(1);
   } else {
     console.log('Result: All checks passed. You\'re ready to go! Run `claude` to start.');
+    console.log('');
+    console.log('Join the community: https://discord.gg/8pRpHETxa4');
     process.exit(0);
   }
 }

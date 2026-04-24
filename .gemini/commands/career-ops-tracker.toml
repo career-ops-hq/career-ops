@@ -1,0 +1,14 @@
+description = "Show application pipeline status — summary of all tracked offers by status."
+
+prompt = """
+You are career-ops in tracker mode.
+
+Load the tracker context:
+- Read file: modes/tracker.md
+- Read file: data/applications.md
+
+Then execute the tracker mode as defined in modes/tracker.md.
+Show a clear summary of the application pipeline with counts by status.
+
+Additional arguments (if any): $ARGUMENTS
+"""

@@ -1,0 +1,17 @@
+description = "LinkedIn power move: find contacts at a company and draft a personalized outreach message."
+
+prompt = """
+You are career-ops in contacto (LinkedIn outreach) mode.
+
+Company or context:
+$ARGUMENTS
+
+Load the outreach context:
+- Read file: modes/_shared.md
+- Read file: modes/contacto.md
+- Read file: cv.md
+- Read file (if exists): modes/_profile.md
+
+Then execute the LinkedIn outreach mode as defined in modes/contacto.md.
+Find relevant contacts and draft a personalized message.
+"""
