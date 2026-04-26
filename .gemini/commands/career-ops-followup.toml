@@ -1,0 +1,17 @@
+description = "Follow-up cadence tracker: flag overdue applications and generate follow-up message drafts."
+
+prompt = """
+You are career-ops in followup mode.
+
+Load the follow-up context:
+- Read file: modes/followup.md
+- Read file (if exists): data/applications.md
+- Read file (if exists): data/follow-ups.md
+
+You can also run: node followup-cadence.mjs
+
+Then execute the followup mode as defined in modes/followup.md.
+Flag overdue applications and generate polished follow-up message drafts.
+
+Additional context: $ARGUMENTS
+"""

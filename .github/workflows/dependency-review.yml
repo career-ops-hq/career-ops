@@ -15,6 +15,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Dependency Review
+        # TODO: remove continue-on-error once the Dependency graph is enabled in
+        # Settings > Security & Analysis (see #343). Until then, this is a temporary
+        # workaround to unblock PRs — note that fail-on-severity: high is still
+        # configured but will not block merges while continue-on-error is true.
+        continue-on-error: true
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high

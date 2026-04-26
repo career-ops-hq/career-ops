@@ -1,6 +1,6 @@
 # Career-Ops
 
-[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [繁體中文](README.zh-TW.md)
+[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
 
 <p align="center">
   <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Multi-Agent Job Search System" width="800"></a>
@@ -8,13 +8,14 @@
 
 <p align="center">
   <em>I spent months applying to jobs the hard way. So I engineered the system I wish I had.</em><br>
-  Companies use AI to filter candidates. <strong>I gave candidates AI to <em>choose</em> companies.</strong><br>
+  Companies use AI to filter candidates. <strong>I just gave candidates AI to <em>choose</em> companies.</strong><br>
   <em>Now it's open source.</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
   <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Gemini CLI">
   <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
@@ -29,6 +30,7 @@
   <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
   <img src="https://img.shields.io/badge/KO-white?style=flat" alt="KO">
   <img src="https://img.shields.io/badge/JA-red?style=flat" alt="JA">
+  <img src="https://img.shields.io/badge/ZH--CN-red?style=flat" alt="ZH-CN">
   <img src="https://img.shields.io/badge/ZH--TW-blue?style=flat" alt="ZH-TW">
 </p>
 
@@ -109,6 +111,52 @@ claude   # Open Claude Code in this directory
 > **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
 
 See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
+
+## Gemini CLI Integration
+
+Career-ops supports [Gemini CLI](https://github.com/google-gemini/gemini-cli) natively — the same way it supports Claude Code and OpenCode. All 15 slash commands are available, using the same `modes/*.md` evaluation logic.
+
+### Option A — Native Gemini CLI (Recommended)
+
+```bash
+# 1. Install Gemini CLI
+npm install -g @google/gemini-cli
+# or: npx @google/gemini-cli --version
+
+# 2. Authenticate (free — uses your Google account)
+gemini auth
+
+# 3. Run in the career-ops directory
+cd career-ops
+gemini
+
+# 4. Use slash commands just like Claude Code
+/career-ops "Senior AI Engineer at Anthropic..."
+/career-ops-evaluate --file ./jds/openai.txt
+/career-ops-scan
+/career-ops-pdf
+/career-ops-tracker
+```
+
+The `GEMINI.md` file is auto-loaded as context. All 15 commands are defined in `.gemini/commands/*.toml`.
+
+### Option B — Standalone API Script (No CLI install needed)
+
+```bash
+# 1. Get a free API key at https://aistudio.google.com/apikey
+cp .env.example .env
+# Edit .env → set GEMINI_API_KEY=your_key_here
+
+# 2. Install dependencies
+npm install
+
+# 3. Evaluate a job description
+node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
+node gemini-eval.mjs --file ./jds/my-job.txt
+npm run gemini:eval -- "JD text here"
+```
+
+> **Free tier:** Both options work without billing. Native CLI uses Google OAuth; the API script uses `gemini-2.0-flash` (15 RPM, 1M tokens/day free).
 
 ## Usage
 
@@ -236,8 +284,6 @@ I'm Santiago -- Head of Applied AI, former founder (built and sold a business th
 
 My portfolio and other open source projects → [santifer.io](https://santifer.io)
 
-☕ [Buy me a coffee](https://buymeacoffee.com/santifer) if career-ops helped your job search.
-
 ## Star History
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
@@ -278,4 +324,3 @@ MIT
 [![X](https://img.shields.io/badge/X-000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/santifer)
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/8pRpHETxa4)
 [![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:hi@santifer.io)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/santifer)

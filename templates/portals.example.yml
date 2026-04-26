@@ -7,6 +7,11 @@
 #   3. WebSearch with site: filters (broad discovery, may be stale)
 #
 # IMPORTANT: Each company in tracked_companies MUST have careers_url.
+#   Prefer the BRANDED company careers URL whenever available; use ATS-hosted URL only as fallback.
+#   ✅ https://careers.mastercard.com   ⚠️ https://mastercard.wd1.myworkdayjobs.com (fallback only)
+#   ✅ https://openai.com/careers       ⚠️ https://job-boards.greenhouse.io/openai (fallback only)
+#   Exception: ATS-hosted careers_url is acceptable when no branded careers page exists.
+#   Using raw ATS URLs when a branded page exists can cause false 410 errors (job ID mismatch).
 #
 # HOW TO CUSTOMIZE:
 #   1. Copy this file to portals.yml in the project root
