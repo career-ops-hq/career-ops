@@ -1,6 +1,6 @@
 # Mode: latex — LaTeX/Overleaf CV Export
 
-Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `pdflatex`.
+Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `tectonic` or `pdflatex`.
 
 ## Pipeline
 
@@ -19,7 +19,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 13. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
-**Requires:** `pdflatex` on PATH (MiKTeX or TeX Live). First compilation may auto-install missing LaTeX packages via MiKTeX.
+**Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.
 
 ## Template Placeholders
 

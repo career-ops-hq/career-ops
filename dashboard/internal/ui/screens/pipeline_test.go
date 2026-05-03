@@ -8,6 +8,19 @@ import (
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
 
+func tabIndexForFilter(t *testing.T, filter string) int {
+	t.Helper()
+
+	for i, tab := range pipelineTabs {
+		if tab.filter == filter {
+			return i
+		}
+	}
+
+	t.Fatalf("expected pipeline tabs to include filter %q", filter)
+	return -1
+}
+
 func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 	initialApps := []model.CareerApplication{
 		{
@@ -83,6 +96,7 @@ func TestRenderAppLineIncludesDateColumn(t *testing.T) {
 	)
 
 	line := pm.renderAppLine(model.CareerApplication{
+		Number:  42,
 		Date:    "2026-04-13",
 		Company: "Anthropic",
 		Role:    "Forward Deployed Engineer",
@@ -92,5 +106,55 @@ func TestRenderAppLineIncludesDateColumn(t *testing.T) {
 
 	if !strings.Contains(line, "2026-04-13") {
 		t.Fatalf("expected rendered line to include date column, got %q", line)
+	}
+	if !strings.Contains(line, "#42") {
+		t.Fatalf("expected rendered line to include tracker number marker, got %q", line)
+	}
+}
+
+func TestRejectedAndDiscardedTabsFilterCorrectly(t *testing.T) {
+	apps := []model.CareerApplication{
+		{
+			Company:    "Acme",
+			Role:       "Backend Engineer",
+			Status:     "Rejected",
+			Score:      3.4,
+			ReportPath: "reports/001-acme.md",
+		},
+		{
+			Company:    "Beta",
+			Role:       "Platform Engineer",
+			Status:     "Discarded",
+			Score:      2.1,
+			ReportPath: "reports/002-beta.md",
+		},
+		{
+			Company:    "Gamma",
+			Role:       "AI Engineer",
+			Status:     "Applied",
+			Score:      4.6,
+			ReportPath: "reports/003-gamma.md",
+		},
+	}
+
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		apps,
+		model.PipelineMetrics{Total: len(apps)},
+		"..",
+		120,
+		40,
+	)
+
+	pm.activeTab = tabIndexForFilter(t, filterRejected)
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 1 || pm.filtered[0].Status != "Rejected" {
+		t.Fatalf("expected rejected tab to isolate rejected rows, got %+v", pm.filtered)
+	}
+
+	pm.activeTab = tabIndexForFilter(t, filterDiscarded)
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 1 || pm.filtered[0].Status != "Discarded" {
+		t.Fatalf("expected discarded tab to isolate discarded rows, got %+v", pm.filtered)
 	}
 }

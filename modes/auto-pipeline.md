@@ -24,7 +24,10 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 Include Block G in the saved report. Add `**Legitimacy:** {tier}` to the report header.
 
 ## Paso 3 — Generar PDF
-Ejecutar el pipeline completo de `pdf` (leer `modes/pdf.md`).
+Read `config/profile.yml`. Check `cv.output_format`:
+
+- If `"latex"`, execute the full pipeline from `modes/latex.md`
+- Otherwise (default), execute the full pipeline from `modes/pdf.md`
 
 ## Paso 4 — Draft Application Answers (solo si score >= 4.5)
 

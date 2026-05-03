@@ -66,6 +66,14 @@ cd dashboard && go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
 
+## Brand and Trademark
+
+Contributions to the codebase are governed by the MIT [LICENSE](LICENSE).
+The "career-ops" name itself is governed by [TRADEMARK.md](TRADEMARK.md).
+If you fork the project for commercial use, you're welcome to do so
+under MIT — please give it your own product name and follow the
+trademark policy regarding commercial naming and endorsement claims.
+
 ## Need Help?
 
 - [Join the Discord](https://discord.gg/8pRpHETxa4) — fastest way to get answers and connect with other contributors

@@ -9,6 +9,9 @@ const HARD_EXPIRED_PATTERNS = [
   /this job (listing )?is closed/i,
   /job (listing )?not found/i,
   /the page you are looking for doesn.t exist/i,
+  /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
+  /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
+  /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
   /offre (expirée|n'est plus disponible)/i,
 ];

@@ -18,6 +18,12 @@ Contributors with sustained technical ownership over specific areas. Full author
 - **@kennedy58** — Testing alternative inference providers
 - **@kelvan** — Surfaced the token consumption issue that drove the optimization roadmap
 
+## Community Voices
+
+Members who landed roles using career-ops and opted in to share their journey publicly. Their tips and patterns shape how we explain the project.
+
+- **[@logumani2112](https://github.com/logumani2112)** — Landed Backend Developer (.NET) at an IT services company. 50 listings evaluated, 1 month from first scan to offer. Most useful feature: A–F evaluation scoring. Their tip: *"Focus on quality over quantity. Use the evaluation scoring to prioritize the right opportunities and tailor your resume for each role."* ([#440](https://github.com/santifer/career-ops/issues/440))
+
 ## Community Guides
 
 Members helping newcomers in Discord day-to-day.

@@ -44,24 +44,39 @@ const SYSTEM_PATHS = [
   'modes/project.md',
   'modes/tracker.md',
   'modes/training.md',
+  'modes/latex.md',
   'modes/de/',
+  'modes/fr/',
+  'modes/ja/',
+  'modes/pt/',
+  'modes/ru/',
   'CLAUDE.md',
   'QWEN.md',
   'AGENTS.md',
+  'GEMINI.md',
   'generate-pdf.mjs',
+  'generate-latex.mjs',
   'merge-tracker.mjs',
   'verify-pipeline.mjs',
   'dedup-tracker.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'update-system.mjs',
+  'scan.mjs',
+  'doctor.mjs',
+  'check-liveness.mjs',
+  'liveness-core.mjs',
+  'analyze-patterns.mjs',
+  'followup-cadence.mjs',
+  'gemini-eval.mjs',
+  'test-all.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'dashboard/',
   'templates/',
   'fonts/',
   '.claude/skills/',
-  '.qwen/',
+'.gemini/commands/',
   'docs/',
   'VERSION',
   'DATA_CONTRACT.md',
@@ -85,6 +100,7 @@ const USER_PATHS = [
   'reports/',
   'output/',
   'jds/',
+  'writing-samples/',
 ];
 
 function localVersion() {
@@ -138,34 +154,78 @@ async function check() {
   }
 
   const local = localVersion();
-  let remote;
+  let remote = '';
+  let releaseVersion = '';
+  let changelog = '';
 
+  // Fetch both sources in parallel — only fail offline if BOTH are unreachable.
+  // Use AbortSignal so a hung TCP connection can't stall the session-start check.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  let versionResult, releaseResult;
   try {
-    const res = await fetch(RAW_VERSION_URL);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    remote = (await res.text()).trim();
-  } catch {
-    console.log(JSON.stringify({ status: 'offline', local }));
+    [versionResult, releaseResult] = await Promise.allSettled([
+      fetch(RAW_VERSION_URL, { signal: controller.signal }),
+      fetch(RELEASES_API, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'career-ops-update-checker',
+        },
+        signal: controller.signal,
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const SEMVER_RE = /^v?(\d+\.\d+\.\d+)$/i;
+
+  if (versionResult.status === 'fulfilled' && versionResult.value.ok) {
+    try {
+      const raw = (await versionResult.value.text()).trim();
+      const match = raw.match(SEMVER_RE);
+      remote = match ? match[1] : '';
+    } catch {
+      // Body read failed; treat as no VERSION source
+    }
+  }
+
+  if (releaseResult.status === 'fulfilled' && releaseResult.value.ok) {
+    try {
+      const release = await releaseResult.value.json();
+      changelog = release.body || '';
+      const rawTag = String(release.tag_name || '').trim();
+      const match = rawTag.match(SEMVER_RE);
+      releaseVersion = match ? match[1] : '';
+    } catch {
+      // Body parse failed; treat as no release source
+    }
+  }
+
+  if (!remote && !releaseVersion) {
+    // Distinguish true network failures from "fetched OK but response was
+    // unparseable" — the latter shouldn't be silenced as offline since the
+    // network is actually fine.
+    const bothNetworkFailed =
+      versionResult.status !== 'fulfilled' &&
+      releaseResult.status !== 'fulfilled';
+    const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
+    console.log(JSON.stringify({ status, local }));
     return;
+  }
+
+  // Use the higher version between VERSION file and GitHub Release
+  // (handles cases where VERSION file is not bumped after a release,
+  // or the raw host is unreachable but the API is).
+  if (!remote) {
+    remote = releaseVersion;
+  } else if (releaseVersion && compareVersions(releaseVersion, remote) > 0) {
+    remote = releaseVersion;
   }
 
   if (compareVersions(local, remote) >= 0) {
     console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
     return;
-  }
-
-  // Fetch changelog from GitHub releases
-  let changelog = '';
-  try {
-    const res = await fetch(RELEASES_API, {
-      headers: { 'Accept': 'application/vnd.github.v3+json' }
-    });
-    if (res.ok) {
-      const release = await res.json();
-      changelog = release.body || '';
-    }
-  } catch {
-    // No changelog available, that's OK
   }
 
   console.log(JSON.stringify({

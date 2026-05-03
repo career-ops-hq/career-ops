@@ -114,6 +114,25 @@ try {
   } else {
     fail(`Active job page misclassified as ${activeWorkdayPage.result}`);
   }
+
+  const closedMycareersfuture = classifyLiveness({
+    finalUrl: 'https://www.mycareersfuture.gov.sg/job/engineering/senior-staff-embedded-software-engineer',
+    bodyText: [
+      'Senior Staff Embedded Software Engineer',
+      'MaxLinear Asia Singapore Private Limited',
+      '9 applications    Posted 27 Oct 2025    Closed on 26 Nov 2025',
+      'Applications have closed for this job',
+      'Log in to Apply',
+      "You'll need to log in with Singpass to verify your identity.",
+      'Roles & Responsibilities: design, develop and maintain embedded firmware for broadband communications ICs.',
+    ].join('\n'),
+    applyControls: ['Log in to Apply'],
+  });
+  if (closedMycareersfuture.result === 'expired') {
+    pass('Closed postings with "Applications have closed" banner are detected');
+  } else {
+    fail(`Closed mycareersfuture posting misclassified as ${closedMycareersfuture.result}`);
+  }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
 }

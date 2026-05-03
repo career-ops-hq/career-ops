@@ -16,6 +16,10 @@ batch/tracker-additions/**/*.tsv
 jds/*
 !jds/.gitkeep
 
+# Writing samples (user's personal files — never committed)
+writing-samples/*
+!writing-samples/README.md
+
 # User config and customization (never auto-updated)
 config/profile.yml
 portals.yml
