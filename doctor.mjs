@@ -64,22 +64,16 @@ async function checkPlaywright() {
 }
 
 function checkAICLI() {
-  let qwenFound = false;
   let claudeFound = false;
-  try { execSync('command -v qwen', { shell: 'bash' }); qwenFound = true; } catch {}
   try { execSync('command -v claude', { shell: 'bash' }); claudeFound = true; } catch {}
 
-  if (qwenFound && claudeFound) {
-    return { pass: true, label: 'AI CLI available (qwen + claude)' };
-  } else if (qwenFound) {
-    return { pass: true, label: 'AI CLI available (qwen)' };
-  } else if (claudeFound) {
+  if (claudeFound) {
     return { pass: true, label: 'AI CLI available (claude)' };
   }
   return {
     pass: false,
-    label: 'No AI CLI found (qwen or claude)',
-    fix: 'Install Qwen Code CLI or Claude Code CLI for full functionality',
+    label: 'No AI CLI found (claude)',
+    fix: 'Install Claude Code CLI for full functionality',
   };
 }
 
@@ -208,7 +202,7 @@ async function main() {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
     process.exit(1);
   } else {
-    console.log('Result: All checks passed. You\'re ready to go! Run `qwen` or `claude` to start.');
+    console.log('Result: All checks passed. You\'re ready to go! Run `claude` to start.');
     console.log('');
     console.log('Join the community: https://discord.gg/8pRpHETxa4');
     process.exit(0);

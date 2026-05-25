@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//Users/benoitprentout/.qwen/**)"
-    ]
-  }
-}

@@ -23,7 +23,30 @@ Leer `portals.yml` que contiene:
 - `tracked_companies`: Empresas específicas con `careers_url` para navegación directa
 - `title_filter`: Keywords positive/negative/seniority_boost para filtrado de títulos
 
-## Estrategia de descubrimiento (3 niveles)
+## Estrategia de descubrimiento (4 niveles)
+
+### Nivel 0 — LinkedIn MCP
+
+**Usa el MCP `linkedin` para buscar empleos en LinkedIn:**
+
+1. **Session already configured:**
+   - Los tokens están en `~/.linkedin-mcp/cookies.json`
+   - La función `linkedin_search_jobs` funciona directamente
+
+2. **Buscar ofertas:**
+   - `linkedin_search_jobs({ keywords: "Operations Manager", location: "Toulouse, France", max_pages: 2 })` → Devuelve lista de ofertas con título, URL, empresa, ubicación
+   - `linkedin_get_job_details({ job_id: "4405150026" })` → Devuelve JD completo, requisitos, beneficios, descripción
+   - Las URLs públicas son: `https://www.linkedin.com/jobs/view/{job_id}/`
+
+3. **En el scan:**
+   - Para cada búsqueda: iterar resultados, filtrar por `title_filter` de `portals.yml`, dedup contra `scan-history.tsv`
+   - Reconstruir URL: `https://www.linkedin.com/jobs/view/{job_id}/`
+   - Las URLs son deduplicables contra el historial directamente
+
+4. **Consideraciones:**
+   - LinkedIn tiene rate limits — ejecutar búsquedas de forma secuencial
+   - Si hay errores de sesión, re-login con: `uvx linkedin-scraper-mcp@latest --login`
+   - max_pages controla paginación — usar 1-2 para evitar rate limits
 
 ### Nivel 1 — Playwright directo (PRINCIPAL)
 
@@ -60,9 +83,10 @@ Para empresas con API pública o feed estructurado, usar la respuesta JSON/XML c
 Los `search_queries` con `site:` filters cubren portales de forma transversal (todos los Ashby, todos los Greenhouse, etc.). Útil para descubrir empresas NUEVAS que aún no están en `tracked_companies`, pero los resultados pueden estar desfasados.
 
 **Prioridad de ejecución:**
-1. Nivel 1: Playwright → todas las `tracked_companies` con `careers_url`
-2. Nivel 2: API → todas las `tracked_companies` con `api:`
-3. Nivel 3: WebSearch → todos los `search_queries` con `enabled: true`
+1. Nivel 0: LinkedIn MCP → búsquedas configuradas en `portals.yml` (linkedin_keywords + linkedin_locations)
+2. Nivel 1: Playwright → todas las `tracked_companies` con `careers_url`
+3. Nivel 2: API → todas las `tracked_companies` con `api:`
+4. Nivel 3: WebSearch → todos los `search_queries` con `enabled: true`
 
 Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y deduplicar.
 
@@ -72,7 +96,18 @@ Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y dedu
 2. **Leer historial**: `data/scan-history.tsv` → URLs ya vistas
 3. **Leer dedup sources**: `data/applications.md` + `data/pipeline.md`
 
-4. **Nivel 1 — Playwright scan** (paralelo en batches de 3-5):
+4. **Nivel 0 — LinkedIn MCP search** (secuencial):
+   Para cada búsqueda en `portals.yml` (si existen `linkedin_keywords` y `linkedin_locations`):
+   a. Para cada combinación de keyword + location:
+      - `linkedin.search_jobs({ keywords: keyword, location: location, limit: 30 })`
+   b. De cada resultado extraer: `{title, url, company, location, postedDate}`
+   c. Las URLs de LinkedIn siguen el patrón: `https://www.linkedin.com/jobs/view/{jobId}/`
+   d. Filtrar por `title_filter` de `portals.yml`
+   e. Verificar liveness con Playwright (mismo proceso que Nivel 3)
+   f. Deduplicar contra `scan-history.tsv`, `applications.md`, `pipeline.md`
+   g. Acumular en lista de candidatos
+
+5. **Nivel 1 — Playwright scan** (paralelo en batches de 3-5):
    Para cada empresa en `tracked_companies` con `enabled: true` y `careers_url` definida:
    a. `browser_navigate` a la `careers_url`
    b. `browser_snapshot` para leer todos los job listings
@@ -171,6 +206,19 @@ https://...	2026-02-10	WebSearch — AI PM	PM AI	ClosedCo	skipped_expired
 
 ## Resumen de salida
 
+```
+Portal Scan — {YYYY-MM-DD}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Nivel 0 (LinkedIn): N ofertas encontradas → N añadidas
+Nivel 1 (Playwright): N ofertas → N añadidas
+Nivel 2 (API): N ofertas → N añadidas
+Nivel 3 (WebSearch): N ofertas encontradas → N verificadas → N añadidas
+
+Total añadidas a pipeline.md: N
+  + {company} | {title} | {source}
+  ...
+
+→ Ejecuta /career-ops pipeline para evaluar las nuevas ofertas.
 ```
 Portal Scan — {YYYY-MM-DD}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━

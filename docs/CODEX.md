@@ -14,6 +14,17 @@ Claude workflow.
 - Playwright Chromium installed for PDF generation and reliable job verification
 - Go 1.21+ if you want the TUI dashboard
 
+## Available MCPs
+
+Career-Ops has these MCPs configured in OpenCode:
+
+| MCP | Purpose |
+|-----|---------|
+| `linkedin` | LinkedIn job search via `search_jobs` and `get_job_details` tools. Requires login: `uvx linkedin-scraper-mcp@latest --login` |
+| `playwright` | Browser automation for scraping careers pages and verifying job liveness |
+| `exa` | Web search for broad job discovery |
+| `getinside` | Additional job discovery
+
 ## Install
 
 ```bash

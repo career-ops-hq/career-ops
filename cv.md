@@ -8,7 +8,7 @@
 
 ## Professional Summary
 
-Six years fixing operations where the playbook didn't exist yet: pharma cold chain, agricultural river logistics, creative studio, and now a Series A Retail Media startup. At getinside (€1.6M → €3M target), I built the ops layer from scratch — print supply chain, studio P&L, campaign tooling — and raised operational margin from 30% to 41% in 11 months by automating recurring workflows (Google Apps Script, Python, Apify) instead of hiring headcount.
+Six years fixing operations where the playbook didn't exist yet: pharma cold chain, agricultural river logistics, creative studio, and now a Series A Retail Media startup. At getinside (€1.6M → €3M target), I built the ops layer from scratch — print supply chain, studio P&L, campaign tooling — and raised operational margin from 30% to 40% in my first year by automating recurring workflows (Google Apps Script, Python, Apify) instead of hiring headcount, and sustained it.
 
 The pattern is consistent: inherit a broken process, build a lightweight tool, leave a system that outlasts me. IATA/HACCP/Six Sigma certified. More useful when the problem is messy.
 
@@ -18,7 +18,7 @@ The pattern is consistent: inherit a broken process, build a lightweight tool, l
 
 | Area | Impact |
 |------|--------|
-| Margin | +11pp in 11 months (30% → 41%) |
+| Margin | +10pp in first year (30% → 40%) |
 | Automation | 3 Slack bots, email QA platform, revenue simulator — all in production |
 | CPM negotiation | -33–50% vs. initial distributor rates |
 | Campaigns | 400+/year, 16M+ contacts, 44K+ conversions |

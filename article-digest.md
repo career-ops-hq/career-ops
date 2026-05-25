@@ -9,7 +9,7 @@
 ## getinside — Operations Layer (October 2023 – Present)
 
 ### Operational Margin Lift
-- **Metric:** +11pp margin (30% → 41%) in 11 months; +10% vs. 2024 baseline
+- **Metric:** +10pp margin (30% → 40%) in first year; sustained thereafter
 - **Driver:** Supplier renegotiation (CPM -33-50%), process automation, cost tracking
 - **Context:** Print + studio supply chain at Series A Retail Media startup
 - **P&L scope:** €55K margin managed (print + studio)

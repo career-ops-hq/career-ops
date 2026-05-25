@@ -51,7 +51,6 @@ const SYSTEM_PATHS = [
   'modes/pt/',
   'modes/ru/',
   'CLAUDE.md',
-  'QWEN.md',
   'AGENTS.md',
   'GEMINI.md',
   'generate-pdf.mjs',
