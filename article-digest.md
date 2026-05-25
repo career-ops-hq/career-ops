@@ -22,7 +22,7 @@
   - `@operations_bot` — Tuesday morning status report on campaigns in distribution and upcoming
   - **Stack:** Slack API, Apify, Google Sheets
 - **Email QA platform (archive-news)** — Tests email rendering across clients, validates tracking pixel and URL integration. Tech: Streamlit, Gmail API, GitHub. Built because getinside lacks native QA features.
-- **Operations handbook** — getinside-ops.github.io/handbook. Externally shared knowledge base. Maintained with VS Code + Qwen CLI/Claude Code + NotebookLM.
+- **Operations handbook** — getinside-ops.github.io/handbook. Externally shared knowledge base. Maintained with VS Code + Claude Code + NotebookLM.
 - **Email brief intake automation** — Tally.so form → Google Sheets pipeline. Standardizes brief collection, auto-archives, generates PDF briefs.
 - **Revenue simulator** — Self-serve tool for retailers to estimate potential revenue. Built via Google AI Studio, migrated to Claude Code + GitHub.
 
