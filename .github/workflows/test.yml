@@ -14,6 +14,6 @@ jobs:
           node-version: '20'
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: '1.26'
       - run: npm install
       - run: node test-all.mjs --quick

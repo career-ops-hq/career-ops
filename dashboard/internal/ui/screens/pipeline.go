@@ -115,6 +115,9 @@ type PipelineModel struct {
 	// Status picker sub-state
 	statusPicker bool
 	statusCursor int
+	// Search sub-state — narrows the active tab by substring on company/role/notes.
+	searchInput bool   // true while the user is typing the query
+	searchQuery string // committed (or in-progress) lowercased query
 }
 
 // NewPipelineModel creates a new pipeline screen.
@@ -185,6 +188,10 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.sortMode = m.sortMode
 	reloaded.activeTab = m.activeTab
 	reloaded.viewMode = m.viewMode
+	// Preserve search state across refresh — otherwise pressing `r` silently drops a
+	// committed query and the user loses their place mid-investigation.
+	reloaded.searchQuery = m.searchQuery
+	reloaded.searchInput = m.searchInput
 	reloaded.applyFilterAndSort()
 	reloaded.CopyReportCache(&m)
 
@@ -231,6 +238,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		if m.statusPicker {
 			return m.handleStatusPicker(msg)
 		}
+		if m.searchInput {
+			return m.handleSearchInput(msg)
+		}
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -242,8 +252,26 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 
 func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
-	case "q", "esc":
+	case "esc":
+		// While a search is committed, Esc clears the search (matches vim's `:nohl`
+		// ergonomics). With no query, Esc is a no-op — q is the only quit key, which
+		// keeps the help bar honest and avoids accidental exits.
+		if m.searchQuery != "" {
+			m.searchQuery = ""
+			m.applyFilterAndSort()
+			m.cursor = 0
+			m.scrollOffset = 0
+			return m, m.loadCurrentReport()
+		}
+		return m, nil
+
+	case "q":
 		return m, func() tea.Msg { return PipelineClosedMsg{} }
+
+	case "/":
+		// Open search input. Pre-fill with the current query so refining is one keystroke away.
+		m.searchInput = true
+		return m, nil
 
 	case "down", "j":
 		if len(m.filtered) > 0 {
@@ -377,6 +405,62 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	return m, nil
 }
 
+// handleSearchInput consumes keys while the search input bar is open.
+// Esc cancels (closes input AND clears query). Enter commits (closes input,
+// keeps query, refreshes filtered list). Backspace + printable chars edit
+// the query and live-update the filter so the user sees results as they type.
+//
+// Report previews are NOT lazy-loaded on every keystroke — that would trigger
+// a synchronous os.ReadFile per rune/backspace/ctrl+u and stutter live
+// typing. Instead the load fires once when the user commits (Enter) or
+// cancels (Esc); subsequent cursor movement in handleKey loads as before.
+func (m PipelineModel) handleSearchInput(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searchInput = false
+		m.searchQuery = ""
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, m.loadCurrentReport()
+
+	case "enter":
+		m.searchInput = false
+		// Query already applied during typing; load the preview for the
+		// committed first match (skipped during typing for perf).
+		return m, m.loadCurrentReport()
+
+	case "backspace":
+		if len(m.searchQuery) > 0 {
+			// Drop the last UTF-8 rune so multi-byte characters delete cleanly.
+			runes := []rune(m.searchQuery)
+			m.searchQuery = string(runes[:len(runes)-1])
+			m.applyFilterAndSort()
+			m.cursor = 0
+			m.scrollOffset = 0
+		}
+		return m, nil
+
+	case "ctrl+u":
+		// vim-flavored: clear the in-progress query without leaving search mode.
+		m.searchQuery = ""
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, nil
+	}
+
+	// Append printable runes (ignore other special keys like arrows / ctrl-combos).
+	if r := msg.Runes; len(r) > 0 {
+		m.searchQuery += strings.ToLower(string(r))
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
@@ -426,12 +510,35 @@ func (m PipelineModel) loadCurrentReport() tea.Cmd {
 	}
 }
 
+// matchesSearch reports whether app contains the query as a case-insensitive
+// substring of its company, role, or notes. Empty query matches everything.
+// Lowercases both sides so callers don't have to remember the contract.
+func matchesSearch(app model.CareerApplication, query string) bool {
+	if query == "" {
+		return true
+	}
+	q := strings.ToLower(query)
+	if strings.Contains(strings.ToLower(app.Company), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(app.Role), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(app.Notes), q) {
+		return true
+	}
+	return false
+}
+
 // applyFilterAndSort rebuilds the filtered list from apps.
 func (m *PipelineModel) applyFilterAndSort() {
 	var filtered []model.CareerApplication
 
 	currentFilter := pipelineTabs[m.activeTab].filter
 	for _, app := range m.apps {
+		if !matchesSearch(app, m.searchQuery) {
+			continue
+		}
 		norm := data.NormalizeStatus(app.Status)
 		switch currentFilter {
 		case filterAll:
@@ -492,9 +599,25 @@ func (m *PipelineModel) applyFilterAndSort() {
 	m.filtered = filtered
 }
 
+// chromeRowsFixed returns the number of fixed chrome rows above/below the body
+// (header + tabs(2) + metrics + sortbar + help + 1 search bar when active).
+// Shared by View() and adjustScroll() so the search-row addition stays in sync.
+func (m PipelineModel) chromeRowsFixed() int {
+	rows := 7 // header + tabs(2) + metrics + sortbar + help + preview baseline
+	if m.searchInput || m.searchQuery != "" {
+		rows++
+	}
+	return rows
+}
+
+// previewBudgetApprox is the approximate row count reserved for the preview block
+// when computing scroll positioning. View() measures the actual rendered preview
+// height; adjustScroll uses this constant to avoid re-rendering on every keystroke.
+const previewBudgetApprox = 5
+
 // adjustScroll updates scrollOffset so the cursor stays visible.
 func (m *PipelineModel) adjustScroll() {
-	availHeight := m.height - 12 // header + tabs(2) + metrics + sortbar + footer + preview
+	availHeight := m.height - m.chromeRowsFixed() - previewBudgetApprox
 	if availHeight < 5 {
 		availHeight = 5
 	}
@@ -541,6 +664,7 @@ func (m PipelineModel) View() string {
 	tabs := m.renderTabs()
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
+	searchBar := m.renderSearchBar()
 	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
@@ -553,7 +677,7 @@ func (m PipelineModel) View() string {
 
 	// Calculate available height for body
 	previewLines := strings.Count(preview, "\n") + 1
-	availHeight := m.height - 7 - previewLines // header + tabs(2) + metrics + sortbar + help + preview
+	availHeight := m.height - m.chromeRowsFixed() - previewLines
 	if availHeight < 3 {
 		availHeight = 3
 	}
@@ -567,15 +691,47 @@ func (m PipelineModel) View() string {
 		body = m.overlayStatusPicker(body)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		tabs,
-		metricsBar,
-		sortBar,
-		body,
-		preview,
-		help,
-	)
+	sections := []string{header, tabs, metricsBar, sortBar}
+	if searchBar != "" {
+		sections = append(sections, searchBar)
+	}
+	sections = append(sections, body, preview, help)
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// renderSearchBar returns an empty string when there is no active or in-progress
+// search; otherwise it renders a vim-style status line showing the query and the
+// match count. While in input mode, a trailing cursor is appended.
+func (m PipelineModel) renderSearchBar() string {
+	if !m.searchInput && m.searchQuery == "" {
+		return ""
+	}
+
+	style := lipgloss.NewStyle().
+		Foreground(m.theme.Text).
+		Width(m.width).
+		Padding(0, 2)
+
+	prompt := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render("/")
+	queryStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
+	hintStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+
+	display := queryStyle.Render(m.searchQuery)
+	if m.searchInput {
+		display += lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
+	}
+
+	tabFiltered := m.countForFilter(pipelineTabs[m.activeTab].filter)
+	matchInfo := hintStyle.Render(fmt.Sprintf("  %d/%d matching", len(m.filtered), tabFiltered))
+
+	hint := ""
+	if m.searchInput {
+		hint = hintStyle.Render("   Enter: keep   Esc: cancel   Ctrl+U: clear")
+	} else {
+		hint = hintStyle.Render("   Esc: clear   /: edit")
+	}
+
+	return style.Render(prompt + " " + display + matchInfo + hint)
 }
 
 func (m PipelineModel) renderHeader() string {
@@ -860,10 +1016,19 @@ func (m PipelineModel) renderHelp() string {
 				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
 	}
 
+	if m.searchInput {
+		return style.Render(
+			keyStyle.Render("type") + descStyle.Render(" filter live  ") +
+				keyStyle.Render("Enter") + descStyle.Render(" keep  ") +
+				keyStyle.Render("Ctrl+U") + descStyle.Render(" clear  ") +
+				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
+	}
+
 	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
 
 	keys := keyStyle.Render("↑↓/jk") + descStyle.Render(" nav  ") +
 		keyStyle.Render("←→/hl") + descStyle.Render(" tabs  ") +
+		keyStyle.Render("/") + descStyle.Render(" search  ") +
 		keyStyle.Render("s") + descStyle.Render(" sort  ") +
 		keyStyle.Render("r") + descStyle.Render(" refresh  ") +
 		keyStyle.Render("Enter") + descStyle.Render(" report  ") +
@@ -871,7 +1036,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("c") + descStyle.Render(" change  ") +
 		keyStyle.Render("v") + descStyle.Render(" view  ") +
 		keyStyle.Render("p") + descStyle.Render(" progress  ") +
-		keyStyle.Render("Esc") + descStyle.Render(" quit")
+		keyStyle.Render("q") + descStyle.Render(" quit")
 
 	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
 	if gap < 1 {

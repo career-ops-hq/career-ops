@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const QUICK = process.argv.includes('--quick');
+const NODE = process.execPath;
 
 let passed = 0;
 let failed = 0;
@@ -50,7 +51,7 @@ console.log('1. Syntax checks');
 
 const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
 for (const f of mjsFiles) {
-  const result = run('node', ['--check', f]);
+  const result = run(NODE, ['--check', f]);
   if (result !== null) {
     pass(`${f} syntax OK`);
   } else {
@@ -68,11 +69,12 @@ const scripts = [
   { name: 'normalize-statuses.mjs', expectExit: 0 },
   { name: 'dedup-tracker.mjs', expectExit: 0 },
   { name: 'merge-tracker.mjs', expectExit: 0 },
+  { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'update-system.mjs check', expectExit: 0 },
 ];
 
 for (const { name, allowFail } of scripts) {
-  const result = run('node', name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
+  const result = run(NODE, name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
   if (result !== null) {
     pass(`${name} runs OK`);
   } else if (allowFail) {
@@ -203,7 +205,7 @@ const allowedFiles = [
   'README.pt-BR.md', 'README.ru.md',
   // Standard project files
   'LICENSE', 'CITATION.cff', 'CONTRIBUTING.md',
-  'package.json', '.github/FUNDING.yml', 'CLAUDE.md', 'go.mod', 'test-all.mjs',
+  'package.json', '.github/FUNDING.yml', 'CLAUDE.md', 'AGENTS.md', 'go.mod', 'test-all.mjs',
   // Community / governance files (added in v1.3.0, all legitimately reference the maintainer)
   'CODE_OF_CONDUCT.md', 'GOVERNANCE.md', 'SECURITY.md', 'SUPPORT.md',
   '.github/SECURITY.md',
@@ -280,11 +282,71 @@ if (shared.includes('_profile.md')) {
   fail('_shared.md does NOT reference _profile.md');
 }
 
-// ── 9. CLAUDE.md INTEGRITY ──────────────────────────────────────
+// ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
-console.log('\n9. CLAUDE.md integrity');
+console.log('\n9. Local parser contract');
 
-const claude = readFile('CLAUDE.md');
+const scanScript = readFile('scan.mjs');
+if (
+  scanScript.includes('typeof company.name !== \'string\'') &&
+  scanScript.includes('company.name.trim()') &&
+  scanScript.includes('company.name.toLowerCase()')
+) {
+  pass('scan.mjs guards company names before filtering');
+} else {
+  fail('scan.mjs does not guard company names before filtering');
+}
+
+if (
+  scanScript.includes("skipIds: ['local-parser']") &&
+  scanScript.includes('local parser failed, used API fallback') &&
+  scanScript.includes('resolveProvider(company, providers')
+) {
+  pass('scan.mjs falls back to ATS API when local parser fails');
+} else {
+  fail('scan.mjs does not fall back to ATS API when local parser fails');
+}
+
+if (fileExists('providers/local-parser.mjs')) {
+  pass('local-parser provider module exists');
+} else {
+  fail('local-parser provider module is missing');
+}
+
+const scanMode = fileExists('modes/scan.md') ? readFile('modes/scan.md') : '';
+if (
+  scanMode.includes('local_parser_ok') &&
+  scanMode.includes('no repetir scraping caro') &&
+  scanMode.includes('nombre no listado en `local_parser_ok`')
+) {
+  pass('scan.md skips expensive levels after successful local parser');
+} else {
+  fail('scan.md missing local_parser_ok skip rules for agent scan');
+}
+
+if (!fileExists('scripts/parsers/cohere_jobs.py')) {
+  pass('Cohere parser example is not bundled as a runtime script');
+} else {
+  fail('Cohere parser example is still bundled as a runtime script');
+}
+
+const portalExample = readFile('templates/portals.example.yml');
+if (
+  !portalExample.includes('cohere_jobs.py') &&
+  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
+  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
+  portalExample.includes('already know their target careers URL')
+) {
+  pass('portals example documents a generic local parser contract');
+} else {
+  fail('portals example still points at a bundled Cohere parser');
+}
+
+// ── 10. AGENTS.md INTEGRITY ─────────────────────────────────────
+
+console.log('\n10. AGENTS.md integrity');
+
+const agents = readFile('AGENTS.md');
 const requiredSections = [
   'Data Contract', 'Update Check', 'Ethical Use',
   'Offer Verification', 'Canonical States', 'TSV Format',
@@ -292,16 +354,16 @@ const requiredSections = [
 ];
 
 for (const section of requiredSections) {
-  if (claude.includes(section)) {
-    pass(`CLAUDE.md has section: ${section}`);
+  if (agents.includes(section)) {
+    pass(`AGENTS.md has section: ${section}`);
   } else {
-    fail(`CLAUDE.md missing section: ${section}`);
+    fail(`AGENTS.md missing section: ${section}`);
   }
 }
 
-// ── 10. VERSION FILE ─────────────────────────────────────────────
+// ── 11. VERSION FILE ─────────────────────────────────────────────
 
-console.log('\n10. Version file');
+console.log('\n11. Version file');
 
 if (fileExists('VERSION')) {
   const version = readFile('VERSION').trim();
@@ -312,6 +374,137 @@ if (fileExists('VERSION')) {
   }
 } else {
   fail('VERSION file missing');
+}
+
+// ── 11. LOCATION FILTER — always_allow tier ───────────────────────
+
+console.log('\n11. Location filter — always_allow tier');
+
+try {
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+  const filter = buildLocationFilter({
+    always_allow: ['belgium', 'brussels'],
+    allow: ['europe', 'emea', 'remote'],
+    block: ['france', 'germany', 'united states'],
+  });
+
+  // Case 1: home-region passes regardless of other text
+  if (filter('Brussels, Belgium') === true) pass('Brussels, Belgium passes (always_allow hit)');
+  else fail('Brussels, Belgium should pass');
+
+  // Case 2: always_allow wins over block (THE motivating case for this tier)
+  if (filter('Remote, Belgium or France') === true) pass('Remote, Belgium or France passes (always_allow beats block)');
+  else fail('Remote, Belgium or France should pass — always_allow must win over block');
+
+  // Case 3: no always_allow hit, block still rejects
+  if (filter('Paris, France') === false) pass('Paris, France is rejected (block still applies)');
+  else fail('Paris, France should be rejected');
+
+  // Case 4: empty location → pass (existing semantics, unchanged)
+  if (filter('') === true) pass('empty location passes (unchanged semantics)');
+  else fail('empty location should pass');
+
+  // Case 5: case-insensitivity
+  if (filter('BRUSSELS, BELGIUM') === true) pass('case-insensitive match works');
+  else fail('case-insensitive match failed');
+
+  // Case 6: backward compatibility — no always_allow key behaves like stock allow/block
+  const stockFilter = buildLocationFilter({
+    allow: ['europe', 'remote'],
+    block: ['france'],
+  });
+  if (stockFilter('Remote, Belgium or France') === false) pass('without always_allow, block still wins (backward compatible)');
+  else fail('without always_allow, behaviour must match stock allow/block (block wins)');
+
+  // Case 7: null/missing locationFilter → pass-all filter (early-return path)
+  const nullFilter = buildLocationFilter(null);
+  if (nullFilter('Anywhere on Earth') === true && nullFilter('') === true) {
+    pass('null locationFilter returns a pass-all filter (early-return path)');
+  } else {
+    fail('null locationFilter should return a pass-all filter');
+  }
+
+  // Case 8: string-instead-of-array → wrapped to a 1-item list
+  const stringFilter = buildLocationFilter({ always_allow: 'belgium', block: ['france'] });
+  if (stringFilter('Remote, Belgium or France') === true) {
+    pass('always_allow as a bare string is wrapped to a single-item list');
+  } else {
+    fail('always_allow as a bare string should still work');
+  }
+
+  // Case 9: null/non-string items are filtered out (no crash, no false matches)
+  const messyFilter = buildLocationFilter({
+    always_allow: [null, 'belgium', 42, undefined],
+    block: ['france', null, 7],
+  });
+  if (messyFilter('Brussels, Belgium') === true && messyFilter('Paris, France') === false) {
+    pass('non-string entries (null, numbers, undefined) are filtered out without crashing');
+  } else {
+    fail('mixed-type keyword lists should not crash and should still match string entries');
+  }
+
+  // Case 10: all-null/non-string list → empty after normalization (no false rejects)
+  const allBadFilter = buildLocationFilter({ block: [null, 42, undefined], allow: ['remote'] });
+  if (allBadFilter('Remote') === true) {
+    pass('a block list with only non-string entries normalizes to [] (no false rejects)');
+  } else {
+    fail('non-string-only block list should not cause rejection');
+  }
+
+  // Case 11: empty / whitespace-only entries are dropped (would otherwise pass-all via includes(''))
+  const emptyKeywordFilter = buildLocationFilter({
+    always_allow: ['', '  '],
+    allow: ['remote'],
+    block: ['france'],
+  });
+  if (emptyKeywordFilter('Paris, France') === false) {
+    pass('empty/whitespace always_allow entries are dropped (no pass-all via includes(""))');
+  } else {
+    fail('empty always_allow entries should NOT bypass block — would have made the filter pass-all');
+  }
+
+  // Case 12: surrounding whitespace is trimmed so the keyword still matches
+  const whitespaceFilter = buildLocationFilter({
+    always_allow: ['  Belgium  ', '\tBrussels\n'],
+    block: ['france'],
+  });
+  if (whitespaceFilter('Remote, Belgium or France') === true) {
+    pass('whitespace-padded keywords still match after trim');
+  } else {
+    fail('"  Belgium  " should be trimmed and still match "Remote, Belgium or France"');
+  }
+
+  // Case 13: whitespace-only location is treated as missing (pass-all-tiers)
+  if (filter('   \t  ') === true) pass('whitespace-only location passes (treated as missing)');
+  else fail('whitespace-only location should pass');
+
+  // Case 14: non-string location (number/object/null) → pass without throwing
+  let crashed = false;
+  try {
+    const r1 = filter(42);
+    const r2 = filter({ city: 'Brussels' });
+    const r3 = filter(null);
+    const r4 = filter(undefined);
+    if (r1 === true && r2 === true && r3 === true && r4 === true) {
+      pass('non-string location values (number, object, null, undefined) pass without throwing');
+    } else {
+      fail(`non-string location results: number=${r1}, object=${r2}, null=${r3}, undefined=${r4}`);
+    }
+  } catch (e) {
+    crashed = true;
+    fail(`non-string location crashed: ${e.message}`);
+  }
+
+  // Case 15: a malformed location (e.g. legacy object) does NOT bypass block when interpreted naively —
+  // the guard returns true (pass) BEFORE block/allow even run, which is correct: scoring/eval happens
+  // downstream from the scan filter, so malformed locations should fall through to the manual evaluation
+  // step rather than being silently dropped here.
+  if (filter(42) === true) pass('non-string locations are passed through to downstream evaluation, not silently dropped');
+  else fail('non-string locations should pass through');
+
+} catch (e) {
+  fail(`always_allow tests crashed: ${e.message}`);
 }
 
 // ── SUMMARY ─────────────────────────────────────────────────────

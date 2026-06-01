@@ -4,8 +4,8 @@
 
 ```
                     ┌─────────────────────────────────┐
-                    │         Claude Code Agent        │
-                    │   (reads CLAUDE.md + modes/*.md) │
+                    │         AI Coding CLI Agent      │
+                    │   (reads AGENTS.md + modes/*.md) │
                     └──────────┬──────────────────────┘
                                │
             ┌──────────────────┼──────────────────────┐
@@ -17,7 +17,7 @@
             │                  │                       │
             │           ┌──────▼──────┐          ┌────▼─────┐
             │           │ pipeline.md │          │ N workers│
-            │           │ (URL inbox) │          │ (claude -p)
+            │           │ (URL inbox) │          │ (headless)
             │           └─────────────┘          └────┬─────┘
             │                                          │
      ┌──────▼──────────────────────────────────────────▼──────┐
@@ -56,14 +56,14 @@
 The batch system processes multiple offers in parallel:
 
 ```
-batch-input.tsv    →  batch-runner.sh  →  N × claude -p workers
+batch-input.tsv    →  batch-runner.sh  →  N × headless CLI workers
 (id, url, source)     (orchestrator)       (self-contained prompt)
                            │
                     batch-state.tsv
                     (tracks progress)
 ```
 
-Each worker is a headless Claude instance (`claude -p`) that receives the full `batch-prompt.md` as context. Workers produce:
+Each worker is a headless AI CLI instance — the bundled `batch-runner.sh` invokes `claude -p`, but the architecture supports any CLI's headless mode (see the Headless / Batch Mode table in `AGENTS.md` for the correct command per CLI). Workers produce:
 - Report .md
 - PDF
 - Tracker TSV line

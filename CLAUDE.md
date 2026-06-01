@@ -46,30 +46,6 @@ To rollback: `node update-system.mjs rollback`
 
 AI-powered job search automation built on Claude Code: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing.
 
-### npm scripts (preferred entry points)
-
-| Command | What it does |
-|---------|--------------|
-| `npm run doctor` | Environment diagnostics (Node, Playwright, CLI, cv.md, profile, fonts) |
-| `npm test` | System health checks (65+ assertions in `test-all.mjs`) — no per-test runner |
-| `npm run verify` | Tracker + reports integrity check |
-| `npm run normalize` | Normalize statuses in applications.md |
-| `npm run dedup` | Dedup tracker entries |
-| `npm run merge` | Merge `data/tracker-additions/*.tsv` into applications.md (run after every batch) |
-| `npm run sync-check` | Detect drift between cv.md and report claims |
-| `npm run scan` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs) |
-| `npm run liveness` | Check whether tracked postings are still active |
-| `npm run pdf` | Generate ATS-optimized PDF from cv.md |
-| `npm run update:check` / `npm run update` / `npm run rollback` | Self-update career-ops from upstream |
-
-### Dashboard (Go TUI)
-
-`dashboard/` contains a Go TUI for browsing the pipeline. Build + launch:
-
-```bash
-cd dashboard && go build -o career-dashboard && ./career-dashboard
-```
-
 ### Main Files
 
 | File | Function |
@@ -91,7 +67,7 @@ cd dashboard && go build -o career-dashboard && ./career-dashboard
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
+| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy), plus `## Machine Summary` YAML for downstream scripts. Header includes `**Legitimacy:** {tier}`. |
 
 ### OpenCode Commands
 
@@ -331,7 +307,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## Stack and Conventions
 
-- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), MCPs (LinkedIn for job search, Canva for visual CV)
+- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Scripts in `.mjs`, configuration in YAML
 - Output in `output/` (gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
@@ -390,41 +366,5 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 - No markdown bold (`**`) in status field
 - No dates in status field (use the date column)
 - No extra text (use the notes column)
-
----
-
-## MCP Availability by Platform
-
-| MCP | Claude Code | OpenCode | Codex |
-|-----|-------------|----------|-------|
-| `playwright` | ✅ (via plugin) | ✅ | ✅ |
-| `linkedin` (`search_jobs`, `get_job_details`, `get_person_profile`, etc.) | ✅ available | ✅ | ✅ |
-| `exa` (web search) | ❌ not configured | ✅ | ✅ |
-| `getinside` (job discovery) | ❌ not configured | ✅ | ✅ |
-
-**Memory correction (2026-05):** The earlier note "LinkedIn MCP unavailable in Claude Code" is wrong. `mcp__linkedin__*` tools work in this session — prefer them for LinkedIn URLs in `data/pipeline.md` over Playwright-based scraping.
-
-**LinkedIn MCP login:** `uvx linkedin-scraper-mcp@latest --login` (stores session in `~/.linkedin-mcp/cookies.json`)
-
-**Claude Code scan behavior:** Nivel 0 (LinkedIn MCP) is unavailable. Skip it and use Playwright (Nivel 1) + ATS APIs (Nivel 2) + WebSearch (Nivel 3). Note this in the scan summary output.
-
----
-
-## Session Learnings (Persistent)
-
-These are facts discovered during sessions that the agent should remember for future evaluations and CV edits. They are user-specific and override assumptions.
-
-<!-- USER LAYER: this section is fork-specific personalization. Preserve across upstream merges. -->
-
-### Benoît Prentout — Corrections & Facts
-
-| Fact | Source | Applies to |
-|------|--------|------------|
-| **OpenCode skill setup** — The career-ops skill requires its `modes/` directory (with `_shared.md`, `scan.md`, etc.) to be present in the skill directory (`~/.config/opencode/skills/career-ops/modes/`). The skill only had SKILL.md (router) but was missing mode files. The project at `/Users/benoitprentout/github repos/career-ops-fork/` has a space in the path. | Session debugging | Skill configuration, mode file setup |
-| **Evotec** — always written without accent ("Evotec", never "Évotec") | User correction | cv.md, profile.yml, _profile.md, all reports |
-| **No direct management at getinside** — user does NOT manage a team. Instead: onboards new employees from other services (including their N+1) and onboards all platform users. Serves as central operational reference point, not a line manager. | User correction | CV framing, interview narratives |
-| **Tool stack**: Claude Code, Qwen CLI, Gemini CLI, GitHub (Pages, version control), Streamlit, HubSpot, Slack API, Apify API, Tally.so, Gmail API, Google AI Studio, NotebookLM | User correction | CV skills section, technical ops evaluations |
-| **Shipped project portfolio at getinside**: (1) Operations handbook on GitHub Pages, (2) Email QA & archive platform (Streamlit + Gmail API), (3) 3 Slack bots in production (@linkedin_radar_bot, @print_bot, @operations_bot), (4) Email brief automation (Tally.so → Sheets → PDF), (5) Revenue simulator (Google AI Studio → Claude Code + GitHub). All built because the product team hadn't shipped these features. | User correction | Ops & Automation, Marketing Ops, Head of Ops evaluations |
-| **Marketing Ops / RevOps is a valid archetype match** — campaign ops (400+ campaigns/year), HubSpot CRM, studio management, email QA, CPM pricing, performance reporting, creative tooling. Surface for Marketing Ops, RevOps, Studio Manager, Creative Ops roles. | User request | Archetype detection, scoring, portals.yml |
-| **HubSpot used regularly** (not conditionally) — always mention for Marketing Ops / RevOps roles. Covers CRM, campaign tracking, pipeline management. | User correction | Skills surfacing logic |
-| **Marketing ops market in Toulouse/remote-France is thin** — most roles are Paris-based or expired. Worth scanning but don't expect many hits. | Observation from scan | Expectation management |
+@AGENTS.md
+<!-- Add anything Claude Code specific that other agents don't need -->

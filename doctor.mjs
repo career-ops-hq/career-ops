@@ -8,7 +8,6 @@
 import { existsSync, mkdirSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = __dirname;
@@ -61,20 +60,6 @@ async function checkPlaywright() {
       fix: 'Run: npx playwright install chromium',
     };
   }
-}
-
-function checkAICLI() {
-  let claudeFound = false;
-  try { execSync('command -v claude', { shell: 'bash' }); claudeFound = true; } catch {}
-
-  if (claudeFound) {
-    return { pass: true, label: 'AI CLI available (claude)' };
-  }
-  return {
-    pass: false,
-    label: 'No AI CLI found (claude)',
-    fix: 'Install Claude Code CLI for full functionality',
-  };
 }
 
 function checkCv() {
@@ -172,7 +157,6 @@ async function main() {
     checkNodeVersion(),
     checkDependencies(),
     await checkPlaywright(),
-    checkAICLI(),
     checkCv(),
     checkProfile(),
     checkPortals(),

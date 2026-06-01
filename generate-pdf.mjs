@@ -118,31 +118,11 @@ async function generatePDF() {
     /url\(['"]?\.\/fonts\//g,
     `url('file://${fontsDir}/`
   );
-  // Close any unclosed quotes from the replacement
+  // Close any unclosed quotes from the replacement (handles all font formats)
   html = html.replace(
-    /file:\/\/([^'")]+)\.woff2['"]\)/g,
-    `file://$1.woff2')`
+    /file:\/\/([^'")]+)\.(woff2?|ttf|otf)['"]?\)/g,
+    `file://$1.$2')`
   );
-
-  // Embed local photo as data URI for reliable rendering (avoids file:// path issues)
-  const resourcesDir = resolve(__dirname, 'resources');
-  const imgSrcMatch = html.match(/src=["']\.\/resources\/([^"']+)["']/);
-  if (imgSrcMatch) {
-    const imgPath = resolve(resourcesDir, imgSrcMatch[1]);
-    try {
-      const imgBuffer = await readFile(imgPath);
-      const ext = imgPath.split('.').pop().toLowerCase();
-      const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[ext] || 'image/png';
-      const b64 = imgBuffer.toString('base64');
-      html = html.replace(
-        /src=["']\.\/resources\/[^"']+["']/g,
-        `src="data:${mime};base64,${b64}"`
-      );
-      console.log(`📷 Photo embedded: ${imgSrcMatch[1]} (${(imgBuffer.length / 1024).toFixed(0)}KB)`);
-    } catch (e) {
-      console.warn(`⚠️  Photo not loaded: ${e.message}`);
-    }
-  }
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
@@ -154,45 +134,47 @@ async function generatePDF() {
   }
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  try {
+    const page = await browser.newPage();
 
-  // Set content with file base URL for any relative resources
-  await page.setContent(html, {
-    waitUntil: 'networkidle',
-    baseURL: `file://${dirname(inputPath)}/`,
-  });
+    // Set content with file base URL for any relative resources
+    await page.setContent(html, {
+      waitUntil: 'networkidle',
+      baseURL: `file://${dirname(inputPath)}/`,
+    });
 
-  // Wait for fonts to load
-  await page.evaluate(() => document.fonts.ready);
+    // Wait for fonts to load
+    await page.evaluate(() => document.fonts.ready);
 
-  // Generate PDF
-  const pdfBuffer = await page.pdf({
-    format: format,
-    printBackground: true,
-    margin: {
-      top: '0.6in',
-      right: '0.6in',
-      bottom: '0.6in',
-      left: '0.6in',
-    },
-    preferCSSPageSize: false,
-  });
+    // Generate PDF
+    const pdfBuffer = await page.pdf({
+      format: format,
+      printBackground: true,
+      margin: {
+        top: '0.6in',
+        right: '0.6in',
+        bottom: '0.6in',
+        left: '0.6in',
+      },
+      preferCSSPageSize: false,
+    });
 
-  // Write PDF
-  const { writeFile } = await import('fs/promises');
-  await writeFile(outputPath, pdfBuffer);
+    // Write PDF
+    const { writeFile } = await import('fs/promises');
+    await writeFile(outputPath, pdfBuffer);
 
-  // Count pages (approximate from PDF structure)
-  const pdfString = pdfBuffer.toString('latin1');
-  const pageCount = (pdfString.match(/\/Type\s*\/Page[^s]/g) || []).length;
+    // Count pages (approximate from PDF structure)
+    const pdfString = pdfBuffer.toString('latin1');
+    const pageCount = (pdfString.match(/\/Type\s*\/Page[^s]/g) || []).length;
 
-  await browser.close();
+    console.log(`✅ PDF generated: ${outputPath}`);
+    console.log(`📊 Pages: ${pageCount}`);
+    console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
-  console.log(`✅ PDF generated: ${outputPath}`);
-  console.log(`📊 Pages: ${pageCount}`);
-  console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
-
-  return { outputPath, pageCount, size: pdfBuffer.length };
+    return { outputPath, pageCount, size: pdfBuffer.length };
+  } finally {
+    await browser.close();
+  }
 }
 
 generatePDF().catch((err) => {

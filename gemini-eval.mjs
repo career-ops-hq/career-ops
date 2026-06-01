@@ -14,7 +14,18 @@
  * Requires:
  *   GEMINI_API_KEY in .env (or environment variable)
  *
- * Free-tier model: gemini-2.0-flash (generous quota, no billing required)
+ * Free-tier model: gemini-2.5-flash (generous quota, no billing required)
+ *
+ * Model deprecation reference (per Google AI for Developers, May 2026):
+ *   - gemini-2.0-flash       deprecated 2026-03-31  (do not use)
+ *   - gemini-2.0-flash-lite  deprecated 2026-03-31
+ *   - gemini-2.5-flash       deprecated 2026-06-17  (current default)
+ *   - gemini-2.5-flash-lite  deprecated 2026-07-22
+ * Stable Gemini models follow a 12-month lifecycle from their release date.
+ * Source: https://ai.google.dev/gemini-api/docs/models
+ *
+ * When the current default approaches its deprecation date, bump
+ * `modelName` below and the `--model` examples accordingly.
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
@@ -40,13 +51,15 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 
 const PATHS = {
   // Primary evaluation logic lives in these two mode files
-  shared:   join(ROOT, 'modes', '_shared.md'),
-  oferta:   join(ROOT, 'modes', 'oferta.md'),
+  shared:      join(ROOT, 'modes', '_shared.md'),
+  oferta:      join(ROOT, 'modes', 'oferta.md'),
   // Canonical skill path referenced in Issue #344
-  evaluate: join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
-  cv:       join(ROOT, 'cv.md'),
-  reports:  join(ROOT, 'reports'),
-  tracker:  join(ROOT, 'data', 'applications.md'),
+  evaluate:    join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
+  cv:          join(ROOT, 'cv.md'),
+  profile:     join(ROOT, 'modes', '_profile.md'),
+  profileYml:  join(ROOT, 'config', 'profile.yml'),
+  reports:     join(ROOT, 'reports'),
+  tracker:     join(ROOT, 'data', 'applications.md'),
 };
 
 // ---------------------------------------------------------------------------
@@ -65,11 +78,11 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   USAGE
     node gemini-eval.mjs "<JD text>"
     node gemini-eval.mjs --file ./jds/my-job.txt
-    node gemini-eval.mjs --model gemini-2.0-flash "<JD text>"
+    node gemini-eval.mjs --model gemini-2.5-flash "<JD text>"
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <name>   Gemini model to use (default: gemini-2.0-flash)
+    --model <name>   Gemini model to use (default: gemini-2.5-flash)
     --no-save        Do not save report to reports/ directory
     --help           Show this help
 
@@ -87,7 +100,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+let modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -163,9 +176,11 @@ if (!readdirSync) {
 // ---------------------------------------------------------------------------
 console.log('\n📂  Loading context files...');
 
-const sharedContext  = readFile(PATHS.shared,   'modes/_shared.md');
-const ofertaLogic    = readFile(PATHS.oferta,   'modes/oferta.md');
-const cvContent      = readFile(PATHS.cv,       'cv.md');
+const sharedContext  = readFile(PATHS.shared,      'modes/_shared.md');
+const ofertaLogic    = readFile(PATHS.oferta,      'modes/oferta.md');
+const cvContent      = readFile(PATHS.cv,          'cv.md');
+const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
+const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
 
 // ---------------------------------------------------------------------------
 // Build the system prompt (mirrors the Claude skill router logic)
@@ -189,6 +204,16 @@ ${ofertaLogic}
 CANDIDATE RESUME (cv.md)
 ═══════════════════════════════════════════════════════
 ${cvContent}
+
+═══════════════════════════════════════════════════════
+CANDIDATE PROFILE & TARGETS (config/profile.yml)
+═══════════════════════════════════════════════════════
+${profileYml}
+
+═══════════════════════════════════════════════════════
+USER ARCHETYPES & NARRATIVE (_profile.md)
+═══════════════════════════════════════════════════════
+${profileContent}
 
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION
@@ -231,10 +256,11 @@ try {
   ]);
   evaluationText = result.response.text();
 } catch (err) {
-  console.error('❌  Gemini API error:', err.message);
-  if (err.message?.includes('API_KEY')) {
+  const sanitizedMsg = (err.message || '').split(apiKey).join('[REDACTED]');
+  console.error('❌  Gemini API error:', sanitizedMsg);
+  if (sanitizedMsg.includes('API_KEY')) {
     console.error('    Check your GEMINI_API_KEY in .env');
-  } else if (err.message?.includes('quota') || err.message?.includes('rate')) {
+  } else if (sanitizedMsg.includes('quota') || sanitizedMsg.includes('rate')) {
     console.error('    You may have hit the free-tier rate limit. Wait 60s and retry.');
   }
   process.exit(1);
@@ -264,8 +290,15 @@ let legitimacy = 'unknown';
 if (summaryMatch) {
   const block = summaryMatch[1];
   const extract = (key) => {
-    const m = block.match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
+    const prefix = `${key}:`;
+    const lines = block.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith(prefix)) {
+        return trimmed.slice(prefix.length).trim();
+      }
+    }
+    return 'unknown';
   };
   company    = extract('COMPANY');
   role       = extract('ROLE');

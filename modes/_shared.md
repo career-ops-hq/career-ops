@@ -41,7 +41,7 @@ The evaluation uses 6 blocks (A-F) with a global score of 1-5:
 - 4.5+ → Strong match, recommend applying immediately
 - 4.0-4.4 → Good match, worth applying
 - 3.5-3.9 → Decent but not ideal, apply only if specific reason
-- Below 3.5 → Recommend against applying (see Ethical Use in CLAUDE.md)
+- Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
 
 ## Posting Legitimacy (Block G)
 

@@ -9,17 +9,39 @@
  * Run: node analyze-patterns.mjs          (JSON to stdout)
  *      node analyze-patterns.mjs --summary (human-readable table)
  *      node analyze-patterns.mjs --min-threshold 3
+ *      node analyze-patterns.mjs --self-test
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { load as yamlLoad } from 'js-yaml';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
+
+const MACHINE_SUMMARY_FIELDS = new Set([
+  'company',
+  'role',
+  'score',
+  'legitimacy_tier',
+  'archetype',
+  'final_decision',
+  'hard_stops',
+  'soft_gaps',
+  'top_strengths',
+  'risk_level',
+  'confidence',
+  'next_action',
+  // Optional context fields accepted for future reports.
+  'domain',
+  'seniority',
+  'remote',
+  'team_size',
+]);
 
 // --- CLI args ---
 const args = process.argv.slice(2);
@@ -58,6 +80,75 @@ function classifyOutcome(status) {
   return 'pending'; // evaluated
 }
 
+function normalizeList(value) {
+  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+  if (value === null || value === undefined || value === '') return [];
+  if (typeof value === 'object') return [];
+  return [String(value).trim()].filter(Boolean);
+}
+
+function normalizeScalar(value) {
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function parseMachineSummary(content) {
+  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  if (!fenceMatch) return null;
+
+  const raw = fenceMatch[1].trim();
+  if (!raw) return null;
+
+  try {
+    const parsed = yamlLoad(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => MACHINE_SUMMARY_FIELDS.has(key))
+    );
+  } catch {
+    return null;
+  }
+}
+
+function runSelfTest() {
+  const summary = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+legitimacy_tier: "High Confidence"
+archetype: "AI Platform / LLMOps Engineer"
+final_decision: "Apply"
+hard_stops: []
+soft_gaps:
+  - "No direct healthcare domain experience"
+top_strengths:
+  - "Production evaluation pipelines"
+risk_level: "Medium"
+confidence: "High"
+next_action: "Follow up on ticket #42 with tailored CV"
+\`\`\`
+`);
+
+  const failures = [];
+  if (!summary) failures.push('summary was not parsed');
+  if (summary?.score !== 4.4) failures.push('numeric score was not parsed');
+  if (!Array.isArray(summary?.hard_stops) || summary.hard_stops.length !== 0) failures.push('empty list was not parsed');
+  if (summary?.soft_gaps?.[0] !== 'No direct healthcare domain experience') failures.push('list item was not parsed');
+  if (summary?.next_action !== 'Follow up on ticket #42 with tailored CV') failures.push('hash-containing scalar field was not parsed');
+
+  if (failures.length > 0) {
+    console.error(`Machine Summary parser self-test failed: ${failures.join('; ')}`);
+    process.exit(1);
+  }
+
+  console.log('Machine Summary parser self-test OK');
+  process.exit(0);
+}
+
 // --- Parse applications.md ---
 function parseTracker() {
   if (!existsSync(APPS_FILE)) return [];
@@ -83,15 +174,52 @@ function parseReport(reportPath) {
   if (!existsSync(reportPath)) return null;
   const content = readFileSync(reportPath, 'utf-8');
   const report = {
+    company: null,
+    role: null,
     archetype: null,
+    legitimacyTier: null,
+    finalDecision: null,
     seniority: null,
     remote: null,
     teamSize: null,
     comp: null,
     domain: null,
+    riskLevel: null,
+    confidence: null,
+    nextAction: null,
+    topStrengths: [],
     scores: {},
     gaps: [],
   };
+
+  const machineSummary = parseMachineSummary(content);
+  if (machineSummary) {
+    report.machineSummary = machineSummary;
+    report.company = normalizeScalar(machineSummary.company) || report.company;
+    report.role = normalizeScalar(machineSummary.role) || report.role;
+    report.archetype = normalizeScalar(machineSummary.archetype) || report.archetype;
+    report.legitimacyTier = normalizeScalar(machineSummary.legitimacy_tier) || report.legitimacyTier;
+    report.finalDecision = normalizeScalar(machineSummary.final_decision) || report.finalDecision;
+    report.domain = normalizeScalar(machineSummary.domain) || report.domain;
+    report.seniority = normalizeScalar(machineSummary.seniority) || report.seniority;
+    report.remote = normalizeScalar(machineSummary.remote) || report.remote;
+    report.teamSize = normalizeScalar(machineSummary.team_size) || report.teamSize;
+    report.riskLevel = normalizeScalar(machineSummary.risk_level) || report.riskLevel;
+    report.confidence = normalizeScalar(machineSummary.confidence) || report.confidence;
+    report.nextAction = normalizeScalar(machineSummary.next_action) || report.nextAction;
+    report.topStrengths = normalizeList(machineSummary.top_strengths);
+
+    if (typeof machineSummary.score === 'number') {
+      report.scores.global = machineSummary.score;
+    }
+
+    for (const hardStop of normalizeList(machineSummary.hard_stops)) {
+      report.gaps.push({ description: hardStop, severity: 'hard stop', mitigation: '' });
+    }
+    for (const softGap of normalizeList(machineSummary.soft_gaps)) {
+      report.gaps.push({ description: softGap, severity: 'soft gap', mitigation: '' });
+    }
+  }
 
   // Strip bold markers for easier matching
   const plain = content.replace(/\*\*/g, '');
@@ -105,22 +233,22 @@ function parseReport(reportPath) {
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
   const archMatch = plain.match(blockARegex);
-  if (archMatch) report.archetype = archMatch[1].trim();
+  if (archMatch && !report.archetype) report.archetype = archMatch[1].trim();
 
   const senMatch = plain.match(seniorityRegex);
-  if (senMatch) report.seniority = senMatch[1].trim();
+  if (senMatch && !report.seniority) report.seniority = senMatch[1].trim();
 
   const remMatch = plain.match(remoteRegex);
-  if (remMatch) report.remote = remMatch[1].trim();
+  if (remMatch && !report.remote) report.remote = remMatch[1].trim();
 
   const teamMatch = plain.match(teamRegex);
-  if (teamMatch) report.teamSize = teamMatch[1].trim();
+  if (teamMatch && !report.teamSize) report.teamSize = teamMatch[1].trim();
 
   const compMatch = plain.match(compRegex);
-  if (compMatch) report.comp = compMatch[1].trim();
+  if (compMatch && !report.comp) report.comp = compMatch[1].trim();
 
   const domainMatch = plain.match(domainRegex);
-  if (domainMatch) report.domain = domainMatch[1].trim();
+  if (domainMatch && !report.domain) report.domain = domainMatch[1].trim();
 
   // Extract scoring table — look for table with "Global" row (using plain, bold already stripped)
   const scoreRegex = /\|\s*(?:CV Match|Match con CV)\s*\|\s*([\d.]+)\/5\s*\|/i;
@@ -131,22 +259,22 @@ function parseReport(reportPath) {
   const globalRegex = /\|\s*(?:Global)\s*\|\s*([\d.]+)\/5\s*\|/i;
 
   const cvScoreMatch = plain.match(scoreRegex);
-  if (cvScoreMatch) report.scores.cvMatch = parseFloat(cvScoreMatch[1]);
+  if (cvScoreMatch && report.scores.cvMatch === undefined) report.scores.cvMatch = parseFloat(cvScoreMatch[1]);
 
   const nsMatch = plain.match(northStarRegex);
-  if (nsMatch) report.scores.northStar = parseFloat(nsMatch[1]);
+  if (nsMatch && report.scores.northStar === undefined) report.scores.northStar = parseFloat(nsMatch[1]);
 
   const csMatch = plain.match(compScoreRegex);
-  if (csMatch) report.scores.comp = parseFloat(csMatch[1]);
+  if (csMatch && report.scores.comp === undefined) report.scores.comp = parseFloat(csMatch[1]);
 
   const culMatch = plain.match(culturalRegex);
-  if (culMatch) report.scores.cultural = parseFloat(culMatch[1]);
+  if (culMatch && report.scores.cultural === undefined) report.scores.cultural = parseFloat(culMatch[1]);
 
   const rfMatch = plain.match(redFlagsRegex);
-  if (rfMatch) report.scores.redFlags = parseFloat(rfMatch[1]);
+  if (rfMatch && report.scores.redFlags === undefined) report.scores.redFlags = parseFloat(rfMatch[1]);
 
   const glMatch = plain.match(globalRegex);
-  if (glMatch) report.scores.global = parseFloat(glMatch[1]);
+  if (glMatch && report.scores.global === undefined) report.scores.global = parseFloat(glMatch[1]);
 
   // Extract gaps table
   const gapTableRegex = /\|\s*Gap\s*\|\s*Severity\s*\|.*?\n\|[-|\s]+\n([\s\S]*?)(?:\n\n|\n##|\n\*\*|$)/i;
@@ -156,11 +284,14 @@ function parseReport(reportPath) {
     for (const row of gapRows) {
       const cols = row.split('|').map(s => s.trim()).filter(Boolean);
       if (cols.length >= 2) {
-        report.gaps.push({
-          description: cols[0],
-          severity: cols[1].toLowerCase(),
-          mitigation: cols[2] || '',
-        });
+        const duplicate = report.gaps.some(g => g.description.toLowerCase() === cols[0].toLowerCase());
+        if (!duplicate) {
+          report.gaps.push({
+            description: cols[0],
+            severity: cols[1].toLowerCase(),
+            mitigation: cols[2] || '',
+          });
+        }
       }
     }
   }
@@ -224,7 +355,10 @@ function analyze() {
     const reportPath = reportMatch ? join(CAREER_OPS, reportMatch[1]) : null;
     const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
-    const score = parseFloat(e.score) || 0;
+    const trackerScore = parseFloat(e.score);
+    const score = Number.isFinite(trackerScore)
+      ? trackerScore
+      : (Number.isFinite(reportData?.scores?.global) ? reportData.scores.global : 0);
 
     // Fallback: if report didn't have Remote field, try the notes column
     const remoteSource = reportData?.remote || e.notes || '';
@@ -539,6 +673,10 @@ function printSummary(result) {
 }
 
 // --- Run ---
+if (args.includes('--self-test')) {
+  runSelfTest();
+}
+
 const result = analyze();
 
 if (summaryMode) {

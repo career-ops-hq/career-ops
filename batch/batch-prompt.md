@@ -15,6 +15,8 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 | Archivo | Ruta absoluta | Cuándo |
 |---------|---------------|--------|
 | cv.md | `cv.md (project root)` | SIEMPRE |
+| _profile.md | `modes/_profile.md (if exists)` | SIEMPRE (user customizations: archetypes, role_shape, location policy, comp targets) |
+| profile.yml | `config/profile.yml (if exists)` | SIEMPRE (candidate identity, comp range, role_shape rules) |
 | llms.txt | `llms.txt (if exists)` | SIEMPRE |
 | article-digest.md | `article-digest.md (project root)` | SIEMPRE (proof points) |
 | i18n.ts | `i18n.ts (if exists, optional)` | Solo entrevistas/deep |
@@ -24,6 +26,20 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 **REGLA: NUNCA escribir en cv.md ni i18n.ts.** Son read-only.
 **REGLA: NUNCA hardcodear métricas.** Leerlas de cv.md + article-digest.md en el momento.
 **REGLA: Para métricas de artículos, article-digest.md prevalece sobre cv.md.** cv.md puede tener números más antiguos — es normal.
+**REGLA: Antes de evaluar, cargar `modes/_profile.md` y `config/profile.yml` si existen.** Contienen las preferencias del candidato Y reglas concretas de scoring que **sobrescriben** los defaults del sistema.
+
+Tipos de patrones que estos archivos pueden incluir:
+- **Caps de bloque** — ej: "cap Block A at 3.0/5 if title contains 'Lead'/'Head'/'Principal'"
+- **Overrides de recomendación** — ej: "force SKIP if comp ceiling below $120K" o "force SKIP if role_shape signals broad ownership"
+- **Scoring por dimensión** — ej: "Remote: full credit on remote-first; score 2.0 on full on-site outside [region]"
+- **Framing adaptativo por archetype** — mappings entre arquetipos detectados y proof points a priorizar
+
+Aplicación durante la evaluación A-G:
+- **Bloque A:** aplicar caps de role-shape ANTES de calcular el score del bloque
+- **Bloques B-D:** aplicar adaptive framing por archetype y reglas de dimension scoring (location, comp, etc.)
+- **Bloque F:** aplicar recommendation overrides (SKIP forzado, etc.) — `_profile.md` puede convertir un score técnicamente alto en un SKIP por shape o por comp
+
+**En conflicto, las reglas de `_profile.md` ganan sobre los defaults de `_shared.md`.** Esto es intencional: `_profile.md` es la capa de personalización del usuario.
 
 ---
 
@@ -165,6 +181,34 @@ Analyze posting signals to assess whether this is a real, active opening.
 | Red flags | -X (si hay) |
 | **Global** | **X/5** |
 
+#### Machine Summary
+
+Create a machine-readable summary from the completed A-G evaluation and global score. This block is for downstream scripts; keep field names exact, use YAML, and do not add prose inside the fence.
+
+```yaml
+company: "{empresa}"
+role: "{rol}"
+score: {X.X}
+legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
+archetype: "{detectado}"
+final_decision: "{Apply | Consider | Research first | Skip}"
+hard_stops:
+  - "{blocking gap or risk}"
+soft_gaps:
+  - "{non-blocking gap}"
+top_strengths:
+  - "{strength most relevant to this role}"
+risk_level: "{Low | Medium | High}"
+confidence: "{Low | Medium | High}"
+next_action: "{one concrete next step}"
+```
+
+Rules:
+- Use `[]` for `hard_stops`, `soft_gaps`, or `top_strengths` when empty.
+- `score` is numeric only, without `/5`.
+- `final_decision` must reflect the full evaluation, not only the CV match.
+- Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
+
 ### Paso 3 — Guardar Report .md
 
 Guardar evaluación completa en:
@@ -188,6 +232,26 @@ Donde `{company-slug}` es el nombre de empresa en lowercase, sin espacios, con g
 **Batch ID:** {{ID}}
 
 ---
+
+## Machine Summary
+
+```yaml
+company: "{empresa}"
+role: "{rol}"
+score: {X.X}
+legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
+archetype: "{detectado}"
+final_decision: "{Apply | Consider | Research first | Skip}"
+hard_stops:
+  - "{blocking gap or risk}"
+soft_gaps:
+  - "{non-blocking gap}"
+top_strengths:
+  - "{strength most relevant to this role}"
+risk_level: "{Low | Medium | High}"
+confidence: "{Low | Medium | High}"
+next_action: "{one concrete next step}"
+```
 
 ## A) Resumen del Rol
 (contenido completo)

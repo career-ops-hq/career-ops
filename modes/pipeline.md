@@ -1,57 +1,57 @@
-# Modo: pipeline — Inbox de URLs (Second Brain)
+# Mode: pipeline — URL Inbox (Second Brain)
 
-Procesa URLs de ofertas acumuladas en `data/pipeline.md`. El usuario agrega URLs cuando quiera y luego ejecuta `/career-ops pipeline` para procesarlas todas.
+Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time and then executes `/career-ops pipeline` to process them all.
 
 ## Workflow
 
-1. **Leer** `data/pipeline.md` → buscar items `- [ ]` en la sección "Pendientes"
-2. **Para cada URL pendiente**:
-   a. Calcular siguiente `REPORT_NUM` secuencial (leer `reports/`, tomar el número más alto + 1)
-   b. **Extraer JD** usando Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
-   c. Si la URL no es accesible → marcar como `- [!]` con nota y continuar
-   d. **Ejecutar auto-pipeline completo**: Evaluación A-F → Report .md → PDF (si score >= 3.0) → Tracker
-   e. **Mover de "Pendientes" a "Procesadas"**: `- [x] #NNN | URL | Empresa | Rol | Score/5 | PDF ✅/❌`
-3. **Si hay 3+ URLs pendientes**, lanzar agentes en paralelo (Agent tool con `run_in_background`) para maximizar velocidad.
-4. **Al terminar**, mostrar tabla resumen:
+1. **Read** `data/pipeline.md` → search for `- [ ]` items in the "Pending" section
+2. **For each pending URL**:
+   a. Calculate the next sequential `REPORT_NUM` (read `reports/`, take the highest number + 1)
+   b. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
+   c. If the URL is not accessible → mark as `- [!]` with a note and continue
+   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= 3.0) → Tracker
+   e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
+3. **If there are 3+ pending URLs**, launch agents in parallel (Agent tool with `run_in_background`) to maximize speed.
+4. **At the end**, show summary table:
 
 ```
-| # | Empresa | Rol | Score | PDF | Acción recomendada |
+| # | Company | Role | Score | PDF | Recommended action |
 ```
 
-## Formato de pipeline.md
+## Format of pipeline.md
 
 ```markdown
-## Pendientes
+## Pending
 - [ ] https://jobs.example.com/posting/123
 - [ ] https://boards.greenhouse.io/company/jobs/456 | Company Inc | Senior PM
 - [!] https://private.url/job — Error: login required
 
-## Procesadas
+## Processed
 - [x] #143 | https://jobs.example.com/posting/789 | Acme Corp | AI PM | 4.2/5 | PDF ✅
 - [x] #144 | https://boards.greenhouse.io/xyz/jobs/012 | BigCo | SA | 2.1/5 | PDF ❌
 ```
 
-## Detección inteligente de JD desde URL
+## Intelligent JD detection from URL
 
-1. **Playwright (preferido):** `browser_navigate` + `browser_snapshot`. Funciona con todas las SPAs.
-2. **WebFetch (fallback):** Para páginas estáticas o cuando Playwright no está disponible.
-3. **WebSearch (último recurso):** Buscar en portales secundarios que indexan el JD.
+1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`. Works with all SPAs.
+2. **WebFetch (fallback):** For static pages or when Playwright is unavailable.
+3. **WebSearch (last resort):** Search in secondary portals that index the JD.
 
-**Casos especiales:**
-- **LinkedIn**: Puede requerir login → marcar `[!]` y pedir al usuario que pegue el texto
-- **PDF**: Si la URL apunta a un PDF, leerlo directamente con Read tool
-- **`local:` prefix**: Leer el archivo local. Ejemplo: `local:jds/linkedin-pm-ai.md` → leer `jds/linkedin-pm-ai.md`
+**Special cases:**
+- **LinkedIn**: May require login → mark `[!]` and ask the user to paste the text
+- **PDF**: If the URL points to a PDF, read it directly with the Read tool
+- **`local:` prefix**: Read the local file. Example: `local:jds/linkedin-pm-ai.md` → read `jds/linkedin-pm-ai.md`
 
-## Numeración automática
+## Automatic numbering
 
-1. Listar todos los archivos en `reports/`
-2. Extraer el número del prefijo (e.g., `142-medispend...` → 142)
-3. Nuevo número = máximo encontrado + 1
+1. List all files in `reports/`
+2. Extract the number from the prefix (e.g., `142-medispend...` → 142)
+3. New number = maximum found + 1
 
-## Sincronización de fuentes
+## Source synchronization
 
-Antes de procesar cualquier URL, verificar sync:
+Before processing any URL, verify sync:
 ```bash
 node cv-sync-check.mjs
 ```
-Si hay desincronización, advertir al usuario antes de continuar.
+If there is a desynchronization, warn the user before continuing.

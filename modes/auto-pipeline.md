@@ -1,43 +1,46 @@
-# Modo: auto-pipeline — Pipeline Completo Automático
+# Mode: auto-pipeline — Full Automatic Pipeline
 
-Cuando el usuario pega un JD (texto o URL) sin sub-comando explícito, ejecutar TODO el pipeline en secuencia:
+When the user pastes a JD (text or URL) without an explicit sub-command, execute the ENTIRE pipeline in sequence:
 
-## Paso 0 — Extraer JD
+## Step 0 — Extract JD
 
-Si el input es una **URL** (no texto de JD pegado), seguir esta estrategia para extraer el contenido:
+If the input is a **URL** (not pasted JD text), follow this strategy to extract the content:
 
-**Orden de prioridad:**
+**Priority order:**
 
-1. **Playwright (preferido):** La mayoría de portales de empleo (Lever, Ashby, Greenhouse, Workday) son SPAs. Usar `browser_navigate` + `browser_snapshot` para renderizar y leer el JD.
-2. **WebFetch (fallback):** Para páginas estáticas (ZipRecruiter, WeLoveProduct, company career pages).
-3. **WebSearch (último recurso):** Buscar título del rol + empresa en portales secundarios que indexan el JD en HTML estático.
+1. **Playwright (preferred):** Most job portals (Lever, Ashby, Greenhouse, Workday) are SPAs. Use `browser_navigate` + `browser_snapshot` to render and read the JD.
+2. **WebFetch (fallback):** For static pages (ZipRecruiter, WeLoveProduct, company career pages).
+3. **WebSearch (last resort):** Search for the role title + company in secondary portals that index the JD in static HTML.
 
-**Si ningún método funciona:** Pedir al candidato que pegue el JD manualmente o comparta un screenshot.
+**If no method works:** Ask the candidate to paste the JD manually or share a screenshot.
 
-**Si el input es texto de JD** (no URL): usar directamente, sin necesidad de fetch.
+**If the input is JD text** (not a URL): use directly, without needing to fetch.
 
-## Paso 1 — Evaluación A-G
-Ejecutar exactamente igual que el modo `oferta` (leer `modes/oferta.md` para todos los bloques A-F + Block G Posting Legitimacy).
+## Step 1 — A-G Evaluation
 
-## Paso 2 — Guardar Report .md
-Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` (ver formato en `modes/oferta.md`).
-Include Block G in the saved report. Add `**Legitimacy:** {tier}` to the report header.
+Execute the same as the `oferta` mode (read `modes/oferta.md` for all A-F blocks + Block G Posting Legitimacy).
 
-## Paso 3 — Generar PDF
+## Step 2 — Save Report .md
+
+Save the full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` (see format in `modes/oferta.md`).
+Include Block G in the saved report. Add **URL:** {url} and **Legitimacy:** {tier} to the report header.
+
+## Step 3 — Generate PDF
+
 Read `config/profile.yml`. Check `cv.output_format`:
 
 - If `"latex"`, execute the full pipeline from `modes/latex.md`
 - Otherwise (default), execute the full pipeline from `modes/pdf.md`
 
-## Paso 4 — Draft Application Answers (solo si score >= 4.5)
+## Step 4 — Draft Application Answers (only if score >= 4.5)
 
-Si el score final es >= 4.5, generar borrador de respuestas para el formulario de aplicación:
+If the final score is >= 4.5, generate a draft of responses for the application form:
 
-1. **Extraer preguntas del formulario**: Usar Playwright para navegar al formulario y hacer snapshot. Si no se pueden extraer, usar las preguntas genéricas.
-2. **Generar respuestas** siguiendo el tono (ver abajo).
-3. **Guardar en el report** como sección `## H) Draft Application Answers`.
+1. **Extract form questions**: Use Playwright to navigate to the form and take a snapshot. If they cannot be extracted, use the generic questions.
+2. **Generate responses** following the tone (see below).
+3. **Save in the report** as section `## H) Draft Application Answers`.
 
-### Preguntas genéricas (usar si no se pueden extraer del formulario)
+### Generic questions (use if they cannot be extracted from the form)
 
 - Why are you interested in this role?
 - Why do you want to work at [Company]?
@@ -45,27 +48,28 @@ Si el score final es >= 4.5, generar borrador de respuestas para el formulario d
 - What makes you a good fit for this position?
 - How did you hear about this role?
 
-### Tono para Form Answers
+### Tone for Form Answers
 
-**Posición: "I'm choosing you."** el candidato tiene opciones y está eligiendo esta empresa por razones concretas.
+**Position: "I'm choosing you."** The candidate has options and is choosing this company for specific reasons.
 
-**Reglas de tono:**
-- **Confiado sin arrogancia**: "I've spent the past year building production AI agent systems — your role is where I want to apply that experience next"
-- **Selectivo sin soberbia**: "I've been intentional about finding a team where I can contribute meaningfully from day one"
-- **Específico y concreto**: Siempre referenciar algo REAL del JD o de la empresa, y algo REAL de la experiencia del candidato
-- **Directo, sin fluff**: 2-4 frases por respuesta. Sin "I'm passionate about..." ni "I would love the opportunity to..."
-- **El hook es la prueba, no la afirmación**: En vez de "I'm great at X", decir "I built X that does Y"
+**Tone rules:**
+- **Confident without arrogance**: "I've spent the past year building production AI agent systems — your role is where I want to apply that experience next"
+- **Selective without arrogance**: "I've been intentional about finding a team where I can contribute meaningfully from day one"
+- **Specific and concrete**: Always reference something REAL from the JD or the company, and something REAL from the candidate's experience
+- **Direct, without fluff**: 2-4 sentences per response. No "I'm passionate about..." or "I would love the opportunity to..."
+- **The hook is the proof, not the statement**: Instead of "I'm great at X", say "I built X that does Y"
 
-**Framework por pregunta:**
+**Framework per question:**
 - **Why this role?** → "Your [specific thing] maps directly to [specific thing I built]."
-- **Why this company?** → Mencionar algo concreto sobre la empresa. "I've been using [product] for [time/purpose]."
-- **Relevant experience?** → Un proof point cuantificado. "Built [X] that [metric]. Sold the company in 2025."
+- **Why this company?** → Mention something specific about the company. "I've been using [product] for [time/purpose]."
+- **Relevant experience?** → A quantified proof point. "Built [X] that [metric]. Sold the company in 2025."
 - **Good fit?** → "I sit at the intersection of [A] and [B], which is exactly where this role lives."
-- **How did you hear?** → Honesto: "Found through [portal/scan], evaluated against my criteria, and it scored highest."
+- **How did you hear?** → Honest: "Found through [portal/scan], evaluated against my criteria, and it scored highest."
 
-**Idioma**: Siempre en el idioma del JD (EN default). Aplicar `/tech-translate`.
+**Language**: Always in the language of the JD (EN default). Apply `/tech-translate`.
 
-## Paso 5 — Actualizar Tracker
-Registrar en `data/applications.md` con todas las columnas incluyendo Report y PDF en ✅.
+## Step 5 — Update Tracker
 
-**Si algún paso falla**, continuar con los siguientes y marcar el paso fallido como pendiente en el tracker.
+Record it in `data/applications.md` with all columns including Report and PDF as ✅.
+
+**If any step fails**, continue with the next ones and mark the failed step as pending in the tracker.

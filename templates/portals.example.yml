@@ -1,9 +1,10 @@
 # Portal Scanner Configuration
 # Used by /career-ops scan to discover new offers automatically.
 #
-# Strategy (3 levels):
+# Strategy (4 levels):
+#   0. Local parser → per-company `parser:` script for SSR/static career pages (zero-token)
 #   1. Playwright → careers_url of each company (real-time, reliable)
-#   2. Greenhouse API → structured JSON (fast, Greenhouse-only)
+#   2. HTTP JSON (WebFetch) → per-company `api:` on tracked_companies (see board_api_catalog below)
 #   3. WebSearch with site: filters (broad discovery, may be stale)
 #
 # IMPORTANT: Each company in tracked_companies MUST have careers_url.
@@ -19,6 +20,48 @@
 #   3. Add/remove companies in tracked_companies
 #   4. Adjust search_queries for your preferred job boards
 #   5. Set enabled: false on companies you don't care about
+
+# -- Location filter (optional) --
+# Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
+# If this entire block is absent, all locations pass (current default behavior).
+#
+# Semantics (case-insensitive substring, in this order):
+#   - Empty location string on a job → pass (don't penalize missing data)
+#   - Any `always_allow` keyword present → pass (takes precedence over `block`)
+#   - Any `block` keyword present → reject
+#   - `allow` empty → pass (already cleared block)
+#   - `allow` non-empty → must match at least one keyword
+#
+# `always_allow` is optional. It rescues multi-location postings that name your
+# home region: with always_allow ["New York"] and block ["India"], a job listed
+# "Remote, New York or India" passes (New York wins), while "Remote, India" is
+# still rejected. Omit always_allow entirely and the filter behaves as before.
+#
+# Example below targets US-based remote + a couple of US metros, blocking
+# common foreign hubs. Customize to your geography.
+
+# location_filter:
+#   # always_allow is checked BEFORE block — keep this list to your home region only
+#   always_allow:
+#     - "United States"   # (replace with your home region)
+#     - "New York"
+#   allow:
+#     - "Remote"
+#     - "United States"
+#     - "USA"
+#     - "Atlanta"
+#     - "New York"
+#   block:
+#     - "India"
+#     - "Bengaluru"
+#     - "United Kingdom"
+#     - "London"
+#     - "Germany"
+#     - "France"
+#     - "Singapore"
+#     - "Japan"
+#     - "Brazil"
+#     - "Australia"
 
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
@@ -278,10 +321,75 @@ search_queries:
     query: 'site:news.ycombinator.com OR site:hnrss.org "AI Engineer" OR "Forward Deployed" OR "DevRel" OR "Founding Engineer" remote'
     enabled: true
 
+  # -- Türkiye / Turkey job portals --
+  # WebSearch queries for Turkish job boards (no public ATS APIs).
+  # [CUSTOMIZE] Replace keywords with your target roles in Turkish.
+
+  - name: Kariyer.net — Backend / Software Engineer
+    query: 'site:kariyer.net "Backend Developer" OR "Software Engineer" OR "Yazılım Geliştirici" OR "Backend Geliştirici" Ankara OR Istanbul OR uzaktan'
+    enabled: false
+
+  - name: Kariyer.net — Frontend Engineer
+    query: 'site:kariyer.net "Frontend Developer" OR "React Developer" OR "Frontend Geliştirici" Ankara OR Istanbul OR uzaktan'
+    enabled: false
+
+  - name: Yenibiris.com — Software Engineer
+    query: 'site:yenibiris.com "Software Engineer" OR "Backend Developer" OR "Frontend Developer" OR "Yazılım Geliştirici"'
+    enabled: false
+
+  - name: Secretcv.com — Tech Roles
+    query: 'site:secretcv.com "Software Engineer" OR "Backend" OR "Frontend" OR "Full Stack"'
+    enabled: false
+
+  - name: İşin Olsun — Startup / Tech
+    query: 'site:isinolsun.com "Yazılım" OR "Software" OR "Backend" OR "Frontend" OR "Full Stack"'
+    enabled: false
+
+  - name: LinkedIn — Turkey Tech Roles
+    query: 'site:linkedin.com/jobs "Software Engineer" OR "Backend Engineer" OR "Frontend Engineer" Turkey OR Türkiye OR Ankara OR Istanbul'
+    enabled: false
+
 # -- Tracked companies --
 # Companies whose career pages are checked directly.
-# scan_method: playwright (default), websearch, greenhouse_api
+# scan_method: playwright (default), websearch, local_parser
 # For Greenhouse companies, add api: field for faster structured JSON access.
+#
+# Provider routing (scan.mjs):
+#   By default each entry is auto-detected from `careers_url` against the
+#   loaded providers in providers/*.mjs (local-parser, ashby, greenhouse, lever).
+#   local-parser runs first when parser.command + parser.script are set.
+#
+#   Optional fields on a tracked_companies entry:
+#     provider: <id>     — force a specific provider, skipping detect().
+#     transport: http    — reserved for future transports. Defaults to http.
+#
+# For SSR/static career pages, add parser.command + parser.script. The command
+# can be python3, node, or another local executable. The script must print JSON
+# jobs to stdout: [{ "title": "...", "url": "...", "location": "..." }]
+#
+# Generic local parser examples. Most parser scripts are company-specific and
+# already know their target careers URL. `args` are optional and can help the
+# parser author (reuse across companies, debug flags, JSON snapshots, etc.).
+#
+# JavaScript parser:
+# - name: Example JS Company
+#   careers_url: https://example.com/careers
+#   scan_method: local_parser
+#   parser:
+#     command: node
+#     script: scripts/parsers/example-js-company-jobs.js
+#     format: jobs-json-v1
+#   enabled: true
+#
+# Python parser:
+# - name: Example Python Company
+#   careers_url: https://example.org/jobs
+#   scan_method: local_parser
+#   parser:
+#     command: python3
+#     script: scripts/parsers/example_python_company_jobs.py
+#     format: jobs-json-v1
+#   enabled: true
 
 tracked_companies:
 
@@ -389,6 +497,12 @@ tracked_companies:
     careers_url: https://job-boards.greenhouse.io/runpod
     api: https://boards-api.greenhouse.io/v1/boards/runpod/jobs
     notes: "GPU cloud for AI."
+    enabled: true
+
+  - name: Weights & Biases (CoreWeave)
+    careers_url: https://job-boards.greenhouse.io/coreweave
+    api: https://boards-api.greenhouse.io/v1/boards/coreweave/jobs
+    notes: "Acquired by CoreWeave (announced March 2025, closed May 2025). W&B roles now live on CoreWeave's Greenhouse board. Old Lever URL (jobs.lever.co/wandb) returns 404."
     enabled: true
 
   - name: Glean
@@ -551,11 +665,6 @@ tracked_companies:
   - name: Mistral AI
     careers_url: https://jobs.lever.co/mistral
     notes: "Paris. European AI lab."
-    enabled: true
-
-  - name: Weights & Biases
-    careers_url: https://jobs.lever.co/wandb
-    notes: "MLOps platform."
     enabled: true
 
   - name: Palantir
@@ -942,3 +1051,134 @@ tracked_companies:
     scan_query: '"Maxim AI" OR "getmaxim" careers "engineer" OR "product"'
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
+
+  # ============================================================
+  # -- Türkiye / Turkey market
+  # ============================================================
+  # Tech companies for candidates targeting the Turkish market or
+  # Turkish-language postings. Job-portal search queries (Kariyer.net,
+  # Yenibiris.com, Secretcv, İşin Olsun, LinkedIn-TR) live in the
+  # `search_queries:` section above — that's where the scanner picks
+  # them up.
+  #
+  # NOTE on scanning: Most Turkish companies below do NOT expose a
+  # public ATS API (Greenhouse / Lever / Ashby) on their careers_url,
+  # so `scan.mjs` will filter them out automatically (it requires a
+  # detectable ATS). They are listed here as discovery aids — paste
+  # the URL of any specific role into `data/pipeline.md` and run
+  # `/career-ops pipeline`, which uses Playwright/WebFetch instead.
+  # Only Getir (jobs.lever.co/getir) is currently scannable.
+  #
+  # Key Turkish market notes:
+  #   - Salaries often quoted as NET (after tax/SGK deductions)
+  #   - Common benefits: yemek kartı (meal card), özel sağlık sigortası
+  #     (private health insurance), servis (company shuttle)
+  #   - Probation (deneme süresi): max 2 months by law
+  #   - Severance (kıdem tazminatı): 1 month per year of service
+  #   - Use modes/tr/ for Turkish-language evaluations and applications
+  # ============================================================
+
+  - name: Trendyol
+    careers_url: https://www.trendyol.com/kariyerimiz
+    scan_method: websearch
+    scan_query: 'site:trendyol.com/kariyerimiz OR "trendyol" "Software Engineer" OR "Backend" OR "Frontend" careers'
+    notes: "Istanbul (Maslak tech HQ). Turkey's largest e-commerce platform (Alibaba-owned). Large tech org, competitive salaries."
+    enabled: false
+
+  - name: Hepsiburada
+    careers_url: https://www.hepsiburada.com/kariyer
+    scan_method: websearch
+    scan_query: '"hepsiburada" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım"'
+    notes: "Istanbul. Major Turkish e-commerce platform. Listed on NASDAQ."
+    enabled: false
+
+  - name: Getir
+    careers_url: https://jobs.lever.co/getir
+    scan_method: websearch
+    scan_query: 'site:jobs.lever.co/getir OR "getir" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Ultra-fast delivery unicorn. Exited international markets in April 2024; now Turkey-only."
+    enabled: false
+
+  - name: Insider
+    careers_url: https://useinsider.com/careers
+    scan_method: websearch
+    scan_query: '"useinsider" OR "insider" careers "Software Engineer" OR "Backend" OR "Frontend" site:jobs.lever.co OR site:jobs.ashbyhq.com'
+    notes: "Istanbul. B2B SaaS marketing platform. Unicorn. Strong remote-friendly culture."
+    enabled: false
+
+  - name: Dream Games
+    careers_url: https://www.dreamgames.com/careers
+    scan_method: websearch
+    scan_query: '"dreamgames" OR "dream games" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Mobile gaming company (Royal Match). Strong engineering culture, competitive pay."
+    enabled: false
+
+  - name: Peak Games (Zynga)
+    careers_url: https://www.peakgames.net/en/career
+    scan_method: websearch
+    scan_query: '"peak games" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Mobile gaming studio acquired by Zynga. Strong tech team."
+    enabled: false
+
+  - name: Yemeksepeti (Delivery Hero)
+    careers_url: https://www.yemeksepeti.com/kariyer
+    scan_method: websearch
+    scan_query: '"yemeksepeti" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım"'
+    notes: "Istanbul. Food delivery platform (Delivery Hero subsidiary). Large tech team."
+    enabled: false
+
+  - name: Sahibinden.com
+    careers_url: https://www.sahibinden.com/kariyer
+    scan_method: websearch
+    scan_query: '"sahibinden" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım Geliştirici"'
+    notes: "Istanbul. Turkey's largest classifieds platform. Established tech org."
+    enabled: false
+
+  - name: Garanti BBVA Technology
+    careers_url: https://www.garantibbvateknoloji.com.tr/kariyer
+    scan_method: websearch
+    scan_query: '"garanti bbva teknoloji" OR "garantibbvateknoloji" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Fintech/banking tech arm of Garanti BBVA. Large engineering org, competitive benefits."
+    enabled: false
+
+  - name: Akbank Tech
+    careers_url: https://www.akbank.com/tr-tr/sayfalar/kariyer.aspx
+    scan_method: websearch
+    scan_query: '"akbank" careers "Software Engineer" OR "Yazılım Mühendisi" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Turkish bank with large in-house tech team."
+    enabled: false
+
+  - name: Turkcell
+    careers_url: https://kariyer.turkcell.com.tr
+    scan_method: websearch
+    scan_query: 'site:kariyer.turkcell.com.tr OR "turkcell" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Turkey's largest telecom. Large digital and tech transformation team."
+    enabled: false
+
+  - name: Iyzico (PayU)
+    careers_url: https://iyzico.com/kariyer
+    scan_method: websearch
+    scan_query: '"iyzico" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım"'
+    notes: "Istanbul. Fintech / payment infrastructure (PayU subsidiary). Good engineering culture."
+    enabled: false
+
+  - name: Papara
+    careers_url: https://papara.com/kariyer
+    scan_method: websearch
+    scan_query: '"papara" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Turkish fintech / digital wallet. Fast-growing, unicorn valuation."
+    enabled: false
+
+  - name: Craftgate
+    careers_url: https://craftgate.io/career
+    scan_method: websearch
+    scan_query: '"craftgate" careers "Software Engineer" OR "Backend" OR "Frontend"'
+    notes: "Istanbul. Payment orchestration platform. Strong engineering-first culture."
+    enabled: false
+
+  - name: n11.com (Doğuş)
+    careers_url: https://www.n11.com/kurumsal/kariyer
+    scan_method: websearch
+    scan_query: '"n11" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım"'
+    notes: "Istanbul. E-commerce marketplace (Doğuş Group)."
+    enabled: false

@@ -2,7 +2,9 @@
 
 Escanea portales de empleo configurados, filtra por relevancia de título, y añade nuevas ofertas al pipeline para evaluación posterior.
 
-> **Nota (v1.5+):** El escáner por defecto (`scan.mjs` / `npm run scan`) es **zero-token** y sólo consulta directamente las APIs públicas de Greenhouse, Ashby y Lever. Los niveles con Playwright/WebSearch descritos abajo son el flujo **agente** (ejecutado por Claude/Codex), no lo que hace `scan.mjs`. Si una empresa no tiene API Greenhouse/Ashby/Lever, `scan.mjs` la ignorará; para esos casos, el agente debe completar manualmente el Nivel 1 (Playwright) o Nivel 3 (WebSearch).
+> **Nota (v1.6+):** El escáner por defecto (`scan.mjs` / `npm run scan`) es **zero-token** y usa fuentes estructuradas: parsers locales configurados por empresa y APIs públicas de Greenhouse, Ashby y Lever. Los niveles con Playwright/WebSearch descritos abajo son el flujo **agente** (ejecutado por Claude/Codex), no lo que hace `scan.mjs`. Si una empresa no tiene parser local ni API Greenhouse/Ashby/Lever, `scan.mjs` la ignorará; para esos casos, el agente debe completar manualmente el Nivel 1 (Playwright) o Nivel 3 (WebSearch).
+>
+> **Regla (v1.8+):** Si el parser local de una empresa termina con éxito en Nivel 0, el agente **no** debe repetir esa empresa en Playwright (Nivel 1) ni en API (Nivel 2). En Nivel 3, las queries generales siguen activas, pero se descartan resultados de empresas ya cubiertas por parser. Ver [Regla: local parser exitoso](#regla-local-parser-exitoso--no-repetir-scraping-caro).
 
 ## Ejecución recomendada
 
@@ -21,36 +23,91 @@ Agent(
 Leer `portals.yml` que contiene:
 - `search_queries`: Lista de queries WebSearch con `site:` filters por portal (descubrimiento amplio)
 - `tracked_companies`: Empresas específicas con `careers_url` para navegación directa
+- `tracked_companies[].parser`: Parser local opcional para páginas SSR o HTML estable
 - `title_filter`: Keywords positive/negative/seniority_boost para filtrado de títulos
 
 ## Estrategia de descubrimiento (4 niveles)
 
-### Nivel 0 — LinkedIn MCP
+### Nivel 0 — Local parser (MÁS BARATO)
 
-**Usa el MCP `linkedin` para buscar empleos en LinkedIn:**
+**Para cada empresa en `tracked_companies` con `parser:` configurado:** ejecutar el parser local definido en `portals.yml`. Este nivel es ideal cuando la página de careers usa SSR o HTML estable y ya existe un script JavaScript, Python, o de otro runtime local que extrae los jobs sin ayuda del agente.
 
-1. **Session already configured:**
-   - Los tokens están en `~/.linkedin-mcp/cookies.json`
-   - La función `linkedin_search_jobs` funciona directamente
+Contrato recomendado:
 
-2. **Buscar ofertas:**
-   - `linkedin_search_jobs({ keywords: "Operations Manager", location: "Toulouse, France", max_pages: 2 })` → Devuelve lista de ofertas con título, URL, empresa, ubicación
-   - `linkedin_get_job_details({ job_id: "4405150026" })` → Devuelve JD completo, requisitos, beneficios, descripción
-   - Las URLs públicas son: `https://www.linkedin.com/jobs/view/{job_id}/`
+```yaml
+- name: Example Company
+  careers_url: https://example.com/careers
+  scan_method: local_parser
+  parser:
+    command: node
+    script: scripts/parsers/example-company-jobs.js
+    format: jobs-json-v1
+  enabled: true
+```
 
-3. **En el scan:**
-   - Para cada búsqueda: iterar resultados, filtrar por `title_filter` de `portals.yml`, dedup contra `scan-history.tsv`
-   - Reconstruir URL: `https://www.linkedin.com/jobs/view/{job_id}/`
-   - Las URLs son deduplicables contra el historial directamente
+Normalmente el parser es específico para una empresa y ya conoce la URL, selectores y paginación. `args` es opcional: usarlo como ayude a quien construyó el script, por ejemplo para reutilizarlo entre empresas, pasar `{careers_url}` o `{company}`, activar un flag de depuración, guardar un snapshot JSON, o controlar cualquier comportamiento propio del parser.
 
-4. **Consideraciones:**
-   - LinkedIn tiene rate limits — ejecutar búsquedas de forma secuencial
-   - Si hay errores de sesión, re-login con: `uvx linkedin-scraper-mcp@latest --login`
-   - max_pages controla paginación — usar 1-2 para evitar rate limits
+El parser debe imprimir JSON a stdout:
+
+Formato array:
+
+```json
+[
+  { "title": "Senior AI Engineer", "url": "https://example.com/jobs/123", "location": "Remote" }
+]
+```
+
+Formato objeto con `jobs`:
+
+```json
+{
+  "jobs": [
+    { "title": "Senior AI Engineer", "url": "https://example.com/jobs/123", "location": "Remote" }
+  ]
+}
+```
+
+Formato objeto con `results`:
+
+```json
+{
+  "results": [
+    { "title": "Senior AI Engineer", "url": "https://example.com/jobs/123", "location": "Remote" }
+  ]
+}
+```
+
+`company` es opcional; si no viene, `scan.mjs` usa el nombre de `tracked_companies`.
+
+El escáner no necesita conservar el JSON completo después de leer stdout. Si un parser también genera un artefacto para auditoría o depuración, guardarlo en `data/parser-output/{company}/` y mantenerlo fuera de git (los JSON en `.gitignore`; los `.gitkeep` se mantienen en git para conservar la estructura).
+
+### Regla: local parser exitoso — no repetir scraping caro
+
+El objetivo de `scan_method: local_parser` es **reducir tokens**: evitar que el LLM vuelva a scrapear la misma empresa con Playwright o APIs redundantes.
+
+Durante el scan del agente, mantener en memoria el conjunto **`local_parser_ok`**: nombres de empresas (`tracked_companies[].name`) donde Nivel 0 terminó con éxito:
+
+- `parser.command` + `parser.script` existen y el script se ejecutó sin error fatal
+- stdout fue JSON válido (`[]`, `{ jobs: [] }`, o `{ results: [] }`)
+- No hubo timeout ni crash del proceso
+
+| Nivel | Si la empresa está en `local_parser_ok` |
+|-------|----------------------------------------|
+| **1 — Playwright** | **Omitir** — no `browser_navigate` a su `careers_url` (método más caro en tokens) |
+| **2 — API** | **Omitir** — no WebFetch de su `api:` (ya cubierta por parser; `scan.mjs` tampoco usa API tras parser exitoso) |
+| **3 — WebSearch** | Ejecutar queries **generales** (`site:`, títulos de rol); **descartar** cada hit cuya empresa normalizada coincida con `local_parser_ok` |
+
+**Excepciones:**
+
+- Parser **falló** → la empresa **no** entra en `local_parser_ok`; Niveles 1 y 2 aplican con normalidad (mismo criterio que el fallback de `scan.mjs` cuando el parser falla y existe API ATS).
+- Nivel 3: no desactivar queries transversales (`site:jobs.ashbyhq.com`, `site:boards.greenhouse.io`, etc.) — sirven para descubrir empresas **nuevas**. Solo filtrar resultados de empresas ya en `tracked_companies` con parser exitoso.
+- No crear queries `search_queries` dedicadas a una empresa con parser local activo (p. ej. `site:jobs.ashbyhq.com/cohere "AI Engineer"`); usar el parser o, si falla, Playwright/API.
+
+**Nivel 0 recomendado:** ejecutar `node scan.mjs` (o `npm run scan`) al inicio del workflow del agente. Eso cubre parsers locales + APIs en un solo paso zero-token y devuelve qué empresas usaron `local-parser` con éxito.
 
 ### Nivel 1 — Playwright directo (PRINCIPAL)
 
-**Para cada empresa en `tracked_companies`:** Navegar a su `careers_url` con Playwright (`browser_navigate` + `browser_snapshot`), leer TODOS los job listings visibles, y extraer título + URL de cada uno. Este es el método más fiable porque:
+**Para cada empresa en `tracked_companies` que no esté en `local_parser_ok`:** Navegar a su `careers_url` con Playwright (`browser_navigate` + `browser_snapshot`), leer TODOS los job listings visibles, y extraer título + URL de cada uno. Este es el método más fiable porque:
 - Ve la página en tiempo real (no resultados cacheados de Google)
 - Funciona con SPAs (Ashby, Lever, Workday)
 - Detecta ofertas nuevas al instante
@@ -60,7 +117,7 @@ Leer `portals.yml` que contiene:
 
 ### Nivel 2 — ATS APIs / Feeds (COMPLEMENTARIO)
 
-Para empresas con API pública o feed estructurado, usar la respuesta JSON/XML como complemento rápido de Nivel 1. Es más rápido que Playwright y reduce errores de scraping visual.
+Para empresas con API pública o feed estructurado **que no estén en `local_parser_ok`**, usar la respuesta JSON/XML como complemento rápido de Nivel 1. Es más rápido que Playwright y reduce errores de scraping visual.
 
 **Soporte actual (variables entre `{}`):**
 - **Greenhouse**: `https://boards-api.greenhouse.io/v1/boards/{company}/jobs`
@@ -80,15 +137,15 @@ Para empresas con API pública o feed estructurado, usar la respuesta JSON/XML c
 
 ### Nivel 3 — WebSearch queries (DESCUBRIMIENTO AMPLIO)
 
-Los `search_queries` con `site:` filters cubren portales de forma transversal (todos los Ashby, todos los Greenhouse, etc.). Útil para descubrir empresas NUEVAS que aún no están en `tracked_companies`, pero los resultados pueden estar desfasados.
+Los `search_queries` con `site:` filters cubren portales de forma transversal (todos los Ashby, todos los Greenhouse, etc.). Útil para descubrir empresas NUEVAS que aún no están en `tracked_companies`, pero los resultados pueden estar desfasados. Tras filtrar hits de empresas en `local_parser_ok`, los resultados restantes se deduplican con Niveles 0–2.
 
 **Prioridad de ejecución:**
-1. Nivel 0: LinkedIn MCP → búsquedas configuradas en `portals.yml` (linkedin_keywords + linkedin_locations)
-2. Nivel 1: Playwright → todas las `tracked_companies` con `careers_url`
-3. Nivel 2: API → todas las `tracked_companies` con `api:`
-4. Nivel 3: WebSearch → todos los `search_queries` con `enabled: true`
+1. Nivel 0: Local parser → empresas con `parser:` configurado y script existente; construir `local_parser_ok`
+2. Nivel 1: Playwright → `tracked_companies` con `careers_url`, **excepto** `local_parser_ok`
+3. Nivel 2: API → `tracked_companies` con `api:`, **excepto** `local_parser_ok`
+4. Nivel 3: WebSearch → todos los `search_queries` con `enabled: true`; descartar hits de empresas en `local_parser_ok`
 
-Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y deduplicar.
+Los niveles son aditivos — se ejecutan en orden, los resultados se mezclan y deduplican. Las empresas en `local_parser_ok` **no** pasan por Niveles 1 ni 2; en Nivel 3 solo aportan descubrimiento transversal (otras empresas en el mismo portal).
 
 ## Workflow
 
@@ -96,19 +153,20 @@ Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y dedu
 2. **Leer historial**: `data/scan-history.tsv` → URLs ya vistas
 3. **Leer dedup sources**: `data/applications.md` + `data/pipeline.md`
 
-4. **Nivel 0 — LinkedIn MCP search** (secuencial):
-   Para cada búsqueda en `portals.yml` (si existen `linkedin_keywords` y `linkedin_locations`):
-   a. Para cada combinación de keyword + location:
-      - `linkedin.search_jobs({ keywords: keyword, location: location, limit: 30 })`
-   b. De cada resultado extraer: `{title, url, company, location, postedDate}`
-   c. Las URLs de LinkedIn siguen el patrón: `https://www.linkedin.com/jobs/view/{jobId}/`
-   d. Filtrar por `title_filter` de `portals.yml`
-   e. Verificar liveness con Playwright (mismo proceso que Nivel 3)
-   f. Deduplicar contra `scan-history.tsv`, `applications.md`, `pipeline.md`
-   g. Acumular en lista de candidatos
+3.5. **Nivel 0 — Local parser** (`scan.mjs`, zero-token):
+   Inicializar `local_parser_ok = []`.
+   Preferir ejecutar `node scan.mjs` una vez para cubrir todos los parsers + APIs zero-token; si se hace manualmente, repetir la lógica siguiente.
+   Para cada empresa en `tracked_companies` con `enabled: true`, `parser.command` y script existente:
+   a. Ejecutar `parser.command` con `parser.script` + `parser.args` usando ejecución local sin shell
+   b. Expandir placeholders `{careers_url}` y `{company}` en argumentos
+   c. Leer JSON de stdout (`[]`, `{ jobs: [] }`, o `{ results: [] }`)
+   d. Normalizar cada job a `{title, url, company, location}`
+   e. Resolver URLs relativas contra `careers_url`
+   f. Si el parser falla, registrar error, intentar fallback por API ATS si existe, y continuar con las demás empresas (**no** añadir a `local_parser_ok`)
+   g. Si el parser termina con éxito (pasos c–e sin error fatal), añadir `entry.name` a `local_parser_ok` y acumular jobs en candidatos
 
-5. **Nivel 1 — Playwright scan** (paralelo en batches de 3-5):
-   Para cada empresa en `tracked_companies` con `enabled: true` y `careers_url` definida:
+4. **Nivel 1 — Playwright scan** (paralelo en batches de 3-5):
+   Para cada empresa en `tracked_companies` con `enabled: true`, `careers_url` definida, y **nombre no listado en `local_parser_ok`**:
    a. `browser_navigate` a la `careers_url`
    b. `browser_snapshot` para leer todos los job listings
    c. Si la página tiene filtros/departamentos, navegar las secciones relevantes
@@ -118,7 +176,7 @@ Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y dedu
    g. Si `careers_url` falla (404, redirect), intentar `scan_query` como fallback y anotar para actualizar la URL
 
 5. **Nivel 2 — ATS APIs / feeds** (paralelo):
-   Para cada empresa en `tracked_companies` con `api:` definida y `enabled: true`:
+   Para cada empresa en `tracked_companies` con `api:` definida, `enabled: true`, y **nombre no listado en `local_parser_ok`**:
    a. WebFetch de la URL de API/feed
    b. Si `api_provider` está definido, usar su parser; si no está definido, inferir por dominio (`boards-api.greenhouse.io`, `jobs.ashbyhq.com`, `api.lever.co`, `*.bamboohr.com`, `*.teamtailor.com`, `*.myworkdayjobs.com`)
    c. Para **Ashby**, enviar POST con:
@@ -131,18 +189,28 @@ Los niveles son aditivos — se ejecutan todos, los resultados se mezclan y dedu
    g. Acumular en lista de candidatos (dedup con Nivel 1)
 
 6. **Nivel 3 — WebSearch queries** (paralelo si posible):
-   Para cada query en `search_queries` con `enabled: true`:
+   Para cada query en `search_queries` con `enabled: true` (queries generales por portal/rol — no queries dedicadas a una empresa con parser local activo):
    a. Ejecutar WebSearch con el `query` definido
    b. De cada resultado extraer: `{title, url, company}`
       - **title**: del título del resultado (antes del " @ " o " | ")
       - **url**: URL del resultado
       - **company**: después del " @ " en el título, o extraer del dominio/path
-   c. Acumular en lista de candidatos (dedup con Nivel 1+2)
+   c. **Omitir** el resultado si `company` (normalizado) coincide con algún nombre en `local_parser_ok`
+   d. Acumular el resto en lista de candidatos (dedup con Nivel 0+1+2)
 
 6. **Filtrar por título** usando `title_filter` de `portals.yml`:
    - Al menos 1 keyword de `positive` debe aparecer en el título (case-insensitive)
    - 0 keywords de `negative` deben aparecer
    - `seniority_boost` keywords dan prioridad pero no son obligatorios
+
+6b. **Filtrar por ubicación (opcional)** usando `location_filter` de `portals.yml`:
+   - Si el bloque `location_filter` está ausente, todas las ubicaciones pasan (comportamiento por defecto)
+   - Ubicación vacía en una oferta → pasa (no penalizar datos faltantes)
+   - Cualquier keyword de `block` presente → rechazar (precedencia sobre allow)
+   - `allow` vacío → pasa (ya superó block)
+   - `allow` no vacío → debe coincidir al menos una keyword
+   - Todas las coincidencias son case-insensitive substring
+   - La ubicación se persiste como 7ª columna en `scan-history.tsv` para auditoría posterior
 
 7. **Deduplicar** contra 3 fuentes:
    - `scan-history.tsv` → URL exacta ya vista
@@ -206,19 +274,6 @@ https://...	2026-02-10	WebSearch — AI PM	PM AI	ClosedCo	skipped_expired
 
 ## Resumen de salida
 
-```
-Portal Scan — {YYYY-MM-DD}
-━━━━━━━━━━━━━━━━━━━━━━━━━
-Nivel 0 (LinkedIn): N ofertas encontradas → N añadidas
-Nivel 1 (Playwright): N ofertas → N añadidas
-Nivel 2 (API): N ofertas → N añadidas
-Nivel 3 (WebSearch): N ofertas encontradas → N verificadas → N añadidas
-
-Total añadidas a pipeline.md: N
-  + {company} | {title} | {source}
-  ...
-
-→ Ejecuta /career-ops pipeline para evaluar las nuevas ofertas.
 ```
 Portal Scan — {YYYY-MM-DD}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━

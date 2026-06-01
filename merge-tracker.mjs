@@ -94,12 +94,37 @@ const ROLE_STOPWORDS = new Set([
   'with', 'from', 'into', 'over', 'this', 'that',
 ]);
 
+// Short specialty acronyms that ARE discriminating despite their length.
+// Without this allowlist, `length > 3` strips them out, leaving only the
+// generic "Software Engineer" baseline (see Issue #633).
+//
+// Deliberately narrow: includes tokens like 'api' / 'sre' / 'sdk' that name
+// a specific team or technology, and excludes broad ones like 'ai' / 'ml' /
+// 'llm' that appear across many roles (AI Engineer, ML Manager, etc.).
+// Adding the broad ones would regress #329's AI Success/Deployment case.
+const SHORT_SPECIALTY = new Set([
+  'api', 'sre', 'sdk', 'cli', 'gpu', 'cpu',
+  'ios', 'qa', 'ux', 'ui', 'ar', 'vr',
+  'ocr', 'crm', 'erp',
+]);
+
+// Generic role-level descriptors. Two roles whose ONLY overlap is in this
+// set (e.g. [software, engineer]) are NOT the same role — they're just
+// labelled at the same altitude. See Issue #633: "Staff SWE, API" vs
+// "Staff SWE, Kubernetes Platform" share [software, engineer] only.
+const BASELINE_TOKENS = new Set([
+  'software', 'engineer', 'developer', 'manager', 'architect',
+  'analyst', 'designer', 'consultant', 'specialist',
+  'platform', 'systems', 'services',
+  'backend', 'frontend', 'fullstack',
+]);
+
 function roleTokens(s) {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 3 && !ROLE_STOPWORDS.has(w));
+    .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
 function roleFuzzyMatch(a, b) {
@@ -108,16 +133,21 @@ function roleFuzzyMatch(a, b) {
   if (wordsA.length === 0 || wordsB.length === 0) return false;
 
   const setB = new Set(wordsB);
-  const overlap = wordsA.filter(w => setB.has(w)).length;
-  if (overlap === 0) return false;
+  const overlap = wordsA.filter(w => setB.has(w));
+  if (overlap.length < 2) return false;
+
+  // Require at least one non-baseline token in the overlap. Roles that
+  // share only generic descriptors like [software, engineer] are NOT the
+  // same role (see Issue #633).
+  const discriminating = overlap.filter(w => !BASELINE_TOKENS.has(w));
+  if (discriminating.length === 0) return false;
 
   // Jaccard-style ratio on content tokens. Two roles are "the same" only
   // when the overlap dominates the smaller side — not when they just share
   // a location + "engineer".
   const minLen = Math.min(wordsA.length, wordsB.length);
-  const ratio = overlap / minLen;
-
-  return overlap >= 2 && ratio >= 0.6;
+  const ratio = overlap.length / minLen;
+  return ratio >= 0.6;
 }
 
 function extractReportNum(reportStr) {

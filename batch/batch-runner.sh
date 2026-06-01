@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# career-ops batch runner — standalone orchestrator for batch workers
-# Reads batch-input.tsv, delegates each offer to a qwen -p or claude -p worker,
+# career-ops batch runner — standalone orchestrator for claude -p workers
+# Reads batch-input.tsv, delegates each offer to a claude -p worker,
 # tracks state in batch-state.tsv for resumability.
-# Auto-detects which CLI is available; prefers qwen, falls back to claude.
+#
+# NOTE: This script is Claude Code-specific. It uses claude -p with
+# --dangerously-skip-permissions and --append-system-prompt-file flags
+# that are not available in other CLIs. Multi-CLI support is out of scope
+# for now — contributions welcome.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -22,17 +26,6 @@ STATE_LOCK_PID_FILE="$STATE_LOCK_DIR/pid"
 STATE_LOCK_TIMEOUT_SECONDS=30
 MAIN_PID="${BASHPID:-$$}"
 
-# CLI detection: prefer qwen, fall back to claude
-BATCH_CLI=""
-BATCH_CLI_NAME=""
-if command -v qwen &>/dev/null; then
-  BATCH_CLI="qwen"
-  BATCH_CLI_NAME="qwen"
-elif command -v claude &>/dev/null; then
-  BATCH_CLI="claude"
-  BATCH_CLI_NAME="claude"
-fi
-
 # Defaults
 PARALLEL=1
 DRY_RUN=false
@@ -40,11 +33,12 @@ RETRY_FAILED=false
 START_FROM=0
 MAX_RETRIES=2
 MIN_SCORE=0
+MODEL=""  # empty = let claude -p use the Claude Max default
 
 usage() {
   cat <<'USAGE'
-career-ops batch runner — process job offers in batch via batch workers
-Uses your default AI CLI (qwen or claude, auto-detected).
+career-ops batch runner — process job offers in batch via claude -p workers
+Uses your default Claude model (Claude Max subscription).
 
 Usage: batch-runner.sh [OPTIONS]
 
@@ -55,6 +49,9 @@ Options:
   --start-from N       Start from offer ID N (skip earlier IDs)
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
+  --model NAME         Claude model passed to `claude -p --model` (default:
+                       unset = Claude Max default). Use a cheaper model for
+                       large batches, e.g. `--model claude-sonnet-4-6`.
   -h, --help           Show this help
 
 Files:
@@ -88,6 +85,7 @@ while [[ $# -gt 0 ]]; do
     --start-from) START_FROM="$2"; shift 2 ;;
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
+    --model) MODEL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -131,12 +129,10 @@ check_prerequisites() {
     exit 1
   fi
 
-  if [[ -z "$BATCH_CLI" ]]; then
-    echo "ERROR: Neither 'qwen' nor 'claude' CLI found in PATH. Install one to run batch processing."
+  if ! command -v claude &>/dev/null; then
+    echo "ERROR: 'claude' CLI not found in PATH."
     exit 1
   fi
-
-  echo "Using CLI: $BATCH_CLI_NAME"
 
   mkdir -p "$LOGS_DIR" "$TRACKER_DIR" "$REPORTS_DIR"
 }
@@ -364,13 +360,17 @@ process_offer() {
     -e "s|{{ID}}|${esc_id}|g" \
     "$PROMPT_FILE" > "$resolved_prompt"
 
-  # Launch batch worker (uses qwen -p or claude -p, auto-detected)
+  # Launch claude -p worker.
+  # Model defaults to the Claude Max subscription default unless --model was
+  # passed. Building the command in an array keeps quoting safe regardless.
+  local -a claude_args=(-p --dangerously-skip-permissions)
+  if [[ -n "$MODEL" ]]; then
+    claude_args+=(--model "$MODEL")
+  fi
+  claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
+
   local exit_code=0
-  "$BATCH_CLI" -p \
-    --dangerously-skip-permissions \
-    --append-system-prompt-file "$resolved_prompt" \
-    "$prompt" \
-    > "$log_file" 2>&1 || exit_code=$?
+  claude "${claude_args[@]}" > "$log_file" 2>&1 || exit_code=$?
 
   # Cleanup resolved prompt
   rm -f "$resolved_prompt"
