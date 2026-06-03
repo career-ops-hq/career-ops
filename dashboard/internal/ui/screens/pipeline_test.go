@@ -405,10 +405,9 @@ func TestRespondedTabSitsBetweenInterviewAndApplied(t *testing.T) {
 	}
 }
 
-// Regression: with no committed search query, Esc must NOT close the screen.
-// The help bar advertises only `q quit`, so Esc quitting silently was a bug
-// that surfaced as accidental exits when users hit Esc to "back out" of the UI.
-func TestEscWithoutQueryIsNoOp(t *testing.T) {
+// Regression: with no committed search query, Esc must never quit the app.
+// In the command-center dashboard it safely returns home instead.
+func TestEscWithoutQueryReturnsHome(t *testing.T) {
 	apps := []model.CareerApplication{
 		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6},
 	}
@@ -419,13 +418,12 @@ func TestEscWithoutQueryIsNoOp(t *testing.T) {
 	}
 
 	pm, cmd := pm.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if cmd != nil {
-		// PipelineClosedMsg used to fire here; ensure it doesn't anymore.
-		if msg := cmd(); msg != nil {
-			if _, ok := msg.(PipelineClosedMsg); ok {
-				t.Fatalf("expected Esc with no query to be a no-op, got PipelineClosedMsg")
-			}
-			t.Fatalf("expected Esc with no query to return nil cmd, got %T", msg)
+	if cmd == nil {
+		t.Fatal("expected Esc with no query to emit PipelineOpenHomeMsg")
+	}
+	if msg := cmd(); msg != nil {
+		if _, ok := msg.(PipelineOpenHomeMsg); !ok {
+			t.Fatalf("expected PipelineOpenHomeMsg, got %T", msg)
 		}
 	}
 	if pm.searchInput {

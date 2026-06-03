@@ -89,6 +89,9 @@ type PipelineDiscardReasonsLoadedMsg struct {
 // PipelineRefreshMsg requests a full tracker reload from disk.
 type PipelineRefreshMsg struct{}
 
+// PipelineOpenHomeMsg is emitted when the command center should open.
+type PipelineOpenHomeMsg struct{}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
@@ -516,8 +519,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		// While a search is committed, Esc clears the search (matches vim's `:nohl`
-		// ergonomics). With no query, Esc is a no-op — q is the only quit key, which
-		// keeps the help bar honest and avoids accidental exits.
+		// ergonomics). With no query, Esc returns to the command center; it never quits.
 		if m.searchQuery != "" {
 			m.searchQuery = ""
 			m.applyFilterAndSort()
@@ -525,7 +527,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 			m.scrollOffset = 0
 			return m, m.loadCurrentReport()
 		}
-		return m, nil
+		return m, func() tea.Msg { return PipelineOpenHomeMsg{} }
 
 	case "q":
 		return m, func() tea.Msg { return PipelineClosedMsg{} }
@@ -2007,6 +2009,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("S") + descStyle.Render(i18n.Current.HelpStats) +
 		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
 		keyStyle.Render("m") + descStyle.Render(i18n.Current.HelpManifesto) +
+		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack) +
 		keyStyle.Render("q") + descStyle.Render(i18n.Current.HelpQuit)
 
 	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brandPlain) - 2

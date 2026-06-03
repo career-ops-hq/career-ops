@@ -20,29 +20,38 @@ import (
 type viewState int
 
 const (
-	viewPipeline viewState = iota
+	viewCommand viewState = iota
+	viewPipeline
 	viewReport
 	viewProgress
 	viewStats
 )
 
 type appModel struct {
-	pipeline        screens.PipelineModel
-	viewer          screens.ViewerModel
-	progress        screens.ProgressModel
-	stats           screens.StatsModel
-	state           viewState
-	careerOpsPath   string
-	theme           theme.Theme
-	progressMetrics model.ProgressMetrics
-	statsMetrics    model.StatsMetrics
-	evaluatedCount  int
+	command          screens.CommandModel
+	pipeline         screens.PipelineModel
+	viewer           screens.ViewerModel
+	progress         screens.ProgressModel
+	stats            screens.StatsModel
+	state            viewState
+	returnState      viewState
+	careerOpsPath    string
+	theme            theme.Theme
+	progressMetrics  model.ProgressMetrics
+	statsMetrics     model.StatsMetrics
+	evaluatedCount   int
+	dashboardContext model.DashboardContext
 }
 
 func (m *appModel) reloadPipelineData() {
 	apps := data.ParseApplications(m.careerOpsPath)
+	if apps == nil {
+		apps = []model.CareerApplication{}
+	}
 	metrics := data.ComputeMetrics(apps)
 	m.progressMetrics = data.ComputeProgressMetrics(apps)
+	m.dashboardContext = data.LoadDashboardContext(m.careerOpsPath, apps)
+	m.command = m.command.WithContext(m.dashboardContext)
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
@@ -76,6 +85,42 @@ func enrichArchetypes(careerOpsPath string, apps []model.CareerApplication, pm *
 	}
 }
 
+func enrichPipelineReports(pm *screens.PipelineModel, apps []model.CareerApplication, careerOpsPath string) {
+	for _, app := range apps {
+		if app.ReportPath == "" {
+			continue
+		}
+		archetype, tldr, remote, comp := data.LoadReportSummary(careerOpsPath, app.ReportPath)
+		if archetype != "" || tldr != "" || remote != "" || comp != "" {
+			pm.EnrichReport(app.ReportPath, archetype, tldr, remote, comp)
+		}
+	}
+}
+
+func newAppModel(careerOpsPath string, width, height int) appModel {
+	apps := data.ParseApplications(careerOpsPath)
+	if apps == nil {
+		apps = []model.CareerApplication{}
+	}
+	metrics := data.ComputeMetrics(apps)
+	progressMetrics := data.ComputeProgressMetrics(apps)
+	dashboardContext := data.LoadDashboardContext(careerOpsPath, apps)
+	t := theme.NewTheme("auto")
+	pm := screens.NewPipelineModel(t, apps, metrics, careerOpsPath, width, height)
+	enrichPipelineReports(&pm, apps, careerOpsPath)
+
+	return appModel{
+		command:          screens.NewCommandModel(t, dashboardContext, width, height),
+		pipeline:         pm,
+		careerOpsPath:    careerOpsPath,
+		theme:            t,
+		progressMetrics:  progressMetrics,
+		dashboardContext: dashboardContext,
+		state:            viewCommand,
+		returnState:      viewCommand,
+	}
+}
+
 func (m appModel) Init() tea.Cmd {
 	return nil
 }
@@ -94,6 +139,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.command.Resize(msg.Width, msg.Height)
 		m.pipeline.Resize(msg.Width, msg.Height)
 		if m.state == viewReport {
 			m.viewer.Resize(msg.Width, msg.Height)
@@ -104,12 +150,30 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == viewStats {
 			m.stats.Resize(msg.Width, msg.Height)
 		}
-		pm, cmd := m.pipeline.Update(msg)
-		m.pipeline = pm
-		return m, cmd
+		return m, nil
+
+	case screens.CommandClosedMsg:
+		return m, tea.Quit
+
+	case screens.CommandOpenPipelineMsg:
+		m.state = viewPipeline
+		return m, nil
+
+	case screens.CommandOpenProgressMsg:
+		m.returnState = viewCommand
+		m.openProgress()
+		return m, nil
+
+	case screens.CommandRefreshMsg:
+		m.reloadPipelineData()
+		return m, nil
 
 	case screens.PipelineClosedMsg:
 		return m, tea.Quit
+
+	case screens.PipelineOpenHomeMsg:
+		m.state = viewCommand
+		return m, nil
 
 	case screens.PipelineLoadReportMsg:
 		archetype, tldr, remote, comp := data.LoadReportSummary(msg.CareerOpsPath, msg.ReportPath)
@@ -192,16 +256,15 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case screens.PipelineOpenProgressMsg:
-		m.progress = screens.NewProgressModel(
-			m.theme,
-			m.progressMetrics,
-			m.pipeline.Width(), m.pipeline.Height(),
-		)
-		m.state = viewProgress
+		m.returnState = viewPipeline
+		m.openProgress()
 		return m, nil
 
 	case screens.ProgressClosedMsg:
-		m.state = viewPipeline
+		if m.returnState == viewReport || m.returnState == viewProgress {
+			m.returnState = viewCommand
+		}
+		m.state = m.returnState
 		return m, nil
 
 	case screens.PipelineOpenStatsMsg:
@@ -228,6 +291,11 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, runGeneratePDF(msg)
 
 	default:
+		if m.state == viewCommand {
+			cm, cmd := m.command.Update(msg)
+			m.command = cm
+			return m, cmd
+		}
 		if m.state == viewReport {
 			vm, cmd := m.viewer.Update(msg)
 			m.viewer = vm
@@ -300,8 +368,19 @@ func summarizeCmdError(err error, out []byte) string {
 	return err.Error()
 }
 
+func (m *appModel) openProgress() {
+	m.progress = screens.NewProgressModel(
+		m.theme,
+		m.progressMetrics,
+		m.pipeline.Width(), m.pipeline.Height(),
+	)
+	m.state = viewProgress
+}
+
 func (m appModel) View() string {
 	switch m.state {
+	case viewCommand:
+		return m.command.View()
 	case viewReport:
 		return m.viewer.View()
 	case viewProgress:
@@ -324,42 +403,7 @@ func main() {
 		i18n.SetLang(os.Getenv("LANG"))
 	}
 
-	careerOpsPath := *pathFlag
-
-	// Load applications
-	apps := data.ParseApplications(careerOpsPath)
-	if apps == nil {
-		fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
-		os.Exit(1)
-	}
-
-	// Compute metrics
-	metrics := data.ComputeMetrics(apps)
-	progressMetrics := data.ComputeProgressMetrics(apps)
-
-	// Batch-load all report summaries
-	t := theme.NewTheme("auto")
-	pm := screens.NewPipelineModel(t, apps, metrics, careerOpsPath, 120, 40)
-
-	enrichArchetypes(careerOpsPath, apps, &pm)
-	statsMetrics := data.ComputeStatsMetrics(apps)
-
-	m := appModel{
-		pipeline:        pm,
-		careerOpsPath:   careerOpsPath,
-		theme:           t,
-		progressMetrics: progressMetrics,
-		statsMetrics:    statsMetrics,
-		evaluatedCount:  func() int {
-			n := 0
-			for _, a := range apps {
-				if a.Score > 0 {
-					n++
-				}
-			}
-			return n
-		}(),
-	}
+	m := newAppModel(*pathFlag, 120, 40)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
