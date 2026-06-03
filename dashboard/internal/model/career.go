@@ -29,6 +29,41 @@ type CareerApplication struct {
 	CompEstimate string
 }
 
+type DashboardReadinessItem struct {
+	Label    string
+	Path     string
+	Ready    bool
+	Required bool
+	Hint     string
+}
+
+type DashboardAction struct {
+	Title   string
+	Detail  string
+	Command string
+}
+
+type JourneyStep struct {
+	Label  string
+	Status string // done, active, todo
+	Detail string
+}
+
+type DashboardContext struct {
+	Readiness         []DashboardReadinessItem
+	RequiredReady     int
+	RequiredTotal     int
+	MissingRequired   int
+	SetupComplete     bool
+	PendingURLs       int
+	ReportCount       int
+	ProofPointsStatus string
+	StoryBankStatus   string
+	Metrics           PipelineMetrics
+	NextAction        DashboardAction
+	Journey           []JourneyStep
+}
+
 // PipelineMetrics holds aggregate stats for the pipeline dashboard.
 type PipelineMetrics struct {
 	Total      int

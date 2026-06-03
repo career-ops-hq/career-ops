@@ -456,6 +456,191 @@ func enrichAppURLsByCompany(careerOpsPath string, apps []model.CareerApplication
 	}
 }
 
+// LoadDashboardContext inspects the local career-ops workspace and builds the
+// operator-facing command-center context. It intentionally reads only local
+// files so the dashboard can guide brand-new users before any AI evaluation ran.
+func LoadDashboardContext(careerOpsPath string, apps []model.CareerApplication) model.DashboardContext {
+	ctx := model.DashboardContext{
+		Metrics:           ComputeMetrics(apps),
+		PendingURLs:       countPendingPipelineURLs(careerOpsPath),
+		ReportCount:       countMarkdownFiles(filepath.Join(careerOpsPath, "reports")),
+		ProofPointsStatus: readinessStatus(fileExists(filepath.Join(careerOpsPath, "article-digest.md"))),
+		StoryBankStatus:   readinessStatus(fileExists(filepath.Join(careerOpsPath, "interview-prep", "story-bank.md"))),
+	}
+
+	ctx.Readiness = []model.DashboardReadinessItem{
+		{Label: "CV", Path: "cv.md", Ready: fileExists(filepath.Join(careerOpsPath, "cv.md")), Required: true, Hint: "Add a markdown CV; this is the source of truth for tailoring."},
+		{Label: "Profile", Path: "config/profile.yml", Ready: fileExists(filepath.Join(careerOpsPath, "config", "profile.yml")), Required: true, Hint: "Set name, email, target roles, location, and salary constraints."},
+		{Label: "Targeting", Path: "modes/_profile.md", Ready: fileExists(filepath.Join(careerOpsPath, "modes", "_profile.md")), Required: true, Hint: "Store role archetypes, deal-breakers, and search narrative."},
+		{Label: "Scanner", Path: "portals.yml", Ready: fileExists(filepath.Join(careerOpsPath, "portals.yml")), Required: true, Hint: "Choose portals, companies, and title filters."},
+		{Label: "Tracker", Path: "data/applications.md", Ready: fileExists(filepath.Join(careerOpsPath, "data", "applications.md")) || fileExists(filepath.Join(careerOpsPath, "applications.md")), Required: true, Hint: "Application ledger; created automatically by onboarding."},
+		{Label: "Proof points", Path: "article-digest.md", Ready: ctx.ProofPointsStatus == "ready", Required: false, Hint: "Compact achievements and projects improve CV tailoring."},
+		{Label: "Story bank", Path: "interview-prep/story-bank.md", Ready: ctx.StoryBankStatus == "ready", Required: false, Hint: "STAR+R stories compound across interview prep."},
+	}
+
+	for _, item := range ctx.Readiness {
+		if item.Required {
+			ctx.RequiredTotal++
+			if item.Ready {
+				ctx.RequiredReady++
+			}
+		}
+	}
+	ctx.MissingRequired = ctx.RequiredTotal - ctx.RequiredReady
+	ctx.SetupComplete = ctx.RequiredTotal > 0 && ctx.MissingRequired == 0
+	ctx.NextAction = nextDashboardAction(ctx)
+	ctx.Journey = buildJourney(ctx)
+	return ctx
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func readinessStatus(ready bool) string {
+	if ready {
+		return "ready"
+	}
+	return "missing"
+}
+
+func countPendingPipelineURLs(careerOpsPath string) int {
+	paths := []string{
+		filepath.Join(careerOpsPath, "data", "pipeline.md"),
+		filepath.Join(careerOpsPath, "pipeline.md"),
+	}
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		count := 0
+		for _, line := range strings.Split(string(content), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+				continue
+			}
+			if strings.Contains(trimmed, "http://") || strings.Contains(trimmed, "https://") || strings.HasPrefix(trimmed, "local:") {
+				count++
+			}
+		}
+		return count
+	}
+	return 0
+}
+
+func countMarkdownFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func nextDashboardAction(ctx model.DashboardContext) model.DashboardAction {
+	for _, item := range ctx.Readiness {
+		if item.Required && !item.Ready {
+			switch item.Path {
+			case "cv.md":
+				return model.DashboardAction{Title: "Add your CV", Detail: "Career-ops cannot score fit or tailor PDFs until the candidate story exists.", Command: "create cv.md"}
+			case "config/profile.yml":
+				return model.DashboardAction{Title: "Personalize profile", Detail: "Fill target roles, location policy, salary range, and contact details.", Command: "edit config/profile.yml"}
+			case "modes/_profile.md":
+				return model.DashboardAction{Title: "Define targeting", Detail: "Capture archetypes, deal-breakers, and proof-point strategy.", Command: "cp modes/_profile.template.md modes/_profile.md"}
+			case "portals.yml":
+				return model.DashboardAction{Title: "Configure scanner", Detail: "Choose companies and title filters before scanning.", Command: "cp templates/portals.example.yml portals.yml"}
+			case "data/applications.md":
+				return model.DashboardAction{Title: "Create tracker", Detail: "Create the application ledger before evaluating roles.", Command: "mkdir -p data && touch data/applications.md"}
+			default:
+				return model.DashboardAction{Title: "Finish setup", Detail: item.Hint, Command: item.Path}
+			}
+		}
+	}
+
+	if ctx.PendingURLs > 0 {
+		return model.DashboardAction{Title: "Process pending jobs", Detail: fmt.Sprintf("%d queued job links are waiting in the pipeline.", ctx.PendingURLs), Command: "/career-ops pipeline"}
+	}
+	if ctx.Metrics.Actionable > 0 {
+		return model.DashboardAction{Title: "Work the shortlist", Detail: fmt.Sprintf("%d active opportunities need a decision, application, or follow-up.", ctx.Metrics.Actionable), Command: "open dashboard pipeline"}
+	}
+	if ctx.Metrics.Total == 0 {
+		return model.DashboardAction{Title: "Evaluate first role", Detail: "Paste a job URL or JD to create the first scored report.", Command: "/career-ops <job-url>"}
+	}
+	return model.DashboardAction{Title: "Scan for fresh roles", Detail: "No immediate blockers. Refill the pipeline with new listings.", Command: "npm run scan"}
+}
+
+func buildJourney(ctx model.DashboardContext) []model.JourneyStep {
+	setupStatus := "active"
+	setupDetail := fmt.Sprintf("%d/%d required files ready", ctx.RequiredReady, ctx.RequiredTotal)
+	if ctx.SetupComplete {
+		setupStatus = "done"
+	}
+
+	discoverStatus := "todo"
+	discoverDetail := "scan portals or paste job URLs"
+	if ctx.PendingURLs > 0 {
+		discoverStatus = "active"
+		discoverDetail = fmt.Sprintf("%d URLs waiting", ctx.PendingURLs)
+	} else if ctx.Metrics.Total > 0 {
+		discoverStatus = "done"
+		discoverDetail = "roles have been evaluated"
+	}
+
+	shortlistStatus := "todo"
+	shortlistDetail := "wait for evaluated roles"
+	if ctx.Metrics.Actionable > 0 {
+		shortlistStatus = "active"
+		shortlistDetail = fmt.Sprintf("%d active opportunities", ctx.Metrics.Actionable)
+	} else if ctx.Metrics.Total > 0 {
+		shortlistStatus = "done"
+		shortlistDetail = "no active shortlist items"
+	}
+
+	applyStatus := "todo"
+	applyDetail := "apply only to roles worth the time"
+	if ctx.Metrics.ByStatus["applied"]+ctx.Metrics.ByStatus["responded"]+ctx.Metrics.ByStatus["interview"]+ctx.Metrics.ByStatus["offer"] > 0 {
+		applyStatus = "active"
+		applyDetail = "applications are in motion"
+	}
+
+	interviewStatus := "todo"
+	interviewDetail := "build stories before screens"
+	if ctx.Metrics.ByStatus["interview"]+ctx.Metrics.ByStatus["offer"] > 0 {
+		interviewStatus = "active"
+		interviewDetail = "interview loop active"
+	} else if ctx.StoryBankStatus == "ready" {
+		interviewDetail = "story bank ready"
+	}
+
+	followupStatus := "todo"
+	followupDetail := "cadence starts after applications"
+	if ctx.Metrics.ByStatus["applied"]+ctx.Metrics.ByStatus["responded"] > 0 {
+		followupStatus = "active"
+		followupDetail = "track responses and follow-ups"
+	}
+
+	return []model.JourneyStep{
+		{Label: "Setup", Status: setupStatus, Detail: setupDetail},
+		{Label: "Discover", Status: discoverStatus, Detail: discoverDetail},
+		{Label: "Shortlist", Status: shortlistStatus, Detail: shortlistDetail},
+		{Label: "Apply", Status: applyStatus, Detail: applyDetail},
+		{Label: "Interview", Status: interviewStatus, Detail: interviewDetail},
+		{Label: "Follow up", Status: followupStatus, Detail: followupDetail},
+	}
+}
+
 // ComputeMetrics calculates aggregate metrics from applications.
 func ComputeMetrics(apps []model.CareerApplication) model.PipelineMetrics {
 	m := model.PipelineMetrics{

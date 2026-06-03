@@ -8,7 +8,81 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/santifer/career-ops/dashboard/internal/model"
 )
+
+func TestLoadDashboardContextReportsMissingReadinessAndNextAction(t *testing.T) {
+	tempDir := t.TempDir()
+
+	ctx := LoadDashboardContext(tempDir, nil)
+
+	if ctx.RequiredTotal == 0 {
+		t.Fatal("expected required readiness items to be counted")
+	}
+	if ctx.RequiredReady != 0 {
+		t.Fatalf("expected no required items ready in empty repo, got %d", ctx.RequiredReady)
+	}
+	if ctx.MissingRequired == 0 {
+		t.Fatal("expected missing required items in empty repo")
+	}
+	if ctx.NextAction.Title != "Add your CV" {
+		t.Fatalf("expected first next action to be adding CV, got %q", ctx.NextAction.Title)
+	}
+	if ctx.SetupComplete {
+		t.Fatal("empty repo should not be setup complete")
+	}
+}
+
+func TestLoadDashboardContextCountsCareerOpsArtifacts(t *testing.T) {
+	tempDir := t.TempDir()
+	mustWrite := func(path, content string) {
+		t.Helper()
+		full := filepath.Join(tempDir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("failed to create dir for %s: %v", path, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write %s: %v", path, err)
+		}
+	}
+
+	mustWrite("cv.md", "# Student CV\n")
+	mustWrite("config/profile.yml", "name: Student\n")
+	mustWrite("modes/_profile.md", "# Targeting\n")
+	mustWrite("portals.yml", "companies: []\n")
+	mustWrite("data/applications.md", "# Applications Tracker\n")
+	mustWrite("data/pipeline.md", "- https://jobs.example.com/one\n- https://jobs.example.com/two\n")
+	mustWrite("reports/001-example-2026-06-03.md", "# Report\n")
+	mustWrite("article-digest.md", "# Proof points\n")
+	mustWrite("interview-prep/story-bank.md", "# Story bank\n")
+
+	apps := []model.CareerApplication{
+		{Company: "Example", Role: "Intern", Status: "Evaluated", Score: 4.4, HasPDF: true},
+		{Company: "AppliedCo", Role: "Graduate Engineer", Status: "Applied", Score: 4.1},
+	}
+
+	ctx := LoadDashboardContext(tempDir, apps)
+
+	if !ctx.SetupComplete {
+		t.Fatalf("expected setup complete, readiness: %+v", ctx.Readiness)
+	}
+	if ctx.PendingURLs != 2 {
+		t.Fatalf("expected 2 pending URLs, got %d", ctx.PendingURLs)
+	}
+	if ctx.ReportCount != 1 {
+		t.Fatalf("expected 1 report, got %d", ctx.ReportCount)
+	}
+	if ctx.ProofPointsStatus != "ready" || ctx.StoryBankStatus != "ready" {
+		t.Fatalf("expected proof points and story bank ready, got %q/%q", ctx.ProofPointsStatus, ctx.StoryBankStatus)
+	}
+	if ctx.Metrics.Total != 2 || ctx.Metrics.Actionable != 2 {
+		t.Fatalf("expected metrics to be computed from apps, got %+v", ctx.Metrics)
+	}
+	if ctx.NextAction.Title != "Process pending jobs" {
+		t.Fatalf("pending pipeline should drive next action, got %q", ctx.NextAction.Title)
+	}
+}
 
 func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
