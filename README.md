@@ -384,14 +384,22 @@ The verification is sequential and only runs against new offers (after dedup), s
 
 ## Dashboard TUI
 
-The built-in terminal dashboard lets you browse your pipeline visually:
+The built-in terminal dashboard is now a job-search command center, not just a table viewer:
 
 ```bash
 npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-Features: 6 filter tabs, 4 sort modes, grouped/flat view, lazy-loaded previews, inline status changes.
+It opens on a **Career Command Center** that helps students, undergrads, and active job seekers see exactly where they are in the search:
+
+- setup readiness: CV, profile, targeting, scanner, tracker, proof points, story bank
+- next best action: the concrete file or command blocking progress
+- journey rail: setup → discover → shortlist → apply → interview → follow up
+- momentum metrics: evaluated roles, active opportunities, average/top score, pending URLs, generated PDFs
+- drill-down screens: pipeline table, report viewer, and progress analytics
+
+Navigation: `p` pipeline, `a` analytics, `r` refresh, `Esc` home from the pipeline, `q` quit. The dashboard now also starts cleanly in a fresh repo before `data/applications.md` exists, so first-time users get onboarding guidance instead of a crash.
 
 There is also an **experimental web UI** (alpha, opt-in — nothing runs unless you start it): see [`web/README.md`](web/README.md).
 
