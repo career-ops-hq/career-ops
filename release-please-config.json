@@ -10,6 +10,15 @@
           "type": "json",
           "path": "package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "scaffolder/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "VERSION"
         }
       ]
     }

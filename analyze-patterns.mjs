@@ -225,14 +225,18 @@ function parseReport(reportPath) {
   const plain = content.replace(/\*\*/g, '');
 
   // Extract Block A table (Role Summary) — works with both EN and ES headers
-  const blockARegex = /\|\s*(?:Archetype|Arquetipo)\s*\|\s*(.*?)\s*\|/i;
+  // Archetype cell may be labeled "Archetype", "Arquetipo", or "Detected archetype" (drift from EN translation).
+  const blockARegex = /\|\s*(?:Detected\s+)?(?:Archetype|Arquetipo)\s*\|\s*(.*?)\s*\|/i;
   const seniorityRegex = /\|\s*(?:Seniority|Nivel|Level)\s*\|\s*(.*?)\s*\|/i;
   const remoteRegex = /\|\s*(?:Remote|Remoto|Location)\s*\|\s*(.*?)\s*\|/i;
   const teamRegex = /\|\s*(?:Team|Team size|Equipo)\s*\|\s*(.*?)\s*\|/i;
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
-  const archMatch = plain.match(blockARegex);
+  // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
+  const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
+
+  const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);
   if (archMatch && !report.archetype) report.archetype = archMatch[1].trim();
 
   const senMatch = plain.match(seniorityRegex);

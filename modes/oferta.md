@@ -142,6 +142,63 @@ Analyze the job posting for signals that indicate whether this is a real, active
 
 ---
 
+## Cover Letter Draft (auto-generated after Block G)
+
+After saving the report and recording in the tracker, append a cover letter draft to the report file under `## Cover Letter Draft`. This is a starting point — not the final letter. The user completes it via `/career-ops cover {slug}`.
+
+**How to generate the draft:**
+
+1. Read `cv.md` — select 4 achievement bullets most relevant to the JD's top requirements (exact wording, real metrics only)
+2. Read `config/profile.yml` — extract candidate name, current role, years of experience
+3. Write a 2-sentence opening based on the role title and JD mission language
+4. Write a 1-paragraph profile intro from the cv.md summary, adapted to the JD domain
+5. Leave the "Problems / Why this company / Approach" section as a placeholder — this requires user input
+6. Detect and flag any gaps (domain mismatch, language requirement, start date urgency) so the user sees them immediately
+
+**Draft format to append to the report:**
+
+```markdown
+## Cover Letter Draft
+
+> Draft generated at evaluation time. Complete via `/career-ops cover {slug}` to fill in angles, confirm research, and generate the PDF.
+> Gaps flagged below — address them during the cover flow.
+
+---
+
+**Opening** *(placeholder — refine with your "why this role" angle)*
+{2-sentence opening based on JD role title and mission language}
+
+**Profile introduction**
+{1 paragraph from cv.md summary, adapted to JD domain and required competencies}
+
+**Key achievements** *(selected from cv.md — exact wording preserved)*
+- **{lead from cv.md},** {impact sentence with metric}.
+- **{lead from cv.md},** {impact sentence with metric}.
+- **{lead from cv.md},** {impact sentence with metric}.
+- **{lead from cv.md},** {impact sentence with metric}.
+
+**Problems I will solve** *(placeholder — requires company research + your input)*
+> To be completed: what challenges does {company} face that you'd address? How would you approach them?
+
+**Closing**
+I am happy to discuss further at your convenience.
+
+---
+
+**Gaps flagged:**
+{List any detected gaps — domain mismatch, language requirement, start date urgency, title mismatch. If none, write "None detected."}
+
+**JD keywords to mirror** *(extracted for ATS + human read)*
+{8-10 exact phrases from the JD}
+
+---
+*Run `/career-ops cover {slug}` to complete angles, confirm company research, and generate the PDF.*
+```
+
+Apply all language rules from `_shared.md` Professional Writing section to the draft content. No em dashes, no buzzwords, active voice, concrete claims only.
+
+---
+
 ## Post-evaluation
 
 **ALWAYS** after generating blocks A-G:
@@ -150,7 +207,7 @@ Analyze the job posting for signals that indicate whether this is a real, active
 
 Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
-- `{###}` = next sequential number (3 digits, zero-padded)
+- `{###}` = next sequential number (3 digits, zero-padded). To allocate it atomically and prevent race conditions, you MUST run `node reserve-report-num.mjs` to claim the number (stdout returns `{###}`), write the report, and then run `node reserve-report-num.mjs --release {###}` to release the sentinel.
 - `{company-slug}` = company name in lowercase, without spaces (use hyphens)
 - `{YYYY-MM-DD}` = current date
 
@@ -208,7 +265,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - Score: match average (1-5)
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
-- Report: link relative to the report .md (e.g., `[001](reports/001-company-2026-01-01.md)`)
+- Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)
 
 **Tracker format:**
 

@@ -1,9 +1,9 @@
 # Career-Ops
 
-[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
+[English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [العربية](README.ar.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — 多代理求職系統" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops 多代理求職系統" width="800"></a>
 </p>
 
 <p align="center">
@@ -13,23 +13,17 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  <br>
-  <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
-  <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
-  <img src="https://img.shields.io/badge/DE-grey?style=flat" alt="DE">
-  <img src="https://img.shields.io/badge/FR-blue?style=flat" alt="FR">
-  <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
-  <img src="https://img.shields.io/badge/KO-white?style=flat" alt="KO">
-  <img src="https://img.shields.io/badge/JA-red?style=flat" alt="JA">
-  <img src="https://img.shields.io/badge/ZH--TW-blue?style=flat" alt="ZH-TW">
+  <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
+  &nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+</p>
+
+<p align="center"><sub>媒體報導</sub></p>
+
+<p align="center">
+  <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 ---
@@ -40,7 +34,28 @@
 
 <p align="center"><strong>評估超過 740 份職缺 · 生成超過 100 份個人化履歷 · 成功獲得理想職位</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社群-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
+<p align="center">
+  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社群-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  &nbsp;
+  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a>
+</p>
+
+<p align="center">
+  <sub>技術棧</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Gemini CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
 
 ## 這是什麼
 
@@ -62,49 +77,51 @@ career-ops 具有代理能力：Claude Code 透過 Playwright 瀏覽求職頁面
 
 ## 功能特色
 
-| 功能 | 說明 |
-|------|------|
-| **自動管道** | 貼上 URL，自動完成評估 + PDF + 追蹤紀錄 |
-| **6 區塊評估** | 職位摘要、履歷匹配、職級策略、薪酬調查、個人化、面試準備（STAR+R）|
-| **面試故事庫** | 跨評估累積 STAR+Reflection 故事 — 能回答任何行為面試問題的 5-10 個核心故事 |
-| **薪資談判腳本** | 薪資談判框架、地區薪資折扣反駁話術、競爭 Offer 運用策略 |
-| **ATS PDF 生成** | 注入關鍵字的履歷，採用 Space Grotesk + DM Sans 設計 |
-| **平台掃描器** | 預設超過 45 家企業（Anthropic、OpenAI、ElevenLabs、Retool、n8n...）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自訂查詢 |
-| **批次處理** | 使用 `claude -p` 工作器並行評估 |
-| **儀表板 TUI** | 在終端機 UI 中瀏覽、篩選及排序你的求職管道 |
-| **人機協作** | AI 負責評估與建議，你負責決策與行動。系統絕不自動送出應徵 — 最終決定永遠在你手上 |
-| **管道完整性** | 自動合併、去重、狀態正規化、健康檢查 |
+| 功能             | 說明                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **自動管道**     | 貼上 URL，自動完成評估 + PDF + 追蹤紀錄                                                                                |
+| **6 區塊評估**   | 職位摘要、履歷匹配、職級策略、薪酬調查、個人化、面試準備（STAR+R）— 另有 Block G 職缺正當性檢查，標記詐騙與幽靈職缺          |
+| **面試故事庫**   | 跨評估累積 STAR+Reflection 故事 — 能回答任何行為面試問題的 5-10 個核心故事                                             |
+| **薪資談判腳本** | 薪資談判框架、地區薪資折扣反駁話術、競爭 Offer 運用策略                                                                |
+| **ATS PDF 生成** | 注入關鍵字的履歷，採用 Space Grotesk + DM Sans 設計                                                                    |
+| **平台掃描器**   | 預設超過 45 家企業（Anthropic、OpenAI、ElevenLabs、Retool、n8n...）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自訂查詢 |
+| **批次處理**     | 使用 `claude -p` 工作器並行評估                                                                                        |
+| **儀表板 TUI**   | 在終端機 UI 中瀏覽、篩選及排序你的求職管道                                                                             |
+| **人機協作**     | AI 負責評估與建議，你負責決策與行動。系統絕不自動送出應徵 — 最終決定永遠在你手上                                       |
+| **管道完整性**   | 自動合併、去重、狀態正規化、健康檢查                                                                                   |
 
 ## 快速開始
 
+**最快的方式 — 一行指令：**
+
 ```bash
-# 1. 複製並安裝
+npx @santifer/career-ops init
+```
+
+> 💡 `npx` 隨 [Node.js](https://nodejs.org) 一起提供 — 它會執行安裝程式一次，
+> 而不會在全域安裝任何東西。還沒有 Node？請先安裝它。
+> （已經在使用 Claude Code / Gemini / Codex CLI？那你已經有了。）
+
+這會把最新版本複製到 `./career-ops` 並安裝相依套件。接著：
+
+```bash
+cd career-ops
+claude   # 或 gemini / codex / qwen / opencode — 在此開啟你的 AI CLI
+```
+
+**首次啟動時，career-ops 會透過對話帶你完成設定 — 你的履歷、個人檔案與目標職位 — 完全不需要手動編輯。**
+
+<details>
+<summary><b>偏好手動設定？（git clone）</b></summary>
+
+```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
-npx playwright install chromium   # PDF 生成所需
-
-# 2. 檢查設定
-npm run doctor                     # 驗證所有必要條件
-
-# 3. 設定檔
-cp config/profile.example.yml config/profile.yml  # 填入你的個人資訊
-cp templates/portals.example.yml portals.yml       # 自訂目標企業
-
-# 4. 加入你的履歷
-# 在專案根目錄建立 cv.md，以 Markdown 格式撰寫你的履歷
-
-# 5. 透過 Claude 個人化設定
-claude   # 在此目錄開啟 Claude Code
-
-# 然後請 Claude 幫你調整系統：
-# 「把職位類型改成後端工程師相關職缺」
-# 「把模式翻譯成繁體中文」
-# 「把這 5 家公司加入 portals.yml」
-# 「用我貼的這份履歷更新我的個人檔案」
-
-# 6. 開始使用
-# 貼上職缺 URL 或執行 /career-ops
+npx playwright install chromium   # 僅 PDF 生成所需
+claude   # 開啟你的 AI CLI — 首次啟動時會帶你完成設定
 ```
+
+</details>
 
 > **這個系統設計上就是讓 Claude 來客製化的。** 模式、職位類型、評分權重、談判腳本 — 直接告訴 Claude 要修改什麼，它就會動手。Claude 讀取的是它自己使用的相同檔案，所以它確切知道要編輯哪裡。
 

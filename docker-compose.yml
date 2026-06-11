@@ -1,0 +1,33 @@
+services:
+  career-ops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: career-ops:local
+    container_name: career-ops
+    working_dir: /app
+    # Long-running shell so `docker compose exec` is instant.
+    command: ["tail", "-f", "/dev/null"]
+    init: true
+    # Mount whole project so edits on host are visible inside the container.
+    # node_modules is kept inside the image to avoid host/container ABI mismatch
+    # (host is ubuntu26.04 where playwright won't install; image is jammy).
+    volumes:
+      - .:/app
+      - career-ops-node-modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      # Forward common API keys if set on host. Empty values are ignored.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    # Chromium needs a larger /dev/shm than the default 64M.
+    shm_size: "1gb"
+    # Dashboard TUI is interactive; expose nothing by default but allow `-it`.
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+
+volumes:
+  career-ops-node-modules:

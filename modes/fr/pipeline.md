@@ -6,7 +6,7 @@ Traite les URLs d'offres accumulees dans `data/pipeline.md`. Le candidat ajoute 
 
 1. **Lire** `data/pipeline.md` -> trouver les items `- [ ]` dans la section "En attente" / "Pending" / "Pendientes"
 2. **Pour chaque URL en attente** :
-   a. Calculer le prochain `REPORT_NUM` sequentiel (lire `reports/`, prendre le numero le plus eleve + 1)
+   a. Reserver le prochain `REPORT_NUM` sequentiel de maniere atomique en executant `node reserve-report-num.mjs` (et liberer le sentinel en executant `node reserve-report-num.mjs --release <num>` une fois le rapport ecrit)
    b. **Extraire l'offre** avec Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch
    c. Si l'URL n'est pas accessible -> marquer comme `- [!]` avec une note et continuer
    d. **Executer l'auto-pipeline complet** : Evaluation A-F -> Report .md -> PDF (si score >= 3.0) -> Tracker
@@ -48,9 +48,9 @@ Traite les URLs d'offres accumulees dans `data/pipeline.md`. Le candidat ajoute 
 
 ## Numerotation automatique
 
-1. Lister tous les fichiers dans `reports/`
-2. Extraire le numero du prefixe (ex : `142-medispend...` -> 142)
-3. Nouveau numero = maximum trouve + 1
+1. Executer `node reserve-report-num.mjs` pour reserver le prochain numero sequentiel de maniere atomique (stdout renvoie `{###}`).
+2. Ecrire le rapport avec ce numero.
+3. Liberer le sentinel en executant `node reserve-report-num.mjs --release {###}` une fois le rapport ecrit.
 
 ## Synchronisation des sources
 

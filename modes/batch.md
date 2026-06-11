@@ -64,9 +64,11 @@ batch/batch-runner.sh [OPTIONS]
 Options:
 - `--dry-run` — list pending jobs without executing
 - `--retry-failed` — retry only failed jobs
+- `--resume-paused` — resume jobs paused after a Claude session/rate limit
 - `--start-from N` — start from ID N
 - `--parallel N` — N workers in parallel
 - `--max-retries N` — attempts per job (default: 2)
+- `--rate-limit-sleep N` — seconds to wait before retrying a transient rate-limited worker (default: 300; use 0 to pause the batch immediately)
 
 ## batch-state.tsv Format
 
@@ -75,7 +77,13 @@ id	url	status	started_at	completed_at	report_num	score	error	retries
 1	https://...	completed	2026-...	2026-...	002	4.2	-	0
 2	https://...	failed	2026-...	2026-...	-	-	Error msg	1
 3	https://...	pending	-	-	-	-	-	0
+4	https://...	rate_limited	2026-...	2026-...	004	-	rate-limit; retrying after 300s	1
+5	https://...	paused_rate_limit	2026-...	2026-...	005	-	session limit; paused	1
 ```
+
+Valid statuses include `pending`, `processing`, `completed`, `failed`, `skipped`, `rate_limited`, and `paused_rate_limit`. `rate_limited` is an intermediate non-completed state emitted while the runner waits before retrying; if the run is interrupted there, a later non-`--retry-failed` run treats it as pending work.
+
+`paused_rate_limit` means a worker hit a Claude session/usage limit. The runner stops scheduling new offers, preserves the retry count, and resumes only when explicitly called with `--resume-paused`.
 
 ## Resumability
 
@@ -101,5 +109,6 @@ The worker produces:
 | JD behind login | Conductor attempts to read DOM. If it fails → `failed` |
 | Portal changes layout | Conductor reasons about HTML, adapts |
 | Worker crashes | Conductor marks `failed`, continues. Retry with `--retry-failed` |
+| Claude session/usage limit | Runner marks the current offer `paused_rate_limit`, stops scheduling new offers, preserves retries. Resume with `--resume-paused` after reset. |
 | Conductor crashes | Re-run → reads state → skip completed jobs |
 | PDF fails | .md report is saved. PDF remains pending |

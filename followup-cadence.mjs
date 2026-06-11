@@ -13,13 +13,15 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import yaml from 'js-yaml';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
 
 // --- CLI args ---
@@ -27,17 +29,57 @@ const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
 const appliedDaysIdx = args.indexOf('--applied-days');
-const APPLIED_FIRST = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1]) || 7 : 7;
+const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
 
 // --- Cadence config ---
-const CADENCE = {
-  applied_first: APPLIED_FIRST,
+export const DEFAULT_CADENCE = {
+  applied_first: 7,
   applied_subsequent: 7,
   applied_max_followups: 2,
   responded_initial: 1,
   responded_subsequent: 3,
   interview_thankyou: 1,
 };
+
+const PROFILE_CADENCE_KEYS = {
+  applied_first_days: 'applied_first',
+  applied_subsequent_days: 'applied_subsequent',
+  applied_max_followups: 'applied_max_followups',
+  responded_initial_days: 'responded_initial',
+  responded_subsequent_days: 'responded_subsequent',
+  interview_thankyou_days: 'interview_thankyou',
+};
+
+function positiveInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+export function loadProfileCadence(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return {};
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return {};
+  }
+  const source = raw.followup_cadence || {};
+  const cadence = {};
+  for (const [profileKey, cadenceKey] of Object.entries(PROFILE_CADENCE_KEYS)) {
+    const parsed = positiveInteger(source[profileKey]);
+    if (parsed !== null) cadence[cadenceKey] = parsed;
+  }
+  return cadence;
+}
+
+export function resolveCadenceConfig({ profilePath = PROFILE_FILE, appliedDays = appliedDaysOverride } = {}) {
+  const cadence = { ...DEFAULT_CADENCE, ...loadProfileCadence(profilePath) };
+  const cliApplied = positiveInteger(appliedDays);
+  if (cliApplied !== null) cadence.applied_first = cliApplied;
+  return cadence;
+}
+
+const CADENCE = resolveCadenceConfig();
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -56,7 +98,7 @@ const ALIASES = {
 
 const ACTIONABLE_STATUSES = ['applied', 'responded', 'interview'];
 
-function normalizeStatus(raw) {
+export function normalizeStatus(raw) {
   const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
     .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
   return ALIASES[clean] || clean;
@@ -67,16 +109,16 @@ function today() {
   return new Date(new Date().toISOString().split('T')[0]);
 }
 
-function parseDate(dateStr) {
+export function parseDate(dateStr) {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) return null;
   return new Date(dateStr.trim());
 }
 
-function daysBetween(d1, d2) {
+export function daysBetween(d1, d2) {
   return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
 }
 
-function addDays(date, days) {
+export function addDays(date, days) {
   const result = new Date(date);
   result.setUTCDate(result.getUTCDate() + days);
   return result.toISOString().split('T')[0];
@@ -153,7 +195,7 @@ function resolveReportPath(reportField) {
 }
 
 // --- Compute urgency ---
-function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
+export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
@@ -173,7 +215,7 @@ function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCou
 }
 
 // --- Compute next follow-up date ---
-function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount) {
+export function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount) {
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return null; // cold
     if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.applied_first);
@@ -327,13 +369,15 @@ function printSummary(result) {
   console.log('');
 }
 
-// --- Run ---
-const result = analyze();
+// --- Run (CLI only; guarded so the module is safely importable for tests) ---
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = analyze();
 
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-if (result.error) process.exit(1);

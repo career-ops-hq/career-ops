@@ -1,0 +1,16 @@
+.git
+node_modules
+output
+batch/logs
+batch/batch-state.tsv
+batch/batch-input.tsv
+batch/tracker-additions
+jds/*
+!jds/.gitkeep
+reports/*.md
+.env
+.update-dismissed
+.update-lock
+*.log
+.DS_Store
+writing-samples

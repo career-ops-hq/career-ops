@@ -18,16 +18,32 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, exists
 import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
+// Support both layouts: data/applications.md (boilerplate) and applications.md (original).
+// CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
+const APPS_FILE = process.env.CAREER_OPS_TRACKER
+  ? process.env.CAREER_OPS_TRACKER
+  : existsSync(join(CAREER_OPS, 'data/applications.md'))
+    ? join(CAREER_OPS, 'data/applications.md')
+    : join(CAREER_OPS, 'applications.md');
+const TRACKER_DIR = dirname(APPS_FILE);
+// CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
+const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
+  ? process.env.CAREER_OPS_ADDITIONS
+  : join(CAREER_OPS, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
+const MIGRATE = process.argv.includes('--migrate');
+
+// The reports/ dir sits at the repo root, which is the tracker's parent in the
+// data/ layout (data/applications.md) and the tracker's own dir at root layout.
+const REPORTS_ROOT = basename(TRACKER_DIR) === 'data' ? dirname(TRACKER_DIR) : TRACKER_DIR;
+
+// Normalize a report link relative to the tracker file's own directory (#760).
+const normalizeReportLink = (reportField) => normalizeLink(reportField, TRACKER_DIR, REPORTS_ROOT);
 
 // Ensure required directories exist (fresh setup)
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
@@ -142,11 +158,14 @@ function roleFuzzyMatch(a, b) {
   const discriminating = overlap.filter(w => !BASELINE_TOKENS.has(w));
   if (discriminating.length === 0) return false;
 
-  // Jaccard-style ratio on content tokens. Two roles are "the same" only
-  // when the overlap dominates the smaller side — not when they just share
-  // a location + "engineer".
-  const minLen = Math.min(wordsA.length, wordsB.length);
-  const ratio = overlap.length / minLen;
+  // True Jaccard ratio on content tokens (overlap / union). Dividing by the
+  // smaller side conflated distinct roles that share a long prefix — e.g.
+  // "Full-Stack Engineer 5, AI Insights & Visualizations" vs "Full Stack
+  // Engineer 5, Ads Reporting" (overlap full/stack/engineer = 3, min side 4
+  // → 0.75 "match"). Union punishes the non-shared specialty tokens, while
+  // genuine reposts (identical token sets) still score 1.0.
+  const union = new Set([...wordsA, ...wordsB]).size;
+  const ratio = overlap.length / union;
   return ratio >= 0.6;
 }
 
@@ -263,6 +282,25 @@ if (!existsSync(APPS_FILE)) {
   process.exit(0);
 }
 const appContent = readFileSync(APPS_FILE, 'utf-8');
+
+// One-time migration: rewrite existing report links so they resolve relative
+// to the tracker file's directory (see #760). Run with: node merge-tracker.mjs --migrate
+if (MIGRATE) {
+  const migrated = appContent
+    .split('\n')
+    .map(line => (line.startsWith('|') ? normalizeReportLink(line) : line));
+  const before = appContent.split('\n');
+  const changed = migrated.filter((l, i) => l !== before[i]).length;
+
+  if (DRY_RUN) {
+    console.log(`🔎 Migration (dry-run): ${changed} row(s) would be rewritten in ${basename(APPS_FILE)}`);
+  } else {
+    writeFileSync(APPS_FILE, migrated.join('\n'));
+    console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === CAREER_OPS ? 'repo root' : 'data/'}`);
+  }
+  process.exit(0);
+}
+
 const appLines = appContent.split('\n');
 const existingApps = [];
 let maxNum = 0;
@@ -310,6 +348,11 @@ for (const file of tsvFiles) {
   const addition = parseTsvContent(content, file);
   if (!addition) { skipped++; continue; }
 
+  // Normalize the report link to be relative to the tracker file's directory.
+  // The TSV convention carries a root-relative `reports/...` link; rewrite it
+  // so it resolves correctly when clicked from applications.md (see #760).
+  addition.report = normalizeReportLink(addition.report);
+
   // Check for duplicate by:
   // 1. Exact report number match
   // 2. Company + role fuzzy match
@@ -325,8 +368,16 @@ for (const file of tsvFiles) {
   }
 
   if (!duplicate) {
-    // Exact entry number match
-    duplicate = existingApps.find(app => app.num === addition.num);
+    // Exact entry number match — but only when the company also matches.
+    // The TSV `num` doubles as the tracker row id, yet report-file numbering
+    // and tracker-row numbering can drift out of sync (e.g. reports maxed at
+    // 067 while the tracker was already at #69). A bare num collision across
+    // *different* companies is that drift, not a duplicate — matching on num
+    // alone silently merges a brand-new role into an unrelated existing row.
+    const normCompany = normalizeCompany(addition.company);
+    duplicate = existingApps.find(app =>
+      app.num === addition.num && normalizeCompany(app.company) === normCompany
+    );
   }
 
   if (!duplicate) {

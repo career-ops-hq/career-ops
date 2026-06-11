@@ -12,6 +12,7 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
+| `npm run build:latex` | `build-cv-latex.mjs` | Build .tex from structured JSON payload |
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `npm run update:check` | `update-system.mjs check` | Check for upstream updates |
@@ -19,6 +20,8 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
+| `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
+| `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 
 ---
 
@@ -92,6 +95,22 @@ Processed TSVs are moved to `batch/tracker-additions/merged/`.
 
 ---
 
+## validate:portals
+
+Validates `portals.yml` before running the scanner. The validator is offline: it reads YAML, loads local provider IDs from `providers/*.mjs`, and checks common configuration mistakes without fetching any job boards.
+
+It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, and invalid local parser blocks. Duplicate enabled company names are warnings because they may be intentional during migrations, but they are worth reviewing.
+
+```bash
+npm run validate:portals
+npm run validate:portals -- --file templates/portals.example.yml
+node validate-portals.mjs --self-test
+```
+
+**Exit codes:** `0` no errors (warnings allowed), `1` one or more errors found.
+
+---
+
 ## pdf
 
 Renders an HTML file to a print-quality, ATS-parseable PDF via headless Chromium. Resolves font paths from `fonts/`, normalizes Unicode for ATS compatibility (em-dashes, smart quotes, zero-width characters), and reports page count and file size.
@@ -103,6 +122,19 @@ npm run pdf -- input.html output.pdf --format=a4        # A4 (default)
 ```
 
 **Exit codes:** `0` PDF generated, `1` missing arguments or generation failure.
+
+---
+
+## build:latex
+
+Builds a `.tex` file from a structured JSON payload, handling template merge and LaTeX escaping automatically. The JSON is produced by the agent during evaluation — this script replaces the manual LaTeX generation step in `modes/latex.md`.
+
+```bash
+node build-cv-latex.mjs input.json output.tex
+node build-cv-latex.mjs --test
+```
+
+**Exit codes:** `0` file generated, `1` missing inputs, invalid JSON, unresolved placeholders, or template not found.
 
 ---
 
@@ -156,7 +188,7 @@ Possible JSON responses:
 
 ## update
 
-Applies the upstream update. Creates a backup branch (`backup-pre-update-{version}`), fetches from the canonical repo, checks out only system-layer files, runs `npm install`, and commits. User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
+Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches from the canonical repo, checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
 
 ```bash
 npm run update
@@ -168,7 +200,7 @@ npm run update
 
 ## rollback
 
-Restores system-layer files from the most recent backup branch created during an update.
+Restores system-layer files from the most recent backup branch created during an update. Rollback prefers the newest timestamped branch matching `backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>` and still accepts legacy `backup-pre-update-<version>` branches for older installs.
 
 ```bash
 npm run rollback
@@ -198,6 +230,8 @@ Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 
 Zero-token portal scanner. Runs configured local parsers for SSR/static career pages and hits ATS APIs (Greenhouse, Ashby, Lever) directly — no LLM tokens consumed. Reads `portals.yml` for target companies, outputs matching listings to stdout, and optionally appends to `data/pipeline.md`.
 
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
+
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 
 ```yaml
@@ -216,3 +250,21 @@ npm run scan
 ```
 
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
+
+## scan:full
+
+Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
+
+Postings without a usable publish date are skipped — a reverse scan is only useful for fresh postings. New matches are appended to `data/pipeline.md` and `data/scan-history.tsv` in the same format as `scan.mjs`.
+
+```bash
+npm run scan:full                              # all ATS directories, last 3 days
+node scan-ats-full.mjs --since 7               # postings from the last 7 days
+node scan-ats-full.mjs --ats greenhouse,workday # subset of sources
+node scan-ats-full.mjs --limit 200             # max companies per ATS
+node scan-ats-full.mjs --dry-run               # preview without writing
+node scan-ats-full.mjs --liveness              # Playwright-verify matches first
+node scan-ats-full.mjs --md-out notes/scans    # also write a dated markdown digest
+```
+
+**Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.

@@ -1,9 +1,9 @@
 # Career-Ops
 
-[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
+[English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [العربية](README.ar.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Multi-Agent Job Search System" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Job Search System" width="800"></a>
 </p>
 
 <p align="center">
@@ -13,20 +13,17 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  <br>
-  <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
-  <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
-  <img src="https://img.shields.io/badge/DE-grey?style=flat" alt="DE">
-  <img src="https://img.shields.io/badge/FR-blue?style=flat" alt="FR">
-  <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
+  <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
+  &nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+</p>
+
+<p align="center"><sub>DESTAQUE EM</sub></p>
+
+<p align="center">
+  <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 ---
@@ -37,7 +34,26 @@
 
 <p align="center"><strong>740+ vagas avaliadas · 100+ CVs personalizados · 1 vaga dos sonhos conquistada</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+&nbsp;
+<a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+
+<p align="center">
+  <sub>Feito com</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Gemini CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
 
 ## O que é isso
 
@@ -59,49 +75,51 @@ Construído por alguém que usou isso para avaliar 740+ vagas, gerar 100+ CVs pe
 
 ## Funcionalidades
 
-| Funcionalidade | Descrição |
-|---------|-------------|
-| **Auto-Pipeline** | Cole uma URL e receba avaliação completa + PDF + entrada no tracker |
-| **Avaliação em 6 blocos** | Resumo da vaga, aderência ao CV, estratégia de senioridade, pesquisa de compensação, personalização, preparação para entrevista (STAR+R) |
-| **Banco de histórias de entrevista** | Acumula histórias STAR+Reflection ao longo das avaliações -- 5-10 histórias principais que respondem qualquer pergunta comportamental |
-| **Scripts de negociação** | Frameworks para negociação salarial, resposta a desconto geográfico e alavanca com ofertas concorrentes |
-| **Geração de PDF ATS** | CVs com injeção de palavras-chave usando design com Space Grotesk + DM Sans |
-| **Scanner de portais** | 45+ empresas pré-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas customizadas em Ashby, Greenhouse, Lever e Wellfound |
-| **Processamento em lote** | Avaliação paralela com workers `claude -p` |
-| **Dashboard TUI** | Interface no terminal para navegar, filtrar e ordenar seu pipeline |
-| **Humano no loop** | A IA avalia e recomenda, você decide e age. O sistema nunca envia candidatura automaticamente -- a decisão final é sempre sua |
-| **Integridade do pipeline** | Merge automatizado, deduplicação, normalização de status e health checks |
+| Funcionalidade                       | Descrição                                                                                                                                      |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auto-Pipeline**                    | Cole uma URL e receba avaliação completa + PDF + entrada no tracker                                                                            |
+| **Avaliação em 6 blocos**            | Resumo da vaga, aderência ao CV, estratégia de senioridade, pesquisa de compensação, personalização, preparação para entrevista (STAR+R) -- além de uma verificação de legitimidade da vaga (Bloco G) que sinaliza golpes e vagas-fantasma       |
+| **Banco de histórias de entrevista** | Acumula histórias STAR+Reflection ao longo das avaliações -- 5-10 histórias principais que respondem qualquer pergunta comportamental          |
+| **Scripts de negociação**            | Frameworks para negociação salarial, resposta a desconto geográfico e alavanca com ofertas concorrentes                                        |
+| **Geração de PDF ATS**               | CVs com injeção de palavras-chave usando design com Space Grotesk + DM Sans                                                                    |
+| **Scanner de portais**               | 45+ empresas pré-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas customizadas em Ashby, Greenhouse, Lever e Wellfound |
+| **Processamento em lote**            | Avaliação paralela com workers `claude -p`                                                                                                     |
+| **Dashboard TUI**                    | Interface no terminal para navegar, filtrar e ordenar seu pipeline                                                                             |
+| **Humano no loop**                   | A IA avalia e recomenda, você decide e age. O sistema nunca envia candidatura automaticamente -- a decisão final é sempre sua                  |
+| **Integridade do pipeline**          | Merge automatizado, deduplicação, normalização de status e health checks                                                                       |
 
 ## Início rápido
 
+**Forma mais rápida — um único comando:**
+
 ```bash
-# 1. Clone e instale
+npx @santifer/career-ops init
+```
+
+> 💡 `npx` já vem com o [Node.js](https://nodejs.org) — ele roda o instalador uma vez,
+> sem instalar nada globalmente. Ainda não tem Node? Instale-o primeiro.
+> (Já usa uma CLI Claude Code / Gemini / Codex? Então você já tem.)
+
+Isso clona o último release em `./career-ops` e instala as dependências. Depois:
+
+```bash
+cd career-ops
+claude   # ou gemini / codex / qwen / opencode — abra sua CLI de IA aqui
+```
+
+**No primeiro uso, o career-ops conduz você pela configuração — seu CV, perfil e vagas-alvo — apenas conversando. Nada para editar à mão.**
+
+<details>
+<summary><b>Prefere configurar manualmente? (git clone)</b></summary>
+
+```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
-npx playwright install chromium   # Necessário para geração de PDF
-
-# 2. Verifique o setup
-npm run doctor                     # Valida todos os pré-requisitos
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edite com seus dados
-cp templates/portals.example.yml portals.yml       # Personalize as empresas
-
-# 4. Adicione seu CV
-# Crie cv.md na raiz do projeto com seu CV em markdown
-
-# 5. Personalize com Claude
-claude   # Abra o Claude Code neste diretório
-
-# Depois, peça ao Claude para adaptar o sistema para você:
-# "Mude os arquétipos para vagas de engenharia backend"
-# "Traduza os modos para português"
-# "Adicione estas 5 empresas ao portals.yml"
-# "Atualize meu perfil com este CV que vou colar"
-
-# 6. Comece a usar
-# Cole a URL de uma vaga ou rode /career-ops
+npx playwright install chromium   # necessário apenas para geração de PDF
+claude
 ```
+
+</details>
 
 > **O sistema foi projetado para ser customizado pelo próprio Claude.** Modos, arquétipos, pesos de pontuação, scripts de negociação -- é só pedir para ele alterar. Ele lê os mesmos arquivos que usa, então sabe exatamente o que editar.
 

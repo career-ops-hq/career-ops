@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -57,10 +58,13 @@ type reportSummary struct {
 
 // Sort modes
 const (
-	sortScore   = "score"
-	sortDate    = "date"
-	sortCompany = "company"
-	sortStatus  = "status"
+	sortScore    = "score"
+	sortDate     = "date"
+	sortCompany  = "company"
+	sortStatus   = "status"
+	sortLocation = "location"
+	sortPay      = "pay"
+	sortLast     = "last"
 )
 
 // Filter modes
@@ -91,7 +95,7 @@ var pipelineTabs = []pipelineTab{
 	{filterDiscarded, "DISCARDED"},
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
 
 var statusOptions = []string{"Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded", "SKIP"}
 
@@ -555,24 +559,10 @@ func (m *PipelineModel) applyFilterAndSort() {
 	}
 
 	// Sort
-	switch m.sortMode {
-	case sortScore:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return filtered[i].Score > filtered[j].Score
-		})
-	case sortDate:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return filtered[i].Date > filtered[j].Date
-		})
-	case sortCompany:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return strings.ToLower(filtered[i].Company) < strings.ToLower(filtered[j].Company)
-		})
-	case sortStatus:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return data.StatusPriority(filtered[i].Status) < data.StatusPriority(filtered[j].Status)
-		})
-	}
+	less := m.sortLess()
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return less(filtered[i], filtered[j])
+	})
 
 	// In grouped mode, always sort by status priority first, then by selected sort within groups
 	if m.viewMode == "grouped" {
@@ -583,27 +573,66 @@ func (m *PipelineModel) applyFilterAndSort() {
 				return pi < pj
 			}
 			// Within same group, use selected sort
-			switch m.sortMode {
-			case sortScore:
-				return filtered[i].Score > filtered[j].Score
-			case sortDate:
-				return filtered[i].Date > filtered[j].Date
-			case sortCompany:
-				return strings.ToLower(filtered[i].Company) < strings.ToLower(filtered[j].Company)
-			default:
-				return filtered[i].Score > filtered[j].Score
-			}
+			return less(filtered[i], filtered[j])
 		})
 	}
 
 	m.filtered = filtered
 }
 
+// sortLess returns the comparator for the active sort mode. Shared by the flat
+// sort and the within-group tiebreaker in grouped view.
+func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
+	switch m.sortMode {
+	case sortDate:
+		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+	case sortCompany:
+		return func(a, b model.CareerApplication) bool {
+			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
+		}
+	case sortStatus:
+		return func(a, b model.CareerApplication) bool {
+			return data.StatusPriority(a.Status) < data.StatusPriority(b.Status)
+		}
+	case sortLocation:
+		// Remote-first, then hybrid, then onsite; alphabetical city as tiebreaker.
+		return func(a, b model.CareerApplication) bool {
+			ra, rb := workModeRank(a.WorkMode), workModeRank(b.WorkMode)
+			if ra != rb {
+				return ra < rb
+			}
+			return a.Location < b.Location
+		}
+	case sortPay:
+		// Highest band ceiling first; unknown pay (0) sinks to the bottom.
+		return func(a, b model.CareerApplication) bool { return a.PayMax > b.PayMax }
+	case sortLast:
+		// Most recent contact first; empty dates sink to the bottom.
+		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	default: // sortScore
+		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+	}
+}
+
+// workModeRank orders work modes remote-first for the location sort.
+func workModeRank(mode string) int {
+	switch mode {
+	case "Remote":
+		return 0
+	case "Hybrid":
+		return 1
+	case "Full":
+		return 2
+	default:
+		return 3
+	}
+}
+
 // chromeRowsFixed returns the number of fixed chrome rows above/below the body
-// (header + tabs(2) + metrics + sortbar + help + 1 search bar when active).
-// Shared by View() and adjustScroll() so the search-row addition stays in sync.
+// (header + tabs(2) + metrics + sortbar + column header + help + 1 search bar
+// when active). Shared by View() and adjustScroll() so additions stay in sync.
 func (m PipelineModel) chromeRowsFixed() int {
-	rows := 7 // header + tabs(2) + metrics + sortbar + help + preview baseline
+	rows := 8 // header + tabs(2) + metrics + sortbar + column header + help + preview baseline
 	if m.searchInput || m.searchQuery != "" {
 		rows++
 	}
@@ -613,7 +642,7 @@ func (m PipelineModel) chromeRowsFixed() int {
 // previewBudgetApprox is the approximate row count reserved for the preview block
 // when computing scroll positioning. View() measures the actual rendered preview
 // height; adjustScroll uses this constant to avoid re-rendering on every keystroke.
-const previewBudgetApprox = 5
+const previewBudgetApprox = 6
 
 // adjustScroll updates scrollOffset so the cursor stays visible.
 func (m *PipelineModel) adjustScroll() {
@@ -695,7 +724,7 @@ func (m PipelineModel) View() string {
 	if searchBar != "" {
 		sections = append(sections, searchBar)
 	}
-	sections = append(sections, body, preview, help)
+	sections = append(sections, m.renderColumnHeader(), body, preview, help)
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
@@ -879,71 +908,166 @@ func (m PipelineModel) renderBody() string {
 	return strings.Join(lines, "\n")
 }
 
+// colWidths holds per-column rune budgets for the table. The location and
+// last-contact columns are adaptive: they appear only when the terminal is wide
+// enough, so narrow windows keep the original compact layout.
+type colWidths struct {
+	num, score, date, company, status, loc, pay, last, role int
+}
+
+func (m PipelineModel) columnWidths() colWidths {
+	c := colWidths{num: 5, score: 5, date: 10, company: 16, status: 12, pay: 16}
+	if m.width >= 110 {
+		c.loc = 20
+	}
+	if m.width >= 132 {
+		c.last = 10
+	}
+	fixed := c.num + c.score + c.date + c.company + c.status + c.pay + c.loc + c.last
+	c.role = m.width - fixed - 14 // separators + outer padding
+	if c.role < 15 {
+		c.role = 15
+	}
+	return c
+}
+
+// renderLocCell renders the work-mode + city column, e.g. "Remote",
+// "Hybrid · Charlotte, NC", "Full · Austin, TX".
+func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
+	color := m.theme.Subtext
+	switch app.WorkMode {
+	case "Remote":
+		color = m.theme.Green
+	case "Hybrid":
+		color = m.theme.Yellow
+	case "Full":
+		color = m.theme.Red
+	}
+	text := app.WorkMode
+	if app.Location != "" {
+		if text != "" {
+			text += " · " + app.Location
+		} else {
+			text = app.Location
+		}
+	}
+	if text == "" {
+		text = "—"
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).Render(truncateRunes(text, width))
+}
+
+// renderPayCell prefers the pay range parsed from notes and falls back to the
+// report-cache comp estimate (the pre-column behavior). POSTED bands render
+// green; estimates stay yellow.
+func (m PipelineModel) renderPayCell(app model.CareerApplication, width int) string {
+	text := app.PayRange
+	color := m.theme.Yellow
+	if app.PaySource == "POSTED" {
+		color = m.theme.Green
+	}
+	if text == "" {
+		if summary, ok := m.reportCache[app.ReportPath]; ok && summary.comp != "" {
+			text = summary.comp
+		}
+	}
+	if text == "" {
+		return lipgloss.NewStyle().Width(width).Render("")
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).Render(truncateRunes(text, width-1))
+}
+
+// renderColumnHeader labels the table columns; widths mirror renderAppLine.
+func (m PipelineModel) renderColumnHeader() string {
+	cw := m.columnWidths()
+	h := lipgloss.NewStyle().Foreground(m.theme.Subtext).Bold(true)
+	cell := func(label string, width int) string {
+		return h.Width(width).Render(truncateRunes(label, width))
+	}
+
+	segments := []string{
+		cell("#", cw.num),
+		h.Render("FIT"), // score cell is unpadded, always 3 runes wide
+		cell("APPLIED", cw.date),
+		cell("COMPANY", cw.company),
+		cell("ROLE", cw.role),
+		cell("STATUS", cw.status),
+	}
+	if cw.loc > 0 {
+		segments = append(segments, cell("LOCATION", cw.loc))
+	}
+	segments = append(segments, cell("PAY", cw.pay))
+	if cw.last > 0 {
+		segments = append(segments, cell("LAST", cw.last))
+	}
+
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	return padStyle.Render(" " + strings.Join(segments, " "))
+}
+
 func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool) string {
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
-
-	// Column widths
-	numW := 5   // "#123 "
-	scoreW := 5 // "4.5  "
-	dateW := 10
-	companyW := 16
-	statusW := 12
-	compW := 14
-	// Role gets remaining space
-	roleW := m.width - numW - scoreW - dateW - companyW - statusW - compW - 13
-	if roleW < 15 {
-		roleW = 15
-	}
+	cw := m.columnWidths()
 
 	// Tracker number (fixed width)
 	numText := "#—"
 	if app.Number > 0 {
 		numText = fmt.Sprintf("#%d", app.Number)
 	}
-	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(numW)
+	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
 	// Score with color
 	scoreStyle := m.scoreStyle(app.Score)
 	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
 
 	// Company (truncate)
-	company := truncateRunes(app.Company, companyW)
-	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(companyW)
+	company := truncateRunes(app.Company, cw.company)
+	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
 	// Date (fixed width)
 	dateText := app.Date
 	if dateText == "" {
 		dateText = "—"
 	}
-	dateStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(dateW)
+	dateStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.date)
 
 	// Role (truncate)
-	role := truncateRunes(app.Role, roleW)
-	roleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(roleW)
+	role := truncateRunes(app.Role, cw.role)
+	roleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.role)
 
 	// Status with color -- fixed column
 	norm := data.NormalizeStatus(app.Status)
 	statusColor := m.statusColorMap()[norm]
-	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Width(statusW)
+	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Width(cw.status)
 	statusText := statusStyle.Render(statusLabel(norm))
 
-	// Comp from report cache -- fixed column
-	compText := ""
-	if summary, ok := m.reportCache[app.ReportPath]; ok && summary.comp != "" {
-		comp := truncateRunes(summary.comp, compW-1)
-		compStyle := lipgloss.NewStyle().Foreground(m.theme.Yellow)
-		compText = compStyle.Render(comp)
-	}
-
-	line := fmt.Sprintf(" %s %s %s %s %s %s %s",
-		numStyle.Render(truncateRunes(numText, numW)),
+	segments := []string{
+		numStyle.Render(truncateRunes(numText, cw.num)),
 		score,
-		dateStyle.Render(truncateRunes(dateText, dateW)),
+		dateStyle.Render(truncateRunes(dateText, cw.date)),
 		companyStyle.Render(company),
 		roleStyle.Render(role),
 		statusText,
-		compText,
-	)
+	}
+
+	if cw.loc > 0 {
+		segments = append(segments, m.renderLocCell(app, cw.loc))
+	}
+	segments = append(segments, m.renderPayCell(app, cw.pay))
+	if cw.last > 0 {
+		lastText := "—"
+		if app.LastContact != "" {
+			lastText = formatTimeAgo(app.LastContact)
+		}
+		lastStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.last)
+		if app.LastContact != "" && app.LastContact != app.Date {
+			// Activity after applying (rejection, recruiter view, screen) — surface it.
+			lastStyle = lastStyle.Foreground(m.theme.Text)
+		}
+		segments = append(segments, lastStyle.Render(truncateRunes(lastText, cw.last)))
+	}
+
+	line := " " + strings.Join(segments, " ")
 
 	if selected {
 		selStyle := lipgloss.NewStyle().
@@ -970,6 +1094,37 @@ func (m PipelineModel) renderPreview() string {
 	valueStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
+	// Quick facts derived from notes — available even when there is no report,
+	// and the only place narrow terminals see location/pay/last-contact.
+	var facts []string
+	if app.WorkMode != "" || app.Location != "" {
+		loc := app.WorkMode
+		if app.Location != "" {
+			if loc != "" {
+				loc += " · " + app.Location
+			} else {
+				loc = app.Location
+			}
+		}
+		facts = append(facts, labelStyle.Render("Loc: ")+valueStyle.Render(loc))
+	}
+	if app.PayRange != "" {
+		pay := app.PayRange
+		if app.PaySource != "" {
+			pay += " (" + app.PaySource + ")"
+		}
+		facts = append(facts, labelStyle.Render("Pay: ")+valueStyle.Render(pay))
+	}
+	if app.LastContact != "" {
+		facts = append(facts, labelStyle.Render("Last contact: ")+
+			valueStyle.Render(fmt.Sprintf("%s (%s)", app.LastContact, formatTimeAgo(app.LastContact))))
+	}
+	if len(facts) > 0 {
+		lines = append(lines, padStyle.Render(strings.Join(facts, "   ")))
+	}
+
+	outcome := previewOutcome(app)
+
 	// Check report cache
 	if summary, ok := m.reportCache[app.ReportPath]; ok {
 		if summary.archetype != "" {
@@ -988,15 +1143,41 @@ func (m PipelineModel) renderPreview() string {
 			lines = append(lines, padStyle.Render(
 				labelStyle.Render("Remote: ")+valueStyle.Render(summary.remote)))
 		}
-	} else if app.Notes != "" {
-		// Fallback: show notes
+	} else if app.Notes != "" && outcome == "" {
+		// Fallback: show notes (the outcome line below already carries them)
 		notes := truncateRunes(app.Notes, m.width-10)
 		lines = append(lines, padStyle.Render(dimStyle.Render(notes)))
-	} else {
+	} else if outcome == "" {
 		lines = append(lines, padStyle.Render(dimStyle.Render("Loading preview...")))
 	}
 
+	// Closed-out postings: surface what happened as the last preview line.
+	// The notes-only fallback above disappears once a report summary is
+	// cached, which is exactly when the discard reason got lost (#787).
+	if outcome != "" {
+		// Width budget: 4 cols padding + 9 for the "Outcome: " label + slack,
+		// mirroring the m.width-10 budget of the notes fallback above.
+		lines = append(lines, padStyle.Render(
+			labelStyle.Render("Outcome: ")+valueStyle.Render(truncateRunes(outcome, m.width-14))))
+	}
+
 	return strings.Join(lines, "\n")
+}
+
+// previewOutcome returns "what happened" to a closed-out application — the raw
+// status (which often carries the decision date, e.g. "descartado 2026-03-12")
+// plus the tracker notes holding the reason. Returns "" for apps still in play.
+func previewOutcome(app model.CareerApplication) string {
+	switch data.NormalizeStatus(app.Status) {
+	case "discarded", "skip", "rejected":
+	default:
+		return ""
+	}
+	outcome := strings.TrimSpace(strings.ReplaceAll(app.Status, "**", ""))
+	if app.Notes != "" {
+		outcome += " — " + app.Notes
+	}
+	return outcome
 }
 
 func (m PipelineModel) renderHelp() string {
@@ -1112,6 +1293,25 @@ func (m PipelineModel) countByNormStatus(status string) int {
 		}
 	}
 	return count
+}
+
+// formatTimeAgo renders an ISO date as a relative duration: hours while the
+// contact is less than a day old ("5h ago"), days otherwise ("3d ago").
+// Tracker dates are day-granular, so hours count from local midnight of that day.
+func formatTimeAgo(dateStr string) string {
+	t, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+	if err != nil {
+		return dateStr // not a date — show it untouched rather than lie
+	}
+	d := time.Since(t)
+	if d < 0 {
+		d = 0
+	}
+	hours := int(d.Hours())
+	if hours < 24 {
+		return fmt.Sprintf("%dh ago", hours)
+	}
+	return fmt.Sprintf("%dd ago", hours/24)
 }
 
 // truncateRunes truncates a string to at most maxRunes runes, appending "..." if truncated.

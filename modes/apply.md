@@ -14,11 +14,27 @@ Interactive mode for when the candidate is filling out an application form in Ch
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
 4. LOAD        → Read full report + Section G (if it exists)
-5. COMPARE     → Does the role on screen match the one evaluated? If it changed → notify
+5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
 ```
+
+## Step 5 — Preflight gate
+
+Before generating any application answers, verify that the form still points to the intended active job. This gate runs after the page has been detected, the company/role has been identified, and the matching report has been loaded.
+
+1. Read the visible URL, page title, company, role, and any closed/expired signals.
+2. If a URL is available, verify liveness with Playwright:
+   - active posting evidence: title/role + job description or form fields + submit/apply path
+   - closed posting evidence: expired/closed/no longer accepting applications, missing JD with only nav/footer, hard redirect to generic careers/search, or 404/410
+3. Compare the visible company and role against the matched report.
+4. If company or title changed materially, stop before drafting and ask:
+   "The form appears to be for [visible company] — [visible role], but the matched report is [report company] — [report role]. Do you want me to re-evaluate, adapt with this mismatch, or stop?"
+5. If the posting appears closed, refuse to generate final copy unless the candidate explicitly overrides with a known reason.
+6. If liveness cannot be verified because the candidate only pasted questions or a screenshot, state that limitation and ask the candidate to confirm the company, role, and active posting before drafting.
+
+Do not continue to Step 6 until this preflight is resolved.
 
 ## Step 1 — Detect the job
 
@@ -41,11 +57,11 @@ Interactive mode for when the candidate is filling out an application form in Ch
 
 If the role on screen differs from the one evaluated:
 - **Notify the candidate**: "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
-- **If adapt**: Adjust responses to the new role without re-evaluating
+- **If adapt**: Adjust responses to the new role without re-evaluating, only after the candidate explicitly accepts the mismatch
 - **If re-evaluate**: Execute full A-F evaluation, update report, regenerate Section G
 - **Update tracker**: Change role title in applications.md if applicable
 
-## Step 4 — Analyze form questions
+## Step 6 — Analyze form questions
 
 Identify ALL visible questions:
 - Free text fields (cover letter, why this role, etc.)
@@ -58,7 +74,17 @@ Classify each question:
 - **Already answered in Section G** → adapt the existing response
 - **New question** → generate response from the report + cv.md
 
-## Step 5 — Generate responses
+For each field, preserve the application form contract:
+- `field_type`: `text`, `textarea`, `select`, `radio`, `checkbox`, `number`, `file`, or `unknown`
+- `required`: `yes`, `no`, or `unknown`
+- `limit`: exact character/word limit if visible; otherwise `unknown`
+- `options`: visible options for select/radio/checkbox fields
+- `needs_candidate_confirmation`: `yes` for legal, demographic, work authorization, visa, relocation, salary, disability, veteran, sponsorship, background-check, or self-identification questions unless the answer is explicitly present in `config/profile.yml`
+
+Never invent answers for legal, demographic, work-authorization, visa/sponsorship, salary, disability, veteran, background-check, relocation, or self-identification fields. If the answer is not present in `config/profile.yml` or visible context, mark it as needing candidate confirmation and provide the safest question to ask the candidate.
+
+
+## Step 7 — Generate responses
 
 For each question, generate the response following:
 
@@ -78,7 +104,7 @@ Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
 ---
 
 ### 1. [Exact form question]
-> [Response ready for copy-paste]
+> [Response ready for copy-paste, or "Ask candidate: ..." if the field needs confirmation]
 
 ### 2. [Next question]
 > [Response]
@@ -92,7 +118,7 @@ Notes:
 - [Personalization suggestions the candidate should review]
 ```
 
-## Step 6 — Post-apply (optional)
+## Step 8 — Post-apply (optional)
 
 If the candidate confirms that they submitted the application:
 1. Update status in `applications.md` from "Evaluated" to "Applied"

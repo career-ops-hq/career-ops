@@ -21,6 +21,16 @@
 #   4. Adjust search_queries for your preferred job boards
 #   5. Set enabled: false on companies you don't care about
 
+# -- Scan history recheck policy (optional) --
+# By default, URLs recorded in data/scan-history.tsv are deduped forever.
+# Set recheck_after_days to let previously added URLs become eligible again
+# after N days, useful for roles that reopen or are republished at the same URL.
+# Permanent invalid statuses such as blocked host or malformed URL still remain
+# deduped forever.
+#
+# scan_history:
+#   recheck_after_days: 30
+
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
 # If this entire block is absent, all locations pass (current default behavior).
@@ -62,6 +72,24 @@
 #     - "Japan"
 #     - "Brazil"
 #     - "Australia"
+
+# -- Salary filter (optional) --
+# Filter scanned jobs by annual compensation range. Applied AFTER location
+# filter, BEFORE dedup. Only applies when structured salary data exists.
+#
+# Semantics:
+#   - min/max are annual compensation filters (use annualized values)
+#   - max: 0 means "no upper limit"
+#   - If no salary data exists on a job, it passes (conservative behavior)
+#   - If both currencies are known and differ, the job is rejected by the salary filter
+#   - Partial ranges (min only or max only) work correctly
+#   - If this entire block is absent, salary is not filtered (default behavior)
+#
+# Example: target roles paying at least $100k, no upper limit
+# salary_filter:
+#   min: 100000
+#   max: 0
+#   currency: "USD"
 
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
@@ -390,6 +418,21 @@ search_queries:
 #     script: scripts/parsers/example_python_company_jobs.py
 #     format: jobs-json-v1
 #   enabled: true
+
+# ── Provider auto-detection ───────────────────────────────────────
+# scan.mjs auto-loads everything in providers/*.mjs and tries each
+# provider's detect() in order. URL patterns recognized:
+#
+#   greenhouse      job-boards(.eu)?.greenhouse.io/<slug>  (or api: field)
+#   ashby           jobs.ashbyhq.com/<slug>
+#   lever           jobs.lever.co/<slug>
+#   workable        apply.workable.com/<slug>
+#   smartrecruiters (careers|jobs).smartrecruiters.com/<slug>
+#   recruitee       <slug>.recruitee.com
+#
+# When the public careers URL is a branded custom domain (e.g.
+# careers.adyen.com), set `provider: smartrecruiters` explicitly to
+# bypass detect(). The `provider:` field wins over auto-detection.
 
 tracked_companies:
 
@@ -1182,3 +1225,62 @@ tracked_companies:
     scan_query: '"n11" careers "Software Engineer" OR "Backend" OR "Frontend" OR "Yazılım"'
     notes: "Istanbul. E-commerce marketplace (Doğuş Group)."
     enabled: false
+
+# ── Job Boards ────────────────────────────────────────────────────────
+# Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),
+# job boards return offers from many companies in a single API call.
+# Same title/location filtering and dedup apply.
+
+job_boards:
+
+  # ── SolidJobs (Polish market) ──────────────────────────────────────
+  # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.
+  # Available divisions: it, engineering, marketing, sales, hr, logistics, finances, other
+
+  - name: SolidJobs IT
+    careers_url: https://solid.jobs/public-api/offers/it?campaign=career-ops
+    provider: solidjobs
+    enabled: true
+    notes: "Polish IT job board — IT division"
+
+  - name: SolidJobs Engineering
+    careers_url: https://solid.jobs/public-api/offers/engineering?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Engineering & Production division"
+
+  - name: SolidJobs Marketing
+    careers_url: https://solid.jobs/public-api/offers/marketing?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Marketing division"
+
+  - name: SolidJobs Sales
+    careers_url: https://solid.jobs/public-api/offers/sales?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Sales division"
+
+  - name: SolidJobs HR
+    careers_url: https://solid.jobs/public-api/offers/hr?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — HR division"
+
+  - name: SolidJobs Logistics
+    careers_url: https://solid.jobs/public-api/offers/logistics?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Logistics division"
+
+  - name: SolidJobs Finances
+    careers_url: https://solid.jobs/public-api/offers/finances?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Finances division"
+
+  - name: SolidJobs Other
+    careers_url: https://solid.jobs/public-api/offers/other?campaign=career-ops
+    provider: solidjobs
+    enabled: false
+    notes: "Polish job board — Other specialists division"

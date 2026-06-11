@@ -1,7 +1,8 @@
 {
   "name": "career-ops",
-  "version": "1.8.1",
+  "version": "1.10.0",
   "description": "AI-powered job search pipeline built on Claude Code",
+  "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
     "verify": "node verify-pipeline.mjs",
@@ -11,10 +12,13 @@
     "pdf": "node generate-pdf.mjs",
     "sync-check": "node cv-sync-check.mjs",
     "update:check": "node update-system.mjs check",
+    "update:test": "node updater-migration-tests.mjs",
     "update": "node update-system.mjs apply",
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "scan": "node scan.mjs",
+    "scan:full": "node scan-ats-full.mjs",
+    "validate:portals": "node validate-portals.mjs",
     "patterns": "node analyze-patterns.mjs",
     "gemini:eval": "node gemini-eval.mjs"
   },
@@ -38,6 +42,6 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
-    "playwright": "^1.58.1"
+    "playwright": "1.58.1"
   }
 }

@@ -6,7 +6,7 @@
     "name": "santifer",
     "url": "https://santifer.io"
   },
-  "skills": [".claude/skills/"],
+  "skills": true,
   "permissions": {
     "allow": [
       "Bash(node:*)",

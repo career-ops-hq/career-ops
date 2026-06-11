@@ -350,6 +350,40 @@
     break-inside: avoid;
     page-break-inside: avoid;
   }
+
+  /* === RTL (Arabic) Support === */
+  html[lang="ar"] body {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+
+  html[lang="ar"] .header h1,
+  html[lang="ar"] .section-title,
+  html[lang="ar"] .job-company,
+  html[lang="ar"] .project-title,
+  html[lang="ar"] .competency-tag,
+  html[lang="ar"] .skill-category {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+
+  html[lang="ar"] .header-gradient {
+    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+  }
+
+  html[lang="ar"] .job ul {
+    padding-right: 18px;
+    padding-left: 0;
+  }
+
+  html[lang="ar"] .project-badge {
+    margin-right: 6px;
+    margin-left: 0;
+  }
+
+  html[lang="ar"] .cert-year {
+    text-align: left;
+  }
 </style>
 </head>
 <body>

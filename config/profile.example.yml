@@ -66,9 +66,69 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# Optional follow-up cadence preferences for `node followup-cadence.mjs`.
+# CLI flags still win for one-off runs (for example `--applied-days 10`).
+# followup_cadence:
+#   applied_first_days: 7
+#   applied_subsequent_days: 7
+#   applied_max_followups: 2
+#   responded_initial_days: 1
+#   responded_subsequent_days: 3
+#   interview_thankyou_days: 1
+
 cv:
   output_format: "html" # "html" (default) or "latex"
   # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
   # canva_resume_design_id: "DAxxxxxxxxx"
+
+# ── Cover Letter Settings ──────────────────────────────────────────────────
+#
+# Used by `/career-ops cover` and the cover letter sub-flow in `/career-ops pdf`.
+# All fields are optional — omit any you don't need.
+
+cover_letter:
+  # Your notice period in calendar days. Surfaced as a prompt default when the
+  # JD requests an immediate start. The user confirms the actual value before it
+  # appears in the letter.
+  notice_period_days: 30
+
+  # Your current professional domain (used to detect domain gaps vs the JD).
+  # Plain English, e.g. "digital media", "fintech", "healthcare IT".
+  primary_domain: "your current domain"
+
+  # Languages you are actively learning. Each entry MAY produce a closing
+  # sentence in that language IF the JD location matches one of the listed
+  # countries AND the user confirms inclusion during the cover letter flow.
+  # Remove the block entirely if not applicable.
+  language_learning:
+    - language: Spanish
+      current_level: B1
+      target_level: B2
+      target_date: "end of 2026"
+      # The sentence to include, written in that language. Keep it one line.
+      sentence: "Estoy aprendiendo español y espero alcanzar el nivel B2 a finales de 2026."
+      # Only trigger this entry when the JD location is in one of these countries.
+      countries: [Spain, Mexico, Argentina, Colombia, Chile]
+
+# ── Auto-PDF threshold ──────────────────────────────────────────────────────
+#
+# Auto-PDF threshold during evaluation (used by `/career-ops pipeline` and
+# `bash batch/batch-runner.sh`).
+#
+# An offer's tailored CV PDF is auto-generated only when its score is
+# >= this threshold. Generating a PDF costs ~30-60s per offer (Playwright
+# launch + HTML render), and most offers in a scan score 2.x/3.x and never
+# become an actual application — so the gate avoids wasted renders.
+#
+# Default (key absent OR commented out): 3.0 — the original gate of
+# `/career-ops pipeline`. Both evaluation paths apply the same default, so
+# a batch run and an interactive run treat the same offer identically.
+#
+# Raise it (e.g. 4.0) to auto-generate PDFs only for stronger matches and
+# leave the rest report-only — those can still be produced on demand via
+# `/career-ops pdf {company-slug}`. Fractional thresholds work (e.g. 3.5 —
+# half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
+# generate a PDF for every offer.
+# auto_pdf_score_threshold: 4.0
