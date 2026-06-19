@@ -1,0 +1,3 @@
+# discover-web3vacancy dismissed slugs (one per line)
+# Format: slug<TAB>YYYY-MM-DD<TAB>note (date and note optional)
+# Add a slug here to suppress it from future discovery runs.
