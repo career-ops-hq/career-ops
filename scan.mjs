@@ -30,9 +30,16 @@ const APPLICATIONS_PATH = 'data/applications.md';
 mkdirSync('data', { recursive: true });
 
 const CONCURRENCY = 10;
-const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 25_000; // Bumped from 10s -> 25s on 2026-05-29 after benchmarks showed
+                                  // Ashby's posting-api/job-board endpoint responds in 10-19s even
+                                  // single-thread (server-side delay, NOT concurrency queueing).
+                                  // 25s catches all observed Ashby boards including outliers under
+                                  // parallel load. Lever / Greenhouse / Workable all respond sub-2s
+                                  // and are unaffected by this larger ceiling.
 
 // ── API detection ───────────────────────────────────────────────────
+
+const GETRO_HOST_RE = /^(?:jobs|careers|portfoliojobs)\.[a-z0-9-]+\.(?:com|org|io|xyz|vc|capital|fund|co|network)$|\.getro\.com$/i;
 
 function detectApi(company) {
   // Greenhouse: explicit api field
@@ -41,6 +48,22 @@ function detectApi(company) {
   }
 
   const url = company.careers_url || '';
+
+  // Getro: explicit `type: getro` in YAML OR known Getro host pattern.
+  // Getro boards SSR up to 20 jobs per keyword query into `_next/data/{buildId}/jobs.json?q=...`.
+  // Build ID rotates on each Getro deploy, so we detect it dynamically from the board HTML.
+  if (company.type === 'getro' && url) {
+    try {
+      const host = new URL(url).host;
+      return { type: 'getro', host };
+    } catch { /* fall through */ }
+  }
+
+  // Onchainhires (Jobited-powered aggregator): explicit `type: onchainhires` in YAML.
+  // Exposes a clean REST API at api.onchainhires.com/v1/jobs?page=N&limit=N (paginated).
+  if (company.type === 'onchainhires') {
+    return { type: 'onchainhires', host: 'api.onchainhires.com' };
+  }
 
   // Ashby
   const ashbyMatch = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
@@ -51,21 +74,37 @@ function detectApi(company) {
     };
   }
 
-  // Lever
-  const leverMatch = url.match(/jobs\.lever\.co\/([^/?#]+)/);
+  // Lever (covers both US and EU shards). EU shard support added 2026-05-30 after
+  // Aave (`jobs.eu.lever.co/aavelabs`) was silently skipped, missing 12 active jobs
+  // including "Staff Smart Contract Engineer".
+  const leverMatch = url.match(/jobs(?:\.eu)?\.lever\.co\/([^/?#]+)/);
   if (leverMatch) {
+    const apiHost = url.includes('jobs.eu.lever.co') ? 'api.eu.lever.co' : 'api.lever.co';
     return {
       type: 'lever',
-      url: `https://api.lever.co/v0/postings/${leverMatch[1]}`,
+      url: `https://${apiHost}/v0/postings/${leverMatch[1]}`,
     };
   }
 
-  // Greenhouse EU boards
-  const ghEuMatch = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  if (ghEuMatch && !company.api) {
+  // Workable (local patch — see notes at top of file)
+  const workableMatch = url.match(/apply\.workable\.com\/([^/?#]+)/);
+  if (workableMatch) {
+    return {
+      type: 'workable',
+      url: `https://apply.workable.com/api/v1/widget/accounts/${workableMatch[1]}?details=true`,
+    };
+  }
+
+  // Greenhouse boards: matches both newer `job-boards.greenhouse.io/{slug}` and older `boards.greenhouse.io/{slug}` patterns,
+  // plus their `.eu` shard variants. Extended 2026-05-29 to cover ~10 portals.yml entries that were
+  // silently skipped (Uniswap Labs, OP Labs, Offchain Labs, LayerZero, Chainlink, StarkWare, Scroll,
+  // Render Network, Helium / Nova Labs, Hivemapper). All Greenhouse boards share the same API host
+  // (`boards-api.greenhouse.io`), so the slug is the only thing that varies.
+  const ghMatch = url.match(/(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
+  if (ghMatch && !company.api) {
     return {
       type: 'greenhouse',
-      url: `https://boards-api.greenhouse.io/v1/boards/${ghEuMatch[1]}/jobs`,
+      url: `https://boards-api.greenhouse.io/v1/boards/${ghMatch[1]}/jobs`,
     };
   }
 
@@ -74,6 +113,21 @@ function detectApi(company) {
 
 // ── API parsers ─────────────────────────────────────────────────────
 
+// Coerce any of (ISO string, Unix ms, Unix seconds, YYYY-MM-DD) → Unix seconds, or null.
+// Used to harvest a portable `postedAt` from each ATS so the freshness filter can apply uniformly.
+function toUnixSeconds(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    // Heuristic: >1e12 → milliseconds; otherwise seconds.
+    return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (typeof value === 'string') {
+    const t = Date.parse(value);
+    return isNaN(t) ? null : Math.floor(t / 1000);
+  }
+  return null;
+}
+
 function parseGreenhouse(json, companyName) {
   const jobs = json.jobs || [];
   return jobs.map(j => ({
@@ -81,6 +135,7 @@ function parseGreenhouse(json, companyName) {
     url: j.absolute_url || '',
     company: companyName,
     location: j.location?.name || '',
+    postedAt: toUnixSeconds(j.updated_at || j.first_published),
   }));
 }
 
@@ -91,6 +146,7 @@ function parseAshby(json, companyName) {
     url: j.jobUrl || '',
     company: companyName,
     location: j.location || '',
+    postedAt: toUnixSeconds(j.publishedAt || j.updatedAt),
   }));
 }
 
@@ -101,10 +157,29 @@ function parseLever(json, companyName) {
     url: j.hostedUrl || '',
     company: companyName,
     location: j.categories?.location || '',
+    postedAt: toUnixSeconds(j.createdAt),
   }));
 }
 
-const PARSERS = { greenhouse: parseGreenhouse, ashby: parseAshby, lever: parseLever };
+function parseWorkable(json, companyName) {
+  const jobs = json?.jobs || [];
+  return jobs.map(j => {
+    const locParts = [j.city, j.state, j.country].filter(Boolean);
+    const baseLocation = locParts.join(', ');
+    const location = j.telecommuting
+      ? (baseLocation ? `Remote / ${baseLocation}` : 'Remote')
+      : baseLocation;
+    return {
+      title: j.title || '',
+      url: j.url || j.shortlink || '',
+      company: companyName,
+      location,
+      postedAt: toUnixSeconds(j.published_on || j.published_at || j.created_at),
+    };
+  });
+}
+
+const PARSERS = { greenhouse: parseGreenhouse, ashby: parseAshby, lever: parseLever, workable: parseWorkable };
 
 // ── Fetch with timeout ──────────────────────────────────────────────
 
@@ -118,6 +193,113 @@ async function fetchJson(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ── Getro adapter ───────────────────────────────────────────────────
+// Getro powers VC/ecosystem boards (jobs.solana.com, coinbase.getro.com, jobs.optimism.io, etc.).
+// Their public API requires auth, but each board SSRs jobs into Next.js page data:
+//   https://{host}/_next/data/{buildId}/jobs.json?q={keyword}
+// Returns up to 20 keyword-matched jobs in `pageProps.initialState.jobs.found`.
+// We probe one keyword per `title_filter.positive` term and union by job id.
+// The `url` field on each job points to the underlying ATS (Lever/Ashby/Greenhouse), so the
+// existing scan-history URL dedup naturally collapses cross-board overlaps.
+
+const GETRO_UA = 'Mozilla/5.0 (career-ops scan.mjs)';
+
+async function detectGetroBuildId(host) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://${host}/jobs`, {
+      headers: { 'User-Agent': GETRO_UA },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    const html = await res.text();
+    const m = html.match(/_next\/static\/([A-Za-z0-9_-]+)\/_buildManifest/);
+    if (!m) throw new Error(`no buildId on ${host}`);
+    return m[1];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchGetroKeyword(host, buildId, kw) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `https://${host}/_next/data/${buildId}/jobs.json?q=${encodeURIComponent(kw)}`,
+      { headers: { 'User-Agent': GETRO_UA, 'Accept': 'application/json' }, signal: controller.signal },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data?.pageProps?.initialState?.jobs?.found || [];
+  } catch { return []; }
+  finally { clearTimeout(timer); }
+}
+
+// ── Onchainhires adapter ────────────────────────────────────────────
+// Onchainhires (Jobited-powered) is a per-job aggregator: many companies, one board.
+// Public REST API at api.onchainhires.com/v1/jobs?page=N&limit=N returns
+//   { success, message, data: [...jobs], meta: { total } }.
+// Each job has: id, name (title), company.name, locations, createdAt, isActive, etc.
+// Listing URL is constructed as https://onchainhires.com/jobs/{id}.
+
+async function fetchOnchainhires(host, defaultCompanyName) {
+  const PAGE_SIZE = 50;
+  const MAX_PAGES = 20;
+  const out = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    let data;
+    try {
+      data = await fetchJson(`https://${host}/v1/jobs?page=${page}&limit=${PAGE_SIZE}`);
+    } catch { break; }
+    const items = Array.isArray(data?.data) ? data.data : [];
+    if (!items.length) break;
+    for (const j of items) {
+      if (j?.isActive === false) continue;
+      const locRaw = j.locations;
+      const location = Array.isArray(locRaw)
+        ? locRaw.map(l => l?.city || l?.country || l).filter(Boolean).join(', ')
+        : (typeof locRaw === 'object' ? (locRaw?.city || locRaw?.country || '') : '');
+      out.push({
+        title: j.name || '',
+        url: j.id ? `https://onchainhires.com/jobs/${j.id}` : '',
+        company: j.company?.name || defaultCompanyName,
+        location,
+        postedAt: toUnixSeconds(j.createdAt),
+      });
+    }
+    const total = data?.meta?.total;
+    if (total != null && out.length >= total) break;
+    if (items.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
+async function fetchGetroBoard(host, positiveKeywords, companyName) {
+  const buildId = await detectGetroBuildId(host);
+
+  // Fan out keyword queries in parallel (typically ~10 queries × ~1s each → ~1s total instead of ~10s).
+  const results = await Promise.all(
+    positiveKeywords.map(kw => fetchGetroKeyword(host, buildId, kw)),
+  );
+
+  const seen = new Map();
+  for (const found of results) {
+    for (const j of found) {
+      if (!j?.url || seen.has(j.id)) continue;
+      seen.set(j.id, {
+        title: j.title || '',
+        url: j.url,
+        company: j.organization?.name || companyName,
+        location: Array.isArray(j.locations) ? j.locations.join(', ') : '',
+        postedAt: toUnixSeconds(j.createdAt),
+      });
+    }
+  }
+  return [...seen.values()];
 }
 
 // ── Title filter ────────────────────────────────────────────────────
@@ -185,6 +367,16 @@ function loadSeenCompanyRoles() {
 
 // ── Pipeline writer ─────────────────────────────────────────────────
 
+function formatOfferLine(o) {
+  const now = Math.floor(Date.now() / 1000);
+  let staleTag = '';
+  if (o.stale && o.postedAt) {
+    const ageDays = Math.floor((now - o.postedAt) / 86400);
+    staleTag = ` | STALE ${ageDays}d`;
+  }
+  return `- [ ] ${o.url} | ${o.company} | ${o.title}${staleTag}`;
+}
+
 function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
@@ -197,9 +389,7 @@ function appendToPipeline(offers) {
     // No Pendientes section — append at end before Procesadas
     const procIdx = text.indexOf('## Procesadas');
     const insertAt = procIdx === -1 ? text.length : procIdx;
-    const block = `\n${marker}\n\n` + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n\n';
+    const block = `\n${marker}\n\n` + offers.map(formatOfferLine).join('\n') + '\n\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   } else {
     // Find the end of existing Pendientes content (next ## or end)
@@ -207,9 +397,7 @@ function appendToPipeline(offers) {
     const nextSection = text.indexOf('\n## ', afterMarker);
     const insertAt = nextSection === -1 ? text.length : nextSection;
 
-    const block = '\n' + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n';
+    const block = '\n' + offers.map(formatOfferLine).join('\n') + '\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   }
 
@@ -289,17 +477,47 @@ async function main() {
   const newOffers = [];
   const errors = [];
 
+  const positiveKeywords = config.title_filter?.positive || [];
+
+  // Freshness gate (added 2026-05-30 after repeat misses surfaced expired postings).
+  // Per user-memory rule: <30d fresh, 30-90d stale-with-warning, >90d EXCLUDE.
+  // Applied here so the gate covers every adapter (greenhouse/ashby/lever/workable/getro)
+  // — adapters now harvest `postedAt` (Unix seconds) when the source exposes it.
+  // Jobs missing postedAt pass through (we cannot prove they are old).
+  const NOW_SEC = Math.floor(Date.now() / 1000);
+  const STALE_AFTER = 30 * 86400;
+  const EXCLUDE_AFTER = 90 * 86400;
+  let totalExpired = 0;
+  let totalStale = 0;
+
   const tasks = targets.map(company => async () => {
-    const { type, url } = company._api;
+    const { type, url, host } = company._api;
     try {
-      const json = await fetchJson(url);
-      const jobs = PARSERS[type](json, company.name);
+      let jobs;
+      if (type === 'getro') {
+        jobs = await fetchGetroBoard(host, positiveKeywords, company.name);
+      } else if (type === 'onchainhires') {
+        jobs = await fetchOnchainhires(host, company.name);
+      } else {
+        const json = await fetchJson(url);
+        jobs = PARSERS[type](json, company.name);
+      }
       totalFound += jobs.length;
 
       for (const job of jobs) {
         if (!titleFilter(job.title)) {
           totalFiltered++;
           continue;
+        }
+        // Freshness gate — exclude jobs proven to be older than EXCLUDE_AFTER.
+        // Jobs without postedAt pass (cannot prove staleness).
+        if (job.postedAt != null) {
+          const ageSec = NOW_SEC - job.postedAt;
+          if (ageSec > EXCLUDE_AFTER) {
+            totalExpired++;
+            continue;
+          }
+          if (ageSec > STALE_AFTER) totalStale++;
         }
         if (seenUrls.has(job.url)) {
           totalDupes++;
@@ -313,7 +531,8 @@ async function main() {
         // Mark as seen to avoid intra-scan dupes
         seenUrls.add(job.url);
         seenCompanyRoles.add(key);
-        newOffers.push({ ...job, source: `${type}-api` });
+        const stale = job.postedAt != null && (NOW_SEC - job.postedAt) > STALE_AFTER;
+        newOffers.push({ ...job, source: `${type}-api`, stale });
       }
     } catch (err) {
       errors.push({ company: company.name, error: err.message });
@@ -335,6 +554,8 @@ async function main() {
   console.log(`Companies scanned:     ${targets.length}`);
   console.log(`Total jobs found:      ${totalFound}`);
   console.log(`Filtered by title:     ${totalFiltered} removed`);
+  console.log(`Expired (>90d):        ${totalExpired} excluded`);
+  console.log(`Stale (30-90d):        ${totalStale} included with warning`);
   console.log(`Duplicates:            ${totalDupes} skipped`);
   console.log(`New offers added:      ${newOffers.length}`);
 

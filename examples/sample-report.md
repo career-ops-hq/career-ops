@@ -4,7 +4,7 @@
 **Archetype:** AI Platform / LLMOps Engineer
 **Score:** 4.2/5
 **URL:** https://jobs.example.com/acme-ai-senior-engineer
-**PDF:** output/cv-candidate-acme-ai-2026-04-01.pdf
+**PDF:** output/acme-ai-2026-04-01/cv-candidate.pdf
 
 ---
 

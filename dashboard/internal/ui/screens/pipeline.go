@@ -2,9 +2,11 @@ package screens
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -57,10 +59,13 @@ type reportSummary struct {
 
 // Sort modes
 const (
-	sortScore   = "score"
-	sortDate    = "date"
-	sortCompany = "company"
-	sortStatus  = "status"
+	sortScore    = "score"
+	sortDate     = "date"
+	sortCompany  = "company"
+	sortStatus   = "status"
+	sortLocation = "location"
+	sortPay      = "pay"
+	sortLast     = "last"
 )
 
 // Filter modes
@@ -70,6 +75,8 @@ const (
 	filterApplied   = "applied"
 	filterInterview = "interview"
 	filterSkip      = "skip"
+	filterRejected  = "rejected"
+	filterDiscarded = "discarded"
 	filterTop       = "top"
 )
 
@@ -85,9 +92,42 @@ var pipelineTabs = []pipelineTab{
 	{filterInterview, "INTERVIEW"},
 	{filterTop, "TOP ≥4"},
 	{filterSkip, "SKIP"},
+	{filterRejected, "REJECTED"},
+	{filterDiscarded, "DISCARDED"},
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
+
+// ColumnID identifies an optional table column in the pipeline view.
+type ColumnID int
+
+const (
+	// Optional columns — user-toggleable via the column picker (C key).
+	ColDate        ColumnID = iota // APPLIED date
+	ColLocation                    // LOCATION city+state
+	ColPay                         // PAY range
+	ColHasReport                   // RPT: ✓/—
+	ColHasPDF                      // PDF: ✓/—
+	ColLastContact                 // LAST contact date
+)
+
+// colDef describes one optional column for the picker UI.
+type colDef struct {
+	id     ColumnID
+	header string
+	hint   string
+	width  int
+	onByDefault bool
+}
+
+var optionalCols = []colDef{
+	{ColDate, "APPLIED", "", 10, true},
+	{ColLocation, "LOCATION", "", 20, true},
+	{ColPay, "PAY", "", 16, true},
+	{ColHasReport, "RPT", "✓/—", 4, false},
+	{ColHasPDF, "PDF", "✓/—", 4, false},
+	{ColLastContact, "LAST", "", 10, false},
+}
 
 var statusOptions = []string{"Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded", "SKIP"}
 
@@ -111,10 +151,21 @@ type PipelineModel struct {
 	// Status picker sub-state
 	statusPicker bool
 	statusCursor int
+	// Search sub-state — narrows the active tab by substring on company/role/notes.
+	searchInput bool   // true while the user is typing the query
+	searchQuery string // committed (or in-progress) lowercased query
+	// Column picker sub-state — opened with C, closed with esc.
+	colPicker    bool
+	colPickerIdx int
+	visibleCols  map[ColumnID]bool
 }
 
 // NewPipelineModel creates a new pipeline screen.
 func NewPipelineModel(t theme.Theme, apps []model.CareerApplication, metrics model.PipelineMetrics, careerOpsPath string, width, height int) PipelineModel {
+	visible := make(map[ColumnID]bool)
+	for _, col := range optionalCols {
+		visible[col.id] = col.onByDefault
+	}
 	m := PipelineModel{
 		apps:          apps,
 		metrics:       metrics,
@@ -126,6 +177,7 @@ func NewPipelineModel(t theme.Theme, apps []model.CareerApplication, metrics mod
 		theme:         t,
 		careerOpsPath: careerOpsPath,
 		reportCache:   make(map[string]reportSummary),
+		visibleCols:   visible,
 	}
 	m.applyFilterAndSort()
 	return m
@@ -181,6 +233,12 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.sortMode = m.sortMode
 	reloaded.activeTab = m.activeTab
 	reloaded.viewMode = m.viewMode
+	// Preserve search state across refresh — otherwise pressing `r` silently drops a
+	// committed query and the user loses their place mid-investigation.
+	reloaded.searchQuery = m.searchQuery
+	reloaded.searchInput = m.searchInput
+	// Preserve user's column visibility choices across refresh.
+	reloaded.visibleCols = m.visibleCols
 	reloaded.applyFilterAndSort()
 	reloaded.CopyReportCache(&m)
 
@@ -224,8 +282,14 @@ func (m PipelineModel) CurrentApp() (model.CareerApplication, bool) {
 func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.colPicker {
+			return m.handleColPicker(msg)
+		}
 		if m.statusPicker {
 			return m.handleStatusPicker(msg)
+		}
+		if m.searchInput {
+			return m.handleSearchInput(msg)
 		}
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
@@ -238,8 +302,26 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 
 func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
-	case "q", "esc":
+	case "esc":
+		// While a search is committed, Esc clears the search (matches vim's `:nohl`
+		// ergonomics). With no query, Esc is a no-op — q is the only quit key, which
+		// keeps the help bar honest and avoids accidental exits.
+		if m.searchQuery != "" {
+			m.searchQuery = ""
+			m.applyFilterAndSort()
+			m.cursor = 0
+			m.scrollOffset = 0
+			return m, m.loadCurrentReport()
+		}
+		return m, nil
+
+	case "q":
 		return m, func() tea.Msg { return PipelineClosedMsg{} }
+
+	case "/":
+		// Open search input. Pre-fill with the current query so refining is one keystroke away.
+		m.searchInput = true
+		return m, nil
 
 	case "down", "j":
 		if len(m.filtered) > 0 {
@@ -321,6 +403,11 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	case "r":
 		return m, func() tea.Msg { return PipelineRefreshMsg{} }
 
+	case "C":
+		m.colPicker = true
+		m.colPickerIdx = 0
+		return m, nil
+
 	case "c":
 		if len(m.filtered) > 0 {
 			m.statusPicker = true
@@ -373,6 +460,62 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	return m, nil
 }
 
+// handleSearchInput consumes keys while the search input bar is open.
+// Esc cancels (closes input AND clears query). Enter commits (closes input,
+// keeps query, refreshes filtered list). Backspace + printable chars edit
+// the query and live-update the filter so the user sees results as they type.
+//
+// Report previews are NOT lazy-loaded on every keystroke — that would trigger
+// a synchronous os.ReadFile per rune/backspace/ctrl+u and stutter live
+// typing. Instead the load fires once when the user commits (Enter) or
+// cancels (Esc); subsequent cursor movement in handleKey loads as before.
+func (m PipelineModel) handleSearchInput(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searchInput = false
+		m.searchQuery = ""
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, m.loadCurrentReport()
+
+	case "enter":
+		m.searchInput = false
+		// Query already applied during typing; load the preview for the
+		// committed first match (skipped during typing for perf).
+		return m, m.loadCurrentReport()
+
+	case "backspace":
+		if len(m.searchQuery) > 0 {
+			// Drop the last UTF-8 rune so multi-byte characters delete cleanly.
+			runes := []rune(m.searchQuery)
+			m.searchQuery = string(runes[:len(runes)-1])
+			m.applyFilterAndSort()
+			m.cursor = 0
+			m.scrollOffset = 0
+		}
+		return m, nil
+
+	case "ctrl+u":
+		// vim-flavored: clear the in-progress query without leaving search mode.
+		m.searchQuery = ""
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, nil
+	}
+
+	// Append printable runes (ignore other special keys like arrows / ctrl-combos).
+	if r := msg.Runes; len(r) > 0 {
+		m.searchQuery += strings.ToLower(string(r))
+		m.applyFilterAndSort()
+		m.cursor = 0
+		m.scrollOffset = 0
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
@@ -407,6 +550,32 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	return m, nil
 }
 
+// handleColPicker consumes keys while the column picker overlay is open.
+func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "C":
+		m.colPicker = false
+		return m, nil
+
+	case "down", "j":
+		m.colPickerIdx++
+		if m.colPickerIdx >= len(optionalCols) {
+			m.colPickerIdx = len(optionalCols) - 1
+		}
+
+	case "up", "k":
+		m.colPickerIdx--
+		if m.colPickerIdx < 0 {
+			m.colPickerIdx = 0
+		}
+
+	case " ":
+		col := optionalCols[m.colPickerIdx]
+		m.visibleCols[col.id] = !m.visibleCols[col.id]
+	}
+	return m, nil
+}
+
 func (m PipelineModel) loadCurrentReport() tea.Cmd {
 	app, ok := m.CurrentApp()
 	if !ok || app.ReportPath == "" {
@@ -422,12 +591,35 @@ func (m PipelineModel) loadCurrentReport() tea.Cmd {
 	}
 }
 
+// matchesSearch reports whether app contains the query as a case-insensitive
+// substring of its company, role, or notes. Empty query matches everything.
+// Lowercases both sides so callers don't have to remember the contract.
+func matchesSearch(app model.CareerApplication, query string) bool {
+	if query == "" {
+		return true
+	}
+	q := strings.ToLower(query)
+	if strings.Contains(strings.ToLower(app.Company), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(app.Role), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(app.Notes), q) {
+		return true
+	}
+	return false
+}
+
 // applyFilterAndSort rebuilds the filtered list from apps.
 func (m *PipelineModel) applyFilterAndSort() {
 	var filtered []model.CareerApplication
 
 	currentFilter := pipelineTabs[m.activeTab].filter
 	for _, app := range m.apps {
+		if !matchesSearch(app, m.searchQuery) {
+			continue
+		}
 		norm := data.NormalizeStatus(app.Status)
 		switch currentFilter {
 		case filterAll:
@@ -444,24 +636,10 @@ func (m *PipelineModel) applyFilterAndSort() {
 	}
 
 	// Sort
-	switch m.sortMode {
-	case sortScore:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return filtered[i].Score > filtered[j].Score
-		})
-	case sortDate:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return filtered[i].Date > filtered[j].Date
-		})
-	case sortCompany:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return strings.ToLower(filtered[i].Company) < strings.ToLower(filtered[j].Company)
-		})
-	case sortStatus:
-		sort.SliceStable(filtered, func(i, j int) bool {
-			return data.StatusPriority(filtered[i].Status) < data.StatusPriority(filtered[j].Status)
-		})
-	}
+	less := m.sortLess()
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return less(filtered[i], filtered[j])
+	})
 
 	// In grouped mode, always sort by status priority first, then by selected sort within groups
 	if m.viewMode == "grouped" {
@@ -472,25 +650,82 @@ func (m *PipelineModel) applyFilterAndSort() {
 				return pi < pj
 			}
 			// Within same group, use selected sort
-			switch m.sortMode {
-			case sortScore:
-				return filtered[i].Score > filtered[j].Score
-			case sortDate:
-				return filtered[i].Date > filtered[j].Date
-			case sortCompany:
-				return strings.ToLower(filtered[i].Company) < strings.ToLower(filtered[j].Company)
-			default:
-				return filtered[i].Score > filtered[j].Score
-			}
+			return less(filtered[i], filtered[j])
 		})
 	}
 
 	m.filtered = filtered
 }
 
+// sortLess returns the comparator for the active sort mode. Shared by the flat
+// sort and the within-group tiebreaker in grouped view.
+func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
+	switch m.sortMode {
+	case sortDate:
+		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+	case sortCompany:
+		return func(a, b model.CareerApplication) bool {
+			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
+		}
+	case sortStatus:
+		return func(a, b model.CareerApplication) bool {
+			return data.StatusPriority(a.Status) < data.StatusPriority(b.Status)
+		}
+	case sortLocation:
+		// Remote-first, then hybrid, then onsite; alphabetical city as tiebreaker.
+		return func(a, b model.CareerApplication) bool {
+			ra, rb := workModeRank(a.WorkMode), workModeRank(b.WorkMode)
+			if ra != rb {
+				return ra < rb
+			}
+			return a.Location < b.Location
+		}
+	case sortPay:
+		// Highest band ceiling first; unknown pay (0) sinks to the bottom.
+		return func(a, b model.CareerApplication) bool { return a.PayMax > b.PayMax }
+	case sortLast:
+		// Most recent contact first; empty dates sink to the bottom.
+		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	default: // sortScore
+		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+	}
+}
+
+// workModeRank orders work modes remote-first for the location sort.
+func workModeRank(mode string) int {
+	switch mode {
+	case "Remote":
+		return 0
+	case "RemoteFlex":
+		return 1
+	case "Hybrid":
+		return 2
+	case "Full":
+		return 3
+	default:
+		return 4
+	}
+}
+
+// chromeRowsFixed returns the number of fixed chrome rows above/below the body
+// (header + tabs(2) + metrics + sortbar + column header + help + 1 search bar
+// when active). Shared by View() and adjustScroll() so additions stay in sync.
+func (m PipelineModel) chromeRowsFixed() int {
+	rows := 8 // header + tabs(2) + metrics + sortbar + column header + help + preview baseline
+	if m.searchInput || m.searchQuery != "" {
+		rows++
+	}
+	return rows
+}
+
+// previewBudgetApprox is the approximate row count reserved for the preview block
+// when computing scroll positioning. View() measures the actual rendered preview
+// height; adjustScroll uses this constant to avoid re-rendering on every keystroke.
+const previewBudgetApprox = 6
+
 // adjustScroll updates scrollOffset so the cursor stays visible.
 func (m *PipelineModel) adjustScroll() {
-	availHeight := m.height - 12 // header + tabs(2) + metrics + sortbar + footer + preview
+	availHeight := m.height - m.chromeRowsFixed() - previewBudgetApprox
 	if availHeight < 5 {
 		availHeight = 5
 	}
@@ -537,6 +772,7 @@ func (m PipelineModel) View() string {
 	tabs := m.renderTabs()
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
+	searchBar := m.renderSearchBar()
 	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
@@ -549,7 +785,7 @@ func (m PipelineModel) View() string {
 
 	// Calculate available height for body
 	previewLines := strings.Count(preview, "\n") + 1
-	availHeight := m.height - 7 - previewLines // header + tabs(2) + metrics + sortbar + help + preview
+	availHeight := m.height - m.chromeRowsFixed() - previewLines
 	if availHeight < 3 {
 		availHeight = 3
 	}
@@ -558,20 +794,57 @@ func (m PipelineModel) View() string {
 	}
 	body = strings.Join(bodyLines, "\n")
 
+	// Column picker overlay
+	if m.colPicker {
+		body = m.overlayColPicker(body)
+	}
+
 	// Status picker overlay
 	if m.statusPicker {
 		body = m.overlayStatusPicker(body)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		tabs,
-		metricsBar,
-		sortBar,
-		body,
-		preview,
-		help,
-	)
+	sections := []string{header, tabs, metricsBar, sortBar}
+	if searchBar != "" {
+		sections = append(sections, searchBar)
+	}
+	sections = append(sections, m.renderColumnHeader(), body, preview, help)
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// renderSearchBar returns an empty string when there is no active or in-progress
+// search; otherwise it renders a vim-style status line showing the query and the
+// match count. While in input mode, a trailing cursor is appended.
+func (m PipelineModel) renderSearchBar() string {
+	if !m.searchInput && m.searchQuery == "" {
+		return ""
+	}
+
+	style := lipgloss.NewStyle().
+		Foreground(m.theme.Text).
+		Width(m.width).
+		Padding(0, 2)
+
+	prompt := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render("/")
+	queryStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
+	hintStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+
+	display := queryStyle.Render(m.searchQuery)
+	if m.searchInput {
+		display += lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
+	}
+
+	tabFiltered := m.countForFilter(pipelineTabs[m.activeTab].filter)
+	matchInfo := hintStyle.Render(fmt.Sprintf("  %d/%d matching", len(m.filtered), tabFiltered))
+
+	hint := ""
+	if m.searchInput {
+		hint = hintStyle.Render("   Enter: keep   Esc: cancel   Ctrl+U: clear")
+	} else {
+		hint = hintStyle.Render("   Esc: clear   /: edit")
+	}
+
+	return style.Render(prompt + " " + display + matchInfo + hint)
 }
 
 func (m PipelineModel) renderHeader() string {
@@ -719,62 +992,224 @@ func (m PipelineModel) renderBody() string {
 	return strings.Join(lines, "\n")
 }
 
+// colWidths holds per-column rune budgets for the table.
+type colWidths struct {
+	num, score, company, status, role int
+	// optional columns — 0 means the column is hidden
+	date, loc, pay, rpt, pdf, last int
+}
+
+func (m PipelineModel) colVisible(id ColumnID) bool {
+	if m.visibleCols == nil {
+		// Fall back to default for callers before init (tests, etc.)
+		for _, col := range optionalCols {
+			if col.id == id {
+				return col.onByDefault
+			}
+		}
+		return false
+	}
+	return m.visibleCols[id]
+}
+
+func (m PipelineModel) columnWidths() colWidths {
+	c := colWidths{num: 5, score: 5, company: 16, status: 12}
+	if m.colVisible(ColDate) {
+		c.date = 10
+	}
+	if m.colVisible(ColLocation) {
+		c.loc = 20
+	}
+	if m.colVisible(ColPay) {
+		c.pay = 16
+	}
+	if m.colVisible(ColHasReport) {
+		c.rpt = 4
+	}
+	if m.colVisible(ColHasPDF) {
+		c.pdf = 4
+	}
+	if m.colVisible(ColLastContact) {
+		c.last = 10
+	}
+	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last
+	c.role = m.width - fixed - 14 // separators + outer padding
+	if c.role < 15 {
+		c.role = 15
+	}
+	return c
+}
+
+func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
+	switch mode {
+	case "Remote":
+		return m.theme.Green
+	case "RemoteFlex":
+		return m.theme.Sky
+	case "Hybrid":
+		return m.theme.Yellow
+	case "Full":
+		return m.theme.Red
+	default:
+		return m.theme.Subtext
+	}
+}
+
+func (m PipelineModel) renderLocCell(app model.CareerApplication, width int) string {
+	text := app.WorkMode
+	if app.Location != "" {
+		if text != "" {
+			text += " · " + app.Location
+		} else {
+			text = app.Location
+		}
+	}
+	if text == "" {
+		text = "—"
+	}
+	return lipgloss.NewStyle().Foreground(m.workModeColor(app.WorkMode)).Width(width).Render(truncateRunes(text, width))
+}
+
+func (m PipelineModel) renderCheckCell(yes bool, width int) string {
+	text := "—"
+	color := m.theme.Subtext
+	if yes {
+		text = "✓"
+		color = m.theme.Green
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).Render(text)
+}
+
+// renderPayCell prefers the pay range parsed from notes and falls back to the
+// report-cache comp estimate (the pre-column behavior). POSTED bands render
+// green; estimates stay yellow.
+func (m PipelineModel) renderPayCell(app model.CareerApplication, width int) string {
+	text := app.PayRange
+	color := m.theme.Yellow
+	if app.PaySource == "POSTED" {
+		color = m.theme.Green
+	}
+	if text == "" {
+		if summary, ok := m.reportCache[app.ReportPath]; ok && summary.comp != "" {
+			text = summary.comp
+		}
+	}
+	if text == "" {
+		return lipgloss.NewStyle().Width(width).Render("")
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).Render(truncateRunes(text, width-1))
+}
+
+// renderColumnHeader labels the table columns; widths mirror renderAppLine.
+func (m PipelineModel) renderColumnHeader() string {
+	cw := m.columnWidths()
+	h := lipgloss.NewStyle().Foreground(m.theme.Subtext).Bold(true)
+	cell := func(label string, width int) string {
+		return h.Width(width).Render(truncateRunes(label, width))
+	}
+
+	segments := []string{
+		cell("#", cw.num),
+		h.Render("FIT"), // score cell is unpadded, always 3 runes wide
+	}
+	if cw.date > 0 {
+		segments = append(segments, cell("APPLIED", cw.date))
+	}
+	segments = append(segments, cell("COMPANY", cw.company))
+	segments = append(segments, cell("ROLE", cw.role))
+	segments = append(segments, cell("STATUS", cw.status))
+	if cw.loc > 0 {
+		segments = append(segments, cell("LOCATION", cw.loc))
+	}
+	if cw.pay > 0 {
+		segments = append(segments, cell("PAY", cw.pay))
+	}
+	if cw.rpt > 0 {
+		segments = append(segments, cell("RPT", cw.rpt))
+	}
+	if cw.pdf > 0 {
+		segments = append(segments, cell("PDF", cw.pdf))
+	}
+	if cw.last > 0 {
+		segments = append(segments, cell("LAST", cw.last))
+	}
+
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	return padStyle.Render(" " + strings.Join(segments, " "))
+}
+
 func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool) string {
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	cw := m.columnWidths()
 
-	// Column widths
-	scoreW := 5 // "4.5  "
-	dateW := 10
-	companyW := 16
-	statusW := 12
-	compW := 14
-	// Role gets remaining space
-	roleW := m.width - scoreW - dateW - companyW - statusW - compW - 12
-	if roleW < 15 {
-		roleW = 15
+	// Tracker number (fixed width)
+	numText := "#—"
+	if app.Number > 0 {
+		numText = fmt.Sprintf("#%d", app.Number)
 	}
+	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
 	// Score with color
 	scoreStyle := m.scoreStyle(app.Score)
 	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
 
 	// Company (truncate)
-	company := truncateRunes(app.Company, companyW)
-	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(companyW)
+	company := truncateRunes(app.Company, cw.company)
+	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
 	// Date (fixed width)
 	dateText := app.Date
 	if dateText == "" {
 		dateText = "—"
 	}
-	dateStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(dateW)
+	dateStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.date)
 
 	// Role (truncate)
-	role := truncateRunes(app.Role, roleW)
-	roleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(roleW)
+	role := truncateRunes(app.Role, cw.role)
+	roleStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.role)
 
 	// Status with color -- fixed column
 	norm := data.NormalizeStatus(app.Status)
 	statusColor := m.statusColorMap()[norm]
-	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Width(statusW)
+	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Width(cw.status)
 	statusText := statusStyle.Render(statusLabel(norm))
 
-	// Comp from report cache -- fixed column
-	compText := ""
-	if summary, ok := m.reportCache[app.ReportPath]; ok && summary.comp != "" {
-		comp := truncateRunes(summary.comp, compW-1)
-		compStyle := lipgloss.NewStyle().Foreground(m.theme.Yellow)
-		compText = compStyle.Render(comp)
+	segments := []string{
+		numStyle.Render(truncateRunes(numText, cw.num)),
+		score,
+	}
+	if cw.date > 0 {
+		segments = append(segments, dateStyle.Render(truncateRunes(dateText, cw.date)))
+	}
+	segments = append(segments, companyStyle.Render(company))
+	segments = append(segments, roleStyle.Render(role))
+	segments = append(segments, statusText)
+
+	if cw.loc > 0 {
+		segments = append(segments, m.renderLocCell(app, cw.loc))
+	}
+	if cw.pay > 0 {
+		segments = append(segments, m.renderPayCell(app, cw.pay))
+	}
+	if cw.rpt > 0 {
+		segments = append(segments, m.renderCheckCell(app.ReportPath != "", cw.rpt))
+	}
+	if cw.pdf > 0 {
+		segments = append(segments, m.renderCheckCell(app.HasPDF, cw.pdf))
+	}
+	if cw.last > 0 {
+		lastText := "—"
+		if app.LastContact != "" {
+			lastText = formatTimeAgo(app.LastContact)
+		}
+		lastStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.last)
+		if app.LastContact != "" && app.LastContact != app.Date {
+			lastStyle = lastStyle.Foreground(m.theme.Text)
+		}
+		segments = append(segments, lastStyle.Render(truncateRunes(lastText, cw.last)))
 	}
 
-	line := fmt.Sprintf(" %s %s %s %s %s %s",
-		score,
-		dateStyle.Render(truncateRunes(dateText, dateW)),
-		companyStyle.Render(company),
-		roleStyle.Render(role),
-		statusText,
-		compText,
-	)
+	line := " " + strings.Join(segments, " ")
 
 	if selected {
 		selStyle := lipgloss.NewStyle().
@@ -801,11 +1236,42 @@ func (m PipelineModel) renderPreview() string {
 	valueStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
+	// Quick facts derived from notes — available even when there is no report,
+	// and the only place narrow terminals see location/pay/last-contact.
+	var facts []string
+	if app.WorkMode != "" || app.Location != "" {
+		loc := app.WorkMode
+		if app.Location != "" {
+			if loc != "" {
+				loc += " · " + app.Location
+			} else {
+				loc = app.Location
+			}
+		}
+		facts = append(facts, labelStyle.Render("Loc: ")+valueStyle.Render(loc))
+	}
+	if app.PayRange != "" {
+		pay := app.PayRange
+		if app.PaySource != "" {
+			pay += " (" + app.PaySource + ")"
+		}
+		facts = append(facts, labelStyle.Render("Pay: ")+valueStyle.Render(pay))
+	}
+	if app.LastContact != "" {
+		facts = append(facts, labelStyle.Render("Last contact: ")+
+			valueStyle.Render(fmt.Sprintf("%s (%s)", app.LastContact, formatTimeAgo(app.LastContact))))
+	}
+	if len(facts) > 0 {
+		lines = append(lines, padStyle.Render(strings.Join(facts, "   ")))
+	}
+
+	outcome := previewOutcome(app)
+
 	// Check report cache
 	if summary, ok := m.reportCache[app.ReportPath]; ok {
 		if summary.archetype != "" {
 			lines = append(lines, padStyle.Render(
-				labelStyle.Render("Arquetipo: ")+valueStyle.Render(summary.archetype)))
+				labelStyle.Render("Archetype: ")+valueStyle.Render(summary.archetype)))
 		}
 		if summary.tldr != "" {
 			lines = append(lines, padStyle.Render(
@@ -819,15 +1285,41 @@ func (m PipelineModel) renderPreview() string {
 			lines = append(lines, padStyle.Render(
 				labelStyle.Render("Remote: ")+valueStyle.Render(summary.remote)))
 		}
-	} else if app.Notes != "" {
-		// Fallback: show notes
+	} else if app.Notes != "" && outcome == "" {
+		// Fallback: show notes (the outcome line below already carries them)
 		notes := truncateRunes(app.Notes, m.width-10)
 		lines = append(lines, padStyle.Render(dimStyle.Render(notes)))
-	} else {
+	} else if outcome == "" {
 		lines = append(lines, padStyle.Render(dimStyle.Render("Loading preview...")))
 	}
 
+	// Closed-out postings: surface what happened as the last preview line.
+	// The notes-only fallback above disappears once a report summary is
+	// cached, which is exactly when the discard reason got lost (#787).
+	if outcome != "" {
+		// Width budget: 4 cols padding + 9 for the "Outcome: " label + slack,
+		// mirroring the m.width-10 budget of the notes fallback above.
+		lines = append(lines, padStyle.Render(
+			labelStyle.Render("Outcome: ")+valueStyle.Render(truncateRunes(outcome, m.width-14))))
+	}
+
 	return strings.Join(lines, "\n")
+}
+
+// previewOutcome returns "what happened" to a closed-out application — the raw
+// status (which often carries the decision date, e.g. "descartado 2026-03-12")
+// plus the tracker notes holding the reason. Returns "" for apps still in play.
+func previewOutcome(app model.CareerApplication) string {
+	switch data.NormalizeStatus(app.Status) {
+	case "discarded", "skip", "rejected":
+	default:
+		return ""
+	}
+	outcome := strings.TrimSpace(strings.ReplaceAll(app.Status, "**", ""))
+	if app.Notes != "" {
+		outcome += " — " + app.Notes
+	}
+	return outcome
 }
 
 func (m PipelineModel) renderHelp() string {
@@ -840,6 +1332,13 @@ func (m PipelineModel) renderHelp() string {
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
+	if m.colPicker {
+		return style.Render(
+			keyStyle.Render("↑↓/jk") + descStyle.Render(" navigate  ") +
+				keyStyle.Render("SPACE") + descStyle.Render(" toggle  ") +
+				keyStyle.Render("Esc/C") + descStyle.Render(" close"))
+	}
+
 	if m.statusPicker {
 		return style.Render(
 			keyStyle.Render("↑↓/jk") + descStyle.Render(" navigate  ") +
@@ -847,18 +1346,28 @@ func (m PipelineModel) renderHelp() string {
 				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
 	}
 
+	if m.searchInput {
+		return style.Render(
+			keyStyle.Render("type") + descStyle.Render(" filter live  ") +
+				keyStyle.Render("Enter") + descStyle.Render(" keep  ") +
+				keyStyle.Render("Ctrl+U") + descStyle.Render(" clear  ") +
+				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
+	}
+
 	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
 
 	keys := keyStyle.Render("↑↓/jk") + descStyle.Render(" nav  ") +
 		keyStyle.Render("←→/hl") + descStyle.Render(" tabs  ") +
+		keyStyle.Render("/") + descStyle.Render(" search  ") +
 		keyStyle.Render("s") + descStyle.Render(" sort  ") +
 		keyStyle.Render("r") + descStyle.Render(" refresh  ") +
 		keyStyle.Render("Enter") + descStyle.Render(" report  ") +
 		keyStyle.Render("o") + descStyle.Render(" open URL  ") +
 		keyStyle.Render("c") + descStyle.Render(" change  ") +
+		keyStyle.Render("C") + descStyle.Render(" columns  ") +
 		keyStyle.Render("v") + descStyle.Render(" view  ") +
 		keyStyle.Render("p") + descStyle.Render(" progress  ") +
-		keyStyle.Render("Esc") + descStyle.Render(" quit")
+		keyStyle.Render("q") + descStyle.Render(" quit")
 
 	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
 	if gap < 1 {
@@ -894,6 +1403,43 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 	}
 
 	// Append picker to body
+	bodyLines = append(bodyLines, picker...)
+	return strings.Join(bodyLines, "\n")
+}
+
+// overlayColPicker renders the column visibility picker inline at the bottom
+// of the body. SPACE toggles the focused column; ESC or C closes.
+func (m PipelineModel) overlayColPicker(body string) string {
+	bodyLines := strings.Split(body, "\n")
+	pickerWidth := 36
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	borderStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+
+	var picker []string
+	picker = append(picker, padStyle.Render(borderStyle.Render("─── Columns (SPACE toggle · ESC close) ───")))
+
+	for i, col := range optionalCols {
+		on := m.visibleCols[col.id]
+		check := "[ ]"
+		checkColor := m.theme.Subtext
+		if on {
+			check = "[✓]"
+			checkColor = m.theme.Green
+		}
+		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
+		if i == m.colPickerIdx {
+			style = style.Background(m.theme.Overlay).Bold(true)
+		}
+		checkStr := lipgloss.NewStyle().Foreground(checkColor).Render(check)
+		label := col.header
+		if col.hint != "" {
+			label += "  " + dimStyle.Render(col.hint)
+		}
+		row := checkStr + " " + label
+		picker = append(picker, padStyle.Render(style.Render(row)))
+	}
+
 	bodyLines = append(bodyLines, picker...)
 	return strings.Join(bodyLines, "\n")
 }
@@ -934,6 +1480,31 @@ func (m PipelineModel) countByNormStatus(status string) int {
 		}
 	}
 	return count
+}
+
+// formatTimeAgo renders an ISO date as a relative duration in calendar days:
+// "today", "yesterday", or "Nd ago". Tracker dates are day-granular (no
+// time-of-day), so we never report sub-day hours — doing so would fabricate
+// precision the data doesn't have (e.g. an entry dated today would otherwise
+// read "13h ago" simply because it's 1pm, not because contact was 13h back).
+func formatTimeAgo(dateStr string) string {
+	t, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+	if err != nil {
+		return dateStr // not a date — show it untouched rather than lie
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	contactDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
+	// Round to the nearest day so DST transitions don't skew the count.
+	days := int(math.Round(today.Sub(contactDay).Hours() / 24))
+	switch {
+	case days <= 0:
+		return "today"
+	case days == 1:
+		return "yesterday"
+	default:
+		return fmt.Sprintf("%dd ago", days)
+	}
 }
 
 // truncateRunes truncates a string to at most maxRunes runes, appending "..." if truncated.

@@ -15,8 +15,8 @@ jobs:
     steps:
       - uses: actions/first-interaction@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          pr-message: |
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_message: |
             Welcome to career-ops, @${{ github.actor }}! Thanks for your first PR.
 
             A few things to know:
@@ -25,7 +25,7 @@ jobs:
             - Read [CONTRIBUTING.md](https://github.com/santifer/career-ops/blob/main/CONTRIBUTING.md) if you haven't
 
             We'll review your PR soon. Join our [Discord](https://discord.gg/8pRpHETxa4) if you have questions.
-          issue-message: |
+          issue_message: |
             Thanks for opening your first issue, @${{ github.actor }}! We'll take a look soon.
 
             In the meantime:

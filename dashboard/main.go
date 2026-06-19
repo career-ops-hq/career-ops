@@ -4,8 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -108,18 +106,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineOpenURLMsg:
 		url := msg.URL
 		return m, func() tea.Msg {
-			var cmd *exec.Cmd
-			switch runtime.GOOS {
-			case "darwin":
-				cmd = exec.Command("open", url)
-			case "linux":
-				cmd = exec.Command("xdg-open", url)
-			case "windows":
-				cmd = exec.Command("cmd", "/c", "start", "", url)
-			default:
-				cmd = exec.Command("xdg-open", url)
+			if err := openWithDefaultApp(url); err != nil {
+				fmt.Fprintf(os.Stderr, "WARN: failed to open URL %q: %v\n", url, err)
 			}
-			_ = cmd.Run()
 			return nil
 		}
 

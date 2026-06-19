@@ -102,7 +102,7 @@ Außerdem aufnehmen:
 
 Die vollständige Bewertung in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` ablegen.
 
-- `{###}` = nächste fortlaufende Nummer (3-stellig, mit führenden Nullen)
+- `{###}` = nächste fortlaufende Nummer (3-stellig, mit führenden Nullen). Um diese Nummer atomar zuzuweisen und Race-Conditions zu vermeiden, MÜSSEN Sie `node reserve-report-num.mjs` ausführen, um die Nummer zu reservieren (die Ausgabe gibt `{###}` zurück), den Report schreiben und dann `node reserve-report-num.mjs --release {###}` ausführen, um den Sentinel freizugeben.
 - `{company-slug}` = Firmenname in Kleinbuchstaben, ohne Leerzeichen (Bindestriche verwenden)
 - `{YYYY-MM-DD}` = aktuelles Datum
 
