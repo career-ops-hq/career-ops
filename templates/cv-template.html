@@ -5,14 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{NAME}} — CV</title>
 <style>
-  /* ATS-safe typography (#font-extraction fix):
-     The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
-     glyph advances that make PDF text extractors inject spurious spaces inside
-     words (e.g. "SUM M ARY", "Germ any") — which corrupts ATS keyword parsing.
-     This template's job is clean machine-readable parsing, so we use a standard
-     static system sans stack instead. Verified clean via pypdf text extraction.
-     The lang="ja" rules reuse this Latin base stack (with a CJK fallback added);
-     the lang="ar" rules below intentionally define their own Arabic stack. */
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 
   * {
     margin: 0;
@@ -26,7 +21,7 @@
   }
 
   body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 11px;
     line-height: 1.5;
     color: #1a1a2e;
@@ -42,54 +37,115 @@
     padding: 2px 0;
   }
 
-  /* === HEADER === */
+  /* === HEADER (Card Style F — final) === */
   .header {
-    margin-bottom: 20px;
+    background: #f8fafb;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 22px;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .accent-bar {
+    width: 3px;
+    align-self: stretch;
+    background: linear-gradient(to bottom, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .avatar {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .header-content {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    flex: 1;
+    gap: 90px;
+  }
+
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 4px;
   }
 
   .header h1 {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
-    font-size: 28px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
     font-weight: 700;
     color: #1a1a2e;
-    letter-spacing: -0.02em;
-    margin-bottom: 6px;
-    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin-bottom: 0;
+    line-height: 1.15;
   }
 
-  .header-gradient {
-    height: 2px;
-    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
-    border-radius: 1px;
-    margin-bottom: 10px;
+  .header-subtitle {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
   }
 
-  .contact-row {
+  .location {
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
+    color: #888;
+    margin-top: 3px;
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
-    font-size: 10.5px;
-    line-height: 1.4;
-    color: #555;
+    align-items: center;
+    gap: 4px;
   }
 
-  .contact-row a {
+  .social-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
     color: #555;
     text-decoration: none;
+    line-height: 1.4;
   }
 
-  .contact-row .separator {
-    color: #ccc;
+  .icon { width: 12px; height: 12px; flex-shrink: 0; }
+  .icon-email { color: hsl(187, 74%, 32%); }
+  .icon-linkedin { color: #0A66C2; }
+  .icon-github { color: #333; }
+
+  .sep-gradient {
+    width: 1px;
+    height: 36px;
+    background: linear-gradient(to bottom, transparent, #ccc, transparent);
+    flex-shrink: 0;
   }
 
   /* === SECTIONS === */
   .section {
-    margin-bottom: 18px;
+    margin-bottom: 22px;
   }
 
   .section-title {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: 'Sora', sans-serif;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -121,7 +177,7 @@
   }
 
   .competency-tag {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 10px;
     font-weight: 500;
     color: hsl(187, 74%, 28%);
@@ -145,7 +201,7 @@
   }
 
   .job-company {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: 'Sora', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
     color: hsl(270, 70%, 45%);
@@ -191,7 +247,7 @@
   }
 
   .project-title {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: 'Sora', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
     color: hsl(270, 70%, 45%);
@@ -257,19 +313,12 @@
   }
 
   /* === CERTIFICATIONS === */
-  .cert-table {
-    display: table;
-    width: 100%;
-  }
-
   .cert-item {
-    display: table-row;
-  }
-
-  .cert-item > * {
-    display: table-cell;
-    vertical-align: baseline;
-    padding-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
   }
 
   .cert-title {
@@ -280,15 +329,12 @@
 
   .cert-org {
     color: hsl(270, 70%, 45%);
-    white-space: nowrap;
   }
 
   .cert-year {
     font-size: 10px;
     color: #777;
     white-space: nowrap;
-    text-align: right;
-    width: 44px;
   }
 
   /* === SKILLS === */
@@ -330,68 +376,6 @@
     break-inside: avoid;
     page-break-inside: avoid;
   }
-
-  /* === RTL (Arabic) Support === */
-  html[lang="ar"] body {
-    direction: rtl;
-    text-align: right;
-    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-  }
-
-  html[lang="ar"] .header h1,
-  html[lang="ar"] .section-title,
-  html[lang="ar"] .job-company,
-  html[lang="ar"] .project-title,
-  html[lang="ar"] .competency-tag,
-  html[lang="ar"] .skill-category {
-    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-  }
-
-  html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
-  }
-
-  html[lang="ar"] .job ul {
-    padding-right: 18px;
-    padding-left: 0;
-  }
-
-  html[lang="ar"] .project-badge {
-    margin-right: 6px;
-    margin-left: 0;
-  }
-
-  html[lang="ar"] .cert-year {
-    text-align: left;
-  }
-
-  html[lang="ar"] .cert-table {
-    direction: rtl;
-  }
-
-  /* === CJK (Japanese) font fallback === */
-  /* The bundled webfonts are Latin-only (see #951). Without a CJK fallback,
-     Japanese text renders as tofu (□) in headless Chromium on any system
-     without a CJK system font (Linux/CI, minimal containers). The Latin brand
-     fonts are kept first so ASCII still uses Space Grotesk / DM Sans, then the
-     browser's per-glyph fallback picks the first installed CJK face for kana
-     and kanji. Mirrors the lang="ar" precedent above. */
-  html[lang="ja"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
-      'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
-      Meiryo, 'MS PGothic', sans-serif;
-  }
-
-  html[lang="ja"] .header h1,
-  html[lang="ja"] .section-title,
-  html[lang="ja"] .job-company,
-  html[lang="ja"] .project-title,
-  html[lang="ja"] .competency-tag,
-  html[lang="ja"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
-      'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
-      Meiryo, 'MS PGothic', sans-serif;
-  }
 </style>
 </head>
 <body>
@@ -399,18 +383,34 @@
 
   <!-- HEADER -->
   <div class="header avoid-break">
-    <h1>{{NAME}}</h1>
-    <div class="header-gradient"></div>
-    <div class="contact-row">
-      <span>{{PHONE}}</span>
-      <span class="separator">|</span>
-      <span>{{EMAIL}}</span>
-      <span class="separator">|</span>
-      <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
-      <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
-      <span>{{LOCATION}}</span>
+    <div class="header-top">
+      <div class="accent-bar"></div>
+      <img class="avatar" src="{{AVATAR_PATH}}" alt="" />
+      <div class="header-content">
+        <div class="header-left">
+          <h1>{{NAME}}</h1>
+          <div class="header-subtitle">{{HEADER_SUBTITLE}}</div>
+          <div class="location">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            {{LOCATION}}
+          </div>
+        </div>
+        <div class="sep-gradient"></div>
+        <div class="header-right">
+          <a class="social-link" href="{{LINKEDIN_URL}}">
+            <svg class="icon icon-linkedin" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            {{LINKEDIN_DISPLAY}}
+          </a>
+          <a class="social-link" href="{{PORTFOLIO_URL}}">
+            <svg class="icon icon-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+            {{PORTFOLIO_DISPLAY}}
+          </a>
+          <a class="social-link" href="mailto:{{EMAIL}}">
+            <svg class="icon icon-email" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+            {{EMAIL}}
+          </a>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -449,7 +449,7 @@
   <!-- CERTIFICATIONS -->
   <div class="section avoid-break">
     <div class="section-title">{{SECTION_CERTIFICATIONS}}</div>
-    <div class="cert-table">{{CERTIFICATIONS}}</div>
+    {{CERTIFICATIONS}}
   </div>
 
   <!-- SKILLS -->
