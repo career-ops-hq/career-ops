@@ -454,15 +454,19 @@ async function main() {
   const titleFilter = buildTitleFilter(config.title_filter);
 
   // 2. Filter to enabled companies with detectable APIs
-  const targets = companies
+  const enabledAndFiltered = companies
     .filter(c => c.enabled !== false)
     .filter(c => !filterCompany || c.name.toLowerCase().includes(filterCompany))
-    .map(c => ({ ...c, _api: detectApi(c) }))
-    .filter(c => c._api !== null);
+    .map(c => ({ ...c, _api: detectApi(c) }));
 
-  const skippedCount = companies.filter(c => c.enabled !== false).length - targets.length;
+  const targets = enabledAndFiltered.filter(c => c._api !== null);
+  // P0.1: track which companies were silently skipped so we can list them in the summary.
+  // Without this, users have no visibility into which companies fell out of coverage
+  // because their careers_url doesn't match any known ATS pattern, or they have no
+  // careers_url at all (websearch-only entries).
+  const skipped = enabledAndFiltered.filter(c => c._api === null);
 
-  console.log(`Scanning ${targets.length} companies via API (${skippedCount} skipped — no API detected)`);
+  console.log(`Scanning ${targets.length} companies via API (${skipped.length} skipped — no API detected)`);
   if (dryRun) console.log('(dry run — no files will be written)\n');
 
   // 3. Load dedup sets
@@ -563,6 +567,17 @@ async function main() {
     console.log(`\nErrors (${errors.length}):`);
     for (const e of errors) {
       console.log(`  ✗ ${e.company}: ${e.error}`);
+    }
+  }
+
+  // P0.1: surface the names of skipped companies so the user knows what fell out of coverage.
+  if (skipped.length > 0) {
+    console.log(`\nSkipped (${skipped.length} — no API detected):`);
+    for (const c of skipped) {
+      const reason = c.careers_url
+        ? `no recognized ATS pattern (${c.careers_url})`
+        : 'no careers_url (websearch-only)';
+      console.log(`  - ${c.name}: ${reason}`);
     }
   }
 
