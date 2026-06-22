@@ -6,7 +6,7 @@
 
 1. **読み取り** `data/pipeline.md` → 「未処理」セクションの `- [ ]` アイテムを検索
 2. **各未処理 URL に対して**：
-   a. 次の `REPORT_NUM` を連番で計算（`reports/` を読み、最大番号 + 1）
+   a. 次の `REPORT_NUM` をアトミックに予約するために `node reserve-report-num.mjs` を実行し（レポートが書き込まれたら `node reserve-report-num.mjs --release <num>` を実行してセンチネルを解放します）
    b. **JD を抽出** Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch の順で
    c. URL にアクセスできない場合 → `- [!]` にマークし注記、次へ進む
    d. **完全な auto-pipeline を実行**：評価 A-F → Report .md → PDF（スコア >= 3.0 の場合）→ Tracker
@@ -50,9 +50,9 @@
 
 ## 自動採番
 
-1. `reports/` 内のすべてのファイルをリスト
-2. プレフィックスから番号を抽出（例：`142-medispend...` → 142）
-3. 新番号 = 見つかった最大値 + 1
+1. `node reserve-report-num.mjs` を実行して、次の連番をアトミックに予約します（標準出力から `{###}` が返されます）。
+2. その番号を使用してレポートファイルを書き込みます。
+3. レポートが書き込まれたら、`node reserve-report-num.mjs --release {###}` を実行してセンチネルを解放します。
 
 ## ソース同期
 

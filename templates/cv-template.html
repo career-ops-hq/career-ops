@@ -5,340 +5,392 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{NAME}} — CV</title>
 <style>
-  @font-face {
-    font-family: 'Space Grotesk';
-    src: url('./fonts/space-grotesk-latin.woff2') format('woff2');
-    font-weight: 300 700;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-  }
-  @font-face {
-    font-family: 'Space Grotesk';
-    src: url('./fonts/space-grotesk-latin-ext.woff2') format('woff2');
-    font-weight: 300 700;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-  }
-  @font-face {
-    font-family: 'DM Sans';
-    src: url('./fonts/dm-sans-latin.woff2') format('woff2');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-  }
-  @font-face {
-    font-family: 'DM Sans';
-    src: url('./fonts/dm-sans-latin-ext.woff2') format('woff2');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-  }
-  @font-face {
-    font-family: 'Montserrat';
-    src: url('./fonts/montserrat-latin.woff2') format('woff2');
-    font-weight: 300 700;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-  }
-  @font-face {
-    font-family: 'Montserrat';
-    src: url('./fonts/montserrat-latin-ext.woff2') format('woff2');
-    font-weight: 300 700;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-  }
-  @font-face {
-    font-family: 'Inter';
-    src: url('./fonts/inter-latin.woff2') format('woff2');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-  }
-  @font-face {
-    font-family: 'Inter';
-    src: url('./fonts/inter-latin-ext.woff2') format('woff2');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: swap;
-    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  /* ATS-safe typography (#font-extraction fix):
+     The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
+     glyph advances that make PDF text extractors inject spurious spaces inside
+     words (e.g. "SUM M ARY", "Germ any") — which corrupts ATS keyword parsing.
+     This template's job is clean machine-readable parsing, so we use a standard
+     static system sans stack instead. Verified clean via pypdf text extraction.
+     The lang="ja" rules reuse this Latin base stack (with a CJK fallback added);
+     the lang="ar" rules below intentionally define their own Arabic stack. */
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 
   body {
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 10px;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 11px;
     line-height: 1.5;
-    color: #1E293B;
+    color: #1a1a2e;
     background: #ffffff;
+    padding: 0;
+    margin: 0;
   }
 
-  /* 1-page A4 enforcement: max-height = 297mm - 2×0.6in margins */
   .page {
     width: 100%;
     max-width: {{PAGE_WIDTH}};
-    max-height: 266mm;
-    overflow: hidden;
     margin: 0 auto;
+    padding: 2px 0;
   }
 
-  /* ── HEADER ─────────────────────────────────────────────── */
+  /* === HEADER === */
   .header {
-    margin-bottom: 11px;
-  }
-
-  .header-inner {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-  }
-
-  .header-left { flex: 1; }
-
-  /* Clean circle — no decorative ring */
-  .cv-photo {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    object-fit: cover;
-    object-position: center top;
-    flex-shrink: 0;
-    margin-top: 3px;
+    margin-bottom: 20px;
   }
 
   .header h1 {
-    font-family: 'Space Grotesk', 'Montserrat', sans-serif;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 28px;
     font-weight: 700;
-    color: #0F172A;
-    letter-spacing: -0.04em;
-    line-height: 1.05;
+    color: #1a1a2e;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+    line-height: 1.1;
   }
 
-  /* Role tagline — anchors the reader, set per-role archetype */
-  .header-tagline {
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 10.5px;
-    font-weight: 400;
-    color: #94A3B8;
-    margin-top: 4px;
-    letter-spacing: 0.02em;
+  .header-gradient {
+    height: 2px;
+    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    border-radius: 1px;
+    margin-bottom: 10px;
   }
 
   .contact-row {
-    margin-top: 5px;
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 3px 0;
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 9.5px;
-    color: #64748B;
+    gap: 8px 14px;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 10.5px;
     line-height: 1.4;
+    color: #555;
   }
 
-  .contact-row a { color: #64748B; text-decoration: none; }
-  .contact-row .sep { color: #CBD5E1; margin: 0 7px; }
-  .ci { display: inline-flex; align-items: center; gap: 3px; }
-  .contact-icon { width: 9px; height: 9px; color: #94A3B8; flex-shrink: 0; }
+  .contact-row a {
+    color: #555;
+    text-decoration: none;
+  }
 
-  /* ── SECTIONS ───────────────────────────────────────────── */
-  .section { margin-bottom: 10px; }
+  .contact-row .separator {
+    color: #ccc;
+  }
 
-  /* Uppercase tracking section title */
+  /* === SECTIONS === */
+  .section {
+    margin-bottom: 18px;
+  }
+
   .section-title {
-    font-family: 'Space Grotesk', 'Montserrat', sans-serif;
-    font-size: 11.5px;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: #4F46E5;
-    margin-bottom: 6px;
+    letter-spacing: 0.06em;
+    color: hsl(187, 74%, 32%);
+    border-bottom: 1.5px solid #e2e2e2;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+    line-height: 1.2;
   }
 
-  /* ── PROFESSIONAL SUMMARY ───────────────────────────────── */
+  /* === PROFESSIONAL SUMMARY === */
   .summary-text {
-    font-size: 10px;
-    line-height: 1.55;
-    color: #334155;
+    font-size: 11px;
+    line-height: 1.7;
+    color: #2f2f2f;
   }
 
-  /* ── CORE COMPETENCIES — pill tags (startup-tech signal) ── */
-  .competencies-grid { display: flex; flex-wrap: nowrap; overflow: hidden; gap: 5px; }
+  /* Links must never break across lines */
+  a {
+    white-space: nowrap;
+  }
+
+  /* === CORE COMPETENCIES === */
+  .competencies-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 
   .competency-tag {
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 9px;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 10px;
     font-weight: 500;
-    color: #4338CA;
-    background: #EEF2FF;
-    padding: 3px 10px;
-    border-radius: 20px;    /* pill shape */
-    border: 1px solid #C7D2FE;
+    color: hsl(187, 74%, 28%);
+    background: hsl(187, 40%, 95%);
+    padding: 4px 10px;
+    border-radius: 3px;
+    border: 1px solid hsl(187, 40%, 88%);
   }
 
-  /* ── WORK EXPERIENCE ────────────────────────────────────── */
+  /* === WORK EXPERIENCE === */
+  .job {
+    margin-bottom: 14px;
+  }
 
-  /* Space between job entries */
-  .job { padding-top: 5px; margin-bottom: 0; }
-  .job + .job { padding-top: 9px; }
-  .section-title + .job { padding-top: 0; }
-
-  /* Company row: name (dominant anchor) + date badge (secondary) */
   .job-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 2px;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 4px;
   }
 
   .job-company {
-    font-family: 'Space Grotesk', 'Montserrat', sans-serif;
-    font-size: 11.5px;
-    font-weight: 700;
-    color: #0F172A;
-    letter-spacing: -0.01em;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: hsl(270, 70%, 45%);
   }
 
-  /* Date badge — clearly secondary, time-reference visual */
   .job-period {
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 8.5px;
-    font-weight: 500;
-    color: #475569;
-    background: #F1F5F9;
-    padding: 2px 7px;
-    border-radius: 4px;
+    font-size: 10.5px;
+    color: #777;
     white-space: nowrap;
-    flex-shrink: 0;
   }
 
-  /* Role + Location on one line — reduces vertical stacking */
-  .job-meta {
-    font-size: 9.5px;
-    color: #475569;
-    margin-bottom: 3px;
-    line-height: 1.3;
+  .job-role {
+    font-size: 11px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 6px;
   }
 
-  .job-meta .role { font-weight: 600; }
-  .job-meta .location { color: #94A3B8; font-weight: 400; }
-  .job-meta .dot { color: #CBD5E1; margin: 0 4px; }
-
-  /* Inline note for compact older/shorter roles (no bullet list) */
-  .job-note {
-    font-size: 9.5px;
-    color: #64748B;
-    line-height: 1.55;
-    margin-top: 2px;
+  .job-location {
+    font-size: 10px;
+    color: #888;
   }
 
-  .job ul { padding-left: 13px; margin-top: 2px; }
-  .job li { font-size: 9.5px; line-height: 1.55; color: #334155; margin-bottom: 2px; }
-
-  /* Indigo on key metrics — recruiter eye goes to impact numbers */
-  .job li strong,
-  .job-note strong {
-    font-weight: 700;
-    color: #4338CA;
-    background: rgba(79, 70, 229, 0.08);
-    padding: 0 3px;
-    border-radius: 3px;
+  .job ul {
+    padding-left: 18px;
+    margin-top: 6px;
   }
 
-  /* ── PROJECTS ────────────────────────────────────────────── */
-  .project { margin-bottom: 6px; }
+  .job li {
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 4px;
+  }
 
-  .project-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+  .job li strong {
+    font-weight: 600;
+  }
+
+  /* === PROJECTS === */
+  .project {
+    margin-bottom: 12px;
+  }
 
   .project-title {
-    font-family: 'Space Grotesk', 'Montserrat', sans-serif;
-    font-size: 10.5px;
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: 11.5px;
     font-weight: 600;
-    color: #1E293B;
+    color: hsl(270, 70%, 45%);
   }
 
   .project-badge {
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 500;
-    color: #4F46E5;
-    background: #EEF2FF;
-    padding: 1px 5px;
+    color: hsl(187, 74%, 32%);
+    background: hsl(187, 40%, 95%);
+    padding: 1px 6px;
     border-radius: 2px;
-    border: 1px solid #C7D2FE;
+    margin-left: 6px;
   }
 
-  .project-desc { font-size: 9.5px; color: #4b5563; line-height: 1.5; }
-  .project-tech { font-size: 9px; color: #888; margin-top: 2px; }
+  .project-desc {
+    font-size: 10.5px;
+    color: #444;
+    margin-top: 3px;
+    line-height: 1.55;
+  }
 
-  /* ── EDUCATION ───────────────────────────────────────────── */
-  .edu-item { margin-bottom: 4px; }
+  .project-tech {
+    font-size: 9.5px;
+    color: #888;
+    margin-top: 3px;
+  }
+
+  /* === EDUCATION === */
+  .edu-item {
+    margin-bottom: 8px;
+  }
 
   .edu-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 8px;
+    gap: 12px;
   }
 
-  .edu-name { font-weight: 600; font-size: 10px; color: #0F172A; }
-  .edu-org { color: #334155; font-weight: 500; }
+  .edu-title {
+    font-weight: 600;
+    font-size: 11px;
+    color: #333;
+  }
 
-  /* Year badge — consistent with job-period badge */
+  .edu-org {
+    color: hsl(270, 70%, 45%);
+    font-weight: 500;
+  }
+
   .edu-year {
-    font-size: 8.5px;
-    font-weight: 500;
-    color: #475569;
-    background: #F1F5F9;
-    padding: 2px 6px;
-    border-radius: 3px;
+    font-size: 10px;
+    color: #777;
     white-space: nowrap;
-    flex-shrink: 0;
   }
 
-  .edu-desc { font-size: 9px; color: #6b7280; margin-top: 2px; line-height: 1.4; }
+  .edu-desc {
+    font-size: 10px;
+    color: #666;
+    margin-top: 2px;
+    line-height: 1.5;
+  }
 
-  /* ── CERTIFICATIONS ─────────────────────────────────────── */
+  /* === CERTIFICATIONS === */
+  .cert-table {
+    display: table;
+    width: 100%;
+  }
+
   .cert-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 3px;
+    display: table-row;
   }
 
-  .cert-name { font-size: 9.5px; font-weight: 500; color: #334155; }
-  .cert-org { color: #334155; font-weight: 400; }
+  .cert-item > * {
+    display: table-cell;
+    vertical-align: baseline;
+    padding-bottom: 6px;
+  }
 
-  /* Year badge — consistent with job-period and edu-year */
-  .cert-year {
-    font-size: 8.5px;
+  .cert-title {
+    font-size: 10.5px;
     font-weight: 500;
-    color: #475569;
-    background: #F1F5F9;
-    padding: 2px 6px;
-    border-radius: 3px;
-    white-space: nowrap;
-    flex-shrink: 0;
+    color: #333;
   }
 
-  /* ── SKILLS ─────────────────────────────────────────────── */
-  .skills-grid { display: flex; flex-direction: column; gap: 3px; }
-  .skill-item { font-size: 9.5px; color: #475569; line-height: 1.5; }
-  .skill-cat { font-weight: 600; color: #0F172A; }
+  .cert-org {
+    color: hsl(270, 70%, 45%);
+    white-space: nowrap;
+  }
 
+  .cert-year {
+    font-size: 10px;
+    color: #777;
+    white-space: nowrap;
+    text-align: right;
+    width: 44px;
+  }
+
+  /* === SKILLS === */
+  .skills-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+
+  .skill-item {
+    font-size: 10.5px;
+    color: #444;
+  }
+
+  .skill-category {
+    font-weight: 600;
+    color: #333;
+    font-size: 10.5px;
+  }
+
+  /* === PRINT === */
   @media print {
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .page { padding: 0; }
+    body {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .page {
+      padding: 0;
+    }
+  }
+
+  /* === PAGE BREAK CONTROL === */
+  .avoid-break,
+  .job,
+  .project,
+  .edu-item,
+  .cert-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* === RTL (Arabic) Support === */
+  html[lang="ar"] body {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+
+  html[lang="ar"] .header h1,
+  html[lang="ar"] .section-title,
+  html[lang="ar"] .job-company,
+  html[lang="ar"] .project-title,
+  html[lang="ar"] .competency-tag,
+  html[lang="ar"] .skill-category {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+
+  html[lang="ar"] .header-gradient {
+    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+  }
+
+  html[lang="ar"] .job ul {
+    padding-right: 18px;
+    padding-left: 0;
+  }
+
+  html[lang="ar"] .project-badge {
+    margin-right: 6px;
+    margin-left: 0;
+  }
+
+  html[lang="ar"] .cert-year {
+    text-align: left;
+  }
+
+  html[lang="ar"] .cert-table {
+    direction: rtl;
+  }
+
+  /* === CJK (Japanese) font fallback === */
+  /* The bundled webfonts are Latin-only (see #951). Without a CJK fallback,
+     Japanese text renders as tofu (□) in headless Chromium on any system
+     without a CJK system font (Linux/CI, minimal containers). The Latin brand
+     fonts are kept first so ASCII still uses Space Grotesk / DM Sans, then the
+     browser's per-glyph fallback picks the first installed CJK face for kana
+     and kanji. Mirrors the lang="ar" precedent above. */
+  html[lang="ja"] body {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+      'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
+      Meiryo, 'MS PGothic', sans-serif;
+  }
+
+  html[lang="ja"] .header h1,
+  html[lang="ja"] .section-title,
+  html[lang="ja"] .job-company,
+  html[lang="ja"] .project-title,
+  html[lang="ja"] .competency-tag,
+  html[lang="ja"] .skill-category {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+      'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
+      Meiryo, 'MS PGothic', sans-serif;
   }
 </style>
 </head>
@@ -346,27 +398,24 @@
 <div class="page">
 
   <!-- HEADER -->
-  <div class="header">
-    <div class="header-inner">
-      <img src="{{PHOTO_SRC}}" class="cv-photo" alt="" />
-      <div class="header-left">
-        <h1>{{NAME}}</h1>
-        <div class="header-tagline">{{TAGLINE}}</div>
-        <div class="contact-row">
-          <span class="ci"><svg aria-hidden="true" class="contact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.36 12 19.79 19.79 0 0 1 1.29 3.32 2 2 0 0 1 3.27 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 17z"/></svg>{{PHONE}}</span>
-          <span class="sep">·</span>
-          <span class="ci"><svg aria-hidden="true" class="contact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>{{EMAIL}}</span>
-          <span class="sep">·</span>
-          <span class="ci"><svg aria-hidden="true" class="contact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect width="4" height="12" x="2" y="9"/><circle cx="4" cy="4" r="2"/></svg><a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a></span>
-          <span class="sep">·</span>
-          <span class="ci"><svg aria-hidden="true" class="contact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>{{LOCATION}}</span>
-        </div>
-      </div>
+  <div class="header avoid-break">
+    <h1>{{NAME}}</h1>
+    <div class="header-gradient"></div>
+    <div class="contact-row">
+      <span>{{PHONE}}</span>
+      <span class="separator">|</span>
+      <span>{{EMAIL}}</span>
+      <span class="separator">|</span>
+      <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <span>{{LOCATION}}</span>
     </div>
   </div>
 
   <!-- PROFESSIONAL SUMMARY -->
-  <div class="section">
+  <div class="section avoid-break">
     <div class="section-title">{{SECTION_SUMMARY}}</div>
     <div class="summary-text">{{SUMMARY_TEXT}}</div>
   </div>
@@ -385,27 +434,28 @@
     {{EXPERIENCE}}
   </div>
 
-  <!-- PROJECTS (omit entire section if no relevant projects exist) -->
-  {{PROJECTS_SECTION}}
+  <!-- PROJECTS -->
+  <div class="section avoid-break">
+    <div class="section-title">{{SECTION_PROJECTS}}</div>
+    {{PROJECTS}}
+  </div>
 
   <!-- EDUCATION -->
-  <div class="section">
+  <div class="section avoid-break">
     <div class="section-title">{{SECTION_EDUCATION}}</div>
     {{EDUCATION}}
   </div>
 
   <!-- CERTIFICATIONS -->
-  <div class="section">
+  <div class="section avoid-break">
     <div class="section-title">{{SECTION_CERTIFICATIONS}}</div>
-    {{CERTIFICATIONS}}
+    <div class="cert-table">{{CERTIFICATIONS}}</div>
   </div>
 
   <!-- SKILLS -->
-  <div class="section">
+  <div class="section avoid-break">
     <div class="section-title">{{SECTION_SKILLS}}</div>
-    <div class="skills-grid">
-      {{SKILLS}}
-    </div>
+    {{SKILLS}}
   </div>
 
 </div>

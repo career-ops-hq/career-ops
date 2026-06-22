@@ -14,15 +14,18 @@
  * Run: node career-ops/verify-pipeline.mjs
  */
 
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+// Support both layouts: data/applications.md (boilerplate) and applications.md (original).
+// CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
+const APPS_FILE = process.env.CAREER_OPS_TRACKER
+  ? process.env.CAREER_OPS_TRACKER
+  : existsSync(join(CAREER_OPS, 'data/applications.md'))
+    ? join(CAREER_OPS, 'data/applications.md')
+    : join(CAREER_OPS, 'applications.md');
 const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
@@ -65,17 +68,49 @@ if (!existsSync(APPS_FILE)) {
 const content = readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
+// Map columns by header name so the checks work whether the tracker uses the
+// original 9-column layout or a customized one with an extra column (e.g. a
+// Location column after Role). Fixed-position indexing would otherwise read
+// Location where Score is expected and flag false errors. Falls back to the
+// legacy fixed layout when no recognizable header row is found.
+const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
+const HEADER_ALIASES = {
+  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
+  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
+  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
+};
+function detectColumns(allLines) {
+  for (const line of allLines) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map(s => s.trim().toLowerCase());
+    if (!cells.includes('company') || !cells.includes('role')) continue;
+    const map = {};
+    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
+  }
+  return null;
+}
+const COLMAP = detectColumns(lines) || LEGACY_COLMAP;
+const MAX_IDX = Math.max(...Object.values(COLMAP));
+
 const entries = [];
 for (const line of lines) {
   if (!line.startsWith('|')) continue;
   const parts = line.split('|').map(s => s.trim());
-  if (parts.length < 9) continue;
-  const num = parseInt(parts[1]);
+  if (parts.length <= MAX_IDX) continue;
+  const num = parseInt(parts[COLMAP.num]);
   if (isNaN(num)) continue;
   entries.push({
-    num, date: parts[2], company: parts[3], role: parts[4],
-    score: parts[5], status: parts[6], pdf: parts[7], report: parts[8],
-    notes: parts[9] || '',
+    num,
+    date: parts[COLMAP.date],
+    company: parts[COLMAP.company],
+    role: parts[COLMAP.role],
+    location: COLMAP.location != null ? parts[COLMAP.location] : '',
+    score: parts[COLMAP.score],
+    status: parts[COLMAP.status],
+    pdf: parts[COLMAP.pdf],
+    report: parts[COLMAP.report],
+    notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
   });
 }
 
@@ -125,13 +160,18 @@ for (const [key, group] of companyRoleMap) {
 if (dupes === 0) ok('No exact duplicates found');
 
 // --- Check 3: Report links ---
+// Markdown links resolve relative to the file that contains them, so report
+// links must resolve against the tracker's own directory (see #760). For the
+// transition we also accept legacy root-relative links: try the tracker dir
+// first, then fall back to the repo root before flagging a link broken.
+const TRACKER_DIR = dirname(APPS_FILE);
 let brokenReports = 0;
 for (const e of entries) {
   const match = e.report.match(/\]\(([^)]+)\)/);
   if (!match) continue;
-  const reportPath = join(CAREER_OPS, match[1]);
-  if (!existsSync(reportPath)) {
-    error(`#${e.num}: Report not found: ${match[1]}`);
+  const link = match[1];
+  if (!existsSync(join(TRACKER_DIR, link)) && !existsSync(join(CAREER_OPS, link))) {
+    error(`#${e.num}: Report not found: ${link}`);
     brokenReports++;
   }
 }
@@ -154,8 +194,8 @@ for (const line of lines) {
   if (!line.startsWith('|')) continue;
   if (line.includes('---') || line.includes('Empresa')) continue;
   const parts = line.split('|');
-  if (parts.length < 9) {
-    error(`Row with <9 columns: ${line.substring(0, 80)}...`);
+  if (parts.length <= MAX_IDX) {
+    error(`Row with too few columns (need ${MAX_IDX} data cols): ${line.substring(0, 80)}...`);
     badRows++;
   }
 }
@@ -181,6 +221,32 @@ for (const e of entries) {
   }
 }
 if (boldScores === 0) ok('No bold in scores');
+
+// --- Check 8: Stale report-number sentinels (GC) ---
+// reserve-report-num.mjs drops NNN-RESERVED.md files in reports/ when a
+// number is claimed.  If the process crashed before writing the real report
+// and deleting the sentinel it will linger.  Sentinels older than 4 h are
+// stale; remove them here so they don't skew the next slot allocation.
+const SENTINEL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+let staleSentinels = 0;
+if (existsSync(REPORTS_DIR)) {
+  const now = Date.now();
+  for (const name of readdirSync(REPORTS_DIR)) {
+    if (!name.endsWith('-RESERVED.md')) continue;
+    const full = join(REPORTS_DIR, name);
+    try {
+      const { mtimeMs } = statSync(full);
+      if (now - mtimeMs > SENTINEL_MAX_AGE_MS) {
+        unlinkSync(full);
+        warn(`Removed stale reservation sentinel: ${name}`);
+        staleSentinels++;
+      }
+    } catch {
+      // Already gone between readdir and stat — fine.
+    }
+  }
+}
+if (staleSentinels === 0) ok('No stale reservation sentinels');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

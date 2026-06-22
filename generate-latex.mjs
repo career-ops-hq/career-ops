@@ -18,18 +18,24 @@ import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 
-const REQUIRED_SECTIONS = [
-  '\\\\section{Education}',
-  '\\\\section{Work Experience}',
-  '\\\\section{Personal Projects}',
-  '\\\\section{Technical Skills}',
-];
+// The template emits 4 sections (Education, Work Experience, Personal
+// Projects, Technical Skills). We count \section{} blocks rather than match
+// the English titles, so a localized CV (e.g. "Educación", "学歴") still
+// validates instead of failing with a spurious "Missing section".
+const MIN_SECTIONS = 4;
 
 const REQUIRED_COMMANDS = [
   '\\\\resumeSubheading',
   '\\\\resumeItem',
   '\\\\resumeProjectHeading',
 ];
+
+// CJK (Japanese/Chinese/Korean) ranges: Hiragana, Katakana, CJK ideographs,
+// compatibility ideographs, halfwidth katakana, and Hangul. The template is a
+// pdfLaTeX/Computer-Modern setup with no CJK font, so these glyphs cannot
+// render under pdflatex or tectonic — detect them and fail with guidance
+// instead of emitting a broken PDF / cryptic compile log.
+const CJK_RE = /[぀-ヿ㐀-鿿豈-﫿ｦ-ﾟ가-힯ᄀ-ᇿ]/;
 
 async function main() {
   const inputPath = process.argv[2];
@@ -50,11 +56,15 @@ async function main() {
 
   const issues = [];
 
-  // Check required sections
-  for (const pattern of REQUIRED_SECTIONS) {
-    if (!new RegExp(pattern).test(content)) {
-      issues.push(`Missing section matching: ${pattern}`);
-    }
+  // Check section count (language-agnostic — see MIN_SECTIONS).
+  const sectionCount = (content.match(/\\section\{/g) || []).length;
+  if (sectionCount < MIN_SECTIONS) {
+    issues.push(`Expected at least ${MIN_SECTIONS} \\section{} blocks (Education, Work Experience, Projects, Skills — or localized equivalents), found ${sectionCount}`);
+  }
+
+  // The template cannot render CJK; fail with guidance instead of a broken PDF.
+  if (CJK_RE.test(content)) {
+    issues.push('CJK characters detected. The LaTeX template does not support Japanese/Chinese/Korean yet (pdfLaTeX setup with no CJK font). Use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
   }
 
   // Check required commands are used

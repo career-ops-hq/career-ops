@@ -46,30 +46,6 @@ To rollback: `node update-system.mjs rollback`
 
 AI-powered job search automation built on Claude Code: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing.
 
-### npm scripts (preferred entry points)
-
-| Command | What it does |
-|---------|--------------|
-| `npm run doctor` | Environment diagnostics (Node, Playwright, CLI, cv.md, profile, fonts) |
-| `npm test` | System health checks (65+ assertions in `test-all.mjs`) — no per-test runner |
-| `npm run verify` | Tracker + reports integrity check |
-| `npm run normalize` | Normalize statuses in applications.md |
-| `npm run dedup` | Dedup tracker entries |
-| `npm run merge` | Merge `data/tracker-additions/*.tsv` into applications.md (run after every batch) |
-| `npm run sync-check` | Detect drift between cv.md and report claims |
-| `npm run scan` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs) |
-| `npm run liveness` | Check whether tracked postings are still active |
-| `npm run pdf` | Generate ATS-optimized PDF from cv.md |
-| `npm run update:check` / `npm run update` / `npm run rollback` | Self-update career-ops from upstream |
-
-### Dashboard (Go TUI)
-
-`dashboard/` contains a Go TUI for browsing the pipeline. Build + launch:
-
-```bash
-cd dashboard && go build -o career-dashboard && ./career-dashboard
-```
-
 ### Main Files
 
 | File | Function |
@@ -91,69 +67,53 @@ cd dashboard && go build -o career-dashboard && ./career-dashboard
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
+| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy), plus `## Machine Summary` YAML for downstream scripts. Header includes `**Legitimacy:** {tier}`. |
 
-### OpenCode Commands
+### OpenCode & Gemini CLI Commands
 
-When using [OpenCode](https://opencode.ai), the following slash commands are available (defined in `.opencode/commands/`):
+Both [OpenCode](https://opencode.ai) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) natively support the open agent skill standard (`agentskills.io`). 
 
-| Command | Claude Code Equivalent | Description |
-|---------|------------------------|-------------|
-| `/career-ops` | `/career-ops` | Show menu or evaluate JD with args |
-| `/career-ops-pipeline` | `/career-ops pipeline` | Process pending URLs from inbox |
-| `/career-ops-evaluate` | `/career-ops oferta` | Evaluate job offer (A-F scoring) |
-| `/career-ops-compare` | `/career-ops ofertas` | Compare and rank multiple offers |
-| `/career-ops-contact` | `/career-ops contacto` | LinkedIn outreach (find contacts + draft) |
-| `/career-ops-deep` | `/career-ops deep` | Deep company research |
-| `/career-ops-pdf` | `/career-ops pdf` | Generate ATS-optimized CV |
-| `/career-ops-latex` | `/career-ops latex` | Export CV as LaTeX/Overleaf .tex |
-| `/career-ops-training` | `/career-ops training` | Evaluate course/cert against goals |
-| `/career-ops-project` | `/career-ops project` | Evaluate portfolio project idea |
-| `/career-ops-tracker` | `/career-ops tracker` | Application status overview |
-| `/career-ops-apply` | `/career-ops apply` | Live application assistant |
-| `/career-ops-scan` | `/career-ops scan` | Scan portals for new offers |
-| `/career-ops-batch` | `/career-ops batch` | Batch processing with parallel workers |
-| `/career-ops-patterns` | `/career-ops patterns` | Analyze rejection patterns and improve targeting |
-| `/career-ops-followup` | `/career-ops followup` | Follow-up cadence tracker |
+Instead of registering individual `.toml` files for every slash command, all subcommands are routed through the single unified skill defined in `.agents/skills/career-ops/SKILL.md`.
 
-**Note:** OpenCode commands invoke the same `.claude/skills/career-ops/SKILL.md` skill used by Claude Code. The `modes/*` files are shared between both platforms.
+You can invoke the command center or any of its modes directly within your CLI:
 
-### Gemini CLI Commands
+* `/career-ops` (Shows the Command Center menu)
+* `/career-ops {JD text or URL}` (Runs the auto-evaluation pipeline)
+* `/career-ops [subcommand]` (Runs a specific subcommand)
 
-When using the [Gemini CLI](https://github.com/google-gemini/gemini-cli), the following slash commands are available (defined in `.gemini/commands/`):
+#### Subcommands:
+* `pipeline` — Process pending URLs from inbox
+* `scan` — Scan job portals for new offers
+* `tracker` — Show application status overview
+* `pdf` — Generate ATS-optimized CV PDF
+* `latex` — Export CV as LaTeX/Overleaf .tex
+* `cover` — Generate cover letter
+* `interview-prep` — Generate interview preparation guide
+* `interview` — Onboarding/on-demand interview
+* `contacto` — Generate LinkedIn outreach message
+* `deep` — Execute deep company research
+* `training` — Evaluate course/cert against North Star
+* `project` — Evaluate portfolio project idea
+* `batch` — Run parallel batch evaluations
+* `patterns` — Analyze rejection patterns
+* `followup` — Update and calculate follow-ups
+* `update` — Update system files
 
-| Command | Claude Code Equivalent | Description |
-|---------|------------------------|-------------|
-| `/career-ops` | `/career-ops` | Show menu or evaluate JD with args |
-| `/career-ops-pipeline` | `/career-ops pipeline` | Process pending URLs from inbox |
-| `/career-ops-evaluate` | `/career-ops oferta` | Evaluate job offer (A-G scoring) |
-| `/career-ops-compare` | `/career-ops ofertas` | Compare and rank multiple offers |
-| `/career-ops-contact` | `/career-ops contacto` | LinkedIn outreach (find contacts + draft) |
-| `/career-ops-deep` | `/career-ops deep` | Deep company research |
-| `/career-ops-pdf` | `/career-ops pdf` | Generate ATS-optimized CV |
-| `/career-ops-training` | `/career-ops training` | Evaluate course/cert against goals |
-| `/career-ops-project` | `/career-ops project` | Evaluate portfolio project idea |
-| `/career-ops-tracker` | `/career-ops tracker` | Application status overview |
-| `/career-ops-apply` | `/career-ops apply` | Live application assistant |
-| `/career-ops-scan` | `/career-ops scan` | Scan portals for new offers |
-| `/career-ops-batch` | `/career-ops batch` | Batch processing with parallel workers |
-| `/career-ops-patterns` | `/career-ops patterns` | Analyze rejection patterns and improve targeting |
-| `/career-ops-followup` | `/career-ops followup` | Follow-up cadence tracker |
-
-**Note:** Gemini CLI commands are defined in `.gemini/commands/*.toml`. The project context is auto-loaded from `GEMINI.md`. All `modes/*` files are shared across Claude Code, OpenCode, and Gemini CLI.
+All `modes/*` files and prompt contexts (e.g., `GEMINI.md`) are shared across Claude Code, OpenCode, and Gemini CLI.
 
 ### First Run — Onboarding (IMPORTANT)
 
-**Before doing ANYTHING else, check if the system is set up.** Run these checks silently every time a session starts:
+**Before doing ANYTHING else, check if the system is set up.** On the first message of each session, run the cold-start check — one deterministic source of truth (this doc and `doctor.mjs` share the same prerequisite list, so they can never drift):
 
-1. Does `cv.md` exist?
-2. Does `config/profile.yml` exist (not just profile.example.yml)?
-3. Does `modes/_profile.md` exist (not just _profile.template.md)?
-4. Does `portals.yml` exist (not just templates/portals.example.yml)?
+```bash
+node doctor.mjs --json
+```
+
+Output: `{"onboardingNeeded": <bool>, "missing": [...], "warnings": [...]}`, where `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent. `warnings` is reserved for non-blocking setup signals.
 
 If `modes/_profile.md` is missing, copy from `modes/_profile.template.md` silently. This is the user's customization file — it will never be overwritten by updates.
 
-**If ANY of these is missing, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
+**If, after that, `onboardingNeeded` is still true (any of `cv.md` / `config/profile.yml` / `portals.yml` is missing), enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
 #### Step 1: CV (required)
 If `cv.md` is missing, ask:
@@ -273,6 +233,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Wants LinkedIn outreach | `contacto` |
 | Asks for company research | `deep` |
 | Preps for interview at specific company | `interview-prep` |
+| Wants interactive profile/CV onboarding | `interview` |
 | Wants to generate CV/PDF | `pdf` |
 | Evaluates a course/cert | `training` |
 | Evaluates portfolio project | `project` |
@@ -331,7 +292,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## Stack and Conventions
 
-- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), MCPs (LinkedIn for job search, Canva for visual CV)
+- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Scripts in `.mjs`, configuration in YAML
 - Output in `output/` (gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
@@ -356,10 +317,12 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 5. `status` -- canonical status (e.g., `Evaluated`)
 6. `score` -- format `X.X/5` (e.g., `4.2/5`)
 7. `pdf` -- `✅` or `❌`
-8. `report` -- markdown link `[num](reports/...)`
+8. `report` -- markdown link, always written **root-relative**: `[num](reports/...)`
 9. `notes` -- one-line summary
 
 **Note:** In applications.md, score comes BEFORE status. The merge script handles this column swap automatically.
+
+**Report link normalization:** The TSV always carries a **root-relative** `[num](reports/...)` link. `merge-tracker.mjs` rewrites it so the link is relative to the tracker file's own directory before writing it into the tracker — `../reports/...` when the tracker is at `data/applications.md`, or `reports/...` at the root layout. This keeps links clickable from the tracker (markdown links resolve relative to the file that contains them). Normalization is idempotent. To fix links in an existing tracker, run `node merge-tracker.mjs --migrate` (see #760).
 
 ### Pipeline Integrity
 
@@ -390,41 +353,5 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 - No markdown bold (`**`) in status field
 - No dates in status field (use the date column)
 - No extra text (use the notes column)
-
----
-
-## MCP Availability by Platform
-
-| MCP | Claude Code | OpenCode | Codex |
-|-----|-------------|----------|-------|
-| `playwright` | ✅ (via plugin) | ✅ | ✅ |
-| `linkedin` (`search_jobs`, `get_job_details`, `get_person_profile`, etc.) | ✅ available | ✅ | ✅ |
-| `exa` (web search) | ❌ not configured | ✅ | ✅ |
-| `getinside` (job discovery) | ❌ not configured | ✅ | ✅ |
-
-**Memory correction (2026-05):** The earlier note "LinkedIn MCP unavailable in Claude Code" is wrong. `mcp__linkedin__*` tools work in this session — prefer them for LinkedIn URLs in `data/pipeline.md` over Playwright-based scraping.
-
-**LinkedIn MCP login:** `uvx linkedin-scraper-mcp@latest --login` (stores session in `~/.linkedin-mcp/cookies.json`)
-
-**Claude Code scan behavior:** Nivel 0 (LinkedIn MCP) is unavailable. Skip it and use Playwright (Nivel 1) + ATS APIs (Nivel 2) + WebSearch (Nivel 3). Note this in the scan summary output.
-
----
-
-## Session Learnings (Persistent)
-
-These are facts discovered during sessions that the agent should remember for future evaluations and CV edits. They are user-specific and override assumptions.
-
-<!-- USER LAYER: this section is fork-specific personalization. Preserve across upstream merges. -->
-
-### Benoît Prentout — Corrections & Facts
-
-| Fact | Source | Applies to |
-|------|--------|------------|
-| **OpenCode skill setup** — The career-ops skill requires its `modes/` directory (with `_shared.md`, `scan.md`, etc.) to be present in the skill directory (`~/.config/opencode/skills/career-ops/modes/`). The skill only had SKILL.md (router) but was missing mode files. The project at `/Users/benoitprentout/github repos/career-ops-fork/` has a space in the path. | Session debugging | Skill configuration, mode file setup |
-| **Evotec** — always written without accent ("Evotec", never "Évotec") | User correction | cv.md, profile.yml, _profile.md, all reports |
-| **No direct management at getinside** — user does NOT manage a team. Instead: onboards new employees from other services (including their N+1) and onboards all platform users. Serves as central operational reference point, not a line manager. | User correction | CV framing, interview narratives |
-| **Tool stack**: Claude Code, Qwen CLI, Gemini CLI, GitHub (Pages, version control), Streamlit, HubSpot, Slack API, Apify API, Tally.so, Gmail API, Google AI Studio, NotebookLM | User correction | CV skills section, technical ops evaluations |
-| **Shipped project portfolio at getinside**: (1) Operations handbook on GitHub Pages, (2) Email QA & archive platform (Streamlit + Gmail API), (3) 3 Slack bots in production (@linkedin_radar_bot, @print_bot, @operations_bot), (4) Email brief automation (Tally.so → Sheets → PDF), (5) Revenue simulator (Google AI Studio → Claude Code + GitHub). All built because the product team hadn't shipped these features. | User correction | Ops & Automation, Marketing Ops, Head of Ops evaluations |
-| **Marketing Ops / RevOps is a valid archetype match** — campaign ops (400+ campaigns/year), HubSpot CRM, studio management, email QA, CPM pricing, performance reporting, creative tooling. Surface for Marketing Ops, RevOps, Studio Manager, Creative Ops roles. | User request | Archetype detection, scoring, portals.yml |
-| **HubSpot used regularly** (not conditionally) — always mention for Marketing Ops / RevOps roles. Covers CRM, campaign tracking, pipeline management. | User correction | Skills surfacing logic |
-| **Marketing ops market in Toulouse/remote-France is thin** — most roles are Paris-based or expired. Worth scanning but don't expect many hits. | Observation from scan | Expectation management |
+@AGENTS.md
+<!-- Add anything Claude Code specific that other agents don't need -->

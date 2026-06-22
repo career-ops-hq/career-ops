@@ -15,6 +15,8 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 | Archivo | Ruta absoluta | Cuándo |
 |---------|---------------|--------|
 | cv.md | `cv.md (project root)` | SIEMPRE |
+| _profile.md | `modes/_profile.md (if exists)` | SIEMPRE (user customizations: archetypes, role_shape, location policy, comp targets) |
+| profile.yml | `config/profile.yml (if exists)` | SIEMPRE (candidate identity, comp range, role_shape rules) |
 | llms.txt | `llms.txt (if exists)` | SIEMPRE |
 | article-digest.md | `article-digest.md (project root)` | SIEMPRE (proof points) |
 | i18n.ts | `i18n.ts (if exists, optional)` | Solo entrevistas/deep |
@@ -24,6 +26,20 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 **REGLA: NUNCA escribir en cv.md ni i18n.ts.** Son read-only.
 **REGLA: NUNCA hardcodear métricas.** Leerlas de cv.md + article-digest.md en el momento.
 **REGLA: Para métricas de artículos, article-digest.md prevalece sobre cv.md.** cv.md puede tener números más antiguos — es normal.
+**REGLA: Antes de evaluar, cargar `modes/_profile.md` y `config/profile.yml` si existen.** Contienen las preferencias del candidato Y reglas concretas de scoring que **sobrescriben** los defaults del sistema.
+
+Tipos de patrones que estos archivos pueden incluir:
+- **Caps de bloque** — ej: "cap Block A at 3.0/5 if title contains 'Lead'/'Head'/'Principal'"
+- **Overrides de recomendación** — ej: "force SKIP if comp ceiling below $120K" o "force SKIP if role_shape signals broad ownership"
+- **Scoring por dimensión** — ej: "Remote: full credit on remote-first; score 2.0 on full on-site outside [region]"
+- **Framing adaptativo por archetype** — mappings entre arquetipos detectados y proof points a priorizar
+
+Aplicación durante la evaluación A-G:
+- **Bloque A:** aplicar caps de role-shape ANTES de calcular el score del bloque
+- **Bloques B-D:** aplicar adaptive framing por archetype y reglas de dimension scoring (location, comp, etc.)
+- **Bloque F:** aplicar recommendation overrides (SKIP forzado, etc.) — `_profile.md` puede convertir un score técnicamente alto en un SKIP por shape o por comp
+
+**En conflicto, las reglas de `_profile.md` ganan sobre los defaults de `_shared.md`.** Esto es intencional: `_profile.md` es la capa de personalización del usuario.
 
 ---
 
@@ -165,6 +181,34 @@ Analyze posting signals to assess whether this is a real, active opening.
 | Red flags | -X (si hay) |
 | **Global** | **X/5** |
 
+#### Machine Summary
+
+Create a machine-readable summary from the completed A-G evaluation and global score. This block is for downstream scripts; keep field names exact, use YAML, and do not add prose inside the fence.
+
+```yaml
+company: "{empresa}"
+role: "{rol}"
+score: {X.X}
+legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
+archetype: "{detectado}"
+final_decision: "{Apply | Consider | Research first | Skip}"
+hard_stops:
+  - "{blocking gap or risk}"
+soft_gaps:
+  - "{non-blocking gap}"
+top_strengths:
+  - "{strength most relevant to this role}"
+risk_level: "{Low | Medium | High}"
+confidence: "{Low | Medium | High}"
+next_action: "{one concrete next step}"
+```
+
+Rules:
+- Use `[]` for `hard_stops`, `soft_gaps`, or `top_strengths` when empty.
+- `score` is numeric only, without `/5`.
+- `final_decision` must reflect the full evaluation, not only the CV match.
+- Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
+
 ### Paso 3 — Guardar Report .md
 
 Guardar evaluación completa en:
@@ -184,10 +228,30 @@ Donde `{company-slug}` es el nombre de empresa en lowercase, sin espacios, con g
 **Score:** {X/5}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **URL:** {URL de la oferta original}
-**PDF:** career-ops/output/cv-candidate-{company-slug}-{{DATE}}.pdf
+**PDF:** {output/cv-candidate-{company-slug}-{{DATE}}.pdf if score ≥ the resolved `auto_pdf_score_threshold` from Paso 4, else `not generated — run /career-ops pdf {company-slug} to create on demand`}
 **Batch ID:** {{ID}}
 
 ---
+
+## Machine Summary
+
+```yaml
+company: "{empresa}"
+role: "{rol}"
+score: {X.X}
+legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
+archetype: "{detectado}"
+final_decision: "{Apply | Consider | Research first | Skip}"
+hard_stops:
+  - "{blocking gap or risk}"
+soft_gaps:
+  - "{non-blocking gap}"
+top_strengths:
+  - "{strength most relevant to this role}"
+risk_level: "{Low | Medium | High}"
+confidence: "{Low | Medium | High}"
+next_action: "{one concrete next step}"
+```
 
 ## A) Resumen del Rol
 (contenido completo)
@@ -216,7 +280,20 @@ Donde `{company-slug}` es el nombre de empresa en lowercase, sin espacios, con g
 (15-20 keywords del JD para ATS)
 ```
 
-### Paso 4 — Generar PDF
+### Paso 4 — Generar PDF (configurable)
+
+**Gate:** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key is absent, default to **`3.0`** (the original gate of Path A). This step ONLY runs when the score from Paso 2 is **≥ the resolved threshold**. For everything below it, skip this entire step — the user can generate a tailored PDF on demand later via `/career-ops pdf {company-slug}` using the report from Paso 3 as input.
+
+**Rationale:** Generating a tailored PDF costs ~30–60s per offer (Playwright launch + HTML render) and produces files that often go unused — most roles score 2.x/3.x and never reach application. The `3.0` default matches Path A's original behavior; raise `auto_pdf_score_threshold` (e.g. `4.0`) to pre-generate fewer PDFs, or set `0` to generate one for every offer. Both Path A (`/career-ops pipeline`) and Path B (this batch worker) read the same config key for consistency.
+
+**If score < threshold:**
+- Skip steps 1–14 below.
+- In the report header use: `**PDF:** not generated — run /career-ops pdf {company-slug} to create on demand`.
+- In Paso 5 (tracker line) use `pdf_emoji` = `❌`.
+- In Paso 6 (output JSON) set `"pdf": null`.
+- Done — move to Paso 5.
+
+**If score ≥ threshold**, generate the tailored PDF:
 
 1. Lee `cv.md` + `i18n.ts`
 2. Extrae 15-20 keywords del JD
@@ -238,6 +315,8 @@ node generate-pdf.mjs \
   --format={letter|a4}
 ```
 14. Reporta: ruta PDF, nº páginas, % cobertura keywords
+
+On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 
 **Reglas ATS:**
 - Single-column (sin sidebars)
@@ -313,7 +392,7 @@ Formato TSV (una sola línea, sin header, 9 columnas tab-separated):
 | 5 | status | canonical | `Evaluada` | DEBE ser canónico (ver states.yml) |
 | 6 | score | X.XX/5 | `4.55/5` | O `N/A` si no evaluable |
 | 7 | pdf | emoji | `✅` o `❌` | Si se generó PDF |
-| 8 | report | md link | `[647](reports/647-...)` | Link al report |
+| 8 | report | md link | `[647](reports/647-...)` | Link root-relative; merge-tracker.mjs lo normaliza relativo al tracker (ej. `../reports/...`, #760) |
 | 9 | notes | string | `APPLY HIGH...` | Resumen 1 frase |
 
 **IMPORTANTE:** El orden TSV tiene status ANTES de score (col 5→status, col 6→score). En applications.md el orden es inverso (col 5→score, col 6→status). merge-tracker.mjs maneja la conversión.

@@ -40,7 +40,7 @@ A avaliação usa 6 blocos (A-F) com uma nota global de 1-5:
 - 4.5+ → Match forte, recomendado aplicar imediatamente
 - 4.0-4.4 → Bom match, vale a pena aplicar
 - 3.5-3.9 → Razoável mas não ideal, aplicar apenas se houver motivo específico
-- Abaixo de 3.5 → Recomendado não aplicar (veja Ethical Use no CLAUDE.md)
+- Abaixo de 3.5 → Recomendado não aplicar (veja Ethical Use no AGENTS.md)
 
 ## North Star -- Vagas-Alvo
 

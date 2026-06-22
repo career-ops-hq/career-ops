@@ -6,12 +6,31 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Publish the npm scaffolder only when a release was just created.
+      # Runs in the same job because a release created via GITHUB_TOKEN does
+      # not trigger separate `on: release` workflows.
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.release_created }}
+      - uses: actions/setup-node@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish scaffolder to npm
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm publish --provenance --access public
+        working-directory: scaffolder
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

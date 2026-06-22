@@ -1,8 +1,13 @@
 # Personal data (user fills these)
 cv.md
 data/applications.md
+data/applications.db
 data/pipeline.md
 data/scan-history.tsv
+data/parser-output/**/*.json
+!data/parser-output/.gitkeep
+!data/parser-output/**/.gitkeep
+data/cache/ats-companies/
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -15,6 +20,10 @@ batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
 jds/*
 !jds/.gitkeep
+
+# Interview prep (accumulated STAR+R stories — user data)
+interview-prep/*
+!interview-prep/.gitkeep
 
 # Writing samples (user's personal files — never committed)
 writing-samples/*
@@ -34,13 +43,18 @@ modes/_profile.md
 .resolved-prompt-*
 node_modules/
 bun.lock
+# Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
+reports/*-RESERVED.md
+
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
+*.bak
 
 # OS
 .DS_Store
 *.mov
 *.mp4
 
-# Claude Code local
+# CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
 
@@ -52,6 +66,10 @@ bun.lock
 .qwen/extensions/
 .qwen/settings.json
 .qwen/settings.json.orig
+
+# OpenCode local
+.opencode/settings.local.json
+.opencode/memory/
 
 # Playwright MCP debug artifacts
 .playwright-mcp/
@@ -65,5 +83,14 @@ resources/
 *.jpeg
 *.gif
 
+# Build artifacts
+batch/temp-cv.html
+
 career-dashboard
 package-lock.json
+
+# Playwright MCP server run artifacts (ephemeral, machine-local — never commit)
+.playwright-mcp/
+
+# Planning (local scratchpad)
+plan/

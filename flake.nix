@@ -12,6 +12,17 @@
 
       inputs.nixpkgs = nixpkgs;
 
+      # flakelight only exposes its default Linux systems unless `systems` is
+      # set, so on macOS `nix develop` / direnv fail with a confusing
+      # "does not provide attribute 'devShells.aarch64-darwin.default'" error.
+      # List the common dev systems so the devShell resolves on macOS too.
+      systems = [
+        "aarch64-darwin"
+        "x86_64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+
       devShell.packages =
         pkgs: with pkgs; [
 

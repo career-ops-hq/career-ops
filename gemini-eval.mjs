@@ -14,12 +14,24 @@
  * Requires:
  *   GEMINI_API_KEY in .env (or environment variable)
  *
- * Free-tier model: gemini-2.0-flash (generous quota, no billing required)
+ * Free-tier model: gemini-2.5-flash (generous quota, no billing required)
+ *
+ * Model deprecation reference (per Google AI for Developers, May 2026):
+ *   - gemini-2.0-flash       deprecated 2026-03-31  (do not use)
+ *   - gemini-2.0-flash-lite  deprecated 2026-03-31
+ *   - gemini-2.5-flash       deprecated 2026-06-17  (current default)
+ *   - gemini-2.5-flash-lite  deprecated 2026-07-22
+ * Stable Gemini models follow a 12-month lifecycle from their release date.
+ * Source: https://ai.google.dev/gemini-api/docs/models
+ *
+ * When the current default approaches its deprecation date, bump
+ * `modelName` below and the `--model` examples accordingly.
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env before anything else
@@ -40,13 +52,16 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 
 const PATHS = {
   // Primary evaluation logic lives in these two mode files
-  shared:   join(ROOT, 'modes', '_shared.md'),
-  oferta:   join(ROOT, 'modes', 'oferta.md'),
+  shared:      join(ROOT, 'modes', '_shared.md'),
+  oferta:      join(ROOT, 'modes', 'oferta.md'),
   // Canonical skill path referenced in Issue #344
-  evaluate: join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
-  cv:       join(ROOT, 'cv.md'),
-  reports:  join(ROOT, 'reports'),
-  tracker:  join(ROOT, 'data', 'applications.md'),
+  evaluate:    join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
+  cv:          join(ROOT, 'cv.md'),
+  profile:     join(ROOT, 'modes', '_profile.md'),
+  profileYml:  join(ROOT, 'config', 'profile.yml'),
+  reports:     join(ROOT, 'reports'),
+  tracker:     join(ROOT, 'data', 'applications.md'),
+  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -65,11 +80,11 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   USAGE
     node gemini-eval.mjs "<JD text>"
     node gemini-eval.mjs --file ./jds/my-job.txt
-    node gemini-eval.mjs --model gemini-2.0-flash "<JD text>"
+    node gemini-eval.mjs --model gemini-2.5-flash "<JD text>"
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <name>   Gemini model to use (default: gemini-2.0-flash)
+    --model <name>   Gemini model to use (default: gemini-2.5-flash)
     --no-save        Do not save report to reports/ directory
     --help           Show this help
 
@@ -87,7 +102,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+let modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -148,6 +163,64 @@ function nextReportNumber() {
   return String(Math.max(...files) + 1).padStart(3, '0');
 }
 
+function validateEvaluationShape(text) {
+  const issues = [];
+  const requiredBlocks = [
+    ['A', /(?:^|\n)#{1,3}\s*(?:A[).:-]?|Block A\b)/im],
+    ['B', /(?:^|\n)#{1,3}\s*(?:B[).:-]?|Block B\b)/im],
+    ['C', /(?:^|\n)#{1,3}\s*(?:C[).:-]?|Block C\b)/im],
+    ['D', /(?:^|\n)#{1,3}\s*(?:D[).:-]?|Block D\b)/im],
+    ['E', /(?:^|\n)#{1,3}\s*(?:E[).:-]?|Block E\b)/im],
+    ['F', /(?:^|\n)#{1,3}\s*(?:F[).:-]?|Block F\b)/im],
+    ['G', /(?:^|\n)#{1,3}\s*(?:G[).:-]?|Block G\b)/im],
+  ];
+
+  for (const [label, pattern] of requiredBlocks) {
+    if (!pattern.test(text)) issues.push(`missing Block ${label}`);
+  }
+
+  const summary = text.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
+  if (!summary) {
+    issues.push('missing SCORE_SUMMARY block');
+  } else {
+    const summaryBlock = summary[1];
+    for (const key of ['COMPANY', 'ROLE', 'ARCHETYPE', 'LEGITIMACY']) {
+      const field = summaryBlock.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, 'mi'));
+      const value = field?.[1]?.trim() ?? '';
+      if (!value || (key !== 'COMPANY' && value.toLowerCase() === 'unknown')) {
+        issues.push(`SCORE_SUMMARY ${key} is required`);
+      }
+    }
+
+    const score = summaryBlock.match(/^\s*SCORE:\s*([0-9]+(?:\.[0-9]+)?)/mi);
+    const scoreValue = score ? Number(score[1]) : NaN;
+    if (!Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > 5) {
+      issues.push('SCORE_SUMMARY score must be a number between 0 and 5');
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new Error(`Gemini returned an invalid career-ops report: ${issues.join('; ')}`);
+  }
+}
+
+function slugifyCompany(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+}
+
+function tsvSafe(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+function normalizedTrackerScore(value) {
+  const clean = tsvSafe(value);
+  if (!clean || clean === '?') return 'N/A';
+  return /\/5$/i.test(clean) ? clean : `${clean}/5`;
+}
+
 // Lazy import — only used when saving
 let readdirSync;
 try {
@@ -163,9 +236,11 @@ if (!readdirSync) {
 // ---------------------------------------------------------------------------
 console.log('\n📂  Loading context files...');
 
-const sharedContext  = readFile(PATHS.shared,   'modes/_shared.md');
-const ofertaLogic    = readFile(PATHS.oferta,   'modes/oferta.md');
-const cvContent      = readFile(PATHS.cv,       'cv.md');
+const sharedContext  = readFile(PATHS.shared,      'modes/_shared.md');
+const ofertaLogic    = readFile(PATHS.oferta,      'modes/oferta.md');
+const cvContent      = readFile(PATHS.cv,          'cv.md');
+const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
+const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
 
 // ---------------------------------------------------------------------------
 // Build the system prompt (mirrors the Claude skill router logic)
@@ -189,6 +264,16 @@ ${ofertaLogic}
 CANDIDATE RESUME (cv.md)
 ═══════════════════════════════════════════════════════
 ${cvContent}
+
+═══════════════════════════════════════════════════════
+CANDIDATE PROFILE & TARGETS (config/profile.yml)
+═══════════════════════════════════════════════════════
+${profileYml}
+
+═══════════════════════════════════════════════════════
+USER ARCHETYPES & NARRATIVE (_profile.md)
+═══════════════════════════════════════════════════════
+${profileContent}
 
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION
@@ -231,12 +316,21 @@ try {
   ]);
   evaluationText = result.response.text();
 } catch (err) {
-  console.error('❌  Gemini API error:', err.message);
-  if (err.message?.includes('API_KEY')) {
+  const sanitizedMsg = (err.message || '').split(apiKey).join('[REDACTED]');
+  console.error('❌  Gemini API error:', sanitizedMsg);
+  if (sanitizedMsg.includes('API_KEY')) {
     console.error('    Check your GEMINI_API_KEY in .env');
-  } else if (err.message?.includes('quota') || err.message?.includes('rate')) {
+  } else if (sanitizedMsg.includes('quota') || sanitizedMsg.includes('rate')) {
     console.error('    You may have hit the free-tier rate limit. Wait 60s and retry.');
   }
+  process.exit(1);
+}
+
+try {
+  validateEvaluationShape(evaluationText);
+} catch (err) {
+  console.error('❌  Gemini output failed validation:', err.message);
+  console.error('    No report was saved. Retry, lower temperature, or use the Claude pipeline for this JD.');
   process.exit(1);
 }
 
@@ -264,8 +358,15 @@ let legitimacy = 'unknown';
 if (summaryMatch) {
   const block = summaryMatch[1];
   const extract = (key) => {
-    const m = block.match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
+    const prefix = `${key}:`;
+    const lines = block.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith(prefix)) {
+        return trimmed.slice(prefix.length).trim();
+      }
+    }
+    return 'unknown';
   };
   company    = extract('COMPANY');
   role       = extract('ROLE');
@@ -278,6 +379,7 @@ if (summaryMatch) {
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
+  let reportSaved = false;
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
@@ -285,9 +387,10 @@ if (saveReport) {
 
     const num         = nextReportNumber();
     const today       = new Date().toISOString().split('T')[0];
-    const companySlug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
+    const trackerPath = join(PATHS.trackerAdditions, `${num}-${companySlug}.tsv`);
 
     const reportContent = `# Evaluation: ${company} — ${role}
 
@@ -304,13 +407,40 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
 `;
 
     writeFileSync(reportPath, reportContent, 'utf-8');
+    mkdirSync(PATHS.trackerAdditions, { recursive: true });
+    const trackerFields = [
+      String(parseInt(num, 10)),
+      today,
+      tsvSafe(company),
+      tsvSafe(role),
+      'Evaluated',
+      normalizedTrackerScore(score),
+      '❌',
+      `[${num}](reports/${filename})`,
+      'Gemini evaluation',
+    ];
+    writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
-
-    // Append tracker entry reminder
-    console.log(`\n📊  Tracker entry (add to data/applications.md):`);
-    console.log(`    | ${num} | ${today} | ${company} | ${role} | ${score} | Evaluada | ❌ | [${num}](reports/${filename}) |`);
+    console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
+    reportSaved = true;
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
+    process.exitCode = 1;
+  }
+
+  if (reportSaved) {
+    try {
+      const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (mergeOutput.trim()) console.log(mergeOutput.trim());
+      console.log('📊  Tracker merged into data/applications.md.');
+    } catch (err) {
+      console.warn(`⚠️   Report saved, but could not merge tracker addition into data/applications.md: ${err.message}`);
+      process.exitCode = 1;
+    }
   }
 }
 
