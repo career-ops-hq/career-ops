@@ -46,16 +46,30 @@ const PIPELINE_PATH = 'data/pipeline.md';
 const CACHE_DIR = 'data/cache/ats-companies';
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
-// appear weekly), so pinning a commit would defeat the purpose. The integrity
-// boundary is SLUG_RE below — every entry is validated against a safe charset
-// before it is interpolated into a provider URL, so a tampered dataset can at
-// worst name boards that don't exist.
+// appear weekly), so pinning a commit would defeat the purpose. Integrity rests
+// on two layers instead: SLUG_RE validates every entry against a safe charset
+// before interpolation, and entryOnHost (below) re-parses each finished
+// careers_url and drops anything that doesn't resolve to the ATS's own host —
+// so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
 const CONCURRENCY = 20;
 
 // Dataset entries are external input destined for URL interpolation — reject
 // anything outside a conservative slug charset.
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
+
+// SSRF guard / defense in depth: confirm a constructed careers_url actually
+// resolves to the expected ATS host before it reaches provider.fetch. Returns
+// the synthetic entry, or null if the URL won't parse or the host isn't canonical.
+export function entryOnHost(name, careersUrl, isCanonicalHost) {
+  let hostname;
+  try {
+    ({ hostname } = new URL(careersUrl));
+  } catch {
+    return null;
+  }
+  return isCanonicalHost(hostname) ? { name, careers_url: careersUrl } : null;
+}
 
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
@@ -64,19 +78,22 @@ const SOURCES = {
     provider: greenhouse,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
-      ? { name: String(slug), careers_url: `https://job-boards.greenhouse.io/${slug}` } : null,
+      ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
+      : null,
   },
   lever: {
     provider: lever,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
-      ? { name: String(slug), careers_url: `https://jobs.lever.co/${slug}` } : null,
+      ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
+      : null,
   },
   ashby: {
     provider: ashby,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
-      ? { name: String(slug), careers_url: `https://jobs.ashbyhq.com/${slug}` } : null,
+      ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
+      : null,
   },
   workday: {
     provider: workday,
@@ -85,7 +102,11 @@ const SOURCES = {
     toEntry: (line) => {
       const [tenant, instance, site] = String(line).split('|');
       if (![tenant, instance, site].every(p => p && SLUG_RE.test(p))) return null;
-      return { name: tenant, careers_url: `https://${tenant}.${instance}.myworkdayjobs.com/${site}` };
+      return entryOnHost(
+        tenant,
+        `https://${tenant}.${instance}.myworkdayjobs.com/${site}`,
+        h => h === `${tenant}.${instance}.myworkdayjobs.com` && h.endsWith('.myworkdayjobs.com'),
+      );
     },
   },
 };

@@ -8,45 +8,15 @@
  *
  * Fills templates/cover-letter-template.html with the payload, then renders
  * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
+ *
+ * `buildHtml` is exported as a pure function so the template can be tested
+ * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
  */
 
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, basename, join } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
-import { renderHtmlToPdf } from "./generate-pdf.mjs";
-
-const { values: args } = parseArgs({
-  options: {
-    payload: { type: "string" },
-    out:     { type: "string" },
-    help:    { type: "boolean", short: "h" },
-  },
-  strict: false,
-});
-
-if (args.help || !args.payload) {
-  console.log(`
-Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf]
-
-  --payload   Path to the JSON payload file (required)
-  --out       Override output path from payload (optional)
-`);
-  process.exit(args.help ? 0 : 1);
-}
-
-const payloadPath = resolve(args.payload);
-if (!existsSync(payloadPath)) {
-  console.error(`ERROR: payload file not found: ${payloadPath}`);
-  process.exit(1);
-}
-
-const payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
-
-if (args.out) {
-  payload.output_path = args.out;
-}
 
 const OUTPUT_ROOT = resolve("output");
 
@@ -55,16 +25,6 @@ function safeOutputPath(raw) {
   const filename = basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/\.{2,}/g, "-");
   return join(OUTPUT_ROOT, filename);
 }
-
-if (!payload.output_path) {
-  const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
-  payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
-} else {
-  payload.output_path = safeOutputPath(payload.output_path);
-}
-
-if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
 
 function _require(obj, keys, context) {
   for (const key of keys) {
@@ -143,7 +103,7 @@ function buildFootnotesBlock(footnotes) {
   return `<div class="footnotes">\n${lines}\n  </div>`;
 }
 
-function buildHtml(payload) {
+export function buildHtml(payload) {
   _require(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
@@ -154,6 +114,9 @@ function buildHtml(payload) {
   const templatePath = resolve(scriptDir, "templates", "cover-letter-template.html");
   let html = readFileSync(templatePath, "utf-8");
 
+  // Optional salutation (e.g. "Dear Jane Smith,"). Omitted -> no salutation,
+  // preserving the original behavior for payloads that don't set it.
+  const greetingBlock = letter.greeting ? `<p class="greeting">${escapeHtml(letter.greeting)}</p>` : "";
   const closingBlock = letter.closing ? `<p>${escapeHtml(letter.closing)}</p>` : "";
   const languageClosingBlock = letter.language_closing
     ? `<p class="language-closing">${escapeHtml(letter.language_closing)}</p>`
@@ -166,6 +129,7 @@ function buildHtml(payload) {
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
     "{{DATELINE}}": buildDateline(letter),
+    "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
     "{{ACHIEVEMENTS_BLOCK}}": buildAchievementsBlock(letter.achievements),
@@ -175,20 +139,71 @@ function buildHtml(payload) {
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
-  for (const [token, value] of Object.entries(replacements)) {
-    html = html.split(token).join(value);
+  // Single-pass substitution: each {{TOKEN}} is replaced exactly once against
+  // the original template. A single regex pass (rather than iterative
+  // split/join) ensures a substituted value that itself contains a {{TOKEN}}
+  // sequence is left literal instead of being re-interpreted as a placeholder.
+  // Tokens with no entry in the map are left untouched.
+  return html.replace(/\{\{[A-Z_]+\}\}/g, (token) => replacements[token] ?? token);
+}
+
+async function main() {
+  const { values: args } = parseArgs({
+    options: {
+      payload: { type: "string" },
+      out:     { type: "string" },
+      help:    { type: "boolean", short: "h" },
+    },
+    strict: false,
+  });
+
+  if (args.help || !args.payload) {
+    console.log(`
+Usage:
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf]
+
+  --payload   Path to the JSON payload file (required)
+  --out       Override output path from payload (optional)
+`);
+    process.exit(args.help ? 0 : 1);
   }
 
-  return html;
+  const payloadPath = resolve(args.payload);
+  if (!existsSync(payloadPath)) {
+    console.error(`ERROR: payload file not found: ${payloadPath}`);
+    process.exit(1);
+  }
+
+  const payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
+
+  if (args.out) {
+    payload.output_path = args.out;
+  }
+
+  if (!payload.output_path) {
+    const company = (payload.letter?.company || "company").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
+  } else {
+    payload.output_path = safeOutputPath(payload.output_path);
+  }
+
+  if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
+
+  // Imported lazily so buildHtml can be used (and tested) without Playwright.
+  const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+
+  try {
+    const html = buildHtml(payload);
+    const outputPath = resolve(payload.output_path);
+    await renderHtmlToPdf(html, outputPath, { format: "a4" });
+    console.log(`\nCover letter PDF: ${payload.output_path}`);
+  } catch (err) {
+    console.error("ERROR generating cover letter PDF:");
+    console.error(err.message);
+    process.exit(1);
+  }
 }
 
-try {
-  const html = buildHtml(payload);
-  const outputPath = resolve(payload.output_path);
-  await renderHtmlToPdf(html, outputPath, { format: "a4" });
-  console.log(`\nCover letter PDF: ${payload.output_path}`);
-} catch (err) {
-  console.error("ERROR generating cover letter PDF:");
-  console.error(err.message);
-  process.exit(1);
-}
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) main();

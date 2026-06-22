@@ -68,17 +68,49 @@ if (!existsSync(APPS_FILE)) {
 const content = readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
+// Map columns by header name so the checks work whether the tracker uses the
+// original 9-column layout or a customized one with an extra column (e.g. a
+// Location column after Role). Fixed-position indexing would otherwise read
+// Location where Score is expected and flag false errors. Falls back to the
+// legacy fixed layout when no recognizable header row is found.
+const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
+const HEADER_ALIASES = {
+  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
+  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
+  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
+};
+function detectColumns(allLines) {
+  for (const line of allLines) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map(s => s.trim().toLowerCase());
+    if (!cells.includes('company') || !cells.includes('role')) continue;
+    const map = {};
+    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
+  }
+  return null;
+}
+const COLMAP = detectColumns(lines) || LEGACY_COLMAP;
+const MAX_IDX = Math.max(...Object.values(COLMAP));
+
 const entries = [];
 for (const line of lines) {
   if (!line.startsWith('|')) continue;
   const parts = line.split('|').map(s => s.trim());
-  if (parts.length < 9) continue;
-  const num = parseInt(parts[1]);
+  if (parts.length <= MAX_IDX) continue;
+  const num = parseInt(parts[COLMAP.num]);
   if (isNaN(num)) continue;
   entries.push({
-    num, date: parts[2], company: parts[3], role: parts[4],
-    score: parts[5], status: parts[6], pdf: parts[7], report: parts[8],
-    notes: parts[9] || '',
+    num,
+    date: parts[COLMAP.date],
+    company: parts[COLMAP.company],
+    role: parts[COLMAP.role],
+    location: COLMAP.location != null ? parts[COLMAP.location] : '',
+    score: parts[COLMAP.score],
+    status: parts[COLMAP.status],
+    pdf: parts[COLMAP.pdf],
+    report: parts[COLMAP.report],
+    notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
   });
 }
 
@@ -162,8 +194,8 @@ for (const line of lines) {
   if (!line.startsWith('|')) continue;
   if (line.includes('---') || line.includes('Empresa')) continue;
   const parts = line.split('|');
-  if (parts.length < 9) {
-    error(`Row with <9 columns: ${line.substring(0, 80)}...`);
+  if (parts.length <= MAX_IDX) {
+    error(`Row with too few columns (need ${MAX_IDX} data cols): ${line.substring(0, 80)}...`);
     badRows++;
   }
 }

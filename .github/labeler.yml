@@ -1,7 +1,9 @@
 "🔴 core-architecture":
   - changed-files:
       - any-glob-to-any-file:
+          - AGENTS.md
           - CLAUDE.md
+          - OPENCODE.md
           - DATA_CONTRACT.md
           - modes/_shared.md
 
@@ -11,6 +13,9 @@
           - modes/*.md
           - modes/**/*.md
           - .claude/skills/**
+          - .opencode/skills/**
+          - .qwen/skills/**
+          - .antigravitycli/skills/**
 
 "🔧 scripts":
   - changed-files:

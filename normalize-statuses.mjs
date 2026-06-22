@@ -86,6 +86,23 @@ function normalizeStatus(raw) {
   return { status: null, unknown: true };
 }
 
+/**
+ * Rebuild a markdown table row from `line.split('|')` cells without dropping the
+ * last real cell. `split('|')` adds a leading empty element and, only when the
+ * row ends with `|`, a trailing empty one. The old `slice(1, -1)` assumed that
+ * trailing empty always existed, so a row written without a trailing pipe
+ * (`| 5 | … | note`) lost its notes cell on rewrite. Drop the leading empty and
+ * only drop a trailing element when it is genuinely empty.
+ *
+ * @param {string[]} parts - Trimmed cells from `line.split('|').map(s => s.trim())`.
+ * @returns {string} The rebuilt `| a | b | … |` row.
+ */
+function rebuildRow(parts) {
+  const cells = parts.slice(1);
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+  return '| ' + cells.join(' | ') + ' |';
+}
+
 // Read applications.md
 if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
@@ -139,7 +156,7 @@ for (let i = 0; i < lines.length; i++) {
   }
 
   // Reconstruct line
-  const newLine = '| ' + parts.slice(1, -1).join(' | ') + ' |';
+  const newLine = rebuildRow(parts);
   lines[i] = newLine;
   changes++;
 

@@ -55,6 +55,14 @@ batch/
 5. **Pagination**: If no more jobs → click "Next" → repeat
 6. **End**: Merge `tracker-additions/` → `applications.md` + summary
 
+### What to watch during a run
+
+During a conductor run, the operator has two primary live interfaces to monitor:
+1. **The headed Chrome window:** Watch the browser navigate the portals, login to sessions, and interact with the job description pages in real time.
+2. **The agent CLI conversation:** Follow the agent's turn-by-turn narration in the shell.
+
+The individual worker tasks spawn headlessly in the background and write their stdout/stderr logs to `batch/logs/{report_num}-{id}.log`, which can be inspected on demand.
+
 ## Mode B: Standalone script
 
 ```bash

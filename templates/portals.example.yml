@@ -91,6 +91,31 @@
 #   max: 0
 #   currency: "USD"
 
+# -- Content filter (optional) --
+# Filters on the job DESCRIPTION text, not just the title — useful when
+# companies post generic titles ("Software Engineer") with very different
+# stacks. Case-insensitive substring match.
+# Semantics:
+#   - A job with no description always passes (see provider support below)
+#   - Any `negative` keyword present → reject
+#   - `positive` empty → pass (after clearing negatives)
+#   - `positive` non-empty → at least one keyword must be present
+#   - If this entire block is absent, descriptions are not filtered (default)
+#
+# Provider support: the scanner is zero-token and only reads descriptions that
+# a provider already returns in its list payload — it never fetches each job
+# page. Currently Lever (`descriptionPlain`) supplies descriptions; jobs from
+# providers that don't always pass this filter (they're never silently dropped).
+#
+# Example: keep roles that mention Rust/Go, drop legacy PHP/WordPress shops
+# content_filter:
+#   positive:
+#     - "rust"
+#     - "golang"
+#   negative:
+#     - "php"
+#     - "wordpress"
+
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
 # At least 1 positive must match AND 0 negatives must match (case-insensitive).
@@ -1284,3 +1309,26 @@ job_boards:
     provider: solidjobs
     enabled: false
     notes: "Polish job board — Other specialists division"
+
+  # -- Indonesia job boards (provider: jobstreet / glints) --
+
+  - name: Jobstreet Indonesia
+    provider: jobstreet
+    api: https://id.jobstreet.com/api/chalice-search/v4/search
+    siteKey: ID-Main
+    searchKeywords: "data scientist"
+    searchLocation: "Jakarta"
+    pageSize: 30
+    maxPages: 3
+    enabled: false
+    notes: "Indonesia's largest job board (SEEK group). Public JSON search API — zero tokens."
+
+  - name: Glints Indonesia
+    provider: glints
+    api: https://glints.com/api/graphql
+    searchKeywords: "data scientist"
+    countryCode: ID
+    pageSize: 30
+    maxPages: 3
+    enabled: false
+    notes: "SEA job platform covering ID/SG/MY/VN. Undocumented public GraphQL API — adjust graphqlQuery if schema changes."

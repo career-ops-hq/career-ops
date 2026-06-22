@@ -1,7 +1,7 @@
 {
   "name": "career-ops",
-  "version": "1.10.0",
-  "description": "AI-powered job search pipeline built on Claude Code",
+  "version": "1.12.0",
+  "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, OpenCode, Gemini, Codex, Qwen)",
   "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
@@ -9,6 +9,7 @@
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
     "merge": "node merge-tracker.mjs",
+    "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
     "sync-check": "node cv-sync-check.mjs",
     "update:check": "node update-system.mjs check",
@@ -19,13 +20,17 @@
     "scan": "node scan.mjs",
     "scan:full": "node scan-ats-full.mjs",
     "validate:portals": "node validate-portals.mjs",
+    "verify:portals": "node verify-portals.mjs",
+    "tracker": "node tracker.mjs",
     "patterns": "node analyze-patterns.mjs",
-    "gemini:eval": "node gemini-eval.mjs"
+    "gemini:eval": "node gemini-eval.mjs",
+    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
   "keywords": [
     "ai",
     "job-search",
     "claude-code",
+    "opencode",
     "career",
     "career-ops",
     "careerops",
@@ -42,6 +47,6 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
-    "playwright": "1.58.1"
+    "playwright": "1.61.0"
   }
 }

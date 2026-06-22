@@ -67,7 +67,7 @@ Use the template in `cv-template.html`. Replace the `{{...}}` placeholders with 
 
 | Placeholder | Content |
 |-------------|-----------|
-| `{{LANG}}` | `en` or `es` |
+| `{{LANG}}` | CV language code (e.g. `en`, `es`, `ja`, `ar`). Drives language-specific CSS in the template: `ja` enables a CJK font fallback so Japanese renders instead of tofu (□); `ar` enables RTL + Arabic fonts. Use the BCP-47/ISO-639 code that matches the CV language. |
 | `{{PAGE_WIDTH}}` | `8.5in` (letter) or `210mm` (A4) |
 | `{{NAME}}` | (from profile.yml) |
 | `{{PHONE}}` | (from profile.yml — include with its separator only when `profile.yml` has a non-empty `phone` value; omit both `<span>` and `<span class="separator">` otherwise) |
@@ -185,6 +185,8 @@ Want a cover letter for this role too?
 - Say "yes" or "cover letter" to generate one now
 - Or run `/career-ops cover {slug}` later
 ```
+
+Apply `voice-dna.md` (if present) to the cover letter — full guardrail, conversational voice included (Tier 1 + Tier 2). The CV PDF itself stays Tier 1 only (formal ATS register). See `_shared.md` → Voice DNA.
 
 If the user says yes, run the full cover letter flow from `modes/cover.md` in slug mode:
 1. Load the existing `## Cover Letter Draft` from the evaluation report as a starting point

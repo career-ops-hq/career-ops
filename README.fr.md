@@ -45,7 +45,11 @@
 </p>
 
 <p align="center">
-  <sub>Développé avec</sub><br>
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>Fonctionne aussi avec n'importe quel CLI compatible avec le standard agent-skill</sub><br>
   <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
   <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
   <img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Gemini CLI">
@@ -58,7 +62,7 @@
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
   <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Politique de marque déposée"></a>
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
 </p>
 
 ## Qu'est-ce que c'est
@@ -147,15 +151,15 @@ gemini auth
 cd career-ops
 gemini
 
-# 4. Utilisez les commandes slash comme avec Claude Code
+# 4. Utilisez la commande unifiée /career-ops avec ses sous-commandes :
 /career-ops "Senior AI Engineer at Anthropic..."
-/career-ops-evaluate --file ./jds/openai.txt
-/career-ops-scan
-/career-ops-pdf
-/career-ops-tracker
+/career-ops pipeline
+/career-ops scan
+/career-ops pdf
+/career-ops tracker
 ```
 
-Le fichier `GEMINI.md` is chargé automatiquement comme contexte. Les 15 commandes sont définies dans `.gemini/commands/*.toml`.
+Le fichier `GEMINI.md` est chargé automatiquement comme contexte. Toutes les sous-commandes sont routées via la définition unifiée `.agents/skills/career-ops/SKILL.md`.
 
 ### Option B : Script d'API autonome (Aucune installation de CLI requise)
 

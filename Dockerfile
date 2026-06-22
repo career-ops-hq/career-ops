@@ -3,7 +3,7 @@
 # Host kernels that block Playwright's chromium installer (e.g. Ubuntu 26.04) work fine here
 # because the browser ships in the image and runs under the image's userland.
 
-FROM mcr.microsoft.com/playwright:v1.58.1-jammy
+FROM mcr.microsoft.com/playwright:v1.61.0-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=development \

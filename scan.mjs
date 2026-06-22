@@ -176,6 +176,37 @@ export function buildLocationFilter(locationFilter) {
   };
 }
 
+// ── Content filter ──────────────────────────────────────────────────
+// Optional. If `content_filter` is absent from portals.yml, all jobs pass.
+// Filters on the job DESCRIPTION text to separate same-titled roles with
+// different stacks (a "Software Engineer" listing that mentions "PHP" vs one
+// that mentions "Rust"). Semantics (case-insensitive substring, in order):
+//   - Empty / whitespace-only / non-string description → PASS. The scanner is
+//     zero-token and only sees descriptions a provider already returns in its
+//     list payload; providers without one must never be silently dropped.
+//   - any `negative` keyword present → reject
+//   - `positive` empty → pass (already cleared negatives)
+//   - `positive` non-empty → at least one keyword must be present
+//
+// Provider support: only providers whose list API ships the description for
+// free (no extra per-job request, which would break the zero-token design)
+// populate `job.description`. Lever (`descriptionPlain`) does today; others
+// leave it empty and therefore always pass this filter.
+
+export function buildContentFilter(contentFilter) {
+  if (!contentFilter) return () => true;
+  const positive = normalizeKeywordList(contentFilter.positive);
+  const negative = normalizeKeywordList(contentFilter.negative);
+
+  return (description) => {
+    if (typeof description !== 'string' || description.trim() === '') return true;
+    const lower = description.toLowerCase();
+    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (positive.length === 0) return true;
+    return positive.some(k => lower.includes(k));
+  };
+}
+
 // ── Salary filter ───────────────────────────────────────────────────
 // Optional. If `salary_filter` is absent from portals.yml, all salaries pass.
 // Semantics:
@@ -408,31 +439,104 @@ function loadSeenCompanyRoles() {
 
 // ── Pipeline writer ─────────────────────────────────────────────────
 
+function normalizeScanScalar(value) {
+  return String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
+function normalizeScanUrl(value) {
+  return String(value ?? '').trim().split(/\s+/)[0] || '';
+}
+
+const MARKDOWN_ESCAPE_CHARS = {
+  '\\': '\\\\',
+  '[': '\\[',
+  ']': '\\]',
+};
+
+export function sanitizeMarkdownField(value) {
+  return normalizeScanScalar(value)
+    .replace(/[\\[\]]/g, char => MARKDOWN_ESCAPE_CHARS[char])
+    .replace(/\|/g, '/');
+}
+
+function sanitizePipelineUrl(value) {
+  return normalizeScanUrl(value)
+    .replace(/[\\[\]]/g, char => MARKDOWN_ESCAPE_CHARS[char])
+    .replace(/\|/g, '%7C');
+}
+
+export function sanitizeTsvField(value) {
+  const normalized = normalizeScanScalar(value);
+  return /^[=+\-@]/.test(normalized) ? `'${normalized}` : normalized;
+}
+
+export function formatPipelineOffer(offer) {
+  const url = sanitizePipelineUrl(offer.url);
+  const company = sanitizeMarkdownField(offer.company);
+  const title = sanitizeMarkdownField(offer.title);
+  return `- [ ] ${url} | ${company} | ${title}`;
+}
+
+export function formatScanHistoryRow(offer, date, status = 'added') {
+  return [
+    normalizeScanUrl(offer.url),
+    date,
+    offer.source,
+    offer.title,
+    offer.company,
+    status,
+    offer.location || '',
+  ].map(sanitizeTsvField).join('\t');
+}
+
+// Standard skeleton created on fresh install — matches the format documented
+// in modes/pipeline.md and expected by /career-ops pipeline.
+const PIPELINE_SKELETON = `# Pipeline — Pending URLs
+
+Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
+
+## Pending
+
+## Processed
+`;
+
+// Current section names (English). Legacy Spanish names are checked as fallback
+// so existing pipeline.md files created before this change keep working.
+const PENDING_MARKERS = ['## Pending', '## Pendientes'];
+const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
+
 export function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
+  // Auto-create with standard skeleton if missing (fresh-install guard).
+  if (!existsSync(PIPELINE_PATH)) {
+    writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
+  }
+
   let text = readFileSync(PIPELINE_PATH, 'utf-8');
 
-  // Find "## Pendientes" section and append after it
-  const marker = '## Pendientes';
-  const idx = text.indexOf(marker);
+  const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
+  const idx = marker !== null ? text.indexOf(marker) : -1;
+
   if (idx === -1) {
-    // No Pendientes section — append at end before Procesadas
-    const procIdx = text.indexOf('## Procesadas');
+    // No Pending section found — insert one before Processed (or at end)
+    const procIdx = PROCESSED_MARKERS.reduce((found, m) => {
+      const i = text.indexOf(m);
+      return (found === -1 || (i !== -1 && i < found)) ? i : found;
+    }, -1);
     const insertAt = procIdx === -1 ? text.length : procIdx;
-    const block = `\n${marker}\n\n` + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n\n';
+    const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   } else {
-    // Find the end of existing Pendientes content (next ## or end)
+    // Find the end of existing Pending content (next ## or end)
     const afterMarker = idx + marker.length;
     const nextSection = text.indexOf('\n## ', afterMarker);
     const insertAt = nextSection === -1 ? text.length : nextSection;
 
-    const block = '\n' + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
-    ).join('\n') + '\n';
+    const block = '\n' + offers.map(formatPipelineOffer).join('\n') + '\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   }
 
@@ -449,9 +553,7 @@ export function appendToScanHistory(offers, date, status = 'added') {
     writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n', 'utf-8');
   }
 
-  const lines = offers.map(o =>
-    `${o.url}\t${date}\t${o.source}\t${o.title}\t${o.company}\t${status}\t${o.location || ''}`
-  ).join('\n') + '\n';
+  const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
   appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
 }
@@ -641,6 +743,7 @@ async function main() {
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
+  const contentFilter = buildContentFilter(config.content_filter);
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -712,6 +815,7 @@ async function main() {
   let totalFilteredTitle = 0;
   let totalFilteredLocation = 0;
   let totalFilteredSalary = 0;
+  let totalFilteredContent = 0;
   let totalDupes = 0;
   const newOffers = [];
   const errors = [...resolveErrors];
@@ -752,6 +856,10 @@ async function main() {
         }
         if (!salaryFilter(job.salary)) {
           totalFilteredSalary++;
+          continue;
+        }
+        if (!contentFilter(job.description)) {
+          totalFilteredContent++;
           continue;
         }
         if (seenUrls.has(job.url)) {
@@ -851,6 +959,7 @@ async function main() {
   console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
   console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
   console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);
+  console.log(`Filtered by content:  ${totalFilteredContent} removed`);
   console.log(`Duplicates:            ${totalDupes} skipped`);
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);

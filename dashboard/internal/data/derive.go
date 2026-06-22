@@ -64,10 +64,16 @@ func deriveNoteFields(app *model.CareerApplication) {
 	}
 
 	// Work mode: hybrid beats remote ("Remote/hybrid" means office days exist);
+	// "remote-first" / "remote + flex" is softer than fully remote;
 	// a bare city+state with no keyword implies fully on-site.
 	switch {
 	case strings.Contains(lower, "hybrid"):
 		app.WorkMode = "Hybrid"
+	case strings.Contains(lower, "remote") &&
+		(strings.Contains(lower, "flex") ||
+			strings.Contains(lower, "remote-first") ||
+			strings.Contains(lower, "remote first")):
+		app.WorkMode = "RemoteFlex"
 	case strings.Contains(lower, "remote"):
 		app.WorkMode = "Remote"
 	case strings.Contains(lower, "onsite") || strings.Contains(lower, "on-site") || strings.Contains(lower, "in-office"):

@@ -38,7 +38,7 @@ function extractArray(name) {
     return [];
   }
   pass(`${name} array exists`);
-  return Array.from(match[1].matchAll(/'([^']+)'/g), (entry) => entry[1]);
+  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
 }
 
 const systemPaths = extractArray('SYSTEM_PATHS');
@@ -47,9 +47,11 @@ const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
 const requiredSystemPaths = [
   'modes/followup.md',
+  'modes/interview.md',
   'modes/interview-prep.md',
   'modes/patterns.md',
   'modes/update.md',
+  'modes/ar/',
   'modes/tr/',
   'modes/ua/',
   'batch/README.md',
@@ -58,7 +60,10 @@ const requiredSystemPaths = [
   '.env.example',
   '.claude-plugin/',
   '.qwen/',
+  '.antigravitycli/skills/',
+  'tracker-columns-tests.mjs',
   'updater-migration-tests.mjs',
+  'README.ar.md',
   'README.ja.md',
   'README.ua.md',
   'CHANGELOG.md',
@@ -71,9 +76,13 @@ const requiredSystemPaths = [
 
 const requiredBootstrapPaths = [
   '.agents/',
+  '.opencode/skills/',
+  '.antigravitycli/skills/',
   'providers/',
   'liveness-browser.mjs',
+  'role-matcher.mjs',
   'updater-migration-tests.mjs',
+  'tracker-columns-tests.mjs',
 ];
 
 for (const path of requiredSystemPaths) {
@@ -84,6 +93,62 @@ for (const path of requiredSystemPaths) {
 for (const path of requiredBootstrapPaths) {
   if (bootstrapPaths.includes(path)) pass(`BOOTSTRAP_PATHS covers ${path}`);
   else fail(`BOOTSTRAP_PATHS missing ${path}`);
+}
+
+const twoPassManifestChecks = [
+  {
+    name: 'apply has a re-exec guard',
+    pattern: /CAREER_OPS_UPDATE_REEXEC/,
+  },
+  {
+    name: 'apply first updates update-system.mjs from FETCH_HEAD',
+    pattern: /git\('checkout',\s*'FETCH_HEAD',\s*'--',\s*'update-system\.mjs'\)/,
+  },
+  {
+    name: 'apply re-execs through the current Node binary',
+    pattern: /execFileSync\(process\.execPath,\s*\[\s*'update-system\.mjs',\s*'apply'\s*\]/,
+  },
+  {
+    name: 'apply carries the original backup branch across re-exec',
+    pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH/,
+  },
+  {
+    name: 'apply reads the target updater manifest from FETCH_HEAD',
+    pattern: /git\('show',\s*'FETCH_HEAD:update-system\.mjs'\)/,
+  },
+  {
+    name: 'apply extracts SYSTEM_PATHS from the target updater',
+    pattern: /extractArrayFromSource\([^,]+,\s*'SYSTEM_PATHS'\)/,
+  },
+  {
+    name: 'apply merges local and target system manifests',
+    pattern: /mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths[\s\S]*?\)/,
+  },
+  {
+    name: 'apply checks out the merged manifest instead of only the local manifest',
+    pattern: /for\s*\(const path of updatePaths\)/,
+  },
+  {
+    name: 'revertPaths uses git checkout HEAD (not just --) to reset index+worktree (#915)',
+    pattern: /git\('checkout',\s*'HEAD',\s*'--'/,
+  },
+  {
+    name: 'apply commit is scoped to update paths, not bare commit (#915)',
+    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.pathsToStage\)/,
+  },
+  {
+    name: 'rollback commit is scoped to rollback paths, not bare commit (#915)',
+    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.rollbackPaths\)/,
+  },
+  {
+    name: 'apply captures uncommitted work via git stash create before branching (#915)',
+    pattern: /git\('stash',\s*'create'\)/,
+  },
+];
+
+for (const check of twoPassManifestChecks) {
+  if (check.pattern.test(source)) pass(check.name);
+  else fail(check.name);
 }
 
 for (const userPath of ['cv.md', 'config/profile.yml', 'modes/_profile.md', 'portals.yml', 'data/', 'reports/']) {

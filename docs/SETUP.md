@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - An AI coding CLI — [Claude Code](https://claude.ai/code), Gemini CLI, Codex, Qwen Code, OpenCode or GitHub Copilot CLI
-- [Node.js](https://nodejs.org) 18+ and `git` (`npx` ships with Node — the installer refuses to run without them)
+- [Node.js](https://nodejs.org) 18+ and `git` (`npx` ships with Node — the installer refuses to run without them) — note: the Gemini CLI integration requires Node.js 20+
 - (Optional) Go 1.21+ (for the dashboard TUI)
 
 ## Quick Start

@@ -1,5 +1,7 @@
 # Mode: contacto -- LinkedIn Power Move
 
+> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_shared.md` → Voice DNA.
+
 1. **Identify targets** via WebSearch:
    - Hiring manager of the team
    - Assigned recruiter

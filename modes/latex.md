@@ -22,6 +22,11 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 
 **Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.
 
+## Language support
+
+- **Localized section titles are fine.** The validator counts `\section{}` blocks instead of matching English titles, so a Spanish/French/German CV (e.g. `\section{Educación}`) validates normally.
+- **CJK (Japanese / Chinese / Korean) is NOT supported on this path yet.** The template is a pdfLaTeX / Computer-Modern setup with no CJK font, so kana/kanji/hangul cannot render. `generate-latex.mjs` detects CJK characters and stops with guidance. For a Japanese CV, use `pdf` mode (HTML → PDF), which renders CJK via a `lang="ja"` font fallback.
+
 ## JSON Input Schema
 
 Write a JSON file with this structure. `build-cv-latex.mjs` handles template merge and LaTeX escaping — no need to escape special characters yourself.

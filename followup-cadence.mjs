@@ -114,6 +114,17 @@ export function parseDate(dateStr) {
   return new Date(dateStr.trim());
 }
 
+// The tracker `date` column is often the evaluation date, while the real
+// submission date is recorded in the notes as "Applied YYYY-MM-DD" (or
+// "APPLIED ..."). Prefer that so cadence reflects when the application actually
+// went out, not when the role was evaluated. Returns the first such date, or
+// null when the notes don't carry one (caller falls back to the date column).
+export function parseAppliedDate(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(/\bapplied\s+(\d{4}-\d{2}-\d{2})/i);
+  return m ? m[1] : null;
+}
+
 export function daysBetween(d1, d2) {
   return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
 }
@@ -190,7 +201,11 @@ function extractContacts(notes) {
 function resolveReportPath(reportField) {
   const match = reportField.match(/\]\(([^)]+)\)/);
   if (!match) return null;
-  const fullPath = join(CAREER_OPS, match[1]);
+  // Report links in the tracker are normalized relative to the tracker file's
+  // own directory (see PR #760 — `merge-tracker.mjs --migrate`). Resolve against
+  // dirname(APPS_FILE), not the project root, otherwise relative paths like
+  // `../reports/...` (the data/applications.md layout) escape above the project.
+  const fullPath = join(dirname(APPS_FILE), match[1]);
   return existsSync(fullPath) ? match[1] : null;
 }
 
@@ -255,7 +270,9 @@ function analyze() {
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
 
-    const appDate = parseDate(app.date);
+    // Prefer the "Applied YYYY-MM-DD" date from notes; fall back to the column.
+    const appliedDate = parseAppliedDate(app.notes) || app.date;
+    const appDate = parseDate(appliedDate);
     if (!appDate) continue;
 
     const daysSinceApp = daysBetween(appDate, now);
@@ -273,7 +290,7 @@ function analyze() {
     }
 
     const urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
-    const nextFollowupDate = computeNextFollowupDate(normalized, app.date, lastFollowupDate, followupCount);
+    const nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
@@ -283,6 +300,7 @@ function analyze() {
     entries.push({
       num: app.num,
       date: app.date,
+      appliedDate,
       company: app.company,
       role: app.role,
       status: normalized,

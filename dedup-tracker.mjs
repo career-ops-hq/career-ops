@@ -12,16 +12,21 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { roleFuzzyMatch } from './role-matcher.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+// Support both layouts: data/applications.md (boilerplate) and applications.md
+// (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
+// fixture so the real user tracker is never touched.
+const APPS_FILE = process.env.CAREER_OPS_TRACKER
+  ? process.env.CAREER_OPS_TRACKER
+  : existsSync(join(CAREER_OPS, 'data/applications.md'))
+    ? join(CAREER_OPS, 'data/applications.md')
+    : join(CAREER_OPS, 'applications.md');
 const DRY_RUN = process.argv.includes('--dry-run');
 
-// Ensure required directories exist (fresh setup)
-mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
+// Ensure the target tracker directory exists in both normal and fixture mode.
+mkdirSync(dirname(APPS_FILE), { recursive: true });
 
 // Status advancement order (higher = more advanced in pipeline)
 // Aplicado > Rechazado because active application > terminal state
@@ -49,6 +54,17 @@ const STATUS_RANK = {
   'oferta': 6,
 };
 
+/**
+ * Normalize a company name into the grouping key used by deduplication.
+ *
+ * The tracker may contain punctuation, parenthetical branding, or spacing
+ * differences for the same employer. This function removes those presentation
+ * differences while keeping the alphanumeric company identity that determines
+ * which rows are safe to compare for duplicate roles.
+ *
+ * @param {string} name - Company name from an applications.md row.
+ * @returns {string} Lowercase company key used for same-company grouping.
+ */
 function normalizeCompany(name) {
   return name.toLowerCase()
     .replace(/[()]/g, '')
@@ -57,47 +73,181 @@ function normalizeCompany(name) {
     .trim();
 }
 
-function normalizeRole(role) {
-  return role.toLowerCase()
-    .replace(/[()]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/[^a-z0-9 /]/g, '')
-    .trim();
+/**
+ * Normalize tracker status text before ranking or comparing it.
+ *
+ * Existing trackers can contain bold Markdown wrappers or legacy dates appended
+ * to the status cell. Dedup needs the canonical status word only, in lowercase,
+ * so advanced-state protection works the same for old and new tracker rows.
+ *
+ * @param {string} status - Raw status cell from applications.md.
+ * @returns {string} Lowercase status key with Markdown/date noise removed.
+ */
+function normalizeStatus(status) {
+  return String(status ?? '')
+    .replace(/\*\*/g, '')
+    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '')
+    .trim()
+    .toLowerCase();
 }
 
-const ROLE_STOPWORDS = new Set([
-  'senior', 'junior', 'lead', 'staff', 'principal', 'head', 'chief',
-  'manager', 'director', 'associate', 'intern', 'contractor',
-  'remote', 'hybrid', 'onsite',
-  'engineer', 'engineering',
-]);
+/**
+ * Convert a tracker status into its pipeline-advancement rank.
+ *
+ * Higher ranks represent states that carry more user intent and should not be
+ * casually overwritten or removed. Unknown statuses rank as 0 so malformed data
+ * is treated conservatively rather than promoted.
+ *
+ * @param {string} status - Raw or normalized status value.
+ * @returns {number} Numeric rank from STATUS_RANK, or 0 for unknown statuses.
+ */
+function statusRank(status) {
+  return STATUS_RANK[normalizeStatus(status)] || 0;
+}
 
-const LOCATION_STOPWORDS = new Set([
-  'tokyo', 'japan', 'london', 'berlin', 'paris', 'singapore',
-  'york', 'francisco', 'angeles', 'seattle', 'austin', 'boston',
-  'chicago', 'denver', 'toronto', 'amsterdam', 'dublin', 'sydney',
-  'remote', 'global', 'emea', 'apac', 'latam',
-]);
+/**
+ * Check whether a status represents a real application already in motion.
+ *
+ * Rows at Applied or later have user-visible history that dedup must preserve
+ * unless the duplicate relationship is exact. This guard prevents fuzzy title
+ * matches from silently deleting an active application record.
+ *
+ * @param {string} status - Raw status value from the tracker row.
+ * @returns {boolean} True when the row is Applied, Responded, Interview, or Offer.
+ */
+function isAdvancedStatus(status) {
+  return statusRank(status) >= STATUS_RANK.applied;
+}
 
+/**
+ * Extract the report number from a Markdown report link.
+ *
+ * Tracker report cells are normally written as links like
+ * `[123](../reports/123-company-role-date.md)`. The bracketed number is the
+ * stable report identity used to distinguish exact duplicates from merely
+ * similar fuzzy-title matches.
+ *
+ * @param {string} reportStr - Raw report cell from applications.md.
+ * @returns {number|null} Parsed report number, or null when no link number exists.
+ */
+function extractReportNum(reportStr) {
+  const m = String(reportStr ?? '').match(/\[(\d+)\]/);
+  return m ? parseInt(m[1]) : null;
+}
+
+/**
+ * Determine whether two tracker rows point to the same exact report identity.
+ *
+ * Exact identity is stronger than fuzzy role matching. If two rows share the
+ * same tracker number or bracketed report number, dedup may treat them as the
+ * same record even when an advanced status is present.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {boolean} True when both rows represent the same report identity.
+ */
+function sameReportIdentity(a, b) {
+  if (a.num === b.num) return true;
+  const reportA = extractReportNum(a.report);
+  const reportB = extractReportNum(b.report);
+  return reportA !== null && reportA === reportB;
+}
+
+/**
+ * Build a stable key for logging one protected fuzzy pair only once.
+ *
+ * The nested dedup loop can encounter a protected pair during cluster building.
+ * Sorting the row numbers produces the same key regardless of comparison order,
+ * which keeps the warning output readable and avoids repeated noise.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {string} Stable pair key in ascending tracker-number order.
+ */
+function pairKey(a, b) {
+  return [a.num, b.num].sort((x, y) => x - y).join(':');
+}
+
+const protectedFuzzyPairs = new Set();
+
+/**
+ * Decide whether two same-company tracker rows should be deduplicated.
+ *
+ * The function first accepts exact report identity, then applies the shared
+ * fuzzy role matcher. If either row is already Applied or later, fuzzy matching
+ * alone is not enough; dedup keeps both rows and warns because deleting one
+ * would lose application status, report link, and notes for a potentially
+ * distinct opening.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {boolean} True when dedup may cluster the two rows as duplicates.
+ */
 function roleMatch(a, b) {
-  const filterStopwords = (words) =>
-    words.filter(w => !ROLE_STOPWORDS.has(w) && !LOCATION_STOPWORDS.has(w));
+  if (sameReportIdentity(a, b)) return true;
+  if (!roleFuzzyMatch(a.role, b.role)) return false;
 
-  const wordsA = filterStopwords(normalizeRole(a).split(/\s+/).filter(w => w.length > 2));
-  const wordsB = filterStopwords(normalizeRole(b).split(/\s+/).filter(w => w.length > 2));
+  // Fuzzy title matches are intentionally conservative once either row has
+  // entered the real application pipeline. A user may already have applied to
+  // one sibling role, so deleting that row because a higher-scored sibling has
+  // similar wording would lose status, report, and notes. Keep both unless the
+  // rows point to the exact same report identity.
+  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) {
+    const key = pairKey(a, b);
+    if (!protectedFuzzyPairs.has(key)) {
+      protectedFuzzyPairs.add(key);
+      console.warn(`⚠️  Keep #${a.num} and #${b.num}: fuzzy role match but advanced status requires exact report identity`);
+    }
+    return false;
+  }
 
-  if (wordsA.length === 0 || wordsB.length === 0) return false;
-
-  const overlap = wordsA.filter(w => wordsB.some(wb => wb === w));
-  const smaller = Math.min(wordsA.length, wordsB.length);
-  const ratio = overlap.length / smaller;
-
-  return overlap.length >= 2 && ratio >= 0.6;
+  return true;
 }
 
+/**
+ * Parse a tracker score cell into a numeric value for keeper selection.
+ *
+ * Scores may include Markdown bolding or a `/5` suffix. Dedup only needs the
+ * numeric part so it can keep the highest-scored duplicate row in a cluster.
+ *
+ * @param {string} s - Raw score cell such as `4.3/5` or `**4.3/5**`.
+ * @returns {number} Parsed score, or 0 when no number is present.
+ */
 function parseScore(s) {
   const m = s.replace(/\*\*/g, '').match(/([\d.]+)/);
   return m ? parseFloat(m[1]) : 0;
+}
+
+/**
+ * Parse one Markdown table row from applications.md into a tracker object.
+ *
+ * Header and separator rows return null because they either lack enough cells
+ * or do not have a numeric tracker id. Valid data rows keep the raw line; the
+ * caller attaches the physical line index after parsing so later updates and
+ * removals never depend on tracker numbers being globally unique.
+ *
+ * @param {string} line - One line from applications.md.
+ * @returns {object|null} Parsed tracker row, or null for non-application lines.
+ */
+/**
+ * Rebuild a markdown table row from the cells produced by `line.split('|')`.
+ *
+ * `split('|')` yields a leading empty element (before the opening `|`) and,
+ * when the row ends with a trailing `|`, a trailing empty element too. The old
+ * `slice(1, -1)` assumed that trailing empty always existed — but a row written
+ * without a trailing pipe (`| 5 | … | note`, still a valid 9-cell row) has its
+ * real last cell (the notes) at the end, so `slice(1, -1)` silently dropped it.
+ * Here we drop the leading empty and only drop a trailing element when it is
+ * actually empty, preserving every real cell regardless of trailing-pipe style
+ * (and tolerating extra columns like a custom Location).
+ *
+ * @param {string[]} parts - Trimmed cells from `line.split('|').map(s => s.trim())`.
+ * @returns {string} The rebuilt `| a | b | … |` row.
+ */
+function rebuildRow(parts) {
+  const cells = parts.slice(1);
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+  return '| ' + cells.join(' | ') + ' |';
 }
 
 function parseAppLine(line) {
@@ -129,14 +279,13 @@ const lines = content.split('\n');
 
 // Parse all entries
 const entries = [];
-const entryLineMap = new Map(); // num → line index
 
 for (let i = 0; i < lines.length; i++) {
   if (!lines[i].startsWith('|')) continue;
   const app = parseAppLine(lines[i]);
   if (app && app.num > 0) {
+    app.lineIdx = i;
     entries.push(app);
-    entryLineMap.set(app.num, i);
   }
 }
 
@@ -166,7 +315,7 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
-      if (roleMatch(companyEntries[i].role, companyEntries[j].role)) {
+      if (roleMatch(companyEntries[i], companyEntries[j])) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }
@@ -179,10 +328,10 @@ for (const [company, companyEntries] of groups) {
     const keeper = cluster[0];
 
     // Check if any removed entry has more advanced status
-    let bestStatusRank = STATUS_RANK[keeper.status.toLowerCase()] || 0;
+    let bestStatusRank = statusRank(keeper.status);
     let bestStatus = keeper.status;
     for (let k = 1; k < cluster.length; k++) {
-      const rank = STATUS_RANK[cluster[k].status.toLowerCase()] || 0;
+      const rank = statusRank(cluster[k].status);
       if (rank > bestStatusRank) {
         bestStatusRank = rank;
         bestStatus = cluster[k].status;
@@ -191,11 +340,11 @@ for (const [company, companyEntries] of groups) {
 
     // Update keeper's status if a removed entry had a more advanced one
     if (bestStatus !== keeper.status) {
-      const lineIdx = entryLineMap.get(keeper.num);
+      const lineIdx = keeper.lineIdx;
       if (lineIdx !== undefined) {
         const parts = lines[lineIdx].split('|').map(s => s.trim());
         parts[6] = bestStatus;
-        lines[lineIdx] = '| ' + parts.slice(1, -1).join(' | ') + ' |';
+        lines[lineIdx] = rebuildRow(parts);
         console.log(`  📝 #${keeper.num}: status promoted to "${bestStatus}" (from #${cluster.find(e => e.status === bestStatus)?.num})`);
       }
     }
@@ -203,7 +352,7 @@ for (const [company, companyEntries] of groups) {
     // Remove duplicates
     for (let k = 1; k < cluster.length; k++) {
       const dup = cluster[k];
-      const lineIdx = entryLineMap.get(dup.num);
+      const lineIdx = dup.lineIdx;
       if (lineIdx !== undefined) {
         linesToRemove.add(lineIdx);
         removed++;

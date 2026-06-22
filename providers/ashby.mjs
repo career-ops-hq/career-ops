@@ -92,6 +92,32 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// Build the full location string from primary + secondary locations.
+// Ashby's posting-api puts extra hiring regions in `secondaryLocations[]`
+// (each with a region label + a postalAddress). Using only `j.location` drops
+// them, so an EU-eligible role whose PRIMARY label is e.g. "Canada" reads as
+// Canada-only and gets wrongly removed by scan.mjs's location_filter. We fold
+// in each secondary's region, locality, and country so the filter can match
+// (e.g. "Europe", "Berlin", "Germany"). Deduped, joined with " · ".
+/** @param {any} j */
+function formatLocation(j) {
+  const parts = [];
+  if (typeof j.location === 'string' && j.location.trim()) parts.push(j.location.trim());
+  if (Array.isArray(j.secondaryLocations)) {
+    for (const s of j.secondaryLocations) {
+      if (!s || typeof s !== 'object') continue;
+      if (typeof s.location === 'string' && s.location.trim()) parts.push(s.location.trim());
+      const pa = s.address && s.address.postalAddress;
+      if (pa) {
+        for (const k of ['addressLocality', 'addressCountry']) {
+          if (typeof pa[k] === 'string' && pa[k].trim()) parts.push(pa[k].trim());
+        }
+      }
+    }
+  }
+  return [...new Set(parts)].join(' · ');
+}
+
 /** @type {Provider} */
 export default {
   id: 'ashby',
@@ -118,7 +144,7 @@ export default {
           title: j.title || '',
           url: j.jobUrl || '',
           company: entry.name,
-          location: j.location || '',
+          location: formatLocation(j),
           salary: parseCompensation(j),
           postedAt: toEpochMs(j.publishedAt),
         }));
