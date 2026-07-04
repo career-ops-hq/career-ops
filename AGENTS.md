@@ -275,6 +275,7 @@ Two separate axes:
 | Fills out application form | `apply` |
 | Searches for new offers | `scan` |
 | Processes pending URLs | `pipeline` |
+| Wants a fast first-pass filter before full evaluation | `triage` |
 | Batch processes offers | `batch` |
 | Asks about rejection patterns, wants to improve targeting, or wants to match interview answers to best-fit roles | `patterns` |
 | Receives an offer/contract and wants help understanding it before signing | `offer-prep` — clause walk with neutral tags + lawyer question list; describes, never judges; no verdicts, no online research; optional draft-only negotiation reply from the "Items to raise" list |

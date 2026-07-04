@@ -28,11 +28,61 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
 
 ## Workflow
 
+### Two-pass mode (default when 5+ URLs survive the liveness sweep)
+
+Running a full A-G evaluation on every URL wastes tokens on roles that would
+immediately disqualify. The two-pass gate runs a lightweight triage first, then
+full evaluation only on roles that pass.
+
+**Read `config/profile.yml` → `pipeline.triage_threshold`** (default `3.5`).
+**Read `config/profile.yml` → `pipeline.triage_min_urls`** (default `5`).
+
+If the number of surviving URLs < `triage_min_urls`, skip triage and run full
+evaluations directly (the numbered steps below). Otherwise:
+
+#### Pass 1 — Parallel triage (reads `modes/triage.md` + `modes/_brief.md` only)
+
+Launch one triage agent per surviving URL in parallel
+(`run_in_background=true`). Each agent:
+1. Reads only `modes/_brief.md` (the compact profile brief — see `modes/triage.md`)
+2. WebFetches the JD
+3. Returns a single `TRIAGE: {verdict} | {company} | {role} | {score}/5 | {reason}` line
+4. Writes NO files
+
+Each triage agent costs a small fraction of a full evaluation (it never reads
+`cv.md`, `modes/_shared.md`, `modes/_profile.md`, or `modes/oferta.md`).
+
+Collect all `TRIAGE:` lines. Partition results:
+- **PASS** (≥ triage_threshold) → queue for full evaluation (Pass 2)
+- **MARGINAL** (3.0–3.4) → show to user; skip full evaluation unless user overrides
+- **FAIL** (< 3.0) → mark `- [x] ~~URL | Company | Role~~ — FAIL triage ({score}/5: {reason})` in Processed; write a minimal SKIP TSV: `{next_num}\t{date}\t{company}\t{role}\tSKIP\t{score}/5\t❌\t\t{reason}`
+- **SKIP** → mark as inaccessible in pipeline.md
+
+Show the user a triage summary table before proceeding:
+```
+| Company | Role | Score | Verdict | Reason |
+```
+
+#### Pass 2 — Full evaluation (only PASS roles)
+
+For each PASS URL, execute the full evaluation exactly as described in the
+numbered steps below. MARGINAL roles are shown in the summary but skipped unless
+the user explicitly says "evaluate #N anyway."
+
+`modes/_brief.md` is a user-layer file. If it does not exist, `doctor.mjs`
+auto-copies it from `modes/_brief.template.md`; fill it in (or ask the agent to)
+before relying on triage. If no brief is available, skip two-pass mode and run
+full evaluations directly.
+
+---
+
+### Full evaluation (per URL)
+
 1. **Read** `data/pipeline.md` → search for `- [ ]` items in the "Pending" section. Run the **Liveness sweep** (above) first and drop any expired entries before continuing.
-2. **For each surviving pending URL**:
+2. **For each URL proceeding to full evaluation**:
    a. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
    b. If the URL is not accessible → mark as `- [!]` with a note and continue
-   c. **Pre-screen gate**: apply the gate above (using the extracted JD). If the JD is an obvious mismatch, log the discard to `data/discard.log` (per the **Discard log** rule above — three fields, no job ID in interactive mode), mark it `- [x] #-- | {url} | skipped (pre-screen mismatch: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed for discarded postings.
+   c. **Pre-screen gate**: apply the gate above (using the extracted JD). If the JD is an obvious mismatch, log the discard to `data/discard.log` (per the **Discard log** rule above — three fields, no job ID in interactive mode), mark it `- [x] #-- | {url} | skipped (pre-screen mismatch: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed for discarded postings. When two-pass mode ran, triage has already filtered these roles out — the gate stays in place as a second line of defense for URLs that reached full evaluation without triage (batches below `triage_min_urls`, or no `modes/_brief.md`).
    d. Claim the next sequential `REPORT_NUM` atomically by running `node reserve-report-num.mjs` (and release the sentinel using `node reserve-report-num.mjs --release <num>` after the report is written)
    e. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker. Read `modes/_custom.md` → Pipeline Rules, if it exists, and apply its override here. Default (if absent or silent): standard pipeline execution.
    f. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
@@ -40,12 +90,27 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
    **About the PDF gate (configurable):** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key does not exist, default to `3.0` (this mode's original gate). If the evaluation score is less than the threshold, skip PDF generation: write the report normally, show in the header `**PDF:** not generated — run /career-ops pdf {company-slug} to create on demand`, and mark PDF ❌ in the tracker. If the score is ≥ threshold, generate the PDF as usual.
 
    **Tuning it:** Generating a tailored PDF costs ~30–60s per entry (Playwright launch + HTML render) and produces files that often go unused — most roles score in the 2.x/3.x range and never reach the application stage. Raise `auto_pdf_score_threshold` (e.g. `4.0`) to write only the report for marginal offers and produce the PDF on demand via `/career-ops pdf {slug}`; set `0` to generate one for every offer. Both modes (Path A `/career-ops pipeline` and Path B `batch/batch-runner.sh`) read the same key, so behavior is identical regardless of which path processes an offer.
-3. **If there are 3+ pending URLs**, launch agents in parallel (Agent tool with `run_in_background`) to maximize speed — at most one agent per pending URL. Each is a **single-pass worker**: it evaluates its one URL and must **not** spawn further subagents or invoke other skills; its company/comp research stays inline and bounded (see `modes/_shared.md` → Subagent delegation). This keeps a pipeline run from fanning out into a recursive agent swarm.
+3. **If there are 3+ URLs for full evaluation**, launch agents in parallel (Agent tool with `run_in_background`) to maximize speed — at most one agent per URL. Each is a **single-pass worker**: it evaluates its one URL and must **not** spawn further subagents or invoke other skills; its company/comp research stays inline and bounded (see `modes/_shared.md` → Subagent delegation). This keeps a pipeline run from fanning out into a recursive agent swarm.
 4. **At the end**, show summary table:
 
 ```
-| # | Company | Role | Score | PDF | Recommended action |
+| # | Company | Role | Triage | Full Score | PDF | Recommended action |
 ```
+
+### Token budget reference
+
+Two-pass mode spends a cheap triage read on every URL and reserves the expensive
+full evaluation for roles that pass. On a mixed batch the savings compound:
+
+| Batch size | Without triage | With triage (est.) | Savings |
+|-----------|---------------|-------------------|---------|
+| 5 URLs | ~325K | ~130K | ~60% |
+| 10 URLs | ~650K | ~220K | ~66% |
+| 16 URLs | ~1.05M | ~330K | ~69% |
+
+Illustrative — assumes ~65K/full eval, ~15K/triage agent, ~50% pass rate. Your
+actual mix and pass rate will vary; the win grows with batch size and with the
+share of roles that triage filters out.
 
 ## Format of pipeline.md
 
