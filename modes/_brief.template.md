@@ -67,12 +67,16 @@ hard gaps you cannot bridge — be specific so triage can pattern-match them.
 - {e.g. Travel above your limit for the role type}
 
 ## Quick Scoring Guide
+
+Bands are relative to `triage_threshold` (`config/profile.yml → pipeline.triage_threshold`,
+default **3.5**), matching the verdict table in `modes/triage.md` — so a score at or
+above the threshold is PASS, and only the band below it is MARGINAL.
+
 | Score | Verdict | What it means |
 |-------|---------|---------------|
-| 4.5–5.0 | **PASS** | Strong archetype + comp + location, no hard DQs |
-| 4.0–4.4 | **PASS** | Clear fit, 1–2 soft/bridgeable gaps |
-| 3.0–3.9 | **MARGINAL** | Borderline — shown to user as one line |
-| < 3.0 | **FAIL** | Does not clear bar — filtered |
+| ≥ threshold (default 3.5) | **PASS** | Clears the bar — strong archetype + comp + location, gaps bridgeable |
+| 3.0 – (threshold − 0.1) | **MARGINAL** | Borderline — shown to user as one line |
+| < 3.0 | **FAIL** | Does not clear the bar — filtered |
 
 ## Soft Red Flags (−0.5 each, additive)
 Not disqualifiers, but they lower the score.

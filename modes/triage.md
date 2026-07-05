@@ -28,10 +28,20 @@ filled in, triage cannot run — fall back to full evaluation.
 ## Steps
 
 ### 1. Fetch JD
-WebFetch the URL. If the page returns no JD content (error, redirect to generic
-careers page, or only nav/footer), return immediately:
 
-```
+Get the JD content, mirroring `pipeline.md`'s JD detection so an accessible posting
+isn't wrongly skipped just because WebFetch can't read it:
+
+- **PDF URL** (path ends in `.pdf`, or the page serves a PDF): read it directly with
+  the **Read** tool. Do NOT WebFetch — WebFetch can't extract PDF text, which would
+  wrongly mark a live PDF posting `SKIP`.
+- **`local:` prefix** (e.g. `local:jds/role.md`): read the local file with the Read tool.
+- **Otherwise:** WebFetch the URL.
+
+If the fetch returns no JD content (error, redirect to a generic careers page, or
+only nav/footer), return immediately:
+
+```text
 TRIAGE: SKIP | {Company} | {Role or "Unknown"} | 0/5 | Posting inaccessible or expired
 ```
 
@@ -80,12 +90,12 @@ returning a verdict.
 ### 5. Return
 Return ONLY this single line. No prose. No markdown. No headers.
 
-```
+```text
 TRIAGE: {PASS|MARGINAL|FAIL|SKIP} | {Company} | {Role} | {Score}/5 | {reason ≤ 25 words}
 ```
 
 **Examples:**
-```
+```text
 TRIAGE: PASS | Acme Corp | Senior Program Manager | 4.3/5 | Remote, comp clears floor, archetype direct match, 3+ proof points map
 TRIAGE: FAIL | Globex | Staff Engineer | 2.0/5 | Hard DQ: primary hands-on coding required — outside target archetypes
 TRIAGE: MARGINAL | Initech | Sr PM | 3.4/5 | Required cert is a gap, travel risk, comp barely clears floor

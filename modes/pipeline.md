@@ -104,13 +104,17 @@ full evaluation for roles that pass. On a mixed batch the savings compound:
 
 | Batch size | Without triage | With triage (est.) | Savings |
 |-----------|---------------|-------------------|---------|
-| 5 URLs | ~325K | ~130K | ~60% |
-| 10 URLs | ~650K | ~220K | ~66% |
-| 16 URLs | ~1.05M | ~330K | ~69% |
+| 5 URLs | ~325K | ~238K | ~27% |
+| 10 URLs | ~650K | ~475K | ~27% |
+| 16 URLs | ~1.05M | ~760K | ~27% |
 
-Illustrative — assumes ~65K/full eval, ~15K/triage agent, ~50% pass rate. Your
-actual mix and pass rate will vary; the win grows with batch size and with the
-share of roles that triage filters out.
+Illustrative — assumes ~65K/full eval, ~15K/triage agent, ~50% pass rate
+(without = N × 65K; with = N × 15K + passers × 65K). Triage reads every URL
+cheaply and reserves the full evaluation for the ~half that pass, so at a 50%
+pass rate the percentage saving stays near ~27% across batch sizes (absolute
+tokens saved still grow with batch size). The percentage win grows as the pass
+rate drops — the more roles triage filters out, the fewer full evaluations you
+run (≈52% saved at a 25% pass rate). Your actual mix and pass rate will vary.
 
 ## Format of pipeline.md
 
