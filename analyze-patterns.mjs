@@ -617,16 +617,29 @@ function analyze() {
   };
 
   // --- Tech stack gaps (from negative + self_filtered outcomes) ---
+  // Canonical spellings keyed by lowercased match — the /i regex below returns
+  // the source casing ("react native", "NODEJS"), and without this map each
+  // case variant of the same tech lands in its own techStackGaps bucket.
+  // Keys cover the optional-dot regex variants (node.js/nodejs, vue.js/vuejs).
+  const TECH_CANONICAL = new Map([
+    'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
+    'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
+    'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
+    'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
+    'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
+  ].map(t => [t.toLowerCase(), t]));
+  TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
+  TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
   const stackGapCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
     if (!e.report?.gaps) continue;
     for (const gap of e.report.gaps) {
       // Extract tech keywords from gap descriptions
-      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest|React Native)\b/gi);
+      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)\b/gi);
       if (techs) {
         for (const tech of techs) {
-          const normalized = tech.charAt(0).toUpperCase() + tech.slice(1);
+          const normalized = TECH_CANONICAL.get(tech.toLowerCase()) || tech;
           stackGapCounts.set(normalized, (stackGapCounts.get(normalized) || 0) + 1);
         }
       }

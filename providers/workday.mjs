@@ -116,17 +116,25 @@ function pageIsPastWindow(pageJobs, sinceMs) {
 }
 
 function resolveEndpoint(entry) {
-  const url = entry.careers_url || '';
-  const m = url.match(/^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
-  if (!m) return null;
-  const [, tenant, instance, site] = m;
-  const origin = `https://${tenant}.${instance}.myworkdayjobs.com`;
-  return {
-    api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
-    // externalPath is relative to the site, not the host root — without the
-    // site segment the URL 404s.
-    jobBase: `${origin}/${site}`,
-  };
+  // Try api: first, then careers_url (mirrors greenhouse/ashby), returning the
+  // first that matches the Workday tenant pattern. This lets a branded page
+  // (e.g. https://www.ptc.com/en/careers) stay as careers_url while the Workday
+  // tenant URL is pinned via api: — and, because we fall through on a non-match,
+  // a non-Workday api: value doesn't shadow a valid careers_url.
+  for (const url of [entry.api, entry.careers_url]) {
+    if (typeof url !== 'string' || !url) continue;
+    const m = url.match(/^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
+    if (!m) continue;
+    const [, tenant, instance, site] = m;
+    const origin = `https://${tenant}.${instance}.myworkdayjobs.com`;
+    return {
+      api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
+      // externalPath is relative to the site, not the host root — without the
+      // site segment the URL 404s.
+      jobBase: `${origin}/${site}`,
+    };
+  }
+  return null;
 }
 
 function parsePostedOn(label) {
@@ -195,9 +203,22 @@ export default {
     // one): bounded by `total` when the server reports it, always capped at
     // maxPages. When `total` is absent, only probe further pages if the first
     // one was full — a short first page already means there's nothing more.
-    const pagesToFetch = total !== null
+    let pagesToFetch = total !== null
       ? Math.min(Math.ceil(total / PAGE_SIZE), maxPages)
       : (firstPostings.length >= PAGE_SIZE ? maxPages : 1);
+
+    // Honor a context page cap — verify-portals' liveness probe sets
+    // `ctx.maxPages: 1` so it only needs to know a board is live, not its full
+    // count. Without this we'd fetch page 0, then request page 1 and trip the
+    // probe's second-request sentinel; fetchPageWithRetry treats that abort as
+    // transient and retries it MAX_RETRIES times (with backoff) before giving up
+    // — noisy in the logs and rude to the tenant. Capping here makes workday a
+    // "cooperating provider" that stops after one page and reports an exact
+    // first-page count. Kept separate from `maxPages` so the entry-cap warning
+    // below (pagesToFetch === maxPages) stays quiet. No effect on real scans,
+    // which don't set ctx.maxPages.
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+    pagesToFetch = Math.min(pagesToFetch, ctxCap);
 
     // Why pagination stopped — drives which warning (if any) fires below.
     // 'fetch-error' must NOT produce the "raise max_pages" advice: that knob

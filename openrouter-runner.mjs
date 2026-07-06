@@ -556,7 +556,10 @@ async function cmdScan() {
       const matched = jobs.filter(j => titleMatches(j.title));
       console.log(`${jobs.length} listings, ${matched.length} matched`);
       for (const j of matched) {
-        found.push({ url: j.absolute_url ?? c.api, company: c.name, role: j.title, location: j.location?.name ?? '' });
+        // Skip postings without a public URL — falling back to the API
+        // endpoint would write an unusable link into the pipeline.
+        if (!j.absolute_url) continue;
+        found.push({ url: j.absolute_url, company: c.name, role: j.title, location: j.location?.name ?? '' });
       }
     } catch (e) {
       console.log(`ERROR: ${e.message}`);

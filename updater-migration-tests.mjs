@@ -46,6 +46,7 @@ const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
 const requiredSystemPaths = [
+  'modes/email.md',
   'modes/followup.md',
   'modes/interview.md',
   'modes/interview-prep.md',

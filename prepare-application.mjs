@@ -15,11 +15,11 @@
  * Supported ATS:
  *   Greenhouse  boards.greenhouse.io / greenhouse.io
  *   Ashby       jobs.ashbyhq.com / ashbyhq.com
- *   Lever       jobs.lever.co / lever.co
+ *   Lever       jobs.(eu.)?lever.co / lever.co
  */
 
 import { readFileSync, existsSync, statSync } from 'fs';
-import { basename, resolve, dirname } from 'path';
+import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +30,7 @@ const ALLOWED_HOSTS = new Set([
   'jobs.ashbyhq.com',
   'ashbyhq.com',
   'jobs.lever.co',
+  'jobs.eu.lever.co',
   'lever.co',
 ]);
 
@@ -52,7 +53,8 @@ if (!applyUrl || !pdfPath) {
 const outputDir = resolve(ROOT, 'output');
 const absPdf    = resolve(ROOT, pdfPath);
 
-if (!absPdf.startsWith(outputDir + '/') && absPdf !== outputDir) {
+const relPdf = relative(outputDir, absPdf);
+if (relPdf === '' || relPdf.startsWith('..') || isAbsolute(relPdf)) {
   console.error(`Error: --pdf must point to a file inside output/ (got ${pdfPath})`);
   process.exit(1);
 }
@@ -98,7 +100,7 @@ function detectAts(url) {
   const path = url.pathname;
   const GH  = new Set(['boards.greenhouse.io', 'greenhouse.io']);
   const ASH = new Set(['jobs.ashbyhq.com', 'ashbyhq.com']);
-  const LEV = new Set(['jobs.lever.co', 'lever.co']);
+  const LEV = new Set(['jobs.lever.co', 'jobs.eu.lever.co', 'lever.co']);
 
   const gh = path.match(/^\/([^/]+)\/jobs\/(\d+)/);
   if (gh && GH.has(url.hostname)) {

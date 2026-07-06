@@ -22,7 +22,7 @@ import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, resolveScoreStatus } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -407,6 +407,34 @@ function extractReportNum(reportStr) {
   return m ? parseInt(m[1]) : null;
 }
 
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
+/**
+ * Extract a req/job/posting number from a tracker Notes cell, if present.
+ *
+ * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
+ * req numbers on its own, which lets two distinct postings at the same company
+ * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
+ * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
+ * pulls out that number so the caller can treat a confirmed mismatch as proof
+ * the rows are NOT duplicates, without touching cases where no number is
+ * present on either side.
+ *
+ * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
+ * @returns {string|null} Uppercased req/job number, or null when none is found.
+ */
+function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
+}
+
 /**
  * Parse a score cell into a numeric value for score-upgrade decisions.
  *
@@ -511,13 +539,22 @@ function parseTsvContent(content, filename) {
       return null;
     }
     // Format: num | date | company | role | score | status | pdf | report | notes [| location]
+    // Identify score vs status by content, not position, so a swapped row can't
+    // merge silently (#1427).
+    const resolved = resolveScoreStatus(parts[4], parts[5]);
+    if (!resolved) {
+      console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4]}" | "${parts[5]}") — refusing to merge a possible column swap`);
+      return null;
+    }
     addition = {
       num: parseInt(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
-      score: parts[4],
-      status: validateStatus(parts[5]),
+      // Write-canonical: the tracker stores scores unbolded (verify-pipeline
+      // rejects bold scores), so strip any markdown bold from the incoming cell.
+      score: resolved.score.replace(/\*\*/g, '').trim(),
+      status: validateStatus(resolved.status),
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
@@ -531,28 +568,14 @@ function parseTsvContent(content, filename) {
       return null;
     }
 
-    // Detect column order: some TSVs have (status, score), others have (score, status)
-    // Heuristic: if col4 looks like a score and col5 looks like a status, they're swapped
-    const col4 = parts[4].trim();
-    const col5 = parts[5].trim();
-    const col4LooksLikeScore = /^\d+\.?\d*\/5$/.test(col4) || col4 === 'N/A' || col4 === 'DUP';
-    const col5LooksLikeScore = /^\d+\.?\d*\/5$/.test(col5) || col5 === 'N/A' || col5 === 'DUP';
-    const col4LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col4);
-    const col5LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col5);
-
-    let statusCol, scoreCol;
-    if (col4LooksLikeStatus && !col4LooksLikeScore) {
-      // Standard format: col4=status, col5=score
-      statusCol = col4; scoreCol = col5;
-    } else if (col4LooksLikeScore && col5LooksLikeStatus) {
-      // Swapped format: col4=score, col5=status
-      statusCol = col5; scoreCol = col4;
-    } else if (col5LooksLikeScore && !col4LooksLikeScore) {
-      // col5 is definitely score → col4 must be status
-      statusCol = col4; scoreCol = col5;
-    } else {
-      // Default: standard format (status before score)
-      statusCol = col4; scoreCol = col5;
+    // Column order varies: batch TSVs write (status, score), applications.md is
+    // (score, status). Identify each by content — the score cell is recognizable
+    // by pattern, a status never is — so a reordered TSV merges correctly and an
+    // undecidable row is skipped loudly instead of merging swapped data (#1427).
+    const resolved = resolveScoreStatus(parts[4].trim(), parts[5].trim());
+    if (!resolved) {
+      console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4].trim()}" | "${parts[5].trim()}") — refusing to merge a possible column swap`);
+      return null;
     }
 
     addition = {
@@ -560,8 +583,10 @@ function parseTsvContent(content, filename) {
       date: parts[1],
       company: parts[2],
       role: parts[3],
-      status: validateStatus(statusCol),
-      score: scoreCol,
+      status: validateStatus(resolved.status),
+      // Write-canonical: strip any markdown bold so the stored score stays
+      // unbolded (verify-pipeline rejects bold scores).
+      score: resolved.score.replace(/\*\*/g, '').trim(),
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
@@ -649,8 +674,8 @@ if (tsvFiles.length === 0) {
 
 // Sort files numerically for deterministic processing
 tsvFiles.sort((a, b) => {
-  const numA = parseInt(a.replace(/\D/g, '')) || 0;
-  const numB = parseInt(b.replace(/\D/g, '')) || 0;
+  const numA = parseInt(/^(\d+)/.exec(a)?.[1] ?? '', 10) || 0;
+  const numB = parseInt(/^(\d+)/.exec(b)?.[1] ?? '', 10) || 0;
   return numA - numB;
 });
 
@@ -706,9 +731,20 @@ for (const file of tsvFiles) {
   if (!duplicate) {
     // Company + role fuzzy match
     const normCompany = normalizeCompany(addition.company);
+    const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
       if (normalizeCompany(app.company) !== normCompany) return false;
-      return roleFuzzyMatch(addition.role, app.role);
+      if (!roleFuzzyMatch(addition.role, app.role)) return false;
+      // Req/job-number guard (#1524): a similarly-worded title at the same
+      // company can still be a genuinely distinct posting when a req/job
+      // number in the Notes column proves it (employers like TD commonly run
+      // concurrent near-identical L&D/HR titles distinguished only by req#).
+      // Only treat this as evidence the rows differ when BOTH sides carry an
+      // extractable number and they disagree — if either side has none, fall
+      // back to today's fuzzy-match-only behavior unchanged.
+      const appReqNum = extractReqNumber(app.notes);
+      if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
+      return true;
     });
   }
 

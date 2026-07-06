@@ -39,6 +39,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { resolveColumns } from './tracker-parse.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -143,7 +144,7 @@ function normalizeStatus(raw, states) {
   return states.byKey.get(cleaned) || null;
 }
 
-const SCORE_RE = /^\*{0,2}(\d(?:\.\d)?\/5)\*{0,2}$/;
+const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
@@ -157,18 +158,27 @@ function repairPlaceholder(cell) {
 // ── Markdown parsing ────────────────────────────────────────────────
 
 function parseMarkdownRows(text, diag) {
+  const lines = text.split('\n');
+  // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
+  // (e.g. an inserted Location column) can't shift Score into Status. Falls back
+  // to the legacy fixed 9-column layout when no header row is found.
+  const colmap = resolveColumns(lines);
+  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
+  const width = Math.max(...Object.values(colmap)) + 2;
   const rows = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim().startsWith('|')) continue;
-    let cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-    if (cells.length < 2) continue;
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) continue; // header / separator
-    if (cells.length > 9) {
-      cells = [...cells.slice(0, 8), cells.slice(8).join(' | ')]; // stray pipes → notes
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    let parts = t.split('|').map(c => c.trim());
+    if (parts.length < 3) continue; // needs at least one real cell
+    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    if (parts.length > width && colmap.notes === width - 2) {
+      // Stray pipes inside the trailing free-text column → fold back into notes.
+      parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
-    while (cells.length < 9) cells.push('');
-    rows.push(cells);
+    const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
+    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
   }
   return rows;
 }
@@ -181,16 +191,21 @@ function parseMarkdownRows(text, diag) {
 // duplicates are all removed.
 export function removeRowByNum(content, num) {
   const target = String(num).trim();
+  const lines = content.split('\n');
+  // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
+  // cell on customized layouts (e.g. with a Location column).
+  const colmap = resolveColumns(lines);
   let removedCount = 0;
   let report = null;
-  const kept = content.split('\n').filter((line) => {
+  const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t.startsWith('|')) return true; // non-table line — keep verbatim
-    const cells = t.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) return true; // header / separator
-    if (cells[0] === target) {
+    const parts = t.split('|').map((c) => c.trim());
+    const numCell = parts[colmap.num] ?? '';
+    if (numCell === '#' || /^[-: ]*$/.test(parts.join(''))) return true; // header / separator
+    if (numCell === target) {
       removedCount++;
-      if (report === null) report = cells[7] || null; // report column (index 7)
+      if (report === null) report = (colmap.report != null ? parts[colmap.report] : '') || null;
       return false;
     }
     return true;

@@ -96,7 +96,9 @@ async function main() {
 
   for (const line of lines) {
     if (/\\resumeItem\{/.test(line)) resumeItemCount++;
-    if (/\\resumeSubheading[^C]/.test(line)) subheadingCount++;
+    // Negative lookahead (not [^C]) so a line ending exactly at the macro
+    // name still counts; only the \resumeSubheadingContinue variant is excluded.
+    if (/\\resumeSubheading(?!Continue)/.test(line)) subheadingCount++;
     if (/\\resumeProjectHeading/.test(line)) projectHeadingCount++;
   }
 

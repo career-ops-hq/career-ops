@@ -28,7 +28,7 @@
  * `modelName` below and the `--model` examples accordingly.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -219,16 +219,6 @@ function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
   if (!clean || clean === '?') return 'N/A';
   return /\/5$/i.test(clean) ? clean : `${clean}/5`;
-}
-
-// Lazy import — only used when saving
-let readdirSync;
-try {
-  ({ readdirSync } = await import('fs'));
-} catch { /* already imported above via named exports */ }
-// Use named import fallback
-if (!readdirSync) {
-  readdirSync = (await import('fs')).readdirSync;
 }
 
 // ---------------------------------------------------------------------------

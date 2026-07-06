@@ -24,7 +24,7 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 ## Source-of-Truth Boundary (CRITICAL)
 
-User-facing content (CV, cover letters, form answers, recruiter outreach, application form responses) is generated **exclusively** from these files plus statements the user makes directly in the current conversation:
+User-facing content (CV, cover letters, application emails, form answers, recruiter outreach, application form responses) is generated **exclusively** from these files plus statements the user makes directly in the current conversation:
 
 - `cv.md`
 - `article-digest.md`
@@ -106,8 +106,12 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
 | `analyze-patterns.mjs` | Pattern analysis script (JSON output). Includes ATS channel analysis (per-vendor advance rate; motivated by Bommasani et al., Algorithmic Monocultures in Hiring, FAccT 2026). |
+| `stats.mjs` | Lifetime pipeline stats aggregator (JSON or `--summary`) — tracker roll-up, canonical `ever*` funnel, lifetime scan totals, portal coverage, follow-up compliance, scan-run trends |
+| `data/scan-runs.tsv` | Per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
+| `followup-seed.mjs` | Seeds `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied (JSON output) |
 | `detect-reposts.mjs` | Repost detector — flags roles re-listed 2+ times in 90 days from scan-history.tsv (JSON or `--summary` table output) |
+| `process-quality.mjs` | Recruiting-process friction aggregator — parses `[process-friction]` tags candidates add to `data/active-interviews.md` Notes and reports per-company friction rate (JSON or `--summary` table output) |
 | `data/follow-ups.md` | Follow-up history tracker |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `check-liveness.mjs` | Job posting liveness checker |
@@ -265,8 +269,9 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Pastes JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
 | Asks to evaluate offer | `oferta` |
 | Asks to compare offers | `ofertas` |
-| Wants LinkedIn outreach | `contacto` |
-| Asks for company research | `deep` |
+| Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a ≤300-char message tailored to the contact type (recruiter / hiring manager / peer / interviewer) |
+| Wants a formal application email | `email` — draft-only subject, body, attachment checklist, and contact block from a report or JD; never sends, submits, or clicks anything |
+| Asks for company research | `deep` — generates a structured 6-axis research prompt covering AI strategy, recent moves, engineering culture, likely challenges, competitors, and the candidate's angle given their profile |
 | Preps for interview at specific company | `interview-prep` |
 | Wants a time-blocked prep plan for an upcoming interview | `interview/plan` |
 | Wants to run practice interview questions with feedback | `interview/practice` |
@@ -282,6 +287,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Asks about rejection patterns, wants to improve targeting, or wants to match interview answers to best-fit roles | `patterns` |
 | Asks about follow-ups or application cadence | `followup` |
 | Wants to update the system | `update` |
+| Wants to queue a request for later / check the inbox between sessions | `agent-inbox` — append-only checklist the agent drains at the start of the next session; nothing auto-submits |
 
 ### CV Source of Truth
 
@@ -341,6 +347,8 @@ When spawning headless workers for batch processing, use the appropriate command
 | Qwen | `qwen -p "prompt"` |
 | Antigravity CLI | `agy -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
+
+**Parallel fan-outs — reserve report numbers first.** When orchestrating N parallel evaluators (headless workers, subagents, or multiple agent windows), reserve the report-number range before spawning: `node reserve-report-num.mjs --count N` prints e.g. `042-049`; hand each worker its own number. Each slot claim is individually atomic; the contiguous range is an ergonomic allocation, not an all-or-nothing transaction — on collision the partially claimed slots are released and the reservation restarts past the collision. Release with `node reserve-report-num.mjs --release 042-049` when done (stale sentinels are GC'd after 4h, so reserve right before spawning; collision restarts leave permanent — harmless — gaps in the sequence). Never let parallel workers compute `max+1` themselves — that is the #749 race.
 
 ## Stack and Conventions
 

@@ -26,8 +26,18 @@
  *   node reserve-report-num.mjs
  *   # stdout: 035           (zero-padded, 3 digits)
  *
+ *   node reserve-report-num.mjs --count 8
+ *   # stdout: 042-049       (reserves a contiguous range — for multi-agent
+ *   #                        fan-outs: reserve first, hand each parallel
+ *   #                        worker its own number. On collision the whole
+ *   #                        range restarts past the taken slot, so skipped
+ *   #                        numbers become permanent gaps — expected, not
+ *   #                        corruption. Range protection follows the normal
+ *   #                        sentinel TTL: reserve right before spawning.)
+ *
  *   node reserve-report-num.mjs --release 035
- *   # Deletes the sentinel for 035 (call after writing the real report).
+ *   node reserve-report-num.mjs --release 042-049
+ *   # Deletes the sentinel(s) (call after writing the real report(s)).
  *
  *   node reserve-report-num.mjs --gc
  *   # Removes all stale sentinels older than MAX_SENTINEL_AGE_MS.
@@ -41,7 +51,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPORTS_DIR = join(__dirname, 'reports');
+const REPORTS_DIR = process.env.CAREER_OPS_REPORTS_DIR || join(__dirname, 'reports');
 
 // Sentinels older than this are considered stale and may be GC'd.
 // 4 hours covers any reasonable interactive or batch session.
@@ -50,6 +60,9 @@ const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 // Maximum number of retries before giving up (guards against pathological
 // contention — in practice 2-3 parallel windows will resolve in < 5 tries).
 const MAX_RETRIES = 50;
+
+// Maximum range size for --count (guards typos like --count 800).
+const MAX_COUNT = 50;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -69,14 +82,33 @@ function maxSlot() {
   return max;
 }
 
-/** Attempt to atomically claim slot `n`. Returns true on success. */
-function claimSlot(n) {
-  // Check if any file (real report or sentinel) already occupies this slot
-  if (existsSync(REPORTS_DIR)) {
-    const prefix = `${pad(n)}-`;
-    const alreadyExists = readdirSync(REPORTS_DIR).some(name => name.startsWith(prefix));
-    if (alreadyExists) return false;
+/**
+ * One readdir pass → Set of numeric prefixes currently occupying slots
+ * (e.g. "042" from "042-acme-2026-07-02.md" or "042-RESERVED.md").
+ * Advisory only — real atomicity comes from claimSlot's O_CREAT|O_EXCL write.
+ */
+function takenPrefixes() {
+  const taken = new Set();
+  if (!existsSync(REPORTS_DIR)) return taken;
+  for (const name of readdirSync(REPORTS_DIR)) {
+    const m = name.match(/^(\d+)-/);
+    if (m) taken.add(m[1]);
   }
+  return taken;
+}
+
+/**
+ * Attempt to atomically claim slot `n`. Returns true on success.
+ * `taken` is an optional pre-scanned Set from takenPrefixes(); without it,
+ * the occupancy pre-check scans REPORTS_DIR itself. Either way the check is
+ * only advisory — the 'wx' write below is what guarantees atomicity.
+ */
+function claimSlot(n, taken = null) {
+  // Check if any file (real report or sentinel) already occupies this slot
+  const occupied = taken
+    ? taken.has(pad(n))
+    : existsSync(REPORTS_DIR) && readdirSync(REPORTS_DIR).some(name => name.startsWith(`${pad(n)}-`));
+  if (occupied) return false;
 
   const sentinel = join(REPORTS_DIR, `${pad(n)}-RESERVED.md`);
   try {
@@ -93,6 +125,43 @@ function claimSlot(n) {
 function releaseSlot(n) {
   const sentinel = join(REPORTS_DIR, `${pad(n)}-RESERVED.md`);
   if (existsSync(sentinel)) unlinkSync(sentinel);
+}
+
+/**
+ * Reserve `count` contiguous slots. All-or-nothing per attempt: if any slot
+ * in the candidate range is already taken, release the slots claimed so far
+ * and restart past the collision. Each slot claim is individually atomic
+ * (O_CREAT|O_EXCL), which is all the pipeline needs — contiguity is an
+ * ergonomic property, not a correctness one. Skipped numbers become
+ * permanent gaps; report numbers are opaque IDs, so gaps are harmless.
+ * Returns the array of reserved numbers, or null if MAX_RETRIES attempts
+ * were exhausted. Terminates under contention: `base` strictly advances
+ * past every collision, so two racing ranges can never livelock.
+ */
+function reserveRange(count) {
+  let base = maxSlot() + 1;
+  let tries = 0;
+  // One directory scan per attempt, shared by every per-slot check;
+  // refreshed only after a collision forces a retry.
+  let taken = takenPrefixes();
+  while (tries < MAX_RETRIES) {
+    const claimed = [];
+    let failedAt = -1;
+    for (let n = base; n < base + count; n++) {
+      if (claimSlot(n, taken)) {
+        claimed.push(n);
+      } else {
+        failedAt = n;
+        break;
+      }
+    }
+    if (failedAt === -1) return claimed;
+    for (const n of claimed) releaseSlot(n);
+    base = failedAt + 1;
+    tries++;
+    taken = takenPrefixes();
+  }
+  return null;
 }
 
 /** GC stale sentinels (no real report was written within MAX_SENTINEL_AGE_MS). */
@@ -124,11 +193,18 @@ function gc() {
 const [,, cmd, arg] = process.argv;
 
 if (cmd === '--release') {
-  if (!arg || !/^\d{1,3}$/.test(arg)) {
-    process.stderr.write('Usage: node reserve-report-num.mjs --release <NNN>\n');
+  const m = (arg || '').match(/^(\d{1,3})(?:-(\d{1,3}))?$/);
+  if (!m) {
+    process.stderr.write('Usage: node reserve-report-num.mjs --release <NNN>[-<MMM>]\n');
     process.exit(1);
   }
-  releaseSlot(parseInt(arg, 10));
+  const start = parseInt(m[1], 10);
+  const end = m[2] ? parseInt(m[2], 10) : start;
+  if (end < start) {
+    process.stderr.write('reserve-report-num: --release range end must be >= start\n');
+    process.exit(1);
+  }
+  for (let n = start; n <= end; n++) releaseSlot(n);
   process.exit(0);
 }
 
@@ -137,21 +213,33 @@ if (cmd === '--gc') {
   process.exit(0);
 }
 
-// Default: reserve next slot.
+// Default (or --count N): reserve the next slot(s).
+let count = 1;
+if (cmd === '--count') {
+  if (!/^\d+$/.test(arg || '')) {
+    process.stderr.write(`Usage: node reserve-report-num.mjs --count <1-${MAX_COUNT}>\n`);
+    process.exit(1);
+  }
+  count = parseInt(arg, 10);
+  if (count < 1 || count > MAX_COUNT) {
+    process.stderr.write(`Usage: node reserve-report-num.mjs --count <1-${MAX_COUNT}>\n`);
+    process.exit(1);
+  }
+}
+// Any other/unknown cmd falls through to a single reserve — unchanged
+// legacy behavior.
+
 mkdirSync(REPORTS_DIR, { recursive: true });
 
-let candidate = maxSlot() + 1;
-let tries = 0;
-
-while (tries < MAX_RETRIES) {
-  if (claimSlot(candidate)) {
-    process.stdout.write(pad(candidate) + '\n');
-    process.exit(0);
-  }
-  // Slot already taken (sentinel or real file appeared) — try next.
-  candidate++;
-  tries++;
+const nums = reserveRange(count);
+if (!nums) {
+  process.stderr.write(`reserve-report-num: could not claim ${count} slot(s) after ${MAX_RETRIES} retries\n`);
+  process.exit(1);
 }
 
-process.stderr.write(`reserve-report-num: could not claim a slot after ${MAX_RETRIES} retries\n`);
-process.exit(1);
+process.stdout.write(
+  count === 1
+    ? pad(nums[0]) + '\n'
+    : `${pad(nums[0])}-${pad(nums[nums.length - 1])}\n`
+);
+process.exit(0);

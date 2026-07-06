@@ -24,6 +24,7 @@ Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
 Run the career-ops scan mode and summarize new matches.
 Run the career-ops pipeline mode for data/pipeline.md.
 Run the career-ops pdf mode for the latest evaluated role.
+Run the career-ops email mode for the latest evaluated role. Draft only; never sends, submits, or clicks.
 Run the career-ops tracker mode and summarize the current statuses.
 ```
 
@@ -36,6 +37,7 @@ codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/
 codex exec "Run career-ops scan mode in this repo and summarize new matches."
 codex exec "Run career-ops pipeline mode for data/pipeline.md."
 codex exec "Run career-ops pdf mode for the latest evaluated role."
+codex exec "Run career-ops email mode for the latest evaluated role. Draft only; do not send, submit, or click anything."
 codex exec "Run career-ops tracker mode and summarize the current statuses."
 ```
 

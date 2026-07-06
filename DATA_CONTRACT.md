@@ -25,6 +25,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/applications.db` | Derived query index over `applications.md` (SQLite, rebuilt by `node tracker.mjs sync` — safe to delete) |
 | `data/pipeline.md` | Your URL inbox |
 | `data/scan-history.tsv` | Your scan history |
+| `data/scan-runs.tsv` | Your per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `data/follow-ups.md` | Your follow-up history |
 | `writing-samples/*` | Your personal writing samples for style calibration (except `writing-samples/README.md`, which is system-owned documentation delivered by updates) |
 | `reports/*` | Your evaluation reports |
@@ -46,6 +47,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/apply.md` | Application assistant instructions |
 | `modes/auto-pipeline.md` | Auto-pipeline instructions |
 | `modes/contacto.md` | LinkedIn outreach instructions |
+| `modes/email.md` | Formal application email draft instructions |
 | `modes/deep.md` | Research prompt instructions |
 | `modes/regional/*` | Regional market calibration modes |
 | `modes/ofertas.md` | Comparison instructions |

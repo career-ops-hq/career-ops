@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PDF_PAGE_MARGIN = '0.6in';
 
 // Ensure output directory exists (fresh setup)
 mkdirSync(resolve(__dirname, 'output'), { recursive: true });
@@ -190,6 +191,22 @@ export function repoRelativeManifestPath(pathValue) {
   const rel = relative(__dirname, resolve(pathValue));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
+}
+
+export function injectPrintPageCss(html, format = 'a4') {
+  const normalizedFormat = String(format || 'a4').toLowerCase();
+  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
+  const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: ${PDF_PAGE_MARGIN}; }\n</style>`;
+
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+  }
+
+  if (/<html\b[^>]*>/i.test(html)) {
+    return html.replace(/<html\b[^>]*>/i, match => `${match}\n<head>\n${pageStyle}\n</head>`);
+  }
+
+  return `${pageStyle}\n${html}`;
 }
 
 /**
@@ -378,6 +395,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
+  html = injectPrintPageCss(html, format);
   html = await inlineLocalFonts(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
@@ -400,15 +418,14 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     // Generate PDF
     const pdfBuffer = await page.pdf({
-      format: format,
       printBackground: true,
       margin: {
-        top: '0.6in',
-        right: '0.6in',
-        bottom: '0.6in',
-        left: '0.6in',
+        top: '0',
+        right: '0',
+        bottom: '0',
+        left: '0',
       },
-      preferCSSPageSize: false,
+      preferCSSPageSize: true,
     });
 
     // Write PDF

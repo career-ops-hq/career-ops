@@ -38,6 +38,16 @@ const RELEASES_API = 'https://api.github.com/repos/santifer/career-ops/releases/
 // Anchoring on `(?:^|-)` lets the releases-API fallback parse our tags,
 // which Release Please always prefixes with the component name.
 export const SEMVER_RE = /(?:^|-)v?(\d+\.\d+\.\d+)$/i;
+export const DEFAULT_GIT_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_GIT_TIMEOUT_MS, 30000);
+export const DEFAULT_GIT_FETCH_TIMEOUT_MS = parsePositiveInt(
+  process.env.CAREER_OPS_GIT_FETCH_TIMEOUT_MS,
+  Math.max(DEFAULT_GIT_TIMEOUT_MS, 300000),
+);
+export const NPM_INSTALL_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_NPM_INSTALL_TIMEOUT_MS, 60000);
+export const PLAYWRIGHT_INSTALL_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_PLAYWRIGHT_INSTALL_TIMEOUT_MS, 120000);
+export const DASHBOARD_REBUILD_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_DASHBOARD_REBUILD_TIMEOUT_MS, 60000);
+export const UPDATE_PATH_CHECKOUT_BUDGET_MS = parsePositiveInt(process.env.CAREER_OPS_UPDATE_PATH_CHECKOUT_BUDGET_MS, 5000);
+export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_REEXEC_BUFFER_TIMEOUT_MS, 60000);
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
@@ -47,6 +57,8 @@ const SYSTEM_PATHS = [
   'modes/oferta.md',
   'modes/pdf.md',
   'modes/cover.md',
+  'modes/email.md',
+  'modes/add.md',
   'modes/scan.md',
   'modes/batch.md',
   'modes/apply.md',
@@ -67,13 +79,19 @@ const SYSTEM_PATHS = [
   'interview-prep/sessions/README.md',
   'modes/patterns.md',
   'modes/update.md',
+  'modes/agent-inbox.md',
   'modes/ar/',
   'modes/da/',
   'modes/de/',
+  'modes/de/interview/',
   'modes/fr/',
+  'modes/fr/interview/',
   'modes/es/',
+  'modes/es/interview/',
+  'modes/id/',
   'modes/it/',
   'modes/ja/',
+  'modes/ko/',
   'modes/pl/',
   'modes/pt/',
   'modes/ru/',
@@ -101,9 +119,11 @@ const SYSTEM_PATHS = [
   'verify-pipeline.mjs',
   'reconcile-pipeline.mjs',
   'dedup-tracker.mjs',
+  'add-entry.mjs',
   'role-matcher.mjs',
   'tracker-utils.mjs',
   'tracker-parse.mjs',
+  'tracker-aliases.json',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'update-system.mjs',
@@ -115,15 +135,23 @@ const SYSTEM_PATHS = [
   'prepare-application.mjs',
   'providers/',
   'seeds/',
+  'tests/',
   'doctor.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'analyze-patterns.mjs',
+  'stats.mjs',
   'detect-reposts.mjs',
+  'fingerprint-core.mjs',
+  'process-quality.mjs',
+  'process-quality.test.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
+  'agent-inbox.mjs',
+  'followup-seed.mjs',
+  'followup-seed-tests.mjs',
   'gemini-eval.mjs',
   'ollama-eval.mjs',
   'openai-eval.mjs',
@@ -133,10 +161,13 @@ const SYSTEM_PATHS = [
   'test-salary-filter.mjs',
   'test-trust-validator.mjs',
   'tracker-columns-tests.mjs',
+  'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'verify-portals.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
+  'reply-matcher.mjs',
+  'reply-matcher.test.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'batch/README.md',
@@ -146,6 +177,7 @@ const SYSTEM_PATHS = [
   'examples/',
   'config/profile.example.yml',
   '.env.example',
+  '.editorconfig',
   '.agents/',
   '.claude/skills/',
   '.opencode/skills/',
@@ -186,6 +218,7 @@ const SYSTEM_PATHS = [
   'TRADEMARK.md',
   'LICENSE',
   'CITATION.cff',
+  '.editorconfig',
   '.github/',
   'package.json',
   'build-cv-latex.mjs',
@@ -202,6 +235,35 @@ const SYSTEM_PATHS = [
   'plugin-audit.mjs',
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
+];
+
+const BOOTSTRAP_PATHS = [
+  '.agents/',
+  '.opencode/skills/',
+  '.antigravitycli/skills/',
+  '.grok/skills/',
+  '.kimi/skills/',
+  'providers/',
+  'liveness-browser.mjs',
+  'tracker-links.mjs',
+  'role-matcher.mjs',
+  'tracker-utils.mjs',
+  'tracker-parse.mjs',
+  'tracker-aliases.json',
+  'scaffolder/',
+  'reserve-report-num.mjs',
+  'updater-migration-tests.mjs',
+  'validate-portals.mjs',
+  'tracker-columns-tests.mjs',
+  'plugins/',
+  'plugins.mjs',
+  'plugins-registry.json',
+  'plugin-install.mjs',
+  'plugin-audit.mjs',
+  'validate-plugin-registry.mjs',
+  'config/plugins.example.yml',
+  'agent-inbox.mjs',
+  'agent-inbox-tests.mjs',
 ];
 
 // User layer paths — NEVER touch these (safety check)
@@ -222,6 +284,7 @@ const USER_PATHS = [
   'config/plugins.yml',
   'plugins.local/',
   'plugins.lock',
+  '.claude/settings.json',
 ];
 
 function parseVersionFile(raw) {
@@ -275,8 +338,54 @@ function newestBackupBranch(branches) {
   return timestamped[0]?.branch || branchList[0];
 }
 
+export function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function gitTimeoutMs(args) {
+  return args[0] === 'fetch' ? DEFAULT_GIT_FETCH_TIMEOUT_MS : DEFAULT_GIT_TIMEOUT_MS;
+}
+
+export function reexecTimeoutMs(updatePathCount = SYSTEM_PATHS.length + BOOTSTRAP_PATHS.length) {
+  return Math.max(
+    120000,
+    DEFAULT_GIT_FETCH_TIMEOUT_MS +
+      DEFAULT_GIT_TIMEOUT_MS * 3 +
+      UPDATE_PATH_CHECKOUT_BUDGET_MS * Math.max(0, updatePathCount) +
+      NPM_INSTALL_TIMEOUT_MS +
+      PLAYWRIGHT_INSTALL_TIMEOUT_MS +
+      DASHBOARD_REBUILD_TIMEOUT_MS +
+      REEXEC_BUFFER_TIMEOUT_MS,
+  );
+}
+
+function describeGitCommand(args) {
+  return `git ${args.join(' ')}`;
+}
+
+function isTimeoutLikeError(err) {
+  return err?.code === 'ETIMEDOUT' || err?.signal === 'SIGTERM';
+}
+
+function timeoutSeconds(timeout) {
+  return Math.round(timeout / 1000);
+}
+
+function gitTimeoutEnvVar(args) {
+  return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
+}
+
 function gitIn(root, ...args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout: 30000 }).trim();
+  const timeout = gitTimeoutMs(args);
+  try {
+    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
+    }
+    throw err;
+  }
 }
 
 function git(...args) {
@@ -440,7 +549,7 @@ function rebuildDashboardBinaryIfNeeded() {
   try {
     execFileSync('go', ['build', '-o', 'career-dashboard', '.'], {
       cwd: join(ROOT, 'dashboard'),
-      timeout: 60000,
+      timeout: DASHBOARD_REBUILD_TIMEOUT_MS,
       stdio: 'pipe',
     });
     console.log('dashboard binary rebuilt');
@@ -596,6 +705,7 @@ async function apply() {
     git('fetch', CANONICAL_REPO, 'main');
 
     if (!isReexec) {
+      const timeout = reexecTimeoutMs();
       try {
         // The re-exec runs the TARGET updater, so every local module it imports
         // at load time must exist first. Resolve the fetched update-system.mjs's
@@ -606,7 +716,7 @@ async function apply() {
         execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
           cwd: ROOT,
           stdio: 'inherit',
-          timeout: 120000,
+          timeout,
           env: {
             ...process.env,
             CAREER_OPS_UPDATE_REEXEC: '1',
@@ -615,6 +725,10 @@ async function apply() {
         });
         return;
       } catch (err) {
+        if (isTimeoutLikeError(err)) {
+          console.error(`Updater self-reexec timed out after ${timeoutSeconds(timeout)}s.`);
+          throw err;
+        }
         console.error(`Updater self-reexec failed: ${err.message}`);
         throw err;
       }
@@ -634,7 +748,6 @@ async function apply() {
 
     // 3a. Keep bootstrap paths as a fallback for very old targets, but the
     // target updater's SYSTEM_PATHS is now the source of truth for new files.
-    const BOOTSTRAP_PATHS = ['.agents/', '.opencode/skills/', '.antigravitycli/skills/', '.grok/skills/', '.kimi/skills/', 'providers/', 'liveness-browser.mjs', 'tracker-links.mjs', 'role-matcher.mjs', 'tracker-utils.mjs', 'tracker-parse.mjs', 'scaffolder/', 'reserve-report-num.mjs', 'updater-migration-tests.mjs', 'validate-portals.mjs', 'tracker-columns-tests.mjs', 'plugins/', 'plugins.mjs', 'plugins-registry.json', 'plugin-install.mjs', 'plugin-audit.mjs', 'validate-plugin-registry.mjs', 'config/plugins.example.yml'];
     const updatePaths = mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS);
 
     for (const path of updatePaths) {
@@ -644,6 +757,51 @@ async function apply() {
       } catch {
         // File may not exist in remote (new additions), skip
       }
+    }
+
+    // tests/ is auto-discovered and EXECUTED (tests/**/*.test.mjs), so stale
+    // files left behind by upstream renames would run twice or crash the
+    // suite. `git checkout` never deletes upstream-removed files (see the
+    // limitation note in rollback below) — prune tracked extras against
+    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked
+    // local experiments in tests/ are never touched.
+    try {
+      let remoteTests = new Set();
+      try {
+        remoteTests = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'tests/')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // tests/ may not exist in older targets (ls-tree throws) — nothing to
+        // prune. This is the only expected-and-silent failure in this block.
+      }
+      // An empty set means FETCH_HEAD has no tests/ at all (older target, or
+      // ls-tree quietly returning nothing) — pruning against it would delete
+      // every local test file. Only prune when the remote actually ships tests/.
+      if (remoteTests.size > 0) {
+        const localTests = git('ls-files', '--', 'tests/').split('\n').filter(Boolean);
+        for (const f of localTests) {
+          if (!remoteTests.has(f.replace(/\\/g, '/'))) {
+            // Per-file isolation: one failed unlink (locked file, permissions)
+            // must not abort pruning the rest.
+            try {
+              unlinkSync(join(ROOT, f));
+              // Raw path only: `updated` entries are reused as git pathspecs by
+              // revertPaths() and the scoped commit below. Pushed only after a
+              // successful unlink so failed deletions never enter `updated`.
+              updated.push(f);
+              console.log(`Pruned stale test file: ${f}`);
+            } catch (err) {
+              console.error(`Failed to prune stale test file ${f}: ${err.message}`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Unexpected failure (e.g. ls-files threw) — surface it instead of
+      // silently skipping the prune step.
+      console.error(`Stale-test prune step failed: ${err.message}`);
     }
 
     const materializedSkillEntrypoints = ensureSkillEntrypoints(ROOT);
@@ -723,14 +881,14 @@ async function apply() {
 
     // 5. Install any new dependencies
     try {
-      execSync('npm install --silent', { cwd: ROOT, timeout: 60000 });
+      execSync('npm install --silent', { cwd: ROOT, timeout: NPM_INSTALL_TIMEOUT_MS });
     } catch {
       console.log('npm install skipped (may need manual run)');
     }
 
     // 5b. Ensure Playwright browser binary is up to date after npm install
     try {
-      execSync('npx playwright install chromium', { cwd: ROOT, timeout: 120000, stdio: 'ignore' });
+      execSync('npx playwright install chromium', { cwd: ROOT, timeout: PLAYWRIGHT_INSTALL_TIMEOUT_MS, stdio: 'ignore' });
     } catch {
       console.log('playwright install skipped (run manually: npx playwright install chromium)');
     }

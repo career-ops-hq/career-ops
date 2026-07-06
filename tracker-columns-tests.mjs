@@ -50,6 +50,16 @@ function runScript(script, args, sandbox) {
   }
 }
 
+// Sync the sandbox tracker into the tracker.mjs index and return one parsed
+// row by company name (row is null when sync/query fails or the row is absent).
+function syncAndQueryRow(sb, company) {
+  const sync = runScript('tracker.mjs', ['sync'], sb);
+  const query = runScript('tracker.mjs', ['query', '--json'], sb);
+  let row = null;
+  try { row = JSON.parse(query.stdout).find(r => r.company === company) ?? null; } catch { /* malformed output → null */ }
+  return { sync, query, row };
+}
+
 // Create a sandbox dir holding a tracker file and an additions dir.
 function makeSandbox(trackerContent, additions = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'co-cols-'));
@@ -141,6 +151,137 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
     fail(`verify-pipeline clean on 9-col tracker (code ${verify.code})\n${verify.stdout}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 4: tracker.mjs CLI maps a 10-column tracker by header (#1596) ──────
+// tracker.mjs used a fixed 9-cell destructure, so a Location column shifted
+// Score into Status and folded the real Notes cell away.
+{
+  const sb = makeSandbox(HEADER_10);
+  const { sync, query, row } = syncAndQueryRow(sb, 'Acme');
+  if (sync.code === 0 && query.code === 0 && row) {
+    if (row.role === 'Engineer') pass('tracker.mjs: Role read from Role column on 10-col tracker');
+    else fail(`tracker.mjs: Role on 10-col tracker — got "${row.role}"`);
+    if (row.score === '4.0/5') pass('tracker.mjs: Score not shifted on 10-col tracker');
+    else fail(`tracker.mjs: Score on 10-col tracker — got "${row.score}"`);
+    if (row.status === 'Applied') pass('tracker.mjs: Status not shifted on 10-col tracker');
+    else fail(`tracker.mjs: Status on 10-col tracker — got "${row.status}"`);
+    if (row.notes === 'seed row') pass('tracker.mjs: Notes intact on 10-col tracker');
+    else fail(`tracker.mjs: Notes on 10-col tracker — got "${row.notes}"`);
+  } else {
+    fail(`tracker.mjs sync/query on 10-col tracker (sync ${sync.code}, query ${query.code})\n${sync.stdout}${query.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 5: removeRowByNum resolves the Report column by header ─────────────
+{
+  const { removeRowByNum } = await import('./tracker.mjs');
+  const tenCol = HEADER_10.replace('| — | seed row |', '| [1](reports/001-acme-2026-01-01.md) | seed row |');
+  const res = removeRowByNum(tenCol, 1);
+  if (res.removed && res.report === '[1](reports/001-acme-2026-01-01.md)') {
+    pass('removeRowByNum: report column resolved by header on 10-col tracker');
+  } else {
+    fail(`removeRowByNum: report on 10-col tracker — got "${res.report}"`);
+  }
+}
+
+// ── Test 6: scan.mjs seen-set maps company/role by header ───────────────────
+// loadSeenCompanyRoles used a positional regex, so a 10-col tracker produced
+// keys like "engineer::remote" and scan dedup missed real matches.
+{
+  const { loadSeenCompanyRoles } = await import('./scan.mjs');
+  const sb = makeSandbox(HEADER_10);
+  const seen = loadSeenCompanyRoles(sb.tracker);
+  if (seen.has('acme::engineer')) pass('scan.mjs: seen-set keys company::role on 10-col tracker');
+  else fail(`scan.mjs: seen-set on 10-col tracker — got [${[...seen].join(', ')}]`);
+  if (![...seen].some(k => k.includes('remote') || k.includes('4.0/5'))) {
+    pass('scan.mjs: seen-set has no shifted-column garbage keys');
+  } else {
+    fail(`scan.mjs: shifted keys present — [${[...seen].join(', ')}]`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 7: schema contract — every consumer maps an UNKNOWN extra column ───
+// The header-name contract (#1596): a column no consumer recognizes must be
+// skipped by ALL of them, never silently shifted into a known field. This is
+// the guard that makes the next column insertion a one-place change instead of
+// a repo-wide incident. normalize-statuses.mjs is excluded until PR #1114
+// (which retrofits it) lands — add it here when that merges.
+{
+  const HEADER_UNKNOWN = `# Applications Tracker
+
+| # | Date | Company | Priority | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|----------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | high | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+`;
+  const sb = makeSandbox(HEADER_UNKNOWN);
+
+  const verify = runScript('verify-pipeline.mjs', [], sb);
+  if (verify.code === 0 && /0 errors/.test(verify.stdout)) {
+    pass('contract: verify-pipeline skips an unknown extra column');
+  } else {
+    fail(`contract: verify-pipeline on unknown-column tracker (code ${verify.code})\n${verify.stdout}`);
+  }
+
+  const { sync, row } = syncAndQueryRow(sb, 'Acme');
+  if (sync.code === 0 && row && row.role === 'Engineer' && row.score === '4.0/5' && row.status === 'Applied') {
+    pass('contract: tracker.mjs skips an unknown extra column');
+  } else {
+    fail(`contract: tracker.mjs on unknown-column tracker — got ${JSON.stringify(row)}`);
+  }
+
+  const { loadSeenCompanyRoles } = await import('./scan.mjs');
+  const seen = loadSeenCompanyRoles(sb.tracker);
+  if (seen.has('acme::engineer') && seen.size === 1) {
+    pass('contract: scan.mjs seen-set skips an unknown extra column');
+  } else {
+    fail(`contract: scan.mjs seen-set on unknown-column tracker — [${[...seen].join(', ')}]`);
+  }
+
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 8: web read path resolves headers via the SHARED alias table ───────
+// web/src/lib/tracker-table.mjs (behind readApplications() in career-ops.ts)
+// loads tracker-aliases.json — the same file tracker-parse.mjs exports as
+// HEADER_ALIASES — instead of mirroring it. Passing ROOT here exercises the
+// REAL alias file, so an alias added/renamed there is either honored by the
+// web reader too or fails this test; a second drifting table can't come back.
+{
+  const { parseApplications, loadHeaderAliases } = await import('./web/src/lib/tracker-table.mjs');
+  const { HEADER_ALIASES } = await import('./tracker-parse.mjs');
+  const WEB_10COL = `# Applications Tracker
+
+| # | Date | Company | Role | Location | Score | Status | PDF | Report | Priority | Notes |
+|---|------|---------|------|----------|-------|--------|-----|--------|----------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | Remote | 4.0/5 | Applied | ✅ | — | high | seed row |
+`;
+  const rows = parseApplications(WEB_10COL, ROOT);
+  const r = rows[0];
+  if (rows.length === 1 && r.company === 'Acme' && r.role === 'Engineer') {
+    pass('web reader: Company/Role read by header on 10-col tracker');
+  } else {
+    fail(`web reader: Company/Role on 10-col tracker — got ${JSON.stringify(r)}`);
+  }
+  if (r && r.score === '4.0/5' && r.status === 'Applied') {
+    pass('web reader: Score/Status not shifted by Location column');
+  } else {
+    fail(`web reader: Score/Status on 10-col tracker — got ${JSON.stringify(r)}`);
+  }
+  if (r && r.notes === 'seed row') {
+    pass('web reader: unknown Priority column skipped, Notes intact');
+  } else {
+    fail(`web reader: Notes past unknown column — got "${r && r.notes}"`);
+  }
+  // The web reader and the Node tooling must consume the IDENTICAL table.
+  const webAliases = loadHeaderAliases(ROOT);
+  if (JSON.stringify(webAliases) === JSON.stringify(HEADER_ALIASES) && Object.keys(webAliases).length > 0) {
+    pass('web reader: alias table is byte-identical to tracker-parse HEADER_ALIASES');
+  } else {
+    fail(`web reader: alias table drifted from HEADER_ALIASES — web ${JSON.stringify(webAliases)} vs core ${JSON.stringify(HEADER_ALIASES)}`);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

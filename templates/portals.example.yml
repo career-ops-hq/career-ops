@@ -482,7 +482,7 @@ search_queries:
 #
 #   greenhouse      job-boards(.eu)?.greenhouse.io/<slug>  (or api: field)
 #   ashby           jobs.ashbyhq.com/<slug>
-#   lever           jobs.lever.co/<slug>
+#   lever           jobs.(eu.)?lever.co/<slug>
 #   workable        apply.workable.com/<slug>
 #   smartrecruiters (careers|jobs).smartrecruiters.com/<slug>
 #   recruitee       <slug>.recruitee.com
@@ -495,6 +495,10 @@ search_queries:
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
+#   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
+#   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
+#   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
+#                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -543,6 +547,25 @@ search_queries:
 #                          # is logged if the cap truncates real results)
 #   enabled: true
 #
+# - name: Example Avature Co
+#   # Avature career site. Auto-detects any *.avature.net host; for a branded
+#   # host that proxies Avature, set provider: avature + api: the SearchJobs URL.
+#   careers_url: https://exampleco.avature.net/careers/SearchJobs
+#   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
+#                          # limit — so ~300 postings by default, max 200 pages)
+#   enabled: true
+#
+# - name: Example SuccessFactors Co
+#   # SAP SuccessFactors Recruiting Marketing (RMK, ex-jobs2web) branded board —
+#   # what many large industrials run at their own domain (jobs.<company>.com).
+#   # Branded hosts carry no "successfactors" string, so set provider: explicitly
+#   # and point api: at the board origin (host only, no path). The provider pulls
+#   # the public /tile-search-results fragment (zero-token, no auth).
+#   careers_url: https://www.exampleco.com/careers   # public/branded careers page
+#   provider: successfactors
+#   api: https://jobs.exampleco.com                  # RMK board origin
+#   enabled: true
+#
 # - name: SolidJobs — Engineering
 #   # division path is required; one of:
 #   # it, engineering, marketing, sales, hr, logistics, finances, other
@@ -550,6 +573,15 @@ search_queries:
 #   enabled: true
 #
 # -- Job boards / aggregators (no careers_url; set provider: explicitly) --
+#
+# - name: Amazon / AWS                    # global amazon.jobs board
+#   provider: amazon
+#   amazon:                # keys pass straight through to the search.json API
+#     normalized_country_code: [DEU]   # array → facet filter (…[]=DEU); REQUIRED-ish,
+#                                       # the board is 100k+ postings otherwise
+#     base_query: machine learning      # optional keyword filter
+#     # loc_query: Berlin               # optional free-text location (fuzzy, not a hard filter)
+#   enabled: true
 #
 # - name: 4 Day Week                      # 4-day-week / reduced-hours roles
 #   provider: 4dayweek
@@ -596,6 +628,11 @@ search_queries:
 #     categories: ["Software Engineering"]  # optional facet filter
 #   enabled: true
 #
+# - name: Dassault Systèmes              # single-company; Exalead card_search_api
+#   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
+#   provider: dassault                    # optional — 3ds.com host also auto-detects
+#   enabled: true                         # ~445 English postings (zero-token XML)
+#
 # -- Remote-job feeds (no careers_url, no extra fields) --
 # title_filter / location_filter defined above still apply.
 #
@@ -633,6 +670,18 @@ search_queries:
 #   provider: jobicy
 #   enabled: true
 #
+# - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
+#   provider: hackernews
+#   enabled: true
+#
+# - name: Jobspresso                      # curated remote roles (public WordPress feed)
+#   provider: jobspresso
+#   enabled: true
+#
+# - name: The Muse                        # board-wide public jobs API
+#   provider: themuse
+#   enabled: true
+#
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
 # branded careers page does not expose), so set it via the api: field — e.g.:
 #
@@ -649,6 +698,20 @@ search_queries:
 #
 #   - name: Example GmbH
 #     careers_url: https://example-gmbh.jobs.personio.de
+#     enabled: true
+#
+# Teamtailor auto-detects from a <slug>.teamtailor.com careers host and reads
+# the public no-auth /jobs.rss feed — e.g.:
+#
+#   - name: Example Co
+#     careers_url: https://example.teamtailor.com
+#     enabled: true
+#
+#   # If the tenant fronts a branded careers domain, set provider: teamtailor
+#   # explicitly and point careers_url at that host (it serves the same feed):
+#   - name: Example Co (branded)
+#     careers_url: https://careers.example.com
+#     provider: teamtailor
 #     enabled: true
 #
 # Some JibeApply sites run on a branded custom domain rather than
@@ -1155,6 +1218,11 @@ tracked_companies:
   - name: Pigment
     careers_url: https://jobs.lever.co/pigment
     notes: "Paris FR / NYC / London. AI-powered FP&A planning platform."
+    enabled: true
+
+  - name: Diabolocom
+    careers_url: https://jobs.eu.lever.co/diabolocom
+    notes: "Paris FR. AI-native contact center (CCaaS) platform — Frost & Sullivan 2026 AI CX Leader in Europe; hybrid LLM/SLM architecture powering Agent Assist, Voice Analytics, and automated QA."
     enabled: true
 
   # -- UK & Ireland AI (EU-friendly hiring) --

@@ -12,17 +12,73 @@
  * leading pipe, so the first real column ("#"/num) is index 1.
  */
 
+import { readFileSync } from 'fs';
+
 /** The original fixed 9-column layout (num … notes at indices 1 … 9). */
 export const LEGACY_COLMAP = {
   num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9,
 };
 
-/** Header text (lowercased) → canonical field name. Includes ES aliases. */
-export const HEADER_ALIASES = {
-  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
-  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
-};
+/**
+ * Header text (lowercased) → canonical field name. Includes ES aliases.
+ * Loaded from tracker-aliases.json — the ONE shared alias table, which the web
+ * read path (web/src/lib/tracker-table.mjs) also loads at runtime, so the two
+ * can never drift (PR #1598 review). Add new aliases in the JSON, not here.
+ *
+ * A missing or corrupt JSON is a broken install (the file ships alongside this
+ * module in SYSTEM_PATHS/BOOTSTRAP_PATHS): fail fast with an actionable
+ * message rather than degrading silently — a quiet fallback here would
+ * reintroduce exactly the reader drift the shared table exists to prevent.
+ * (The web loader degrades to the legacy fixed order instead because it reads
+ * the file from a user-configured root at request time.)
+ */
+export const HEADER_ALIASES = (() => {
+  const src = new URL('./tracker-aliases.json', import.meta.url);
+  try {
+    return JSON.parse(readFileSync(src, 'utf-8'));
+  } catch (e) {
+    throw new Error(
+      `tracker-parse.mjs: cannot load tracker-aliases.json (${e.message}). ` +
+      'The file ships with career-ops next to tracker-parse.mjs — restore it ' +
+      'from the repo or re-run: node update-system.mjs apply',
+    );
+  }
+})();
+
+/**
+ * A score cell in the tracker: `N/5` or `N.N/5` (any precision), or the
+ * sentinels `N/A` / `DUP`. Markdown bold is stripped first. A status label
+ * never matches this, which is what makes it a reliable discriminator between
+ * the score and status columns regardless of their order (#1427).
+ */
+export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
+
+/** @param {string} v @returns {boolean} whether the cell reads as a score. */
+export function looksLikeScoreCell(v) {
+  const t = String(v ?? '').replace(/\*\*/g, '').trim();
+  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP';
+}
+
+/**
+ * Given the two adjacent cells that carry score and status in EITHER order,
+ * identify which is which by content — the score cell is recognizable by
+ * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
+ * tolerate the two known column orders (batch TSV writes status-then-score;
+ * `applications.md` is score-then-status) instead of trusting position.
+ *
+ * Returns null when the order is undecidable — neither cell, or BOTH cells, look
+ * like a score — so callers can fail loudly rather than merge a silent swap.
+ *
+ * @param {string} a - first of the two cells
+ * @param {string} b - second of the two cells
+ * @returns {{score: string, status: string}|null}
+ */
+export function resolveScoreStatus(a, b) {
+  const aScore = looksLikeScoreCell(a);
+  const bScore = looksLikeScoreCell(b);
+  if (aScore === bScore) return null; // ambiguous: neither, or both
+  return aScore ? { score: a, status: b } : { score: b, status: a };
+}
 
 /**
  * Scan the table for a header row and build a field-name → column-index map.

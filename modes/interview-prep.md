@@ -160,9 +160,29 @@ This is where the original Technical / Role-Specific buckets live. Peers are eva
 
 ### Audience: `panel-mixed`
 
-Onsite loops and mixed panels rarely give the candidate time to context-switch — preparation has to be pre-routed. For each panel slot:
+Onsite loops and mixed panels rarely give the candidate time to context-switch — preparation has to be pre-routed.
 
-- **If the interviewer is named in the schedule**, do a quick LinkedIn/blog look-up and tag them to one of the three audiences (recruiter / HM / peer-tech). Then pull from that audience's pack.
+**Panel Intel table (required whenever panelists are named).** Before drafting per-slot prep, build this table from whatever profile text or screenshot description the user provides — no scraping or automation, the same pasted-in input the mode already relies on elsewhere:
+
+```markdown
+## Panel Intel
+| Name | Role | Read |
+|------|------|------|
+| {Panelist A} | {title, tenure, reporting line if visible} | {what their background implies about what they'll ask, and how much weight their questions carry} |
+| {Panelist B} | {title, tenure, reporting line if visible} | {...} |
+```
+
+Fill the table using these heuristics:
+
+- **Decision-maker weighting**: cross-reference the JD's reporting line (e.g. "reports to Manager: X") against the named panelists. Whoever it points to is the likely primary decision-maker for this loop — flag them explicitly in the `Read` column (e.g. "likely hiring-manager-equivalent — this is who the offer decision routes through") and weight prep effort toward their pack accordingly.
+- **Career-trajectory signal**: read the provided experience text or screenshot description for what each panelist's path implies about the kind of questions they'll ask. Someone who held the *exact role being hired for* for several years before being promoted into managing it will ask sharper, more concrete, scenario-based questions than someone in an adjacent function (e.g., HR/recruiting) who is more likely there for process, culture, or compliance framing rather than technical depth. Note this angle in the `Read` column, not just the job title.
+- **Audience tagging**: after profiling, still tag each panelist to one of the three existing audiences (recruiter / HM / peer-tech) and pull from that audience's pack — the table doesn't replace that step, it gives it a defined input.
+
+**Per-panelist closing question.** Where a panelist's own trajectory offers an obvious angle, draft one tailored closing question for them specifically — the same pattern this mode already uses at the company level ("Sharp questions to ask back" in the `hiring-manager` and mixed-panel packs, tied to a named team challenge from Step 1), just aimed at the individual instead of the company. For example, someone promoted from the role into managing it is a natural fit for "what do you wish you'd known walking into this role that isn't in the job posting" — a question a recruiter or an adjacent-function panelist couldn't answer as meaningfully. List these alongside the audience pack's own "sharp questions to ask back," tagged with the panelist's name so the candidate knows which slot to use them in.
+
+For each panel slot:
+
+- **If the interviewer is named in the schedule**, use the Panel Intel table above to tag them to one of the three audiences (recruiter / HM / peer-tech). Then pull from that audience's pack.
 - **If the slot is unlabeled**, prep all three packs but cap each to 3–5 highest-priority items so the candidate isn't drowning in notes.
 - **Hand-off discipline**: tell the candidate explicitly what NOT to repeat verbatim across slots (e.g. the same proof point told identically twice signals scripted answers; vary the angle).
 - **Energy management**: 4-hour onsites burn out less-experienced candidates first. Flag the slot most likely to test depth (usually peer-tech) and reserve the candidate's freshest material for it.

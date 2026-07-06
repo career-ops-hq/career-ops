@@ -27,7 +27,7 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 ## Source-of-Truth Boundary (CRITICAL)
 
-User-facing content (CV, cover letters, form answers, recruiter outreach, application form responses) is generated **exclusively** from these files plus statements the user makes directly in the current conversation:
+User-facing content (CV, cover letters, application emails, form answers, recruiter outreach, application form responses) is generated **exclusively** from these files plus statements the user makes directly in the current conversation:
 
 - `cv.md`
 - `article-digest.md`
@@ -103,7 +103,10 @@ AI-powered job search automation built on Claude Code: pipeline tracking, offer 
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
 | `analyze-patterns.mjs` | Pattern analysis script (JSON output). Includes ATS channel analysis (per-vendor advance rate; motivated by Bommasani et al., Algorithmic Monocultures in Hiring, FAccT 2026). |
+| `stats.mjs` | Lifetime pipeline stats aggregator (JSON or `--summary`) — tracker roll-up, canonical `ever*` funnel, lifetime scan totals, portal coverage, follow-up compliance, scan-run trends |
+| `data/scan-runs.tsv` | Per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
+| `followup-seed.mjs` | Seeds `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied (JSON output) |
 | `data/follow-ups.md` | Follow-up history tracker |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `check-liveness.mjs` | Job posting liveness checker |
@@ -129,6 +132,7 @@ You can invoke the command center or any of its modes directly within your CLI:
 * `pdf` — Generate ATS-optimized CV PDF
 * `latex` — Export CV as LaTeX/Overleaf .tex
 * `cover` — Generate cover letter
+* `email` — Draft formal application email only; never sends, submits, or clicks
 * `interview-prep` — Generate interview preparation guide
 * `interview` — Onboarding/on-demand interview
 * `contacto` — Generate LinkedIn outreach message
@@ -259,6 +263,7 @@ Default modes are in `modes/` (English). Language-specific modes live in `modes/
 | Asks to evaluate offer | `oferta` |
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` |
+| Wants a formal application email | `email` — draft-only; never sends, submits, or clicks anything |
 | Asks for company research | `deep` |
 | Preps for interview at specific company | `interview-prep` |
 | Wants interactive profile/CV onboarding | `interview` |

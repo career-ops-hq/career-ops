@@ -461,7 +461,7 @@ process_offer() {
   # Inject user-layer personalization into the temporary worker prompt.
   # The resolved prompt is gitignored runtime state, so user profile data stays
   # out of the system layer while batch scoring matches interactive scoring.
-  for context_file in "$PROJECT_DIR/modes/_profile.md" "$PROJECT_DIR/config/profile.yml"; do
+  for context_file in "$PROJECT_DIR/modes/_profile.md" "$PROJECT_DIR/config/profile.yml" "$PROJECT_DIR/modes/_custom.md"; do
     if [[ -f "$context_file" ]]; then
       {
         printf '\n\n---\n\n'

@@ -100,7 +100,7 @@ export function normalizeGetonbrdJob(j, fallbackCompany) {
   /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number }} */
   const job = { title, url, company, location };
   // `attributes.published_at` is epoch SECONDS → convert to ms (omitted when absent).
-  if (Number.isFinite(attr.published_at)) job.postedAt = attr.published_at * 1000;
+  if (Number.isFinite(attr.published_at) && attr.published_at > 0) job.postedAt = attr.published_at * 1000;
   return job;
 }
 

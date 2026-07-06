@@ -621,9 +621,11 @@ func detectTrackerColumns(lines []string) map[string]int {
 		m := make(map[string]int)
 		for i, c := range cells {
 			if name, ok := trackerHeaderAliases[strings.ToLower(c)]; ok {
-				if _, seen := m[name]; !seen {
-					m[name] = i
-				}
+				// Unconditional assign: with a duplicated header name the LAST
+				// occurrence wins, matching detectColumns in tracker-parse.mjs
+				// (which this function mirrors) — first-wins here made the two
+				// runtimes map the same header row differently.
+				m[name] = i
 			}
 		}
 		complete := true

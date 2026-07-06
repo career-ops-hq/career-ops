@@ -6,6 +6,9 @@ candidate:
   full_name: "Jane Smith"
   email: "jane@example.com"
   phone: "+1-555-0123"
+  # Optional. Used by `/career-ops email` contact blocks in markets where WeChat
+  # is an expected recruiting channel. Omit or leave blank if not applicable.
+  wechat: ""
   location: "San Francisco, CA"
   linkedin: "linkedin.com/in/janesmith"
   portfolio_url: "https://janesmith.dev"
@@ -117,6 +120,44 @@ cover_letter:
       sentence: "Estoy aprendiendo español y espero alcanzar el nivel B2 a finales de 2026."
       # Only trigger this entry when the JD location is in one of these countries.
       countries: [Spain, Mexico, Argentina, Colombia, Chile]
+
+# ── Contact Preferences ──────────────────────────────────────────────────────
+#
+# Used by `/career-ops contacto` (outreach CTA) and `/career-ops email` (contact
+# block) to steer drafted messages toward how you actually want to be reached.
+# Optional. Omit the whole block, or set preferred_channel to "either", to keep
+# today's behavior unchanged (no channel steering).
+#
+# contact_preferences:
+#   preferred_channel: "email"   # email | phone | either — default "either" if omitted
+#   # Optional. Surfaced near the contact block in `/career-ops email` drafts and
+#   # can inform the CTA wording in `/career-ops contacto`. Keep it one line.
+#   note: "Screens unknown numbers — please email or text first to schedule a call"
+
+# ── Outreach / greeting ─────────────────────────────────────────────────────
+#
+# Used by the greeting variant of `/career-ops contacto` (the short first-touch
+# message for BOSS Zhipin 打招呼, job-board chat, or a cold-email opener).
+#
+# greeting_max_chars is the hard character budget for that message. Default when
+# the key is absent: 150 (BOSS Zhipin's greeting limit). Raise or lower it to
+# match the platform you're messaging on.
+# outreach:
+#   greeting_max_chars: 150
+
+# ── Application Email Drafts ────────────────────────────────────────────────
+#
+# Used by `/career-ops email` when drafting formal application emails. This is
+# separate from `contacto` short outreach and `cover` full cover letters.
+# All fields are optional.
+#
+# application_email:
+#   include_contact_block: true
+#   include_attachment_checklist: true
+#   # Use this when you want the email body to say "the email used to send this
+#   # message" instead of printing a concrete email address from candidate.email.
+#   # default_sender_note: "the email used to send this message"
+#   # signature_name: "Jane Smith"
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

@@ -4,6 +4,7 @@ import { readFile, writeFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { resolve, dirname, basename, join } from 'path';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -245,9 +246,9 @@ async function runSelfTest() {
     ],
   };
 
-  const testOutput = '/tmp/build-cv-latex-test.tex';
+  const testOutput = join(tmpdir(), 'build-cv-latex-test.tex');
   const raw = JSON.stringify(sample, null, 2);
-  const tmpInput = '/tmp/build-cv-latex-test-input.json';
+  const tmpInput = join(tmpdir(), 'build-cv-latex-test-input.json');
   await writeFile(tmpInput, raw, 'utf-8');
 
   const absInput = resolve(tmpInput);

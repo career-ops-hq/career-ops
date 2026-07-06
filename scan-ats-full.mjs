@@ -25,6 +25,7 @@
  *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+ *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
@@ -114,8 +115,53 @@ const SOURCES = {
 
 // ── CLI args ────────────────────────────────────────────────────────
 
+const KNOWN_FLAGS = [
+  '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
+  '--verbose', '--md-out', '--json', '--include-undated', '--shuffle',
+  '--help', '-h',
+];
+
+// Flags that consume the next argv token as a value (space-separated form —
+// the `--flag=value` form is self-contained and never needs this).
+const VALUE_FLAGS = ['--since', '--limit', '--ats', '--seeds', '--md-out'];
+
+const USAGE = `Usage:
+  node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
+  node scan-ats-full.mjs --since 7            # postings from the last 7 days
+  node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+  node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
+  node scan-ats-full.mjs --dry-run            # preview without writing files
+  node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+  node scan-ats-full.mjs --verbose            # log per-board fetch failures
+  node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+  node scan-ats-full.mjs --help               # print this usage block and exit`;
+
 function parseArgs(argv) {
   const args = argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  // A value-taking flag's space-separated value (e.g. the `-tmp` in
+  // `--md-out -tmp`) must not be mistaken for an unrecognized flag just
+  // because it happens to start with `-`. Mirrors valueOf()'s own adjacency
+  // rule below so `--flag value` and `--flag=value` are validated consistently.
+  const consumedValueIndices = new Set();
+  args.forEach((a, idx) => {
+    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
+      consumedValueIndices.add(idx + 1);
+    }
+  });
+
+  const unknownFlags = args.filter((a, idx) =>
+    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    process.exit(1);
+  }
+
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
     if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith('--')) return args[idx + 1];

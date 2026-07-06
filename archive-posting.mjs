@@ -157,7 +157,7 @@ function extractCompanyFromUrl(url) {
     const { hostname, pathname } = new URL(url);
     const parts = pathname.split('/').filter(Boolean);
     if (hostname === 'boards.greenhouse.io') return parts[0] || null;
-    if (hostname === 'jobs.lever.co') return parts[0] || null;
+    if (/^jobs\.(eu\.)?lever\.co$/.test(hostname)) return parts[0] || null;
     if (hostname === 'jobs.ashbyhq.com') return parts[0] || null;
     if (hostname === 'app.dover.io') return parts[0] || null;
     return null;

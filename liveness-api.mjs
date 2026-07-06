@@ -51,13 +51,14 @@ const ATS_PROVIDERS = [
   },
   {
     id: 'lever',
-    // jobs.lever.co/{slug}/{id}
+    // jobs.(eu.)?lever.co/{slug}/{id}
     match(u) {
-      if (u.hostname !== 'jobs.lever.co') return null;
+      const host = u.hostname.match(/^jobs\.((?:eu\.)?lever\.co)$/);
+      if (!host) return null;
       const m = u.pathname.match(/^\/([^/]+)\/([^/?#]+)\/?$/);
-      return m ? { slug: m[1], id: m[2] } : null;
+      return m ? { apiHost: `api.${host[1]}`, slug: m[1], id: m[2] } : null;
     },
-    api: ({ slug, id }) => `https://api.lever.co/v0/postings/${slug}/${id}`,
+    api: ({ apiHost, slug, id }) => `https://${apiHost}/v0/postings/${slug}/${id}`,
   },
   {
     id: 'ashby',

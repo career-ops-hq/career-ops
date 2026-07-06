@@ -23,7 +23,7 @@ This complements — does not replace — the per-URL liveness gate in `auto-pip
    a. Claim the next sequential `REPORT_NUM` atomically by running `node reserve-report-num.mjs` (and release the sentinel using `node reserve-report-num.mjs --release <num>` after the report is written)
    b. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
    c. If the URL is not accessible → mark as `- [!]` with a note and continue
-   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker
+   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker. Read `modes/_custom.md` → Pipeline Rules, if it exists, and apply its override here. Default (if absent or silent): standard pipeline execution.
    e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
 
    **About the PDF gate (configurable):** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key does not exist, default to `3.0` (this mode's original gate). If the evaluation score is less than the threshold, skip PDF generation: write the report normally, show in the header `**PDF:** not generated — run /career-ops pdf {company-slug} to create on demand`, and mark PDF ❌ in the tracker. If the score is ≥ threshold, generate the PDF as usual.
@@ -44,6 +44,7 @@ This complements — does not replace — the per-URL liveness gate in `auto-pip
 - [ ] https://boards.greenhouse.io/company/jobs/456 | Company Inc | Senior PM
 - [ ] https://jobs.ashbyhq.com/acme/789 | Acme Corp | Solutions Architect | Remote (US)
 - [ ] https://jobs.ashbyhq.com/acme/790 | Acme Corp | AI Engineer | Remote (US) | 180000-220000 USD
+- [ ] https://jobs.ashbyhq.com/acme/791 | Acme Corp | Staff PM | note: curated shortlist
 - [!] https://private.url/job — Error: login required
 
 ## Processed
@@ -61,6 +62,14 @@ maximum (canonical) shape, not the only one. The columns are positional, so a ro
 carrying compensation always includes the location cell (empty if unknown); a row
 with only a location stays 4 columns. Existing shorter rows remain valid and are
 read as having empty values for the missing trailing columns.
+
+One further trailing segment is optional and **labeled**, not positional:
+`| note: {text}`. Unlike the positional cells above, it can ride on any row shape
+(`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid), because
+the `note:` prefix identifies it regardless of column position. It carries a
+free-text ranking signal an importer attached to the offer (the deterministic
+scanner never sets it). Treat it as a hint when triaging; it does not change how
+you process the URL.
 
 ## Intelligent JD detection from URL
 

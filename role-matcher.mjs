@@ -7,6 +7,11 @@
  * path would silently delete with weaker matching rules.
  */
 
+export const SENIORITY_TOKENS = new Set([
+  'junior', 'mid', 'middle', 'senior', 'staff', 'principal', 'lead', 'head',
+  'chief', 'associate', 'intern', 'entry'
+]);
+
 // Tokens that almost every role shares must not count as strong matching
 // signal. This set covers seniority, work mode, contract shape, locations, and
 // other words that frequently appear in titles without identifying the opening.
@@ -69,6 +74,17 @@ export function roleTokens(role) {
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
+function extractSeniorities(title) {
+  const text = typeof title === 'string' ? title : String(title ?? '');
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => SENIORITY_TOKENS.has(w))
+  );
+}
+
 /**
  * Decide whether two role titles are likely the same opening.
  *
@@ -83,6 +99,18 @@ export function roleTokens(role) {
  * @returns {boolean} True when the titles are similar enough to deduplicate.
  */
 export function roleFuzzyMatch(a, b) {
+  const senA = extractSeniorities(a);
+  const senB = extractSeniorities(b);
+
+  // If both titles explicitly specify seniority, they MUST overlap in at least one seniority token.
+  // e.g. "Senior" vs "Principal" -> differ, return false.
+  // e.g. "Senior" vs "Senior Staff" -> overlap, proceed to Jaccard check.
+  // e.g. "Engineer" vs "Senior Engineer" -> one lacks seniority, proceed to Jaccard check.
+  if (senA.size > 0 && senB.size > 0) {
+    const hasOverlap = [...senA].some(s => senB.has(s));
+    if (!hasOverlap) return false;
+  }
+
   const wordsA = [...new Set(roleTokens(a))];
   const wordsB = [...new Set(roleTokens(b))];
   if (wordsA.length === 0 || wordsB.length === 0) return false;
