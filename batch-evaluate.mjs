@@ -57,13 +57,7 @@ function readFile(path, label) {
 }
 
 function nextReportNumber() {
-  if (!existsSync(PATHS.reports)) return '001';
-  const files = readdirSync(PATHS.reports)
-    .filter(f => /^\d{3}-/.test(f))
-    .map(f => parseInt(f.slice(0, 3)))
-    .filter(n => !isNaN(n));
-  if (files.length === 0) return '001';
-  return String(Math.max(...files) + 1).padStart(3, '0');
+  return execFileSync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
 }
 
 function slugifyCompany(value) {
@@ -76,8 +70,8 @@ function tsvSafe(value) {
 
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?') return 'N/A';
-  return /\/5$/i.test(clean) ? clean : `${clean}/5`;
+  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
+  return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
 }
 
 // Load Context
@@ -251,7 +245,13 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
   }
 }
 
-async function main() {  const limitArg = process.argv.find(a => a.startsWith("--limit="));  const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
+async function main() {
+  const limitArg = process.argv.find(a => a.startsWith("--limit="));
+  const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
+  
+  const concArg = process.argv.find(a => a.startsWith("--concurrency="));
+  const CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2;
+
   if (!existsSync(PATHS.pipeline)) {
     console.log("No pipeline.md found.");
     return;
@@ -262,7 +262,9 @@ async function main() {  const limitArg = process.argv.find(a => a.startsWith("-
     .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
     .filter(i => i !== -1);
 
-  if (limitCount > 0) { pendingIndices.splice(0, pendingIndices.length - limitCount); }
+  if (limitCount > 0) {
+    pendingIndices.splice(limitCount);
+  }
   if (pendingIndices.length === 0) {
     console.log("No pending [-] offers found in pipeline.md.");
     return;
@@ -272,7 +274,6 @@ async function main() {  const limitArg = process.argv.find(a => a.startsWith("-
   const browser = await chromium.launch({ headless: true });
   
   // Concurrency queue
-  const CONCURRENCY = 2;
   let active = 0;
   let index = 0;
   
