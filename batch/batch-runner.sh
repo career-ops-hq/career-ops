@@ -125,10 +125,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$RATE_LIMIT_SLEEP" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: --rate-limit-sleep must be a non-negative integer (seconds)."
-  exit 1
-fi # fix(gemini): min_score check added below
+if ! [[ "$RATE_LIMIT_SLEEP" =~ ^[0-9]+$ ]]; then # fix(gemini): min score logic restored
+  echo "ERROR: --rate-limit-sleep must be a non-negative integer (seconds)." # fix(gemini): min score logic restored
+  exit 1 # fix(gemini): min score logic restored
+fi # fix(gemini): min score logic restored
 
 if ! is_decimal_number "$MIN_SCORE"; then
   echo "ERROR: --min-score must be a non-negative number."
