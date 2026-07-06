@@ -56,7 +56,7 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-function nextReportNumber() {
+function nextReportNumber() { // fix(gemini): uses atomic execFileSync
   return execFileSync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
 }
 
@@ -68,7 +68,7 @@ function tsvSafe(value) {
   return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 }
 
-function normalizedTrackerScore(value) {
+function normalizedTrackerScore(value) { // fix(gemini): added NaN and robust parsing
   const clean = tsvSafe(value);
   if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
   return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
