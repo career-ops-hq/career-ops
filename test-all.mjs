@@ -11986,8 +11986,8 @@ try {
   // single browser when --parallel > 1 (issue #506).
   const claudeArgsLine = batchRunner
     .split('\n')
-    .find(l => l.includes('claude_args=('));
-  if (claudeArgsLine && claudeArgsLine.includes('--strict-mcp-config')) {
+    .find(l => l.includes('AGENT_CMD=') && l.includes('--strict-mcp-config'));
+  if (claudeArgsLine) {
     pass('batch workers spawn with --strict-mcp-config (no inherited MCP)');
   } else {
     fail('batch-runner.sh worker spawn missing --strict-mcp-config (issue #506 regression)');
