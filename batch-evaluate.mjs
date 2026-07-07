@@ -140,6 +140,15 @@ async function scrapeUrl(browser, url) {
   
   const page = await browser.newPage();
   try {
+    await page.route('**/*', (route) => {
+      const targetUrl = route.request().url();
+      const interceptedRejected = rejectPrivateOrInvalid(targetUrl);
+      if (interceptedRejected) {
+        return route.abort('accessdenied');
+      }
+      return route.continue();
+    });
+
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     
     const finalRejected = rejectPrivateOrInvalid(page.url());
