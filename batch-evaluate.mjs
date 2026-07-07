@@ -61,7 +61,7 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-async function nextReportNumber() {
+async function nextReportNumber() { // outdate-bot
   const { stdout } = await execFileAsync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
 }
@@ -168,7 +168,7 @@ async function evaluateWithRetry(jdText, retries = 5) {
       console.error(`⚠️ API Error (attempt ${attempt}/${retries}): ${err.message}`);
       const status = err?.status ?? err?.response?.status;
       const retryable = status === 429 || status === 503;
-      if (attempt >= retries || !retryable) throw err;
+      if (attempt >= retries || !retryable) throw err; // outdate-bot
       console.log(`⏳ Waiting ${delay/1000}s before retry...`);
       await new Promise(r => setTimeout(r, delay));
       delay *= 2; // Exponential backoff
@@ -264,7 +264,7 @@ async function main() {
   const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
   
   const concArg = process.argv.find(a => a.startsWith("--concurrency="));
-  let CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2;
+  let CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2; // outdate-bot
   if (isNaN(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = 2;
 
   if (!existsSync(PATHS.pipeline)) {
