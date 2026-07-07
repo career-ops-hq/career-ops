@@ -141,6 +141,12 @@ async function scrapeUrl(browser, url) {
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    
+    const finalRejected = rejectPrivateOrInvalid(page.url());
+    if (finalRejected) {
+      throw new Error(`Invalid or blocked URL after redirect: ${finalRejected.reason}`);
+    }
+
     await page.waitForTimeout(2000); // wait for dynamic content
     const text = await page.evaluate(() => {
       document.querySelectorAll('script, style, noscript, iframe, svg, img').forEach(s => s.remove());
