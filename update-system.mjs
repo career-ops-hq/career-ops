@@ -196,6 +196,7 @@ const SYSTEM_PATHS = [
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'batch-evaluate.mjs',
   'providers/',
   'seeds/',
   'tests/',

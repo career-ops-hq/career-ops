@@ -56,8 +56,13 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-function nextReportNumber() { // fix(gemini): uses atomic execFileSync
-  return execFileSync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
+
+async function nextReportNumber() {
+  const { stdout } = await execFileAsync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
+  return stdout.trim();
 }
 
 function slugifyCompany(value) {
@@ -142,6 +147,7 @@ async function scrapeUrl(browser, url) {
 }
 
 async function evaluateWithRetry(jdText, retries = 5) {
+  if (typeof retries !== 'number' || isNaN(retries) || retries < 1) retries = 1;
   let attempt = 0;
   let delay = 5000;
   while (attempt < retries) {
@@ -154,7 +160,9 @@ async function evaluateWithRetry(jdText, retries = 5) {
     } catch (err) {
       attempt++;
       console.error(`⚠️ API Error (attempt ${attempt}/${retries}): ${err.message}`);
-      if (attempt >= retries) throw err;
+      const status = err?.status ?? err?.response?.status;
+      const retryable = status === 429 || status === 503;
+      if (attempt >= retries || !retryable) throw err;
       console.log(`⏳ Waiting ${delay/1000}s before retry...`);
       await new Promise(r => setTimeout(r, delay));
       delay *= 2; // Exponential backoff
@@ -206,7 +214,7 @@ async function processOffer(browser, line, idx) {
     mkdirSync(PATHS.reports, { recursive: true });
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
-    const num = nextReportNumber();
+    const num = await nextReportNumber();
     const today = new Date().toISOString().split('T')[0];
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
@@ -250,7 +258,8 @@ async function main() {
   const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
   
   const concArg = process.argv.find(a => a.startsWith("--concurrency="));
-  const CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2;
+  let CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2;
+  if (isNaN(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = 2;
 
   if (!existsSync(PATHS.pipeline)) {
     console.log("No pipeline.md found.");
