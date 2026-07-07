@@ -16,8 +16,9 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
-import { execFileSync } from 'child_process';
-
+import { execFileSync, execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
   config();
@@ -56,10 +57,6 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-const execFileAsync = promisify(execFile);
-
 async function nextReportNumber() {
   const { stdout } = await execFileAsync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
@@ -73,7 +70,7 @@ function tsvSafe(value) {
   return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 }
 
-function normalizedTrackerScore(value) { // fix(gemini): added NaN and robust parsing
+function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
   if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
   return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
