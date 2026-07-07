@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
+import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -61,7 +62,7 @@ function readFile(path, label) {
 }
 
 async function nextReportNumber() {
-  const { stdout } = await execFileAsync('node', [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
+  const { stdout } = await execFileAsync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
 }
 
@@ -132,6 +133,11 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 `;
 
 async function scrapeUrl(browser, url) {
+  const rejected = rejectPrivateOrInvalid(url);
+  if (rejected) {
+    throw new Error(`Invalid or blocked URL: ${rejected.reason}`);
+  }
+  
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
