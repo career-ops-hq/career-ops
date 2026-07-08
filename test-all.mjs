@@ -2498,6 +2498,42 @@ if (trackerModeDoc.includes('company-history.mjs') && trackerModeDoc.includes('s
 // company-history.mjs — every legitimacy Source must be observable without
 // executing a script that could silently fail. See PR #1712 review.
 
+// Funnel-calibration wiring (#status-ledger): the lens must be offered where
+// the data lives, and the honesty rules must survive as mode text, not just
+// script output.
+if (
+  patternsModeDoc.includes('funnel-velocity.mjs') &&
+  patternsModeDoc.includes('selection-bias') &&
+  patternsModeDoc.includes('n=20')
+) {
+  pass('patterns mode offers the funnel-calibration lens with its honesty rules');
+} else {
+  fail('patterns mode missing funnel-velocity lens, selection-bias note, or n=20 claim gate');
+}
+
+if (
+  trackerModeDoc.includes('funnel-velocity.mjs') &&
+  trackerModeDoc.includes('set-status.mjs') &&
+  trackerModeDoc.includes('--on')
+) {
+  pass('tracker mode surfaces funnel-velocity and routes status changes through set-status --on');
+} else {
+  fail('tracker mode missing funnel-velocity mention or set-status/--on routing');
+}
+
+if (followupModeDoc.includes('funnel-velocity.mjs') && followupModeDoc.includes('--on')) {
+  pass('followup mode cross-references the waiting block and --on event dating');
+} else {
+  fail('followup mode missing funnel-velocity waiting cross-reference or --on');
+}
+
+const applyModeDoc = readFile('modes/apply.md');
+if (applyModeDoc.includes('--on YYYY-MM-DD')) {
+  pass('apply Step 9 documents --on for backdated submissions');
+} else {
+  fail('apply mode missing --on backdating hint in Step 9');
+}
+
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
 console.log('\n9. Local parser contract');
