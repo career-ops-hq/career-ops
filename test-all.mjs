@@ -2450,19 +2450,25 @@ if (ofertaMode.includes('company-history.mjs') && ofertaMode.includes('Not a leg
   fail('oferta mode missing company-history.mjs reference or the "Not a legitimacy signal" guardrail');
 }
 
+// Hygiene must not just be mentioned — it must be documented BEFORE the
+// aged-Applied cards are consumed (the documented precedence is the guard
+// against drawing conclusions from stale tracker rows).
+const patternsHygieneIdx = patternsModeDoc.toLowerCase().indexOf('hygiene');
+const patternsAgedIdx = patternsModeDoc.indexOf('aged-Applied');
 if (
   patternsModeDoc.includes('company-history.mjs') &&
-  (patternsModeDoc.includes('hygiene') || patternsModeDoc.includes('aged-Applied'))
+  patternsHygieneIdx !== -1 && patternsAgedIdx !== -1 &&
+  patternsHygieneIdx < patternsAgedIdx
 ) {
-  pass('patterns mode adds the company-history lens with hygiene surfaced first');
+  pass('patterns mode adds the company-history lens with hygiene documented before aged-Applied cards');
 } else {
-  fail('patterns mode missing company-history.mjs lens or hygiene-first mention');
+  fail('patterns mode missing company-history.mjs lens, hygiene mention, aged-Applied mention, or hygiene-before-aged-Applied ordering');
 }
 
-if (followupModeDoc.includes('company-history.mjs') || followupModeDoc.includes('silent-on-you')) {
-  pass('followup mode references company-history.mjs / silent-on-you when setting expectations');
+if (followupModeDoc.includes('company-history.mjs') && followupModeDoc.includes('silent-on-you')) {
+  pass('followup mode references both company-history.mjs and the silent-on-you label when setting expectations');
 } else {
-  fail('followup mode missing company-history.mjs / silent-on-you reference');
+  fail('followup mode must reference BOTH company-history.mjs and silent-on-you');
 }
 
 if (trackerModeDoc.includes('company-history.mjs')) {

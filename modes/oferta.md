@@ -345,9 +345,12 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 
 ### Prior-contact FYI (non-scoring)
 
-Check the `responsiveness` axis of the same `node company-history.mjs --company "{company}"` card. If `responsiveness.label` is `silent-on-you` or `mixed`, append ONE informational line to the report:
+Check the `responsiveness` axis of the same `node company-history.mjs --company "{company}"` card. Branch on `responsiveness.label` and append ONE informational line to the report:
 
+- `silent-on-you`:
 > Note: you applied to {company} on {date}; no response in {N}d after {M} follow-ups. Not a legitimacy signal — factor into how much effort to invest.
+- `mixed` (they answered at least one of your applications and went silent on another — a flat "no response" would be inaccurate):
+> Note: mixed history with {company} — they responded on #{num} ({date}) but went silent on #{num} (applied {date}, {N}d). Not a legitimacy signal — factor into how much effort to invest.
 
 This is information about **your own history** with the company, not about this posting. It must NOT alter the 1-5 score and must NOT alter the Assessment tier above — those are driven exclusively by the `postingChurn` axis and the other Block G signals. If the label is `responded-before` or `no-history`, say nothing (silence is fine; no note needed).
 

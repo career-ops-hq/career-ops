@@ -347,6 +347,27 @@ try {
   ok('unknown flag exits 1', e.status === 1);
 }
 
+// --silence-window validation: non-numeric, zero, and negative must fail fast
+// (a silent fallback hides typos; a 0/negative window labels everything silent).
+for (const bad of ['abc', '0', '--silence-window=-5']) {
+  const flagArgs = bad.startsWith('--') ? [bad] : ['--silence-window', bad];
+  try {
+    execFileSync('node', [scriptPath, ...flagArgs], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+    ok(`--silence-window rejects "${bad}" with exit 1`, false);
+  } catch (e) {
+    ok(`--silence-window rejects "${bad}" with exit 1`,
+      e.status === 1 && /positive integer/.test(String(e.stderr)));
+  }
+}
+
+try {
+  const winOut = execFileSync('node', [scriptPath, '--silence-window', '21'], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+  ok('--silence-window accepts a positive integer', JSON.parse(winOut).metadata.silenceWindowDays === 21);
+} catch (e) {
+  ok('--silence-window accepts a positive integer', false);
+  console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
+}
+
 // ============================================================================
 // RESULTS
 // ============================================================================

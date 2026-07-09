@@ -118,11 +118,21 @@ function parseArgs(argv) {
     return args[idx + 1];
   };
 
+  // --silence-window must be a positive integer, validated before anything
+  // runs: a NaN silently falling back to the default hides the user's typo,
+  // and a zero/negative window would label every application silent.
+  const silenceWindowArg = valueOf('--silence-window');
+  if (silenceWindowArg !== undefined && !/^[1-9]\d*$/.test(silenceWindowArg)) {
+    console.error(`Error: --silence-window expects a positive integer number of days, got "${silenceWindowArg}"`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
   return {
     summaryMode: args.includes('--summary'),
     selfTestMode: args.includes('--self-test'),
     company: valueOf('--company'),
-    silenceWindowArg: valueOf('--silence-window'),
+    silenceWindowArg,
     includeStale: args.includes('--include-stale'),
     scanHistoryOverride: valueOf('--scan-history'),
     followupsOverride: valueOf('--followups'),
@@ -746,7 +756,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const scanHistory = loadRepostClusters(CAREER_OPS, scanHistoryOverride);
       const statusLog = await loadStatusLogSource();
 
-      const silenceWindowDays = silenceWindowArg !== undefined && Number.isFinite(parseInt(silenceWindowArg, 10))
+      // parseArgs already validated the flag as a positive integer.
+      const silenceWindowDays = silenceWindowArg !== undefined
         ? parseInt(silenceWindowArg, 10)
         : resolveDefaultSilenceWindow(CAREER_OPS);
 
