@@ -334,7 +334,18 @@ function printSummary(contacts, quality) {
   console.log('');
 }
 
-function writeVcf(contacts) {
+function writeVcf(contacts, quality) {
+  // --vcf is the piped/scripted mode, so quality clashes go to stderr — the
+  // same never-silently-dropped contract as the JSON and --summary modes.
+  const issues = quality.shortRows.length + quality.missingRequired.length
+    + quality.invalidTypes.length + quality.duplicates.length;
+  if (issues) {
+    console.error(`⚠ ${issues} data-quality issue${issues === 1 ? '' : 's'} in data/contacts.tsv (details: node contacts.mjs --summary):`);
+    if (quality.shortRows.length) console.error(`    ${quality.shortRows.length} row${quality.shortRows.length === 1 ? '' : 's'} with fewer than 4 cells (skipped)`);
+    if (quality.missingRequired.length) console.error(`    ${quality.missingRequired.length} row${quality.missingRequired.length === 1 ? '' : 's'} missing name or company (skipped)`);
+    if (quality.invalidTypes.length) console.error(`    ${quality.invalidTypes.length} contact${quality.invalidTypes.length === 1 ? '' : 's'} with off-enum type (kept)`);
+    if (quality.duplicates.length) console.error(`    ${quality.duplicates.length} duplicated contact${quality.duplicates.length === 1 ? '' : 's'} (the last line wins)`);
+  }
   if (!contacts.length) {
     console.log('No contacts to export — data/contacts.tsv is empty or missing. No file written.');
     return;
@@ -363,7 +374,7 @@ function main() {
   const { contacts, quality } = parseContacts(content);
 
   if (vcfMode) {
-    writeVcf(contacts);
+    writeVcf(contacts, quality);
   } else if (summaryMode) {
     printSummary(contacts, quality);
   } else {

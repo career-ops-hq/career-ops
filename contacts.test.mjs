@@ -17,7 +17,7 @@
  */
 
 import { parseContacts, escapeVcard, foldLine, slug, uidPart, contactUid, contactToVcard, buildVcf } from './contacts.mjs';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync } from 'fs';
@@ -334,6 +334,14 @@ try {
 
   execFileSync('node', [tmpScript, '--vcf', '--caller-id'], { encoding: 'utf-8', timeout: 10000 });
   ok('--vcf --caller-id renders annotated FN', readFileSync(vcfPath, 'utf-8').includes('FN:Jane Doe (Acme recruiter)'));
+
+  // --vcf surfaces the quality report on stderr (same never-silently-dropped
+  // contract as JSON/--summary) while the export itself still succeeds.
+  writeFileSync(join(tmpRoot, 'data/contacts.tsv'), '\n' + row(['', 'NoName GmbH', 'recruiter', 'TA']), { flag: 'a' });
+  const flawedRun = spawnSync('node', [tmpScript, '--vcf'], { encoding: 'utf-8', timeout: 10000 });
+  eq('--vcf with a flawed store still exits 0', flawedRun.status, 0);
+  ok('--vcf reports quality issues on stderr', flawedRun.stderr.includes('data-quality') && flawedRun.stderr.includes('missing name or company'));
+  ok('--vcf keeps stdout for the write confirmation only', flawedRun.stdout.includes('Wrote') && !flawedRun.stdout.includes('data-quality'));
 
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
