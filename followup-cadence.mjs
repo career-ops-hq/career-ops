@@ -151,9 +151,11 @@ function parseTracker() {
 }
 
 // --- Parse follow-ups.md ---
-function parseFollowups() {
-  if (!existsSync(FOLLOWUPS_FILE)) return [];
-  const content = readFileSync(FOLLOWUPS_FILE, 'utf-8');
+// Table rows only (lines starting with `|`); pin-directive lines (`- next #...`)
+// and the header/separator rows are excluded — the header's `num` cell isn't
+// numeric and the separator's dashes aren't either, so both fail the `isNaN`
+// check below and never enter `entries`.
+export function parseFollowups(content) {
   const entries = [];
   for (const line of content.split('\n')) {
     if (!line.startsWith('|')) continue;
@@ -173,6 +175,11 @@ function parseFollowups() {
     });
   }
   return entries;
+}
+
+function readFollowups() {
+  if (!existsSync(FOLLOWUPS_FILE)) return [];
+  return parseFollowups(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
 }
 
 // --- Next-date overrides (pins) ---
@@ -287,7 +294,7 @@ function analyze() {
     return { error: 'No applications found in tracker.' };
   }
 
-  const followups = parseFollowups();
+  const followups = readFollowups();
   const overrides = parseOverrides();
 
   // Group follow-ups by app number
