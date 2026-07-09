@@ -171,6 +171,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
@@ -188,6 +189,7 @@ const scripts = [
   { name: 'followup-cadence.test.mjs', expectExit: 0 },
   { name: 'process-quality.test.mjs', expectExit: 0 },
   { name: 'company-history.test.mjs', expectExit: 0 },
+  { name: 'contacts.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
@@ -2497,6 +2499,19 @@ if (trackerModeDoc.includes('company-history.mjs') && trackerModeDoc.includes('s
 // sourced from scan-history.tsv (agent-observable), NOT routed through
 // company-history.mjs — every legitimacy Source must be observable without
 // executing a script that could silently fail. See PR #1712 review.
+
+// --- contacts phonebook wiring (contacts.mjs <-> contacto mode) ---
+const contactoModeDoc = readFile('modes/contacto.md');
+
+if (
+  contactoModeDoc.includes('data/contacts.tsv') &&
+  contactoModeDoc.includes('contacts.mjs --vcf') &&
+  /never save|never auto-save/i.test(contactoModeDoc)
+) {
+  pass('contacto offers to save identified contacts (user-confirmed, never auto) and surfaces the vCard export');
+} else {
+  fail('contacto missing the save-to-contacts.tsv step, the no-auto-save rule, or the contacts.mjs --vcf mention');
+}
 
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 

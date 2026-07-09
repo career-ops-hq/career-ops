@@ -193,6 +193,8 @@ const SYSTEM_PATHS = [
   'salary-gap.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
+  'contacts.mjs',
+  'contacts.test.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',
