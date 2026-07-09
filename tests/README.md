@@ -43,10 +43,12 @@ run the full `node test-all.mjs` before pushing.
 ## Adding a test
 
 Add one `{name}.test.mjs` file here — it is auto-discovered, no registration
-needed. Do not add a section to `test-all.mjs`. Import the helpers:
+needed. Do not add a section to `test-all.mjs`. Import the helpers with a
+path relative to the test file's location:
 
 ```js
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';    // tests/*.test.mjs
+import { pass, fail, ROOT } from '../helpers.mjs';   // tests/providers/*.test.mjs
 ```
 
 See `CONTRIBUTING.md` for the full contribution flow.
