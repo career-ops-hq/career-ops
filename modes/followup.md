@@ -123,6 +123,10 @@ Do NOT generate another follow-up. Instead suggest:
 > - Trying a different contact via `/career-ops contacto`
 > - Keeping in `Applied` status but deprioritizing"
 
+### Company history context (optional)
+
+Before drafting, check the company's card via `node company-history.mjs --company "{company}"`. If `responsiveness.label` is `silent-on-you`, set expectations rather than discouraging the follow-up: many processes are genuinely just slow, so mention this plainly and suggest capping further time investment in this company if it stays silent after this attempt. The decision to send — and how many more times — stays the user's; never skip or downgrade a follow-up because of this label. Follow-up compliance is never punished.
+
 ## Step 4 — Present Drafts
 
 For each draft, show:

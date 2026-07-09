@@ -2441,6 +2441,42 @@ if (
   fail('upskill trust rule 8 (scope boundary: upskill finds, training judges) missing');
 }
 
+// --- company-history.mjs wiring across mode docs (Task 6) ---
+const followupModeDoc = readFile('modes/followup.md');
+
+if (ofertaMode.includes('company-history.mjs') && ofertaMode.includes('Not a legitimacy signal')) {
+  pass('oferta mode wires company-history.mjs and keeps the prior-contact FYI out of the legitimacy tier');
+} else {
+  fail('oferta mode missing company-history.mjs reference or the "Not a legitimacy signal" guardrail');
+}
+
+if (
+  patternsModeDoc.includes('company-history.mjs') &&
+  (patternsModeDoc.includes('hygiene') || patternsModeDoc.includes('aged-Applied'))
+) {
+  pass('patterns mode adds the company-history lens with hygiene surfaced first');
+} else {
+  fail('patterns mode missing company-history.mjs lens or hygiene-first mention');
+}
+
+if (followupModeDoc.includes('company-history.mjs') || followupModeDoc.includes('silent-on-you')) {
+  pass('followup mode references company-history.mjs / silent-on-you when setting expectations');
+} else {
+  fail('followup mode missing company-history.mjs / silent-on-you reference');
+}
+
+if (trackerModeDoc.includes('company-history.mjs')) {
+  pass('tracker mode offers company-history.mjs when a silent-on-you company is present');
+} else {
+  fail('tracker mode missing company-history.mjs reference');
+}
+
+if (shared.includes('company-history.mjs')) {
+  pass('_shared.md signals table joins the reposting signal through company-history.mjs');
+} else {
+  fail('_shared.md signals table missing company-history.mjs join reference');
+}
+
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
 console.log('\n9. Local parser contract');
