@@ -118,6 +118,23 @@ function parseArgs(argv) {
     return args[idx + 1];
   };
 
+  // A value-taking flag must actually receive a value: without this guard
+  // `--company --summary` would consume `--summary` as the company name and
+  // silently filter to a company that does not exist.
+  for (let idx = 0; idx < args.length; idx += 1) {
+    const flag = args[idx];
+    if (VALUE_FLAGS.includes(flag) && (args[idx + 1] === undefined || args[idx + 1].startsWith('--'))) {
+      console.error(`Error: ${flag} expects a value.`);
+      console.error(USAGE);
+      process.exit(1);
+    }
+    if (VALUE_FLAGS.some(valueFlag => flag === `${valueFlag}=`)) {
+      console.error(`Error: ${flag.slice(0, -1)} expects a non-empty value.`);
+      console.error(USAGE);
+      process.exit(1);
+    }
+  }
+
   // --silence-window must be a positive integer, validated before anything
   // runs: a NaN silently falling back to the default hides the user's typo,
   // and a zero/negative window would label every application silent.
@@ -257,7 +274,10 @@ export function buildFollowupCountsByAppNum(followupRows) {
 // --- Applied-date resolution (priority: status-log -> notes -> tracker date column) ---
 export function resolveAppliedDate(row, statusLogAppliedByNum) {
   const fromLog = statusLogAppliedByNum instanceof Map ? statusLogAppliedByNum.get(row.num) : undefined;
-  if (fromLog) return { dateStr: fromLog, dateBasis: 'status-log' };
+  // Only let a status-log date take precedence when it actually parses —
+  // otherwise one malformed optional observation would erase valid
+  // notes/tracker evidence (computeResponsiveness skips unparsable dates).
+  if (fromLog && parseDate(fromLog)) return { dateStr: fromLog, dateBasis: 'status-log' };
 
   const fromNotes = parseAppliedDate(row.notes);
   if (fromNotes) return { dateStr: fromNotes, dateBasis: 'notes' };

@@ -235,6 +235,14 @@ console.log('\n--- 3. dateBasis provenance ---');
   eq('resolveAppliedDate: status-log outranks both notes and the column', resolveAppliedDate(rowEval, statusLogMap), { dateStr: '2026-05-05', dateBasis: 'status-log' });
   eq('resolveAppliedDate: falls back to evaluation-date column when nothing else applies', resolveAppliedDate(rowEval, null), { dateStr: '2026-01-01', dateBasis: 'evaluation-date' });
   eq('resolveAppliedDate: notes outrank the date column', resolveAppliedDate(rowNotes, null), { dateStr: '2026-01-01', dateBasis: 'notes' });
+
+  // A truthy but unparsable status-log date must NOT take precedence — it
+  // would later fail parseDate() in computeResponsiveness and silently drop a
+  // row that had perfectly valid notes/tracker evidence.
+  const badLogMap = new Map([[301, 'not-a-date']]);
+  eq('resolveAppliedDate: unparsable status-log date falls back to notes', resolveAppliedDate(rowNotes, badLogMap), { dateStr: '2026-01-01', dateBasis: 'notes' });
+  const badLogMapEval = new Map([[300, 'not-a-date']]);
+  eq('resolveAppliedDate: unparsable status-log date falls back to the date column', resolveAppliedDate(rowEval, badLogMapEval), { dateStr: '2026-01-01', dateBasis: 'evaluation-date' });
 }
 
 // ============================================================================
@@ -366,6 +374,19 @@ try {
 } catch (e) {
   ok('--silence-window accepts a positive integer', false);
   console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
+}
+
+// Value-taking flags must not consume the next flag as their value:
+// `--company --summary` would otherwise filter to a company named "--summary".
+for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-history', '--summary'], ['--followups='], ['--company=']]) {
+  const label = flagArgs.join(' ');
+  try {
+    execFileSync('node', [scriptPath, ...flagArgs], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+    ok(`value flag without a value ("${label}") exits 1`, false);
+  } catch (e) {
+    ok(`value flag without a value ("${label}") exits 1`,
+      e.status === 1 && /expects a (non-empty )?value/.test(String(e.stderr)));
+  }
 }
 
 // ============================================================================
