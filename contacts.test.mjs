@@ -20,7 +20,7 @@ import { parseContacts, escapeVcard, foldLine, slug, uidPart, contactUid, contac
 import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 
 let passed = 0;
@@ -303,7 +303,10 @@ try {
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
 // the caller's real workspace contains — a contributor with a real phonebook
 // gets the same results as CI.
-const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
+// realpathSync: macOS tmpdir() is a symlink (/var/folders → /private/var); Node
+// realpath-resolves the ESM entry but pathToFileURL(argv[1]) doesn't, so an
+// unresolved temp path silently defeats the copied script's main-guard.
+const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
@@ -360,7 +363,7 @@ try {
 }
 
 // Empty store: fresh temp root with NO data/contacts.tsv at all.
-const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
+const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
