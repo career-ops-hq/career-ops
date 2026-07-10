@@ -102,7 +102,7 @@ Block G assesses whether a posting is likely a real, active opening. It does NOT
 | Tech specificity in JD | JD text | Medium | Generic JDs correlate with ghost postings but also with poor writing |
 | Requirements realism | JD text | Medium | Contradictions are a strong signal, vagueness is weaker |
 | Recent layoff news | WebSearch | Medium | Must consider department, timing, and company size |
-| Reposting pattern | company-history.mjs (postingChurn axis) | Medium | Same role reposted 2+ times in 90 days is concerning — read the `postingChurn` clusters (`repostCount`/`daysSpan`/`lastSeen`) from `node company-history.mjs --company "{company}"`; still repost data, same reliability |
+| Reposting pattern | company-history.mjs (postingChurn axis) | Medium | Same role reposted 2+ times in 90 days is concerning — read the `postingChurn` clusters (`repostCount`/`daysSpan`/`lastSeen`) from `node company-history.mjs --company <company>` (company name passed as its own single, quoted argument — never spliced into a longer shell string); still repost data, same reliability |
 | Salary transparency | JD text | Low | Jurisdiction-dependent, many legitimate reasons to omit |
 | Role-company fit | Qualitative | Low | Subjective, use only as supporting signal |
 
