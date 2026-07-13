@@ -298,6 +298,7 @@ Two separate axes:
 | Receives an offer/contract and wants help understanding it before signing | `offer-prep` — clause walk with neutral tags + lawyer question list; describes, never judges; no verdicts, no online research; optional draft-only negotiation reply from the "Items to raise" list |
 | Wants to broaden the search with adjacent job titles suggested from the CV | `titles` |
 | Asks what skills to learn, wants a skill-gap analysis of their pipeline | `upskill` |
+| Wants to build or enrich the profile from documents they already have (master CV, LinkedIn export, diplomas, references) | `intake` — scans `documents/`, extracts text locally (`intake.mjs`), proposes source-annotated additions to `config/profile.yml`/`cv.md`/`modes/_profile.md`; writes nothing without explicit confirm |
 | Asks about follow-ups or application cadence | `followup` |
 | Wants to classify application replies and review updates | `reply-watch` — classifies replies, matches to applications, suggests tracker updates |
 | Wants to record application outcome & archive artifacts | `outcome` |
