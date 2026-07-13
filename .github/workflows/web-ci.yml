@@ -1,0 +1,35 @@
+name: Web CI
+
+# CI for the experimental web UI (web/). Informative by design: it is NOT a
+# required check for the core — a red here never blocks a core merge, and core
+# changes never trigger it. The web/ tree versions and releases as its own
+# release-please component.
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build

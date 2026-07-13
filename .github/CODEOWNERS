@@ -1,0 +1,48 @@
+# CODEOWNERS — auto-requests maintainer review on sensitive paths.
+# Last matching pattern wins. See MAINTAINERS.md for the team + ladder.
+#
+# Scope principle: gate what CI can't catch (a bad change here passes the
+# tests silently) + the catastrophic updater + governance docs. Code that
+# test-all.mjs / Renovate / dependency-review already guard (scan.mjs,
+# generate-pdf.mjs, test-all.mjs, package.json) is intentionally NOT gated,
+# so routine contributor PRs aren't bottlenecked on a single owner. Broaden
+# this list once there is more than one code owner.
+
+# Repo docs & governance
+/README*.md            @santifer
+/CONTRIBUTING.md       @santifer
+/MAINTAINERS.md        @santifer
+/ARCHITECTURE.md       @santifer
+/.github/CODEOWNERS    @santifer
+
+# Agent behavior & the multi-CLI contract (prompt layer — CI-blind)
+/CLAUDE.md             @santifer
+/AGENTS.md             @santifer
+/CODEX.md              @santifer
+/OPENCODE.md           @santifer
+/GEMINI.md             @santifer
+
+# Scoring & the system/user data contract (CI-blind; silent-danger)
+/modes/_shared.md      @santifer
+/DATA_CONTRACT.md      @santifer
+
+# The self-updater (catastrophic if wrong — touches user installs)
+/update-system.mjs     @santifer
+/updater-migration-tests.mjs  @santifer
+
+# Plugin governance chokepoint (a bad change here ships unreviewed code to
+# every user — the registry pin, the gates, and the CI must stay single-owner).
+/plugins-registry.json         @santifer
+/validate-plugin-registry.mjs  @santifer
+/plugin-install.mjs            @santifer
+/plugin-audit.mjs              @santifer
+/plugins/_engine.mjs           @santifer
+/plugins/_lock.mjs             @santifer
+/plugins/_net.mjs              @santifer
+/plugins/_registry.mjs         @santifer
+/.github/workflows/            @santifer
+/docs/PLUGIN_REVIEW.md         @santifer
+
+# The experimental web UI — owned by the web track (dual-track review with the
+# core maintainer on any PR that also touches root files).
+/web/ @santifer

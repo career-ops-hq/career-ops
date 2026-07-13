@@ -1,3 +1,95 @@
 # discover-web3vacancy dismissed slugs (one per line)
 # Format: slug<TAB>YYYY-MM-DD<TAB>note (date and note optional)
 # Add a slug here to suppress it from future discovery runs.
+# ---------- Added 2026-06-21 via discover-web3vacancy.mjs triage ----------
+# Batch 1
+adtech-solutions	2026-06-21	marketing/adtech, no SC
+apliteni	2026-06-21	legal consulting, non-crypto
+arrise	2026-06-21	gambling/game presenter platform
+ayni-gold	2026-06-21	gold/commodities, non-crypto
+bee-talents	2026-06-21	staffing/recruiting agency
+bitmex	2026-06-21	talent community pool, non-engineering
+bpmcpa	2026-06-21	tax accounting firm
+caladan	2026-06-21	trading ops, non-engineering
+bix-team	2026-06-21	unidentifiable, generic search results
+coinmarketcap	2026-06-21	data aggregator, no SC engineering
+clover-group	2026-06-21	marketing agency
+btse	2026-06-21	exchange ops, non-engineering
+coins	2026-06-21	ambiguous (different from Coins.ph already tracked)
+crypto	2026-06-21	ambiguous slug, likely duplicate of Crypto.com
+# Batch 2 (excluding 4 over-dismissals re-included: fireblocks, galaxy-digital, gemini, kraken)
+dbbet	2026-06-21	iGaming/gambling, non-crypto
+dem-team	2026-06-21	iGaming bizdev, non-crypto
+elliptic	2026-06-21	blockchain compliance/analytics, low SC
+exness	2026-06-21	forex/trading, non-crypto
+falconx	2026-06-21	institutional trading firm, non-SC focus
+fp-markets	2026-06-21	forex/trading platform, non-crypto
+gate-io	2026-06-21	exchange US-stocks segment, non-SC sample role
+genesis	2026-06-21	chat/support manager, non-engineering
+gomining	2026-06-21	mining company, non-engineering
+grt	2026-06-21	The Graph token trading role, non-engineering
+hut-8	2026-06-21	mining talent pool, non-engineering
+igaming-project	2026-06-21	iGaming/gambling
+improbable	2026-06-21	UK game/simulation, non-crypto
+incode	2026-06-21	identity/KYC, non-crypto-engineering
+international-cpa-network	2026-06-21	marketing/bizdev
+international-fintech-company	2026-06-21	SEO/marketing
+international-payment-solutions-aggregator	2026-06-21	copywriting/marketing
+international-product-company-in-gambling-igaming	2026-06-21	iGaming
+international-product-startup	2026-06-21	adult/non-relevant
+kronosresearch	2026-06-21	quant trading, non-engineering
+lenkep	2026-06-21	design, non-engineering
+localcoin	2026-06-21	P2P exchange compliance, non-engineering
+luckyteam	2026-06-21	marketing/media buying
+luno	2026-06-21	exchange compliance, non-engineering
+luxor-technology	2026-06-21	mining bizdev, non-engineering
+merkle-science	2026-06-21	blockchain analytics, low SC
+mesh	2026-06-21	compliance/governance
+frachtis-vc	2026-06-21	VC firm, no engineering hires
+dakota	2026-06-21	unknown compliance role
+game-gears	2026-06-21	traditional game studio
+geex-arts	2026-06-21	creative/game studio
+highcore-games	2026-06-21	game studio
+inexis-games	2026-06-21	game studio
+karta-io	2026-06-21	unclear company, insufficient Web3 context
+legends-team	2026-06-21	game studio QA
+lycoris-games	2026-06-21	game studio VFX
+mish	2026-06-21	unclear company
+mno-go-games	2026-06-21	game studio
+# Batch 3
+molecule	2026-06-21	biotech/law (paralegal), non-crypto
+moonpay	2026-06-21	KYC/onramp ops, no SC dev (no public ATS found)
+mushroomgaze	2026-06-21	marketing/community
+omut	2026-06-21	PR/community
+pantera-capital	2026-06-21	VC investor relations
+playground-games	2026-06-21	non-crypto gaming
+primitive-games	2026-06-21	non-crypto gaming
+qcp-capital	2026-06-21	trading compliance
+reactimo	2026-06-21	not a real company (likely framework)
+rich-mind	2026-06-21	advertising/marketing
+roblox	2026-06-21	non-crypto metaverse
+rocks-partners	2026-06-21	affiliate/marketing
+skailer	2026-06-21	social media marketing
+skylimit	2026-06-21	SEO marketing
+speend	2026-06-21	technical support, non-engineering
+stronghold	2026-06-21	marketing/community
+taxes-for-expats-tfx	2026-06-21	tax accounting
+thesoul-group	2026-06-21	creative/media production
+tilda-publishing	2026-06-21	website builder, non-crypto
+veles-finance	2026-06-21	social media marketing
+web-design-sun	2026-06-21	web design services, non-crypto
+wildberries	2026-06-21	Russian e-commerce, non-crypto
+wildberries-and-russ	2026-06-21	Russian staffing QA, non-crypto
+yandex	2026-06-21	Russian tech conglomerate, non-crypto
+yandex-plus	2026-06-21	Yandex Plus product, non-crypto
+yeet	2026-06-21	customer support, non-engineering
+# ---------- Re-classified 2026-06-21 per user feedback: large exchanges unlikely to hire SC engineers ----------
+okx	2026-06-21	large exchange, unlikely to hire SC engineers (251 roles, ~0 SC after title_filter)
+binance	2026-06-21	largest exchange, unlikely to hire SC engineers (361 roles, ~0 SC after title_filter)
+gemini	2026-06-21	exchange, unlikely to hire SC engineers
+kraken	2026-06-21	exchange, unlikely to hire SC engineers
+coinhako	2026-06-21	smaller exchange, unlikely to hire SC engineers
+coins	2026-06-21	Filipino payments / exchange (Coins.ph), unlikely to hire SC engineers
+blockchain	2026-06-21	wallet + exchange (Blockchain.com), unlikely to hire SC engineers
+anchorage	2026-06-21	custody firm, backend roles per memory; unlikely SC
+anchorage-digital	2026-06-21	custody firm, backend roles per memory; unlikely SC
