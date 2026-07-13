@@ -12,11 +12,19 @@ Contributors with sustained technical ownership over specific areas. Full author
 
 ## Shipping with the project
 
+- **[@razour08](https://github.com/razour08)** (Ramzi Dekali) — Arabic translation support (`modes/ar/` and `README.ar.md`) for the Arab market.
 - **[@CURT1S03](https://github.com/CURT1S03)** (Curtis) — LaTeX/Overleaf CV export ([PR #362](https://github.com/santifer/career-ops/pull/362), merged — resolves [#47](https://github.com/santifer/career-ops/issues/47))
 - **[@vivek-gite](https://github.com/vivek-gite)** — A16Z provider support ([PR #271](https://github.com/santifer/career-ops/pull/271), in review)
 - **@3fones** — LinkedIn scanner (WIP, paid Claude Max to build on top of the project)
 - **@kennedy58** — Testing alternative inference providers
 - **@kelvan** — Surfaced the token consumption issue that drove the optimization roadmap
+
+## Community Voices
+
+Members who landed roles using career-ops and opted in to share their journey publicly. Their tips and patterns shape how we explain the project.
+
+- **[@logumani2112](https://github.com/logumani2112)** — Landed Backend Developer (.NET) at an IT services company. 50 listings evaluated, 1 month from first scan to offer. Most useful feature: A–F evaluation scoring. Their tip: *"Focus on quality over quantity. Use the evaluation scoring to prioritize the right opportunities and tailor your resume for each role."* ([#440](https://github.com/santifer/career-ops/issues/440))
+- **[@chinna63055](https://github.com/chinna63055)** — 200 listings evaluated, 2 weeks from first scan to offer. Most useful feature: A–F evaluation scoring. ([#388](https://github.com/santifer/career-ops/issues/388))
 
 ## Community Guides
 

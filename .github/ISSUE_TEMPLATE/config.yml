@@ -6,3 +6,6 @@ contact_links:
   - name: GitHub Discussions
     url: https://github.com/santifer/career-ops/discussions
     about: For ideas, Q&A, and community conversations.
+  - name: "📤 Sharing scan results or automation output?"
+    url: https://github.com/santifer/career-ops/blob/main/DATA_CONTRACT.md
+    about: Your scans and reports stay local (data/ + reports/). Please don't file them here — they'd be public, and they're not needed upstream. Point any scheduled run at your own fork.

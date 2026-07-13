@@ -9,7 +9,7 @@ career-ops is an open source project maintained in limited time. Here's how to g
 | **Bug** (something is broken) | [GitHub Issues](https://github.com/santifer/career-ops/issues) — use the Bug Report template |
 | **Feature idea** | [GitHub Issues](https://github.com/santifer/career-ops/issues) — use the Feature Request template |
 | **How do I...?** | [GitHub Discussions](https://github.com/santifer/career-ops/discussions) or [Discord](https://discord.gg/8pRpHETxa4) |
-| **Setup help** | Check [docs/SETUP.md](docs/SETUP.md) first, then ask in [Discord](https://discord.gg/8pRpHETxa4) |
+| **Setup help** | Check [docs/FAQ.md](docs/FAQ.md) for common questions, then [docs/SETUP.md](docs/SETUP.md), then ask in [Discord](https://discord.gg/8pRpHETxa4) |
 | **Security vulnerability** | Email hi@santifer.io — see [SECURITY.md](SECURITY.md) |
 
 ## Before opening an issue

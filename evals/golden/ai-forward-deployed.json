@@ -1,0 +1,10 @@
+{
+  "id": "ai-forward-deployed",
+  "synthetic": true,
+  "jd": "Forward Deployed AI Engineer — Ridgeline (Remote + on-site sprints)\n\nWe embed engineers directly with our customers to get AI into production fast. You will be client-facing from week one: sit with the customer, understand their workflow, prototype a solution in days not months, and deploy it into their environment. This is field work — you own the last mile from demo to live usage, iterating tightly against real user feedback. Expect fast delivery cycles, occasional travel to customer sites for deployment sprints, and the satisfaction of shipping something that gets used the same week. Strong generalist engineering, comfort in ambiguous customer environments, and the instinct to prototype rather than over-design. Clear comp: $190k–$220k base, meaningful equity, travel fully covered.",
+  "label": {
+    "archetype": "AI Forward Deployed",
+    "score": 4.3,
+    "provenance": "reference-frozen-v1"
+  }
+}

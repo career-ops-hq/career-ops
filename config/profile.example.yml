@@ -6,15 +6,20 @@ candidate:
   full_name: "Jane Smith"
   email: "jane@example.com"
   phone: "+1-555-0123"
+  # Optional. Used by `/career-ops email` contact blocks in markets where WeChat
+  # is an expected recruiting channel. Omit or leave blank if not applicable.
+  wechat: ""
   location: "San Francisco, CA"
   linkedin: "linkedin.com/in/janesmith"
   portfolio_url: "https://janesmith.dev"
   github: "github.com/janesmith"
   twitter: "https://x.com/janesmith"
-  # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
-  # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
-  # The ID starts with "D" and is 11 characters long.
-  # canva_resume_design_id: "DAxxxxxxxxx"
+  # Optional profile photo for the PDF CV (opt-in, #264). Leave empty to omit it
+  # entirely: US/UK and many-market ATS penalize photos, so the photoless layout
+  # is the default. Set it only for DACH/European markets (Germany, Austria,
+  # Switzerland) where a professional photo is expected. Use a local file path or
+  # a data: URL — the PDF renderer inlines local images.
+  photo: ""
 
 target_roles:
   # Your North Star roles — what you're optimizing for
@@ -69,3 +74,176 @@ location:
   visa_status: "No sponsorship needed"
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
+
+language:
+  # Human-facing output language for reports, tracker notes, PDFs, cover
+  # letters, outreach, and form answers. Use an ISO language code.
+  # This is separate from language.modes_dir: modes_dir selects market
+  # vocabulary/rules, while output selects the prose language.
+  output: en
+  # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+
+# Optional follow-up cadence preferences for `node followup-cadence.mjs`.
+# CLI flags still win for one-off runs (for example `--applied-days 10`).
+# followup_cadence:
+#   applied_first_days: 7
+#   applied_subsequent_days: 7
+#   applied_max_followups: 2
+#   responded_initial_days: 1
+#   responded_subsequent_days: 3
+#   interview_thankyou_days: 1
+
+# Controls which model tier evaluates your offers. Valid values:
+#   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
+#   standard -- balanced model, no extended thinking. Default if this key is absent.
+#   premium  -- most capable model, adaptive extended thinking. Best for high-stakes offers.
+# See the tier -> model mapping table in modes/_shared.md.
+spend_tier: standard
+
+cv:
+  output_format: "html" # "html" (default) or "latex"
+  # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
+  # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
+  # The ID starts with "D" and is 11 characters long.
+  # canva_resume_design_id: "DAxxxxxxxxx"
+  # Which CV template to use by default. Value is the kebab-case name of a file
+  # in templates/ named cv-template.<name>.html (e.g. "modern" ->
+  # templates/cv-template.modern.html). Leave unset/commented to use the built-in
+  # templates/cv-template.html. You can also pick per-generation just by asking
+  # (e.g. "use the modern template").
+  # template: modern
+
+# ── Culture Screen ───────────────────────────────────────────────────────────
+#
+# Enforces structural capping on the "Cultural signals" dimension during evaluation.
+#
+# culture_screen:
+#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first).
+#   # If absent/commented, the dimension is scored qualitatively without a hard cap.
+#   require:
+#     - "Small, flat teams (under 15 engineers)"
+#     - "Async-first communication, low meeting overhead"
+#   # If true, the dimension is capped at 2/5 if the JD lacks any evidence for the required criteria.
+#   # If false (or absent), lack of evidence defaults to a neutral 3/5.
+#   deprioritize_if_absent: true
+
+# Optional user-owned LaTeX CV for `/career-ops latex-tex` (opt-in tailoring in place).
+# cv.md remains the default source of truth for evaluations and auto-pipeline.
+# latex:
+#   source: resume.tex
+
+# ── Cover Letter Settings ──────────────────────────────────────────────────
+#
+# Used by `/career-ops cover` and the cover letter sub-flow in `/career-ops pdf`.
+# All fields are optional — omit any you don't need.
+
+cover_letter:
+  # Your notice period in calendar days. Surfaced as a prompt default when the
+  # JD requests an immediate start. The user confirms the actual value before it
+  # appears in the letter.
+  notice_period_days: 30
+  # Which cover-letter template to use by default. Kebab-case name of a file in
+  # templates/ named cover-letter-template.<name>.html. Unset -> built-in
+  # templates/cover-letter-template.html.
+  # template: modern
+
+  # Your current professional domain (used to detect domain gaps vs the JD).
+  # Plain English, e.g. "digital media", "fintech", "healthcare IT".
+  primary_domain: "your current domain"
+
+  # Languages you are actively learning. Each entry MAY produce a closing
+  # sentence in that language IF the JD location matches one of the listed
+  # countries AND the user confirms inclusion during the cover letter flow.
+  # Remove the block entirely if not applicable.
+  language_learning:
+    - language: Spanish
+      current_level: B1
+      target_level: B2
+      target_date: "end of 2026"
+      # The sentence to include, written in that language. Keep it one line.
+      sentence: "Estoy aprendiendo español y espero alcanzar el nivel B2 a finales de 2026."
+      # Only trigger this entry when the JD location is in one of these countries.
+      countries: [Spain, Mexico, Argentina, Colombia, Chile]
+
+# ── Contact Preferences ──────────────────────────────────────────────────────
+#
+# Used by `/career-ops contacto` (outreach CTA) and `/career-ops email` (contact
+# block) to steer drafted messages toward how you actually want to be reached.
+# Optional. Omit the whole block, or set preferred_channel to "either", to keep
+# today's behavior unchanged (no channel steering).
+#
+# contact_preferences:
+#   preferred_channel: "email"   # email | phone | either — default "either" if omitted
+#   # Optional. Surfaced near the contact block in `/career-ops email` drafts and
+#   # can inform the CTA wording in `/career-ops contacto`. Keep it one line.
+#   note: "Screens unknown numbers — please email or text first to schedule a call"
+
+# ── Outreach / greeting ─────────────────────────────────────────────────────
+#
+# Used by the greeting variant of `/career-ops contacto` (the short first-touch
+# message for BOSS Zhipin 打招呼, job-board chat, or a cold-email opener).
+#
+# greeting_max_chars is the hard character budget for that message. Default when
+# the key is absent: 150 (BOSS Zhipin's greeting limit). Raise or lower it to
+# match the platform you're messaging on.
+# outreach:
+#   greeting_max_chars: 150
+
+# ── Application Email Drafts ────────────────────────────────────────────────
+#
+# Used by `/career-ops email` when drafting formal application emails. This is
+# separate from `contacto` short outreach and `cover` full cover letters.
+# All fields are optional.
+#
+# application_email:
+#   include_contact_block: true
+#   include_attachment_checklist: true
+#   # Use this when you want the email body to say "the email used to send this
+#   # message" instead of printing a concrete email address from candidate.email.
+#   # default_sender_note: "the email used to send this message"
+#   # signature_name: "Jane Smith"
+
+# ── Scan / JD extractor ─────────────────────────────────────────────────────
+#
+# How the scan and JD-extraction steps read SPA job pages.
+#   mcp (default) — the browser MCP (browser_navigate + browser_snapshot). Works
+#                   out of the box; the snapshot is token-heavy.
+#   cli           — the headless `browser-extract.mjs` helper: renders the page
+#                   and returns compact JSON, cutting per-page tokens ~2–5×. Opt-in.
+#                   If the helper isn't available, the modes fall back to mcp
+#                   silently, so nothing breaks. `doctor` reports the active mode.
+# scan:
+#   extractor: mcp   # mcp (default) | cli
+
+# ── Auto-PDF threshold ──────────────────────────────────────────────────────
+#
+# Auto-PDF threshold during evaluation (used by `/career-ops pipeline` and
+# `bash batch/batch-runner.sh`).
+#
+# An offer's tailored CV PDF is auto-generated only when its score is
+# >= this threshold. Generating a PDF costs ~30-60s per offer (Playwright
+# launch + HTML render), and most offers in a scan score 2.x/3.x and never
+# become an actual application — so the gate avoids wasted renders.
+#
+# Default (key absent OR commented out): 3.0 — the original gate of
+# `/career-ops pipeline`. Both evaluation paths apply the same default, so
+# a batch run and an interactive run treat the same offer identically.
+#
+# Raise it (e.g. 4.0) to auto-generate PDFs only for stronger matches and
+# leave the rest report-only — those can still be produced on demand via
+# `/career-ops pdf {company-slug}`. Fractional thresholds work (e.g. 3.5 —
+# half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
+# generate a PDF for every offer.
+# auto_pdf_score_threshold: 4.0
+
+# ── Re-apply Cooldown Windows ──────────────────────────────────────────────
+#
+# Define cooldown windows for companies where you've recently applied.
+# The scanner will skip new postings at these companies during the window.
+#
+# re_apply_windows:
+#   CompanyA:
+#     same_role_days: 180
+#     cross_role_bucket: "all_EM_roles"
+#     applied_to: ["Senior Software Engineer"]
+#     last_apply_date: "2026-01-01"

@@ -1,0 +1,10 @@
+{
+  "id": "ai-platform-llmops",
+  "synthetic": true,
+  "jd": "Senior AI Platform Engineer — Meridian Labs (Remote)\n\nWe run LLM products at scale and need someone who treats reliability as a feature. You will own our model observability stack: tracing, evals, and regression monitoring across our inference pipelines. Day to day you will build offline and online eval harnesses, wire up dashboards and alerting for latency and quality drift, and harden the pipelines that route requests across providers. We care about measurable quality gates in CI, reproducible benchmarks, and cost-per-request visibility. Strong Python, comfort with OpenAI-compatible APIs, and a track record of shipping monitoring/observability for ML or LLM systems. This is a platform role, not a research role.",
+  "label": {
+    "archetype": "AI Platform / LLMOps",
+    "score": 4.2,
+    "provenance": "reference-frozen-v1"
+  }
+}

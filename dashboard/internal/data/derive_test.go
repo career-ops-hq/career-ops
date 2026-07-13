@@ -104,6 +104,67 @@ func TestDeriveNoteFields(t *testing.T) {
 			workMode: "",
 			last:     "2026-06-01",
 		},
+		{
+			name: "remote EU with EUR estimate range",
+			app: model.CareerApplication{
+				Date:  "2026-06-10",
+				Notes: "Remote EU (Portugal eligible). Comp ~€130-170K (est). Applied 2026-06-10",
+			},
+			location: "",
+			workMode: "Remote",
+			payRange: "~€130-170K",
+			paySrc:   "est",
+			last:     "2026-06-10",
+		},
+		{
+			name: "international city hybrid with EUR posted",
+			app: model.CareerApplication{
+				Date:  "2026-06-09",
+				Notes: "Berlin (Hybrid). Base €90-110K (POSTED). Via Greenhouse",
+			},
+			location: "Berlin",
+			workMode: "Hybrid",
+			payRange: "€90-110K",
+			paySrc:   "POSTED",
+			last:     "2026-06-09",
+		},
+		{
+			name: "CHF range, bare intl city implies onsite",
+			app: model.CareerApplication{
+				Date:  "2026-06-08",
+				Notes: "Zurich. CHF 165-185K. Check Point-backed",
+			},
+			location: "Zurich",
+			workMode: "Full",
+			payRange: "CHF 165-185K",
+			paySrc:   "",
+			last:     "2026-06-08",
+		},
+		{
+			name: "GBP posted range, London",
+			app: model.CareerApplication{
+				Date:  "2026-06-07",
+				Notes: "London. £175-225K (POSTED). 30+ teams",
+			},
+			location: "London",
+			workMode: "Full",
+			payRange: "£175-225K",
+			paySrc:   "POSTED",
+			last:     "2026-06-07",
+		},
+		{
+			name: "Portugal home market, city from role title",
+			app: model.CareerApplication{
+				Date:  "2026-06-06",
+				Role:  "Senior Engineering Manager — Porto",
+				Notes: "Onsite. Comp €60-90K (est, below floor)",
+			},
+			location: "Porto",
+			workMode: "Full",
+			payRange: "€60-90K",
+			paySrc:   "est",
+			last:     "2026-06-06",
+		},
 	}
 
 	for _, tc := range cases {
@@ -138,6 +199,9 @@ func TestPayCeiling(t *testing.T) {
 		"~$124.2-198.7K":   198_700,
 		"$170K":            170_000,
 		"$95-159K":         159_000,
+		"€130-170K":        170_000,
+		"£175-225K":        225_000,
+		"CHF 165-185K":     185_000,
 		"":                 0,
 	}
 	for span, want := range cases {

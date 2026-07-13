@@ -1,65 +1,86 @@
-# モード: pipeline -- URL インボックス（Second Brain）
+# モード: pipeline -- URL Inbox (Second Brain)
 
-`data/pipeline.md` に蓄積された求人 URL を処理する。候補者がいつでも URL を追加し、後から `/career-ops pipeline` を実行してまとめて処理する。
+`data/pipeline.md` に保存された job URLs を処理する。ユーザーはいつでも URL を追加し、後から `/career-ops pipeline` を実行してまとめて処理する。
 
-## ワークフロー
+## Liveness sweep
 
-1. **読み取り** `data/pipeline.md` → 「未処理」セクションの `- [ ]` アイテムを検索
-2. **各未処理 URL に対して**：
-   a. 次の `REPORT_NUM` を連番で計算（`reports/` を読み、最大番号 + 1）
-   b. **JD を抽出** Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch の順で
-   c. URL にアクセスできない場合 → `- [!]` にマークし注記、次へ進む
-   d. **完全な auto-pipeline を実行**：評価 A-F → Report .md → PDF（スコア >= 3.0 の場合）→ Tracker
-   e. **「未処理」から「処理済み」へ移動**：`- [x] #NNN | URL | 企業名 | 求人タイトル | スコア/5 | PDF ✅/❌`
-3. **3 つ以上の URL がある場合**、エージェントを並列起動（Agent tool の `run_in_background`）して速度を最大化。
-4. **完了後**、サマリーテーブルを表示：
+**URLs を処理する前に必ず実行する。** Scanner が headless/batch mode で追加した entries は、Playwright が使えなかったため `**Verification:** unconfirmed (batch mode)` を持つ。つまり liveness は未確認。Sweep なしでは dead postings が 1 tab ずつ evaluation に到達し、phantom roles に時間と tokens を使ってしまう（8 件の stale URLs がある inbox なら 8 回分の無駄な evaluations になる）。
 
-```
-| # | 企業 | 求人 | スコア | PDF | 推奨アクション |
-```
+Per-URL loop の前に、zero-token liveness checker で pending URLs をまとめて sweep する：
 
-## pipeline.md のフォーマット
+1. "Pending" section のすべての `- [ ]` URL を temp file に集める（1 URL per line）。
+2. `node check-liveness.mjs --file <tmpfile>` を実行する（large batches では WAF rate limits を避けるため `--throttle` を追加。pure Playwright、zero Claude tokens）。Checker は URL ごとの verdict を出し、expired/uncertain がある場合は non-zero で終了する。
+3. Checker が **expired/closed** と報告した URL は処理せず pipeline entry を resolve する：`- [x] ~~URL | Company | Role~~ -- posting expired (liveness sweep)` として "Processed" に移し、すでに tracker row がある場合は `Discarded` にする。**JD extraction、evaluation、report/PDF generation はしない。**
+4. `uncertain` results は残し、normal per-URL extraction 中に確認する（一時的な timeout で live posting を落とさないため）。
+5. 生き残った live URLs だけが下の per-URL processing loop に進む。
+
+これは `auto-pipeline` の per-URL liveness gate（Step 0.5）や `apply` preflight を置き換えるものではなく補完するもの。Dead postings を upfront, in bulk で落とし、ユーザーが expired role の tab を開いたり token を使ったりしないようにする。
+
+## Workflow
+
+1. **Read** `data/pipeline.md` → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
+2. **For each surviving pending URL**:
+   a. `node reserve-report-num.mjs` を実行して次の `REPORT_NUM` を atomically claim する（report が書き込まれたら `node reserve-report-num.mjs --release <num>` で sentinel を release）
+   b. **Extract JD** using Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch
+   c. URL に access できない場合 → note 付きで `- [!]` と mark し、次へ進む
+   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF（score >= `auto_pdf_score_threshold` の場合）→ Tracker
+   e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
+
+   **About the PDF gate (configurable):** `config/profile.yml` → `auto_pdf_score_threshold` を読む。Key がなければ default は `3.0`（この mode の original gate）。Evaluation score が threshold 未満なら PDF generation を skip する。Report は通常通り書き、header に `**PDF:** not generated -- run /career-ops pdf {company-slug} to create on demand` と表示し、tracker では PDF ❌。Score が threshold 以上なら通常通り PDF を生成する。
+
+   **Tuning it:** Tailored PDF generation は entry あたり ~30-60s かかる（Playwright launch + HTML render）うえ、使われないことも多い。多くの roles は 2.x/3.x で application stage まで進まない。`auto_pdf_score_threshold` を上げる（例：`4.0`）と marginal offers では report のみを書き、PDF は `/career-ops pdf {slug}` で on demand に作れる。`0` にするとすべての offers で PDF を生成する。Path A `/career-ops pipeline` と Path B `batch/batch-runner.sh` は同じ key を読むため、どちらで処理しても behavior は同じ。
+3. **If there are 3+ pending URLs**, speed を上げるため agents を並列起動する（Agent tool with `run_in_background`）。
+4. **At the end**, summary table を表示：
 
 ```markdown
-## 未処理
+| # | Company | Role | Score | PDF | Recommended action |
+```
+
+## Format of pipeline.md
+
+```markdown
+## Pending
 - [ ] https://jobs.example.com/posting/123
 - [ ] https://boards.greenhouse.io/company/jobs/456 | Company Inc | Senior PM
-- [!] https://private.url/job — エラー: ログインが必要
+- [ ] https://jobs.ashbyhq.com/acme/789 | Acme Corp | Solutions Architect | Remote (US)
+- [!] https://private.url/job -- Error: login required
 
-## 処理済み
+## Processed
 - [x] #143 | https://jobs.example.com/posting/789 | Acme Corp | AI PM | 4.2/5 | PDF ✅
 - [x] #144 | https://boards.greenhouse.io/xyz/jobs/012 | BigCo | SA | 2.1/5 | PDF ❌
 ```
 
-> 注：セクション見出しは EN（「Pending」/「Processed」）、ES（「Pendientes」/「Procesadas」）、DE（「Offen」/「Verarbeitet」）、PT-BR（「Pendentes」/「Processadas」）、または JA（「未処理」/「処理済み」）のいずれでも可。読み取り時は柔軟に、書き込み時は既存ファイルのスタイルを維持。
+Pending lines are `- [ ] {url} | {company} | {title} | {location}`. Scanner は ATS が location を expose する場合、末尾の `| {location}` column を埋める。古い 3-column lines（location なし）も valid で、empty location として読む。
 
-## URL からの JD インテリジェント検出
+> 注：既存ファイルが日本語 section headings（`未処理` / `処理済み`）を使っている場合は、その style を維持してよい。読み取りは柔軟に行い、書き込み時は既存 file の style を保つ。
 
-1. **Playwright（推奨）：** `browser_navigate` + `browser_snapshot`。すべての SPA で動作。
-2. **WebFetch（フォールバック）：** 静的ページ、または Playwright が利用できない場合。
-3. **WebSearch（最終手段）：** JD をインデックスしているセカンダリポータルで検索。
+## Intelligent JD detection from URL
 
-**特殊ケース：**
-- **LinkedIn**：ログインが必要な場合あり → `[!]` にマークし、候補者にテキストを貼り付けてもらう
-- **PDF**：URL が PDF を指す場合、Read tool で直接読む
-- **`local:` プレフィックス**：ローカルファイルを読む。例：`local:jds/linkedin-pm-ai.md` → `jds/linkedin-pm-ai.md` を読む
-- **Wantedly / Green / Findy**：日本の主要プラットフォーム。Playwright でうまく動作
-- **doda / リクナビNEXT / マイナビ転職**：日本の大手求人ポータル。通常 WebFetch でアクセス可能
-- **ビズリーチ**：ハイクラス求人。ログインが必要な場合あり
-- **LinkedIn JP**：グローバル LinkedIn と同じ制約 — ログインが必要な場合あり
+1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`. すべての SPA で動く。
+2. **WebFetch (fallback):** Static pages または Playwright が unavailable な場合。
+3. **WebSearch (last resort):** JD を index している secondary portals で検索。
 
-## 自動採番
+**Special cases:**
+- **LinkedIn:** login が必要な場合あり → `[!]` と mark し、ユーザーに text paste を依頼
+- **PDF:** URL が PDF を指す場合、Read tool で直接読む
+- **`local:` prefix:** Local file を読む。Example: `local:jds/linkedin-pm-ai.md` → `jds/linkedin-pm-ai.md`
+- **Wantedly / Green / Findy:** 日本の主要 platforms。まず Playwright で確認
+- **doda / リクナビNEXT / マイナビ転職:** 日本の大手 job portals。Usually WebFetch または Playwright で確認
+- **ビズリーチ:** ハイクラス求人。Login が必要な場合あり
+- **LinkedIn JP:** Global LinkedIn と同じ constraints。Login が必要な場合あり
 
-1. `reports/` 内のすべてのファイルをリスト
-2. プレフィックスから番号を抽出（例：`142-medispend...` → 142）
-3. 新番号 = 見つかった最大値 + 1
+## Automatic numbering
 
-## ソース同期
+1. `node reserve-report-num.mjs` を実行して next sequential number を claim する（stdout returns `{###}`）。
+2. その number を使って report file を書く。
+3. Report が書けたら `node reserve-report-num.mjs --release {###}` を実行して sentinel を release する。
 
-URL を処理する前に同期を確認：
+## Source synchronization
+
+URL を処理する前に sync を verify：
 
 ```bash
 node cv-sync-check.mjs
 ```
 
-非同期がある場合、続行前に候補者に通知。
+Desynchronization があれば、続行前にユーザーに warn する。

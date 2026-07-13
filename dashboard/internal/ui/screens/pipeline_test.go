@@ -13,7 +13,7 @@ import (
 func tabIndexForFilter(t *testing.T, filter string) int {
 	t.Helper()
 
-	for i, tab := range pipelineTabs {
+	for i, tab := range getPipelineTabs() {
 		if tab.filter == filter {
 			return i
 		}
@@ -519,5 +519,64 @@ func TestPreviewOutcomeForStatusWithoutNotes(t *testing.T) {
 	}
 	if strings.Contains(preview, "Loading preview...") {
 		t.Fatalf("expected outcome line to replace the loading placeholder, got %q", preview)
+	}
+}
+
+func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
+	initialApps := []model.CareerApplication{
+		{
+			Company:    "Acme",
+			Role:       "Backend Engineer",
+			Status:     "Applied",
+			Score:      4.2,
+			ReportPath: "reports/001-acme.md",
+		},
+		{
+			Company:    "Beta",
+			Role:       "Platform Engineer",
+			Status:     "Applied",
+			Score:      4.6,
+			ReportPath: "reports/002-beta.md",
+		},
+		{
+			Company:    "Gamma",
+			Role:       "AI Engineer",
+			Status:     "Applied",
+			Score:      4.8,
+			ReportPath: "reports/003-gamma.md",
+		},
+	}
+
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		initialApps,
+		model.PipelineMetrics{Total: len(initialApps)},
+		"..",
+		120,
+		40,
+	)
+	pm.activeTab = tabIndexForFilter(t, filterApplied)
+	pm.applyFilterAndSort()
+	pm.cursor = 1
+
+	refreshedApps := []model.CareerApplication{
+		initialApps[0],
+		{
+			Company:    "Beta",
+			Role:       "Platform Engineer",
+			Status:     "Rejected", // Changed!
+			Score:      4.6,
+			ReportPath: "reports/002-beta.md",
+		},
+		initialApps[2],
+	}
+
+	reloaded := pm.WithReloadedData(refreshedApps, model.PipelineMetrics{Total: len(refreshedApps)})
+
+	if got := len(reloaded.filtered); got != 2 {
+		t.Fatalf("expected 2 filtered apps after refresh, got %d", got)
+	}
+	if reloaded.cursor < 0 || reloaded.cursor >= len(reloaded.filtered) {
+		t.Fatalf("expected cursor to be within [0, %d], got %d", len(reloaded.filtered)-1, reloaded.cursor)
 	}
 }

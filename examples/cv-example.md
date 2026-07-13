@@ -13,6 +13,7 @@ Full-stack AI engineer with 6 years building production ML systems. Led the ML p
 ## Work Experience
 
 ### TechFin Corp -- Austin, TX
+
 **Senior ML Engineer / ML Platform Lead**
 2020-2024
 
@@ -23,6 +24,7 @@ Full-stack AI engineer with 6 years building production ML systems. Led the ML p
 - Established model monitoring: drift detection, performance dashboards (Grafana), automated retraining triggers
 
 ### DataStartup Inc -- Remote
+
 **ML Engineer**
 2018-2020
 

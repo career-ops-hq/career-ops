@@ -16,6 +16,7 @@
           - .opencode/skills/**
           - .qwen/skills/**
           - .antigravitycli/skills/**
+          - .grok/skills/**
 
 "🔧 scripts":
   - changed-files:
@@ -40,6 +41,7 @@
           - "README.*.md"
           - modes/de/**
           - modes/fr/**
+          - modes/hi/**
           - modes/ja/**
           - modes/ru/**
 

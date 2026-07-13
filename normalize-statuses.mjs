@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { rebuildRow } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original)
@@ -67,7 +68,7 @@ function normalizeStatus(raw) {
   // Already canonical (English, per states.yml) — just fix casing/bold
   const canonical = [
     'Evaluated', 'Applied', 'Responded', 'Interview',
-    'Offer', 'Rejected', 'Discarded', 'SKIP',
+    'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP',
   ];
   for (const c of canonical) {
     if (lower === c.toLowerCase()) return { status: c };
@@ -79,28 +80,12 @@ function normalizeStatus(raw) {
   if (['respondido'].includes(lower)) return { status: 'Responded' };
   if (['entrevista'].includes(lower)) return { status: 'Interview' };
   if (['oferta'].includes(lower)) return { status: 'Offer' };
+  if (['contratado', 'contratada', 'hired', 'accepted', 'accept'].includes(lower)) return { status: 'Hired' };
   if (['cerrada', 'descartada'].includes(lower)) return { status: 'Discarded' };
   if (['no aplicar', 'no_aplicar', 'skip'].includes(lower)) return { status: 'SKIP' };
 
   // Unknown — flag it
   return { status: null, unknown: true };
-}
-
-/**
- * Rebuild a markdown table row from `line.split('|')` cells without dropping the
- * last real cell. `split('|')` adds a leading empty element and, only when the
- * row ends with `|`, a trailing empty one. The old `slice(1, -1)` assumed that
- * trailing empty always existed, so a row written without a trailing pipe
- * (`| 5 | … | note`) lost its notes cell on rewrite. Drop the leading empty and
- * only drop a trailing element when it is genuinely empty.
- *
- * @param {string[]} parts - Trimmed cells from `line.split('|').map(s => s.trim())`.
- * @returns {string} The rebuilt `| a | b | … |` row.
- */
-function rebuildRow(parts) {
-  const cells = parts.slice(1);
-  if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
-  return '| ' + cells.join(' | ') + ' |';
 }
 
 // Read applications.md

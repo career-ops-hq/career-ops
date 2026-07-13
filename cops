@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# cops — thin wrapper: run any career-ops command inside the docker container.
+#
+# Examples:
+#   ./cops doctor
+#   ./cops verify
+#   ./cops pdf cv.html output/cv.pdf
+#   ./cops scan
+#   ./cops node generate-pdf.mjs cv.html output/cv.pdf
+#   ./cops shell                     # interactive bash
+#   ./cops up | down | rebuild | logs
+#
+# Anything not matching a known subcommand is forwarded to npm run <subcommand>
+# when package.json defines it, otherwise executed verbatim inside the container.
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+SERVICE="career-ops"
+
+ensure_up() {
+  if ! docker compose ps --services --filter "status=running" | grep -qx "$SERVICE"; then
+    docker compose up -d >/dev/null
+  fi
+}
+
+case "${1:-}" in
+  ""|help|-h|--help)
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  up)
+    docker compose up -d
+    exit 0
+    ;;
+  down)
+    docker compose down
+    exit 0
+    ;;
+  rebuild)
+    docker compose build --no-cache
+    docker compose up -d
+    exit 0
+    ;;
+  logs)
+    shift
+    docker compose logs -f "$@"
+    exit 0
+    ;;
+  shell|bash)
+    ensure_up
+    exec docker compose exec -it "$SERVICE" bash
+    ;;
+  node|npm|npx|go|bash|sh)
+    ensure_up
+    exec docker compose exec -it "$SERVICE" "$@"
+    ;;
+esac
+
+# Map known npm scripts → `npm run <name>`. Anything else is forwarded raw.
+cmd="$1"; shift || true
+
+case "$cmd" in
+  doctor|verify|normalize|dedup|merge|pdf|sync-check|liveness|scan|gemini:eval|update|update:check|rollback)
+    ensure_up
+    exec docker compose exec -it "$SERVICE" npm run --silent "$cmd" -- "$@"
+    ;;
+  *)
+    ensure_up
+    exec docker compose exec -it "$SERVICE" "$cmd" "$@"
+    ;;
+esac

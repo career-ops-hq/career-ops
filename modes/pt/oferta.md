@@ -103,7 +103,7 @@ Incluir também:
 
 Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
-- `{###}` = próximo número sequencial (3 dígitos, zero-padded)
+- `{###}` = próximo número sequencial (3 dígitos, zero-padded). Para alocar de forma atômica e evitar condições de corrida, você DEVE executar `node reserve-report-num.mjs` para reservar o número (a saída retornará `{###}`), escrever o relatório, e em seguida executar `node reserve-report-num.mjs --release {###}` para liberar o sentinel.
 - `{company-slug}` = nome da empresa em lowercase, sem espaços (usar hifens)
 - `{YYYY-MM-DD}` = data atual
 

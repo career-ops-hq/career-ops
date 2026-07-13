@@ -1,0 +1,16 @@
+{
+  "id": "startup-boards",
+  "name": "career-ops-plugin-startup-boards",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Opt-in scanner provider for YC, Getro, and Consider startup job boards.",
+  "repo": "https://github.com/giacomoguidotto/career-ops-plugin-startup-boards",
+  "sha": "66f61a66beb01eaa63dd01095f745be93fa694a5",
+  "hooks": [
+    "provider"
+  ],
+  "requiredEnv": [],
+  "allowedHosts": [],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1412",
+  "addedAt": "2026-07-02"
+}

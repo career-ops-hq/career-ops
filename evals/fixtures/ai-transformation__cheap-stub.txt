@@ -1,0 +1,14 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case ai-transformation]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Change management, enablement, and adoption across a large enterprise — an AI
+transformation role, not a hands-on build seat.
+
+---SCORE_SUMMARY---
+COMPANY: Meadowbrook Group
+ROLE: AI Transformation Lead
+SCORE: 3.8
+ARCHETYPE: AI Transformation
+LEGITIMACY: Proceed with Caution
+---END_SUMMARY---

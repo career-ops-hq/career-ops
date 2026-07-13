@@ -6,7 +6,7 @@ Processa URLs de vagas acumuladas em `data/pipeline.md`. O candidato adiciona UR
 
 1. **Ler** `data/pipeline.md` → buscar itens `- [ ]` na seção "Pendentes"
 2. **Para cada URL pendente**:
-   a. Calcular próximo `REPORT_NUM` sequencial (ler `reports/`, pegar o número mais alto + 1)
+   a. Reservar o próximo `REPORT_NUM` sequencial de forma atômica executando `node reserve-report-num.mjs` (e liberar o sentinel executando `node reserve-report-num.mjs --release <num>` após a gravação do relatório)
    b. **Extrair JD** usando Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
    c. Se a URL não for acessível → marcar como `- [!]` com nota e continuar
    d. **Executar auto-pipeline completa**: Avaliação A-F → Report .md → PDF (se score >= 3.0) → Tracker
@@ -50,9 +50,9 @@ Processa URLs de vagas acumuladas em `data/pipeline.md`. O candidato adiciona UR
 
 ## Numeração automática
 
-1. Listar todos os arquivos em `reports/`
-2. Extrair o número do prefixo (ex: `142-medispend...` → 142)
-3. Novo número = máximo encontrado + 1
+1. Executar `node reserve-report-num.mjs` para reservar o próximo número sequencial de forma atômica (a saída retornará `{###}`).
+2. Gravar o arquivo de relatório usando esse número.
+3. Liberar o sentinel executando `node reserve-report-num.mjs --release {###}` após a gravação do relatório.
 
 ## Sincronização de fontes
 

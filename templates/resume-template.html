@@ -59,6 +59,15 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    /* Disable fi/fl/ffi ligatures. Headless Chromium substitutes these letter
+       pairs with the Unicode glyphs U+FB01/FB02/FB03 at PDF layout time, and PDF
+       text extractors (what ATS systems read) decode them back to those
+       codepoints, so "verification" becomes "veriﬁcation" and a literal keyword
+       search misses it. Setting this on every element covers headings and
+       competency tags too. Required ligatures (rlig) stay on, so Arabic shaping
+       is unaffected. */
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
   }
 
   html {
@@ -74,6 +83,9 @@
     background: #ffffff;
     padding: 0;
     margin: 0;
+    /* Disable ligatures here as well; see the * rule above. */
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
   }
 
   .page {
@@ -122,6 +134,22 @@
 
   .contact-row .separator {
     color: #ccc;
+  }
+
+  /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
+     Off by default: with no candidate.photo the {{PHOTO}} slot is empty, no
+     <img> is emitted, and the layout is byte-identical to a photoless CV.
+     When opted in (candidate.photo in config/profile.yml) the photo floats into
+     the top corner and the header/summary text wraps beside it. Photos are
+     penalized by US/UK/many-market ATS, so this is never on by default. */
+  .cv-photo {
+    float: right;
+    width: 80px;
+    height: 100px;
+    object-fit: cover;
+    margin: 0 0 8px 14px;
+    border-radius: 3px;
+    border: 1px solid #e2e2e2;
   }
 
   /* === SECTIONS === */
@@ -374,6 +402,11 @@
     direction: rtl;
   }
 
+  html[lang="ar"] .cv-photo {
+    float: left;
+    margin: 0 14px 8px 0;
+  }
+
   /* === CJK (Japanese) font fallback === */
   /* The bundled webfonts are Latin-only (see #951). Without a CJK fallback,
      Japanese text renders as tofu (□) in headless Chromium on any system
@@ -402,6 +435,7 @@
 <body>
 <div class="page">
 
+  {{PHOTO}}
   <!-- HEADER -->
   <div class="header avoid-break">
     <h1>{{NAME}}</h1>

@@ -21,7 +21,7 @@ jobs:
       # Publish the npm scaffolder only when a release was just created.
       # Runs in the same job because a release created via GITHUB_TOKEN does
       # not trigger separate `on: release` workflows.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.release_created }}
       - uses: actions/setup-node@v6
         if: ${{ steps.release.outputs.release_created }}
