@@ -87,7 +87,7 @@ for (let i = 0; i < toProcess.length; i++) {
     prompt
   ];
   
-  const res = spawnSync('claude', claudeArgs, { stdio: 'inherit', shell: true });
+  const res = spawnSync('claude', claudeArgs, { stdio: 'inherit' });
   if (res.error) {
     console.error(`Error running claude: ${res.error.message}`);
   } else if (res.status !== 0) {
