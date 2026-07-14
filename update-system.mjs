@@ -219,6 +219,7 @@ const SYSTEM_PATHS = [
   'batch/aggregate-tokens.mjs',
   'batch/README.md',
   'utils/token-tracker.mjs',
+  'batch-tailor.mjs',
   'dashboard/',
   'templates/',
   'config/cv-facts.example.json',
