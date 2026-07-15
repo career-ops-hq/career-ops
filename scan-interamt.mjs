@@ -7,8 +7,8 @@
  * Playwright maintains a browser session so the wicket-crypt token and cookies
  * are handled transparently.
  *
- * Reads `interamt_searches` from portals.yml. Falls back to a default set of
- * GIS/geospatial keywords if the section is absent.
+ * Reads `interamt_searches` from portals.yml. Falls back to a generic set of
+ * German IT keywords if the section is absent.
  *
  * Usage:
  *   node scan-interamt.mjs
@@ -18,15 +18,14 @@
  */
 
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
 import yaml from 'js-yaml';
+import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
 const PORTALS_PATH    = 'portals.yml';
 const SCAN_HISTORY    = 'data/scan-history.tsv';
-const PIPELINE_PATH   = 'data/pipeline.md';
-const APPLICATIONS    = 'data/applications.md';
 const INTERAMT_HOME   = 'https://interamt.de/koop/app/';
 // Direct offer URL — constructed from StellenangebotId.
 // Wicket adds a session version number (?28&id=...) during live navigation,
@@ -52,6 +51,10 @@ const DRY_RUN    = args.includes('--dry-run');
 const DEBUG      = args.includes('--debug');
 const NO_DATE_FILTER = args.includes('--all');
 const kwIdx = args.indexOf('--keyword');
+if (kwIdx !== -1 && (args[kwIdx + 1] === undefined || args[kwIdx + 1].startsWith('--'))) {
+  console.error('Error: --keyword requires a value, e.g. --keyword "Softwareentwickler"');
+  process.exit(1);
+}
 const SINGLE_KEYWORD = kwIdx !== -1 ? args[kwIdx + 1] : null;
 
 // ── Load portals.yml ─────────────────────────────────────────────────
@@ -112,70 +115,6 @@ function loadLastScanDate() {
     if (!isNaN(d) && (!latest || d > latest)) latest = d;
   });
   return latest;
-}
-
-// ── Dedup ────────────────────────────────────────────────────────────
-
-function loadSeen() {
-  const seen = new Set();
-  if (existsSync(SCAN_HISTORY)) {
-    readFileSync(SCAN_HISTORY, 'utf-8').split('\n').slice(1).forEach(line => {
-      const url = line.split('\t')[0];
-      if (url) seen.add(url);
-    });
-  }
-  if (existsSync(PIPELINE_PATH)) {
-    for (const m of readFileSync(PIPELINE_PATH, 'utf-8').matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(m[1]);
-    }
-  }
-  if (existsSync(APPLICATIONS)) {
-    for (const m of readFileSync(APPLICATIONS, 'utf-8').matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(m[0]);
-    }
-  }
-  return seen;
-}
-
-// ── Writers ──────────────────────────────────────────────────────────
-
-function appendToPipeline(offers) {
-  if (offers.length === 0) return;
-  let text = existsSync(PIPELINE_PATH)
-    ? readFileSync(PIPELINE_PATH, 'utf-8')
-    : '# Pipeline\n\n## Pendientes\n\n';
-
-  const marker = '## Pendientes';
-  const idx = text.indexOf(marker);
-  const block = '\n' + offers.map(o => {
-    const parts = [o.url, o.company, o.title];
-    if (o.city)     parts.push(o.city);
-    if (o.modality) parts.push(o.modality);
-    if (o.deadline) parts.push(`Frist: ${o.deadline}`);
-    return `- [ ] ${parts.join(' | ')}`;
-  }).join('\n') + '\n';
-
-  if (idx === -1) {
-    text += `\n${marker}\n${block}`;
-  } else {
-    const after = idx + marker.length;
-    const next = text.indexOf('\n## ', after);
-    const insertAt = next === -1 ? text.length : next;
-    text = text.slice(0, insertAt) + block + text.slice(insertAt);
-  }
-  writeFileSync(PIPELINE_PATH, text, 'utf-8');
-}
-
-function appendToScanHistory(offers, date) {
-  if (!existsSync(SCAN_HISTORY)) {
-    writeFileSync(SCAN_HISTORY, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tcity\tpublished_date\tdeadline\n', 'utf-8');
-  }
-  const lines = offers.map(o =>
-    [o.url, date, 'interamt', o.title, o.company, 'added',
-     `${o.modality || ''} ${o.city || ''}`.trim(),
-     o.city || '', o.publishedDate || '', o.deadline || ''].join('\t')
-  ).join('\n') + '\n';
-  appendFileSync(SCAN_HISTORY, lines, 'utf-8');
 }
 
 // ── Stable selectors (Wicket name attributes don't change between sessions) ──
@@ -316,7 +255,7 @@ async function searchInteramt(page, keyword, isFirst) {
 async function main() {
   mkdirSync('data', { recursive: true });
 
-  const seen = loadSeen();
+  const { seen } = loadSeenUrls();
   const date = new Date().toISOString().slice(0, 10);
 
   const lastScanDate = NO_DATE_FILTER ? null : loadLastScanDate();
@@ -327,11 +266,11 @@ async function main() {
   }
 
   let totalFound = 0;
-  let filteredTitle = 0;
-  let filteredLocation = 0;
-  let filteredDate = 0;
-  let dupes = 0;
   const newOffers = [];
+  const titleSkipped = [];
+  const locationSkipped = [];
+  const dateSkipped = [];
+  const dupeSkipped = [];
   const errors = [];
 
   const browser = await chromium.launch({ headless: true });
@@ -348,16 +287,26 @@ async function main() {
         process.stdout.write(`${found.length} found\n`);
 
         for (const offer of found) {
-          if (!matchesTitle(offer.title)) { filteredTitle++; continue; }
-          const loc = `${offer.modality || ''} ${offer.city || ''}`.trim();
-          if (!matchesLocation(loc)) { filteredLocation++; continue; }
-          if (lastScanDate) {
-            const pub = parseDE(offer.publishedDate);
-            if (pub && pub <= lastScanDate) { filteredDate++; continue; }
-          }
-          if (seen.has(offer.url)) { dupes++; continue; }
-          seen.add(offer.url);
-          newOffers.push(offer);
+          const location = [offer.modality, offer.city].filter(Boolean).join(' ')
+            + (offer.deadline ? ` (Frist: ${offer.deadline})` : '');
+          const pubDate = parseDE(offer.publishedDate);
+          const canonical = {
+            url: offer.url,
+            company: offer.company,
+            title: offer.title,
+            location,
+            source: 'interamt',
+            postedAt: pubDate ? pubDate.getTime() : undefined,
+          };
+
+          if (!matchesTitle(offer.title)) { titleSkipped.push(canonical); continue; }
+          if (!matchesLocation(location)) { locationSkipped.push(canonical); continue; }
+          // Same-day offers pass: lastScanDate is the day of the last run, and an
+          // offer published later that same day should not be treated as stale.
+          if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
+          if (seen.has(canonical.url)) { dupeSkipped.push(canonical); continue; }
+          seen.add(canonical.url);
+          newOffers.push(canonical);
         }
       } catch (err) {
         process.stdout.write(`ERROR\n`);
@@ -369,9 +318,13 @@ async function main() {
     await browser.close();
   }
 
-  if (!DRY_RUN && newOffers.length > 0) {
-    appendToPipeline(newOffers);
-    appendToScanHistory(newOffers, date);
+  if (!DRY_RUN) {
+    if (newOffers.length > 0) appendToPipeline(newOffers);
+    if (newOffers.length > 0) appendToScanHistory(newOffers, date, 'added');
+    if (titleSkipped.length > 0) appendToScanHistory(titleSkipped, date, 'skipped_title');
+    if (locationSkipped.length > 0) appendToScanHistory(locationSkipped, date, 'skipped_location');
+    if (dateSkipped.length > 0) appendToScanHistory(dateSkipped, date, 'skipped_date');
+    if (dupeSkipped.length > 0) appendToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   // Summary
@@ -380,10 +333,10 @@ async function main() {
   console.log(`${'━'.repeat(45)}`);
   console.log(`Keywords searched:  ${keywords.length}`);
   console.log(`Total found:        ${totalFound}`);
-  console.log(`Filtered by title:  ${filteredTitle}`);
-  console.log(`Filtered location:  ${filteredLocation}`);
-  console.log(`Filtered by date:   ${filteredDate}`);
-  console.log(`Duplicates:         ${dupes}`);
+  console.log(`Filtered by title:  ${titleSkipped.length}`);
+  console.log(`Filtered location:  ${locationSkipped.length}`);
+  console.log(`Filtered by date:   ${dateSkipped.length}`);
+  console.log(`Duplicates:         ${dupeSkipped.length}`);
   console.log(`New offers:         ${newOffers.length}`);
 
   if (errors.length > 0) {
@@ -394,12 +347,12 @@ async function main() {
   if (newOffers.length > 0) {
     console.log('\nNew offers:');
     for (const o of newOffers) {
-      console.log(`  + ${o.company} | ${o.title} | ${[o.city, o.modality].filter(Boolean).join(' ') || 'N/A'}`);
+      console.log(`  + ${o.company} | ${o.title} | ${o.location || 'N/A'}`);
     }
     if (DRY_RUN) {
       console.log('\n(dry run — not saved)');
     } else {
-      console.log(`\nSaved to ${PIPELINE_PATH}`);
+      console.log(`\nSaved to data/pipeline.md`);
     }
   }
 

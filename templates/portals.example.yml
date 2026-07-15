@@ -33,10 +33,10 @@
 
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
-# scanner for Interamt.de — the primary portal for German federal, state, and
-# municipal government job postings. Interamt has no REST API (Apache Wicket,
-# stateful), so it isn't reachable through the tracked_companies providers
-# above; scan-interamt.mjs drives a real browser session instead.
+# scanner for Interamt.de, a portal for German federal, state, and municipal
+# government job postings. Interamt has no REST API (Apache Wicket, stateful),
+# so it isn't reachable through the tracked_companies providers above;
+# scan-interamt.mjs drives a real browser session instead.
 #
 # Each `was:` entry is a search keyword submitted to Interamt's search form.
 # If this block is absent, scan-interamt.mjs falls back to a generic set of
