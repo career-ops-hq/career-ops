@@ -273,7 +273,89 @@ func TestResolveTrackerColumnsDuplicateHeaderLastWins(t *testing.T) {
 |---|-------|---------|------|-------|--------|-----|--------|-------|
 | 1 | stray | Acme | Engineer | 4.0/5 | Applied | ✅ | — | real note |`, "\n")
 	cols := resolveTrackerColumns(dup)
+	// Verify that the last "Notes" column wins
 	if cols["notes"] != 8 {
-		t.Errorf("notes index = %d, want 8 (last occurrence wins, like tracker-parse.mjs)", cols["notes"])
+		t.Fatalf("notes index = %d, expected 8 (tracker-parse.mjs parity)", cols["notes"])
+	}
+}
+
+// A Via column (intermediary channel, #1596) between Company and Role maps by
+// header name; later columns keep their correct indices.
+func TestResolveTrackerColumnsVia(t *testing.T) {
+	viaTracker := strings.Split(`| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|-----|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-05 | ? | Hays | Data Engineer | 4.2/5 | Applied | ✅ | — | fintech, Leeds |`, "\n")
+	cols := resolveTrackerColumns(viaTracker)
+	if cols["via"] != 3 {
+		t.Errorf("via index = %d, want 3", cols["via"])
+	}
+	if cols["role"] != 4 {
+		t.Errorf("role index = %d, want 4 (shifted by Via column)", cols["role"])
+	}
+	if cols["status"] != 6 {
+		t.Errorf("status index = %d, want 6", cols["status"])
+	}
+}
+
+// TestNormalizeStatus verifies that localized string variants map to the canonical English form.
+func TestNormalizeStatus(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Turkish status strings
+		{"değerlendirildi", "evaluated"},
+		{"Değerlendirildi", "evaluated"},
+		{"DEĞERLENDİRİLDİ", "evaluated"},
+		{"başvuruldu", "applied"},
+		{"Başvuruldu", "applied"},
+		{"BAŞVURULDU", "applied"},
+		{"yanıt verildi", "responded"},
+		{"yanıt_verildi", "responded"},
+		{"YANIT VERİLDİ", "responded"},
+		{"mülakat", "interview"},
+		{"Mülakat", "interview"},
+		{"MÜLAKAT", "interview"},
+		{"teklif", "offer"},
+		{"Teklif", "offer"},
+		{"TEKLİF", "offer"},
+		{"reddedildi", "rejected"},
+		{"Reddedildi", "rejected"},
+		{"REDDEDİLDİ", "rejected"},
+		{"iptal edildi", "discarded"},
+		{"iptal_edildi", "discarded"},
+		{"İPTAL EDİLDİ", "discarded"},
+		{"uygun değil", "skip"},
+		{"uygun_değil", "skip"},
+		{"UYGUN DEĞİL", "skip"},
+
+		// No-diacritic variants
+		{"degerlendirildi", "evaluated"},
+		{"DEGERLENDIRILDI", "evaluated"},
+		{"basvuruldu", "applied"},
+		{"BASVURULDU", "applied"},
+		{"yanit verildi", "responded"},
+		{"mulakat", "interview"},
+		{"uygun degil", "skip"},
+
+		// English status strings
+		{"Evaluated", "evaluated"},
+		{"Applied", "applied"},
+		{"Responded", "responded"},
+		{"Interview", "interview"},
+		{"Offer", "offer"},
+		{"Rejected", "rejected"},
+		{"Discarded", "discarded"},
+		{"SKIP", "skip"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			if got := NormalizeStatus(tt.input); got != tt.want {
+				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

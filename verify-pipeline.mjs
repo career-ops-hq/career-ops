@@ -13,6 +13,8 @@
  * 8. Stale report-number reservation sentinels are garbage-collected
  * 9. No two report files cover the same company+role (warning — see #1425)
  * 10. Every report file has a tracker row referencing it (warning — see #1425)
+ * 11. Via channel consistency (see #1596)
+ * 12. No # value reused across 2+ tracker rows (error — see #1704)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -42,7 +44,7 @@ mkdirSync(REPORTS_DIR, { recursive: true });
 
 const CANONICAL_STATUSES = [
   'evaluated', 'applied', 'responded', 'interview',
-  'offer', 'rejected', 'discarded', 'skip',
+  'offer', 'rejected', 'discarded', 'skip', 'hired',
 ];
 
 const ALIASES = {
@@ -54,6 +56,7 @@ const ALIASES = {
   'rechazado': 'rejected', 'rechazada': 'rejected',
   'descartado': 'discarded', 'descartada': 'discarded', 'cerrada': 'discarded', 'cancelada': 'discarded',
   'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
+  'contratado': 'hired', 'contratada': 'hired', 'hired': 'hired', 'accepted': 'hired', 'accept': 'hired',
 };
 
 let errors = 0;
@@ -80,7 +83,7 @@ const lines = content.split('\n');
 const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
 const HEADER_ALIASES = {
   '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
+  'via': 'via', 'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
   'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
 };
 function detectColumns(allLines) {
@@ -108,6 +111,7 @@ for (const line of lines) {
     num,
     date: parts[COLMAP.date],
     company: parts[COLMAP.company],
+    via: COLMAP.via != null ? parts[COLMAP.via] : '',
     role: parts[COLMAP.role],
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
     score: parts[COLMAP.score],
@@ -331,6 +335,79 @@ for (const name of reportFiles) {
   }
 }
 if (orphanReports === 0) ok('No orphan reports');
+
+// --- Check 11: Via channel consistency (#1596) ---
+// The Via column records the intermediary (agency/recruiter firm; `—` when the
+// application was direct). Unknown employers use the structural marker `?` in
+// Company — never a word like "Confidential", which is locale-dependent and can
+// collide with a real firm name.
+let viaIssues = 0;
+const CONFIDENTIAL_WORD_RE = /^(confidential|vertraulich|confidentiel|confidencial|riservato|gizli|機密|سري)$/i;
+for (const e of entries) {
+  const company = String(e.company || '').trim();
+  const via = String(e.via || '').trim();
+  if (company === '?') {
+    if (COLMAP.via == null) {
+      warn(`#${e.num}: unknown employer (?) but the tracker has no Via column — add it with: node merge-tracker.mjs --migrate-via`);
+      viaIssues++;
+    } else if (!via || via === '—') {
+      error(`#${e.num}: unknown employer (?) with no Via channel — record the agency/recruiter firm`);
+      viaIssues++;
+    }
+  }
+  if (CONFIDENTIAL_WORD_RE.test(company)) {
+    warn(`#${e.num}: company "${company}" looks like a confidentiality placeholder — use the structural marker ? (locale-invariant, can't collide with a real firm)`);
+    viaIssues++;
+  }
+}
+// Same company+role reached through different channels: both submissions are
+// real, so this is a warning to the human (double-submission risk), never an
+// auto-merge. Channel identity is normalized the same way merge-tracker.mjs
+// normalizes companies (strip non-alphanumerics, lowercase), so "Hays" and
+// "HAYS " read as one channel; the raw spelling is kept for the message.
+const normalizeChannel = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'direct';
+const channelsByRole = new Map();
+for (const e of entries) {
+  const company = String(e.company || '').trim();
+  if (!company || company === '?') continue;
+  const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
+  if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
+  const channels = channelsByRole.get(key);
+  const norm = normalizeChannel(e.via);
+  if (!channels.has(norm)) channels.set(norm, { raw: String(e.via || '').trim() || '—', num: e.num });
+}
+for (const [key, vias] of channelsByRole) {
+  if (vias.size > 1) {
+    const list = [...vias.values()];
+    warn(`Cross-channel duplicate — ${key.replace('::', ' / ')} reached via ${list.map(v => v.raw).join(' AND ')} (rows ${list.map(v => `#${v.num}`).join(', ')}) — double-submission risk, resolve by hand`);
+    viaIssues++;
+  }
+}
+if (viaIssues === 0) ok('Via channels consistent');
+
+// --- Check 12: Duplicate tracker numbers (#1704) ---
+// The # column is a row id and must be unique. Unlike Check 2 (company+role
+// dedup, which can false-positive on a legitimate re-application), the SAME
+// number appearing on 2+ rows is never legitimate: it means set-status.mjs
+// can't tell the rows apart, and any external reference to "application #N"
+// (interview-prep notes, memory, cross-links) becomes ambiguous. Pure
+// addition, no existing check covers this — see #1704 for the 124-row sweep
+// that found this in the wild (merge-tracker.mjs trusted a stale TSV number
+// as-is whenever it exceeded that run's max, without checking it wasn't
+// already used by an unrelated row merged in a separate, earlier invocation).
+const numGroups = new Map();
+for (const e of entries) {
+  if (!numGroups.has(e.num)) numGroups.set(e.num, []);
+  numGroups.get(e.num).push(e);
+}
+let dupeNums = 0;
+for (const [num, group] of numGroups) {
+  if (group.length > 1) {
+    error(`Duplicate tracker number #${num} used by ${group.length} rows: ${group.map(e => `${e.company} — ${e.role}`).join(' | ')}`);
+    dupeNums++;
+  }
+}
+if (dupeNums === 0) ok('No duplicate tracker numbers');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

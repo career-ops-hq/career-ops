@@ -76,7 +76,7 @@ function maxSlot() {
   const entries = readdirSync(REPORTS_DIR);
   let max = 0;
   for (const name of entries) {
-    const m = name.match(/^(\d{3})-/);
+    const m = name.match(/^(\d+)-/);
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return max;
@@ -193,7 +193,7 @@ function gc() {
 const [,, cmd, arg] = process.argv;
 
 if (cmd === '--release') {
-  const m = (arg || '').match(/^(\d{1,3})(?:-(\d{1,3}))?$/);
+  const m = (arg || '').match(/^(\d+)(?:-(\d+))?$/);
   if (!m) {
     process.stderr.write('Usage: node reserve-report-num.mjs --release <NNN>[-<MMM>]\n');
     process.exit(1);

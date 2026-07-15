@@ -11,6 +11,32 @@ When the user asks to prep for an interview at a specific company+role, or when 
 5. **Profile** at `config/profile.yml` + `modes/_profile.md` — read for candidate context
 6. **Recruiter-side risk map** from the evaluation/PDF/application flow if present — use `modes/heuristics/recruiter-side.md` for the risk categories the interview process must resolve
 
+## URL entry — prep for a role that was never evaluated
+
+The inputs above are report-first, but a common path skips evaluation entirely: a referral, a recruiter reaching out directly, or an interview booked for a posting that never ran through the pipeline. When there is no report, ingest the JD from the URL instead.
+
+**Trigger — both conditions required:**
+
+1. The user **explicitly asks to prep** and provides a JD URL (e.g. "prep me for this", "interview prep: <URL>", `/career-ops interview-prep <URL>`). A pasted URL alone is NOT enough — per AGENTS.md, a bare URL routes to `auto-pipeline`, not here.
+2. **No matching report exists** in `reports/` for that company+role. If a report DOES exist, ignore the URL fetch and use the report — the report stays authoritative.
+
+**Fetch ladder** — same as `modes/oferta.md` and the AGENTS.md Offer Verification rule; JD fetching follows the same ladder:
+
+1. For ATS-shaped URLs (Greenhouse / Lever / Ashby / Workday — the four `liveness-core.mjs` already recognizes), the structured API endpoint may serve the JD directly.
+2. Otherwise Playwright: `browser_navigate` → `browser_snapshot`, read title, URL, and visible content.
+3. WebFetch **only** as the headless/batch fallback. If the JD came from WebFetch, mark the prep output header `**JD source:** unconfirmed (fetched without browser)`.
+4. Closed/expired posting (footer/navbar only, "no longer accepting applications", 404) → tell the user and ask them to paste the JD text instead. **Never fabricate JD content.**
+
+**From the fetched JD, extract:** role title, seniority, key requirements, named team/stack. Feed the normal Step 1+ research flow with these instead of report-derived archetype/gaps — everything downstream is unchanged. Questions derived from the fetched JD keep the `[inferred from JD]` tag.
+
+**What this path does NOT do:**
+
+| Out of scope | Belongs to |
+|--------------|------------|
+| Tracker writes — prep from URL is read-only on the pipeline | normal apply flow owns the tracker |
+| CV generation | `pdf` mode |
+| Contact automation | `contacto` |
+
 ## Step 1 — Research
 
 Run these WebSearch queries. Extract structured data, not summaries. Cite sources for every claim.

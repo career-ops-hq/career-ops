@@ -1,6 +1,6 @@
 # Career-Ops
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md)
+[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
 
 <p align="center">
   <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Job Search System" width="800"></a>
@@ -95,6 +95,14 @@ Career-ops is agentic: whichever AI coding CLI you choose navigates career pages
 
 Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. [Read the full case study](https://santifer.io/career-ops-system).
 
+## The CareerOps Manifesto
+
+**[Read the manifesto](./MANIFESTO.md)** ([career-ops.org/manifesto](https://career-ops.org/manifesto)) and [sign it](./SIGNATURES.md) -- for many signers, it is their first commit.
+
+> CareerOps is the practice of running a job search the way engineers run production: with evidence, with discipline, and with tools on the candidate's side of the table.
+
+> **On contributor counts:** signatures are credited via `Co-authored-by` and tracked in [SIGNATURES.md](./SIGNATURES.md); code contributors are tracked separately in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
+
 ## Features
 
 | Feature                  | Description                                                                                                                              |
@@ -129,7 +137,7 @@ This clones the latest release into `./career-ops` and installs dependencies. Th
 
 ```bash
 cd career-ops
-claude   # or gemini / codex / qwen / opencode / agy / grok — open your AI CLI here
+claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 ```
 
 **On first launch, career-ops walks you through setup — your CV, profile and target roles — just by chatting. Nothing to edit by hand.**
@@ -153,7 +161,7 @@ cp templates/portals.example.yml portals.yml       # Customize companies
 # Create cv.md in the project root with your CV in markdown
 
 # 5. Open your AI CLI in this directory
-claude   # or codex / opencode / gemini / qwen / agy / grok
+claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
 # "Change the archetypes to backend engineering roles"
@@ -413,9 +421,13 @@ career-ops/
 
 ## About the Author
 
-I'm Santiago -- Head of Applied AI, former founder (built and sold a business that still runs with my name on it). I built career-ops to manage my own job search. It worked: I used it to land my current role.
+I'm [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) -- Head of Applied AI, former founder (built and sold a business that still runs with my name on it). I built career-ops to manage my own job search. It worked: I used it to land my current role.
+
+Curious how this repo is maintained in ~4 hours a week? Read [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet).
 
 My portfolio and other open source projects → [santifer.io](https://santifer.io)
+
+Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/wiki/Q138710224) · [career-ops](https://www.wikidata.org/wiki/Q139007988).
 
 ## Disclaimer
 

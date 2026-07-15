@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
@@ -139,8 +140,8 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 			m.statusPicker = true
 			m.statusCursor = 0
 			currentNorm := data.NormalizeStatus(m.app.Status)
-			for idx, opt := range statusOptions {
-				if data.NormalizeStatus(opt) == currentNorm {
+			for idx, pair := range getStatusPairs() {
+				if pair.Canonical == currentNorm {
 					m.statusCursor = idx
 					break
 				}
@@ -209,7 +210,7 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 func (m ViewerModel) bodyHeight() int {
 	h := m.height - 4 // header + footer + padding
 	if m.statusPicker {
-		h -= (len(statusOptions) + 1)
+		h -= (len(getStatusPairs()) + 1)
 	}
 	if h < 3 {
 		h = 3
@@ -716,16 +717,18 @@ func (m ViewerModel) renderFooter() string {
 
 	if m.statusPicker {
 		return style.Render(
-			keyStyle.Render("↑/↓/j/k") + descStyle.Render(" select  ") +
-				keyStyle.Render("Enter") + descStyle.Render(" confirm  ") +
-				keyStyle.Render("Esc/q") + descStyle.Render(" cancel"))
+			keyStyle.Render("↑/↓/j/k") + descStyle.Render(i18n.Current.HelpNav) +
+				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpConfirm) +
+				keyStyle.Render("Esc/q") + descStyle.Render(i18n.Current.HelpCancel))
 	}
 
-	footer := keyStyle.Render("↑↓") + descStyle.Render(" scroll  ") +
-		keyStyle.Render("PgUp/Dn") + descStyle.Render(" page  ") +
-		keyStyle.Render("g/G") + descStyle.Render(" top/end  ") +
-		keyStyle.Render("c") + descStyle.Render(" status  ") +
-		keyStyle.Render("Esc") + descStyle.Render(" back")
+	// Render standard footer shortcuts
+	footer := keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll) + // nav
+		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) + // pagination
+		keyStyle.Render("g/G") + descStyle.Render(i18n.Current.HelpTopEnd) + // top/bottom
+		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) + // status
+		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) + // language
+		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack) // exit
 
 	if m.coverLetterPath != "" {
 		footer += "  " + keyStyle.Render("L") + descStyle.Render(" cover letter")
@@ -743,8 +746,8 @@ func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(statusOptions) {
-			m.statusCursor = len(statusOptions) - 1
+		if m.statusCursor >= len(getStatusPairs()) {
+			m.statusCursor = len(getStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -756,7 +759,7 @@ func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {
 	case "enter":
 		m.statusPicker = false
 		m.clampScrollOffset()
-		newStatus := statusOptions[m.statusCursor]
+		newStatus := getStatusPairs()[m.statusCursor].Canonical
 		return m, func() tea.Msg {
 			return ViewerUpdateStatusMsg{
 				App:       m.app,
@@ -777,18 +780,18 @@ func (m ViewerModel) overlayStatusPicker(body string) string {
 		Bold(true)
 
 	var picker []string
-	picker = append(picker, padStyle.Render(borderStyle.Render("Change status:")))
+	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, opt := range statusOptions {
+	for i, pair := range getStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
 		}
 		prefix := "  "
 		if i == m.statusCursor {
-			prefix = "> "
+			prefix = " >"
 		}
-		picker = append(picker, padStyle.Render(style.Render(prefix+opt)))
+		picker = append(picker, padStyle.Render(prefix+style.Render(pair.Display)))
 	}
 
 	bodyLines = append(bodyLines, picker...)

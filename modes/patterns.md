@@ -44,6 +44,7 @@ Parse the JSON output. It contains:
 | `remotePolicy` | Per-policy bucket: total, positive, negative, conversion rate |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
+| `viaChannelAnalysis` | Via channel analysis (#1596): per-agency advance rate + agency-vs-direct aggregate (see below) |
 | `scoreThreshold` | Recommended minimum score + reasoning |
 | `techStackGaps` | Most frequent tech gaps in negative outcomes |
 | `recommendations` | Top 5 actionable items with reasoning and impact level |
@@ -74,6 +75,30 @@ When you narrate this to the user:
 - Always state coverage (`coveragePct`) so the user knows the stats cover a subset.
 - The `recommendations` array already contains the `high`-impact channel action
   when one qualifies — surface it verbatim rather than inventing a stronger claim.
+
+### `viaChannelAnalysis` — per-agency advance rate (#1596)
+
+Groups **submitted** applications by their `Via` channel (the recruiter/agency
+firm; requires the optional Via column, #1596 — trackers without it produce
+empty buckets and nothing is claimed). `—` rows count as `direct`; the
+`breakdown` lists each agency with total/advanced/`advanceRate`/`sufficientSample`.
+Submitted rows with an *empty* Via cell (legacy tracker or blank cell, as
+opposed to the explicit `—` direct marker) belong to neither bucket and are
+counted in `unknownVia` — when it's non-zero, state it so the user knows the
+agency/direct split covers a subset of submissions.
+In an agency-mediated search the highest-leverage decision is which recruiter
+relationships to invest in — this shows which ones actually convert.
+
+Same causal-humility rules as `vendorAnalysis`: report channel yield, never a
+causal claim; respect `sufficientSample`; a strong agency is *"prioritize roles
+via X — it converts"*, a weak one is an observation, not an accusation.
+- The `recommendations` array already contains the `medium`-impact
+  best-converting-agency action when one qualifies — surface it verbatim rather
+  than inventing a stronger claim.
+
+### Salary lens (optional)
+
+If compensation observations exist (report `advertised_comp` keys or `data/salary-observations.tsv` lines), run `node salary-gap.mjs --summary` as an additional lens: advertised→actual haircut per (company, role) and per currency, plus desired-attainment. Zero tokens — never recompute these numbers manually. Respect its data-quality section the same way as `sufficientSample`: low sample sizes are observations, not recommendations.
 
 ## Step 1b — Session-Content Targeting Signal (optional)
 

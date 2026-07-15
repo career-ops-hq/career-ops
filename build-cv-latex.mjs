@@ -5,50 +5,12 @@ import { existsSync } from 'fs';
 import { resolve, dirname, basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
+import { resolveTemplate } from './cv-templates.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
-
-function escapeLatex(text, mode = 'text') {
-  if (typeof text !== 'string') return '';
-  if (mode === 'url') return text;
-  const out = [];
-  for (const ch of text) {
-    switch (ch) {
-      case '\\': out.push('\\textbackslash{}'); break;
-      case '{': case '}': out.push('\\' + ch); break;
-      case '^': out.push('\\textasciicircum{}'); break;
-      case '~': out.push('\\textasciitilde{}'); break;
-      case '_': out.push('\\_'); break;
-      case '&': out.push('\\&'); break;
-      case '%': out.push('\\%'); break;
-      case '$': out.push('\\$'); break;
-      case '#': out.push('\\#'); break;
-      case '\u00B1': out.push('$\\pm$'); break;
-      case '\u2192': out.push('$\\rightarrow$'); break;
-      default: out.push(ch);
-    }
-  }
-  return out.join('');
-}
-
-function sanitizeUrl(url) {
-  if (typeof url !== 'string') return '';
-  url = url.trim();
-  if (!url) return '';
-  const allowedSchemes = ['mailto:', 'http:', 'https:'];
-  const hasScheme = allowedSchemes.some(s => url.toLowerCase().startsWith(s));
-  if (!hasScheme) {
-    if (url.includes('@') && !url.includes('/')) {
-      url = 'mailto:' + url;
-    } else {
-      url = 'https://' + url;
-    }
-  }
-  url = url.replace(/[{}%$#\\~^]/g, '');
-  return url;
-}
 
 function buildEducation(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
@@ -137,12 +99,22 @@ async function main() {
     process.exit(1);
   }
 
-  if (!existsSync(TEMPLATE_PATH)) {
-    console.error(`Template not found: ${TEMPLATE_PATH}`);
+  // Honor a selected .tex template variant (cv.template default or --template=<name>),
+  // falling back to the base cv-template.tex when no variant exists.
+  const texName = (process.argv.find((a) => a.startsWith('--template=')) || '').split('=')[1];
+  let TEMPLATE_PATH_RESOLVED;
+  try {
+    TEMPLATE_PATH_RESOLVED = resolveTemplate('cv', texName, { format: 'tex', fallback: true });
+  } catch {
+    TEMPLATE_PATH_RESOLVED = TEMPLATE_PATH;
+  }
+
+  if (!existsSync(TEMPLATE_PATH_RESOLVED)) {
+    console.error(`Template not found: ${TEMPLATE_PATH_RESOLVED}`);
     process.exit(1);
   }
 
-  let template = await readFile(TEMPLATE_PATH, 'utf-8');
+  let template = await readFile(TEMPLATE_PATH_RESOLVED, 'utf-8');
 
   const emailUrl = sanitizeUrl(payload.email?.url || '');
   const emailDisplay = payload.email?.display || emailUrl;

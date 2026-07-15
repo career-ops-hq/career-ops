@@ -285,12 +285,30 @@ for (let i = 0; i < lines.length; i++) {
 
 console.log(`📊 ${entries.length} entries loaded`);
 
-// Group by company+role
+// Group by company+role. Unknown-employer rows (Company `?`, #1596) all
+// normalize to the same empty key, so they group by their Via channel instead:
+// the same agency re-blasting one listing IS a duplicate, while the same role
+// via two different agencies is two real submissions and must never merge.
+const BLIND_KEY = ' blind-via:';
 const groups = new Map();
 for (const entry of entries) {
-  const key = normalizeCompany(entry.company);
+  const key = String(entry.company).trim() === '?'
+    ? BLIND_KEY + normalizeCompany(entry.via || '')
+    : normalizeCompany(entry.company);
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(entry);
+}
+
+// Two blind rows only count as the same listing when their evaluation dates
+// sit within the re-post window (mirrors detect-reposts.mjs's 90 days).
+// Unparseable dates never cluster — deleting a real application is worse than
+// keeping a duplicate.
+const BLIND_WINDOW_DAYS = 90;
+function withinBlindWindow(a, b) {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+  return Math.abs(ta - tb) <= BLIND_WINDOW_DAYS * 86400000;
 }
 
 // Find duplicates
@@ -299,6 +317,7 @@ const linesToRemove = new Set();
 
 for (const [company, companyEntries] of groups) {
   if (companyEntries.length < 2) continue;
+  const isBlindGroup = company.startsWith(BLIND_KEY);
 
   // Within same company, find role matches
   const processed = new Set();
@@ -309,7 +328,8 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
-      if (roleMatch(companyEntries[i], companyEntries[j])) {
+      if (roleMatch(companyEntries[i], companyEntries[j])
+          && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }

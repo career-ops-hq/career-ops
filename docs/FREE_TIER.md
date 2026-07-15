@@ -27,9 +27,9 @@ subscription required. This guide covers setup, limits, and trade-offs.
 
 2. Authenticate with your Google account:
 
-   ```bash
-   agy auth login
-   ```
+   Just run `agy`. If not already signed in, it checks the system
+   keyring, then falls back to Google Sign-In (browser locally /
+   URL + code over SSH).
 
 3. Run career-ops as usual:
 

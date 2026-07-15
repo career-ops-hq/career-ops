@@ -1,5 +1,5 @@
 <!--
-Use this template for a PR that adds or updates ONE entry in plugins-registry.json.
+Use this template for a PR that adds or updates ONE plugins-registry/<id>.json file.
 Select it by appending ?template=plugin-registry.md to the PR-compare URL, or
 the plugin template's release workflow opens it for you on a release tag.
 ONE plugin per PR. Change ONLY that plugin's entry.

@@ -23,6 +23,8 @@ New to all this? That's the point. Claim an issue with a comment, ask anything i
 
 A large *feature* PR that skipped this step may be asked to start with an issue if it doesn't fit the architecture or roadmap — that's a scope conversation, never a judgment on your work.
 
+The review process you'll experience here is documented end-to-end in [Agentic maintenance: how this repo is run](https://santifer.io/ai-agent-fleet): why a first-timer's CI waits for human approval, why review comments arrive with test evidence, and what happens between your push and the merge.
+
 ### What makes a good PR
 - Fixes a bug listed in Issues
 - Addresses a feature request that was discussed and approved

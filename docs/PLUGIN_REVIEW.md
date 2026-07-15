@@ -7,7 +7,7 @@ here, so review is the real control.
 
 ## Two tiers
 
-- **Listed** — one entry in `plugins-registry.json`; the code stays in the
+- **Listed** — one `plugins-registry/<id>.json` file; the code stays in the
   author's `career-ops-plugin-<name>` repo; users `add` it. The default, low
   burden.
 - **Bundled** — promoted into `plugins/` (shipped, auto-updated). Reserve for

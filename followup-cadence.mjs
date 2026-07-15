@@ -346,6 +346,12 @@ function analyze() {
       date: app.date,
       appliedDate,
       company: app.company,
+      // Intermediary channel (#1596): agency name when the application went
+      // through an intermediary, null for a direct application (the tracker's
+      // `—` placeholder and the no-Via-column case both normalize to null, so
+      // consumers never learn the sentinel). When set, follow-ups chase the
+      // agency contact, not the company.
+      via: app.via && app.via !== '—' ? app.via : null,
       role: app.role,
       status: normalized,
       score: app.score,

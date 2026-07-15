@@ -89,6 +89,7 @@ if (process.argv.includes('--self-test')) {
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
   assert(covered('.claude/settings.json') === true, '.claude/settings.json must be covered (USER_PATHS exact match, #1408)');
+  assert(covered('.claude/hooks/pre-push-backup.sh') === true, '.claude/hooks/ scripts must be covered (USER_PATHS dir prefix match, same class as #1408)');
 
   // Test directory prefix matches (which end in '/')
   assert(covered('providers/justjoin.mjs') === true, 'providers/justjoin.mjs must be covered (dir prefix match)');

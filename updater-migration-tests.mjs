@@ -53,6 +53,7 @@ const requiredSystemPaths = [
   'modes/patterns.md',
   'modes/update.md',
   'modes/ar/',
+  'modes/hi/',
   'modes/tr/',
   'modes/ua/',
   'batch/README.md',
@@ -67,6 +68,7 @@ const requiredSystemPaths = [
   'updater-migration-tests.mjs',
   'README.ar.md',
   'README.de.md',
+  'README.hi.md',
   'README.ja.md',
   'README.ua.md',
   'CHANGELOG.md',
@@ -163,6 +165,19 @@ const twoPassManifestChecks = [
 for (const check of twoPassManifestChecks) {
   if (check.pattern.test(source)) pass(check.name);
   else fail(check.name);
+}
+
+// #1706: update-system.mjs must be self-loading — no static (top-level) relative
+// imports. A pre-#1245 client's apply() self-reexec checks out ONLY
+// update-system.mjs before re-execing it, so any top-level `import ... from
+// './...'` (or bare `import './...'`) crashes that re-exec with
+// ERR_MODULE_NOT_FOUND on the old→new jump. Relative modules must be lazily
+// `await import()`ed at their point of use instead.
+const staticRelativeImport = /^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]|^\s*import\s*['"]\.[^'"]*['"]/m;
+if (staticRelativeImport.test(source)) {
+  fail('update-system.mjs is self-loading — no static relative imports (#1706)');
+} else {
+  pass('update-system.mjs is self-loading — no static relative imports (#1706)');
 }
 
 for (const userPath of ['cv.md', 'config/profile.yml', 'modes/_profile.md', 'portals.yml', 'data/', 'reports/']) {

@@ -88,13 +88,29 @@ function validateParser(parser, path, errors) {
 
 async function loadProviderIds() {
   const ids = new Set();
-  if (!existsSync(PROVIDERS_DIR)) return ids;
-  const files = readdirSync(PROVIDERS_DIR)
-    .filter(f => f.endsWith('.mjs') && !f.startsWith('_'))
-    .sort();
-  for (const file of files) {
-    const mod = await import(pathToFileURL(join(PROVIDERS_DIR, file)).href);
-    if (mod.default?.id) ids.add(mod.default.id);
+  if (existsSync(PROVIDERS_DIR)) {
+    const files = readdirSync(PROVIDERS_DIR)
+      .filter(f => f.endsWith('.mjs') && !f.startsWith('_'))
+      .sort();
+    for (const file of files) {
+      const mod = await import(pathToFileURL(join(PROVIDERS_DIR, file)).href);
+      if (mod.default?.id) ids.add(mod.default.id);
+    }
+  }
+
+  // scan.mjs accepts explicit provider-plugin ids even when a plugin is
+  // disabled or missing credentials (the runtime installs an actionable
+  // inactive-provider stub). Keep validation aligned with that contract.
+  try {
+    const { discoverPlugins, pluginRoots, resolveSuccessorIds } = await import('./plugins/_engine.mjs');
+    const manifests = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT));
+    for (const manifest of manifests) {
+      if (manifest.hooks.includes('provider')) ids.add(manifest.id);
+    }
+  } catch (err) {
+    // A stripped-down checkout may not include plugin infrastructure. Core
+    // provider validation should continue to work in that environment.
+    if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err;
   }
   return ids;
 }
@@ -134,6 +150,29 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     } else {
       validateKeywordList(config.content_filter.positive, 'content_filter.positive', errors);
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
+      if (config.content_filter.by_title_keyword !== undefined) {
+        if (!isObject(config.content_filter.by_title_keyword)) {
+          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive keyword');
+        } else {
+          const titlePositive = new Set(
+            (Array.isArray(config.title_filter?.positive) ? config.title_filter.positive : [])
+              .filter(k => typeof k === 'string')
+              .map(k => k.trim().toLowerCase())
+          );
+          for (const [kw, rule] of Object.entries(config.content_filter.by_title_keyword)) {
+            const path = `content_filter.by_title_keyword.${kw}`;
+            if (!titlePositive.has(kw.trim().toLowerCase())) {
+              add(warnings, path, `"${kw}" does not match any title_filter.positive keyword and will never apply`);
+            }
+            if (!isObject(rule)) {
+              add(errors, path, 'must be an object with positive/negative keyword lists');
+              continue;
+            }
+            validateKeywordList(rule.positive, `${path}.positive`, errors);
+            validateKeywordList(rule.negative, `${path}.negative`, errors);
+          }
+        }
+      }
     }
   }
 

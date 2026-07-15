@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
@@ -127,7 +128,7 @@ func (m ProgressModel) renderHeader() string {
 		Width(m.width).
 		Padding(0, 2)
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render("SEARCH PROGRESS")
+	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render(i18n.Current.ProgressTitle)
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	total := len(m.metrics.FunnelStages)
@@ -135,7 +136,7 @@ func (m ProgressModel) renderHeader() string {
 	if total > 0 {
 		totalCount = m.metrics.FunnelStages[0].Count
 	}
-	info := right.Render(fmt.Sprintf("%d evaluated | %.1f avg score", totalCount, m.metrics.AvgScore))
+	info := right.Render(fmt.Sprintf(i18n.Current.ProgressSummary, totalCount, m.metrics.AvgScore))
 
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
 	if gap < 1 {
@@ -150,11 +151,11 @@ func (m ProgressModel) renderFunnel() string {
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Sky)
 
 	var lines []string
-	lines = append(lines, padStyle.Render(sectionTitle.Render("Pipeline Funnel")))
+	lines = append(lines, padStyle.Render(sectionTitle.Render(i18n.Current.FunnelTitle)))
 
 	if len(m.metrics.FunnelStages) == 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-		lines = append(lines, padStyle.Render(dimStyle.Render("No data")))
+		lines = append(lines, padStyle.Render(dimStyle.Render(i18n.Current.NoData)))
 		return strings.Join(lines, "\n")
 	}
 
@@ -219,11 +220,11 @@ func (m ProgressModel) renderScoreDistribution() string {
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Sky)
 
 	var lines []string
-	lines = append(lines, padStyle.Render(sectionTitle.Render("Score Distribution")))
+	lines = append(lines, padStyle.Render(sectionTitle.Render(i18n.Current.ScoresTitle)))
 
 	if len(m.metrics.ScoreBuckets) == 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-		lines = append(lines, padStyle.Render(dimStyle.Render("No data")))
+		lines = append(lines, padStyle.Render(dimStyle.Render(i18n.Current.NoData)))
 		return strings.Join(lines, "\n")
 	}
 
@@ -283,7 +284,7 @@ func (m ProgressModel) renderRates() string {
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Sky)
 
 	var lines []string
-	lines = append(lines, padStyle.Render(sectionTitle.Render("Conversion Rates")))
+	lines = append(lines, padStyle.Render(sectionTitle.Render(i18n.Current.RatesTitle)))
 
 	labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text)
 	valueStyle := lipgloss.NewStyle().Bold(true)
@@ -295,13 +296,13 @@ func (m ProgressModel) renderRates() string {
 
 	sep := sepStyle.Render("  |  ")
 
-	rates := labelStyle.Render("Response Rate: ") +
+	rates := labelStyle.Render(i18n.Current.RateResponse) +
 		valueStyle.Foreground(responseColor).Render(fmt.Sprintf("%.1f%%", m.metrics.ResponseRate)) +
 		sep +
-		labelStyle.Render("Interview Rate: ") +
+		labelStyle.Render(i18n.Current.RateInterview) +
 		valueStyle.Foreground(interviewColor).Render(fmt.Sprintf("%.1f%%", m.metrics.InterviewRate)) +
 		sep +
-		labelStyle.Render("Offer Rate: ") +
+		labelStyle.Render(i18n.Current.RateOffer) +
 		valueStyle.Foreground(offerColor).Render(fmt.Sprintf("%.1f%%", m.metrics.OfferRate))
 
 	lines = append(lines, padStyle.Render(rates))
@@ -309,7 +310,7 @@ func (m ProgressModel) renderRates() string {
 	// Active summary
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	activeInfo := dimStyle.Render(fmt.Sprintf(
-		"%d active applications | %d total offers",
+		i18n.Current.ActiveInfo,
 		m.metrics.ActiveApps, m.metrics.TotalOffers,
 	))
 	lines = append(lines, padStyle.Render(activeInfo))
@@ -322,11 +323,11 @@ func (m ProgressModel) renderWeeklyActivity() string {
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Sky)
 
 	var lines []string
-	lines = append(lines, padStyle.Render(sectionTitle.Render("Weekly Activity")))
+	lines = append(lines, padStyle.Render(sectionTitle.Render(i18n.Current.WeeklyTitle)))
 
 	if len(m.metrics.WeeklyActivity) == 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
-		lines = append(lines, padStyle.Render(dimStyle.Render("No data")))
+		lines = append(lines, padStyle.Render(dimStyle.Render(i18n.Current.NoData)))
 		return strings.Join(lines, "\n")
 	}
 
@@ -385,9 +386,10 @@ func (m ProgressModel) renderHelp() string {
 
 	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
 
-	keys := keyStyle.Render("\u2191\u2193") + descStyle.Render(" scroll  ") +
-		keyStyle.Render("PgUp/Dn") + descStyle.Render(" page  ") +
-		keyStyle.Render("Esc") + descStyle.Render(" back")
+	keys := keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll) +
+		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) +
+		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
+		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack)
 
 	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
 	if gap < 1 {

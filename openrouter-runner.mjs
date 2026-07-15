@@ -166,6 +166,25 @@ function fileExists(relPath) {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt caching (#1709)
+// ---------------------------------------------------------------------------
+// The static system prefix (shared + profile + mode + cv, ~12K tokens) is
+// byte-identical across every offer in a run, yet it was re-sent and re-billed
+// on each call. Send it as a structured content block with an ephemeral
+// `cache_control` breakpoint — OpenRouter's documented prompt-caching mechanism.
+// Providers that support caching (Anthropic, Gemini, …) reuse the prefix across
+// back-to-back calls within the cache TTL; providers that don't simply ignore
+// the field, so this is a safe passthrough that never changes the prompt text.
+export function buildCachedSystemMessage(systemPrompt) {
+  return {
+    role: 'system',
+    content: [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // OpenRouter API call — automatic model rotation with fallback
 // ---------------------------------------------------------------------------
 async function callOpenRouter(systemPrompt, userMessage) {
@@ -184,8 +203,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const body = JSON.stringify({
       model: pinnedModel,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage  },
+        buildCachedSystemMessage(systemPrompt),
+        { role: 'user', content: userMessage },
       ],
       max_tokens: MAX_TOKENS,
     });
@@ -241,8 +260,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const body = JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userMessage  }
+          buildCachedSystemMessage(systemPrompt),
+          { role: 'user', content: userMessage },
         ],
         max_tokens: MAX_TOKENS,
       });

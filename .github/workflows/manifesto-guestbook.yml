@@ -1,0 +1,91 @@
+# manifesto-guestbook — cada oleada de firmas mergeada postea UN embed sobrio en
+# el canal #manifesto de Discord (webhook: secret DISCORD_MANIFESTO_WEBHOOK).
+# Trigger POST-MERGE a propósito: el ordinal #N solo existe tras el merge, el
+# dedupe del ledger ya filtró duplicados, y la card ya está revalidada.
+# Regla dura: SIN totales ni contadores en el embed, jamás.
+name: manifesto-guestbook
+on:
+  push:
+    branches: [main]
+    paths: [SIGNATURES.md]
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_MANIFESTO_WEBHOOK }}
+        with:
+          script: |
+            const before = context.payload.before, after = context.payload.after;
+            if (!before || /^0+$/.test(before)) { core.info('primer push — skip'); return; }
+            // Diff de la oleada vía compare API (sin checkout)
+            const { data: cmp } = await github.rest.repos.compareCommits({ ...context.repo, base: before, head: after });
+            const f = (cmp.files || []).find(x => x.filename === 'SIGNATURES.md');
+            if (!f || !f.patch) { core.info('sin diff de SIGNATURES.md — skip'); return; }
+            const added = f.patch.split('\n')
+              .filter(l => l.startsWith('+') && !l.startsWith('+++'))
+              .map(l => l.slice(1))
+              .filter(l => /^- @/.test(l));
+            // Guard anti-repost: una línea EDITADA (mismo id en el lado eliminado del
+            // diff) es una corrección by-self-request, no una firma nueva — no repostear
+            const removedIds = new Set(f.patch.split('\n')
+              .filter(l => l.startsWith('-') && !l.startsWith('---'))
+              .map(l => (l.match(/\| id:(\d+)/) || [])[1]).filter(Boolean));
+            const fresh = added.filter(l => { const id = (l.match(/\| id:(\d+)/) || [])[1]; return !(id && removedIds.has(id)); });
+            if (!fresh.length) { core.info('sin firmas nuevas (edición de header/línea) — skip'); return; }
+            // Ordinales: posición entre las líneas de firma del fichero en AFTER
+            const { data: cur } = await github.rest.repos.getContent({ ...context.repo, path: 'SIGNATURES.md', ref: after });
+            const allSigs = Buffer.from(cur.content, 'base64').toString('utf8').split('\n').filter(l => /^- @/.test(l));
+            const esc = (s) => s.replace(/([*_~`|\\])/g, '\\$1');
+            const lines = [];
+            for (const line of fresh) {
+              const n = allSigs.indexOf(line) + 1;
+              const login = (line.match(/^- @(\S+)/) || [])[1] || '?';
+              const quote = (line.match(/"([^"]*)"/) || [])[1] || '';
+              let first = '';
+              try {
+                const { data: s } = await github.rest.search.issuesAndPullRequests({ q: `author:${login}` });
+                if (s.total_count === 1) first = ' · their first contribution on GitHub';
+              } catch (e) { /* search rate-limited: omitir flag */ }
+              // Firmante clicable a su card (el visual es lo que invita a firmar)
+              lines.push(`**[#${n} @${esc(login)}](https://career-ops.org/manifesto/s/${login})**` + (quote ? ` — "${esc(quote)}"` : '') + first);
+            }
+            const firstLogin = (fresh[0].match(/^- @(\S+)/) || [])[1];
+            // Esperar a que la card del 1er firmante esté PERSONALIZADA antes de postear:
+            // Discord cachea la imagen del embed PARA SIEMPRE — un placeholder cacheado
+            // no se cura solo (caso llwp). Timeout ~7min -> postear igual.
+            if (firstLogin) {
+              for (let i = 0; i < 14; i++) {
+                try {
+                  const cr = await fetch(`https://career-ops.org/manifesto/s/${firstLogin}`);
+                  if (cr.ok && (await cr.text()).includes('Signatory #')) break;
+                } catch (e) { /* seguir esperando */ }
+                await new Promise(res => setTimeout(res, i < 10 ? 3000 : 30000));
+              }
+            }
+            const embed = {
+              author: { name: 'New signatures on the wall' },
+              description: lines.join('\n'),
+              url: 'https://career-ops.org/manifesto',
+              color: 0xd4a24e,
+              footer: { text: 'Sign yours → career-ops.org/manifesto' }
+            };
+            // Imagen = la card OG real del primer firmante de la oleada
+            // (ruta oficial de docs, verificada 200 image/png sin query-hash)
+            if (firstLogin)
+              embed.image = { url: `https://career-ops.org/manifesto/s/${firstLogin}/opengraph-image` };
+            const r = await fetch(process.env.WEBHOOK, {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                username: 'career-ops bot',
+                avatar_url: 'https://cdn.discordapp.com/avatars/1491495413184725002/af49719ebbad192020cfe0af6531ce57.webp',
+                embeds: [embed]
+              })
+            });
+            if (!r.ok) throw new Error(`Discord webhook ${r.status}`);
+            core.info(`guestbook: ${lines.length} firma(s) posteada(s)`);

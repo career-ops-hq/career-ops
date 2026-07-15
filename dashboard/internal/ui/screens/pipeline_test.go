@@ -13,7 +13,7 @@ import (
 func tabIndexForFilter(t *testing.T, filter string) int {
 	t.Helper()
 
-	for i, tab := range pipelineTabs {
+	for i, tab := range getPipelineTabs() {
 		if tab.filter == filter {
 			return i
 		}
@@ -580,4 +580,3 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 		t.Fatalf("expected cursor to be within [0, %d], got %d", len(reloaded.filtered)-1, reloaded.cursor)
 	}
 }
-

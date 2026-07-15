@@ -223,3 +223,162 @@ export function matchCandidates(candidates, apps, followups = []) {
   
   return results;
 }
+
+export function classifyReply(cand) {
+  const subject = cand.subject || '';
+  const body = cand.body_snippet || '';
+  const text = `${cand.from || ''} ${subject} ${body}`;
+  const textLower = text.toLowerCase();
+  const signal = cand.signal || '';
+
+  const evidence = [];
+
+  // Define keyword match helper (case-insensitive)
+  const check = (keywords) => {
+    let found = false;
+    for (const kw of keywords) {
+      if (textLower.includes(kw.toLowerCase())) {
+        evidence.push(kw);
+        found = true;
+      }
+    }
+    return found;
+  };
+
+  // 1. Noise keywords (checked first to separate alerts/leads from actual interviews)
+  const noiseKeywords = [
+    '邀请投递', '抢面试先机', '近期热招', '立即投递', '热招职位', '订阅职位', '职位推荐', '推荐职位',
+    'job alert', 'invitation to apply', 'recommended jobs', 'newsletter', 'marketing digest', 'job recommendation', 'suggested jobs'
+  ];
+
+  // 2. Offer keywords
+  const offerKeywords = [
+    '录取通知书', '录用信', '录用通知', '录用', '薪资确认', '入职协议', '意向书',
+    'offer letter', 'employment agreement', 'job offer', 'congratulations on the offer', 'compensation details', 'offer'
+  ];
+
+  // 3. Rejected keywords
+  const rejectionKeywords = [
+    '很遗憾', '暂不匹配', '不合适', '未能进入下一轮', '感谢您的时间', '未通过', '不再考虑', '决定不推进',
+    'unfortunately', 'not a match', 'not matching', 'decided not to proceed', 'will not be moving forward', 'position has been filled', 'role has been closed', 'unable to offer'
+  ];
+
+  // 4. Auto-confirmation keywords
+  const autoKeywords = [
+    '自动回复', '收到您的申请', '申请已收到', '投递成功', '确认收到',
+    'thank you for applying', 'application received', 'received your application', 'auto-confirmation', 'confirmation of application', 'automatic reply'
+  ];
+
+  // 5. Need Action keywords
+  const actionKeywords = [
+    '补充信息', '提供信息', '完成测评', '在线测评', '笔试题', '做个测试', '截止日期前', '截止时间',
+    'complete a form', 'provide information', 'finish an assessment', 'coding challenge', 'online test', 'respond by a deadline', 'pick a time', 'schedule a time', 'book a time',
+    'complete assessment', 'take a test', 'assessment', 'coding test', 'deadline', 'fill out', 'complete the form', 'provide details', 'submit info'
+  ];
+
+  // 6. Interview keywords
+  const interviewKeywords = [
+    '邀您面试', '邀约面试', '微信小程序面试', 'AI微信小程序', '面试形式', '面试时间', '面试时长', '安排面试', '预约面试', '首轮面试', '视频面试', '电话面试', '现场面试', '面试邀请', '面试流程', '简历通过',
+    'interview invitation', 'schedule an interview', 'scheduling link', 'ai interview', 'video interview', 'phone screen', 'onsite interview', 'final round', 'invite you to interview', 'interview request', 'interview schedule'
+  ];
+
+  // 7. Responded keywords
+  const respondedKeywords = [
+    '联系您', '回复您', '想沟通', '想聊聊', '进一步沟通',
+    'would like to chat', 'reach out', 'connect with you', 'hiring manager responded'
+  ];
+
+  const isNoise = check(noiseKeywords);
+  if (isNoise) {
+    return {
+      type: 'Noise',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'none'
+    };
+  }
+
+  const hasOfferKeywords = check(offerKeywords);
+  const isOffer = signal === 'offer' || hasOfferKeywords;
+  if (isOffer) {
+    if (signal === 'offer' && !evidence.includes('offer')) evidence.push('offer');
+    return {
+      type: 'Offer',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'Offer'
+    };
+  }
+
+  const hasRejectionKeywords = check(rejectionKeywords);
+  const isRejected = signal === 'rejection' || hasRejectionKeywords;
+  if (isRejected) {
+    if (signal === 'rejection' && !evidence.includes('rejection')) evidence.push('rejection');
+    return {
+      type: 'Rejected',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'Rejected'
+    };
+  }
+
+  const isAuto = check(autoKeywords);
+  if (isAuto) {
+    return {
+      type: 'Auto-confirmation',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'none'
+    };
+  }
+
+  const isAction = check(actionKeywords);
+  if (isAction) {
+    const hasSchedulingWording = textLower.includes('schedule') || textLower.includes('pick a time') || textLower.includes('book a time') || textLower.includes('book a slot') ||
+                                 textLower.includes('choose a time') || textLower.includes('select a time') || textLower.includes('appointment') ||
+                                 text.includes('预约') || text.includes('选择时间') || text.includes('选择面试') || text.includes('安排时间');
+    return {
+      type: 'Need Action',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: hasSchedulingWording ? 'Interview' : 'Responded'
+    };
+  }
+
+  const hasInterviewKeywords = check(interviewKeywords);
+  const isInterview = signal === 'interview_invite' || hasInterviewKeywords;
+  if (isInterview) {
+    if (signal === 'interview_invite' && !evidence.includes('interview_invite')) evidence.push('interview_invite');
+    return {
+      type: 'Interview',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'Interview'
+    };
+  }
+
+  const hasRespondedKeywords = check(respondedKeywords);
+  const isResponded = signal === 'update' || hasRespondedKeywords;
+  if (isResponded) {
+    if (signal === 'update' && !evidence.includes('update')) evidence.push('update');
+    return {
+      type: 'Responded',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'Responded'
+    };
+  }
+
+  const recruitingTerms = [
+    'application', 'career', 'job', 'recruiter', 'hiring', 'interview', 'resume',
+    '简历', '职位', '招聘', '应聘'
+  ];
+  const isRecruiting = recruitingTerms.some(term => textLower.includes(term.toLowerCase()));
+  if (isRecruiting) {
+    return {
+      type: 'Unknown',
+      evidence: [],
+      suggestedTrackerUpdate: 'Needs Review'
+    };
+  }
+
+  return {
+    type: 'Unknown',
+    evidence: [],
+    suggestedTrackerUpdate: 'Needs Review'
+  };
+}
+

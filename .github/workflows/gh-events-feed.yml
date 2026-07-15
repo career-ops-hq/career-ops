@@ -1,0 +1,40 @@
+# gh-events-feed — PRs mergeados → canal #gh-events de Discord (solo-lectura).
+# pull_request_target A PROPÓSITO: los PRs de forks no exponen secrets en
+# pull_request normal; aquí SOLO se usa metadata del evento — JAMÁS añadir un
+# checkout del código del fork a este workflow (riesgo de exfiltración).
+name: gh-events-feed
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_CONTRIB_WEBHOOK }}
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const esc = (s) => s.replace(/([*_~`|\\])/g, '\\$1');
+            const first = pr.author_association === 'FIRST_TIME_CONTRIBUTOR'
+              ? '\n🎉 first contribution to career-ops' : '';
+            const embed = {
+              description: `**PR #${pr.number} merged** — ${esc(pr.title)} — by @${esc(pr.user.login)}${first}`,
+              url: pr.html_url,
+              color: 0x57ab5a
+            };
+            const r = await fetch(process.env.WEBHOOK, {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                username: 'career-ops bot',
+                avatar_url: 'https://cdn.discordapp.com/avatars/1491495413184725002/af49719ebbad192020cfe0af6531ce57.webp',
+                embeds: [embed]
+              })
+            });
+            if (!r.ok) throw new Error(`Discord webhook ${r.status}`);

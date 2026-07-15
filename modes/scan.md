@@ -117,6 +117,8 @@ During the agent's scan, keep the **`local_parser_ok`** set in memory. This set 
 
 **Every company MUST have a `careers_url` in portals.yml.** If it does not, search for it once, save it, and use it in future scans.
 
+> **Opt-in — CLI extractor (`scan.extractor: cli`).** When `config/profile.yml` sets `scan.extractor: cli`, run `node browser-extract.mjs <careers_url> --mode listing` for each company instead of `browser_navigate` + `browser_snapshot`. It renders the page headlessly and returns compact JSON — `{ "url": ..., "jobs": [{ "title", "url" }] }` — so the listing enters context at a fraction of a full snapshot's tokens (~2–3× smaller here). Read the `jobs` array directly; then apply `title_filter` as usual. **Fall back silently** to `browser_navigate` + `browser_snapshot` if the command errors (it prints `{ "error", "code" }` and exits non-zero) or isn't present — never let the flag break a scan. Default (`scan.extractor` absent or `mcp`): the `browser_navigate` + `browser_snapshot` flow above.
+
 ### Level 2 — ATS APIs / Feeds (COMPLEMENTARY)
 
 For companies with a public API or structured feed **that are not in `local_parser_ok`**, use the JSON/XML response as a fast complement to Level 1. This is faster than Playwright and reduces visual scraping errors.
@@ -133,12 +135,12 @@ For companies with a public API or structured feed **that are not in `local_pars
 - **Breezy**: `https://{company}.breezy.hr/json`
 
 **Parsing Conventions by Provider:**
-- `greenhouse`: `jobs[]` → `title`, `absolute_url`
-- `ashby`: GET REST API → `jobs[]` with `title`, `jobUrl`, `location`, `publishedAt`; slug derived from `careers_url` pattern `jobs.ashbyhq.com/{slug}`
-- `bamboohr`: list `result[]` → `jobOpeningName`, `id`; build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
-- `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`)
-- `teamtailor`: RSS items → `title`, `link`
-- `workday`: `jobPostings[]`/`jobPostings` (based on tenant) → `title`, `externalPath` or URL built from the host
+- `greenhouse`: `jobs[]` → `title`, `absolute_url`, `location.name`
+- `ashby`: GET REST API → `jobs[]` with `title`, `jobUrl`, `location` (fold in `secondaryLocations[]` — Ashby lists extra hiring regions there), `compensation` (`minValue`/`maxValue`/`currency`; already fetched via `?includeCompensation=true`), `publishedAt`; slug derived from `careers_url` pattern `jobs.ashbyhq.com/{slug}`
+- `bamboohr`: list `result[]` → `jobOpeningName`, `id`, `location` (city + state; append "Remote" when `isRemote`); build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
+- `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`), `categories.location`, `descriptionPlain` (the list API ships the JD body — feeds `content_filter` and the #1597 cross-listing fingerprint)
+- `teamtailor`: RSS items → `title`, `link`, `location` (from the `tt:` block — `tt:city` / `tt:country`)
+- `workday`: `jobPostings[]`/`jobPostings` (based on tenant) → `title`, `externalPath` or URL built from the host, `locationsText` (fallback: derive from the URL path)
 - `breezy`: top-level array `[]` → `name`, `url` (absolute), `location.name` (or city/state/country + `is_remote`), `published_date`
 
 > **Caution — do not infer absence from a truncated read.** Careers SPAs paginate and lazy-load; a `browser_snapshot` or WebFetch of the page (and any LLM summary of that HTML) can silently drop rows, showing only the first screen of roles. Never conclude "role X is not posted" or "only N roles exist" from such a read. When the company has a public ATS API, hit it directly (append `?content=true` where the provider supports it) before making any presence/absence claim — the API returns the full board in one structured response.
@@ -189,10 +191,10 @@ Levels are additive — they are executed in order, and results are merged and d
    For each company in `tracked_companies` with a defined `api:`, `enabled: true`, and a **name not listed in `local_parser_ok`**:
    a. WebFetch the API/feed URL.
    b. If `api_provider` is defined, use its parser; if undefined, infer by domain (`boards-api.greenhouse.io`, `api.ashbyhq.com`, `api.(eu.)?lever.co`, `*.bamboohr.com`, `*.teamtailor.com`, `*.myworkdayjobs.com`, `*.breezy.hr`).
-   c. For **Ashby**, send a GET request to `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true` (slug from `careers_url`). Parse `jobs[]` → `title`, `jobUrl`, `location`. No GraphQL needed.
+   c. For **Ashby**, send a GET request to `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true` (slug from `careers_url`). Parse `jobs[]` → `title`, `jobUrl`, `location` (fold in `secondaryLocations[]`), `compensation`. No GraphQL needed.
    d. For **BambooHR**, the list only returns basic metadata. For each relevant item, retrieve the `id`, make a GET request to `https://{company}.bamboohr.com/careers/{id}/detail`, and extract the full JD from `result.jobOpening`. Use `jobOpeningShareUrl` as the public URL if present; otherwise, use the detail URL.
    e. For **Workday**, send a JSON POST request with at least `{"appliedFacets":{},"limit":20,"offset":0,"searchText":""}` and paginate by `offset` until results are exhausted.
-   f. For each job, extract and normalize: `{title, url, company}`.
+   f. For each job, extract and normalize: `{title, url, company, location}`.
    g. Accumulate in the candidates list (deduplicated against Level 1).
 
 6. **Level 3 — WebSearch Queries** (parallel if possible):
@@ -218,6 +220,11 @@ Levels are additive — they are executed in order, and results are merged and d
    - Non-empty `allow` → must match at least one keyword.
    - All matches are case-insensitive substring matches.
    - The location is persisted as the 7th column in `scan-history.tsv` for later auditing.
+
+6c. **Filter by Posting Age (Optional)** using `max_posting_age_days` from `portals.yml`:
+   - Opt-in. If the key is absent, 0, or non-positive, all ages pass (default behavior).
+   - An offer is skipped only when the provider supplied a posting date (`postedAt`) AND it is older than N days.
+   - Offers from providers that expose no date always pass (do not penalize missing data).
 
 7. **Deduplicate** against 3 sources:
    - `scan-history.tsv` → exact URL already seen
@@ -275,12 +282,36 @@ If a non-publicly accessible URL is found:
 
 ## Scan History
 
-`data/scan-history.tsv` tracks ALL seen URLs:
+`data/scan-history.tsv` tracks ALL seen URLs. Each row has nine tab-separated columns:
+
+| # | Column | Example | Notes |
+|---|--------|---------|-------|
+| 1 | `url` | `https://jobs.lever.co/acme/123` | Canonical posting URL |
+| 2 | `first_seen` | `2026-02-10` | ISO date the URL was first encountered |
+| 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
+| 4 | `title` | `PM AI` | Job title as returned by the ATS |
+| 5 | `company` | `Acme` | Company name |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
+| 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
+| 8 | `jd_fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
+| 9 | `postedAt` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
 
 ```tsv
-url	first_seen	portal	title	company	status
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added
+url	first_seen	portal	title	company	status	location	jd_fingerprint	postedAt
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08
 ```
+
+### Cross-listing detection
+
+The `jd_fingerprint` column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
+
+How it works:
+
+- When the ATS provider's list API returns a description field (e.g. Lever's `descriptionPlain`), the scanner computes a **64-bit SimHash** of the normalized text and stores it as the 8th column.
+- SimHash is locality-sensitive: near-duplicate texts land within a few bits of each other. The scanner flags any two rows from **different companies** whose fingerprints are ≥ 92 % similar (at most 5 of 64 bits differ) and that appeared within a 90-day window.
+- The check is **warn-only**: nothing is dropped automatically. If one side is an agency, apply through ONE channel only — a double submission burns the candidate with both parties.
+- Postings without a usable description get an **empty fingerprint** and are never flagged. No body → no signal, no false positives.
+- The fingerprint is computed **locally** from the text already returned by the API. No extra network request is made and the JD body itself is not stored in the TSV.
 
 ## Output Summary
 

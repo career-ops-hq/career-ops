@@ -17,6 +17,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, basename, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
+import { resolveTemplate } from "./cv-templates.mjs";
 
 const OUTPUT_ROOT = resolve("output");
 
@@ -103,16 +104,30 @@ function buildFootnotesBlock(footnotes) {
   return `<div class="footnotes">\n${lines}\n  </div>`;
 }
 
-export function buildHtml(payload) {
+// Resolve the cover-letter template through the shared resolver so a
+// `cover_letter.template` profile default, an explicit `payload.template`, and
+// installed template packs are all honored. Any resolver failure (no profile,
+// no templates dir, bad config) falls back to the base template, preserving the
+// original hardcoded behavior.
+export function resolveCoverTemplatePath(payload = {}, opts = {}) {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const base = resolve(scriptDir, "templates", "cover-letter-template.html");
+  try {
+    return resolveTemplate("cover", payload.template, { format: "html", fallback: true, ...opts });
+  } catch {
+    return base;
+  }
+}
+
+export function buildHtml(payload, templatePath) {
   _require(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
   _require(letter, ["role_title", "opening", "profile_intro"], "letter");
 
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const templatePath = resolve(scriptDir, "templates", "cover-letter-template.html");
-  let html = readFileSync(templatePath, "utf-8");
+  const resolvedPath = templatePath || resolveCoverTemplatePath(payload);
+  let html = readFileSync(resolvedPath, "utf-8");
 
   // Optional salutation (e.g. "Dear Jane Smith,"). Omitted -> no salutation,
   // preserving the original behavior for payloads that don't set it.

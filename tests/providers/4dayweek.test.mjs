@@ -1,4 +1,5 @@
-// tests/providers/fourdayweek.test.mjs — moved verbatim from test-all.mjs (#1440).
+// tests/providers/4dayweek.test.mjs — renamed from fourdayweek.test.mjs to match
+// the provider id, so `--only providers/4dayweek` discovers it (#1657).
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -7,11 +8,51 @@ console.log('\nProvider — 4dayweek');
 
 try {
   const fdwModule = await import(pathToFileURL(join(ROOT, 'providers/4dayweek.mjs')).href);
+  const { resolveProvider } = await import(pathToFileURL(join(ROOT, 'providers/_registry.mjs')).href);
   const fourdayweek = fdwModule.default;
   const { normalize4dwJob } = fdwModule;
 
   if (fourdayweek.id === '4dayweek') pass('4dayweek.id is "4dayweek"');
   else fail(`4dayweek.id is ${JSON.stringify(fourdayweek.id)}`);
+
+  const explicitHit = fourdayweek.detect({ name: '4 Day Week', provider: '4dayweek' });
+  if (explicitHit?.url === 'https://4dayweek.io/api/jobs') {
+    pass('4dayweek.detect() claims explicit provider config');
+  } else {
+    fail(`4dayweek.detect() explicit provider = ${JSON.stringify(explicitHit)}`);
+  }
+
+  const careersHit = fourdayweek.detect({ name: '4 Day Week', careers_url: 'https://4dayweek.io/jobs' });
+  const apiHit = fourdayweek.detect({ name: '4 Day Week', api: 'https://4dayweek.io/api/jobs' });
+  if (careersHit?.url === 'https://4dayweek.io/api/jobs' && apiHit?.url === 'https://4dayweek.io/api/jobs') {
+    pass('4dayweek.detect() maps trusted 4dayweek.io URLs to the feed URL');
+  } else {
+    fail(`4dayweek.detect() trusted URLs = ${JSON.stringify({ careersHit, apiHit })}`);
+  }
+
+  const detectMisses = [
+    fourdayweek.detect({ name: 'X' }),
+    fourdayweek.detect({ name: 'Other', provider: 'echojobs', careers_url: 'https://4dayweek.io/jobs' }),
+    fourdayweek.detect({ name: 'Path spoof', careers_url: 'https://evil.example/4dayweek.io/jobs' }),
+    fourdayweek.detect({ name: 'Suffix spoof', careers_url: 'https://4dayweek.io.evil.example/jobs' }),
+    fourdayweek.detect({ name: 'HTTP', careers_url: 'http://4dayweek.io/jobs' }),
+    fourdayweek.detect({ name: 'Non-string', careers_url: 42 }),
+  ];
+  if (detectMisses.every(hit => hit === null)) {
+    pass('4dayweek.detect() rejects missing, other-provider, spoofed, http, and non-string URLs');
+  } else {
+    fail(`4dayweek.detect() misses = ${JSON.stringify(detectMisses)}`);
+  }
+
+  const resolved = resolveProvider(
+    { name: '4 Day Week', careers_url: 'https://4dayweek.io/jobs' },
+    new Map([['4dayweek', fourdayweek]]),
+  );
+  if (resolved && 'provider' in resolved && resolved.provider === fourdayweek) {
+    pass('provider registry dispatches 4dayweek.detect() for trusted 4dayweek.io URLs');
+  } else {
+    fail(`provider registry did not dispatch 4dayweek.detect(): ${JSON.stringify(resolved)}`);
+  }
 
   // normalize4dwJob — full mapping (url is BUILT from slug; feed has no url).
   const full = normalize4dwJob(

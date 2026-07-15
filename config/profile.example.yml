@@ -75,6 +75,14 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+language:
+  # Human-facing output language for reports, tracker notes, PDFs, cover
+  # letters, outreach, and form answers. Use an ISO language code.
+  # This is separate from language.modes_dir: modes_dir selects market
+  # vocabulary/rules, while output selects the prose language.
+  output: en
+  # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
 # followup_cadence:
@@ -85,12 +93,44 @@ location:
 #   responded_subsequent_days: 3
 #   interview_thankyou_days: 1
 
+# Controls which model tier evaluates your offers. Valid values:
+#   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
+#   standard -- balanced model, no extended thinking. Default if this key is absent.
+#   premium  -- most capable model, adaptive extended thinking. Best for high-stakes offers.
+# See the tier -> model mapping table in modes/_shared.md.
+spend_tier: standard
+
 cv:
   output_format: "html" # "html" (default) or "latex"
   # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
   # canva_resume_design_id: "DAxxxxxxxxx"
+  # Which CV template to use by default. Value is the kebab-case name of a file
+  # in templates/ named cv-template.<name>.html (e.g. "modern" ->
+  # templates/cv-template.modern.html). Leave unset/commented to use the built-in
+  # templates/cv-template.html. You can also pick per-generation just by asking
+  # (e.g. "use the modern template").
+  # template: modern
+
+# ── Culture Screen ───────────────────────────────────────────────────────────
+#
+# Enforces structural capping on the "Cultural signals" dimension during evaluation.
+#
+# culture_screen:
+#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first).
+#   # If absent/commented, the dimension is scored qualitatively without a hard cap.
+#   require:
+#     - "Small, flat teams (under 15 engineers)"
+#     - "Async-first communication, low meeting overhead"
+#   # If true, the dimension is capped at 2/5 if the JD lacks any evidence for the required criteria.
+#   # If false (or absent), lack of evidence defaults to a neutral 3/5.
+#   deprioritize_if_absent: true
+
+# Optional user-owned LaTeX CV for `/career-ops latex-tex` (opt-in tailoring in place).
+# cv.md remains the default source of truth for evaluations and auto-pipeline.
+# latex:
+#   source: resume.tex
 
 # ── Cover Letter Settings ──────────────────────────────────────────────────
 #
@@ -102,6 +142,10 @@ cover_letter:
   # JD requests an immediate start. The user confirms the actual value before it
   # appears in the letter.
   notice_period_days: 30
+  # Which cover-letter template to use by default. Kebab-case name of a file in
+  # templates/ named cover-letter-template.<name>.html. Unset -> built-in
+  # templates/cover-letter-template.html.
+  # template: modern
 
   # Your current professional domain (used to detect domain gaps vs the JD).
   # Plain English, e.g. "digital media", "fintech", "healthcare IT".
@@ -158,6 +202,18 @@ cover_letter:
 #   # message" instead of printing a concrete email address from candidate.email.
 #   # default_sender_note: "the email used to send this message"
 #   # signature_name: "Jane Smith"
+
+# ── Scan / JD extractor ─────────────────────────────────────────────────────
+#
+# How the scan and JD-extraction steps read SPA job pages.
+#   mcp (default) — the browser MCP (browser_navigate + browser_snapshot). Works
+#                   out of the box; the snapshot is token-heavy.
+#   cli           — the headless `browser-extract.mjs` helper: renders the page
+#                   and returns compact JSON, cutting per-page tokens ~2–5×. Opt-in.
+#                   If the helper isn't available, the modes fall back to mcp
+#                   silently, so nothing breaks. `doctor` reports the active mode.
+# scan:
+#   extractor: mcp   # mcp (default) | cli
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

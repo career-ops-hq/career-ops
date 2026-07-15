@@ -58,6 +58,15 @@ For each **overdue** or **urgent** entry only:
 2. Read `cv.md` for proof points
 3. Read `config/profile.yml` for candidate name and identity
 
+**Agency-mediated applications (#1596):** when the entry's `via` field is set (the cadence JSON emits `via: null` for direct applications), the chase target is the **agency contact** (recruiter named in the notes/contacts), not the company — the recruiter owns the client relationship and has their own incentive to respond. Reference the role by the agency's framing.
+
+**When the end employer is unknown (company `?`), this branch REPLACES the framework rules below — do not fall through to them.** There is no company name to mention and nothing company-specific to reference, so instead:
+- Sentence 1 references the role by the **agency's framing** (their listing title + the recruiter's name) **plus when you applied** — the application date stays in the opening exactly as the framework requires; only the company reference is replaced, never with a placeholder company name.
+- Sentence 2's value-add draws on cv.md/report proof points that fit the role as listed — skip the "specific to THAT company" rule.
+- Add the client-name ask: request the end employer's name as a natural part of the follow-up ("so I can prepare properly, could you share which company this role is with?") — that reveal is what unlocks cross-channel dedup in the tracker.
+
+When `via` is set but the employer IS known, use the framework below unchanged except the recipient: address the recruiter, mention the client company by name.
+
 ### Email Follow-up Framework (first follow-up, followupCount == 0)
 
 Generate a 3-4 sentence email:

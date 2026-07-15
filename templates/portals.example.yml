@@ -91,6 +91,14 @@
 #   max: 0
 #   currency: "USD"
 
+# -- Posting-age filter (optional) --
+# Opt-in freshness gate. Skips offers whose posting date (postedAt, supplied by
+# the provider) is older than N days. Offers from providers that expose no date
+# are never skipped — same "don't penalize missing data" rule as location_filter.
+# Absent, 0, or non-positive → disabled (all ages pass).
+#
+# max_posting_age_days: 45
+
 # -- Trust filter (optional) --
 # Enriches each scanned job with a trust score (0-100) and flags.
 # Jobs are NEVER dropped — only annotated. The trust score helps you
@@ -145,6 +153,22 @@
 #   negative:
 #     - "php"
 #     - "wordpress"
+#
+# by_title_keyword (optional): scope a stricter positive/negative pair to only
+# the jobs matched via a specific title_filter.positive keyword, instead of
+# applying it to every scanned job. Useful when a title keyword is broad
+# enough to need extra confirmation from the description (e.g. "AI Engineer"
+# roles where you want the JD to actually mention a concrete AI tool) without
+# that same requirement leaking onto unrelated categories (Instructional
+# Designer, HR Coordinator, ...). Jobs matched via a keyword with no entry
+# here fall back to the global positive/negative pair above.
+# content_filter:
+#   by_title_keyword:
+#     "AI Engineer":
+#       positive:
+#         - "gpt"
+#         - "llm"
+#         - "claude"
 
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
@@ -494,6 +518,8 @@ search_queries:
 #   pinpoint        <slug>.pinpointhq.com
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
+#   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
@@ -538,6 +564,20 @@ search_queries:
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: 腾讯 (Tencent)
+#   careers_url: https://careers.tencent.com/search.html  # any https://careers.tencent.com URL
+#   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
+#                                # omit keywords to pull the whole board
+#   max_pages: 20          # optional per-keyword page cap (100 posts/page, default 20)
+#   enabled: true
+#
+# - name: 美团 (Meituan)
+#   careers_url: https://zhaopin.meituan.com/web/social   # any https://zhaopin.meituan.com URL
+#   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
+#                                # omit keywords to pull the whole board
+#   max_pages: 30          # optional per-keyword page cap (100 posts/page, default 30)
 #   enabled: true
 #
 # - name: Example Workday Co
@@ -633,6 +673,36 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
+# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+#   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
+#   provider: deutschebahn                # optional — db.jobs host also auto-detects
+#   enabled: true
+#
+# - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list
+#   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
+#   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
+#   enabled: true
+#
+# - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
+#   careers_url: https://www.rheinmetall.com/en/career/vacancies
+#   provider: rheinmetall                 # optional — rheinmetall.com host also auto-detects
+#   enabled: true
+#
+# - name: OHB                             # Cornerstone OnDemand (csod) branded site
+#   careers_url: https://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb
+#   provider: csod                        # anonymous-JWT bootstrap, then public search API
+#   enabled: true
+#
+# - name: RENK                            # softgarden hosted job widget
+#   careers_url: https://renk-group.softgarden.io/de/widgets/jobs
+#   provider: softgarden
+#   enabled: true
+#
+# - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
+#   careers_url: https://mercedes-benz.app.beesite.de   # the *.app.beesite.de host, not the branded front
+#   provider: beesite
+#   enabled: true
+#
 # -- Remote-job feeds (no careers_url, no extra fields) --
 # title_filter / location_filter defined above still apply.
 #
@@ -670,6 +740,11 @@ search_queries:
 #   provider: jobicy
 #   enabled: true
 #
+# - name: EchoJobs                        # tech jobs aggregated from company ATS boards
+#   provider: echojobs
+#   max_pages: 3                          # 100 jobs/page; raise for deeper coverage
+#   enabled: true
+#
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
 #   enabled: true
@@ -680,6 +755,10 @@ search_queries:
 #
 # - name: The Muse                        # board-wide public jobs API
 #   provider: themuse
+#   enabled: true
+#
+# - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
+#   provider: larajobs
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
@@ -724,6 +803,25 @@ search_queries:
 #     api: https://jobs.booking.com/api/jobs
 #     provider: jibeapply
 #     enabled: true
+
+# -- Company aliases (optional) --
+# Map alternate company names to a single canonical label so the scanner's
+# company+role dedup matches your tracker. The scanner keys dedup on the name a
+# provider returns — usually the ATS org (e.g. Greenhouse "Intercom") — which
+# may differ from the brand you track (e.g. "Fin"). Without an alias, the same
+# role is re-scanned and re-evaluated every run because "intercom::role" never
+# matches "fin::role" in data/applications.md.
+#
+# Format: `CanonicalName: [alias, ...]`. Every alias AND the canonical name
+# resolve to the canonical label (case-insensitive). Companies with no entry are
+# unaffected. Combined with title normalization, this suppresses URL-new
+# duplicates caused by requisition URL changes and per-location title splits
+# ("Engineer (Berlin)" vs "Engineer"). It does not classify repost patterns or
+# produce `postingChurn` evidence; detect-reposts.mjs and company-history.mjs own
+# that post-tracking layer.
+#
+# company_aliases:
+#   Fin: [Intercom]
 
 tracked_companies:
 

@@ -75,15 +75,41 @@ export function parseCompensation(job) {
   };
 }
 
+const ALLOWED_ASHBY_HOSTS = new Set(['api.ashbyhq.com']);
+
+/** @param {string} url */
+function assertAshbyUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`ashby: invalid URL: ${url}`);
+  }
+  if (parsed.protocol !== 'https:') throw new Error(`ashby: URL must use HTTPS: ${url}`);
+  if (!ALLOWED_ASHBY_HOSTS.has(parsed.hostname))
+    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_ASHBY_HOSTS].join(', ')}`);
+  return url;
+}
+
 /** @param {import('./_types.js').PortalEntry} entry */
 function resolveApiUrl(entry) {
+  // Explicit api: wins — lets an entry keep a human-facing corporate
+  // careers_url (e.g. https://openai.com/careers) while still pinning the
+  // Ashby posting-api board (mirrors greenhouse's api: precedence).
+  if (entry.api) {
+    assertAshbyUrl(entry.api);
+    return entry.api;
+  }
   const url = entry.careers_url || '';
   const match = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
   if (!match) return null;
   return `https://api.ashbyhq.com/posting-api/job-board/${match[1]}?includeCompensation=true`;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function sleep(ms, ctx) {
+  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
 function toEpochMs(value) {
@@ -123,19 +149,24 @@ export default {
   id: 'ashby',
 
   detect(entry) {
-    const apiUrl = resolveApiUrl(entry);
-    return apiUrl ? { url: apiUrl } : null;
+    try {
+      const apiUrl = resolveApiUrl(entry);
+      return apiUrl ? { url: apiUrl } : null;
+    } catch {
+      return null;
+    }
   },
 
   async fetch(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`ashby: cannot derive API URL for ${entry.name}`);
+    assertAshbyUrl(apiUrl);
     let lastErr;
     for (let attempt = 0; attempt <= ASHBY_RETRIES; attempt++) {
       if (attempt > 0) {
         // exponential backoff + jitter — spaces out retries to dodge Ashby rate-limiting
         const backoff = 1000 * 2 ** (attempt - 1) + Math.floor(Math.random() * 500);
-        await sleep(backoff);
+        await sleep(backoff, ctx);
       }
       try {
         const json = /** @type {any} */ (await ctx.fetchJson(apiUrl, { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' }));

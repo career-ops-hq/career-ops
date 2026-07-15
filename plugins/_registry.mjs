@@ -1,19 +1,56 @@
 // @ts-check
 // plugins/_registry.mjs — the curated community-plugin registry (the trust root).
-// Pure, side-effect-free import (node:fs only). plugins-registry.json is a
-// SYSTEM-layer file: an entry exists only because a maintainer reviewed + merged
-// it at an exact pinned commit. Users only ever install the pinnedSha the
-// SHIPPED registry names — an author cannot reach users without a merged PR.
+// Pure, side-effect-free import (node:fs only). The registry is a SYSTEM-layer
+// area: an entry exists only because a maintainer reviewed + merged it at an
+// exact pinned commit. Users only ever install the pinnedSha the SHIPPED
+// registry names — an author cannot reach users without a merged PR.
+//
+// Storage: one file per plugin under plugins-registry/<id>.json. Each PR adds
+// or bumps its own file, so two registry PRs never touch the same lines and
+// can merge in any order (the single-array plugins-registry.json format made
+// every concurrent registry PR a guaranteed conflict). The legacy single-file
+// format is still read as a fallback for forks mid-migration.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
+export function registryDirPath(root) {
+  return path.join(root, 'plugins-registry');
+}
+
+/** Legacy single-file location (pre per-plugin-files migration). */
 export function registryPath(root) {
   return path.join(root, 'plugins-registry.json');
 }
 
+/**
+ * Read every entry file in plugins-registry/, with its filename (so callers
+ * like the validator can enforce filename === "<id>.json"). Malformed files
+ * fail-open to a null entry but keep their filename for reporting.
+ * @returns {Array<{file: string, entry: any}>}
+ */
+export function loadRegistryFiles(root) {
+  const dir = registryDirPath(root);
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.json')).sort()) {
+    let entry = null;
+    try { entry = JSON.parse(readFileSync(path.join(dir, file), 'utf8')); } catch { /* fail-open */ }
+    out.push({ file, entry });
+  }
+  return out;
+}
+
 /** Load the curated registry. Fail-open to an empty registry. */
 export function loadRegistry(root) {
+  // Per-plugin files are the primary format; sorted by filename for determinism.
+  if (existsSync(registryDirPath(root))) {
+    const plugins = loadRegistryFiles(root)
+      .map(({ entry }) => entry)
+      .filter(e => e && typeof e === 'object');
+    return { registryVersion: 1, plugins };
+  }
+  // Legacy fallback: the old single-array file.
   const f = registryPath(root);
   if (!existsSync(f)) return { registryVersion: 1, plugins: [] };
   try {

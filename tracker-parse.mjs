@@ -47,7 +47,11 @@ export const HEADER_ALIASES = (() => {
 
 /**
  * A score cell in the tracker: `N/5` or `N.N/5` (any precision), or the
- * sentinels `N/A` / `DUP`. Markdown bold is stripped first. A status label
+ * sentinels `N/A` / `DUP` / `—` (em dash) / `-` (hyphen). Markdown bold is
+ * stripped first. `—`/`-` mirror the tracker's own "no data" convention used
+ * in every other column (Report, PDF, etc.) — see #1799: a backfilled entry
+ * with no evaluation (e.g. a rejection for a role never run through
+ * `oferta`) needs a score-cell sentinel too, not just `N/A`. A status label
  * never matches this, which is what makes it a reliable discriminator between
  * the score and status columns regardless of their order (#1427).
  */
@@ -56,7 +60,7 @@ export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
 /** @param {string} v @returns {boolean} whether the cell reads as a score. */
 export function looksLikeScoreCell(v) {
   const t = String(v ?? '').replace(/\*\*/g, '').trim();
-  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP';
+  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
 }
 
 /**
@@ -123,7 +127,15 @@ export function resolveColumns(lines) {
 export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   if (typeof line !== 'string' || !line.startsWith('|')) return null;
   const parts = line.split('|').map(s => s.trim());
-  if (parts.length < 9) return null;
+  // Dynamic width guard: a complete row splits into leading '' + one cell per
+  // column (+ trailing '' when the row ends with a pipe). Anything shorter is
+  // missing a cell, and a missing INTERIOR cell shifts every later column one
+  // left while the trailing empty cell keeps the count plausible — so require
+  // the full width rather than mere coverage of the highest mapped index.
+  // Hand-edited rows without the trailing pipe are one part narrower but
+  // still complete (tracker-utils rebuildRow supports them).
+  const width = Math.max(...Object.values(colmap)) + (line.trimEnd().endsWith('|') ? 2 : 1);
+  if (parts.length < width) return null;
   const num = parseInt(parts[colmap.num], 10);
   if (isNaN(num)) return null;
   const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
@@ -140,5 +152,26 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     raw: line,
   };
   if (colmap.location != null) row.location = at('location');
+  if (colmap.via != null) row.via = at('via');
   return row;
+}
+
+/**
+ * Unicode-aware key for Via (agency) comparison.
+ *
+ * normalizeCompany()-style keys strip everything outside [a-z0-9], so
+ * non-Latin agency names (リクルート, パーソル, …) all collapse to the same
+ * empty key — which made the #1596 cross-channel guard treat two different
+ * agencies as one channel and silently merge two real submissions. Keep
+ * letters and digits of any script instead; NFKC first so full-width/
+ * half-width variants compare equal.
+ *
+ * Shared by every Via consumer (merge-tracker dedup guard, analyze-patterns
+ * channel buckets) so agency identity can't drift between scripts.
+ *
+ * @param {string} name - Raw Via cell or via= tag value.
+ * @returns {string} Case-folded, punctuation-free, script-preserving key.
+ */
+export function normalizeVia(name) {
+  return String(name).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }

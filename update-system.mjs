@@ -19,12 +19,16 @@ import { execFile, execFileSync, execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import {
-  ensureSkillEntrypoints,
-  materializeSkillEntrypoints,
-} from './scaffolder/bin/skill-entrypoints.mjs';
 
-export { materializeSkillEntrypoints, ensureSkillEntrypoints };
+// NOTE: this file must stay *self-loading* — no static (top-level) relative
+// imports. A pre-#1245 client's apply() self-reexec checks out ONLY
+// update-system.mjs before re-execing the target updater, so a static top-level
+// relative import here crashes that re-exec with ERR_MODULE_NOT_FOUND on the
+// old→new jump, before the fuller checkout that would materialize the imported
+// module ever runs (#1706). Local modules (e.g. the skill-entrypoints helper
+// under scaffolder/) are instead pulled in lazily at their point of use, by
+// which time the full update stage has already checked them out. The
+// updater-migration and test-all suites enforce this invariant.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -38,7 +42,10 @@ const RELEASES_API = 'https://api.github.com/repos/santifer/career-ops/releases/
 // Anchoring on `(?:^|-)` lets the releases-API fallback parse our tags,
 // which Release Please always prefixes with the component name.
 export const SEMVER_RE = /(?:^|-)v?(\d+\.\d+\.\d+)$/i;
-export const DEFAULT_GIT_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_GIT_TIMEOUT_MS, 30000);
+// 120s: local git commands are normally instant, but a cloud-evicted working
+// tree (iCloud "optimize storage", OneDrive dehydration) can stall a plain
+// `git status` for a minute of pure I/O wait re-materializing files (#1393).
+export const DEFAULT_GIT_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_GIT_TIMEOUT_MS, 120000);
 export const DEFAULT_GIT_FETCH_TIMEOUT_MS = parsePositiveInt(
   process.env.CAREER_OPS_GIT_FETCH_TIMEOUT_MS,
   Math.max(DEFAULT_GIT_TIMEOUT_MS, 300000),
@@ -51,6 +58,7 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
+  'modes/README.md',
   'modes/_shared.md',
   'modes/_profile.template.md',
   'modes/_custom.template.md',
@@ -71,21 +79,28 @@ const SYSTEM_PATHS = [
   'modes/tracker.md',
   'modes/training.md',
   'modes/interview.md',
+  'modes/interview-redflag.md',
   'modes/latex.md',
+  'modes/latex-tex.md',
   'modes/followup.md',
+  'modes/offer-prep.md',
   'modes/interview-prep.md',
   'modes/interview/',
   'interview-prep/sessions/.gitkeep',
   'interview-prep/sessions/README.md',
   'modes/patterns.md',
+  'modes/titles.md',
+  'modes/upskill.md',
   'modes/update.md',
   'modes/agent-inbox.md',
+  'modes/reply-watch.md',
   'modes/ar/',
   'modes/da/',
   'modes/de/',
   'modes/de/interview/',
   'modes/fr/',
   'modes/fr/interview/',
+  'modes/hi/',
   'modes/es/',
   'modes/es/interview/',
   'modes/id/',
@@ -100,6 +115,7 @@ const SYSTEM_PATHS = [
   'modes/heuristics/',
   'modes/regional/',
   'modes/zh/',
+  'modes/zh-TW/',
   'CLAUDE.md',
   'CODEX.md',
   'OPENCODE.md',
@@ -109,6 +125,11 @@ const SYSTEM_PATHS = [
   'build-dashboard.mjs',
   'generate-pdf.mjs',
   'generate-latex.mjs',
+  'extract-latex-content.mjs',
+  'patch-latex-content.mjs',
+  'lib/latex-escape.mjs',
+  'lib/latex-content.mjs',
+  'img-to-pdf.mjs',
   'archive-posting.mjs',
   'application-answers.mjs',
   'generate-cover-letter.mjs',
@@ -124,14 +145,18 @@ const SYSTEM_PATHS = [
   'tracker-utils.mjs',
   'tracker-parse.mjs',
   'tracker-aliases.json',
+  'set-status.mjs',
+  'set-status-tests.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
+  'verify-cv-facts.mjs',
   'update-system.mjs',
   'reserve-report-num.mjs',
   'scan.mjs',
   'classify-tier.mjs',
   'scan-ats-full.mjs',
   'match-star.mjs',
+  'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'providers/',
   'seeds/',
@@ -141,20 +166,30 @@ const SYSTEM_PATHS = [
   'liveness-core.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
+  'browser-extract.mjs',
   'analyze-patterns.mjs',
+  'upskill.mjs',
   'stats.mjs',
   'detect-reposts.mjs',
   'fingerprint-core.mjs',
   'process-quality.mjs',
   'process-quality.test.mjs',
+  'salary-gap.mjs',
+  'funnel-velocity.mjs',
+  'assessment-log.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
+  'invite-match.mjs',
+  'invite-match.test.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
   'followup-seed-tests.mjs',
   'gemini-eval.mjs',
   'ollama-eval.mjs',
   'openai-eval.mjs',
+  'openai-tailor.mjs',
+  'eval-golden.mjs',
+  'evals/',
   'openrouter-runner.mjs',
   'test-all.mjs',
   'detect-reposts.test.mjs',
@@ -168,11 +203,15 @@ const SYSTEM_PATHS = [
   'validate-system-paths-coverage.mjs',
   'reply-matcher.mjs',
   'reply-matcher.test.mjs',
+  'reply-watch.mjs',
+  'paste-reply.mjs',
+  'paste-reply-tests.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'batch/README.md',
   'dashboard/',
   'templates/',
+  'config/cv-facts.example.json',
   'fonts/',
   'examples/',
   'config/profile.example.yml',
@@ -191,6 +230,9 @@ const SYSTEM_PATHS = [
   'writing-samples/README.md',
   'VERSION',
   'DATA_CONTRACT.md',
+  'MANIFESTO.md',
+  'manifesto.mjs',
+  'SIGNATURES.md',
   'CONTRIBUTING.md',
   'MAINTAINERS.md',
   'ARCHITECTURE.md',
@@ -201,6 +243,7 @@ const SYSTEM_PATHS = [
   'README.de.md',
   'README.es.md',
   'README.fr.md',
+  'README.hi.md',
   'README.ja.md',
   'README.ko-KR.md',
   'README.pl.md',
@@ -222,6 +265,10 @@ const SYSTEM_PATHS = [
   '.github/',
   'package.json',
   'build-cv-latex.mjs',
+  'build-cv-html.mjs',
+  'cv-templates.mjs',
+  'test/cv-templates.test.mjs',
+  'test/cover-resolver.test.mjs',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
@@ -230,6 +277,7 @@ const SYSTEM_PATHS = [
   'DOCKER.md',
   'plugins/',
   'plugins.mjs',
+  'plugins-registry/',
   'plugins-registry.json',
   'plugin-install.mjs',
   'plugin-audit.mjs',
@@ -257,6 +305,7 @@ const BOOTSTRAP_PATHS = [
   'tracker-columns-tests.mjs',
   'plugins/',
   'plugins.mjs',
+  'plugins-registry/',
   'plugins-registry.json',
   'plugin-install.mjs',
   'plugin-audit.mjs',
@@ -285,6 +334,7 @@ const USER_PATHS = [
   'plugins.local/',
   'plugins.lock',
   '.claude/settings.json',
+  '.claude/hooks/',
 ];
 
 function parseVersionFile(raw) {
@@ -804,6 +854,10 @@ async function apply() {
       console.error(`Stale-test prune step failed: ${err.message}`);
     }
 
+    // Lazy import: keep update-system.mjs self-loading (see the top-of-file
+    // note). scaffolder/ was just checked out by the update stage above, so the
+    // module resolves here even on a pre-#1245 old→new re-exec.
+    const { ensureSkillEntrypoints } = await import('./scaffolder/bin/skill-entrypoints.mjs');
     const materializedSkillEntrypoints = ensureSkillEntrypoints(ROOT);
     if (materializedSkillEntrypoints.length > 0) {
       for (const path of materializedSkillEntrypoints) {
@@ -919,6 +973,11 @@ async function apply() {
     console.log(`\nUpdate complete: v${local} → v${remote}`);
     console.log(`Updated ${updated.length} system paths.`);
     console.log(`Rollback available: node update-system.mjs rollback`);
+
+    console.log('\n-- The CareerOps Manifesto ------------------------------');
+    console.log('A new way of job searching is taking shape. You are');
+    console.log('already practicing it. Read it, sign it if you want to help:');
+    console.log('    npm run manifesto  ·  https://career-ops.org/manifesto');
 
   } finally {
     // Remove lock

@@ -106,7 +106,7 @@
 ## 步骤 6 — 投递后动作
 
 当候选人确认已经成功点击“提交申请/投递”后，执行以下清理与建档工作：
-1. 将 `data/applications.md` 中该职位的状态从 `Evaluated` 修改更新为 `Applied`。
+1. 使用规范 CLI 将该职位状态更新为 `Applied`：`node set-status.mjs <report#> Applied`（不要手动编辑 `data/applications.md` 表格）。
 2. 将最终实际提交的表单回答归档并更新至该报告的维度 H 模块中，以便后续面试对照。
 3. 推荐下一步行动：引导候选人使用 `/career-ops contacto` 指令生成 LinkedIn 招聘负责人直达勾兑话术。
 

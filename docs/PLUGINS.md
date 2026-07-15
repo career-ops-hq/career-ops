@@ -62,7 +62,7 @@ trust).
 2. File a **Plugin registration** issue (becomes your plugin's home/changelog).
 3. Open a **registry PR** (the `?template=plugin-registry.md` template — the
    template repo's release workflow can open it for you on a release tag) that
-   adds your entry to `plugins-registry.json`, pinned to an exact commit. CI
+   adds your `plugins-registry/<id>.json` file, pinned to an exact commit. CI
    (`plugin-registry-validate`) checks the naming, manifest, min-files, license,
    egress, and a static audit before a maintainer reviews. Once merged, users can
    `node plugins.mjs add <name>` and your plugin ships to them via the normal

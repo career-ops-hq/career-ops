@@ -173,7 +173,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     });
 
-    return classifyLiveness({ status, finalUrl, bodyText, applyControls });
+    return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
   } catch (err) {
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
