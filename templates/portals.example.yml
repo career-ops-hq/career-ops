@@ -44,10 +44,10 @@
 # Results are still filtered by title_filter/location_filter below.
 #
 # interamt_searches:
-#   - was: "Geoinformatik"
-#   - was: "GIS"
 #   - was: "Softwareentwickler"
+#   - was: "Informatiker"
 #   - was: "Datenanalyst"
+#   - was: "Systemadministrator"
 
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
