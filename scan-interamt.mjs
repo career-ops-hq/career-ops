@@ -14,7 +14,7 @@
  *   node scan-interamt.mjs
  *   node scan-interamt.mjs --dry-run
  *   node scan-interamt.mjs --all            # skip date filter (use for first scan)
- *   node scan-interamt.mjs --keyword "Geoinformatik"
+ *   node scan-interamt.mjs --keyword "Softwareentwickler"
  */
 
 import { chromium } from 'playwright';
