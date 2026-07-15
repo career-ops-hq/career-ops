@@ -31,6 +31,24 @@
 # scan_history:
 #   recheck_after_days: 30
 
+# -- Interamt.de searches (optional, German public sector) --
+# Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
+# scanner for Interamt.de — the primary portal for German federal, state, and
+# municipal government job postings. Interamt has no REST API (Apache Wicket,
+# stateful), so it isn't reachable through the tracked_companies providers
+# above; scan-interamt.mjs drives a real browser session instead.
+#
+# Each `was:` entry is a search keyword submitted to Interamt's search form.
+# If this block is absent, scan-interamt.mjs falls back to a generic set of
+# German IT keywords (Informatiker, Softwareentwickler, IT-Spezialist, ...).
+# Results are still filtered by title_filter/location_filter below.
+#
+# interamt_searches:
+#   - was: "Geoinformatik"
+#   - was: "GIS"
+#   - was: "Softwareentwickler"
+#   - was: "Datenanalyst"
+
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
 # If this entire block is absent, all locations pass (current default behavior).
