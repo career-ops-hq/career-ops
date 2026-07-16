@@ -178,11 +178,13 @@ For each surviving card (that passed Step 2.5's portal filter):
 
 ---
 
-## Step 5 — Full A-G evaluation per role
+## Step 5 — Full A-G evaluation per role (score + artifacts, inline)
 
 For each posting with a usable JD, run an A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`. When a market-specific mode (e.g. German `modes/de/`) is active, use its vocabulary and rules, but do not switch market modes solely because a job description is in another language — the user must request it or configure it in `config/profile.yml`.
 
-Evaluate the following blocks (compact form — 2-4 sentences each):
+**CRITICAL: For each role, evaluate AND immediately persist if high-fit, right here in the loop.** Do not defer writing to a later step. Within each role's processing:
+
+### 5a — Evaluate compact A-G
 
 - **Archetype** — one of the 6 from `_shared.md` (AI Platform/LLMOps, Agentic/Automation, Technical AI PM, AI Solutions Architect, AI Forward Deployed, AI Transformation), mapped to the user's full-stack/backend/general-SWE archetypes in `_profile.md` when the role isn't an AI archetype.
 - **Block A — Role Summary:** title, seniority, location, remote/hybrid/onsite, one-line on what the role is.
@@ -194,30 +196,29 @@ Evaluate the following blocks (compact form — 2-4 sentences each):
 
 Compute the **global score (1–5)** per `_shared.md` (weighted match + North Star + comp + cultural signals − red flags). Apply Block G as a qualitative flag, not a numeric adjustment.
 
-**Bounded research budget (firm):**
-- Max **1 WebSearch per role**, only for Block G concerns.
-- Max **5 WebSearch queries total** across the whole run.
-- **No subagents, no `deep-research`, no recursive skill calls.**
+### 5b — If global score ≥ 4.0/5, persist artifacts immediately
 
----
-
-## Step 5.5 — Write report + tracker entry for high-fit roles (≥ 4.0)
-
-For roles with global score **≥ 4.0/5**, do the following so the user has an actionable artifact to apply from:
+**Do this NOW, before moving to the next role.** Do not skip, do not defer:
 
 1. **Reserve a report number:** run `node reserve-report-num.mjs` to get the next sequential `REPORT_NUM`. Guard all subsequent steps with cleanup: if any step fails, release the sentinel before stopping.
 2. **Sanitize the company slug:** derive a safe slug from the company name by lowercasing, replacing spaces with hyphens, and removing any characters that are not alphanumeric, hyphens, or underscores. Verify the slug contains no path separators (`/` or `\`), no `..` traversal sequences, and no control characters. Reject the listing if the slug is unsafe.
-3. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5. Verify the resolved path stays within the `reports/` directory.
+3. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from the current role. Verify the resolved path stays within the `reports/` directory.
 4. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
 5. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md). Verify the resolved path stays within the `batch/tracker-additions/` directory.
 6. **Merge + clean up the tracker:**
    - Run `node merge-tracker.mjs` to integrate the new entry into `data/applications.md`.
    - Then run `node normalize-statuses.mjs` and `node dedup-tracker.mjs` to enforce canonical states and remove any duplicates.
    - Finally run `node verify-pipeline.mjs` to confirm pipeline integrity.
+7. **Always release the sentinel:** `node reserve-report-num.mjs --release {REPORT_NUM}` — even if a step failed partway, the sentinel MUST be released.
 
-(Or skip the full pipeline and do the above in a single pass — the point is the same: high-fit roles get persisted as evaluable artifacts.)
+### 5c — If score < 4.0/5
 
-**Always release the sentinel,** even if a step fails partway: `node reserve-report-num.mjs --release {REPORT_NUM}`. A stale reservation blocks future report numbering until garbage-collected.
+Skip the role silently. No report, no PDF, no tracker entry — it goes into the "Below threshold" footer at output.
+
+**Bounded research budget (firm, applies across all roles):**
+- Max **1 WebSearch per role**, only for Block G concerns.
+- Max **5 WebSearch queries total** across the whole run.
+- **No subagents, no `deep-research`, no recursive skill calls.**
 
 ---
 
@@ -261,7 +262,7 @@ If **no role clears 4.0**, branch on whether any roles were evaluated:
   > No fresh postings found in the last 24h. This could be a quiet day, or CAPTCHA/bot-blocking may have affected the queries. Re-run tomorrow, or try `/career-ops scan` for direct-portal discovery.
 
 **Next steps line** (always, if ≥ 4.0 roles exist):
-> These are triage picks, not full evaluations. For any role you'll actually apply to, run `/career-ops oferta {url}` for the complete A-G report + tailored CV, then `/career-ops apply {url}` to fill the form.
+> Reports, PDFs, and tracker entries have already been created for the roles above. To submit a formal application, run `/career-ops apply {url}` to fill the form.
 
 ---
 
