@@ -2415,10 +2415,17 @@ if (fileExists('modes/gtop.md')) {
     fail('gtop mode missing A-G evaluation instructions (Step 5)');
   }
 
-  if ((gtopMode.includes('>= 4.0') || gtopMode.includes('≥ 4.0')) && gtopMode.includes('reserve-report-num.mjs') && gtopMode.includes('merge-tracker.mjs')) {
-    pass('gtop mode writes reports + PDF + tracker for high-fit roles (Step 5.5)');
+  if ((gtopMode.includes('>= 4.0') || gtopMode.includes('≥ 4.0')) && gtopMode.includes('reserve-report-num.mjs') && gtopMode.includes('merge-tracker.mjs') && gtopMode.includes('normalize-statuses.mjs') && gtopMode.includes('dedup-tracker.mjs') && gtopMode.includes('verify-pipeline.mjs')) {
+    pass('gtop mode writes reports + PDF + tracker + pipeline cleanup for high-fit roles (Step 5.5)');
   } else {
-    fail('gtop mode missing report-generation workflow for high-fit roles (Step 5.5)');
+    fail('gtop mode missing report-generation or pipeline cleanup workflow for high-fit roles (Step 5.5)');
+  }
+
+  // WebFetch fallback verification header
+  if (gtopMode.includes('**Verification:** unconfirmed (batch mode)')) {
+    pass('gtop mode includes WebFetch fallback verification header');
+  } else {
+    fail('gtop mode missing WebFetch fallback verification header requirement');
   }
 
   if (gtopMode.includes('Max 3 search queries') && gtopMode.includes('No subagents') && gtopMode.includes('aggregator')) {

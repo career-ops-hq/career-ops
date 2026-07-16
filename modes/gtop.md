@@ -82,7 +82,7 @@ For each query URL:
 
    **Do NOT try to extract a destination URL from the card itself.** Google Jobs cards are buttons, not hyperlinks — there is no `href` to read. The real apply URL is only accessible inside the detail panel after clicking the card.
 
-5. If a Google "More jobs" / pagination control is present, click it (`browser_click`) to reveal more cards — but **cap at ~30 cards per query** to bound tokens.
+5. If a Google "More jobs" / pagination control is present, click it (`browser_click`) to reveal more cards. After the click, `browser_snapshot` again and re-parse the newly revealed cards — but **cap at ~30 cards per query** to bound tokens.
 
 **Bot-challenge handling:** If the snapshot shows a CAPTCHA / "Just a moment…" / "unusual traffic" page instead of job cards, note it and skip that query. Continue with the others. Do not retry aggressively.
 
@@ -154,12 +154,12 @@ For each surviving card (that passed Step 2.5's portal filter):
 
 6. **If the detail panel doesn't have enough JD text** (some Google Jobs panels show only a short snippet), navigate to the apply URL directly as fallback:
    - **Security check:** Before navigating, validate the extracted URL is an `https:` URL whose host matches an approved source (linkedin.com, indeed.com, myworkdayjobs.com, greenhouse.io, jobs.ashbyhq.com, lever.co, or a company careers domain). Reject non-HTTPS or unapproved destinations — skip this card instead.
-   - `browser_navigate` → the extracted apply URL (Playwright follows redirects automatically)
-   - `browser_snapshot` → read full JD from the ATS page
+   - **Open in a new tab:** use `browser_tabs` to create a new tab, `browser_navigate` → the extracted apply URL there. This preserves the Google Jobs page with its card buttons and detail panel for subsequent cards.
+   - After extracting the JD, close the fallback tab to return to Google Jobs.
 7. **Platform notes for fallback navigation:**
    - Greenhouse / Ashby / Lever / company career pages: snapshot works after full render.
-   - Workday (`*.myworkdayjobs.com`): heavy SPA — wait longer before snapshot, fall back to WebFetch if empty.
-   - LinkedIn (`linkedin.com/jobs`): often redirects to login. If the snapshot shows "Sign In", fall back to WebSearch for `{company} {role} job description` rather than getting stuck.
+   - Workday (`*.myworkdayjobs.com`): heavy SPA — wait longer before snapshot. WebFetch fallback is allowed only in headless batch mode; if used, mark the report header with `**Verification:** unconfirmed (batch mode)`. In interactive mode, keep it Playwright-only.
+   - LinkedIn (`linkedin.com/jobs`): often redirects to login. If the snapshot shows "Sign In", fall back to WebSearch for `{company} {role} job description` — **this counts toward the 5-query total WebSearch budget** (see bounded research budget in Step 5).
 
 **Token discipline:** Do not dump the full JD text into your response. Extract the key fields silently (title, company, location, requirements, salary if listed) and keep only a short note for scoring.
 
@@ -196,7 +196,10 @@ For roles with global score **≥ 4.0/5**, do the following so the user has an a
 2. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5.
 3. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
 4. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md).
-5. **Merge the tracker:** run `node merge-tracker.mjs` to integrate the new entry into `data/applications.md`.
+5. **Merge + clean up the tracker:**
+   - Run `node merge-tracker.mjs` to integrate the new entry into `data/applications.md`.
+   - Then run `node normalize-statuses.mjs` and `node dedup-tracker.mjs` to enforce canonical states and remove any duplicates.
+   - Finally run `node verify-pipeline.mjs` to confirm pipeline integrity.
 
 (Or skip the full pipeline and do the above in a single pass — the point is the same: high-fit roles get persisted as evaluable artifacts.)
 
@@ -228,15 +231,18 @@ Scanned: 3 queries · {N} cards total · {M} fresh (<24h) · {K} evaluated · {P
 
 2. … (continue for each ≥ 4.0 role)
 
-### Below threshold (evaluated, ≥ 4.0 not met)
+### Below threshold (evaluated, score < 4.0)
 
 - [3.8] {Role} @ {Company} — {one-line reason: e.g. "requires 6+ YOE Scala, level mismatch"}
 - …
 ```
 
-If **no role clears 4.0**, say so plainly:
+If **no role clears 4.0**, branch on whether any roles were evaluated:
 
-> No high-fit roles in the last 24h across the 3 queries. {M} fresh postings were evaluated; strongest was {Role} @ {Company} at {score}/5. Re-run tomorrow, adjust keywords in `portals.yml`, or run `/career-ops scan` for direct-portal discovery.
+- If at least one role was evaluated (M > 0):
+  > No high-fit roles in the last 24h across the 3 queries. {M} fresh postings were evaluated; strongest was {Role} @ {Company} at {score}/5. Re-run tomorrow, adjust keywords in `portals.yml`, or run `/career-ops scan` for direct-portal discovery.
+- If no roles were evaluated (M = 0 — e.g. CAPTCHA blocked all queries, or no postings under 24h):
+  > No fresh postings found in the last 24h. This could be a quiet day, or CAPTCHA/bot-blocking may have affected the queries. Re-run tomorrow, or try `/career-ops scan` for direct-portal discovery.
 
 **Next steps line** (always, if ≥ 4.0 roles exist):
 > These are triage picks, not full evaluations. For any role you'll actually apply to, run `/career-ops oferta {url}` for the complete A-G report + tailored CV, then `/career-ops apply {url}` to fill the form.
