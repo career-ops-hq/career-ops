@@ -2415,7 +2415,7 @@ if (fileExists('modes/gtop.md')) {
     fail('gtop mode missing A-G evaluation instructions (Step 5)');
   }
 
-  if (gtopMode.includes('>= 4.0') && gtopMode.includes('reserve-report-num.mjs') && gtopMode.includes('merge-tracker.mjs')) {
+  if ((gtopMode.includes('>= 4.0') || gtopMode.includes('≥ 4.0')) && gtopMode.includes('reserve-report-num.mjs') && gtopMode.includes('merge-tracker.mjs')) {
     pass('gtop mode writes reports + PDF + tracker for high-fit roles (Step 5.5)');
   } else {
     fail('gtop mode missing report-generation workflow for high-fit roles (Step 5.5)');

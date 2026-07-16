@@ -45,20 +45,20 @@ Read the candidate's location from `config/profile.yml` → `candidate.location`
 
 **If the user passed a custom role argument** (anything after `gtop` in the invocation), use it directly as the sole query keyword. Build 3 queries with that same keyword combined with related terms from `title_filter.positive`:
 
-- **Query A:** `{custom-role} Toronto`
-- **Query B:** `{custom-role} OR related-variant-1 OR related-variant-2 Toronto`
-- **Query C:** `{custom-role} OR other-variant-1 OR other-variant-2 Toronto`
+- **Query A:** `{custom-role} {LOCATION}`
+- **Query B:** `{custom-role} OR related-variant-1 OR related-variant-2 {LOCATION}`
+- **Query C:** `{custom-role} OR other-variant-1 OR other-variant-2 {LOCATION}`
 
 URL-encode each query.
 
-**If no argument was given**, construct **exactly 3 queries** from the candidate's pre-configured keywords (from `portals.yml` `title_filter.positive` + `config/profile.yml` target roles), clustered by theme as follows:
+**If no argument was given**, construct **exactly 3 queries** from the candidate's pre-configured keywords (from `portals.yml` `title_filter.positive` + `config/profile.yml` target roles), clustered by theme. Replace `{LOCATION}` below with the actual location:
 
 - **Query A — Full-Stack / SWE / Backend cluster:**
-  `("Full Stack" OR "Software Engineer" OR "Backend Engineer" OR "Node.js" OR "React Developer") Toronto`
+  `("Full Stack" OR "Software Engineer" OR "Backend Engineer" OR "Node.js" OR "React Developer") {LOCATION}`
 - **Query B — AI / ML / Automation cluster:**
-  `("AI Engineer" OR "ML" OR "LLM" OR "Agent" OR "Automation" OR "RAG" OR "GenAI") Toronto`
+  `("AI Engineer" OR "ML" OR "LLM" OR "Agent" OR "Automation" OR "RAG" OR "GenAI") {LOCATION}`
 - **Query C — Broader Developer cluster:**
-  `("Software Developer" OR "Application Developer" OR "Platform Engineer" OR "Full Stack Developer") Toronto`
+  `("Software Developer" OR "Application Developer" OR "Platform Engineer" OR "Full Stack Developer") {LOCATION}`
 
 Do not exceed 3 queries in either mode.
 
@@ -104,15 +104,7 @@ Google Jobs surfaces listings from a mix of sources. Many are **aggregator/scrap
 
 **Deny the following known aggregator/scraper portals (non-exhaustive):** Recruit.net, Built In, Zippia, Expertini, Toronto Jobs Expertini, Learn4Good, JobServe, CareerBuilder, Monster, SimplyHired, Glassdoor (aggregated), Jooble, Tarta.ai, Adzuna, GrabJobs, JobisJob, Jobrapido, Neuvoo, WowJobs, Snagajob, ZipRecruiter (aggregated).
 
-**How to check the source on each card:** The `via X` text appears on the card after the location — e.g. `Toronto, ON • via LinkedIn`. If the card has no `via` text at all, check the URL:
-- URL contains `linkedin.com` → trusted (LinkedIn)
-- URL contains `indeed.com` → trusted (Indeed)
-- URL contains `myworkdayjobs.com` or `wd1` or `wd5` etc. → trusted (Workday)
-- URL contains `greenhouse.io` → trusted (Greenhouse)
-- URL contains `jobs.ashbyhq.com` → trusted (Ashby)
-- URL contains `lever.co` → trusted (Lever)
-- URL contains a known aggregator domain → deny
-- Otherwise → check the `via` text; if ambiguous, **err on the side of dropping** (better to miss one borderline posting than waste time evaluating aggregator dead ends).
+**How to check the source on each card:** The `via X` text appears on the card after the location — e.g. `Toronto, ON • via LinkedIn`. Trust or deny based on the `via` text using the tables above. If a card has no recognizable `via` text, **drop it** — Google Jobs cards are buttons without visible URL targets, so there is no URL to fall back on at this stage. The `via` text is the only source signal available before clicking the card.
 
 **Important nuance for LinkedIn:** LinkedIn postings on Google Jobs are often direct company postings. Trust them even though LinkedIn may sometimes require login — the Step 4 fallback chain (`WebSearch`) handles that case.
 
@@ -122,7 +114,7 @@ Google Jobs surfaces listings from a mix of sources. Many are **aggregator/scrap
 
 ## Step 3 — Filter to last 24 hours
 
-Parse `postedAge` text into an age estimate, then keep only cards whose age is **< 24 hours**. Boundary rule: `1 day ago` is treated as ~24h and **included** (a "1 day ago" card on Google can be 12–24h old).
+Parse `postedAge` text into an age estimate, then keep only cards whose age is **≤ 24 hours**. Boundary rule: `1 day ago` is treated as ~24h and **included** (a "1 day ago" card on Google can be 12–24h old).
 
 Parsing rules:
 
@@ -161,6 +153,7 @@ For each surviving card (that passed Step 2.5's portal filter):
    - If **closed**, skip this role silently (counts toward the 10-cap).
 
 6. **If the detail panel doesn't have enough JD text** (some Google Jobs panels show only a short snippet), navigate to the apply URL directly as fallback:
+   - **Security check:** Before navigating, validate the extracted URL is an `https:` URL whose host matches an approved source (linkedin.com, indeed.com, myworkdayjobs.com, greenhouse.io, jobs.ashbyhq.com, lever.co, or a company careers domain). Reject non-HTTPS or unapproved destinations — skip this card instead.
    - `browser_navigate` → the extracted apply URL (Playwright follows redirects automatically)
    - `browser_snapshot` → read full JD from the ATS page
 7. **Platform notes for fallback navigation:**
@@ -174,16 +167,16 @@ For each surviving card (that passed Step 2.5's portal filter):
 
 ## Step 5 — Full A-G evaluation per role
 
-For each posting with a usable JD, run a **complete** A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`.
+For each posting with a usable JD, run an A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`.
 
-Evaluate all 7 blocks (compact form — 2-4 sentences each):
+Evaluate the following blocks (compact form — 2-4 sentences each):
 
 - **Archetype** — one of the 6 from `_shared.md` (AI Platform/LLMOps, Agentic/Automation, Technical AI PM, AI Solutions Architect, AI Forward Deployed, AI Transformation), mapped to the user's full-stack/backend/general-SWE archetypes in `_profile.md` when the role isn't an AI archetype.
 - **Block A — Role Summary:** title, seniority, location, remote/hybrid/onsite, one-line on what the role is.
 - **Block B — Match with CV:** map the 3–5 strongest JD requirements to concrete `cv.md` proof points (cite the line/project, never fabricate). Score the skill match 1–5.
 - **Block C — Level & Strategy:** is the seniority a fit for the candidate (mid-senior, 4 YOE)? 1 sentence.
 - **Block D — Comp:** **no WebSearch.** If salary is in the JD, compare to the user's comp target from `_profile.md`. If absent, mark "unknown — verify." Do not research Levels.fyi/Glassdoor.
-- **Block E & F — Omitted** (Customization Plan and Interview Plan are not evaluated at triage stage).
+- **Block E & F — Omitted** (Customization Plan and Interview Plan are not evaluated at triage stage). In the saved report, note them as "Omitted — evaluate with `/career-ops oferta` before applying."
 - **Block G — Legitimacy:** posting age (already known), apply-button state (from the JD snapshot), and **at most 1 WebSearch** only if a concerning signal appears (vague JD, contradictory requirements, recent layoff news). Default to 0 WebSearch here.
 
 Compute the **global score (1–5)** per `_shared.md` (weighted match + North Star + comp + cultural signals − red flags). Apply Block G as a qualitative flag, not a numeric adjustment.
@@ -199,7 +192,7 @@ Compute the **global score (1–5)** per `_shared.md` (weighted match + North St
 
 For roles with global score **≥ 4.0/5**, do the following so the user has an actionable artifact to apply from:
 
-1. **Reserve a report number:** run `node reserve-report-num.mjs` to get the next sequential `REPORT_NUM`.
+1. **Reserve a report number:** run `node reserve-report-num.mjs` to get the next sequential `REPORT_NUM`. Guard all subsequent steps with cleanup: if any step fails, release the sentinel before stopping.
 2. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5.
 3. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
 4. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md).
@@ -207,7 +200,7 @@ For roles with global score **≥ 4.0/5**, do the following so the user has an a
 
 (Or skip the full pipeline and do the above in a single pass — the point is the same: high-fit roles get persisted as evaluable artifacts.)
 
-After writing, release the report number sentinel: `node reserve-report-num.mjs --release {REPORT_NUM}`.
+**Always release the sentinel,** even if a step fails partway: `node reserve-report-num.mjs --release {REPORT_NUM}`. A stale reservation blocks future report numbering until garbage-collected.
 
 ---
 
