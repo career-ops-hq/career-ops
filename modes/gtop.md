@@ -167,7 +167,7 @@ For each surviving card (that passed Step 2.5's portal filter):
 
 ## Step 5 — Full A-G evaluation per role
 
-For each posting with a usable JD, run an A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`.
+For each posting with a usable JD, run an A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`. When a market-specific mode (e.g. German `modes/de/`) is active, use its vocabulary and rules, but do not switch market modes solely because a job description is in another language — the user must request it or configure it in `config/profile.yml`.
 
 Evaluate the following blocks (compact form — 2-4 sentences each):
 
@@ -232,6 +232,8 @@ Scanned: 3 queries · {N} cards total · {M} fresh (<24h) · {K} evaluated · {P
 2. … (continue for each ≥ 4.0 role)
 
 ### Below threshold (evaluated, score < 4.0)
+
+> **Recommendation:** Strongly discourage applying to these roles. Proceed with an application only if the user gives a specific reason to override this recommendation.
 
 - [3.8] {Role} @ {Company} — {one-line reason: e.g. "requires 6+ YOE Scala, level mismatch"}
 - …
