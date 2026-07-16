@@ -35,34 +35,41 @@ It complements `scan` (per-portal/ATS) by casting a wider net across Google's ag
 
 ## Step 1 — Build the Google Jobs queries
 
-Google Jobs search URL format:
+Google Jobs search URL format (freshness baked into the keywords by default):
 
 ```
-https://www.google.com/search?q={URL-encoded keywords}&ibp=htl;jobs&hl=en&gl={GL}
+https://www.google.com/search?q={URL-encoded keywords, including "since yesterday"}+in+{LOCATION}&ibp=htl;jobs&hl=en&gl={GL}
 ```
 
 - `gl={GL}` — the 2-letter country code for the candidate's location (e.g. `ca` for Canada, `us` for the US, `gb` for the UK). Derive it from `config/profile.yml` → `candidate.location`; default to `ca` only if the location is Canadian.
 
-**Note on freshness:** Google Jobs URL params for the date filter (`htichips=date_posted:today`) are unreliable — Google strips them from the rendered results. The reliable freshness gate is the **Step 3 "Posted X ago" text filter** applied after scraping. Optionally, after the first snapshot you may click the on-page **"Date posted" → "Past 24 hours"** filter button to narrow results at the source, but always still apply the Step 3 text filter as the authoritative gate.
+**Freshness is encoded directly in the `q` keywords, not via a URL date param or on-page button click.** Appending the literal phrase `since yesterday` to the search keywords makes Google's jobs index fetch only postings from the past ~24 hours — verified empirically (the user's own working URL uses this technique: `q=...in+toronto+since+yesterday`). This is more reliable than:
+- `htichips=date_posted:today` — Google **strips** this param.
+- `tbs=qdr:d` — Google keeps it, but it is a generic search param, not jobs-specific, and behavior is less consistent.
+- Clicking the on-page "Date posted → Past 24 hours" button — adds an extra round-trip and page-state change; avoid it.
+
+So: **every query's `q` MUST end with `since yesterday`**, and no on-page date filter button is ever clicked. Google rewrites the URL on load (drops `ibp=htl;jobs`, adds `udm=8&jbr=sep:0`) but the `since yesterday` term stays in `q`, so the freshness intent survives the rewrite.
+
+**Note on freshness:** Because `since yesterday` narrows at the source, most results will already be under 24h, but Google can still sneak the occasional older posting ("1 day ago" boundary cards) through. The **Step 3 "Posted X ago" text filter remains the authoritative freshness gate** — every card MUST still pass it. The keyword phrase reduces noise; the text filter guarantees the 24h boundary.
 
 Read the candidate's location from `config/profile.yml` → `candidate.location` (default: `Toronto`).
 
-**If the user passed a custom role argument** (anything after `gtop` in the invocation), use it directly as the sole query keyword. Build 3 queries with that same keyword combined with related terms from `title_filter.positive`:
+**If the user passed a custom role argument** (anything after `gtop` in the invocation), use it directly as the sole query keyword. Build 3 queries with that same keyword combined with related terms from `title_filter.positive`. **Every query MUST end with `since yesterday`** (before URL-encoding):
 
-- **Query A:** `{custom-role} {LOCATION}`
-- **Query B:** `{custom-role} OR related-variant-1 OR related-variant-2 {LOCATION}`
-- **Query C:** `{custom-role} OR other-variant-1 OR other-variant-2 {LOCATION}`
+- **Query A:** `{custom-role} in {LOCATION} since yesterday`
+- **Query B:** `{custom-role} OR related-variant-1 OR related-variant-2 in {LOCATION} since yesterday`
+- **Query C:** `{custom-role} OR other-variant-1 OR other-variant-2 in {LOCATION} since yesterday`
 
-URL-encode each query.
+URL-encode each query (spaces → `+`, quotes and parentheses → percent-encoded).
 
-**If no argument was given**, construct **exactly 3 queries** from the candidate's pre-configured keywords (from `portals.yml` `title_filter.positive` + `config/profile.yml` target roles), clustered by theme. Replace `{LOCATION}` below with the actual location:
+**If no argument was given**, construct **exactly 3 queries** from the candidate's pre-configured keywords (from `portals.yml` `title_filter.positive` + `config/profile.yml` target roles), clustered by theme. Replace `{LOCATION}` below with the actual location. **Every query MUST end with `since yesterday`:**
 
 - **Query A — Full-Stack / SWE / Backend cluster:**
-  `("Full Stack" OR "Software Engineer" OR "Backend Engineer" OR "Node.js" OR "React Developer") {LOCATION}`
+  `("Full Stack" OR "Software Engineer" OR "Backend Engineer" OR "Node.js" OR "React Developer") in {LOCATION} since yesterday`
 - **Query B — AI / ML / Automation cluster:**
-  `("AI Engineer" OR "ML" OR "LLM" OR "Agent" OR "Automation" OR "RAG" OR "GenAI") {LOCATION}`
+  `("AI Engineer" OR "ML" OR "LLM" OR "Agent" OR "Automation" OR "RAG" OR "GenAI") in {LOCATION} since yesterday`
 - **Query C — Broader Developer cluster:**
-  `("Software Developer" OR "Application Developer" OR "Platform Engineer" OR "Full Stack Developer") {LOCATION}`
+  `("Software Developer" OR "Application Developer" OR "Platform Engineer" OR "Full Stack Developer") in {LOCATION} since yesterday`
 
 Do not exceed 3 queries in either mode.
 
