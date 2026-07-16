@@ -1,0 +1,264 @@
+# Mode: gtop — Google Top Jobs (last-24h discovery + triage)
+
+Bulk-discover fresh job postings from **Google Jobs**, keep only those posted in the **last 24 hours**, evaluate each for fit against the candidate's sources of truth, and return a ranked **"apply ASAP"** list of only the high-fit roles (global score ≥ 4.0/5).
+
+This mode accepts an **optional argument**: a role title or keywords to search for. If omitted, it uses the candidate's pre-configured target role keywords from `portals.yml` and `config/profile.yml`.
+
+| Invocation | What it does |
+|------------|-------------|
+| `/career-ops gtop` (no arg) | Uses the 3 default query clusters (Full-Stack/SWE, AI/ML, Broader Dev) from the candidate's title_filter.positive keywords |
+| `/career-ops gtop AI Engineer` | Builds all 3 queries around "AI Engineer" instead of the default clusters |
+| `/career-ops gtop "Full Stack"` | Builds all 3 queries around "Full Stack" |
+| `/career-ops gtop backend engineer` | Builds all 3 queries around "Backend Engineer" |
+
+The argument is a free-text role focus — whatever the user types after `gtop` becomes the primary search term. It's URL-encoded into the Google Jobs query alongside the candidate's location. If no argument is given, the pre-configured keyword clusters from `portals.yml` `title_filter.positive` are used.
+
+It complements `scan` (per-portal/ATS) by casting a wider net across Google's aggregated job index, then filtering hard on freshness.
+
+---
+
+## Prerequisites
+
+1. Run `node doctor.mjs --json`. If `onboardingNeeded` is true, switch to onboarding — do not run this mode.
+2. Read the candidate sources of truth (same as all eval modes, per `_shared.md`):
+   - `cv.md`
+   - `config/profile.yml` (identity, location, target roles, comp)
+   - `modes/_profile.md` (archetypes, narrative, proof points, comp targets)
+   - `modes/_shared.md` (scoring system, archetype detection, legitimacy) — loaded automatically with this mode via SKILL.md context-loading
+   - `article-digest.md` if it exists
+3. Read `portals.yml` → `title_filter.positive` to get the candidate's target-role keywords. These drive the Google Jobs queries below.
+4. Read `config/profile.yml` → `candidate.location` for the search locale (default: `Toronto`).
+
+**NEVER hardcode proof-point metrics.** Read them from cv.md at evaluation time.
+
+---
+
+## Step 1 — Build the Google Jobs queries
+
+Google Jobs search URL format:
+
+```
+https://www.google.com/search?q={URL-encoded keywords}&ibp=htl;jobs&hl=en&gl=ca
+```
+
+Read the candidate's location from `config/profile.yml` → `candidate.location` (default: `Toronto`).
+
+**If the user passed a custom role argument** (anything after `gtop` in the invocation), use it directly as the sole query keyword. Build 3 queries with that same keyword combined with related terms from `title_filter.positive`:
+
+- **Query A:** `{custom-role} Toronto`
+- **Query B:** `{custom-role} OR related-variant-1 OR related-variant-2 Toronto`
+- **Query C:** `{custom-role} OR other-variant-1 OR other-variant-2 Toronto`
+
+URL-encode each query.
+
+**If no argument was given**, construct **exactly 3 queries** from the candidate's pre-configured keywords (from `portals.yml` `title_filter.positive` + `config/profile.yml` target roles), clustered by theme as follows:
+
+- **Query A — Full-Stack / SWE / Backend cluster:**
+  `("Full Stack" OR "Software Engineer" OR "Backend Engineer" OR "Node.js" OR "React Developer") Toronto`
+- **Query B — AI / ML / Automation cluster:**
+  `("AI Engineer" OR "ML" OR "LLM" OR "Agent" OR "Automation" OR "RAG" OR "GenAI") Toronto`
+- **Query C — Broader Developer cluster:**
+  `("Software Developer" OR "Application Developer" OR "Platform Engineer" OR "Full Stack Developer") Toronto`
+
+Do not exceed 3 queries in either mode.
+
+---
+
+## Step 2 — Scrape each query with Playwright
+
+For each query URL:
+
+1. `browser_navigate` → the encoded Google Jobs URL.
+2. Wait for results to render — use `browser_wait_for` on text like `"Apply"` or `"ago"` (posting-age text), or wait ~3–5s. Google Jobs cards load via AJAX.
+3. `browser_snapshot` → capture the rendered page.
+4. Parse job **cards** from the snapshot. Google Jobs renders each listing as a clickable `button` in the left panel. For each card, extract:
+   - **title** — the card's heading / link text
+   - **company** — the text just below the title (smaller, often grey)
+   - **location** — the city/region text
+   - **postedAge** — the relative-time text (e.g. `"Posted 3 hours ago"`, `"1 day ago"`, `"Reposted 2 hours ago"`, `"30+ days ago"`, `"just now"`)
+   - **viaSource** — the `via X` text at the end of the location line (e.g. `"via LinkedIn"`, `"via Indeed"`, `"via Recruit.net"`). This tells you which portal the posting is listed on.
+   - **cardRef** — the `ref=` of the card button, so you can click it later
+   - **cardName** — the full accessible name text of the button (needed as the click target)
+
+   **Do NOT try to extract a destination URL from the card itself.** Google Jobs cards are buttons, not hyperlinks — there is no `href` to read. The real apply URL is only accessible inside the detail panel after clicking the card.
+
+5. If a Google "More jobs" / pagination control is present, click it (`browser_click`) to reveal more cards — but **cap at ~30 cards per query** to bound tokens.
+
+**Bot-challenge handling:** If the snapshot shows a CAPTCHA / "Just a moment…" / "unusual traffic" page instead of job cards, note it and skip that query. Continue with the others. Do not retry aggressively.
+
+### Step 2.5 — Filter to trusted portals only
+
+Google Jobs surfaces listings from a mix of sources. Many are **aggregator/scraper portals** that repost content from the real source — applying through them is slower, less reliable, and often dead ends. Keep only cards whose source (the `via X` text on each card) is one of:
+
+| Source | `via` text example | Why trusted |
+|--------|--------------------|------------|
+| **LinkedIn Jobs** | `via LinkedIn` | Direct company posting on LinkedIn |
+| **Indeed** | `via Indeed` | Primary job board, companies post directly |
+| **Company's own careers portal** | `via {Company} Careers` / `via RBC Careers` / `via U.S. Bank Careers` | Direct portal, canonical source |
+| **Greenhouse** | `via Greenhouse` (rare on Google Jobs) | Official ATS used by the company |
+| **Ashby** | `via Ashby` (rare on Google Jobs) | Official ATS |
+| **Lever** | `via Lever` (rare on Google Jobs) | Official ATS |
+| **Workday** | URL contains `myworkdayjobs.com` or `wd1/` | Official ATS |
+| **ICIMS** | `via {Company} - ICIMS` | Official ATS |
+| **BambooHR** / **Breezy** / **Pinpoint** / **Jobvite** / **SmartRecruiters** | any company's official ATS name | Company's official hiring platform |
+
+**Deny the following known aggregator/scraper portals (non-exhaustive):** Recruit.net, Built In, Zippia, Expertini, Toronto Jobs Expertini, Learn4Good, JobServe, CareerBuilder, Monster, SimplyHired, Glassdoor (aggregated), Jooble, Tarta.ai, Adzuna, GrabJobs, JobisJob, Jobrapido, Neuvoo, WowJobs, Snagajob, ZipRecruiter (aggregated).
+
+**How to check the source on each card:** The `via X` text appears on the card after the location — e.g. `Toronto, ON • via LinkedIn`. If the card has no `via` text at all, check the URL:
+- URL contains `linkedin.com` → trusted (LinkedIn)
+- URL contains `indeed.com` → trusted (Indeed)
+- URL contains `myworkdayjobs.com` or `wd1` or `wd5` etc. → trusted (Workday)
+- URL contains `greenhouse.io` → trusted (Greenhouse)
+- URL contains `jobs.ashbyhq.com` → trusted (Ashby)
+- URL contains `lever.co` → trusted (Lever)
+- URL contains a known aggregator domain → deny
+- Otherwise → check the `via` text; if ambiguous, **err on the side of dropping** (better to miss one borderline posting than waste time evaluating aggregator dead ends).
+
+**Important nuance for LinkedIn:** LinkedIn postings on Google Jobs are often direct company postings. Trust them even though LinkedIn may sometimes require login — the Step 4 fallback chain (`WebSearch`) handles that case.
+
+**Important nuance for Indeed:** Indeed is a primary board, not a scraper. Companies post directly on Indeed. Trust Indeed listings.
+
+---
+
+## Step 3 — Filter to last 24 hours
+
+Parse `postedAge` text into an age estimate, then keep only cards whose age is **< 24 hours**. Boundary rule: `1 day ago` is treated as ~24h and **included** (a "1 day ago" card on Google can be 12–24h old).
+
+Parsing rules:
+
+| Text pattern | Age | Keep? |
+|--------------|-----|-------|
+| `just now` / `Posted just now` | ~0h | ✅ |
+| `N minutes ago` | N min | ✅ |
+| `N hours ago` (N < 24) | N h | ✅ |
+| `1 day ago` | ~24h (boundary) | ✅ |
+| `N days ago` (N > 1) | N×24h | ❌ |
+| `30+ days ago` | >24h | ❌ |
+| `Reposted …` | strip `Reposted `, then apply the rules above | — |
+| `Posted …` | strip `Posted `, then apply the rules above | — |
+
+### Step 3.5 — Deduplicate + cap
+
+Accross all 3 queries, the same posting can appear multiple times. Dedupe by `company + title` (case-insensitive), keeping the one with the freshest `postedAge`.
+
+Then **cap the evaluation set at 10** postings. If more than 10 are fresh, keep the 10 most recent (smallest parsed age). Drop the rest silently but mention the count in the final summary.
+
+---
+
+## Step 4 — Extract the JD + apply URL for each fresh posting (up to 10)
+
+Google Jobs shows each posting's details in a **right-side detail panel** that opens when you click a card. The card buttons remain on the page throughout — clicking a new card replaces the panel for the previous one. So process cards **sequentially**, one at a time:
+
+For each surviving card (that passed Step 2.5's portal filter):
+
+1. **Click the card:** `browser_click` on the card's button (using its `ref=` or full accessible name from Step 2). This opens the detail panel.
+2. **Wait for the panel to render** — `browser_snapshot` or `browser_find` on the detail dialog.
+3. **Extract the destination URL(s):** the detail panel has a `list` of "Apply on X" links, each with a real `href` (not a Google redirect). Read the URL of the **primary/company ATS link** (the first apply link is usually the best — e.g. `Apply on U.S. Bank Careers` rather than `Apply on Built In` or `Apply on LinkedIn`).
+4. **Extract the JD text:** the panel contains a "Job description" heading with expandable text. Click "Show full description" (`browser_click`) if collapsed, then read the full JD content from the panel.
+5. **Liveness gate (Block G-style, zero WebSearch):** from the panel content, classify:
+   - **active:** title/role + real JD text or an Apply path
+   - **closed:** "no longer accepting", "position filled", empty shell with only nav/footer
+   - If **closed**, skip this role silently (counts toward the 10-cap).
+
+6. **If the detail panel doesn't have enough JD text** (some Google Jobs panels show only a short snippet), navigate to the apply URL directly as fallback:
+   - `browser_navigate` → the extracted apply URL (Playwright follows redirects automatically)
+   - `browser_snapshot` → read full JD from the ATS page
+7. **Platform notes for fallback navigation:**
+   - Greenhouse / Ashby / Lever / company career pages: snapshot works after full render.
+   - Workday (`*.myworkdayjobs.com`): heavy SPA — wait longer before snapshot, fall back to WebFetch if empty.
+   - LinkedIn (`linkedin.com/jobs`): often redirects to login. If the snapshot shows "Sign In", fall back to WebSearch for `{company} {role} job description` rather than getting stuck.
+
+**Token discipline:** Do not dump the full JD text into your response. Extract the key fields silently (title, company, location, requirements, salary if listed) and keep only a short note for scoring.
+
+---
+
+## Step 5 — Full A-G evaluation per role
+
+For each posting with a usable JD, run a **complete** A-G evaluation using the same scoring system and archetype detection from `_shared.md` and the block structure from `oferta.md`. Proof points from `cv.md` / `article-digest.md` / `_profile.md`.
+
+Evaluate all 7 blocks (compact form — 2-4 sentences each):
+
+- **Archetype** — one of the 6 from `_shared.md` (AI Platform/LLMOps, Agentic/Automation, Technical AI PM, AI Solutions Architect, AI Forward Deployed, AI Transformation), mapped to the user's full-stack/backend/general-SWE archetypes in `_profile.md` when the role isn't an AI archetype.
+- **Block A — Role Summary:** title, seniority, location, remote/hybrid/onsite, one-line on what the role is.
+- **Block B — Match with CV:** map the 3–5 strongest JD requirements to concrete `cv.md` proof points (cite the line/project, never fabricate). Score the skill match 1–5.
+- **Block C — Level & Strategy:** is the seniority a fit for the candidate (mid-senior, 4 YOE)? 1 sentence.
+- **Block D — Comp:** **no WebSearch.** If salary is in the JD, compare to the user's comp target from `_profile.md`. If absent, mark "unknown — verify." Do not research Levels.fyi/Glassdoor.
+- **Block E & F — Omitted** (Customization Plan and Interview Plan are not evaluated at triage stage).
+- **Block G — Legitimacy:** posting age (already known), apply-button state (from the JD snapshot), and **at most 1 WebSearch** only if a concerning signal appears (vague JD, contradictory requirements, recent layoff news). Default to 0 WebSearch here.
+
+Compute the **global score (1–5)** per `_shared.md` (weighted match + North Star + comp + cultural signals − red flags). Apply Block G as a qualitative flag, not a numeric adjustment.
+
+**Bounded research budget (firm):**
+- Max **1 WebSearch per role**, only for Block G concerns.
+- Max **5 WebSearch queries total** across the whole run.
+- **No subagents, no `deep-research`, no recursive skill calls.**
+
+---
+
+## Step 5.5 — Write report + tracker entry for high-fit roles (≥ 4.0)
+
+For roles with global score **≥ 4.0/5**, do the following so the user has an actionable artifact to apply from:
+
+1. **Reserve a report number:** run `node reserve-report-num.mjs` to get the next sequential `REPORT_NUM`.
+2. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5.
+3. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
+4. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md).
+5. **Merge the tracker:** run `node merge-tracker.mjs` to integrate the new entry into `data/applications.md`.
+
+(Or skip the full pipeline and do the above in a single pass — the point is the same: high-fit roles get persisted as evaluable artifacts.)
+
+After writing, release the report number sentinel: `node reserve-report-num.mjs --release {REPORT_NUM}`.
+
+---
+
+## Step 6 — Rank and output
+
+1. Keep only roles with **global score ≥ 4.0/5**.
+2. Rank descending by score (tiebreak: freshest first).
+3. Output **only** this format. Do not show marginal/low-fit roles in detail — list them in a one-line "below threshold" footer so the candidate knows what was dropped.
+
+```
+## gtop — Google Top Jobs (last 24h)
+
+Scanned: 3 queries · {N} cards total · {M} fresh (<24h) · {K} evaluated · {P} high-fit (≥ 4.0/5)
+
+### ✅ Apply ASAP
+
+1. **{Role} @ {Company}** — 4.X/5
+   - Report: {####} | PDF: ✅
+   - URL: {direct posting URL}
+   - Archetype: {archetype}
+   - Posted: {age text} · {location} · {remote/hybrid/onsite}
+   - Score: skills X/5 · North Star X/5 · comp X/5 — legitimacy: {High Confidence | Proceed with Caution}
+   - Why apply: {one paragraph tying 1–2 concrete cv.md proof points to the top JD requirements — no fabrication}
+   - Action: Apply today / Apply this week — {one-line urgency rationale}
+
+2. … (continue for each ≥ 4.0 role)
+
+### Below threshold (evaluated, ≥ 4.0 not met)
+
+- [3.8] {Role} @ {Company} — {one-line reason: e.g. "requires 6+ YOE Scala, level mismatch"}
+- …
+```
+
+If **no role clears 4.0**, say so plainly:
+
+> No high-fit roles in the last 24h across the 3 queries. {M} fresh postings were evaluated; strongest was {Role} @ {Company} at {score}/5. Re-run tomorrow, adjust keywords in `portals.yml`, or run `/career-ops scan` for direct-portal discovery.
+
+**Next steps line** (always, if ≥ 4.0 roles exist):
+> These are triage picks, not full evaluations. For any role you'll actually apply to, run `/career-ops oferta {url}` for the complete A-G report + tailored CV, then `/career-ops apply {url}` to fill the form.
+
+---
+
+## Guardrails (firm)
+
+1. **Max 3 search queries** — do not add a 4th.
+2. **Max ~30 cards parsed per query.**
+3. **Max 10 JD evaluations per run** — if more are fresh, evaluate the 10 most recent.
+4. **Max 1 WebSearch per role**, max **5 total** across the run — only for Block G concerns.
+5. **No subagents, no `deep-research`, no recursive skill calls.** Sequential, single-pass.
+6. **Report + PDF + tracker only for ≥ 4.0 roles.** For roles below threshold, no artifacts are written. No cover letters at this stage.
+7. **Never hardcode cv.md metrics.** Read at evaluation time.
+8. **Never fabricate proof points.** If a JD requirement isn't backed by an in-scope file, omit the match — silence is fine.
+9. If a Google query hits a bot challenge, skip it and reduce scope rather than retry-looping.
+10. **Trusted portals only** — after extracting cards, drop any whose source (`via X` text or URL domain) is an aggregator/scraper board (Recruit.net, Built In, Expertini, Zippia, etc.). Only keep LinkedIn, Indeed, Workday, Greenhouse, Ashby, Lever, ICIMS, and direct company careers pages. If uncertain, err on dropping.

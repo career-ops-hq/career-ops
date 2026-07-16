@@ -1691,7 +1691,7 @@ const expectedModes = [
   '_shared.md', '_profile.template.md', 'oferta.md', 'pdf.md', 'scan.md',
   'batch.md', 'apply.md', 'auto-pipeline.md', 'contacto.md', 'deep.md',
   'ofertas.md', 'pipeline.md', 'project.md', 'tracker.md', 'training.md',
-  'interview.md', 'latex.md', 'latex-tex.md', 'email.md', 'add.md', 'titles.md',
+'interview.md', 'latex.md', 'latex-tex.md', 'email.md', 'add.md', 'titles.md', 'gtop.md',
   'expand.md', 'discover.md',
   'regional/eu-swe.md',
 ];
@@ -2384,7 +2384,59 @@ if (
   fail('upskill trust rule 8 (scope boundary: upskill finds, training judges) missing');
 }
 
-// ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
+// --- gtop mode integrity ---
+
+if (fileExists('modes/gtop.md')) {
+  pass('gtop mode file exists');
+
+  const gtopMode = readFile('modes/gtop.md');
+
+  if (gtopMode.includes('via LinkedIn') && gtopMode.includes('via Indeed') && gtopMode.includes('Recruit.net')) {
+    pass('gtop mode defines trusted-portal filter (Step 2.5)');
+  } else {
+    fail('gtop mode missing trusted-portal filter (Step 2.5)');
+  }
+
+  if (gtopMode.includes('Click the card') && gtopMode.includes('detail panel')) {
+    pass('gtop mode handles Google Jobs card-as-button click model (Step 2/4)');
+  } else {
+    fail('gtop mode missing card-click instructions (Step 2/4)');
+  }
+
+  if (gtopMode.includes('| `1 day ago`') && gtopMode.includes('N hours ago')) {
+    pass('gtop mode includes posting-age parsing table (Step 3)');
+  } else {
+    fail('gtop mode missing posting-age parsing table (Step 3)');
+  }
+
+  if (gtopMode.includes('Block A') && gtopMode.includes('Block B') && gtopMode.includes('Block G')) {
+    pass('gtop mode includes compact A-G evaluation (Step 5)');
+  } else {
+    fail('gtop mode missing A-G evaluation instructions (Step 5)');
+  }
+
+  if (gtopMode.includes('>= 4.0') && gtopMode.includes('reserve-report-num.mjs') && gtopMode.includes('merge-tracker.mjs')) {
+    pass('gtop mode writes reports + PDF + tracker for high-fit roles (Step 5.5)');
+  } else {
+    fail('gtop mode missing report-generation workflow for high-fit roles (Step 5.5)');
+  }
+
+  if (gtopMode.includes('Max 3 search queries') && gtopMode.includes('No subagents') && gtopMode.includes('aggregator')) {
+    pass('gtop mode includes firm guardrails');
+  } else {
+    fail('gtop mode missing guardrails section');
+  }
+
+  if (gtopMode.includes('optional argument') && gtopMode.includes('custom role argument')) {
+    pass('gtop mode supports optional role argument');
+  } else {
+    fail('gtop mode missing optional role argument support');
+  }
+} else {
+  fail('gtop mode file missing - add modes/gtop.md');
+}
+
+// --- 9. LOCAL PARSER CONTRACT ---
 
 console.log('\n9. Local parser contract');
 
