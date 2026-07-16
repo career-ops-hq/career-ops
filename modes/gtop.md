@@ -98,7 +98,7 @@ Google Jobs surfaces listings from a mix of sources. Many are **aggregator/scrap
 | **Greenhouse** | `via Greenhouse` (rare on Google Jobs) | Official ATS used by the company |
 | **Ashby** | `via Ashby` (rare on Google Jobs) | Official ATS |
 | **Lever** | `via Lever` (rare on Google Jobs) | Official ATS |
-| **Workday** | URL contains `myworkdayjobs.com` or `wd1/` | Official ATS |
+| **Workday** | `via Workday` or `via {Company} Careers` (URL checked in Step 4 if `myworkdayjobs.com`) | Official ATS |
 | **ICIMS** | `via {Company} - ICIMS` | Official ATS |
 | **BambooHR** / **Breezy** / **Pinpoint** / **Jobvite** / **SmartRecruiters** | any company's official ATS name | Company's official hiring platform |
 
@@ -174,7 +174,7 @@ Evaluate the following blocks (compact form — 2-4 sentences each):
 - **Archetype** — one of the 6 from `_shared.md` (AI Platform/LLMOps, Agentic/Automation, Technical AI PM, AI Solutions Architect, AI Forward Deployed, AI Transformation), mapped to the user's full-stack/backend/general-SWE archetypes in `_profile.md` when the role isn't an AI archetype.
 - **Block A — Role Summary:** title, seniority, location, remote/hybrid/onsite, one-line on what the role is.
 - **Block B — Match with CV:** map the 3–5 strongest JD requirements to concrete `cv.md` proof points (cite the line/project, never fabricate). Score the skill match 1–5.
-- **Block C — Level & Strategy:** is the seniority a fit for the candidate (mid-senior, 4 YOE)? 1 sentence.
+- **Block C — Level & Strategy:** is the seniority a fit for the candidate (read years of experience from `config/profile.yml` or `cv.md` — do not hardcode)? 1 sentence.
 - **Block D — Comp:** **no WebSearch.** If salary is in the JD, compare to the user's comp target from `_profile.md`. If absent, mark "unknown — verify." Do not research Levels.fyi/Glassdoor.
 - **Block E & F — Omitted** (Customization Plan and Interview Plan are not evaluated at triage stage). In the saved report, note them as "Omitted — evaluate with `/career-ops oferta` before applying."
 - **Block G — Legitimacy:** posting age (already known), apply-button state (from the JD snapshot), and **at most 1 WebSearch** only if a concerning signal appears (vague JD, contradictory requirements, recent layoff news). Default to 0 WebSearch here.
@@ -193,10 +193,11 @@ Compute the **global score (1–5)** per `_shared.md` (weighted match + North St
 For roles with global score **≥ 4.0/5**, do the following so the user has an actionable artifact to apply from:
 
 1. **Reserve a report number:** run `node reserve-report-num.mjs` to get the next sequential `REPORT_NUM`. Guard all subsequent steps with cleanup: if any step fails, release the sentinel before stopping.
-2. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5.
-3. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
-4. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md).
-5. **Merge + clean up the tracker:**
+2. **Sanitize the company slug:** derive a safe slug from the company name by lowercasing, replacing spaces with hyphens, and removing any characters that are not alphanumeric, hyphens, or underscores. Verify the slug contains no path separators (`/` or `\`), no `..` traversal sequences, and no control characters. Reject the listing if the slug is unsafe.
+3. **Write a full evaluation report** to `reports/{REPORT_NUM}-{company-slug}-{YYYY-MM-DD}.md` following the `oferta.md` report format (same header fields: `#`, `URL:`, `Score:`, `PDF:`, `**Legitimacy:** {tier}`, all 7 blocks A-G). Use the evaluation data from Step 5. Verify the resolved path stays within the `reports/` directory.
+4. **Generate PDF:** run the full pipeline from `modes/pdf.md` to produce a tailored CV PDF. Run `node generate-pdf.mjs` for the HTML→PDF conversion.
+5. **Write a TSV tracker addition** to `batch/tracker-additions/{REPORT_NUM}-{company-slug}.tsv` following the standard 9-column TSV format (see Pipeline Integrity in CLAUDE.md). Verify the resolved path stays within the `batch/tracker-additions/` directory.
+6. **Merge + clean up the tracker:**
    - Run `node merge-tracker.mjs` to integrate the new entry into `data/applications.md`.
    - Then run `node normalize-statuses.mjs` and `node dedup-tracker.mjs` to enforce canonical states and remove any duplicates.
    - Finally run `node verify-pipeline.mjs` to confirm pipeline integrity.
