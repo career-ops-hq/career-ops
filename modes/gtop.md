@@ -156,7 +156,12 @@ Google Jobs shows each posting's details in a **right-side detail panel** that o
 
 For each surviving card (that passed Step 2.5's portal filter):
 
-1. **Click the card:** `browser_click` on the card's button (using its `ref=` or full accessible name from Step 2). This opens the detail panel.
+1. **Click the card to open the detail panel:** The card's `ref=` from your Step 2 snapshot is **ephemeral** — Google Jobs is an SPA that re-renders the DOM, so the ref is stale by the time you get here. To reliably locate and click the current version of the card, use `browser_find` to re-find the card on the live page:
+   - Run `browser_find` with `text:` set to a unique substring from the card — typically the job title or a distinctive part of it (e.g. `"Senior Software Engineer Fitch"` or `"Remote Software Engineer Turing"`).
+   - The result will include the card node with a **live** `ref=` value (e.g. `"Senior Software Engineer..." [ref=e123] [cursor=pointer]`).
+   - Click it with `browser_click` using that fresh `ref=e123` as `target`, and `element:` set to the job title/company for the permission dialog.
+   
+   This opens the detail panel.
 2. **Wait for the panel to render** — `browser_snapshot` or `browser_find` on the detail dialog.
 3. **Extract the destination URL(s):** the detail panel has a `list` of "Apply on X" links, each with a real `href` (not a Google redirect). Read the URL of the **primary/company ATS link** (the first apply link is usually the best — e.g. `Apply on U.S. Bank Careers` rather than `Apply on Built In` or `Apply on LinkedIn`).
 4. **Extract the JD text:** the panel contains a "Job description" heading with expandable text. Click "Show full description" (`browser_click`) if collapsed, then read the full JD content from the panel.
