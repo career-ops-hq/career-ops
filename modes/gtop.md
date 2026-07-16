@@ -38,8 +38,12 @@ It complements `scan` (per-portal/ATS) by casting a wider net across Google's ag
 Google Jobs search URL format:
 
 ```
-https://www.google.com/search?q={URL-encoded keywords}&ibp=htl;jobs&hl=en&gl=ca
+https://www.google.com/search?q={URL-encoded keywords}&ibp=htl;jobs&hl=en&gl={GL}
 ```
+
+- `gl={GL}` — the 2-letter country code for the candidate's location (e.g. `ca` for Canada, `us` for the US, `gb` for the UK). Derive it from `config/profile.yml` → `candidate.location`; default to `ca` only if the location is Canadian.
+
+**Note on freshness:** Google Jobs URL params for the date filter (`htichips=date_posted:today`) are unreliable — Google strips them from the rendered results. The reliable freshness gate is the **Step 3 "Posted X ago" text filter** applied after scraping. Optionally, after the first snapshot you may click the on-page **"Date posted" → "Past 24 hours"** filter button to narrow results at the source, but always still apply the Step 3 text filter as the authoritative gate.
 
 Read the candidate's location from `config/profile.yml` → `candidate.location` (default: `Toronto`).
 
@@ -112,9 +116,11 @@ Google Jobs surfaces listings from a mix of sources. Many are **aggregator/scrap
 
 ---
 
-## Step 3 — Filter to last 24 hours
+## Step 3 — Filter to last 24 hours (authoritative freshness gate)
 
-Parse `postedAge` text into an age estimate, then keep only cards whose age is **≤ 24 hours**. Boundary rule: `1 day ago` is treated as ~24h and **included** (a "1 day ago" card on Google can be 12–24h old).
+**This is the primary and authoritative freshness filter.** Google Jobs returns a mix of ages regardless of any URL param or on-page filter, so every card MUST pass this text-based check before it proceeds — do not assume the results are already filtered.
+
+Parse `postedAge` text into an age estimate, then keep only cards whose age is **≤ 24 hours**. Boundary rule: `1 day ago` is treated as ~24h and **included** (a "1 day ago" card on Google can be 12–24h old). A card with **no** `postedAge` text (age unknown) is dropped — freshness cannot be confirmed.
 
 Parsing rules:
 
