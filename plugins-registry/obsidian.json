@@ -1,0 +1,16 @@
+{
+  "id": "obsidian",
+  "name": "career-ops-plugin-obsidian",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Obsidian export — mirror the tracker into your vault as frontmatter notes queryable by Dataview/Bases; frontmatter belongs to the machine, the note body belongs to you.",
+  "repo": "https://github.com/Schlaflied/career-ops-plugin-obsidian",
+  "sha": "bda96c17579bd850034d183829cf2369a779072c",
+  "hooks": [
+    "export"
+  ],
+  "requiredEnv": [],
+  "allowedHosts": [],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1398",
+  "addedAt": "2026-07-01"
+}

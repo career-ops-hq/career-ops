@@ -1,0 +1,11 @@
+{
+  "id": "transformation-vs-pm",
+  "synthetic": true,
+  "jd": "AI Adoption Program Manager — Calderon Industries (Hybrid)\n\nWe are standing up AI across a large, change-resistant organization and need someone to make adoption actually happen. You will run the enablement program — training, internal champions, playbooks — drive change management across departments, and keep a rough roadmap of which teams onboard when. There is a program-management cadence to this (stakeholder updates, sequencing, status reporting), but the real deliverable is uptake: behavior change, not shipped software. You will not be hands-on with models or code; you orchestrate people and process. Expect long enablement cycles and heavy cross-functional stakeholder management in a slow-moving enterprise. Compensation is 'competitive' — no band is published, and the bonus is tied to adoption targets.",
+  "label": {
+    "archetype": "AI Transformation",
+    "score": 3.2,
+    "provenance": "reference-frozen-v1",
+    "edge_note": "PM-flavored (roadmap/stakeholder/status), but reference resolves to Transformation — enablement/adoption/change-management is the mandate; vague comp + non-technical scope drag the fit score below the core PM case"
+  }
+}

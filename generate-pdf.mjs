@@ -4,12 +4,18 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder]
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
  * dashboard's `d`/`D` hotkeys) can locate the exact PDF for an application.
  * Without --report a manifest row is still written, just unkeyed.
+ *
+ * --allow-reorder downgrades the CV section-order guard from a thrown error
+ * to a console warning, for JDs where the section order was deliberately
+ * tailored (e.g. Projects moved ahead of Education for a technical-heavy
+ * role) rather than accidentally scrambled by an agent. Without this flag,
+ * any divergence from cv.md's section order still fails generation.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
@@ -23,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PDF_PAGE_MARGIN = '0.6in';
 
 // Ensure output directory exists (fresh setup)
 mkdirSync(resolve(__dirname, 'output'), { recursive: true });
@@ -90,6 +97,11 @@ function normalizeTextForATS(html) {
     // wrong for half of users \u2014 better to leave the glyph than emit bad data.
     t = t.replace(/\u20AC/g, () => { bump('euro', 1); return 'EUR '; });
     t = t.replace(/\u00A3/g, () => { bump('pound', 1); return 'GBP '; });
+    // Markdown bold from tailored CV builders (SUMMARY_TEXT uses **…**).
+    t = t.replace(/\*\*([^*]+?)\*\*/g, (_, inner) => {
+      bump('markdown-bold', 1);
+      return `<strong>${inner}</strong>`;
+    });
     return t;
   }
 }
@@ -155,7 +167,16 @@ function extractSourceSectionOrder(markdown) {
   return sections;
 }
 
-function validateCvSectionOrder(html, cvMarkdown) {
+/**
+ * @param {string} html
+ * @param {string} cvMarkdown
+ * @param {{ allowReorder?: boolean }} [options] - `allowReorder` downgrades a
+ *   detected divergence from a thrown error to a console warning, for JDs
+ *   where the section order was deliberately tailored (e.g. Projects moved
+ *   ahead of Education for a technical-heavy role) rather than accidentally
+ *   scrambled by an agent. See #1646.
+ */
+export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false } = {}) {
   const rendered = extractRenderedSectionOrder(html);
   const source = extractSourceSectionOrder(cvMarkdown);
   if (rendered.length < 2 || source.length < 2) return;
@@ -173,9 +194,44 @@ function validateCvSectionOrder(html, cvMarkdown) {
         .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
         .map(section => section.title)
         .join(' -> ');
-      throw new Error(`CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`);
+      const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
+      if (allowReorder) {
+        console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
+        return;
+      }
+      throw new Error(message);
     }
   }
+}
+
+/**
+ * Convert a path to a repo-relative manifest entry, or blank if it is unknown
+ * or outside the career-ops repository.
+ *
+ * @param {string} pathValue - Absolute or cwd-relative filesystem path.
+ * @returns {string} Repo-relative path using forward slashes, or an empty string.
+ */
+export function repoRelativeManifestPath(pathValue) {
+  if (!pathValue) return '';
+  const rel = relative(__dirname, resolve(pathValue));
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
+  return rel.split(sep).join('/');
+}
+
+export function injectPrintPageCss(html, format = 'a4') {
+  const normalizedFormat = String(format || 'a4').toLowerCase();
+  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
+  const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: ${PDF_PAGE_MARGIN}; }\n</style>`;
+
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+  }
+
+  if (/<html\b[^>]*>/i.test(html)) {
+    return html.replace(/<html\b[^>]*>/i, match => `${match}\n<head>\n${pageStyle}\n</head>`);
+  }
+
+  return `${pageStyle}\n${html}`;
 }
 
 /**
@@ -192,7 +248,7 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
   const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
   const toRel = (p) => relative(__dirname, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = toRel(htmlPath);
+  const relHTML = repoRelativeManifestPath(htmlPath);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
@@ -220,17 +276,25 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
   return relPDF;
 }
 
+/**
+ * CLI entrypoint that reads an HTML file, applies ATS-safe normalization, and
+ * renders the PDF while preserving report/source metadata for the manifest.
+ *
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ */
 async function generatePDF() {
   const args = process.argv.slice(2);
 
   // Parse arguments
-  let inputPath, outputPath, format = 'a4', reportNum = '';
+  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.split('=')[1].trim();
+    } else if (arg === '--allow-reorder') {
+      allowReorder = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -239,7 +303,13 @@ async function generatePDF() {
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder]');
+    console.error('');
+    console.error('This script only converts an already-built HTML file to PDF.');
+    console.error('The input HTML is produced by the pdf mode: the agent fills cv-template.html');
+    console.error('with content tailored to the specific job (see modes/pdf.md) — there is no');
+    console.error('mechanical markdown-to-HTML step by design. Run `/career-ops pdf` in your AI');
+    console.error('CLI to drive the full flow end to end.');
     process.exit(1);
   }
 
@@ -253,7 +323,10 @@ async function generatePDF() {
 
   // Path-traversal guard: keep the PDF write inside the project directory so a
   // crafted output argument (e.g. "../../etc/cron.d/x") can't escape the repo.
-  const relOut = relative(process.cwd(), outputPath);
+  // Anchored to the repo root (__dirname), not process.cwd(): running the script
+  // from outside the repo used to falsely refuse in-repo outputs — and, worse,
+  // would have allowed writes anywhere under an arbitrary cwd.
+  const relOut = relative(__dirname, outputPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
     console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
     process.exit(1);
@@ -277,7 +350,7 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  validateCvSectionOrder(html, cvMarkdown);
+  validateCvSectionOrder(html, cvMarkdown, { allowReorder });
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
@@ -288,7 +361,7 @@ async function generatePDF() {
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
   }
 
-  return renderHtmlToPdf(html, outputPath, { format, baseDir: dirname(inputPath) });
+  return renderHtmlToPdf(html, outputPath, { format, baseDir: dirname(inputPath), reportNum, inputPath });
 }
 
 /**
@@ -344,15 +417,24 @@ export async function inlineLocalFonts(html) {
  *
  * @param {string} html - Full HTML document to render.
  * @param {string} outputPath - Absolute path to write the PDF to.
- * @param {{format?: 'a4'|'letter', baseDir?: string}} [opts]
+ * @param {{
+ *   format?: 'a4'|'letter',
+ *   baseDir?: string,
+ *   reportNum?: string,
+ *   inputPath?: string,
+ *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
+ * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
   const baseDir = opts.baseDir || process.cwd();
+  const reportNum = opts.reportNum || '';
+  const inputPath = opts.inputPath || '';
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
+  html = injectPrintPageCss(html, format);
   html = await inlineLocalFonts(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
@@ -361,8 +443,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const { writeFile, unlink } = await import('fs/promises');
   await writeFile(tmpHtmlPath, html, 'utf-8');
 
-  const browser = await chromium.launch({ headless: true });
+  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  let browser = null;
   try {
+    browser = await launchBrowser({ headless: true });
     const page = await browser.newPage();
 
     // Load from file:// so the page origin allows local subresources
@@ -375,15 +459,14 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     // Generate PDF
     const pdfBuffer = await page.pdf({
-      format: format,
       printBackground: true,
       margin: {
-        top: '0.6in',
-        right: '0.6in',
-        bottom: '0.6in',
-        left: '0.6in',
+        top: '0',
+        right: '0',
+        bottom: '0',
+        left: '0',
       },
-      preferCSSPageSize: false,
+      preferCSSPageSize: true,
     });
 
     // Write PDF
@@ -407,9 +490,17 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     return { outputPath, pageCount, size: pdfBuffer.length };
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
     // Clean up temp file
-    await unlink(tmpHtmlPath).catch(() => {});
+    await unlink(tmpHtmlPath).catch((err) => {
+      if (err?.code !== 'ENOENT') {
+        console.warn(`⚠️  Temporary HTML cleanup failed: ${err.message}`);
+      }
+    });
   }
 }
 

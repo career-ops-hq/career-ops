@@ -1,30 +1,28 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Glints provider — hits the undocumented public GraphQL endpoint.
+// Glints provider — hits the public GraphQL v2-alc endpoint.
 //
 // Glints (glints.com) covers Singapore, Indonesia, Malaysia, and Vietnam.
-// Their internal API is a no-auth GraphQL endpoint at /api/graphql that
-// powers the job search page. The schema is not officially documented, so
-// the GraphQL query is configurable via the portal entry.
+// Their internal API is a no-auth GraphQL endpoint at /api/v2-alc/graphql that
+// powers the job search page. The schema is reverse-engineered and may change.
 //
 // This provider is designed for explicit `provider: glints` in portals.yml.
 // Auto-detection is not supported — Glints is a job board aggregator, not
 // a company ATS.
 //
 // Portal entry fields (all optional except `provider`):
-//   api             — GraphQL endpoint URL (default: https://glints.com/api/graphql)
+//   api             — GraphQL endpoint URL (default: https://glints.com/api/v2-alc/graphql)
 //   searchKeywords  — Search keywords string (default: '')
 //   countryCode     — Two-letter country code (default: "ID" for Indonesia)
 //   pageSize        — Results per page (default: 30)
-//   maxPages        — Maximum pages via offset-based pagination (default: 3)
+//   maxPages        — Maximum pages (default: 3)
 //   graphqlQuery    — Custom GraphQL query string. If not provided, the
-//                     built-in default query is used. The query MUST accept
-//                     $keywords (String!), $country (String!), $limit (Int!),
-//                     $offset (Int!) as variables and return results that
-//                     the parser can map.
+//                     built-in default query is used.
 
-const DEFAULT_API = 'https://glints.com/api/graphql';
+import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+
+const DEFAULT_API = 'https://glints.com/api/v2-alc/graphql';
 const DEFAULT_COUNTRY = 'ID';
 const DEFAULT_PAGE_SIZE = 30;
 const DEFAULT_MAX_PAGES = 3;
@@ -35,32 +33,36 @@ const ALLOWED_GLINTS_HOSTS = new Set([
   'glints.id',
 ]);
 
-// Default GraphQL query — based on reverse-engineered schema.
-// Field names are best-guess; adjust via `graphqlQuery` in your portal entry
-// if the schema changes or differs by region.
+// Default GraphQL query — reverse-engineered from glints.com/id search.
+// Uses the searchJobsV3 operation which replaced the older opportunities query.
 const DEFAULT_GRAPHQL_QUERY = `
-query SearchJobs($keywords: String!, $country: String!, $limit: Int!, $offset: Int!) {
-  opportunities(
-    filters: { keywords: $keywords, countryCode: $country }
-    first: $limit
-    offset: $offset
-  ) {
-    data {
+query searchJobsV3($data: JobSearchConditionInput!) {
+  searchJobsV3(data: $data) {
+    jobsInPage {
       id
       title
       company {
         name
+        brandName
       }
-      location
-      salary {
-        min
-        max
-        currency
+      city {
+        name
       }
-      postedAt
-      url
+      country {
+        code
+        name
+      }
+      salaries {
+        salaryType
+        salaryMode
+        maxAmount
+        minAmount
+        CurrencyCode
+      }
+      createdAt
     }
-    totalCount
+    expInfo
+    hasMore
   }
 }`;
 
@@ -100,11 +102,11 @@ function deriveBaseUrl(apiUrl) {
 }
 
 /**
- * Parse a single Glints opportunity into the canonical Job shape.
+ * Parse a single Glints job (searchJobsV3 response) into the canonical Job shape.
  *
  * This parser is exported as a named export for unit tests.
  *
- * @param {any} item — raw GraphQL result item
+ * @param {any} item — raw GraphQL result item from searchJobsV3
  * @param {string} baseUrl — scheme + hostname for resolving relative URLs
  * @param {string} fallbackCompany — company name fallback from portal entry
  * @returns {{title: string, url: string, company: string, location: string, postedAt: number|undefined}|null}
@@ -115,36 +117,24 @@ export function parseGlintsItem(item, baseUrl, fallbackCompany) {
   const title = (item.title || '').trim();
   if (!title) return null;
 
-  // Resolve job URL
-  let url = (item.url || '').trim();
-  if (url) {
-    try {
-      // Try absolute URL first
-      const parsed = new URL(url);
-      url = parsed.href;
-    } catch {
-      // Relative URL — prepend base
-      if (url.startsWith('/')) {
-        url = `${baseUrl}${url}`;
-      }
-    }
-  }
-  if (!url) return null;
+  // Build job URL from the job ID
+  const jobId = (item.id || '').trim();
+  if (!jobId) return null;
+  const url = `${baseUrl}/id/opportunities/jobs/${jobId}`;
 
-  // Validate URL hostname — allow glints.com, its subdomains, and glints.id
+  // Validate URL hostname
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname;
     const allowed = ALLOWED_GLINTS_HOSTS.has(hostname) || hostname.endsWith('.glints.com');
     if (!allowed) return null;
-    url = parsed.href;
   } catch {
     return null;
   }
 
-  const company = (item.company?.name || fallbackCompany || '').trim();
-  const location = (item.location || '').trim();
-  const postedAt = toEpochMs(item.postedAt);
+  const company = (item.company?.name || item.company?.brandName || fallbackCompany || '').trim();
+  const location = (item.city?.name || '').trim();
+  const postedAt = toEpochMs(item.createdAt);
 
   return { title, url, company, location, ...(postedAt != null ? { postedAt } : {}) };
 }
@@ -158,13 +148,17 @@ export function parseGlintsItem(item, baseUrl, fallbackCompany) {
  * @returns {Promise<any>}
  */
 async function graphqlPage(apiUrl, query, variables, ctx) {
-  const body = JSON.stringify({ query, variables });
-  // _http.mjs's fetchWithTimeout passes method, headers, and body through
-  // to the underlying fetch() call, so POST + JSON body works transparently.
+  const body = JSON.stringify({ operationName: 'searchJobsV3', query, variables });
+  // Glints firewall blocks non-browser User-Agents, so use a real Chrome UA
   try {
     const res = await ctx.fetchJson(apiUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': BROWSER_LIKE_USER_AGENT,
+        'origin': 'https://glints.com',
+        'referer': 'https://glints.com/id/opportunities/jobs/explore',
+      },
       body,
       redirect: 'error',
     });
@@ -209,43 +203,43 @@ export default {
     const fallbackCompany = entry.name || '';
 
     const allJobs = [];
-    let totalCount = null; // API may tell us when to stop
 
-    for (let page = 0; page < maxPages; page++) {
-      const offset = page * pageSize;
-      const variables = { keywords, country, limit: pageSize, offset };
+    for (let page = 1; page <= maxPages; page++) {
+      const variables = {
+        data: {
+          SearchTerm: keywords,
+          CountryCode: country,
+          includeExternalJobs: true,
+          pageSize: pageSize,
+          page: page,
+        },
+      };
 
       let json;
       try {
         json = /** @type {any} */ (await graphqlPage(apiUrl, query, variables, ctx));
       } catch (err) {
-        if (page === 0) throw err;
+        if (page === 1) throw err;
         console.error(`glints: page ${page} fetch failed — ${err.message}`);
         break;
       }
 
-      // Handle both GraphQL response shapes:
-      //   { data: { opportunities: { data: [...], totalCount: N } } }
-      //   { data: { opportunities: [...] }
-      const opportunities = json?.data?.opportunities;
-      if (!opportunities) {
-        if (page === 0) throw new Error(`glints: unexpected API response — ${JSON.stringify(json).slice(0, 200)}`);
+      const jobsInPage = json?.data?.searchJobsV3?.jobsInPage;
+      if (!Array.isArray(jobsInPage)) {
+        if (page === 1) throw new Error(`glints: unexpected API response — ${JSON.stringify(json).slice(0, 200)}`);
         break;
       }
 
-      const data = Array.isArray(opportunities) ? opportunities : (Array.isArray(opportunities.data) ? opportunities.data : []);
-      if (typeof opportunities.totalCount === 'number') totalCount = opportunities.totalCount;
+      if (jobsInPage.length === 0) break;
 
-      if (data.length === 0) break;
-
-      for (const item of data) {
+      for (const item of jobsInPage) {
         const job = parseGlintsItem(item, baseUrl, fallbackCompany);
         if (job) allJobs.push(job);
       }
 
-      // Stop conditions
-      if (totalCount != null && allJobs.length >= totalCount) break;
-      if (data.length < pageSize) break;
+      // Stop if no more pages
+      if (json?.data?.searchJobsV3?.hasMore === false) break;
+      if (jobsInPage.length < pageSize) break;
 
       // Rate-limit courtesy delay
       await new Promise(resolve => setTimeout(resolve, 300));

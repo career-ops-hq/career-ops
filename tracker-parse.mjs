@@ -12,17 +12,77 @@
  * leading pipe, so the first real column ("#"/num) is index 1.
  */
 
+import { readFileSync } from 'fs';
+
 /** The original fixed 9-column layout (num … notes at indices 1 … 9). */
 export const LEGACY_COLMAP = {
   num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9,
 };
 
-/** Header text (lowercased) → canonical field name. Includes ES aliases. */
-export const HEADER_ALIASES = {
-  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
-  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
-};
+/**
+ * Header text (lowercased) → canonical field name. Includes ES aliases.
+ * Loaded from tracker-aliases.json — the ONE shared alias table, which the web
+ * read path (web/src/lib/tracker-table.mjs) also loads at runtime, so the two
+ * can never drift (PR #1598 review). Add new aliases in the JSON, not here.
+ *
+ * A missing or corrupt JSON is a broken install (the file ships alongside this
+ * module in SYSTEM_PATHS/BOOTSTRAP_PATHS): fail fast with an actionable
+ * message rather than degrading silently — a quiet fallback here would
+ * reintroduce exactly the reader drift the shared table exists to prevent.
+ * (The web loader degrades to the legacy fixed order instead because it reads
+ * the file from a user-configured root at request time.)
+ */
+export const HEADER_ALIASES = (() => {
+  const src = new URL('./tracker-aliases.json', import.meta.url);
+  try {
+    return JSON.parse(readFileSync(src, 'utf-8'));
+  } catch (e) {
+    throw new Error(
+      `tracker-parse.mjs: cannot load tracker-aliases.json (${e.message}). ` +
+      'The file ships with career-ops next to tracker-parse.mjs — restore it ' +
+      'from the repo or re-run: node update-system.mjs apply',
+    );
+  }
+})();
+
+/**
+ * A score cell in the tracker: `N/5` or `N.N/5` (any precision), or the
+ * sentinels `N/A` / `DUP` / `—` (em dash) / `-` (hyphen). Markdown bold is
+ * stripped first. `—`/`-` mirror the tracker's own "no data" convention used
+ * in every other column (Report, PDF, etc.) — see #1799: a backfilled entry
+ * with no evaluation (e.g. a rejection for a role never run through
+ * `oferta`) needs a score-cell sentinel too, not just `N/A`. A status label
+ * never matches this, which is what makes it a reliable discriminator between
+ * the score and status columns regardless of their order (#1427).
+ */
+export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
+
+/** @param {string} v @returns {boolean} whether the cell reads as a score. */
+export function looksLikeScoreCell(v) {
+  const t = String(v ?? '').replace(/\*\*/g, '').trim();
+  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
+}
+
+/**
+ * Given the two adjacent cells that carry score and status in EITHER order,
+ * identify which is which by content — the score cell is recognizable by
+ * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
+ * tolerate the two known column orders (batch TSV writes status-then-score;
+ * `applications.md` is score-then-status) instead of trusting position.
+ *
+ * Returns null when the order is undecidable — neither cell, or BOTH cells, look
+ * like a score — so callers can fail loudly rather than merge a silent swap.
+ *
+ * @param {string} a - first of the two cells
+ * @param {string} b - second of the two cells
+ * @returns {{score: string, status: string}|null}
+ */
+export function resolveScoreStatus(a, b) {
+  const aScore = looksLikeScoreCell(a);
+  const bScore = looksLikeScoreCell(b);
+  if (aScore === bScore) return null; // ambiguous: neither, or both
+  return aScore ? { score: a, status: b } : { score: b, status: a };
+}
 
 /**
  * Scan the table for a header row and build a field-name → column-index map.
@@ -67,7 +127,15 @@ export function resolveColumns(lines) {
 export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   if (typeof line !== 'string' || !line.startsWith('|')) return null;
   const parts = line.split('|').map(s => s.trim());
-  if (parts.length < 9) return null;
+  // Dynamic width guard: a complete row splits into leading '' + one cell per
+  // column (+ trailing '' when the row ends with a pipe). Anything shorter is
+  // missing a cell, and a missing INTERIOR cell shifts every later column one
+  // left while the trailing empty cell keeps the count plausible — so require
+  // the full width rather than mere coverage of the highest mapped index.
+  // Hand-edited rows without the trailing pipe are one part narrower but
+  // still complete (tracker-utils rebuildRow supports them).
+  const width = Math.max(...Object.values(colmap)) + (line.trimEnd().endsWith('|') ? 2 : 1);
+  if (parts.length < width) return null;
   const num = parseInt(parts[colmap.num], 10);
   if (isNaN(num)) return null;
   const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
@@ -84,5 +152,147 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     raw: line,
   };
   if (colmap.location != null) row.location = at('location');
+  if (colmap.via != null) row.via = at('via');
   return row;
+}
+
+/**
+ * Extract report IDs referenced by one tracker Report cell.
+ *
+ * Both the numeric markdown label and the local report filename are returned.
+ * Keeping both makes tracker drift visible instead of silently trusting one
+ * side of a malformed link. External URLs are ignored even when their path
+ * happens to contain a reports/ segment.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @returns {number[]} Unique positive report IDs in encounter order.
+ */
+function markdownLinkDestination(raw) {
+  const value = String(raw).trimStart();
+  if (value.startsWith('<')) {
+    for (let i = 1; i < value.length; i++) {
+      if (value[i] === '\\') {
+        i++;
+      } else if (value[i] === '>') {
+        return value.slice(1, i).replace(/\\([\\()<> ])/g, '$1');
+      }
+    }
+    return null;
+  }
+
+  let depth = 0;
+  let end = value.length;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === '\\') {
+      i++;
+      continue;
+    }
+    if (value[i] === '(') depth++;
+    else if (value[i] === ')' && depth > 0) depth--;
+    else if (/\s/.test(value[i]) && depth === 0) {
+      end = i;
+      break;
+    }
+  }
+  const destination = value.slice(0, end).trim();
+  return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
+}
+
+function parseMarkdownLinks(value) {
+  const links = [];
+  let cursor = 0;
+  while (cursor < value.length) {
+    const labelStart = value.indexOf('[', cursor);
+    if (labelStart === -1) break;
+
+    let labelEnd = -1;
+    for (let i = labelStart + 1; i < value.length; i++) {
+      if (value[i] === '\\') i++;
+      else if (value[i] === ']') {
+        labelEnd = i;
+        break;
+      }
+    }
+    if (labelEnd === -1 || value[labelEnd + 1] !== '(') {
+      cursor = labelStart + 1;
+      continue;
+    }
+
+    let depth = 1;
+    let linkEnd = -1;
+    for (let i = labelEnd + 2; i < value.length; i++) {
+      if (value[i] === '\\') {
+        i++;
+      } else if (value[i] === '(') {
+        depth++;
+      } else if (value[i] === ')' && --depth === 0) {
+        linkEnd = i;
+        break;
+      }
+    }
+    if (linkEnd === -1) {
+      cursor = labelStart + 1;
+      continue;
+    }
+
+    const target = markdownLinkDestination(value.slice(labelEnd + 2, linkEnd));
+    if (target != null) links.push({ label: value.slice(labelStart + 1, labelEnd), target });
+    cursor = linkEnd + 1;
+  }
+  return links;
+}
+
+export function extractTrackerReportNumbers(reportCell) {
+  const value = String(reportCell ?? '').trim();
+  if (!value || value === '-' || value === '—') return [];
+
+  const numbers = new Set();
+  const numberFromTarget = (rawTarget) => {
+    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
+    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
+    const pathname = target.split(/[?#]/, 1)[0];
+    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
+      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
+    if (!match) return null;
+    const num = parseInt(match[1], 10);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  };
+
+  const markdownLinks = parseMarkdownLinks(value);
+  for (const link of markdownLinks) {
+    const pathNum = numberFromTarget(link.target);
+    if (pathNum == null) continue;
+    const label = link.label.trim();
+    if (/^\d+$/.test(label)) {
+      const labelNum = parseInt(label, 10);
+      if (labelNum > 0) numbers.add(labelNum);
+    }
+    numbers.add(pathNum);
+  }
+
+  if (markdownLinks.length === 0) {
+    const pathNum = numberFromTarget(value);
+    if (pathNum != null) numbers.add(pathNum);
+  }
+  return [...numbers];
+}
+
+/**
+ * Unicode-aware key for Via (agency) comparison.
+ *
+ * normalizeCompany()-style keys strip everything outside [a-z0-9], so
+ * non-Latin agency names (リクルート, パーソル, …) all collapse to the same
+ * empty key — which made the #1596 cross-channel guard treat two different
+ * agencies as one channel and silently merge two real submissions. Keep
+ * letters and digits of any script instead; NFKC first so full-width/
+ * half-width variants compare equal.
+ *
+ * Shared by every Via consumer (merge-tracker dedup guard, analyze-patterns
+ * channel buckets) so agency identity can't drift between scripts.
+ *
+ * @param {string} name - Raw Via cell or via= tag value.
+ * @returns {string} Case-folded, punctuation-free, script-preserving key.
+ */
+export function normalizeVia(name) {
+  return String(name).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }

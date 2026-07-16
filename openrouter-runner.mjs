@@ -23,6 +23,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 import yaml from 'js-yaml';
+import {
+  formatReportNumber, releaseReportNumbers, reserveReportNumbers,
+} from './reserve-report-num.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -166,6 +169,25 @@ function fileExists(relPath) {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt caching (#1709)
+// ---------------------------------------------------------------------------
+// The static system prefix (shared + profile + mode + cv, ~12K tokens) is
+// byte-identical across every offer in a run, yet it was re-sent and re-billed
+// on each call. Send it as a structured content block with an ephemeral
+// `cache_control` breakpoint — OpenRouter's documented prompt-caching mechanism.
+// Providers that support caching (Anthropic, Gemini, …) reuse the prefix across
+// back-to-back calls within the cache TTL; providers that don't simply ignore
+// the field, so this is a safe passthrough that never changes the prompt text.
+export function buildCachedSystemMessage(systemPrompt) {
+  return {
+    role: 'system',
+    content: [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // OpenRouter API call — automatic model rotation with fallback
 // ---------------------------------------------------------------------------
 async function callOpenRouter(systemPrompt, userMessage) {
@@ -184,8 +206,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const body = JSON.stringify({
       model: pinnedModel,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage  },
+        buildCachedSystemMessage(systemPrompt),
+        { role: 'user', content: userMessage },
       ],
       max_tokens: MAX_TOKENS,
     });
@@ -241,8 +263,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const body = JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userMessage  }
+          buildCachedSystemMessage(systemPrompt),
+          { role: 'user', content: userMessage },
         ],
         max_tokens: MAX_TOKENS,
       });
@@ -502,18 +524,6 @@ function addToPipeline(entries) {
   return newEntries.length;
 }
 
-// ---------------------------------------------------------------------------
-// Report numbering
-// ---------------------------------------------------------------------------
-function nextReportNum() {
-  try {
-    const nums = fs.readdirSync(path.join(__dirname, 'reports'))
-      .map(f => parseInt(f.match(/^(\d+)/)?.[1] ?? '0', 10))
-      .filter(n => n > 0);
-    return nums.length ? Math.max(...nums) + 1 : 1;
-  } catch { return 1; }
-}
-
 function extractCompanySlug(text, url) {
   // Try to extract from text (e.g. "Senior Engineer at Acme" or "Company: Acme")
   const m = text.match(/(?:at|@|company[:\s]+)\s*([A-Z][A-Za-z0-9]{2,25})/);
@@ -556,7 +566,10 @@ async function cmdScan() {
       const matched = jobs.filter(j => titleMatches(j.title));
       console.log(`${jobs.length} listings, ${matched.length} matched`);
       for (const j of matched) {
-        found.push({ url: j.absolute_url ?? c.api, company: c.name, role: j.title, location: j.location?.name ?? '' });
+        // Skip postings without a public URL — falling back to the API
+        // endpoint would write an unusable link into the pipeline.
+        if (!j.absolute_url) continue;
+        found.push({ url: j.absolute_url, company: c.name, role: j.title, location: j.location?.name ?? '' });
       }
     } catch (e) {
       console.log(`ERROR: ${e.message}`);
@@ -613,33 +626,52 @@ async function cmdEvaluate(input, ctx) {
     return null;
   }
 
-  // Save report
-  const today   = new Date().toISOString().split('T')[0];
-  const num     = nextReportNum();
-  const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
-  const numStr  = String(num).padStart(3, '0');
-  const relPath = `reports/${numStr}-${slug}-${today}.md`;
+  let reservedNumbers;
+  try {
+    reservedNumbers = await reserveReportNumbers(1, {
+      rootDir: __dirname,
+      reportsDir: path.join(__dirname, 'reports'),
+    });
+  } catch (e) {
+    console.error(`Could not reserve a report number: ${e.message}`);
+    return null;
+  }
 
-  // Extract Legitimacy from LLM output or fall back to placeholder
-  const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
-  const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
-  writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
+  try {
+    // Save report
+    const today   = new Date().toISOString().split('T')[0];
+    const num     = reservedNumbers[0];
+    const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
+    const numStr  = formatReportNumber(num);
+    const relPath = `reports/${numStr}-${slug}-${today}.md`;
+
+    // Extract Legitimacy from LLM output or fall back to placeholder
+    const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
+    const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
+    writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
 
     const scoreMatch  = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+\.?\d*)/i);
-  const scoreValue  = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
-  const scoreStr    = isFinite(scoreValue) ? `${scoreValue.toFixed(1)}/5` : '';
-  const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
-  const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
-  const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-  writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    const scoreValue  = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
+    const scoreStr    = isFinite(scoreValue) ? `${scoreValue.toFixed(1)}/5` : '';
+    const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
+    const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
+    const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
+    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
 
-  console.log(`\n✅ Report saved: ${relPath}`);
-  console.log('\n─── EVALUATION ──────────────────────────────────────\n');
-  console.log(result);
-  console.log('\n─────────────────────────────────────────────────────\n');
+    console.log(`\n✅ Report saved: ${relPath}`);
+    console.log('\n─── EVALUATION ──────────────────────────────────────\n');
+    console.log(result);
+    console.log('\n─────────────────────────────────────────────────────\n');
 
-  return relPath;
+    return relPath;
+  } finally {
+    try {
+      await releaseReportNumbers(reservedNumbers, { reportsDir: path.join(__dirname, 'reports') });
+    } catch (e) {
+      console.warn(`Could not release report reservation: ${e.message}`);
+    }
+  }
 }
 
 // -- PIPELINE --

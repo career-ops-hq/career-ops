@@ -37,6 +37,7 @@
 ## Визначення JD з URL
 
 1. **Playwright (переважно):** `browser_navigate` + `browser_snapshot`. Працює з усіма SPA.
+   - **Опційно — CLI-екстрактор (`scan.extractor: cli` у `config/profile.yml`):** натомість запустіть `node browser-extract.mjs <url>` (`--mode jd`) — компактний `{ "url", "title", "text" }`, менше токенів (залежно від порталу). У разі помилки чи відсутності **тихо** відкотіться до `browser_navigate` + `browser_snapshot`.
 2. **WebFetch (fallback):** Для статичних сторінок.
 3. **WebSearch (останній ресурс):** Пошук на вторинних порталах.
 

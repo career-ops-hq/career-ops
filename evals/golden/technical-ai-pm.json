@@ -1,0 +1,10 @@
+{
+  "id": "technical-ai-pm",
+  "synthetic": true,
+  "jd": "Senior AI Product Manager — Cobalt (Remote, US/EU overlap)\n\nWe are hiring a technical product manager to own the roadmap for our applied-AI product line. You will run discovery with design partners, write the PRDs that turn fuzzy model capabilities into shippable features, and align engineering, research, and go-to-market stakeholders around a prioritized roadmap. Day to day you translate customer problems into product requirements, define success metrics, and make the call on what ships and what waits. We want someone fluent enough in LLM behavior to scope what is feasible, but this is a product manager role — you will spend your time on discovery, specs, and stakeholder alignment, not in the model training loop. Strong written communication, a track record of shipping AI or data products, and comfort saying no to good-but-off-roadmap ideas. Comp band is published: $185k–$215k base plus equity.",
+  "label": {
+    "archetype": "Technical AI PM",
+    "score": 4.0,
+    "provenance": "reference-frozen-v1"
+  }
+}

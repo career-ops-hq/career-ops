@@ -7,20 +7,30 @@ name: 'Plugin registry validate'
 on:
   pull_request:
     paths:
-      - 'plugins-registry.json'
+      - 'plugins-registry/**'
+      - 'plugins-registry.json'  # legacy single-file location (pre-migration forks)
 
 permissions:
   contents: read
+
+# Cancel superseded runs when the same PR is pushed again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
     name: Validate registry entries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # fetch-depth: 0 so the "One plugin per PR" diff below has the base
+      # branch's history + merge-base available (a shallow checkout truncates it).
+      - uses: actions/checkout@v7
         with:
-          node-version: '20'
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
 
       # Deterministic shape gate (no network).
       - name: Validate registry shape
@@ -32,6 +42,22 @@ jobs:
         run: node validate-plugin-registry.mjs --deep
 
       - name: One plugin per PR
+        # base_ref goes through env, never ${{ }}-spliced into the script —
+        # anything expanded inside run: is literal shell code (template injection).
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- plugins-registry.json | wc -l)
-          if [ "$CHANGED" -gt 1 ]; then echo "Only plugins-registry.json may change in a registry PR"; exit 1; fi
+          # Make origin/$BASE_REF resolvable (checkout of a PR merge ref does not
+          # create the base remote-tracking branch on its own).
+          git fetch --no-tags origin "$BASE_REF"
+          # One-time migration exemption: the PR that removes the legacy single
+          # file necessarily rewrites every entry into plugins-registry/<id>.json.
+          # This can only ever match the migration itself — once it lands,
+          # plugins-registry.json no longer exists for any future PR to delete,
+          # so the one-plugin gate below still holds for all registration PRs.
+          if git diff --name-only --diff-filter=D "origin/$BASE_REF"...HEAD -- plugins-registry.json | grep -q .; then
+            echo "Migration PR (removes legacy plugins-registry.json) — one-plugin-per-PR gate not applicable."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD -- 'plugins-registry/*.json' plugins-registry.json | wc -l)
+          if [ "$CHANGED" -gt 1 ]; then echo "A registry PR may add or bump exactly one plugins-registry/<id>.json file"; exit 1; fi

@@ -41,6 +41,7 @@
           - "README.*.md"
           - modes/de/**
           - modes/fr/**
+          - modes/hi/**
           - modes/ja/**
           - modes/ru/**
 

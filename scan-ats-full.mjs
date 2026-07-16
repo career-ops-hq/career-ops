@@ -23,8 +23,10 @@
  *   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
  *   node scan-ats-full.mjs --dry-run            # preview without writing files
  *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+ *   node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+ *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
@@ -37,7 +39,9 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
-import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
+import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -113,8 +117,54 @@ const SOURCES = {
 
 // ── CLI args ────────────────────────────────────────────────────────
 
+const KNOWN_FLAGS = [
+  '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
+  '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
+  '--shuffle', '--help', '-h',
+];
+
+// Flags that consume the next argv token as a value (space-separated form —
+// the `--flag=value` form is self-contained and never needs this).
+const VALUE_FLAGS = ['--since', '--limit', '--ats', '--seeds', '--md-out'];
+
+const USAGE = `Usage:
+  node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
+  node scan-ats-full.mjs --since 7            # postings from the last 7 days
+  node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+  node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
+  node scan-ats-full.mjs --dry-run            # preview without writing files
+  node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+  node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
+  node scan-ats-full.mjs --verbose            # log per-board fetch failures
+  node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+  node scan-ats-full.mjs --help               # print this usage block and exit`;
+
 function parseArgs(argv) {
   const args = argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  // A value-taking flag's space-separated value (e.g. the `-tmp` in
+  // `--md-out -tmp`) must not be mistaken for an unrecognized flag just
+  // because it happens to start with `-`. Mirrors valueOf()'s own adjacency
+  // rule below so `--flag value` and `--flag=value` are validated consistently.
+  const consumedValueIndices = new Set();
+  args.forEach((a, idx) => {
+    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
+      consumedValueIndices.add(idx + 1);
+    }
+  });
+
+  const unknownFlags = args.filter((a, idx) =>
+    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    process.exit(1);
+  }
+
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
     if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith('--')) return args[idx + 1];
@@ -124,7 +174,23 @@ function parseArgs(argv) {
   const sinceDays = Number(valueOf('--since')) || 3;
   const limit = Number(valueOf('--limit')) || Infinity;
   const atsArg = valueOf('--ats');
-  const ats = atsArg ? atsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : Object.keys(SOURCES);
+  // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).
+  // When set, the seed companies are fetched and probed via the ATS providers
+  // instead of (or in addition to) the regular ATS directory walk.
+  const seedsArg = valueOf('--seeds');
+  const seeds = seedsArg
+    ? seedsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const unknownSeeds = seeds.filter(s => !SEED_SOURCES[s]);
+  if (unknownSeeds.length) {
+    console.error(`Error: unknown seed source(s): ${unknownSeeds.join(', ')}. Valid: ${Object.keys(SEED_SOURCES).join(', ')}`);
+    process.exit(1);
+  }
+  // When --seeds is the only discovery flag (no --ats), default --ats to none
+  // so we don't also walk the full ATS directories unintentionally.
+  const ats = atsArg
+    ? atsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    : (seeds.length > 0 ? [] : Object.keys(SOURCES));
   const unknown = ats.filter(a => !SOURCES[a]);
   if (unknown.length) {
     console.error(`Error: unknown ATS source(s): ${unknown.join(', ')}. Valid: ${Object.keys(SOURCES).join(', ')}`);
@@ -134,12 +200,14 @@ function parseArgs(argv) {
     sinceDays,
     limit,
     ats,
+    seeds,
     dryRun: args.includes('--dry-run'),
     liveness: args.includes('--liveness'),
     verbose: args.includes('--verbose'),
     mdOut: valueOf('--md-out'),
     json: args.includes('--json'),
     includeUndated: args.includes('--include-undated'),
+    includeBlacklisted: args.includes('--include-blacklisted'),
     shuffle: args.includes('--shuffle'),
   };
 }
@@ -186,11 +254,49 @@ export function classifyPostingDate(job, cutoff) {
   return 'keep';
 }
 
+// Apply the same user-owned do-not-apply gate as scan.mjs to reverse-scan
+// results. Absent/empty blacklist is a no-op. Default skips are counted and
+// never silent; --include-blacklisted keeps matches but marks them for audit.
+export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted = false } = {}) {
+  if (!blacklist || blacklist.size === 0) {
+    return { offers, filteredBlacklist: 0, annotatedBlacklisted: 0 };
+  }
+
+  const kept = [];
+  let filteredBlacklist = 0;
+  let annotatedBlacklisted = 0;
+
+  for (const offer of offers) {
+    const entry = blacklist.get(normalizeCompany(offer.company || ''));
+    if (!entry) {
+      kept.push(offer);
+      continue;
+    }
+
+    if (!includeBlacklisted) {
+      filteredBlacklist++;
+      continue;
+    }
+
+    annotatedBlacklisted++;
+    const label = `blacklisted${entry.reason ? `: ${entry.reason}` : ''}`;
+    kept.push({
+      ...offer,
+      blacklisted: true,
+      note: typeof offer.note === 'string' && offer.note.trim()
+        ? `${label} — ${offer.note}`
+        : label,
+    });
+  }
+
+  return { offers: kept, filteredBlacklist, annotatedBlacklisted };
+}
+
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
 // prefix. With --shuffle: a random sample of `limit` companies, so a capped
 // scan isn't always biased to the same alphabetical-first slice. Pure; returns
 // a new array and never mutates `list`.
-export function sampleCompanies(list, limit, shuffle) {
+export function sampleCompanies(list, limit, shuffle = false) {
   if (!shuffle || limit >= list.length) return list.slice(0, limit);
   const copy = list.slice();
   for (let i = copy.length - 1; i > 0; i--) {
@@ -198,6 +304,89 @@ export function sampleCompanies(list, limit, shuffle) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy.slice(0, limit);
+}
+
+// ── VC portfolio seed scan ──────────────────────────────────────────
+
+// ATS providers that can auto-detect from a careers_url, in probe order.
+// Workday is excluded: its URL format requires a tenant|instance|site triple
+// that can't be derived from a portfolio slug alone.
+const SEED_PROVIDERS = [greenhouse, lever, ashby];
+
+/**
+ * Scan a VC portfolio seed source and return matching job offers.
+ * Companies are converted to PortalEntry shape, then each ATS provider's
+ * detect() is tried in order (greenhouse → lever → ashby). The first hit
+ * wins and its fetch() is called — identical to how portals.yml tracked
+ * companies flow through scan.mjs.
+ *
+ * @param {string}   seedId      Key from SEED_SOURCES (e.g. 'yc').
+ * @param {object}   opts        Parsed CLI options.
+ * @param {object}   ctx         HTTP context from makeHttpCtx().
+ * @param {Set}      seenUrls    Shared dedup set (mutated in place).
+ * @param {string}   label       Human-readable source label for logs.
+ * @returns {Promise<object[]>}  New job offers (same shape as ATS scan offers).
+ */
+export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
+  const source = SEED_SOURCES[seedId];
+  if (!source) throw new Error(`runSeedScan: unknown seed "${seedId}"`);
+
+  let companies;
+  try {
+    companies = await source.fetch();
+  } catch (err) {
+    console.error(`⚠️  ${seedId}: could not fetch portfolio — ${err.message}`);
+    return [];
+  }
+
+  // Apply the --limit cap here too (by slug, consistent with sampleCompanies).
+  const capped = opts.limit < companies.length
+    ? (opts.shuffle
+      ? (() => { const c = companies.slice(); for (let i = c.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [c[i], c[j]] = [c[j], c[i]]; } return c.slice(0, opts.limit); })()
+      : companies.slice(0, opts.limit))
+    : companies;
+
+  const cutoff = Date.now() - opts.sinceDays * 86_400_000;
+  const offers = [];
+  let errors = 0;
+
+  await parallelEach(capped, CONCURRENCY, async (company) => {
+    const entry = toPortalEntry(company);
+    if (!entry.careers_url) return;
+
+    // Try each ATS provider's detect() — first hit wins.
+    let provider = null;
+    for (const p of SEED_PROVIDERS) {
+      try {
+        if (p.detect?.(entry)) { provider = p; break; }
+      } catch { /* no-op */ }
+    }
+    if (!provider) return; // No ATS detected — skip silently (or log in --verbose).
+
+    let jobs;
+    try {
+      jobs = await provider.fetch(entry, ctx);
+    } catch (err) {
+      errors++;
+      if (opts.verbose) console.error(`  ✗ ${seedId}/${entry.name}: ${err.message}`);
+      return;
+    }
+
+    const sourceName = `${seedId}-seed`;
+    for (const job of jobs) {
+      if (!job.url || !job.title) continue;
+      const dateClass = classifyPostingDate(job, cutoff);
+      if (dateClass === 'stale') continue;
+      if (dateClass === 'undated' && !opts.includeUndated) continue;
+      if (!opts.titleFilter(job.title)) continue;
+      if (!opts.locationFilter(job.location)) continue;
+      if (seenUrls.has(job.url)) continue;
+      seenUrls.add(job.url);
+      offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
+    }
+  });
+
+  return { offers, errors, total: capped.length };
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -265,11 +454,23 @@ async function main() {
   if (!config?.title_filter?.positive?.length) {
     console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
   }
+  // Attach filters to opts so runSeedScan can use them without extra parameters.
+  opts.titleFilter = titleFilter;
+  opts.locationFilter = locationFilter;
 
-  log(`Reverse ATS scan — sources: ${opts.ats.join(', ')} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
+  const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
+  const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
+  const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
+  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   const { seen: seenUrls } = loadSeenUrls();
-  const ctx = makeHttpCtx();
+  const blacklist = loadBlacklist();
+  // sinceMs and includeUndated let providers (currently only workday.mjs)
+  // stop paginating a tenant early instead of always walking to max_pages:
+  // sinceMs once postings are confidently past the --since window, and
+  // includeUndated (when false) for a tenant that exposes no postedOn at
+  // all, since its postings would all be dropped as undated below anyway.
+  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
   const date = new Date().toISOString().slice(0, 10);
 
   const newOffers = [];
@@ -278,6 +479,12 @@ async function main() {
   let totalErrors = 0;
   let droppedNoDate = 0;
   let capHit = false;
+  // Aggregated from providers/workday.mjs's jobs.workdayNoDateSkip tag — see
+  // there for why this is a counter instead of a per-company console.error
+  // (thousands of tenants hit this on a full directory scan; one line each
+  // would just be the same message repeated thousands of times).
+  let noDateSkipCompanies = 0;
+  let noDateSkipJobs = 0;
   const datasetStatus = {};
 
   for (const name of opts.ats) {
@@ -295,6 +502,7 @@ async function main() {
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
         const jobs = await source.provider.fetch(entry, ctx);
+        if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
         for (const job of jobs) {
           if (!job.url || !job.title) continue;
           // Confirmed-stale postings are always dropped. Undated postings are
@@ -324,8 +532,22 @@ async function main() {
     log(`\n  done (${errors} unreachable boards skipped)`);
   }
 
-  let offers = newOffers;
-  if (offers.length && opts.liveness) offers = await filterLive(newOffers);
+  // ── VC portfolio seed sources (--seeds flag) ───────────────────────
+  for (const seedId of opts.seeds) {
+    const seedSource = SEED_SOURCES[seedId];
+    log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);
+    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label);
+    if (result && result.offers) {
+      totalCompaniesScanned += result.total || 0;
+      totalErrors += result.errors || 0;
+      newOffers.push(...result.offers);
+      log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors)`);
+    }
+  }
+
+  const blacklistResult = filterBlacklistedOffers(newOffers, blacklist, { includeBlacklisted: opts.includeBlacklisted });
+  let offers = blacklistResult.offers;
+  if (offers.length && opts.liveness) offers = await filterLive(offers);
   offers.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
 
   log(`\n${'━'.repeat(45)}`);
@@ -333,14 +555,31 @@ async function main() {
   log(`${'━'.repeat(45)}`);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
-  if (droppedNoDate) log(`Undated dropped:    ${droppedNoDate}${opts.includeUndated ? '' : ' (use --include-undated to keep)'}`);
+  // noDateSkipJobs is a subset of droppedNoDate, not a separate pool: every
+  // no-postedOn workday posting counted here also hits the per-job undated
+  // filter in the scan loop above and gets dropped there too. Report it as
+  // a breakdown, not a second count — the two aren't additive.
+  if (droppedNoDate) {
+    const breakdown = noDateSkipCompanies
+      ? ` (incl. ${noDateSkipJobs} from ${noDateSkipCompanies} workday companies with no postedOn)`
+      : '';
+    log(`Undated dropped: ${droppedNoDate}${breakdown}${opts.includeUndated ? '' : '. Use --include-undated to keep'}`);
+  }
+  if (blacklist.size > 0) {
+    if (opts.includeBlacklisted) {
+      log(`Blacklisted:      ${blacklistResult.annotatedBlacklisted} let through annotated (--include-blacklisted)`);
+    } else {
+      log(`Blacklisted:      ${blacklistResult.filteredBlacklist} skipped (blacklist)`);
+    }
+  }
   log(`New matches:        ${offers.length}`);
 
   if (offers.length) {
     log('\nNew offers:');
     for (const o of offers) {
       const posted = o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : 'n/a';
-      log(`  + [${o.source}] ${posted} | ${o.company} | ${o.title} | ${o.location || 'N/A'}\n    ${o.url}`);
+      const blacklistSuffix = o.blacklisted ? ' [BLACKLISTED — on your do-not-apply list]' : '';
+      log(`  + [${o.source}] ${posted} | ${o.company} | ${o.title} | ${o.location || 'N/A'}${blacklistSuffix}\n    ${o.url}`);
     }
   }
 
@@ -392,6 +631,8 @@ async function main() {
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,
+      postingsFilteredBlacklist: blacklistResult.filteredBlacklist,
+      postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       unreachableBoards: totalErrors,
       saved,
       offers: offers.map(o => ({
@@ -401,6 +642,8 @@ async function main() {
         location: o.location || null,
         postedAt: o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : null,
         dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
+        blacklisted: Boolean(o.blacklisted),
+        note: o.note || null,
         source: o.source,
       })),
     }) + '\n');

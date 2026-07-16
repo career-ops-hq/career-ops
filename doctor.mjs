@@ -5,11 +5,12 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
+import { resolveExtractorMode } from './browser-extract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -29,14 +30,29 @@ const yellow = (s) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const dim = (s) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 
 function checkNodeVersion() {
-  const major = parseInt(process.versions.node.split('.')[0]);
-  if (major >= 18) {
-    return { pass: true, label: `Node.js >= 18 (v${process.versions.node})` };
+  const versionStr = process.versions.node;
+  const [major, minor] = versionStr.split('.').map(Number);
+  const hasSqlite = major > 22 || (major === 22 && minor >= 5);
+
+  if (hasSqlite) {
+    return { pass: true, label: `Node.js >= 22.5 (v${versionStr})` };
   }
+
+  if (major >= 18) {
+    return {
+      warn: true,
+      label: `Node.js v${versionStr} detected. Node >= 22.5.0 is highly recommended because tracker.mjs (SQLite database indexing) requires node:sqlite.`,
+      fix: [
+        'Upgrade Node.js to v22.5.0 or later to enable full tracker database support.',
+        'The markdown tracker keeps working without it — the index is optional.',
+      ],
+    };
+  }
+
   return {
     pass: false,
-    label: `Node.js >= 18 (found v${process.versions.node})`,
-    fix: 'Install Node.js 18 or later from https://nodejs.org',
+    label: `Node.js >= 18 (found v${versionStr})`,
+    fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
   };
 }
 
@@ -107,6 +123,25 @@ function playwrightMcpConfigured(root) {
     }
   }
   return false;
+}
+
+// Report which scan/JD extractor is active (config/profile.yml → scan.extractor).
+// `mcp` (default) uses the browser MCP; `cli` uses browser-extract.mjs. When cli
+// is selected but the helper is missing, the modes fall back to MCP — surface
+// that as a warning, never a failure.
+function checkScanExtractor(root) {
+  const mode = resolveExtractorMode(join(root, 'config', 'profile.yml'));
+  if (mode === 'cli') {
+    if (existsSync(join(root, 'browser-extract.mjs'))) {
+      return { pass: true, label: 'Scan extractor: cli (browser-extract.mjs)' };
+    }
+    return {
+      warn: true,
+      label: 'Scan extractor: cli set, but browser-extract.mjs is missing — falls back to MCP',
+      fix: ['Restore browser-extract.mjs, or set `scan.extractor: mcp` in config/profile.yml.'],
+    };
+  }
+  return { pass: true, label: 'Scan extractor: mcp (default)' };
 }
 
 function checkPlaywrightMcp(root) {
@@ -236,7 +271,11 @@ async function checkPortalSlugs(root) {
       pass: false,
       label: `${unresolved.length} ATS slug(s) in portals.yml do not resolve`,
       fix: [
-        ...unresolved.map((r) => `${r.name}: ${r.ats || '?'}/${r.slug || '?'} — ${r.reason || 'unresolved'}`),
+        ...unresolved.map((r) => {
+          let line = `${r.name}: ${r.ats || '?'}/${r.slug || '?'} — ${r.reason || 'unresolved'}`;
+          if (r.suggested) line += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
+          return line;
+        }),
         'Probe variants with: node verify-portals.mjs --add "<company>"',
       ],
     };
@@ -306,6 +345,7 @@ async function main() {
     checkDependencies(),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot),
+    checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
     checkAutoDir('data'),
@@ -351,6 +391,7 @@ async function main() {
     console.log(`Result: All checks passed${warnNote}. You're ready to go! Run \`claude\` (or \`opencode\`) to start.`);
     console.log('');
     console.log('Join the community: https://discord.gg/8pRpHETxa4');
+    console.log('Read the manifesto: `npm run manifesto` — a new way of job searching is taking shape, and you are now part of it.');
     process.exit(0);
   }
 }
@@ -360,6 +401,24 @@ async function main() {
 // a deterministic mechanism the agent runs (instead of re-deriving it from prose),
 // and `--target <dir>` lets the test suite point it at a simulated virgin env.
 function onboardingState(root) {
+  const autoCopied = [];
+  const templates = [
+    { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
+    { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
+  ];
+  for (const { target, template } of templates) {
+    const targetPath = join(root, ...target.split('/'));
+    const templatePath = join(root, ...template.split('/'));
+    if (!existsSync(targetPath) && existsSync(templatePath)) {
+      try {
+        copyFileSync(templatePath, targetPath);
+        autoCopied.push(target);
+      } catch {
+        // Gracefully handle read-only filesystems (e.g., CI/CD or containerized environments)
+        // by leaving the file uncopied and letting onboardingNeeded/prereq checks handle it.
+      }
+    }
+  }
   const missing = USER_LAYER_PREREQS
     .filter(({ path }) => !prereqPresent(root, path))
     .map(({ path }) => path);
@@ -372,7 +431,7 @@ function onboardingState(root) {
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
   } catch { plugins = []; }
-  return { onboardingNeeded: missing.length > 0, missing, warnings, plugins };
+  return { onboardingNeeded: missing.length > 0, missing, warnings, autoCopied, plugins };
 }
 
 if (JSON_OUT) {

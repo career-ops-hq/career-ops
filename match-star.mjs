@@ -15,6 +15,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -182,8 +183,12 @@ function formatAts(story, question) {
   ].filter(s => s !== null).join('\n');
 }
 
+// ── Exports (for test-all.mjs and other consumers) ───────────────────
+export { parseStories, tokenize, score, STOPWORDS };
+
 // ── Main ─────────────────────────────────────────────────────────────
 
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
 if (!existsSync(STORY_BANK_PATH)) {
   console.error(`Error: ${STORY_BANK_PATH} not found.`);
   console.error('Run /career-ops interview-prep on a role first to populate your story bank.');
@@ -249,3 +254,4 @@ for (let i = 0; i < ranked.length; i++) {
 if (ranked.length > 0 && ranked[0].score === 0) {
   console.log('⚠️  No strong match found. Consider adding a story to story-bank.md that covers this competency.');
 }
+} // end CLI guard

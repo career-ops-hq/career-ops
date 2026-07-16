@@ -11,6 +11,32 @@ When the user asks to prep for an interview at a specific company+role, or when 
 5. **Profile** at `config/profile.yml` + `modes/_profile.md` — read for candidate context
 6. **Recruiter-side risk map** from the evaluation/PDF/application flow if present — use `modes/heuristics/recruiter-side.md` for the risk categories the interview process must resolve
 
+## URL entry — prep for a role that was never evaluated
+
+The inputs above are report-first, but a common path skips evaluation entirely: a referral, a recruiter reaching out directly, or an interview booked for a posting that never ran through the pipeline. When there is no report, ingest the JD from the URL instead.
+
+**Trigger — both conditions required:**
+
+1. The user **explicitly asks to prep** and provides a JD URL (e.g. "prep me for this", "interview prep: <URL>", `/career-ops interview-prep <URL>`). A pasted URL alone is NOT enough — per AGENTS.md, a bare URL routes to `auto-pipeline`, not here.
+2. **No matching report exists** in `reports/` for that company+role. If a report DOES exist, ignore the URL fetch and use the report — the report stays authoritative.
+
+**Fetch ladder** — same as `modes/oferta.md` and the AGENTS.md Offer Verification rule; JD fetching follows the same ladder:
+
+1. For ATS-shaped URLs (Greenhouse / Lever / Ashby / Workday — the four `liveness-core.mjs` already recognizes), the structured API endpoint may serve the JD directly.
+2. Otherwise Playwright: `browser_navigate` → `browser_snapshot`, read title, URL, and visible content.
+3. WebFetch **only** as the headless/batch fallback. If the JD came from WebFetch, mark the prep output header `**JD source:** unconfirmed (fetched without browser)`.
+4. Closed/expired posting (footer/navbar only, "no longer accepting applications", 404) → tell the user and ask them to paste the JD text instead. **Never fabricate JD content.**
+
+**From the fetched JD, extract:** role title, seniority, key requirements, named team/stack. Feed the normal Step 1+ research flow with these instead of report-derived archetype/gaps — everything downstream is unchanged. Questions derived from the fetched JD keep the `[inferred from JD]` tag.
+
+**What this path does NOT do:**
+
+| Out of scope | Belongs to |
+|--------------|------------|
+| Tracker writes — prep from URL is read-only on the pipeline | normal apply flow owns the tracker |
+| CV generation | `pdf` mode |
+| Contact automation | `contacto` |
+
 ## Step 1 — Research
 
 Run these WebSearch queries. Extract structured data, not summaries. Cite sources for every claim.
@@ -160,9 +186,29 @@ This is where the original Technical / Role-Specific buckets live. Peers are eva
 
 ### Audience: `panel-mixed`
 
-Onsite loops and mixed panels rarely give the candidate time to context-switch — preparation has to be pre-routed. For each panel slot:
+Onsite loops and mixed panels rarely give the candidate time to context-switch — preparation has to be pre-routed.
 
-- **If the interviewer is named in the schedule**, do a quick LinkedIn/blog look-up and tag them to one of the three audiences (recruiter / HM / peer-tech). Then pull from that audience's pack.
+**Panel Intel table (required whenever panelists are named).** Before drafting per-slot prep, build this table from whatever profile text or screenshot description the user provides — no scraping or automation, the same pasted-in input the mode already relies on elsewhere:
+
+```markdown
+## Panel Intel
+| Name | Role | Read |
+|------|------|------|
+| {Panelist A} | {title, tenure, reporting line if visible} | {what their background implies about what they'll ask, and how much weight their questions carry} |
+| {Panelist B} | {title, tenure, reporting line if visible} | {...} |
+```
+
+Fill the table using these heuristics:
+
+- **Decision-maker weighting**: cross-reference the JD's reporting line (e.g. "reports to Manager: X") against the named panelists. Whoever it points to is the likely primary decision-maker for this loop — flag them explicitly in the `Read` column (e.g. "likely hiring-manager-equivalent — this is who the offer decision routes through") and weight prep effort toward their pack accordingly.
+- **Career-trajectory signal**: read the provided experience text or screenshot description for what each panelist's path implies about the kind of questions they'll ask. Someone who held the *exact role being hired for* for several years before being promoted into managing it will ask sharper, more concrete, scenario-based questions than someone in an adjacent function (e.g., HR/recruiting) who is more likely there for process, culture, or compliance framing rather than technical depth. Note this angle in the `Read` column, not just the job title.
+- **Audience tagging**: after profiling, still tag each panelist to one of the three existing audiences (recruiter / HM / peer-tech) and pull from that audience's pack — the table doesn't replace that step, it gives it a defined input.
+
+**Per-panelist closing question.** Where a panelist's own trajectory offers an obvious angle, draft one tailored closing question for them specifically — the same pattern this mode already uses at the company level ("Sharp questions to ask back" in the `hiring-manager` and mixed-panel packs, tied to a named team challenge from Step 1), just aimed at the individual instead of the company. For example, someone promoted from the role into managing it is a natural fit for "what do you wish you'd known walking into this role that isn't in the job posting" — a question a recruiter or an adjacent-function panelist couldn't answer as meaningfully. List these alongside the audience pack's own "sharp questions to ask back," tagged with the panelist's name so the candidate knows which slot to use them in.
+
+For each panel slot:
+
+- **If the interviewer is named in the schedule**, use the Panel Intel table above to tag them to one of the three audiences (recruiter / HM / peer-tech). Then pull from that audience's pack.
 - **If the slot is unlabeled**, prep all three packs but cap each to 3–5 highest-priority items so the candidate isn't drowning in notes.
 - **Hand-off discipline**: tell the candidate explicitly what NOT to repeat verbatim across slots (e.g. the same proof point told identically twice signals scripted answers; vary the angle).
 - **Energy management**: 4-hour onsites burn out less-experienced candidates first. Flag the slot most likely to test depth (usually peer-tech) and reserve the candidate's freshest material for it.

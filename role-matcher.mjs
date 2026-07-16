@@ -7,6 +7,11 @@
  * path would silently delete with weaker matching rules.
  */
 
+export const SENIORITY_TOKENS = new Set([
+  'junior', 'mid', 'middle', 'senior', 'staff', 'principal', 'lead', 'head',
+  'chief', 'associate', 'intern', 'entry'
+]);
+
 // Tokens that almost every role shares must not count as strong matching
 // signal. This set covers seniority, work mode, contract shape, locations, and
 // other words that frequently appear in titles without identifying the opening.
@@ -19,6 +24,8 @@ export const ROLE_STOPWORDS = new Set([
   'fulltime', 'parttime', 'permanent', 'temporary', 'intern', 'internship',
   // generic job words
   'role', 'position', 'opportunity', 'team', 'based',
+  // reposting/tracking annotations — meta noise, never part of the job itself
+  'repost', 'reposted', 'relisted',
   // very common locations
   'bangalore', 'bengaluru', 'mumbai', 'delhi', 'hyderabad', 'pune', 'chennai',
   'london', 'berlin', 'paris', 'madrid', 'barcelona', 'amsterdam', 'dublin',
@@ -69,6 +76,17 @@ export function roleTokens(role) {
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
+function extractSeniorities(title) {
+  const text = typeof title === 'string' ? title : String(title ?? '');
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => SENIORITY_TOKENS.has(w))
+  );
+}
+
 /**
  * Decide whether two role titles are likely the same opening.
  *
@@ -83,6 +101,18 @@ export function roleTokens(role) {
  * @returns {boolean} True when the titles are similar enough to deduplicate.
  */
 export function roleFuzzyMatch(a, b) {
+  const senA = extractSeniorities(a);
+  const senB = extractSeniorities(b);
+
+  // If both titles explicitly specify seniority, they MUST overlap in at least one seniority token.
+  // e.g. "Senior" vs "Principal" -> differ, return false.
+  // e.g. "Senior" vs "Senior Staff" -> overlap, proceed to Jaccard check.
+  // e.g. "Engineer" vs "Senior Engineer" -> one lacks seniority, proceed to Jaccard check.
+  if (senA.size > 0 && senB.size > 0) {
+    const hasOverlap = [...senA].some(s => senB.has(s));
+    if (!hasOverlap) return false;
+  }
+
   const wordsA = [...new Set(roleTokens(a))];
   const wordsB = [...new Set(roleTokens(b))];
   if (wordsA.length === 0 || wordsB.length === 0) return false;
@@ -96,6 +126,23 @@ export function roleFuzzyMatch(a, b) {
   // engineer] are not the same opening.
   const discriminating = overlap.filter(w => !BASELINE_TOKENS.has(w));
   if (discriminating.length === 0) return false;
+
+  // A generic base title carries no suffix of its own to counterbalance a
+  // specialized sibling's extra word, so the shared tokens alone can cross the
+  // Jaccard threshold even though that extra word is exactly the signal that
+  // these are two different, separately-postable openings (e.g. "Senior
+  // Analytics Engineer" vs "Senior Analytics Engineer, People Analytics").
+  // When one title's token set is a strict subset of the other's, and the
+  // superset's extra tokens contain a non-baseline word, treat that word as a
+  // specialization marker and keep the titles distinct.
+  const smaller = wordsA.length <= wordsB.length ? wordsA : wordsB;
+  const larger = wordsA.length <= wordsB.length ? wordsB : wordsA;
+  const isProperSubset = larger.length > smaller.length && overlap.length === smaller.length;
+  if (isProperSubset) {
+    const smallerSet = new Set(smaller);
+    const extraTokens = larger.filter(w => !smallerSet.has(w));
+    if (extraTokens.some(w => !BASELINE_TOKENS.has(w))) return false;
+  }
 
   // Use a true set-based Jaccard ratio. Dividing by the smaller title inflates
   // matches for roles that share a long generic prefix but differ in specialty.

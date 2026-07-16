@@ -136,6 +136,11 @@
     color: #2f2f2f;
   }
 
+  .summary-text strong {
+    font-weight: 700;
+    color: #1a1a1a;
+  }
+
   /* Links must never break across lines */
   a {
     white-space: nowrap;
@@ -344,8 +349,15 @@
       print-color-adjust: exact;
     }
 
+    /* Keep a small right gutter for the print box. Right-aligned content
+       (job periods, education years) right-aligns to the content-box edge,
+       and the rightmost glyph's side bearing can spill ~1px past it and get
+       clipped by Chromium's print clip. A plain `.page` padding is reset to 0
+       here for print, which is why padding set outside @media print has no
+       effect; restoring a right gutter inside the print rule fixes it without
+       re-centering the page or hard-coding a per-format max-width. See #1341. */
     .page {
-      padding: 0;
+      padding: 0 0.18in 0 0;
     }
   }
 
@@ -367,6 +379,8 @@
      orphaned at the bottom of a page. */
   .section-title,
   .job-company,
+  .job-role,
+  .job-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;

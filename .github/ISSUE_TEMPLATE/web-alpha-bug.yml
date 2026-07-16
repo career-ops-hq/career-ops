@@ -1,0 +1,57 @@
+name: Web (alpha) Bug
+description: Report a bug in the experimental career-ops web UI (opt-in alpha)
+labels: ["web-alpha", "area:web"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying the **experimental career-ops web UI** (opt-in alpha)! 🙏
+        Tip: the in-app **Report a bug** button (bottom-left pill) pre-fills most of this for you.
+        **Please do NOT paste your CV, profile, real application answers, or private job URLs.**
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/santifer/career-ops/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What were you doing, and what went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce it?
+  - type: input
+    id: version
+    attributes:
+      label: Version / channel
+      placeholder: "e.g., 2.0.0-rc.1 · beta · abc1234"
+    validations:
+      required: true
+  - type: input
+    id: screen
+    attributes:
+      label: Screen / route
+      placeholder: "e.g., /apply"
+  - type: input
+    id: cli
+    attributes:
+      label: CLI tool
+      placeholder: "e.g., Claude Code, Gemini, OpenCode"
+  - type: input
+    id: env
+    attributes:
+      label: OS / Browser
+      placeholder: "e.g., macOS 15 / Chrome 138"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Recent errors (from the in-app reporter)
+      description: Paste the auto-captured diagnostics here.
+      render: shell

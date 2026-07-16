@@ -46,12 +46,14 @@ const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
 const requiredSystemPaths = [
+  'modes/email.md',
   'modes/followup.md',
   'modes/interview.md',
   'modes/interview-prep.md',
   'modes/patterns.md',
   'modes/update.md',
   'modes/ar/',
+  'modes/hi/',
   'modes/tr/',
   'modes/ua/',
   'batch/README.md',
@@ -66,6 +68,7 @@ const requiredSystemPaths = [
   'updater-migration-tests.mjs',
   'README.ar.md',
   'README.de.md',
+  'README.hi.md',
   'README.ja.md',
   'README.ua.md',
   'CHANGELOG.md',
@@ -164,12 +167,31 @@ for (const check of twoPassManifestChecks) {
   else fail(check.name);
 }
 
+// #1706: update-system.mjs must be self-loading — no static (top-level) relative
+// imports. A pre-#1245 client's apply() self-reexec checks out ONLY
+// update-system.mjs before re-execing it, so any top-level `import ... from
+// './...'` (or bare `import './...'`) crashes that re-exec with
+// ERR_MODULE_NOT_FOUND on the old→new jump. Relative modules must be lazily
+// `await import()`ed at their point of use instead.
+const staticRelativeImport = /^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]|^\s*import\s*['"]\.[^'"]*['"]/m;
+if (staticRelativeImport.test(source)) {
+  fail('update-system.mjs is self-loading — no static relative imports (#1706)');
+} else {
+  pass('update-system.mjs is self-loading — no static relative imports (#1706)');
+}
+
 for (const userPath of ['cv.md', 'config/profile.yml', 'modes/_profile.md', 'portals.yml', 'data/', 'reports/']) {
   if (userPaths.includes(userPath)) pass(`USER_PATHS protects ${userPath}`);
   else fail(`USER_PATHS missing ${userPath}`);
 }
 
-const allowedSystemUserOverlap = new Set(['writing-samples/README.md']);
+const allowedSystemUserOverlap = new Set([
+  'writing-samples/README.md',
+  // System-owned scaffold inside the user-layer interview-prep/ dir (#1242):
+  // the updater ships these two, but never the real session files alongside them.
+  'interview-prep/sessions/.gitkeep',
+  'interview-prep/sessions/README.md',
+]);
 let hasSystemUserCollision = false;
 for (const systemPath of systemPaths) {
   const overlapsUserPath = userPaths.some((userPath) => {

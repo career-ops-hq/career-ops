@@ -1,0 +1,15 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case ai-solutions-architect]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Owns the reference architecture and enterprise integration design across client
+accounts — a solutions-architect role. (Candidate model does not flag the
+utilization-tied comp / undisclosed base as a fit risk.)
+
+---SCORE_SUMMARY---
+COMPANY: Halgate Consulting
+ROLE: AI Solutions Architect
+SCORE: 4.0
+ARCHETYPE: AI Solutions Architect
+LEGITIMACY: High Confidence
+---END_SUMMARY---

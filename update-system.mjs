@@ -19,12 +19,16 @@ import { execFile, execFileSync, execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import {
-  ensureSkillEntrypoints,
-  materializeSkillEntrypoints,
-} from './scaffolder/bin/skill-entrypoints.mjs';
 
-export { materializeSkillEntrypoints, ensureSkillEntrypoints };
+// NOTE: this file must stay *self-loading* — no static (top-level) relative
+// imports. A pre-#1245 client's apply() self-reexec checks out ONLY
+// update-system.mjs before re-execing the target updater, so a static top-level
+// relative import here crashes that re-exec with ERR_MODULE_NOT_FOUND on the
+// old→new jump, before the fuller checkout that would materialize the imported
+// module ever runs (#1706). Local modules (e.g. the skill-entrypoints helper
+// under scaffolder/) are instead pulled in lazily at their point of use, by
+// which time the full update stage has already checked them out. The
+// updater-migration and test-all suites enforce this invariant.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -38,15 +42,31 @@ const RELEASES_API = 'https://api.github.com/repos/santifer/career-ops/releases/
 // Anchoring on `(?:^|-)` lets the releases-API fallback parse our tags,
 // which Release Please always prefixes with the component name.
 export const SEMVER_RE = /(?:^|-)v?(\d+\.\d+\.\d+)$/i;
+// 120s: local git commands are normally instant, but a cloud-evicted working
+// tree (iCloud "optimize storage", OneDrive dehydration) can stall a plain
+// `git status` for a minute of pure I/O wait re-materializing files (#1393).
+export const DEFAULT_GIT_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_GIT_TIMEOUT_MS, 120000);
+export const DEFAULT_GIT_FETCH_TIMEOUT_MS = parsePositiveInt(
+  process.env.CAREER_OPS_GIT_FETCH_TIMEOUT_MS,
+  Math.max(DEFAULT_GIT_TIMEOUT_MS, 300000),
+);
+export const NPM_INSTALL_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_NPM_INSTALL_TIMEOUT_MS, 60000);
+export const PLAYWRIGHT_INSTALL_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_PLAYWRIGHT_INSTALL_TIMEOUT_MS, 120000);
+export const DASHBOARD_REBUILD_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_DASHBOARD_REBUILD_TIMEOUT_MS, 60000);
+export const UPDATE_PATH_CHECKOUT_BUDGET_MS = parsePositiveInt(process.env.CAREER_OPS_UPDATE_PATH_CHECKOUT_BUDGET_MS, 5000);
+export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_REEXEC_BUFFER_TIMEOUT_MS, 60000);
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
+  'modes/README.md',
   'modes/_shared.md',
   'modes/_profile.template.md',
   'modes/_custom.template.md',
   'modes/oferta.md',
   'modes/pdf.md',
   'modes/cover.md',
+  'modes/email.md',
+  'modes/add.md',
   'modes/scan.md',
   'modes/batch.md',
   'modes/apply.md',
@@ -59,16 +79,34 @@ const SYSTEM_PATHS = [
   'modes/tracker.md',
   'modes/training.md',
   'modes/interview.md',
+  'modes/interview-redflag.md',
   'modes/latex.md',
+  'modes/latex-tex.md',
   'modes/followup.md',
+  'modes/offer-prep.md',
   'modes/interview-prep.md',
+  'modes/interview/',
+  'interview-prep/sessions/.gitkeep',
+  'interview-prep/sessions/README.md',
   'modes/patterns.md',
+  'modes/titles.md',
+  'modes/upskill.md',
   'modes/update.md',
+  'modes/agent-inbox.md',
+  'modes/reply-watch.md',
   'modes/ar/',
   'modes/da/',
   'modes/de/',
+  'modes/de/interview/',
   'modes/fr/',
+  'modes/fr/interview/',
+  'modes/hi/',
+  'modes/es/',
+  'modes/es/interview/',
+  'modes/id/',
+  'modes/it/',
   'modes/ja/',
+  'modes/ko/',
   'modes/pl/',
   'modes/pt/',
   'modes/ru/',
@@ -77,6 +115,7 @@ const SYSTEM_PATHS = [
   'modes/heuristics/',
   'modes/regional/',
   'modes/zh/',
+  'modes/zh-TW/',
   'CLAUDE.md',
   'CODEX.md',
   'OPENCODE.md',
@@ -86,55 +125,98 @@ const SYSTEM_PATHS = [
   'build-dashboard.mjs',
   'generate-pdf.mjs',
   'generate-latex.mjs',
+  'extract-latex-content.mjs',
+  'patch-latex-content.mjs',
+  'lib/latex-escape.mjs',
+  'lib/latex-content.mjs',
+  'img-to-pdf.mjs',
   'archive-posting.mjs',
+  'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
   'tracker-links.mjs',
   'tracker.mjs',
+  'find.mjs',
   'verify-pipeline.mjs',
   'reconcile-pipeline.mjs',
   'dedup-tracker.mjs',
+  'add-entry.mjs',
   'role-matcher.mjs',
   'tracker-utils.mjs',
   'tracker-parse.mjs',
+  'tracker-aliases.json',
+  'set-status.mjs',
+  'set-status-tests.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
+  'verify-cv-facts.mjs',
   'update-system.mjs',
   'reserve-report-num.mjs',
   'scan.mjs',
+  'classify-tier.mjs',
   'scan-ats-full.mjs',
   'match-star.mjs',
+  'jd-skill-gap.mjs',
+  'prepare-application.mjs',
   'providers/',
+  'seeds/',
+  'tests/',
   'doctor.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
+  'browser-extract.mjs',
   'analyze-patterns.mjs',
+  'upskill.mjs',
+  'stats.mjs',
   'detect-reposts.mjs',
+  'fingerprint-core.mjs',
+  'process-quality.mjs',
+  'process-quality.test.mjs',
+  'salary-gap.mjs',
+  'funnel-velocity.mjs',
+  'assessment-log.mjs',
   'followup-cadence.mjs',
+  'followup-cadence.test.mjs',
+  'invite-match.mjs',
+  'invite-match.test.mjs',
+  'agent-inbox.mjs',
+  'followup-seed.mjs',
+  'followup-seed-tests.mjs',
   'gemini-eval.mjs',
   'ollama-eval.mjs',
   'openai-eval.mjs',
+  'openai-tailor.mjs',
+  'eval-golden.mjs',
+  'evals/',
   'openrouter-runner.mjs',
   'test-all.mjs',
   'detect-reposts.test.mjs',
   'test-salary-filter.mjs',
   'test-trust-validator.mjs',
   'tracker-columns-tests.mjs',
+  'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'verify-portals.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
+  'reply-matcher.mjs',
+  'reply-matcher.test.mjs',
+  'reply-watch.mjs',
+  'paste-reply.mjs',
+  'paste-reply-tests.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'batch/README.md',
   'dashboard/',
   'templates/',
+  'config/cv-facts.example.json',
   'fonts/',
   'examples/',
   'config/profile.example.yml',
   '.env.example',
+  '.editorconfig',
   '.agents/',
   '.claude/skills/',
   '.opencode/skills/',
@@ -148,6 +230,9 @@ const SYSTEM_PATHS = [
   'writing-samples/README.md',
   'VERSION',
   'DATA_CONTRACT.md',
+  'MANIFESTO.md',
+  'manifesto.mjs',
+  'SIGNATURES.md',
   'CONTRIBUTING.md',
   'MAINTAINERS.md',
   'ARCHITECTURE.md',
@@ -158,6 +243,7 @@ const SYSTEM_PATHS = [
   'README.de.md',
   'README.es.md',
   'README.fr.md',
+  'README.hi.md',
   'README.ja.md',
   'README.ko-KR.md',
   'README.pl.md',
@@ -175,9 +261,14 @@ const SYSTEM_PATHS = [
   'TRADEMARK.md',
   'LICENSE',
   'CITATION.cff',
+  '.editorconfig',
   '.github/',
   'package.json',
   'build-cv-latex.mjs',
+  'build-cv-html.mjs',
+  'cv-templates.mjs',
+  'test/cv-templates.test.mjs',
+  'test/cover-resolver.test.mjs',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
@@ -186,11 +277,42 @@ const SYSTEM_PATHS = [
   'DOCKER.md',
   'plugins/',
   'plugins.mjs',
+  'plugins-registry/',
   'plugins-registry.json',
   'plugin-install.mjs',
   'plugin-audit.mjs',
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
+];
+
+const BOOTSTRAP_PATHS = [
+  '.agents/',
+  '.opencode/skills/',
+  '.antigravitycli/skills/',
+  '.grok/skills/',
+  '.kimi/skills/',
+  'providers/',
+  'liveness-browser.mjs',
+  'tracker-links.mjs',
+  'role-matcher.mjs',
+  'tracker-utils.mjs',
+  'tracker-parse.mjs',
+  'tracker-aliases.json',
+  'scaffolder/',
+  'reserve-report-num.mjs',
+  'updater-migration-tests.mjs',
+  'validate-portals.mjs',
+  'tracker-columns-tests.mjs',
+  'plugins/',
+  'plugins.mjs',
+  'plugins-registry/',
+  'plugins-registry.json',
+  'plugin-install.mjs',
+  'plugin-audit.mjs',
+  'validate-plugin-registry.mjs',
+  'config/plugins.example.yml',
+  'agent-inbox.mjs',
+  'agent-inbox-tests.mjs',
 ];
 
 // User layer paths — NEVER touch these (safety check)
@@ -211,6 +333,8 @@ const USER_PATHS = [
   'config/plugins.yml',
   'plugins.local/',
   'plugins.lock',
+  '.claude/settings.json',
+  '.claude/hooks/',
 ];
 
 function parseVersionFile(raw) {
@@ -264,8 +388,54 @@ function newestBackupBranch(branches) {
   return timestamped[0]?.branch || branchList[0];
 }
 
+export function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function gitTimeoutMs(args) {
+  return args[0] === 'fetch' ? DEFAULT_GIT_FETCH_TIMEOUT_MS : DEFAULT_GIT_TIMEOUT_MS;
+}
+
+export function reexecTimeoutMs(updatePathCount = SYSTEM_PATHS.length + BOOTSTRAP_PATHS.length) {
+  return Math.max(
+    120000,
+    DEFAULT_GIT_FETCH_TIMEOUT_MS +
+      DEFAULT_GIT_TIMEOUT_MS * 3 +
+      UPDATE_PATH_CHECKOUT_BUDGET_MS * Math.max(0, updatePathCount) +
+      NPM_INSTALL_TIMEOUT_MS +
+      PLAYWRIGHT_INSTALL_TIMEOUT_MS +
+      DASHBOARD_REBUILD_TIMEOUT_MS +
+      REEXEC_BUFFER_TIMEOUT_MS,
+  );
+}
+
+function describeGitCommand(args) {
+  return `git ${args.join(' ')}`;
+}
+
+function isTimeoutLikeError(err) {
+  return err?.code === 'ETIMEDOUT' || err?.signal === 'SIGTERM';
+}
+
+function timeoutSeconds(timeout) {
+  return Math.round(timeout / 1000);
+}
+
+function gitTimeoutEnvVar(args) {
+  return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
+}
+
 function gitIn(root, ...args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout: 30000 }).trim();
+  const timeout = gitTimeoutMs(args);
+  try {
+    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
+    }
+    throw err;
+  }
 }
 
 function git(...args) {
@@ -429,7 +599,7 @@ function rebuildDashboardBinaryIfNeeded() {
   try {
     execFileSync('go', ['build', '-o', 'career-dashboard', '.'], {
       cwd: join(ROOT, 'dashboard'),
-      timeout: 60000,
+      timeout: DASHBOARD_REBUILD_TIMEOUT_MS,
       stdio: 'pipe',
     });
     console.log('dashboard binary rebuilt');
@@ -585,6 +755,7 @@ async function apply() {
     git('fetch', CANONICAL_REPO, 'main');
 
     if (!isReexec) {
+      const timeout = reexecTimeoutMs();
       try {
         // The re-exec runs the TARGET updater, so every local module it imports
         // at load time must exist first. Resolve the fetched update-system.mjs's
@@ -595,7 +766,7 @@ async function apply() {
         execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
           cwd: ROOT,
           stdio: 'inherit',
-          timeout: 120000,
+          timeout,
           env: {
             ...process.env,
             CAREER_OPS_UPDATE_REEXEC: '1',
@@ -604,6 +775,10 @@ async function apply() {
         });
         return;
       } catch (err) {
+        if (isTimeoutLikeError(err)) {
+          console.error(`Updater self-reexec timed out after ${timeoutSeconds(timeout)}s.`);
+          throw err;
+        }
         console.error(`Updater self-reexec failed: ${err.message}`);
         throw err;
       }
@@ -623,7 +798,6 @@ async function apply() {
 
     // 3a. Keep bootstrap paths as a fallback for very old targets, but the
     // target updater's SYSTEM_PATHS is now the source of truth for new files.
-    const BOOTSTRAP_PATHS = ['.agents/', '.opencode/skills/', '.antigravitycli/skills/', '.grok/skills/', '.kimi/skills/', 'providers/', 'liveness-browser.mjs', 'tracker-links.mjs', 'role-matcher.mjs', 'tracker-utils.mjs', 'tracker-parse.mjs', 'scaffolder/', 'reserve-report-num.mjs', 'updater-migration-tests.mjs', 'validate-portals.mjs', 'tracker-columns-tests.mjs', 'plugins/', 'plugins.mjs', 'plugins-registry.json', 'plugin-install.mjs', 'plugin-audit.mjs', 'validate-plugin-registry.mjs', 'config/plugins.example.yml'];
     const updatePaths = mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS);
 
     for (const path of updatePaths) {
@@ -635,6 +809,55 @@ async function apply() {
       }
     }
 
+    // tests/ is auto-discovered and EXECUTED (tests/**/*.test.mjs), so stale
+    // files left behind by upstream renames would run twice or crash the
+    // suite. `git checkout` never deletes upstream-removed files (see the
+    // limitation note in rollback below) — prune tracked extras against
+    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked
+    // local experiments in tests/ are never touched.
+    try {
+      let remoteTests = new Set();
+      try {
+        remoteTests = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'tests/')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // tests/ may not exist in older targets (ls-tree throws) — nothing to
+        // prune. This is the only expected-and-silent failure in this block.
+      }
+      // An empty set means FETCH_HEAD has no tests/ at all (older target, or
+      // ls-tree quietly returning nothing) — pruning against it would delete
+      // every local test file. Only prune when the remote actually ships tests/.
+      if (remoteTests.size > 0) {
+        const localTests = git('ls-files', '--', 'tests/').split('\n').filter(Boolean);
+        for (const f of localTests) {
+          if (!remoteTests.has(f.replace(/\\/g, '/'))) {
+            // Per-file isolation: one failed unlink (locked file, permissions)
+            // must not abort pruning the rest.
+            try {
+              unlinkSync(join(ROOT, f));
+              // Raw path only: `updated` entries are reused as git pathspecs by
+              // revertPaths() and the scoped commit below. Pushed only after a
+              // successful unlink so failed deletions never enter `updated`.
+              updated.push(f);
+              console.log(`Pruned stale test file: ${f}`);
+            } catch (err) {
+              console.error(`Failed to prune stale test file ${f}: ${err.message}`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Unexpected failure (e.g. ls-files threw) — surface it instead of
+      // silently skipping the prune step.
+      console.error(`Stale-test prune step failed: ${err.message}`);
+    }
+
+    // Lazy import: keep update-system.mjs self-loading (see the top-of-file
+    // note). scaffolder/ was just checked out by the update stage above, so the
+    // module resolves here even on a pre-#1245 old→new re-exec.
+    const { ensureSkillEntrypoints } = await import('./scaffolder/bin/skill-entrypoints.mjs');
     const materializedSkillEntrypoints = ensureSkillEntrypoints(ROOT);
     if (materializedSkillEntrypoints.length > 0) {
       for (const path of materializedSkillEntrypoints) {
@@ -712,14 +935,14 @@ async function apply() {
 
     // 5. Install any new dependencies
     try {
-      execSync('npm install --silent', { cwd: ROOT, timeout: 60000 });
+      execSync('npm install --silent', { cwd: ROOT, timeout: NPM_INSTALL_TIMEOUT_MS });
     } catch {
       console.log('npm install skipped (may need manual run)');
     }
 
     // 5b. Ensure Playwright browser binary is up to date after npm install
     try {
-      execSync('npx playwright install chromium', { cwd: ROOT, timeout: 120000, stdio: 'ignore' });
+      execSync('npx playwright install chromium', { cwd: ROOT, timeout: PLAYWRIGHT_INSTALL_TIMEOUT_MS, stdio: 'ignore' });
     } catch {
       console.log('playwright install skipped (run manually: npx playwright install chromium)');
     }
@@ -729,13 +952,14 @@ async function apply() {
 
     // 7. Commit the update
     const remote = localVersion(); // Re-read after checkout updated VERSION
+    const pathsToStage = [...updated];
+    const dismissFile = join(ROOT, '.update-dismissed');
+    if (existsSync(dismissFile)) {
+      unlinkSync(dismissFile);
+      pathsToStage.push('.update-dismissed');
+    }
+
     try {
-      const pathsToStage = [...updated];
-      const dismissFile = join(ROOT, '.update-dismissed');
-      if (existsSync(dismissFile)) {
-        unlinkSync(dismissFile);
-        pathsToStage.push('.update-dismissed');
-      }
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
       addPaths(pathsToStage);
       // Scope the commit to only the staged update paths (#915 bug 2).
@@ -743,13 +967,38 @@ async function apply() {
       // the update commit. Passing the explicit pathspec list constrains the
       // commit to exactly the files this update touched.
       git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
-    } catch {
-      // Nothing to commit (already up to date)
+    } catch (e) {
+      let commitFailed = false;
+      try {
+        const entries = gitStatusEntries();
+        const changedPaths = new Set(entries.map(entry => entry.path));
+        const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
+        commitFailed = allTargetPaths.some(p => changedPaths.has(p));
+      } catch (err) {
+        commitFailed = true;
+      }
+
+      if (commitFailed) {
+        const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
+        const pathspec = allTargetPaths.map(p => `"${p}"`).join(' ');
+        throw new Error(
+          `Update commit failed (files may be staged but not committed).\n` +
+          `    Error: ${e.message.split('\n')[0]}\n` +
+          `    Please run manually to finish the update:\n` +
+          `    git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`
+        );
+      }
+      // Otherwise, genuinely nothing to commit (already up to date)
     }
 
     console.log(`\nUpdate complete: v${local} → v${remote}`);
     console.log(`Updated ${updated.length} system paths.`);
     console.log(`Rollback available: node update-system.mjs rollback`);
+
+    console.log('\n-- The CareerOps Manifesto ------------------------------');
+    console.log('A new way of job searching is taking shape. You are');
+    console.log('already practicing it. Read it, sign it if you want to help:');
+    console.log('    npm run manifesto  ·  https://career-ops.org/manifesto');
 
   } finally {
     // Remove lock

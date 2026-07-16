@@ -1,0 +1,79 @@
+# signature-ci — valida la FORMA de los PRs de firma (corre CON o SIN Ledger Bot).
+# Destino: .github/workflows/signature-ci.yml
+# v2.2 (final): el firmante SOLO añade 1 línea al FINAL (un guion o su
+# frase). Cero formato que validar: 1 línea añadida / 0 borradas / solo
+# SIGNATURES.md / al final del fichero / ≤200 chars / sin bidi/zero-width.
+# La identidad es ESTRUCTURAL (autor del PR) — la línea canónica la escribe el bot.
+name: signature-ci
+on:
+  pull_request:
+    paths: [SIGNATURES.md]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: signature-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Validate diff shape + line format
+        id: check
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Solo SIGNATURES.md puede cambiar
+          CHANGED=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          [ "$CHANGED" = "SIGNATURES.md" ] || { echo "reason=Only SIGNATURES.md may change in a signature PR (changed: $CHANGED)" >> "$GITHUB_OUTPUT"; exit 1; }
+          # Exactamente +1/-0
+          read -r ADD DEL _ <<< "$(git diff --numstat "$BASE_SHA...$HEAD_SHA" -- SIGNATURES.md)"
+          [ "$ADD" = "1" ] && [ "$DEL" = "0" ] || { echo "reason=Signature PRs add exactly 1 line and remove 0 (got +$ADD/-$DEL)" >> "$GITHUB_OUTPUT"; exit 1; }
+          LINE=$(git diff "$BASE_SHA...$HEAD_SHA" -- SIGNATURES.md | grep '^+' | grep -v '^+++' | sed 's/^+//')
+          # v2.2: la línea debe estar AL FINAL del fichero
+          LAST=$(tail -n 1 SIGNATURES.md)
+          [ "$LINE" = "$LAST" ] || { echo "reason=Your line must be the LAST line of SIGNATURES.md — move it to the very end" >> "$GITHUB_OUTPUT"; exit 1; }
+          printf '%s' "$LINE" > /tmp/sig-line.txt
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const raw = readFileSync("/tmp/sig-line.txt", "utf8");
+            const line = raw.normalize("NFC");
+            // bidi / zero-width / control codepoints prohibidos
+            if (/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u0000-\u0008\u000B-\u001F]/u.test(line)) {
+              console.error("reason=Line contains invisible/bidi control characters"); process.exit(1);
+            }
+            if (line.length > 200) { console.error("reason=Keep it to one sentence (max 200 characters)"); process.exit(1); }
+            // v2.2: NADA más que validar — la identidad es el autor del PR (estructural);
+            // el contenido se trata SOLO como frase opcional (el bot sanitiza y reescribe
+            // la línea canónica desde metadatos — nadie imputa identidad por contenido).
+            console.log("shape OK");
+          ' 2> /tmp/reason.txt || { cat /tmp/reason.txt >> "$GITHUB_OUTPUT"; exit 1; }
+      - name: Friendly ack (valid)
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const login = context.payload.pull_request.user.login;
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: context.payload.pull_request.number,
+              body: `Format valid. You're in the queue — signatures land in waves. Your line will live at https://career-ops.org/manifesto/s/${login}\n\nIf GitHub reports a merge conflict, do nothing; we handle it.`
+            });
+      - name: Friendly fix-it (invalid)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const login = context.payload.pull_request.user.login;
+            const reason = `${{ steps.check.outputs.reason || 'the diff shape or line format is off' }}`;
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: context.payload.pull_request.number,
+              body: `Almost there — ${reason}.\n\nAdd exactly ONE line at the very END of SIGNATURES.md: one sentence about your search (or what you want hiring to become), or just a dash:\n\n\`\`\`\n-\n\`\`\`\n\nYour username, the date and the id are added automatically when your signature lands. No other file or line should change.`
+            });

@@ -7,7 +7,7 @@ here, so review is the real control.
 
 ## Two tiers
 
-- **Listed** — one entry in `plugins-registry.json`; the code stays in the
+- **Listed** — one `plugins-registry/<id>.json` file; the code stays in the
   author's `career-ops-plugin-<name>` repo; users `add` it. The default, low
   burden.
 - **Bundled** — promoted into `plugins/` (shipped, auto-updated). Reserve for
@@ -63,3 +63,27 @@ access (authenticated LinkedIn, session-gated boards) is **not** bundled and
 **not** registry-listed. It can still be a `career-ops-plugin-<name>` repo users
 install explicitly into `plugins.local/` with the full "you're trusting this
 author" prompt — the project doesn't host that liability in-tree.
+
+## Bundled plugins are reference seeds (no feature PRs on `plugins/`)
+
+A bundled plugin (`plugins/apify`, `plugins/gmail`, `plugins/notion`) is a
+**reference seed**: a reviewed, minimal, stable example. We do **not** accept
+feature PRs against it — close-redirect them to "publish `career-ops-plugin-<id>`
+and we'll register it as the maintained successor." Bundled plugins only take
+PRs for **security or release-compat fixes** (keeping the seed working across
+core releases).
+
+**Reviewing a `supersedesBundled: true` registry entry.** Such an entry says
+"when installed at this pin, my plugin should take precedence over the bundled
+plugin of the same id." Review it with that weight:
+
+- The entry's `id` MUST match an existing bundled plugin in `plugins/` (a
+  successor for a non-existent seed is meaningless — reject).
+- It is the **same trust bar as any registry entry** (naming, manifest, egress,
+  static audit, pinned sha) — plus the awareness that approving it lets users
+  *replace* a reviewed bundled integration. Read the diff against the seed.
+- Precedence is enforced engine-side **only** for a user who installs it at the
+  exact pinned sha; the bundled seed remains the always-present fallback, so an
+  abandoned successor degrades gracefully (the seed simply stays in charge).
+- Original-author successors (the contributor whose PR seeded the bundled
+  plugin) are the natural, encouraged path — hand them the migration warmly.

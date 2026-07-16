@@ -16,7 +16,9 @@ BATCH_DIR="$SCRIPT_DIR"
 INPUT_FILE="$BATCH_DIR/batch-input.tsv"
 STATE_FILE="$BATCH_DIR/batch-state.tsv"
 PROMPT_FILE="$BATCH_DIR/batch-prompt.md"
+PROFILE_FILE="$PROJECT_DIR/config/profile.yml"
 LOGS_DIR="$BATCH_DIR/logs"
+DISCARD_LOG="$LOGS_DIR/discard.log"
 TRACKER_DIR="$BATCH_DIR/tracker-additions"
 REPORTS_DIR="$PROJECT_DIR/reports"
 APPLICATIONS_FILE="$PROJECT_DIR/data/applications.md"
@@ -36,7 +38,9 @@ START_FROM=0
 MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
-MODEL=""  # empty = let claude -p use the Claude Max default
+MODEL=""  # explicit override; otherwise resolved from config/profile.yml spend_tier
+RESOLVED_MODEL=""
+RESOLVED_SPEND_TIER=""
 RATE_LIMIT_SLEEP=300
 BATCH_PAUSED=false
 STATUS_ONLY=false
@@ -51,7 +55,7 @@ is_decimal_number() {
 usage() {
   cat <<'USAGE'
 career-ops batch runner — process job offers in batch via claude -p workers
-Uses your default Claude model (Claude Max subscription).
+Uses spend_tier from config/profile.yml unless --model overrides it.
 
 Usage: batch-runner.sh [OPTIONS]
 
@@ -67,9 +71,9 @@ Options:
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
   --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
                        (default: 300)
-  --model NAME         Claude model passed to `claude -p --model` (default:
-                       unset = Claude Max default). Use a cheaper model for
-                       large batches, e.g. `--model claude-sonnet-4-6`.
+  --model NAME         Override the tier-resolved Claude model passed to
+                       `claude -p --model` (otherwise uses config/profile.yml
+                       spend_tier: economy/standard/premium; default standard)
   --status             Show batch progress and a per-job table, then exit
   --watch              Live-refresh progress until the run completes
   -h, --help           Show this help
@@ -298,6 +302,78 @@ get_retries() {
   echo "${retries:-0}"
 }
 
+# Read spend_tier from config/profile.yml. Defaults to "standard" if the key
+# is absent or invalid.
+read_spend_tier() {
+  local raw=""
+
+  if [[ -f "$PROFILE_FILE" ]]; then
+    raw=$(
+      awk -F: '
+        /^[[:space:]]*spend_tier[[:space:]]*:/ {
+          value = substr($0, index($0, ":") + 1)
+          print value
+          exit
+        }
+      ' "$PROFILE_FILE"
+    )
+    raw="${raw%%#*}"
+    raw="${raw//$'\r'/}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    case "$raw" in
+      \"*\") raw="${raw#\"}"; raw="${raw%\"}" ;;
+      \'*\') raw="${raw#\'}"; raw="${raw%\'}" ;;
+    esac
+    raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  fi
+
+  case "$raw" in
+    economy|standard|premium)
+      printf '%s\n' "$raw"
+      ;;
+    "")
+      printf '%s\n' "standard"
+      ;;
+    *)
+      echo "WARN: Invalid spend_tier \"$raw\" in ${PROFILE_FILE#"$PROJECT_DIR/"}; falling back to standard." >&2
+      printf '%s\n' "standard"
+      ;;
+  esac
+}
+
+# Tier -> model mapping. Keep in sync with the table in modes/_shared.md.
+spend_tier_to_model() {
+  case "$1" in
+    economy) echo "claude-haiku-4-5" ;;
+    premium) echo "claude-opus-4-8" ;;
+    standard|*) echo "claude-sonnet-4-6" ;;
+  esac
+}
+
+# Resolve the model to pass to `claude -p --model`. --model always wins.
+resolve_worker_model() {
+  if [[ -n "$MODEL" ]]; then
+    RESOLVED_MODEL="$MODEL"
+    RESOLVED_SPEND_TIER="override"
+    return 0
+  fi
+
+  RESOLVED_SPEND_TIER="$(read_spend_tier)"
+  RESOLVED_MODEL="$(spend_tier_to_model "$RESOLVED_SPEND_TIER")"
+}
+
+# Append a one-line, auditable record of a pre-screen-gate discard to
+# batch/logs/discard.log (see modes/batch.md — Pre-screen gate). Format:
+# {ISO8601 timestamp}\t{job id}\t{url}\t{reason}
+log_discard() {
+  local id="$1" url="$2" reason="$3"
+  mkdir -p "$LOGS_DIR"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+}
+
 # Calculate next report number.
 # Caller must hold STATE_LOCK_DIR while this runs.
 next_report_num_unlocked() {
@@ -426,10 +502,10 @@ process_offer() {
   # Build the prompt with placeholders replaced
   local prompt
   if [[ "$SKIP_PDF" == "true" ]]; then
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline: evaluación A-F + report .md + tracker line. NO generes PDF; en el tracker escribe ❌ en la columna PDF y en el JSON final establece \"pdf\": null."
+    prompt="Process this job offer. Run the pipeline: A-G evaluation + report .md + tracker line. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
     echo "    ⏭️  --skip-pdf set — skipping PDF generation for #$id ($url)"
   else
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline completo: evaluación A-F + report .md + PDF + tracker line."
+    prompt="Process this job offer. Run the full pipeline: A-G evaluation + report .md + optional PDF + tracker line."
   fi
   prompt="$prompt URL: $url"
   prompt="$prompt JD file: $jd_file"
@@ -461,11 +537,11 @@ process_offer() {
   # Inject user-layer personalization into the temporary worker prompt.
   # The resolved prompt is gitignored runtime state, so user profile data stays
   # out of the system layer while batch scoring matches interactive scoring.
-  for context_file in "$PROJECT_DIR/modes/_profile.md" "$PROJECT_DIR/config/profile.yml"; do
+  for context_file in "$PROJECT_DIR/modes/_profile.md" "$PROJECT_DIR/config/profile.yml" "$PROJECT_DIR/modes/_custom.md"; do
     if [[ -f "$context_file" ]]; then
       {
         printf '\n\n---\n\n'
-        printf '## Runtime personalization: %s\n\n' "${context_file#$PROJECT_DIR/}"
+        printf '## Runtime personalization: %s\n\n' "${context_file#"$PROJECT_DIR/"}"
         sed 's/^/    /' "$context_file"
         printf '\n'
       } >> "$resolved_prompt"
@@ -473,15 +549,15 @@ process_offer() {
   done
 
   # Launch claude -p worker.
-  # Model defaults to the Claude Max subscription default unless --model was
+  # The model is resolved once per run from spend_tier unless --model was
   # passed. Building the command in an array keeps quoting safe regardless.
   # --strict-mcp-config (with no --mcp-config) starts workers with no MCP
   # servers: they only evaluate offers and need none. Without it each parallel
   # worker inherits the parent session's MCP (e.g. Playwright) and they deadlock
   # fighting over the single shared browser when --parallel > 1 (issue #506).
   local -a claude_args=(-p --dangerously-skip-permissions --strict-mcp-config)
-  if [[ -n "$MODEL" ]]; then
-    claude_args+=(--model "$MODEL")
+  if [[ -n "$RESOLVED_MODEL" ]]; then
+    claude_args+=(--model "$RESOLVED_MODEL")
   fi
   claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
 
@@ -742,6 +818,8 @@ main() {
 
   check_prerequisites
 
+  resolve_worker_model
+
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
     rm -f "$PAUSE_FILE"
@@ -764,6 +842,11 @@ main() {
     echo "Parallel: $PARALLEL | Max retries: $MAX_RETRIES | Limit: $LIMIT"
   else
     echo "Parallel: $PARALLEL | Max retries: $MAX_RETRIES"
+  fi
+  if [[ "$RESOLVED_SPEND_TIER" == "override" ]]; then
+    echo "Model: $RESOLVED_MODEL (explicit --model override)"
+  else
+    echo "Model: $RESOLVED_MODEL (spend_tier=${RESOLVED_SPEND_TIER})"
   fi
   echo "Input: $total_input offers"
   echo ""
@@ -929,4 +1012,3 @@ main() {
 }
 
 main "$@"
-

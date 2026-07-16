@@ -102,7 +102,7 @@ Noter:
 ## Trin 6 -- Efter ansøgningen (valgfrit)
 
 Hvis kandidaten bekræfter, at ansøgningen er sendt:
-1. Opdatér status i `applications.md` fra "Evaluated" til "Applied"
+1. Opdatér status til "Applied" med det kanoniske CLI: `node set-status.mjs <report#> Applied` (redigér ikke `applications.md`-tabellen i hånden)
 2. Opdatér report'ens Blok G med de endelige svar
 3. Foreslå næste trin: `/career-ops contacto` til LinkedIn-outreach mod den ansættende leder
 

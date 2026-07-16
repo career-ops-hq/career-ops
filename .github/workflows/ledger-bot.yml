@@ -1,0 +1,317 @@
+# ledger-bot — applies manifesto signatures to SIGNATURES.md automatically.
+# Discussions in the "Signatures" category are the promoted path; one-line PRs
+# also work (validated by signature-ci, applied here via /approve).
+#
+# Full automation requires the LEDGER_TOKEN secret (fine-grained PAT of the
+# repo owner: contents read/write + discussions read/write). Without it the
+# bot still acks, dedupes and closes duplicates; new signatures wait for a
+# maintainer wave.
+name: ledger-bot
+on:
+  discussion:
+    types: [created]
+  discussion_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+
+# La concurrencia vive a nivel de JOB: los dos jobs que escriben SIGNATURES.md
+# comparten el grupo 'ledger' (serializan entre sí); confirm-first usa grupo
+# propio para que un "yes" nunca desplace de la cola al run de una firma.
+jobs:
+  sign-discussion:
+    if: github.event_name == 'discussion' && github.event.discussion.category.slug == 'signatures'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ledger
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      discussions: write
+    steps:
+      - name: Process signature
+        id: apply
+        uses: actions/github-script@v7
+        env:
+          HAS_LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN != '' }}
+          REVALIDATE_SECRET: ${{ secrets.SIGNATURES_REVALIDATE_SECRET }}
+        with:
+          github-token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const d = context.payload.discussion;
+            const login = d.user.login;
+            const nodeId = d.node_id;
+            const say = (b) => github.graphql(
+              'mutation($id:ID!,$b:String!){addDiscussionComment(input:{discussionId:$id,body:$b}){comment{id}}}',
+              { id: nodeId, b });
+            const close = () => github.graphql(
+              'mutation($id:ID!){closeDiscussion(input:{discussionId:$id}){discussion{id}}}',
+              { id: nodeId });
+            const INVIS = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u0000-\u0008\u000b-\u001f]/g;
+
+            const raw = (d.body || '').normalize('NFC');
+            // Comentario del widget: si difiere del canónico, el usuario probablemente
+            // escribió su frase DENTRO -> revisión humana, nunca descarte silencioso.
+            const CANON = 'Optional: replace the dash below';
+            const comments = [...raw.matchAll(/<!--([\s\S]*?)-->/g)].map(m => m[1].trim());
+            if (comments.some(c => !c.startsWith(CANON))) {
+              await say('Queued for human review (your text needs a quick look — nothing wrong on your side).');
+              core.setOutput('result', 'human-review'); return;
+            }
+            // Frase: strip comentarios -> desenvolver wrap completo -> comillas internas
+            // a simples -> anti-imputación -> cap 200. La identidad JAMÁS sale del texto.
+            let phrase = raw.replace(/<!--[\s\S]*?-->/g, ' ').replace(/^[-\s]+/, '')
+              .replace(/\|/g, ' ').replace(/[>#]/g, ' ').replace(INVIS, '').replace(/\s+/g, ' ').trim();
+            if (/^".*"$/.test(phrase)) phrase = phrase.slice(1, -1);
+            phrase = phrase.replace(/"/g, "'").replace(/\s+/g, ' ').trim();
+            // Cap 200 en límite de palabra (caso llwp: corte mid-word feo en el muro)
+            if (phrase.length > 200) {
+              phrase = phrase.slice(0, 200);
+              const sp = phrase.lastIndexOf(' ');
+              if (sp > 150) phrase = phrase.slice(0, sp);
+              phrase = phrase.trimEnd() + '…';
+            }
+            if (/^@|\bid:\d+|\d{4}-\d{2}-\d{2}/.test(phrase)) phrase = '';
+            // Guard anti-spam de enlaces en el muro: URL en la frase -> revisión humana
+            if (/https?:\/\/|\bwww\./i.test(phrase)) {
+              await say('Queued for human review (your text needs a quick look — nothing wrong on your side).');
+              core.setOutput('result', 'human-review'); return;
+            }
+
+            const { data: u } = await github.rest.users.getByUsername({ username: login });
+            const { data: cur } = await github.rest.repos.getContent({ ...context.repo, path: 'SIGNATURES.md', ref: 'main' });
+            const body = Buffer.from(cur.content, 'base64').toString('utf8').replace(/\n*$/, '\n');
+            // Dedupe por id inmutable: una cuenta firma UNA vez
+            if (new RegExp('\\| id:' + u.id + '\\b').test(body)) {
+              await say(`You already signed — your signature: https://career-ops.org/manifesto/s/${login}`);
+              await close();
+              core.setOutput('result', 'dup'); return;
+            }
+            if (process.env.HAS_LEDGER_TOKEN !== 'true') {
+              // Sin token: ack instantáneo; la firma la aplica la ola del maintainer
+              await say(`Format valid. You're in the queue — signatures land in waves. Your line will live at https://career-ops.org/manifesto/s/${login}`);
+              core.setOutput('result', 'queued-manual'); return;
+            }
+            const displayName = (u.name || '').normalize('NFC').replace(/[|"]/g, ' ')
+              .replace(INVIS, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            const today = new Date().toISOString().slice(0, 10);
+            // n: ordinal INMUTABLE (v2.5) = max(n existentes)+1 — nunca count+1:
+            // los removals dejan hueco y jamas se renumera. Fallback pre-backfill:
+            // si el ledger aun no tiene n:, cuenta las lineas de firma existentes.
+            const maxN = Math.max(0, ...[...body.matchAll(/\| n:(\d+)\b/g)].map(m => +m[1]));
+            const sigCount = (body.match(/^- @/gm) || []).length;
+            const seq = (maxN > 0 ? maxN : sigCount) + 1;
+            const line = `- @${login}` + (displayName ? ` | ${displayName}` : '') + ` | ${today}`
+              + (phrase ? ` | "${phrase}"` : '') + ` | id:${u.id} | src:${d.html_url} | n:${seq}`;
+            const { data: saved } = await github.rest.repos.createOrUpdateFileContents({
+              ...context.repo, path: 'SIGNATURES.md',
+              message: `docs(signatures): add @${login} (discussion #${d.number})\n\nCo-authored-by: ${login} <${u.id}+${login}@users.noreply.github.com>`,
+              content: Buffer.from(body + line + '\n').toString('base64'),
+              sha: cur.sha, branch: 'main',
+              committer: { name: 'career-ops ledger', email: 'ledger@career-ops.org' }
+            });
+            // Línea del firmante en el fichero nuevo: body (normalizado a un solo \n
+            // final) + su línea al final. SPEC-1a: el permalink a SU línea es la prueba.
+            const lineNo = body.split('\n').length;
+            const ledgerUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${saved.commit.sha}/SIGNATURES.md#L${lineNo}`;
+            // Webhook: ESPERAR el 200 ANTES de notificar; si cae, el ISR cubre.
+            for (let i = 1; i <= 3; i++) {
+              try {
+                const r = await fetch('https://career-ops.org/api/revalidate-signatures',
+                  { method: 'POST', headers: { 'x-revalidate-secret': process.env.REVALIDATE_SECRET } });
+                if (r.ok) break;
+              } catch (e) { /* red caída: reintento */ }
+              if (i < 3) await new Promise(res => setTimeout(res, 5000));
+            }
+            // Y ESPERAR a que la card esté PERSONALIZADA antes de publicar el link
+            // (caso llwp: el purge no controla la caché del raw ~5min; el link salía
+            // muerto en la reply). Timeout ~7min -> responder igual, el ISR acaba cubriendo.
+            // docs lee ya por Contents API (sin CDN): la card suele estar en segundos.
+            // Poll rápido 10x3s + cola 4x30s por si su fallback-raw sirvió stale.
+            for (let i = 0; i < 14; i++) {
+              try {
+                const cr = await fetch(`https://career-ops.org/manifesto/s/${login}`);
+                if (cr.ok && (await cr.text()).includes('Signatory #')) break;
+              } catch (e) { /* seguir esperando */ }
+              await new Promise(res => setTimeout(res, i < 10 ? 3000 : 30000));
+            }
+            await say(`merged. you are in the ledger: ${ledgerUrl}\nyour certificate: https://career-ops.org/manifesto/s/${login}?fresh=1`);
+            await close();
+            // first-public-contribution (deteccion best-effort, doble condicion:
+            // contadores lifetime == 0 Y contribution graph vacio hasta ayer — la
+            // doble condicion evita falsos positivos tipo cuentas antiguas con
+            // repos pero graph vacio). Positivo -> pregunta gateada; el yes lo
+            // procesa el job confirm-first. Un fallo aqui NUNCA rompe la firma.
+            try {
+              const life = await github.graphql(
+                'query($l:String!){user(login:$l){issues{totalCount} pullRequests{totalCount} gists{totalCount} repositories(privacy:PUBLIC, isFork:false){totalCount}}}',
+                { l: login });
+              const lu = life.user;
+              const lifetime = lu.issues.totalCount + lu.pullRequests.totalCount + lu.gists.totalCount + lu.repositories.totalCount;
+              if (lifetime === 0) {
+                const created = new Date(u.created_at);
+                const cutoff = new Date(Date.now() - 86400000);
+                const parts = [];
+                for (let y = created.getUTCFullYear(), i = 0; y <= cutoff.getUTCFullYear(); y++, i++) {
+                  const from = new Date(Math.max(+created, Date.UTC(y, 0, 1)));
+                  const to = new Date(Math.min(+cutoff, Date.UTC(y, 11, 31, 23, 59, 59)));
+                  if (from > to) continue;
+                  parts.push(`y${i}: contributionsCollection(from:"${from.toISOString()}", to:"${to.toISOString()}"){totalCommitContributions totalIssueContributions totalPullRequestContributions totalPullRequestReviewContributions totalRepositoryContributions}`);
+                }
+                let clean = true;
+                if (parts.length) {
+                  const cc = await github.graphql(`query($l:String!){user(login:$l){${parts.join(' ')}}}`, { l: login });
+                  for (const k of Object.keys(cc.user)) {
+                    const v = cc.user[k];
+                    if (v && Object.values(v).reduce((a, b) => a + b, 0) > 0) { clean = false; break; }
+                  }
+                }
+                if (clean) {
+                  await say("one more thing: this signature looks like it might be your first public contribution on GitHub. if that's right and you'd like your certificate to mark it, reply yes here. if not, no reply needed.");
+                }
+              }
+            } catch (e) { core.warning('first-contribution detection skipped: ' + e.message); }
+
+  # Vía PR orgánica: un maintainer/diputado comenta /approve sobre el PR validado
+  # por signature-ci; la línea canónica se construye desde METADATOS del PR.
+  sign-pr:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/approve'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ledger
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      APPROVER_ALLOWLIST: "santifer"
+    steps:
+      - name: Gate on allowlist
+        id: gate
+        run: |
+          echo "${APPROVER_ALLOWLIST}" | tr ',' '\n' | grep -qix "${{ github.event.comment.user.login }}" \
+            && echo "ok=true" >> "$GITHUB_OUTPUT" || echo "ok=false" >> "$GITHUB_OUTPUT"
+      - name: Apply signature from PR metadata
+        if: steps.gate.outputs.ok == 'true'
+        id: applypr
+        uses: actions/github-script@v7
+        env:
+          HAS_LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN != '' }}
+          REVALIDATE_SECRET: ${{ secrets.SIGNATURES_REVALIDATE_SECRET }}
+        with:
+          github-token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            if (process.env.HAS_LEDGER_TOKEN !== 'true') { core.setOutput('result', 'no-token'); return; }
+            const prNumber = context.payload.issue.number;
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: prNumber });
+            const { data: files } = await github.rest.pulls.listFiles({ ...context.repo, pull_number: prNumber });
+            if (files.length !== 1 || files[0].filename !== 'SIGNATURES.md' || files[0].additions !== 1 || files[0].deletions !== 0)
+              throw new Error('diff shape changed since validation — aborting');
+            const added = files[0].patch.split('\n').find(l => l.startsWith('+') && !l.startsWith('+++'));
+            const rawLine = added.slice(1).normalize('NFC').trim();
+            const login = pr.user.login;
+            const INVIS = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u0000-\u0008\u000b-\u001f]/g;
+            let phrase = rawLine.replace(/<!--[\s\S]*?-->/g, ' ').replace(/^[-\s]+/, '')
+              .replace(/\|/g, ' ').replace(INVIS, '').replace(/\s+/g, ' ').trim();
+            if (/^".*"$/.test(phrase)) phrase = phrase.slice(1, -1);
+            phrase = phrase.replace(/"/g, "'").trim().slice(0, 200);
+            if (/^@|\bid:\d+|\d{4}-\d{2}-\d{2}/.test(phrase)) phrase = '';
+            const { data: u } = await github.rest.users.getByUsername({ username: login });
+            const { data: cur } = await github.rest.repos.getContent({ ...context.repo, path: 'SIGNATURES.md', ref: 'main' });
+            const body = Buffer.from(cur.content, 'base64').toString('utf8').replace(/\n*$/, '\n');
+            if (new RegExp('\\| id:' + u.id + '\\b').test(body)) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: prNumber,
+                body: `You already signed — your signature: https://career-ops.org/manifesto/s/${login}` });
+              await github.rest.pulls.update({ ...context.repo, pull_number: prNumber, state: 'closed' });
+              core.setOutput('result', 'dup'); return;
+            }
+            const displayName = (u.name || '').normalize('NFC').replace(/[|"]/g, ' ')
+              .replace(INVIS, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            const today = new Date().toISOString().slice(0, 10);
+            const maxN = Math.max(0, ...[...body.matchAll(/\| n:(\d+)\b/g)].map(m => +m[1]));
+            const sigCount = (body.match(/^- @/gm) || []).length;
+            const seq = (maxN > 0 ? maxN : sigCount) + 1;
+            const line = `- @${login}` + (displayName ? ` | ${displayName}` : '') + ` | ${today}`
+              + (phrase ? ` | "${phrase}"` : '') + ` | id:${u.id} | src:${pr.html_url} | n:${seq}`;
+            const { data: savedPr } = await github.rest.repos.createOrUpdateFileContents({
+              ...context.repo, path: 'SIGNATURES.md',
+              message: `docs(signatures): add @${login} (#${prNumber})`,
+              content: Buffer.from(body + line + '\n').toString('base64'),
+              sha: cur.sha, branch: 'main',
+              author:    { name: login, email: `${u.id}+${login}@users.noreply.github.com` },
+              committer: { name: 'career-ops ledger', email: 'ledger@career-ops.org' }
+            });
+            const lineNoPr = body.split('\n').length;
+            const ledgerUrlPr = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${savedPr.commit.sha}/SIGNATURES.md#L${lineNoPr}`;
+            // Webhook (esperar 200) y notificación en el MISMO step — sin outputs cruzados
+            for (let i = 1; i <= 3; i++) {
+              try {
+                const r = await fetch('https://career-ops.org/api/revalidate-signatures',
+                  { method: 'POST', headers: { 'x-revalidate-secret': process.env.REVALIDATE_SECRET } });
+                if (r.ok) break;
+              } catch (e) { /* red caída: reintento */ }
+              if (i < 3) await new Promise(res => setTimeout(res, 5000));
+            }
+            await github.rest.issues.createComment({ ...context.repo, issue_number: prNumber,
+              body: `merged. you are in the ledger: ${ledgerUrlPr}\nyour certificate: https://career-ops.org/manifesto/s/${login}?fresh=1` });
+            await github.rest.pulls.update({ ...context.repo, pull_number: prNumber, state: 'closed' });
+
+  # first-public-contribution: el firmante confirma con un "yes" en su propia
+  # discussion (la pregunta la publico el maintainer). Solo afirmativo claro;
+  # cualquier otra respuesta se ignora ('if not, no reply needed'). La label es
+  # SIEMPRE estado confirmado por el firmante, nunca especulacion del detector.
+  confirm-first:
+    if: >
+      github.event_name == 'discussion_comment' &&
+      github.event.discussion.category.slug == 'signatures' &&
+      github.event.comment.user.login == github.event.discussion.user.login
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ledger-confirm
+      cancel-in-progress: false
+    permissions:
+      discussions: write
+    steps:
+      - name: Confirm first-public-contribution
+        uses: actions/github-script@v7
+        env:
+          REVALIDATE_SECRET: ${{ secrets.SIGNATURES_REVALIDATE_SECRET }}
+        with:
+          github-token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const d = context.payload.discussion;
+            const login = d.user.login;
+            const INVIS = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u0000-\u0008\u000b-\u001f]/g;
+            const body = (context.payload.comment.body || '').replace(INVIS, '').trim().toLowerCase();
+            if (!/^(yes|yep|yeah|sure|ok|okay|correct|si|s\u00ed|that'?s right)[.!\s]*$/.test(body)) return;
+            // La pregunta DEBE existir en el hilo y haberla puesto el maintainer
+            // (identidad del ledger): sin ella, un 'yes' suelto no etiqueta nada.
+            const MARKER = 'first public contribution on GitHub';
+            const info = await github.graphql(
+              `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){
+                 label(name:"first-public-contribution"){id}
+                 discussion(number:$n){id labels(first:20){nodes{name}}
+                   comments(first:100){nodes{author{login} body}}}}}`,
+              { o: context.repo.owner, r: context.repo.repo, n: d.number });
+            const disc = info.repository.discussion;
+            const asked = disc.comments.nodes.some(c =>
+              c.author && c.author.login === 'santifer' && c.body.includes(MARKER));
+            if (!asked) return;
+            if (disc.labels.nodes.some(l => l.name === 'first-public-contribution')) return;
+            await github.graphql(
+              'mutation($l:[ID!]!,$d:ID!){addLabelsToLabelable(input:{labelIds:$l,labelableId:$d}){clientMutationId}}',
+              { l: [info.repository.label.id], d: disc.id });
+            for (let i = 1; i <= 3; i++) {
+              try {
+                const r = await fetch('https://career-ops.org/api/revalidate-signatures',
+                  { method: 'POST', headers: { 'x-revalidate-secret': process.env.REVALIDATE_SECRET } });
+                if (r.ok) break;
+              } catch (e) { /* red caida: reintento */ }
+              if (i < 3) await new Promise(res => setTimeout(res, 5000));
+            }
+            await github.graphql(
+              'mutation($id:ID!,$b:String!){addDiscussionComment(input:{discussionId:$id,body:$b}){comment{id}}}',
+              { id: disc.id, b: `done. your certificate now marks it: https://career-ops.org/manifesto/s/${login}?fresh=1` });

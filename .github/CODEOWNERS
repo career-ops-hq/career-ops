@@ -42,3 +42,7 @@
 /plugins/_registry.mjs         @santifer
 /.github/workflows/            @santifer
 /docs/PLUGIN_REVIEW.md         @santifer
+
+# The experimental web UI — owned by the web track (dual-track review with the
+# core maintainer on any PR that also touches root files).
+/web/ @santifer

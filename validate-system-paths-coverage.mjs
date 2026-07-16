@@ -41,8 +41,10 @@ const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS];
 
 const EXCLUDES = [
   '.coderabbit.yaml',
+  '.editorconfig',
   '.envrc',
   '.gitignore',
+  '.npmignore',
   '.release-please-manifest.json',
   'release-please-config.json',
   'renovate.json',
@@ -53,9 +55,16 @@ const EXCLUDES = [
   'interview-prep/.gitkeep',
 ];
 
+// Trees that live in the repo but deliberately OUTSIDE the updater's world:
+// web/ is the experimental web UI — its own release-please component, never
+// shipped by update-system.mjs, never in the npm package. Excluding it here is
+// part of that isolation contract, not a coverage gap.
+const EXCLUDE_PREFIXES = ['web/'];
+
 function covered(file) {
   // If explicitly excluded, it is covered
   if (EXCLUDES.includes(file)) return true;
+  if (EXCLUDE_PREFIXES.some((p) => file.startsWith(p))) return true;
 
   return ALL_PATHS.some((path) =>
     path.endsWith('/') ? file.startsWith(path) : file === path,
@@ -75,15 +84,21 @@ if (process.argv.includes('--self-test')) {
   // Test explicitly excluded files
   assert(covered('.gitignore') === true, '.gitignore must be covered (excluded)');
   assert(covered('.coderabbit.yaml') === true, '.coderabbit.yaml must be covered (excluded)');
+  assert(covered('.editorconfig') === true, '.editorconfig must be covered (excluded, #1438/#1613)');
 
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
+  assert(covered('.claude/settings.json') === true, '.claude/settings.json must be covered (USER_PATHS exact match, #1408)');
+  assert(covered('.claude/hooks/pre-push-backup.sh') === true, '.claude/hooks/ scripts must be covered (USER_PATHS dir prefix match, same class as #1408)');
 
   // Test directory prefix matches (which end in '/')
   assert(covered('providers/justjoin.mjs') === true, 'providers/justjoin.mjs must be covered (dir prefix match)');
 
   // Test sibling mismatch (strict prefix match)
   assert(covered('providers-sibling/justjoin.mjs') === false, 'providers-sibling/justjoin.mjs must NOT be covered');
+  assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
+  assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
+  assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
 
   // Test unrelated file
   assert(covered('untracked-orphan-file-xyz.js') === false, 'untracked-orphan-file-xyz.js must NOT be covered');

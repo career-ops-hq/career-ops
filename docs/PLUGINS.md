@@ -62,7 +62,7 @@ trust).
 2. File a **Plugin registration** issue (becomes your plugin's home/changelog).
 3. Open a **registry PR** (the `?template=plugin-registry.md` template — the
    template repo's release workflow can open it for you on a release tag) that
-   adds your entry to `plugins-registry.json`, pinned to an exact commit. CI
+   adds your `plugins-registry/<id>.json` file, pinned to an exact commit. CI
    (`plugin-registry-validate`) checks the naming, manifest, min-files, license,
    egress, and a static audit before a maintainer reviews. Once merged, users can
    `node plugins.mjs add <name>` and your plugin ships to them via the normal
@@ -71,8 +71,52 @@ trust).
    (your release workflow opens it from your own fork). Users only ever get the
    commit we approved.
 
-Broadly-useful, low/zero-key plugins may be promoted from listed to **bundled**
-(shipped in `plugins/`). See `docs/PLUGIN_REVIEW.md`.
+Broadly-useful, low/zero-key plugins may be shipped **bundled** in `plugins/`
+(e.g. `apify`, `gmail`, `notion`). Bundled plugins are **reference seeds**:
+reviewed in-tree, always present, and a working example to copy — kept minimal
+and stable on purpose, **not** a home for ongoing feature work.
+
+### Improving a bundled plugin → publish a maintained successor
+
+We **don't take feature PRs against bundled plugins.** If you want to extend one
+(more options, a richer mapping, new behavior), own it properly:
+
+1. Publish `career-ops-plugin-<id>` with the **same `id`** as the bundled plugin
+   (start from the bundled plugin's code — it's MIT and credits its origins).
+2. In your registry PR, set **`"supersedesBundled": true`** on your entry.
+3. Once approved + pinned, anyone who runs `node plugins.mjs add career-ops-plugin-<id>`
+   installs your version, and the engine gives **your maintained successor
+   precedence over the bundled reference** of the same id. `node plugins.mjs available`
+   surfaces the link: *"gmail — 🔁 maintained version: career-ops-plugin-gmail"*.
+
+This keeps the core lean and **puts the integration in your hands, with your name
+on it** — while the bundled seed stays as the always-present fallback, so the
+feature never breaks even if a successor goes quiet. Precedence is granted ONLY
+to a registry-approved successor installed at its exact pinned commit — so an
+unprompted, unreviewed community plugin can never shadow a bundled one.
+
+**Trust boundary (plainly).** The thing this protects is the *supply chain*: the
+registry is a reviewed system file and installs pin an exact commit, so no
+upstream author can push code over a bundled plugin without a maintainer merging
+their entry. It does **not** try to stop *you* from running your own modified
+code on your own machine — career-ops is local-first and the source is yours; if
+you edit `plugins.local/` or your `plugins.lock`, you're choosing to run your own
+version, exactly as you always could. Removing a successor restores the bundled
+reference.
+
+## Community plugins
+
+Every community plugin in the registry is reviewed and pinned to an exact commit (see [Trust badges](#trust-badges) and [Publishing + getting approved](#publishing--getting-approved)).
+
+| Plugin | What it does | Hooks | Keys needed | Author |
+| --- | --- | --- | --- | --- |
+| [career-ops-plugin-tavily](https://github.com/Schlaflied/career-ops-plugin-tavily) | Tavily search/extract for job scanning, liveness checks, and company research. | search | `TAVILY_API_KEY` | @Schlaflied |
+| [career-ops-plugin-google-calendar](https://github.com/Schlaflied/career-ops-plugin-google-calendar) | Google Calendar ingest — detect upcoming interview events and surface them in the career-ops pipeline. | ingest | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REFRESH_TOKEN` | @Schlaflied |
+| [career-ops-plugin-linkedin-alerts](https://github.com/Schlaflied/career-ops-plugin-linkedin-alerts) | LinkedIn job alert ingest — parse LinkedIn alert emails from your Gmail inbox, normalize tracking links to canonical job URLs, and surface them in the career-ops pipeline. | ingest | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | @Schlaflied |
+| [career-ops-plugin-outlook-interviews](https://github.com/Schlaflied/career-ops-plugin-outlook-interviews) | Outlook interview ingest — detect interview invitation emails via Microsoft Graph, extract company / role / meeting link, and surface them in the career-ops pipeline. | ingest | `MSGRAPH_CLIENT_ID`, `MSGRAPH_REFRESH_TOKEN` (optional: `MSGRAPH_CLIENT_SECRET`) | @Schlaflied |
+| [career-ops-plugin-obsidian](https://github.com/Schlaflied/career-ops-plugin-obsidian) | Obsidian export — mirror the tracker into your vault as frontmatter notes queryable by Dataview/Bases; frontmatter belongs to the machine, the note body belongs to you. | export | None | @Schlaflied |
+
+To add your own plugin to the registry, follow the [Publishing + getting approved](#publishing--getting-approved) flow above.
 
 ## Not a plugin
 

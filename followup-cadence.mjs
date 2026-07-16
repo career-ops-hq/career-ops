@@ -175,6 +175,42 @@ function parseFollowups() {
   return entries;
 }
 
+// --- Next-date overrides (pins) ---
+// A user can PIN an application's next follow-up date, taking precedence over
+// the computed cadence (a pin even revives a cold application) until a
+// follow-up logged on/after the pin's set-date resumes the normal schedule.
+// Stored in data/follow-ups.md as directive lines:
+//   - next #42 2026-07-10 (set 2026-07-02)
+// The `(set …)` part records when the pin was made; if omitted (hand-written)
+// it defaults to the pinned date itself. The LAST pin line per application wins.
+const OVERRIDE_RE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?\s*$/i;
+
+export function parseNextOverrides(content) {
+  const byApp = new Map();
+  for (const line of content.split('\n')) {
+    const m = line.match(OVERRIDE_RE);
+    if (!m) continue;
+    const date = m[2];
+    if (!parseDate(date)) continue; // an impossible pinned date never poisons the analysis
+    const appNum = parseInt(m[1]);
+    byApp.set(appNum, { appNum, date, setDate: m[3] || date });
+  }
+  return byApp;
+}
+
+// The pin applies until a follow-up is logged AFTER it. Ties favor the pin:
+// "log a follow-up, then pin the next date" is the common same-day flow.
+export function resolveNextOverride(override, lastFollowupDate) {
+  if (!override) return null;
+  if (lastFollowupDate && lastFollowupDate > override.setDate) return null;
+  return override.date;
+}
+
+function parseOverrides() {
+  if (!existsSync(FOLLOWUPS_FILE)) return new Map();
+  return parseNextOverrides(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+}
+
 // --- Extract contacts from notes ---
 function extractContacts(notes) {
   if (!notes) return [];
@@ -236,7 +272,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
   }
   if (status === 'responded') {
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
-    return addDays(parseDate(appDate), CADENCE.responded_subsequent);
+    return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
     return addDays(parseDate(appDate), CADENCE.interview_thankyou);
@@ -252,6 +288,7 @@ function analyze() {
   }
 
   const followups = parseFollowups();
+  const overrides = parseOverrides();
 
   // Group follow-ups by app number
   const followupsByApp = new Map();
@@ -286,8 +323,18 @@ function analyze() {
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
-    const urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
-    const nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
+    let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
+    let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
+
+    // A pinned next-date takes precedence over the computed cadence (explicit
+    // user intent — it even revives a cold application) until a follow-up
+    // logged after the pin resumes the normal schedule.
+    const nextOverride = resolveNextOverride(overrides.get(app.num), lastFollowupDate);
+    if (nextOverride) {
+      nextFollowupDate = nextOverride;
+      urgency = daysBetween(parseDate(nextOverride), now) >= 0 ? 'overdue' : 'waiting';
+    }
+
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
@@ -299,6 +346,12 @@ function analyze() {
       date: app.date,
       appliedDate,
       company: app.company,
+      // Intermediary channel (#1596): agency name when the application went
+      // through an intermediary, null for a direct application (the tracker's
+      // `—` placeholder and the no-Via-column case both normalize to null, so
+      // consumers never learn the sentinel). When set, follow-ups chase the
+      // agency contact, not the company.
+      via: app.via && app.via !== '—' ? app.via : null,
       role: app.role,
       status: normalized,
       score: app.score,
@@ -310,6 +363,7 @@ function analyze() {
       followupCount,
       urgency,
       nextFollowupDate,
+      nextOverride,
       daysUntilNext,
     });
   }

@@ -38,7 +38,14 @@ jobs:
 
       - name: Build Go
         if: matrix.language == 'go'
-        run: cd dashboard && go build ./...
+        # go build skips *_test.go, so CodeQL's traced build never saw test
+        # files (tool status showed Go at 13/26 files scanned). Compiling the
+        # test packages without running them (-run '^$') lets the extractor
+        # cover them too. The two windows-tagged files stay out by platform.
+        run: |
+          cd dashboard
+          go build ./...
+          go test -run '^$' ./...
 
       - name: Autobuild
         if: matrix.language != 'go'

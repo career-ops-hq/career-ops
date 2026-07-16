@@ -27,18 +27,24 @@ function assertSmartRecruitersUrl(url) {
 }
 
 function resolveSlug(entry) {
-  const raw = typeof entry.careers_url === 'string' ? entry.careers_url : '';
-  if (!raw) return null;
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return null;
+  // entry.api takes precedence over careers_url (mirrors greenhouse/ashby) so a
+  // branded page (e.g. https://jobs.continental.com) can stay as careers_url
+  // while the SmartRecruiters slug is pinned via
+  // api: https://careers.smartrecruiters.com/<slug> in portals.yml.
+  for (const raw of [entry.api, entry.careers_url]) {
+    if (typeof raw !== 'string' || !raw) continue;
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:') continue;
+    if (!SR_CAREERS_HOSTS.has(parsed.hostname)) continue;
+    const slug = parsed.pathname.split('/').filter(Boolean)[0];
+    if (slug) return slug;
   }
-  if (parsed.protocol !== 'https:') return null;
-  if (!SR_CAREERS_HOSTS.has(parsed.hostname)) return null;
-  const slug = parsed.pathname.split('/').filter(Boolean)[0];
-  return slug || null;
+  return null;
 }
 
 function buildPostingsUrl(slug, offset = 0) {

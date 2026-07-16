@@ -1,0 +1,14 @@
+{
+  "id": "theirstack",
+  "name": "career-ops-plugin-theirstack",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "TheirStack API provider — structured job search across 50k+ sources with title/country/remote filters; handles both string and object company response shapes.",
+  "repo": "https://github.com/uelkerd/career-ops-plugin-theirstack",
+  "sha": "a0e5add9bb7bd6f115392535c298bb4b7058c945",
+  "hooks": ["provider"],
+  "requiredEnv": ["THEIRSTACK_API_KEY"],
+  "allowedHosts": ["api.theirstack.com"],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1697",
+  "addedAt": "2026-07-07"
+}
