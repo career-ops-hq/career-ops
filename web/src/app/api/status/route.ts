@@ -60,7 +60,15 @@ export async function POST(req: Request) {
       headerLineIdx = i;
       break;
     }
-    if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
+    if (/^:?-{2,}:?$/.test(cells[1] ?? "")) {
+      // No "Status" column matched, but this is still the separator row —
+      // the row immediately above it is the header by markdown-table
+      // convention (even if malformed/missing the expected column names).
+      // Capture it so the row-scan below still protects it: without this,
+      // a malformed header silently loses the n:"#" guard entirely.
+      if (headerLineIdx < 0) headerLineIdx = i - 1;
+      break; // hit the separator → no header match, keep default
+    }
   }
 
   // Resolve the row by its `#` cell first (the historical primary key), then
