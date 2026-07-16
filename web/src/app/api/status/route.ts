@@ -40,15 +40,24 @@ export async function POST(req: Request) {
   const lines = md.split("\n");
   // Find the Status and Report column indices from the header row (robust to
   // 8- vs 9-col and an optional Via column that shifts everything right).
+  // Also remember the header line's index so the row-scan below can never
+  // target it (a request with n: "#" must not match the header's own "#"
+  // cell text and corrupt the table's structure). The separator row (e.g.
+  // "|---|---|...|") is excluded generically in that scan instead, since it
+  // normally follows immediately after the header — this loop breaks at the
+  // header before ever reaching it.
   let statusIdx = 6;
   let reportIdx = -1;
-  for (const l of lines) {
+  let headerLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
     if (!l.trim().startsWith("|")) continue;
     const cells = l.split("|").map((c) => c.trim().toLowerCase());
     const sIdx = cells.findIndex((c) => c === "status");
     if (sIdx > 0) {
       statusIdx = sIdx;
       reportIdx = cells.findIndex((c) => c === "report");
+      headerLineIdx = i;
       break;
     }
     if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
@@ -73,12 +82,17 @@ export async function POST(req: Request) {
   let reportHit = -1; // report-number match (fallback)
   const rows: string[][] = [];
   for (let i = 0; i < lines.length; i++) {
+    if (i === headerLineIdx) continue; // never let n:"#" match the header's own "#" cell
     if (!lines[i].trim().startsWith("|")) continue;
     const parts = lines[i].split("|");
     if (parts.length < 8) continue;
     if (statusIdx >= parts.length - 1) continue; // guard malformed row
+    if (/^:?-{2,}:?$/.test(parts[1]?.trim() ?? "")) continue; // never let n:"---" match the separator row
     rows[i] = parts;
-    if (primaryHit < 0 && parts[1].trim() === target) primaryHit = i;
+    if (parts[1].trim() === target) {
+      primaryHit = i;
+      break; // exact `#`-cell match always wins — no need to keep scanning for a report-number fallback
+    }
     if (reportHit < 0 && !Number.isNaN(targetNum) && reportNumOf(parts) === targetNum) reportHit = i;
   }
 
