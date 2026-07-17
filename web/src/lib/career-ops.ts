@@ -150,6 +150,22 @@ export function readApplications(): Application[] {
   return parseApplications(md, careerOpsRoot());
 }
 
+export function pdfReadyForReport(n: string): boolean {
+  const reportNum = parseInt(n, 10);
+  if (Number.isNaN(reportNum)) return false;
+  const target = String(reportNum).padStart(3, "0");
+  const tsv = read("data/pdf-index.tsv");
+  if (!tsv) return false;
+
+  for (const line of tsv.split("\n")) {
+    if (!line.trim()) continue;
+    const [report, pdfRel] = line.split("\t");
+    if (report?.trim() !== target || !pdfRel?.trim()) continue;
+    if (fs.existsSync(path.join(careerOpsRoot(), pdfRel.trim()))) return true;
+  }
+  return false;
+}
+
 /**
  * Server-side lifecycle of the user's setup — mirrors the prerequisite list that
  * doctor.mjs uses (cv.md, config/profile.yml, modes/_profile.md, portals.yml), by
