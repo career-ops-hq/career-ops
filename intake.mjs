@@ -36,7 +36,7 @@
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
 import {
-  existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync,
+  existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync,
 } from 'fs';
 import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -98,7 +98,8 @@ export function detectPdfExtractor(probe = defaultProbe) {
 
 function defaultProbe(candidate) {
   try {
-    execFileSync(candidate.name, candidate.probeArgs, { stdio: 'pipe' });
+    // Bounded like extract() below: a wedged binary must not hang every run.
+    execFileSync(candidate.name, candidate.probeArgs, { stdio: 'pipe', timeout: 5_000 });
     return true;
   } catch {
     return false;
@@ -138,7 +139,16 @@ function loadState() {
 function listSourceFiles() {
   if (!existsSync(DOCS_DIR)) return [];
   const out = [];
+  // Directories already walked, by real path. Symlinks are followed (see
+  // below), so without this a link back up the tree — documents/cv/loop ->
+  // documents/ — re-enters it until the path length gives out, reporting
+  // one CV a dozen times over. Two links to the same folder collapse too.
+  const walked = new Set();
   const walk = (dir) => {
+    let real;
+    try { real = realpathSync(dir); } catch { return; }
+    if (walked.has(real)) return;
+    walked.add(real);
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name.startsWith('.') || entry.name === 'README.md' && dir === DOCS_DIR) continue;
       const abs = join(dir, entry.name);

@@ -5,7 +5,7 @@
 // scan/--commit round-trip on an isolated temp documents/ dir, and the
 // three-place registration contract (DATA_CONTRACT / .gitignore /
 // update-system manifest — same cross-check pattern as offer-prep).
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -125,6 +125,52 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
     const selfTest = run(NODE, ['intake.mjs', '--self-test'], { env });
     if (selfTest !== null && selfTest.includes('0 failed')) pass('intake.mjs --self-test passes');
     else fail('intake.mjs --self-test failed');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ── symlink handling ─────────────────────────────────────────────────────
+// Symlinks are followed on purpose (a symlinked master CV is a natural
+// setup), which makes two behaviours worth pinning: a link cycle must not
+// multiply the walk, and a link out of documents/ must keep working.
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'intake-symlink-'));
+  const docsDir = join(tmp, 'documents');
+  const outsideDir = join(tmp, 'outside');
+  mkdirSync(join(docsDir, 'cv'), { recursive: true });
+  mkdirSync(outsideDir, { recursive: true });
+  const env = {
+    ...process.env,
+    CAREER_OPS_DOCUMENTS_DIR: docsDir,
+    CAREER_OPS_INTAKE_STATE: join(tmp, 'intake-state.json'),
+  };
+
+  try {
+    writeFileSync(join(docsDir, 'cv', 'master.md'), '# CV\n');
+    // documents/cv/loop -> documents/ : walking it naively re-enters the
+    // tree until the path length gives out, reporting one file many times.
+    symlinkSync(docsDir, join(docsDir, 'cv', 'loop'));
+
+    const scan = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const cvHits = scan && scan.sources.filter((s) => s.path.endsWith('master.md'));
+    if (cvHits && cvHits.length === 1 && cvHits[0].path === 'cv/master.md') {
+      pass('symlink cycle is walked once: the source is reported a single time');
+    } else {
+      fail(`symlink cycle multiplied the walk: ${JSON.stringify((cvHits || []).map((s) => s.path))}`);
+    }
+
+    // A master CV living outside the repo, linked in — the documented setup.
+    writeFileSync(join(outsideDir, 'real-cv.md'), '# Linked CV\n');
+    symlinkSync(join(outsideDir, 'real-cv.md'), join(docsDir, 'cv', 'linked.md'));
+    const scan2 = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const linked = scan2 && scan2.sources.find((s) => s.path === 'cv/linked.md');
+    const text = run(NODE, ['intake.mjs', '--text', 'cv/linked.md'], { env });
+    if (linked && linked.hash && text && text.includes('Linked CV')) {
+      pass('a source symlinked out of documents/ is still scanned and readable');
+    } else {
+      fail(`symlinked-out source broken: entry=${JSON.stringify(linked)}, text=${JSON.stringify(text)}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
