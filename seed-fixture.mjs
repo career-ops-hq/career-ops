@@ -30,13 +30,25 @@ function walk(dir, base = dir, out = []) {
 }
 
 export function listStates() {
+  if (!existsSync(FIXTURES)) return [];
   return readdirSync(FIXTURES).filter((n) => statSync(join(FIXTURES, n)).isDirectory());
+}
+
+// Strict allowlist: a state must be one of the real fixture subdirectories.
+// Membership in listStates() (basenames only) inherently rejects both unknown
+// states and traversal strings ('../x', 'state/../..'), so no join() ever
+// escapes FIXTURES.
+function assertKnownState(state) {
+  const states = listStates();
+  if (!states.includes(state)) {
+    throw new Error(`Unknown fixture state: ${state} (have: ${states.join(', ') || 'none'})`);
+  }
 }
 
 export function seedFixture(targetDir, { state = DEFAULT_STATE } = {}) {
   if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) throw new Error(`targetDir is not an existing directory: ${targetDir}`);
+  assertKnownState(state);
   const src = join(FIXTURES, state);
-  if (!existsSync(src)) throw new Error(`Unknown fixture state: ${state} (have: ${listStates().join(', ')})`);
   // expected.json is harness metadata, not user data — never seed it.
   const files = walk(src).filter((f) => f !== 'expected.json');
   const manifest = {};
@@ -50,6 +62,7 @@ export function seedFixture(targetDir, { state = DEFAULT_STATE } = {}) {
 }
 
 export function loadExpectations(state = DEFAULT_STATE) {
+  assertKnownState(state);
   return JSON.parse(readFileSync(join(FIXTURES, state, 'expected.json'), 'utf-8'));
 }
 
