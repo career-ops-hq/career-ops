@@ -69,7 +69,12 @@ export function loadExpectations(state = DEFAULT_STATE) {
 function selfTest() {
   let failed = 0;
   const check = (ok, msg) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) failed++; };
-  for (const state of listStates()) {
+  const states = listStates();
+  // Guard against a vacuous pass: zero fixture states would run zero checks and
+  // still print "green". listStates() legitimately returns [] for discovery, so
+  // the assertion lives here in the test, not in listStates() itself.
+  check(states.length > 0, `discovered at least one fixture state (found ${states.length})`);
+  for (const state of states) {
     const dir = mkdtempSync(join(tmpdir(), 'seed-fixture-'));
     try {
       const { files, manifest } = seedFixture(dir, { state });
