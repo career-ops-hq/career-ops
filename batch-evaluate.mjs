@@ -45,7 +45,32 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const modelName = 'gemini-2.5-flash-lite';
+function readSpendTier() {
+  try {
+    if (existsSync(PATHS.profileYml)) {
+      const content = readFileSync(PATHS.profileYml, 'utf-8');
+      const match = content.match(/^[ \t]*spend_tier[ \t]*:[ \t]*(.+)$/m);
+      if (match) {
+        return match[1].trim();
+      }
+    }
+  } catch (err) {}
+  return 'standard';
+}
+
+function spendTierToModel(tier) {
+  switch (tier) {
+    case 'economy': return 'gemini-2.5-flash-lite';
+    case 'premium': return 'gemini-2.5-pro';
+    case 'standard':
+    default:
+      return 'gemini-2.5-flash';
+  }
+}
+
+const modelArg = process.argv.find(a => a.startsWith('--model='));
+const resolvedSpendTier = readSpendTier();
+const modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
 const genAI = new GoogleGenerativeAI(apiKey);
 const model = genAI.getGenerativeModel({
   model: modelName,
