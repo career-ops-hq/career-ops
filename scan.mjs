@@ -47,7 +47,9 @@ import { normalizeCompany } from './tracker-utils.mjs';
 
 try {
   const { config } = await import('dotenv');
-  config();
+  // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
+  // single JSON object (#1906).
+  config({ quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -252,6 +254,82 @@ export function buildContentFilter(contentFilter) {
     }
 
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (positive.length === 0) return true;
+    return positive.some(k => lower.includes(k));
+  };
+}
+
+// ── Visa / work-authorization filter ────────────────────────────────
+// Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
+// Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
+// the generic "visa sponsorship" wording) and drops roles that explicitly
+// refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
+// it only has signal for providers whose list API ships a description (Lever
+// today); jobs without one fall back to the require_mention rule below.
+//
+// Semantics (case-insensitive substring):
+//   - any `negative` keyword present → reject (an explicit "no sponsorship")
+//   - require_mention: false (default) → after clearing negatives, PASS —
+//     including jobs with no description. Use this to only weed out the
+//     explicit rejections while keeping everything unstated.
+//   - require_mention: true → keep only jobs whose description contains at least
+//     one `positive` keyword; a missing/empty description is rejected. Use this
+//     to surface *only* postings that actively advertise sponsorship.
+//
+// `positive` / `negative` default to a curated US-sponsorship vocabulary when
+// omitted, so `visa_filter: { enabled: true }` works out of the box; supplying
+// either list overrides that default.
+
+export const DEFAULT_VISA_POSITIVE = [
+  'visa sponsorship',
+  'sponsor a visa',
+  'sponsor visas',
+  'will sponsor',
+  'sponsorship available',
+  'sponsorship is available',
+  'eligible for sponsorship',
+  'provide sponsorship',
+  'offer sponsorship',
+  'immigration support',
+  'h-1b',
+  'h1b',
+  'h-1b1',
+  'h1b1',
+  'o-1 visa',
+];
+
+export const DEFAULT_VISA_NEGATIVE = [
+  'no visa sponsorship',
+  'no sponsorship',
+  'without sponsorship',
+  'unable to sponsor',
+  'not able to sponsor',
+  'cannot sponsor',
+  'do not sponsor',
+  'does not sponsor',
+  'not offer sponsorship',
+  'not provide sponsorship',
+  'sponsorship is not available',
+  'sponsorship not available',
+  'not offer visa sponsorship',
+];
+
+export function buildVisaFilter(visaFilter) {
+  if (!visaFilter || visaFilter.enabled === false) return () => true;
+  const positive = visaFilter.positive != null
+    ? normalizeKeywordList(visaFilter.positive)
+    : DEFAULT_VISA_POSITIVE.slice();
+  const negative = visaFilter.negative != null
+    ? normalizeKeywordList(visaFilter.negative)
+    : DEFAULT_VISA_NEGATIVE.slice();
+  const requireMention = visaFilter.require_mention === true;
+
+  return (description) => {
+    const hasText = typeof description === 'string' && description.trim() !== '';
+    if (!hasText) return !requireMention;
+    const lower = description.toLowerCase();
+    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (!requireMention) return true;
     if (positive.length === 0) return true;
     return positive.some(k => lower.includes(k));
   };
@@ -919,6 +997,31 @@ export function formatCompensation(salary) {
   return sanitizeMarkdownField(currency ? `${range} ${currency}` : range);
 }
 
+// Trust/legitimacy signal (#1743): the scanner sets offer.trustScore (0-100) +
+// offer.trustFlags on every job (see buildTrustValidator). Surface it only when
+// it's meaningful — a score below 100 means the validator penalized the posting
+// (e.g. missing_apply_url, invalid_url, suspicious_domain). A clean posting
+// (score 100) or a scan without trust_filter configured stays byte-identical
+// (empty), exactly like the posted:/note: segments.
+export function trustIsFlagged(offer) {
+  return typeof offer.trustScore === 'number' && Number.isFinite(offer.trustScore) && offer.trustScore < 100;
+}
+
+function trustFlagList(offer) {
+  return Array.isArray(offer.trustFlags)
+    ? offer.trustFlags.filter((f) => typeof f === 'string' && f.trim())
+    : [];
+}
+
+// Labeled pipeline segment, e.g. `trust: 60 missing_apply_url,suspicious_domain`.
+// '' when the posting isn't flagged, so an unflagged offer produces no segment.
+export function formatTrustSegment(offer) {
+  if (!trustIsFlagged(offer)) return '';
+  const flags = trustFlagList(offer);
+  const body = flags.length ? `${offer.trustScore} ${flags.join(',')}` : String(offer.trustScore);
+  return sanitizeMarkdownField(`trust: ${body}`);
+}
+
 export function formatPipelineOffer(offer) {
   const url = sanitizePipelineUrl(offer.url);
   const company = sanitizeMarkdownField(offer.company);
@@ -940,6 +1043,11 @@ export function formatPipelineOffer(offer) {
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
   if (posted) line = `${line} | posted: ${posted}`;
+  // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted
+  // only when the scanner flagged the posting (score < 100). Ordered after
+  // posted:, before note:, for a stable serialization.
+  const trust = formatTrustSegment(offer);
+  if (trust) line = `${line} | ${trust}`;
   // Optional free-text ranking signal (e.g. a curated-list flag an importer
   // attaches). Labeled — not positional like location/compensation — so it can
   // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
@@ -971,6 +1079,12 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // New trailing column: posting date. Existing readers index by position up to
     // col 7, so appending col 8 is backward-compatible.
     postedAtIsoDate(offer.postedAt),
+    // Trust/legitimacy signal (#1743): score (only when the scanner flagged the
+    // posting, i.e. < 100) + comma-joined flags. Trailing cols 9-10, so existing
+    // index-based readers (fingerprint@7, postedAt@8) are unaffected; a clean
+    // posting or a scan without trust_filter leaves both empty.
+    trustIsFlagged(offer) ? String(offer.trustScore) : '',
+    trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
   ].map(sanitizeTsvField).join('\t');
 }
 
@@ -1123,7 +1237,7 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 // 'completed' in v1; a follow-up wires failure-path writes so trend stats can
 // exclude survivorship bias. Consumers MUST parse by header name, never by
 // position — columns may be appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\n';
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -1135,8 +1249,51 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     // contract above: files created with an older header keep parsing (the
     // extra trailing cell is simply not named there).
     c.filteredBlacklist ?? 0,
+    // filtered_visa appended at the END for the same reason.
+    c.filteredVisa ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
+}
+
+// ── Portal health persistence (#1744) ───────────────────────────────
+
+const PORTAL_HEALTH_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'portal-health.tsv');
+export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
+
+export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
+  if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+  let lines = '';
+  for (const r of healthRecords) {
+    lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
+  }
+  if (lines) appendFileSync(filePath, lines, 'utf-8');
+}
+
+export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
+  if (!existsSync(filePath)) return [];
+  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const records = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length >= 3) {
+      records.push({ timestamp: parts[0], company: parts[1], status: parts[2] });
+    }
+  }
+  return records;
+}
+
+export function computeConsecutiveFailures(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    if (r.status === 'slug_gone' || r.status === 'network') {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
+    } else if (r.status === 'reachable' || r.status === 'empty') {
+      streaks.set(r.company, 0);
+    }
+  }
+  return streaks;
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -1346,6 +1503,8 @@ async function main() {
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
+  const visaFilter = buildVisaFilter(config.visa_filter);
+  const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -1431,6 +1590,7 @@ async function main() {
   let totalFilteredContent = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
+  let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
   const errors = [...resolveErrors];
@@ -1513,6 +1673,10 @@ async function main() {
         }
         if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
+          continue;
+        }
+        if (!visaFilter(job.description)) {
+          totalFilteredVisa++;
           continue;
         }
         if (seenUrls.has(job.url)) {
@@ -1654,6 +1818,9 @@ async function main() {
   }
   console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);
   console.log(`Filtered by content:  ${totalFilteredContent} removed`);
+  if (visaEnabled) {
+    console.log(`Filtered by visa:     ${totalFilteredVisa} removed`);
+  }
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
@@ -1720,17 +1887,67 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
+  
+  const STREAK_THRESHOLD = config.portal_health_threshold || 3;
+  const nowStr = new Date().toISOString();
+  const healthRecords = [];
+  
+  for (const t of targets) {
+    const isUnreachable = unreachableTargets.some(e => e.company === t.name);
+    const isNetwork = networkTargets.some(e => e.company === t.name);
+    const isEmpty = emptyTargets.includes(t.name);
+    
+    let status = 'reachable';
+    if (isUnreachable) status = 'slug_gone';
+    else if (isNetwork) status = 'network';
+    else if (isEmpty) status = 'empty';
+    
+    healthRecords.push({ timestamp: nowStr, company: t.name, status });
+  }
 
-  if (unreachableTargets.length > 0) {
-    const names = unreachableTargets.map((e) => e.company).join(', ');
-    console.log(`\n⚠️  ${unreachableTargets.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
+  const pastHealth = loadPortalHealth();
+  const currentStreaks = computeConsecutiveFailures(pastHealth);
+  
+  for (const r of healthRecords) {
+    if (r.status === 'slug_gone' || r.status === 'network') {
+      currentStreaks.set(r.company, (currentStreaks.get(r.company) || 0) + 1);
+    } else if (r.status === 'reachable' || r.status === 'empty') {
+      currentStreaks.set(r.company, 0);
+    }
+  }
+
+  const persistentlyDead = [];
+  const newlyDeadSlug = [];
+  const newlyDeadNetwork = [];
+  
+  for (const e of [...unreachableTargets, ...networkTargets]) {
+    const streak = currentStreaks.get(e.company) || 1;
+    if (streak >= STREAK_THRESHOLD) {
+      if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
+    } else {
+      if (e.kind === 'slug_gone') {
+        if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
+      } else {
+        newlyDeadNetwork.push(e);
+      }
+    }
+  }
+
+  if (persistentlyDead.length > 0) {
+    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`   ${persistentlyDead.join(', ')}`);
+    console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
+  }
+  if (newlyDeadSlug.length > 0) {
+    const names = newlyDeadSlug.map(x => x.company).join(', ');
+    console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
   }
-  if (networkTargets.length > 0) {
-    console.log(`\nNetwork errors (${networkTargets.length}):`);
-    for (const e of networkTargets) {
+  if (newlyDeadNetwork.length > 0) {
+    console.log(`\nNetwork errors (${newlyDeadNetwork.length}):`);
+    for (const e of newlyDeadNetwork) {
       console.log(`  ✗ ${e.company}: ${e.error}`);
     }
   }
@@ -1760,6 +1977,7 @@ async function main() {
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
   if (!dryRun) {
+    appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
       companies: summaryCompanies, boards: summaryBoards, found: totalFound,
@@ -1769,11 +1987,29 @@ async function main() {
       filteredContent: totalFilteredContent, filteredCooldown: totalFilteredCooldown,
       dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
       filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa,
     });
   }
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
+
+  // One-time-ever manifesto note: first successful REAL run only. The state
+  // file keeps it from ever repeating; --dry-run must leave no trace, and a
+  // piped/quiet run is not the moment for it.
+  if (!dryRun && process.stdout.isTTY && !process.argv.includes('--quiet') && !existsSync('.manifesto-noted')) {
+    // OSC 8 hyperlink where support is known, so the click attributes as
+    // utm_source=cli while the visible text stays clean; otherwise print the
+    // URL with the utm so typed visits attribute too.
+    const osc8 = ['iTerm.app', 'WezTerm', 'vscode', 'ghostty', 'Hyper', 'Tabby'].includes(process.env.TERM_PROGRAM)
+      || !!process.env.WT_SESSION || !!process.env.KITTY_WINDOW_ID
+      || parseInt(process.env.VTE_VERSION || '0', 10) >= 5000;
+    const link = osc8
+      ? '\x1b]8;;https://career-ops.org/manifesto?utm_source=cli\x1b\\career-ops.org/manifesto\x1b]8;;\x1b\\'
+      : 'career-ops.org/manifesto?utm_source=cli';
+    console.log(`\nthe practice behind this tool has a name and a manifesto: ${link}`);
+    try { writeFileSync('.manifesto-noted', new Date().toISOString() + '\n'); } catch { /* best-effort */ }
+  }
 }
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.

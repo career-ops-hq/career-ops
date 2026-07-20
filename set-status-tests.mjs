@@ -17,7 +17,7 @@
  *   0 — success (including no-op re-runs)
  *   1 — usage error or non-canonical state
  *   2 — row not found (bad number, unknown company)
- *   3 — ambiguous company match (candidates listed on stderr / in JSON)
+ *   3 — ambiguous company match or numeric selector/report-link mismatch
  */
 
 import { execFileSync } from 'child_process';
@@ -98,6 +98,13 @@ const TRACKER_DUP_NUM = `# Applications Tracker
 | 5 | 2026-06-03 | Esri Canada | Manager Talent and Organizational Development | 4.1/5 | Evaluated | ❌ | — | — |
 `;
 
+const TRACKER_REPORT_MISMATCH = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 2 | 2026-06-02 | DriftCo | Platform Engineer | 4.0/5 | Evaluated | ✅ | [7](../reports/007-driftco-2026-06-02.md) | migrated badly |
+`;
+
 // ── 1. Update by report number ──────────────────────────────────
 {
   const sb = makeSandbox(TRACKER_9);
@@ -112,6 +119,30 @@ const TRACKER_DUP_NUM = `# Applications Tracker
     pass('by-num: other rows untouched');
   } else {
     fail('by-num: other rows were modified');
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1b. Numeric selector refuses a tracker/report ID mismatch ───
+{
+  const sb = makeSandbox(TRACKER_REPORT_MISMATCH);
+  const before = readTracker(sb);
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'report-number-mismatch'
+      && parsed.trackerNum === 2 && parsed.reportNums?.includes(7)
+      && readTracker(sb) === before) {
+    pass('report-mismatch: numeric selector fails closed without writing');
+  } else {
+    fail(`report-mismatch: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  const forced = runSetStatus(['2', 'Applied', '--force'], sb);
+  if (forced.code === 0 && /\| 2 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('report-mismatch: --force permits an intentional numeric update');
+  } else {
+    fail(`report-mismatch force: code=${forced.code}\n${forced.stdout}${forced.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }

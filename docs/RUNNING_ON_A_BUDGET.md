@@ -1,6 +1,6 @@
 # Running Career-Ops on a Budget
 
-Token usage costs and rate limits are the most common bottlenecks when setting up a high-volume job search pipeline. Since Career-Ops processes full job descriptions, evaluates them against your CV across 10 dimensions, and tailors resumes/cover letters, the context size can grow quickly.
+Token usage costs and rate limits are the most common bottlenecks when setting up a high-volume job search pipeline. Since Career-Ops processes full job descriptions, evaluates them against your CV across five weighted dimensions, and tailors resumes/cover letters, the context size can grow quickly.
 
 Fortunately, **Career-Ops is completely AI-agnostic.** The pipeline relies on the AI coding CLI (or standalone scripts) to process prompt files under `modes/`. This means you can point your CLI to cheaper API providers or local models with **zero code changes** in Career-Ops.
 
@@ -105,7 +105,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
----
+> NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
 
 ## 5. Local LLM Tradeoffs (Ollama / Llama.cpp)
 
@@ -228,7 +228,7 @@ npm run or:eval        # Evaluate a single offer (paste URL or text)
 npm run or:apply       # Generate draft application answers for a report
 ```
 
-**Usage** 
+**Usage**
 
 ```bash
 node openrouter-runner.mjs scan              # Scan Greenhouse API companies for new listings

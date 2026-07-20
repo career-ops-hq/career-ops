@@ -31,6 +31,7 @@ const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
 const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
 const PORTALS_FILE = join(ROOT, 'portals.yml');
+const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
 
@@ -231,7 +232,7 @@ export function scanCompanyNames(content) {
  * @param {object|null} scanStats - Result of computeScanStats (for activePortals).
  * @param {string[]} [producingCompanyNames] - From scanCompanyNames().
  */
-export function computePortalStats(portalsYmlContent, scanStats, producingCompanyNames = []) {
+export function computePortalStats(portalsYmlContent, scanStats, producingCompanyNames = [], portalHealthContent = null) {
   let cfg;
   try {
     cfg = yaml.load(String(portalsYmlContent ?? '')) || {};
@@ -246,12 +247,42 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
   const producing = new Set(producingCompanyNames.map((n) => String(n).toLowerCase()));
   let producingCompanies = 0;
   for (const name of configuredNames) if (producing.has(name)) producingCompanies++;
+
+  let persistentlyDead = 0;
+  if (portalHealthContent) {
+    const lines = portalHealthContent.split('\n');
+    const healthRecords = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        healthRecords.push({ company: parts[1], status: parts[2] });
+      }
+    }
+    const streaks = new Map();
+    for (const r of healthRecords) {
+      if (r.status === 'slug_gone' || r.status === 'network') {
+        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
+      } else if (r.status === 'reachable' || r.status === 'empty') {
+        streaks.set(r.company, 0);
+      }
+    }
+    const threshold = cfg.portal_health_threshold || 3;
+    for (const [company, streak] of streaks.entries()) {
+      if (streak >= threshold && configuredNames.has(String(company).toLowerCase())) {
+        persistentlyDead++;
+      }
+    }
+  }
+
   return {
     configuredCompanies: companies.length,
     configuredBoards: boards.length,
     activePortals: Object.keys(scanStats?.byPortal || {}).length,
     producingCompanies,
     producingPct: pct(producingCompanies, configuredNames.size),
+    persistentlyDead,
   };
 }
 
@@ -351,6 +382,7 @@ export function computeAllStats({
   followupsFile = FOLLOWUPS_FILE,
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
+  portalHealthFile = PORTAL_HEALTH_FILE,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -358,6 +390,7 @@ export function computeAllStats({
   const fups = read(followupsFile);
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
+  const portalHealth = read(portalHealthFile);
   const tracker = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
   return {
@@ -369,12 +402,13 @@ export function computeAllStats({
         followups: !!fups,
         portals: !!portals,
         scanRuns: !!runs,
+        portalHealth: !!portalHealth,
       },
     },
     tracker,
     funnel: tracker ? computeFunnel(tracker.byStatus) : null,
     scan,
-    portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : []) : null,
+    portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
     runs: runs ? computeRunStats(runs) : null,
   };
@@ -411,7 +445,8 @@ function printSummary(stats) {
   }
   const p = stats.portals;
   if (p) {
-    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} have produced a match (${p.producingPct}%) — low ≠ broken, may just be no openings`);
+    const deadPart = p.persistentlyDead > 0 ? ` | 🚨 ${p.persistentlyDead} persistently dead (run verify-portals.mjs)` : '';
+    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} have produced a match (${p.producingPct}%)${deadPart} — low ≠ broken, may just be no openings`);
   } else {
     console.log('Portals:    — no data (portals.yml missing)');
   }

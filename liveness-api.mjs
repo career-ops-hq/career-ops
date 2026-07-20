@@ -2,10 +2,10 @@
 /**
  * liveness-api.mjs — zero-token liveness check for ATS-hosted job postings.
  *
- * Many postings live on ATS platforms (Greenhouse, Lever, Ashby, ...) that expose
- * a public JSON endpoint. We can confirm whether a posting is still live by hitting
- * that endpoint directly — no browser, no LLM tokens — and only fall back to the
- * Playwright check (liveness-browser.mjs) for non-ATS pages or when the API is
+ * Many postings live on ATS platforms (Greenhouse, Lever, Ashby, Workday, ...) that
+ * expose a public JSON endpoint. We can confirm whether a posting is still live by
+ * hitting that endpoint directly — no browser, no LLM tokens — and only fall back to
+ * the Playwright check (liveness-browser.mjs) for non-ATS pages or when the API is
  * inconclusive. This is the cheap first rung of the liveness ladder.
  *
  * CONSERVATIVE BY DESIGN: a false "expired" is worse than the status quo (the user
@@ -14,8 +14,8 @@
  * `null` (→ caller falls back to Playwright).
  *
  * Two endpoint shapes:
- *   - Per-job (Greenhouse, Lever): the URL maps to a single-job endpoint, so a 200
- *     is itself proof the posting is live.
+ *   - Per-job (Greenhouse, Lever, Workday): the URL maps to a single-job endpoint,
+ *     so a 200 is itself proof the posting is live.
  *   - Org-level (Ashby): the URL maps to the org's whole job board. A 200 only
  *     proves the board exists, so the provider's `interpret` step parses the board
  *     and confirms THIS posting is still listed before returning active/expired.
@@ -31,6 +31,22 @@ const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template.
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+// Most providers extract single path segments (SAFE_SEGMENT covers those directly).
+// Workday's job path is genuinely multi-segment (a location slug + a title slug,
+// e.g. "Toronto-ON-CAN/Agentic-AI-Engineer_R260010125"), so a `parts` value may
+// itself contain slashes. This still validates every individual segment against
+// the same strict charset (and rejects ".." in any of them) — it only relaxes
+// "no slash at all" to "no *unsafe* content between slashes", so the traversal/
+// injection guarantee is unchanged.
+function isSafeValue(v) {
+  if (typeof v !== 'string' || v.length === 0) return false;
+  // SAFE_SEGMENT's charset includes "." (some real segments use dots), so ".."
+  // alone passes that regex — same as the single-segment guard in
+  // resolveAtsApi below, the explicit `!includes('..')` check per segment is
+  // load-bearing, not redundant with the regex test.
+  return v.split('/').every((seg) => seg.length > 0 && SAFE_SEGMENT.test(seg) && !seg.includes('..'));
+}
 
 // Each ATS: detect its posting URL, then map to a public JSON API URL.
 // `match` returns the extracted path params (or null); `api` builds the FIXED-host URL.
@@ -87,6 +103,32 @@ const ATS_PROVIDERS = [
       return classifyAshbyBoard(json, jobId);
     },
   },
+  {
+    id: 'workday',
+    // {tenant}.{shard}.myworkdayjobs.com[/{xx-XX}]/{site}/job/{jobPath...}
+    // Mirrors the tenant/shard/site detection in providers/workday.mjs, but for a
+    // single posting rather than the board-wide CXS search endpoint. Workday's
+    // per-job CXS endpoint (`/wday/cxs/{tenant}/{site}/job/{jobPath}`) is a
+    // genuinely PER-JOB API like Greenhouse/Lever — a 200 is itself proof the
+    // posting is live, confirmed against real tenants (BMO, TD, Manulife, CIBC):
+    // an existing posting returns 200, a garbage job id returns 404.
+    //
+    // jobPath is intentionally multi-segment (Workday encodes a location slug and
+    // a title slug as separate path parts, e.g.
+    // "Toronto-ON-CAN/Agentic-AI-Engineer_R260010125") — isSafeValue (not the
+    // single-segment SAFE_SEGMENT check other providers use directly) validates
+    // it component-by-component.
+    match(u) {
+      const m = `${u.hostname}${u.pathname}`.match(
+        /^([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)\/job\/(.+?)\/?$/
+      );
+      if (!m) return null;
+      const [, tenant, shard, site, jobPath] = m;
+      return { tenant, shard, site, jobPath };
+    },
+    api: ({ tenant, shard, site, jobPath }) =>
+      `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
+  },
 ];
 
 /**
@@ -130,8 +172,10 @@ export function resolveAtsApi(rawUrl) {
   for (const provider of ATS_PROVIDERS) {
     const parts = provider.match(u);
     if (!parts) continue;
-    // SSRF guard: every derived segment must be a single safe path segment.
-    if (!Object.values(parts).every((v) => SAFE_SEGMENT.test(v) && !v.includes('..'))) return null;
+    // SSRF guard: every derived value must be safe — a single path segment for
+    // most providers, or (Workday) a slash-separated sequence of safe segments.
+    // isSafeValue enforces the same charset + no-".." rule either way.
+    if (!Object.values(parts).every(isSafeValue)) return null;
     return { ats: provider.id, apiUrl: provider.api(parts), parts, timeoutMs: provider.timeoutMs, interpret: provider.interpret };
   }
   return null;

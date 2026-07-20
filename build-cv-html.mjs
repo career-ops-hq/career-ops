@@ -250,6 +250,24 @@ function renderHtml(template, payload) {
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
 
+  // Projects and education are the genuinely optional CV sections: a
+  // candidate's projects are often already covered under Work Experience, and
+  // not every candidate has a degree. Drop the whole block when there are no
+  // entries, instead of leaving a bare header with nothing under it.
+  //
+  // Both lookaheads match the *next* section marker generically rather than a
+  // named one. Education is followed by Certifications in cv-template.html but
+  // by Skills in resume-template.html, so no single name works there — and a
+  // named `<!-- EDUCATION -->` lookahead on the projects pattern would stop
+  // matching entirely once an empty education block had already been stripped,
+  // leaving the bare "Projects" header this is meant to remove.
+  if (!Array.isArray(payload.projects) || payload.projects.length === 0) {
+    html = html.replace(/<!-- PROJECTS -->[\s\S]*?(?=<!-- [A-Z])/, '');
+  }
+  if (!Array.isArray(payload.education) || payload.education.length === 0) {
+    html = html.replace(/<!-- EDUCATION -->[\s\S]*?(?=<!-- [A-Z])/, '');
+  }
+
   for (const [key, value] of Object.entries(substitutions)) {
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }

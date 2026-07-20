@@ -1,6 +1,10 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
   <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Wieloagentowy system poszukiwania pracy" width="800"></a>
@@ -59,7 +63,7 @@
 
 Career-Ops ([career-ops.org](https://career-ops.org), znany też jako **careerops**) zamienia dowolne AI CLI w pełne centrum dowodzenia poszukiwaniem pracy. Zamiast ręcznego śledzenia aplikacji w arkuszu kalkulacyjnym, dostajesz pipeline zasilany AI, który:
 
-- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–F (10 ważonych wymiarów)
+- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–F (pięć wymiarów składających się na wynik 1.0–5.0)
 - **Generuje spersonalizowane PDF** — CV zoptymalizowane pod ATS, dostosowane do każdej oferty
 - **Skanuje portale** automatycznie (Greenhouse, Ashby, Lever, strony firm)
 - **Przetwarza wsadowo** — ocena 10+ ofert równolegle przez sub-agentów

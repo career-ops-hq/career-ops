@@ -65,7 +65,12 @@ function stripMarkup(text) {
   return text
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+    // Only strip things that actually look like tags: `<name …>` or `</name>`.
+    // A bare `<` is ordinary prose in these sources (`p<0.001`, `ρ < 0.3`, `<30 min`),
+    // and `[^>]` matches newlines — so the old `/<[^>]+>/g` let one stray `<` swallow
+    // everything up to the next `>`, deleting real evidence from the allow-list and
+    // failing truthful CVs (article-digest.md lost 1,327 chars, incl. two metrics).
+    .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')

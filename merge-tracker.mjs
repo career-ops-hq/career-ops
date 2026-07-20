@@ -635,21 +635,21 @@ for (const file of tsvFiles) {
       skipped++;
     }
   } else {
-    // New entry — trust the TSV's own number only when it is BOTH ahead of
-    // this run's max AND not already claimed by any row on the tracker.
-    // `addition.num > maxNum` alone is not proof the number is free: a stale,
-    // precomputed number (e.g. carried by a batch worker's TSV that sat
-    // unmerged while other unrelated evaluations were merged in the
-    // meantime) can still collide with a row already on the tracker even
-    // though it's numerically ahead of a naive maxNum snapshot (#1704).
-    // usedNumbers already includes every number this run has assigned so
-    // far (added below), so same-run collisions are covered too.
+    // New entry - preserve the TSV's reserved ID whenever it is actually
+    // free. Parallel workers can finish out of order, so a valid reservation
+    // may be lower than the current tracker maximum (#1733). Renumber only on
+    // a real collision, using the next free ID above the current maximum and
+    // warning loudly so report/tracker drift is visible (#1704).
     let entryNum;
-    if (addition.num > maxNum && !usedNumbers.has(addition.num)) {
+    if (!usedNumbers.has(addition.num)) {
       entryNum = addition.num;
     } else {
       entryNum = maxNum + 1;
       while (usedNumbers.has(entryNum)) entryNum++;
+      console.warn(
+        `⚠️  Tracker #${addition.num} already used; assigning #${entryNum} to ` +
+        `${addition.company} — ${addition.role}. Report link remains ${addition.report}.`,
+      );
     }
     usedNumbers.add(entryNum);
     if (entryNum > maxNum) maxNum = entryNum;

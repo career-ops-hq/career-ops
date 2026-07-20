@@ -8,7 +8,7 @@
  * modes (apply Step 9, followup, batch) call this instead of editing the table.
  *
  * Usage:
- *   node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--dry-run] [--json]
+ *   node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
  *
  * Row resolution:
  *   - numeric argument → exact match on the # column; if the tracker has a
@@ -43,7 +43,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   rebuildRow, resolveTrackerPath, trackerLockDirFor, acquireTrackerLock,
@@ -59,12 +59,13 @@ const EXIT_NOT_FOUND = 2;
 const EXIT_AMBIGUOUS = 3;
 const EXIT_LOCK_TIMEOUT = 4;
 
-const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--dry-run] [--json]
+const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
 
   <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
+  --force            Allow a numeric selector when the row's report link carries a different ID
   --dry-run          Resolve and validate, but write nothing
   --json             Machine-readable output on stdout (errors included)`;
 
@@ -72,7 +73,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, dryRun: false, json: false };
+const flags = { note: null, role: null, force: false, dryRun: false, json: false };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -86,6 +87,7 @@ for (let i = 0; i < rawArgs.length; i++) {
     flags[a === '--note' ? 'note' : 'role'] = value;
     i++;
   }
+  else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
   else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
@@ -266,6 +268,24 @@ if (rows.length === 0) {
 }
 
 const target = resolveRow(rows);
+
+// A numeric selector is often copied from a report filename. If tracker drift
+// has made the row ID disagree with its local report link, silently updating
+// that row can affect the wrong application. Company selectors remain usable,
+// and --force records an explicit decision to proceed despite the mismatch.
+if (/^\d+$/.test(selector) && !flags.force) {
+  const reportNums = extractTrackerReportNumbers(target.report);
+  const mismatched = reportNums.filter(num => num !== target.num);
+  if (mismatched.length > 0) {
+    failWith(
+      EXIT_AMBIGUOUS,
+      'report-number-mismatch',
+      `Tracker #${target.num} points to report ID(s) ${reportNums.map(num => `#${num}`).join(', ')}. ` +
+        'Use the company selector, repair the Report cell, or re-run with --force.',
+      { trackerNum: target.num, reportNums },
+    );
+  }
+}
 const oldStatus = target.status;
 const note = flags.note != null ? cell(flags.note) : null;
 

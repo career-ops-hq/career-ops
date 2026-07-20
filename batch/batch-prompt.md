@@ -209,6 +209,36 @@ Assess whether the posting appears real and worth pursuing.
 
 Batch mode limitation: Playwright is not available, so exact apply-button state and freshness cannot be directly verified. Mark those signals as `unverified (batch mode)`.
 
+#### Risk Summary (after Block G)
+
+Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order, three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **Aggregation only, zero new judgment:** each row quotes the verdict already produced by its source signal; it never re-scores or overrides.
+
+**`— not evaluated` is a first-class state:** a signal that this worker cannot evaluate is explicitly declared — NEVER omit the row — so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it just found no redflags file), not a fourth free-floating state.
+
+Batch rendering rules per row:
+
+| Signal | Batch rendering |
+|--------|-----------------|
+| Posting legitimacy | Mirror the Block G tier: `✅ High Confidence`, or `⚠️ {tier} — {one-line reason}` |
+| Employment classification | `— not evaluated` (classification check is not part of batch Block G) |
+| Culture screen | `— not evaluated` (batch Block A does not produce the Culture screen pass/caution/fail field) |
+| Interview red flags | If `interview-prep/{company-slug}-redflags.md` exists, mirror its warning level + relative link `[{level}](../interview-prep/{company-slug}-redflags.md)`; if not, `— no interview sessions yet` |
+| AI claims vs. infrastructure | If this prompt/report contains the AI/infrastructure mismatch check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); if not, `— not evaluated` |
+
+Block format:
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Employment classification | — not evaluated |
+| Culture screen | — not evaluated |
+| Interview red flags | — no interview sessions yet |
+| AI claims vs. infrastructure | — not evaluated |
+```
+
 #### Score Global
 Read `modes/_custom.md` → Scoring Rules, if it exists, and apply its override here. Default (if absent or silent): calculate global score based on dimension scores below.
 
@@ -267,6 +297,12 @@ discard_reasons:
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
 advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
+risk_summary:
+  legitimacy: "{high_confidence | proceed_with_caution | suspicious}"
+  classification: "{clear | flagged | not_evaluated}"
+  culture: "{pass | caution | fail | not_evaluated}"
+  interview_redflags: "{none | caution | warning | not_evaluated}"
+  ai_infra: "{consistent | mismatch | not_evaluated}"
 ```
 
 Rules:
@@ -275,6 +311,7 @@ Rules:
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
 - Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
+- `risk_summary` mirrors the `## Risk Summary` block row by row — same source verdicts, snake_cased: `legitimacy` from the Block G tier (`high_confidence` / `proceed_with_caution` / `suspicious`), `culture` from the Block A Culture screen (`pass` / `caution` / `fail`), `interview_redflags` from the red-flag file's warning level (`none` / `caution` / `warning`). Any row rendered `— not evaluated` (or `— no interview sessions yet`) is `not_evaluated` here. Never invent a value the block does not show.
 
 ### Step 3 — Save the Report
 
@@ -325,6 +362,12 @@ discard_reasons:
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
 advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
+risk_summary:
+  legitimacy: "{high_confidence | proceed_with_caution | suspicious}"
+  classification: "{clear | flagged | not_evaluated}"
+  culture: "{pass | caution | fail | not_evaluated}"
+  interview_redflags: "{none | caution | warning | not_evaluated}"
+  ai_infra: "{consistent | mismatch | not_evaluated}"
 ```
 ```
 
@@ -338,6 +381,7 @@ Then include:
 - `## E) Personalization Plan`
 - `## F) Interview Plan`
 - `## G) Posting Legitimacy`
+- `## Risk Summary`
 - `## Extracted Keywords`
 
 Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary` and YAML keys exact for downstream parsers.

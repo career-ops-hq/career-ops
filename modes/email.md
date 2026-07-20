@@ -47,6 +47,17 @@ Supported inputs:
      can't submit the form", "the assessment link is dead", "the login loop
      won't let me back in". Confirm the variant before drafting if ambiguous.
 
+5. `/career-ops email noshow {report-number-or-slug}`
+   - Load the matching `reports/{NNN}-*.md` for company and role context.
+   - Draft a confirmed-time no-show follow-up (see the dedicated section
+     below).
+   - Also trigger this variant conversationally when the user describes a
+     missed call after a two-way scheduling confirmation, e.g. "my call with
+     {interviewer} at {time} didn't happen", "we confirmed 2pm and nobody
+     called", "the recruiter never dialed in". Confirm the variant before
+     drafting if ambiguous — this is distinct from the cadence-driven
+     follow-ups in `modes/followup.md` (see the scope note below).
+
 ---
 
 ## Step 1 — Load Context
@@ -94,7 +105,7 @@ If `candidate.wechat` is absent, omit WeChat. Do not invent one.
 
 ## Step 2 — Classify Email Type
 
-Choose one of four variants from user wording or context:
+Choose one of five variants from user wording or context:
 
 | Variant | When | Tone |
 |---|---|---|
@@ -102,19 +113,24 @@ Choose one of four variants from user wording or context:
 | `referral_request` | User asks for referral, internal contact, friend, alumni, or former colleague. | Warm, low-pressure, easy to forward |
 | `cold_application` | No posted role, speculative reach-out, "cold email". | Direct, value-first, no desperation |
 | `process_stuck` | The ATS or application flow broke mid-process and email is the fallback channel. | Factual, forwardable, one precise ask |
+| `confirmed_time_noshow` | A recruiter or interviewer confirmed a specific call time in a two-way exchange and did not call. | Professional, not annoyed; time-anchored, not apologetic |
 
 If unclear, default to `hr_application`.
 
 **Precedence:** any process-failure signal (a broken step, an error message, a
 dead link, failed scheduling) selects `process_stuck` over the other variants.
-If a failure is hinted at but the intent is ambiguous, ask for confirmation —
-do not fall through to `hr_application`. The `hr_application` default applies
-only when there is no failure indication at all.
+A missed call after an explicit two-way time confirmation selects
+`confirmed_time_noshow` instead — it is not a process failure (nothing broke;
+someone simply did not call), so do not route it through `process_stuck`. If
+a failure or a missed-call signal is hinted at but the intent is ambiguous,
+ask for confirmation — do not fall through to `hr_application`. The
+`hr_application` default applies only when there is no failure or no-show
+indication at all.
 
-For `process_stuck`, skip Step 3 (fit points) and Step 4 (attachment checklist)
-— the reader already has the application; this email exists to unblock a
-process, not to sell — and follow the dedicated section below instead of the
-Step 5 structures.
+For `process_stuck` and `confirmed_time_noshow`, skip Step 3 (fit points) and
+Step 4 (attachment checklist) — the reader already has the application; these
+emails exist to unblock a process or reopen a scheduling gap, not to sell —
+and follow the dedicated sections below instead of the Step 5 structures.
 
 ---
 
@@ -309,6 +325,87 @@ stall the process.
 Best regards,
 {Candidate Name}
 {email}
+```
+
+---
+
+## Confirmed-Time No-Show Follow-up (`confirmed_time_noshow`)
+
+**Scope note:** this variant is unrelated to the elapsed-time cadence in
+`modes/followup.md` / `followup-cadence.mjs` (applied: 7 days, responded: 3
+days, interview: 1 day). Those track "it's been N days since the status
+changed." This variant is same-day and commitment-specific: a recruiter or
+interviewer explicitly confirmed a call time in a two-way exchange (email,
+ATS scheduler, text) and the call did not happen. There is no day-elapsed
+scoring here and no `followup-cadence.mjs` output to read — the trigger is
+the user telling you the confirmed time passed with no call.
+
+### Intake
+
+Required, always ask for whatever is missing (do not invent any of these):
+
+1. **The confirmed date/time**, as agreed in the exchange (include timezone
+   if known).
+   Before drafting, verify that this time has passed and is today in the
+   relevant timezone; otherwise clarify the scenario or use another variant.
+2. **The interviewer or recruiter's name**, exactly as given by the user —
+   do not scrape or guess it from a report.
+3. **Remaining same-day availability** the user wants to offer (a window,
+   e.g. "before 4pm today" or "any time after 2:30").
+4. Company and role, for the subject line (from the linked report if one was
+   given, otherwise ask).
+
+### Draft structure
+
+1. Greeting, addressed to the named interviewer/recruiter by name.
+2. One plain sentence stating the confirmed time and that the call did not
+   happen. State it as a fact, not an accusation — no "I was very
+   disappointed" or over-apologizing for pointing it out.
+3. One sentence offering the remaining same-day availability the user gave.
+4. One-line reaffirmation of interest — brief, not a resell of fit points
+   (Step 3 is skipped for this variant).
+5. Signature.
+
+Keep it short: under 120 words. Reference the specific confirmed time
+plainly once in the body (the subject line may also reference it); do not
+restate it more than once in the body or pad with general "just checking in"
+framing (same banned-phrase rule as `modes/followup.md`).
+
+### Guardrails
+
+- **Tone is professional, not annoyed.** No passive-aggressive phrasing
+  ("I waited...", "I understand things come up, but..."), no guilt framing,
+  no exclamation points.
+- Never fabricate the confirmed time, the interviewer's name, or the
+  availability window — all three are user-provided inputs, never inferred
+  or scraped from a report.
+- Never speculate about why the call was missed (traffic, forgot, double
+  booked). State the fact and move to the ask.
+- This is a single follow-up for a single missed commitment, not a
+  multi-touch cadence — do not suggest a second no-show follow-up; if a
+  second miss happens, treat that as its own new instance of this same
+  scenario.
+- All standing email-mode guardrails apply unchanged: draft only, never
+  send, never click, never submit.
+
+### Example (generic)
+
+All values are placeholders. Fill them only with details the user actually
+provides.
+
+```text
+Subject: {Role} — following up on our {time} call
+
+Hi {Interviewer Name},
+
+We'd confirmed a call today at {confirmed time, timezone} for the {Role}
+role, and I didn't receive it. I'm available {remaining availability window}
+if there's still time to connect today.
+
+Still very interested in the role and happy to work around your schedule.
+
+Best,
+{Candidate Name}
 ```
 
 ---

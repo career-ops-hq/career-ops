@@ -157,6 +157,127 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
 }
 
 /**
+ * Extract report IDs referenced by one tracker Report cell.
+ *
+ * Both the numeric markdown label and the local report filename are returned.
+ * Keeping both makes tracker drift visible instead of silently trusting one
+ * side of a malformed link. External URLs are ignored even when their path
+ * happens to contain a reports/ segment.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @returns {number[]} Unique positive report IDs in encounter order.
+ */
+function markdownLinkDestination(raw) {
+  const value = String(raw).trimStart();
+  if (value.startsWith('<')) {
+    for (let i = 1; i < value.length; i++) {
+      if (value[i] === '\\') {
+        i++;
+      } else if (value[i] === '>') {
+        return value.slice(1, i).replace(/\\([\\()<> ])/g, '$1');
+      }
+    }
+    return null;
+  }
+
+  let depth = 0;
+  let end = value.length;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === '\\') {
+      i++;
+      continue;
+    }
+    if (value[i] === '(') depth++;
+    else if (value[i] === ')' && depth > 0) depth--;
+    else if (/\s/.test(value[i]) && depth === 0) {
+      end = i;
+      break;
+    }
+  }
+  const destination = value.slice(0, end).trim();
+  return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
+}
+
+function parseMarkdownLinks(value) {
+  const links = [];
+  let cursor = 0;
+  while (cursor < value.length) {
+    const labelStart = value.indexOf('[', cursor);
+    if (labelStart === -1) break;
+
+    let labelEnd = -1;
+    for (let i = labelStart + 1; i < value.length; i++) {
+      if (value[i] === '\\') i++;
+      else if (value[i] === ']') {
+        labelEnd = i;
+        break;
+      }
+    }
+    if (labelEnd === -1 || value[labelEnd + 1] !== '(') {
+      cursor = labelStart + 1;
+      continue;
+    }
+
+    let depth = 1;
+    let linkEnd = -1;
+    for (let i = labelEnd + 2; i < value.length; i++) {
+      if (value[i] === '\\') {
+        i++;
+      } else if (value[i] === '(') {
+        depth++;
+      } else if (value[i] === ')' && --depth === 0) {
+        linkEnd = i;
+        break;
+      }
+    }
+    if (linkEnd === -1) {
+      cursor = labelStart + 1;
+      continue;
+    }
+
+    const target = markdownLinkDestination(value.slice(labelEnd + 2, linkEnd));
+    if (target != null) links.push({ label: value.slice(labelStart + 1, labelEnd), target });
+    cursor = linkEnd + 1;
+  }
+  return links;
+}
+
+export function extractTrackerReportNumbers(reportCell) {
+  const value = String(reportCell ?? '').trim();
+  if (!value || value === '-' || value === '—') return [];
+
+  const numbers = new Set();
+  const numberFromTarget = (rawTarget) => {
+    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
+    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
+    const pathname = target.split(/[?#]/, 1)[0];
+    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
+      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
+    if (!match) return null;
+    const num = parseInt(match[1], 10);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  };
+
+  const markdownLinks = parseMarkdownLinks(value);
+  for (const link of markdownLinks) {
+    const pathNum = numberFromTarget(link.target);
+    if (pathNum == null) continue;
+    const label = link.label.trim();
+    if (/^\d+$/.test(label)) {
+      const labelNum = parseInt(label, 10);
+      if (labelNum > 0) numbers.add(labelNum);
+    }
+    numbers.add(pathNum);
+  }
+
+  if (markdownLinks.length === 0) {
+    const pathNum = numberFromTarget(value);
+    if (pathNum != null) numbers.add(pathNum);
+  }
+  return [...numbers];
+}
+
+/**
  * Unicode-aware key for Via (agency) comparison.
  *
  * normalizeCompany()-style keys strip everything outside [a-z0-9], so

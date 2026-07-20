@@ -36,6 +36,7 @@ Elabora gli URL degli annunci accumulati in `data/pipeline.md`. Il candidato agg
 ## Rilevamento dell'annuncio dall'URL
 
 1. **Playwright (preferito):** `browser_navigate` + `browser_snapshot`. Funziona con tutte le Single Page Application (SPA).
+   - **Opzionale — estrattore CLI (`scan.extractor: cli` in `config/profile.yml`):** esegui invece `node browser-extract.mjs <url>` (`--mode jd`) — `{ "url", "title", "text" }` compatto, meno token (dipende dal portale). **Ripiega in silenzio** su `browser_navigate` + `browser_snapshot` in caso di errore o assenza.
 2. **WebFetch (fallback):** Per le pagine statiche o quando Playwright non è disponibile.
 3. **WebSearch (ultima risorsa):** Per cercare su portali secondari che indicizzano l'annuncio.
 

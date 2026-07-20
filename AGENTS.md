@@ -112,7 +112,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/scan-runs.tsv` | Per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
 | `followup-seed.mjs` | Seeds `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied (JSON output) |
-| `set-status.mjs` | Canonical CLI to update a tracker row: `node set-status.mjs <report#\|company> <State> [--note]` — strict states.yml validation, shared tracker lock, atomic write |
+| `set-status.mjs` | Canonical CLI to update a tracker row: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared tracker lock, atomic write |
 | `invite-match.mjs` | Fuzzy-matches a pasted interview-invite email (company name, date, req ID) against `data/applications.md`, ranking candidates when a company has multiple tracker entries (JSON or `--summary` table output) |
 | `paste-reply.mjs` | Manual/no-Gmail input path into `reply-watch.mjs`'s classification pipeline — normalizes a pasted or file-provided email's subject/from/body into a candidate object and appends it to `data/reply-candidates.json` (never overwrites existing entries; never classifies or touches the tracker itself) |
 | `detect-reposts.mjs` | Repost detector — flags roles re-listed 2+ times in 90 days from scan-history.tsv (JSON or `--summary` table output) |
@@ -128,7 +128,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner — walks the full public job-board-aggregator dataset per ATS provider (Greenhouse/Lever/Ashby/Workday), filtered by portals.yml's title_filter/location_filter. No company-list curation needed; complements scan.mjs's company-first model. |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
+| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy) + Risk Summary, plus `## Machine Summary` YAML for downstream scripts. Header includes `**Legitimacy:** {tier}`. |
 
 ### Plugins (optional)
 
@@ -401,7 +401,7 @@ When spawning headless workers for batch processing, use the appropriate command
 | Antigravity CLI | `agy -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
 
-**Parallel fan-outs — reserve report numbers first.** When orchestrating N parallel evaluators (headless workers, subagents, or multiple agent windows), reserve the report-number range before spawning: `node reserve-report-num.mjs --count N` prints e.g. `042-049`; hand each worker its own number. Each slot claim is individually atomic; the contiguous range is an ergonomic allocation, not an all-or-nothing transaction — on collision the partially claimed slots are released and the reservation restarts past the collision. Release with `node reserve-report-num.mjs --release 042-049` when done (stale sentinels are GC'd after 4h, so reserve right before spawning; collision restarts leave permanent — harmless — gaps in the sequence). Never let parallel workers compute `max+1` themselves — that is the #749 race.
+**Parallel fan-outs — reserve report numbers first.** When orchestrating N parallel evaluators (headless workers, subagents, or multiple agent windows), reserve the report-number range before spawning: `node reserve-report-num.mjs --count N` prints e.g. `042-049`; hand each worker its own number. The allocator treats report files, sentinels, tracker row IDs, and tracker report links as occupied. Each slot claim is individually atomic; the contiguous range is an ergonomic allocation, not an all-or-nothing transaction — on collision the partially claimed slots are released and the reservation restarts past the collision. Release with `node reserve-report-num.mjs --release 042-049` when done (stale sentinels are GC'd after 4h, so reserve right before spawning; collision restarts leave permanent — harmless — gaps in the sequence). Never let parallel workers compute `max+1` themselves — that is the #749 race.
 
 ## Stack and Conventions
 

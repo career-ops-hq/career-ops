@@ -1,6 +1,12 @@
-# Career-Ops | نظام إدارة وتخطيط البحث عن وظائف باستخدام الذكاء الاصطناعي (وكيل مأتمت)
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<p align="center">نظام إدارة وتخطيط البحث عن وظائف باستخدام الذكاء الاصطناعي (وكيل مأتمت)</p>
+
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="right" dir="rtl">
   <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — نظام البحث عن وظائف القائم على عدة وكلاء ذكاء اصطناعي" width="800"></a>
@@ -47,7 +53,7 @@
 
 يقوم **Career-Ops** ([career-ops.org](https://career-ops.org)) بتحويل أي واجهة سطر أوامر للبرمجة بالذكاء الاصطناعي (AI coding CLI) إلى مركز قيادة كامل للبحث عن الوظائف. بدلاً من تتبع طلبات التوظيف يدوياً في جداول البيانات، تحصل على مسار عمل مدعوم بالذكاء الاصطناعي يقوم بـ:
 
-- **تقييم العروض الوظيفية** بنظام تقييم هيكلي من A إلى F (يغطي 10 أبعاد موزونة).
+- **تقييم العروض الوظيفية** بنظام تقييم هيكلي من A إلى F (خمسة أبعاد تُنتج درجة من 1.0 إلى 5.0).
 - **إنشاء سير ذاتية مخصصة وموجهة بصيغة PDF** متوافقة مع أنظمة تتبع المتقدمين (ATS).
 - **فحص بوابات التوظيف تلقائياً** (مثل Greenhouse و Ashby و Lever وصفحات الشركات).
 - **المعالجة بالدفعة (Batch Processing)** لتقييم أكثر من 10 عروض عمل بالتوازي باستخدام وكلاء فرعيين.

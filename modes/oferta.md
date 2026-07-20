@@ -277,6 +277,23 @@ Check the JD for these three signal classes:
 
 This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — the posting can be entirely real and still oversell its AI maturity. It is orthogonal to ghost-job detection and is reported separately.
 
+**8. Benefits/Employment Terminology Country Mismatch** (from JD text; cross-check stated location against jurisdiction-specific benefits/employment terms):
+
+Some JDs are copy-pasted from a template built for a different country's postings, leaving behind benefits or employment-law terminology that belongs to the wrong jurisdiction — e.g. a Canada-located posting that lists "401(k)" or "W-2 employment," which are US-only terms. The posting can be entirely live and real and still describe the wrong country's benefits; this is a template-error detector, not a ghost-job signal. Check the JD's benefits/employment section against the jurisdiction-specific term list below (add a new row to extend to another country — this table is a data reference, not instruction logic, so extending it never requires touching the rule text):
+
+| Jurisdiction | Strong markers (unconditional) | Corroborating-only markers |
+|---|---|---|
+| US only | "401(k)", "W-2 employment" | "PTO" — used in Canada and other jurisdictions too, so it never triggers this signal on its own; count it only when it appears alongside "401(k)" or "W-2 employment" in the same posting |
+| Canada only | "RRSP", "T4" | "Employment Standards Act" spelled out — the bare acronym "ESA" is ambiguous (collides with other jurisdictions' usage) and must never be matched on its own |
+
+Only flag when the JD's stated location is in jurisdiction A, but the benefits/employment section uses a strong marker exclusive to jurisdiction B, or a corroborating-only marker that co-occurs with a strong marker from jurisdiction B. A corroborating-only marker appearing by itself (e.g. "PTO" with no "401(k)"/"W-2," or a bare "ESA" with no expanded "Employment Standards Act") must never trigger this signal on its own. Generic terms ("health benefits," "retirement plan") should never trigger this on their own.
+
+If this mismatch is present, append a short, non-alarmist note to the report:
+
+> ⚠️ **Benefits terminology mismatch signal:** This posting is listed in {location}, but its benefits section uses {jurisdiction B}-specific terms ("{specific phrase found}"). This is often a copy-paste artifact from a template used for a different country's postings, and doesn't necessarily mean the posting is fake — but worth confirming with the employer/recruiter which country's employment terms actually apply before assuming the listed benefits package is accurate.
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately.
+
 ### Output format:
 
 **Assessment:** One of three tiers:
@@ -295,6 +312,40 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 - **Startup / pre-revenue:** Early-stage companies may have vague JDs because the role is genuinely undefined. Weight description vagueness less heavily.
 - **No date available:** If posting age cannot be determined and no other signals are concerning, default to "Proceed with Caution" with a note that limited data was available. NEVER default to "Suspicious" without evidence.
 - **Recruiter-sourced (no public posting):** Freshness signals unavailable. Note that active recruiter contact is itself a positive legitimacy signal.
+
+---
+
+## Risk Summary (after Block G)
+
+Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order — so the question the candidate actually asks ("is this company safe to join?") is answered on one screen instead of by mentally joining Block A, Block G, and a sidecar file.
+
+**Aggregation only, zero new judgment.** Each row quotes or links the verdict already produced by its source signal. The summary never re-scores, re-weights, or overrides — if a row looks wrong, the fix belongs in the source signal, not here.
+
+Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state.
+
+| Signal | Source | Row rendering |
+|--------|--------|---------------|
+| Posting legitimacy | Block G assessment tier | `✅ High Confidence`, or `⚠️ {tier} — {one-line reason}` for Proceed with Caution / Suspicious |
+| Employment classification | Employment classification signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ contractor-style language: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
+| Culture screen | Culture screen field in Block A | `✅ pass`, or `⚠️ caution — {evidence}` / `⚠️ fail — {evidence}`; `— not evaluated` when no screen was run |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
+| AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
+
+Block format:
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Employment classification | ⚠️ contractor-style language: "{quoted phrase}" |
+| Culture screen | ⚠️ caution — {evidence} |
+| Interview red flags | — no interview sessions yet |
+| AI claims vs. infrastructure | — not evaluated |
+```
+
+Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose.
 
 ---
 
@@ -407,6 +458,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## G) Posting Legitimacy
 (full content of block G)
 
+## Risk Summary
+(one row per risk signal, fixed order — see the Risk Summary section above)
+
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)
 
@@ -416,7 +470,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (list of 15-20 keywords from the JD for ATS optimization)
 ```
 
-**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`.
+**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`. It also includes `risk_summary`: the Risk Summary block mirrored as a map (schema and enum values in `batch/batch-prompt.md`).
 
 ### 2. Record in tracker
 

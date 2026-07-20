@@ -514,6 +514,27 @@ soft_gaps:
     }
   }
 
+  // Targeted --url-text path (#1894): the fetched page text must reach
+  // computeTargetedGaps as a plain STRING. It used to be run through normalizeJd
+  // (which wants the { title, text } DOM object), yielding { text: '' } and then
+  // a `text.matchAll is not a function` crash. Guard both halves: a realistic
+  // multi-line JD string produces the right gaps, and the source no longer feeds
+  // the raw string to normalizeJd.
+  {
+    const jdText = 'Requirements:\n- Kubernetes and Go\n- 5+ years experience';
+    const { gaps } = computeTargetedGaps(jdText, 'Python, AWS'); // must not throw on a string
+    if (!gaps.includes('Kubernetes') || !gaps.includes('Go')) {
+      failures.push(`url-text: multi-line JD string should yield Kubernetes+Go gaps (got ${gaps.join(',')})`);
+    }
+    const selfSrc = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    if (/normalizeJd\(\s*targetText/.test(selfSrc)) {
+      failures.push('url-text: upskill.mjs still passes the raw fetched string to normalizeJd (regression, #1894)');
+    }
+    if (!/compactText\(targetText\)/.test(selfSrc)) {
+      failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -604,9 +625,15 @@ if (urlTextIdx !== -1 || directUrl) {
         if (browser) await browser.close();
       }
 
+      // Whitespace-collapse + length-cap the fetched page text. Use compactText
+      // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
+      // text } DOM-read object and returns { url, title, text }, so feeding it
+      // the innerText/fetch STRING silently produced { text: '' } — destroying
+      // the JD and then throwing `text.matchAll is not a function` downstream
+      // (#1894). compactText is the string-in/string-out helper this wants.
       try {
-        const { normalizeJd } = await import('./browser-extract.mjs');
-        targetText = normalizeJd(targetText, inputSource);
+        const { compactText } = await import('./browser-extract.mjs');
+        targetText = compactText(targetText);
       } catch (e) {}
     } else {
       if (existsSync(inputSource)) {

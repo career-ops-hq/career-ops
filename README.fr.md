@@ -1,6 +1,10 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
   <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Système de recherche d'emploi multi-agent Career-Ops" width="800"></a>
@@ -69,7 +73,7 @@
 
 Career-Ops ([career-ops.org](https://career-ops.org), également connu sous le nom de **careerops**) transforme n'importe quelle interface de ligne de commande (CLI) de codage IA en un véritable centre de commandement pour votre recherche d'emploi. Au lieu de suivre manuellement vos candidatures dans un tableau de bord, vous disposez d'un pipeline alimenté par l'IA qui :
 
-- **Évalue les offres** avec un système de notation structuré de A à F (10 dimensions pondérées)
+- **Évalue les offres** avec une évaluation structurée de A à F (cinq dimensions alimentant un score de 1,0 à 5,0)
 - **Génère des PDF sur mesure** — des CV optimisés pour les systèmes ATS, personnalisés pour chaque description de poste
 - **Scanne automatiquement les portails** (Greenhouse, Ashby, Lever, pages carrières des entreprises)
 - **Traite en lot** — évalue plus de 10 offres en parallèle avec des sous-agents
@@ -304,9 +308,11 @@ career-ops/
 
 ## À propos de l'auteur
 
-Je m'appelle Santiago — Head of Applied AI, ancien fondateur (j'ai créé et vendu une entreprise qui fonctionne toujours sous mon nom). J'ai conçu career-ops pour gérer ma propre recherche d'emploi. Cela a fonctionné : je l'ai utilisé pour décrocher mon poste actuel.
+Je m'appelle [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) — Head of Applied AI, ancien fondateur (j'ai créé et vendu une entreprise qui fonctionne toujours sous mon nom). J'ai conçu career-ops pour gérer ma propre recherche d'emploi. Cela a fonctionné : je l'ai utilisé pour décrocher mon poste actuel.
 
 Mon portfolio et mes autres projets open source → [santifer.io](https://santifer.io)
+
+Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/wiki/Q138710224) · [career-ops](https://www.wikidata.org/wiki/Q139007988).
 
 ## Historique des étoiles
 

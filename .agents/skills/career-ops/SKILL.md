@@ -51,6 +51,8 @@ Determine the mode from `$mode`:
 | `latex` | `latex` |
 | `latex-tex` | `latex-tex` |
 | `email` | `email` |
+| `add` | `add` |
+| `expand` | `expand` |
 | `training` | `training` |
 | `project` | `project` |
 | `tracker` | `tracker` |
@@ -129,6 +131,7 @@ Available commands:
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
   /career-ops email     → Formal application email draft (draft-only; never sends, submits, or clicks)
   /career-ops add       → Add a project/paper/role to your CV (fetch + preview + confirm)
+  /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops training  → Evaluate course/cert against North Star
   /career-ops project   → Evaluate portfolio project idea
   /career-ops tracker   → Application status overview

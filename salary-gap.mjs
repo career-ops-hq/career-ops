@@ -3,11 +3,11 @@
  * salary-gap.mjs — Desired vs Advertised vs Actual compensation analyzer
  *
  * Salary facts are append-only observations, never mutated:
- *   { tracker#, date, type: desired|advertised|actual, amount, currency, source, note }
+ *   { tracker#, date, type: desired|advertised|actual|stated, amount, currency, source, note, round, interviewer }
  *
  * Sources folded on read (one write path per fact):
  *   1. reports/{###}-*.md Machine Summary `advertised_comp`  -> advertised (source: jd)
- *   2. data/salary-observations.tsv (user-layer, append-only) -> desired/actual (+ corrections)
+ *   2. data/salary-observations.tsv (user-layer, append-only) -> desired/actual/stated (+ corrections)
  *   3. config/profile.yml compensation.target_range           -> desired default (source: profile)
  *
  * Fold: per (tracker#, type), highest trust tier wins, then latest date.
@@ -15,13 +15,15 @@
  *   desired:    user > profile
  *   advertised: user > recruiter-verbal > jd
  *
- * Aggregates grouped by (company, role) and per currency — no FX conversion.
- * Unparseable amounts, unrecognized sources, orphaned observations (tracker#
- * without report/tracker row), sample sizes, and staleness are reported loudly,
- * never dropped silently.
+ * `stated` observations are a separate, narrower-purpose log: a specific number
+ * the candidate verbally committed to, in a specific interview round, to a
+ * specific interviewer — so a later round doesn't accidentally contradict it.
+ * They carry no trust tier and never participate in the fold/gap math above;
+ * look them up with getStatedObservations() or `--stated-for <tracker#>`.
  *
  * Run: node salary-gap.mjs             (JSON)
  *      node salary-gap.mjs --summary   (human-readable)
+ *      node salary-gap.mjs --stated-for <tracker#>   (prior stated-comp observations, JSON)
  *      node salary-gap.mjs --self-test
  */
 
@@ -37,6 +39,8 @@ const REPORTS_DIR = join(CAREER_OPS, 'reports');
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const statedForFlagIdx = args.indexOf('--stated-for');
+const statedForNum = statedForFlagIdx !== -1 ? args[statedForFlagIdx + 1] : null;
 
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
@@ -73,10 +77,15 @@ export function parseAmount(raw) {
   return null;
 }
 
-const VALID_TYPES = new Set(['desired', 'advertised', 'actual']);
+const VALID_TYPES = new Set(['desired', 'advertised', 'actual', 'stated']);
 
 // --- Observation log parsing (TSV) ---
-// line: {tracker#}\t{YYYY-MM-DD}\t{type}\t{amount}\t{currency}\t{source}\t{note}
+// line: {tracker#}\t{YYYY-MM-DD}\t{type}\t{amount}\t{currency}\t{source}\t{note}\t{round}\t{interviewer}
+// `round`/`interviewer` are two OPTIONAL trailing columns, meaningful only for
+// type `stated` (which round, and to whom, the number was said). Appended after
+// `note` rather than reordering the existing 7 columns, so every pre-existing
+// row in the append-only log — which has no idea these columns exist — keeps
+// parsing exactly as before (round/interviewer both default to '').
 export function parseObservations(content) {
   const out = [];
   for (const line of String(content || '').split('\n')) {
@@ -84,13 +93,24 @@ export function parseObservations(content) {
     if (!t || t.startsWith('#')) continue;
     const cells = t.split('\t');
     if (cells.length < 6) continue;
-    const [num, date, type, amount, currency, source, note = ''] = cells.map(c => c.trim());
+    const [num, date, type, amount, currency, source, note = '', round = '', interviewer = ''] = cells.map(c => c.trim());
     if (!VALID_TYPES.has(type)) continue;
     // blank currency cell -> UNKNOWN, so the fold's currency guard excludes it from
     // gap math ('' === '' would otherwise pass the strict-equality comparability check)
-    out.push({ num, date, type, amount, currency: currency ? currency.toUpperCase() : 'UNKNOWN', source, note, parsed: parseAmount(amount) });
+    out.push({ num, date, type, amount, currency: currency ? currency.toUpperCase() : 'UNKNOWN', source, note, round, interviewer, parsed: parseAmount(amount) });
   }
   return out;
+}
+
+// --- Stated-comp lookup ---
+// Returns prior `stated` observations for a tracker#, oldest first, so a later
+// round can be reminded of exactly what was already said and to whom. Deliberately
+// NOT folded/trust-ranked like desired/advertised/actual — every prior statement
+// stays visible (a candidate needs the full trail, not just the "best" one).
+export function getStatedObservations(observations, num) {
+  return observations
+    .filter(o => o.type === 'stated' && o.num === num)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 // Like analyze-patterns.mjs:110 but WITHOUT `json`: analyze-patterns feeds the fence
@@ -360,6 +380,29 @@ function selfTest() {
   const blankCur = parseObservations('008\t2026-07-01\tactual\t91k\t\toffer-letter\tblank currency cell');
   assert(blankCur.length === 1 && blankCur[0].currency === 'UNKNOWN', 'blank currency cell -> UNKNOWN (excluded from gap math by the UNKNOWN guard)');
 
+  // backward compatibility: pre-existing rows (7 cells, no round/interviewer) still parse
+  assert(obs[0].round === '' && obs[0].interviewer === '', 'legacy 7-column row -> round/interviewer default to empty string');
+
+  // stated type: round + interviewer parse correctly on the 8th/9th columns
+  const statedFixture = [
+    '020\t2026-07-01\tstated\t90-95k\tCAD\tuser\ttold recruiter our range\tprescreen\tJane Recruiter',
+    '020\t2026-07-08\tstated\t92k\tCAD\tuser\tconfirmed same number in panel\tpanel\tJohn Manager',
+    '021\t2026-07-02\tstated\t80k\tCAD\tuser\t', // no round/interviewer at all — still valid stated obs
+  ].join('\n');
+  const statedObs = parseObservations(statedFixture);
+  assert(statedObs.length === 3, `3 stated observations, got ${statedObs.length}`);
+  assert(statedObs[0].type === 'stated' && statedObs[0].round === 'prescreen' && statedObs[0].interviewer === 'Jane Recruiter',
+    'stated observation carries round + interviewer');
+  assert(statedObs[2].round === '' && statedObs[2].interviewer === '', 'stated observation without round/interviewer defaults to empty string');
+
+  // getStatedObservations: lookup by tracker#, oldest first, other tracker#s excluded
+  const lookup020 = getStatedObservations(statedObs, '020');
+  assert(lookup020.length === 2, `2 prior stated observations for 020, got ${lookup020.length}`);
+  assert(lookup020[0].interviewer === 'Jane Recruiter' && lookup020[1].interviewer === 'John Manager',
+    'stated lookup returns oldest first');
+  assert(getStatedObservations(statedObs, '021').length === 1, '021 lookup isolated from 020');
+  assert(getStatedObservations(statedObs, '999').length === 0, 'no stated observations for untracked num -> empty array');
+
   // reportToObservation
   const r1 = reportToObservation(REPORT_FIXTURE_001, '001', '2026-06-20');
   assert(r1.company === 'Acme' && r1.role === 'ML Eng', 'report company/role');
@@ -618,6 +661,17 @@ function printSummary(result) {
 
 function main() {
   if (selfTestMode) { selfTest(); return; }
+
+  if (statedForFlagIdx !== -1) {
+    if (!statedForNum) {
+      console.error('Usage: node salary-gap.mjs --stated-for <tracker#>');
+      process.exit(1);
+    }
+    const { observations } = collectSources();
+    const stated = getStatedObservations(observations, statedForNum);
+    console.log(JSON.stringify({ num: statedForNum, stated }, null, 2));
+    return;
+  }
 
   const { apps, observations } = collectSources();
   const result = fold(observations, apps, loadProfileDesired());

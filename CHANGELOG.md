@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.21.0](https://github.com/santifer/career-ops/compare/career-ops-v1.20.0...career-ops-v1.21.0) (2026-07-17)
+
+
+### Features
+
+* **apply:** warn before reapplying to a repeat company ([#1921](https://github.com/santifer/career-ops/issues/1921)) ([6cdca85](https://github.com/santifer/career-ops/commit/6cdca856bfeb6017abbb826afeb0f7282d9dc6f9)), closes [#1920](https://github.com/santifer/career-ops/issues/1920)
+* **cover-letter:** support --format and --report CLI arguments ([#1830](https://github.com/santifer/career-ops/issues/1830)) ([88c75cf](https://github.com/santifer/career-ops/commit/88c75cf47a35ea9c41ed803d89f1d288989f2699)), closes [#1828](https://github.com/santifer/career-ops/issues/1828)
+* **dashboard:** manifesto shortcut, help entry and footer link ([64e81de](https://github.com/santifer/career-ops/commit/64e81dee1ee0be48475d32248b26d928089f5d50))
+* **email:** add confirmed-time no-show follow-up variant ([#1860](https://github.com/santifer/career-ops/issues/1860)) ([c77d138](https://github.com/santifer/career-ops/commit/c77d138faf84e22422d8cb80195d8b4f524eff23)), closes [#1859](https://github.com/santifer/career-ops/issues/1859)
+* **interview-prep:** cross-reference coffee chat notes against interview intel ([#1941](https://github.com/santifer/career-ops/issues/1941)) ([2692051](https://github.com/santifer/career-ops/commit/269205162c4af846ca216b611b32d71ff920e012)), closes [#1940](https://github.com/santifer/career-ops/issues/1940)
+* **interview-redflag:** flag scope/compensation mismatch as a separate fifth dimension ([#1943](https://github.com/santifer/career-ops/issues/1943)) ([ea57b82](https://github.com/santifer/career-ops/commit/ea57b82652cd7b261935f80001c80b3984843e0f)), closes [#1942](https://github.com/santifer/career-ops/issues/1942)
+* **interview-redflag:** suggest a ready-to-copy blacklist row at Reconsider level ([#1856](https://github.com/santifer/career-ops/issues/1856)) ([b645e69](https://github.com/santifer/career-ops/commit/b645e69ab96af5fe5483938da390108bfd816070)), closes [#1854](https://github.com/santifer/career-ops/issues/1854)
+* **interview/plan:** wire the existing Panel Intel table into multi-panelist rounds ([#1858](https://github.com/santifer/career-ops/issues/1858)) ([a8ceed2](https://github.com/santifer/career-ops/commit/a8ceed2b79c102cc33c0309f7201b385ec8ab091)), closes [#1857](https://github.com/santifer/career-ops/issues/1857)
+* **ledger:** immutable n: ordinal per signature + first-contribution question for new signers ([8ec80b5](https://github.com/santifer/career-ops/commit/8ec80b50d87c0ed3f145a74d62ce7f6771d929d1))
+* **liveness:** add Workday to the zero-token ATS liveness API rung ([#1928](https://github.com/santifer/career-ops/issues/1928)) ([f6afdf9](https://github.com/santifer/career-ops/commit/f6afdf97c745de3fe9b6bdc3bb3198a6f412f3b0))
+* **oferta:** Block G signal for benefits terminology country mismatch ([#1936](https://github.com/santifer/career-ops/issues/1936)) ([3f0985d](https://github.com/santifer/career-ops/commit/3f0985d3eaea97d6c3d6bc1468e092bcb0bc4ec3)), closes [#1935](https://github.com/santifer/career-ops/issues/1935)
+* **onboarding:** route to the manifesto from the README and the first successful scan ([e3a82e0](https://github.com/santifer/career-ops/commit/e3a82e07dff4955d23dd97ea61aeccfc10810a9c))
+* **pdf:** add role name to the tailored PDF filename for multi-role tracking ([#1890](https://github.com/santifer/career-ops/issues/1890)) ([e878096](https://github.com/santifer/career-ops/commit/e8780965d93f4d699d79b8d86d8e0c1f68f66437))
+* **providers:** add Oracle Recruiting Cloud zero-auth provider ([#1929](https://github.com/santifer/career-ops/issues/1929)) ([52db048](https://github.com/santifer/career-ops/commit/52db0484b7a506173b055bf23edcba4593233bb9))
+* **reports:** unified Risk Summary block joining the five company-risk signals ([#1738](https://github.com/santifer/career-ops/issues/1738)) ([f0c742a](https://github.com/santifer/career-ops/commit/f0c742a835dd03411b193d28540a3dd300cb2dc0)), closes [#1737](https://github.com/santifer/career-ops/issues/1737)
+* **salary-gap:** track compensation figures stated per interview round ([#1853](https://github.com/santifer/career-ops/issues/1853)) ([8308cd1](https://github.com/santifer/career-ops/commit/8308cd1bbdf2231c743085062e049f0c751c1727)), closes [#1852](https://github.com/santifer/career-ops/issues/1852)
+* **scan:** persist and surface the scanner trust signal to pipeline and history ([#1765](https://github.com/santifer/career-ops/issues/1765)) ([16c8497](https://github.com/santifer/career-ops/commit/16c84976b1d39187edd22f6610c48049d00c79d6)), closes [#1743](https://github.com/santifer/career-ops/issues/1743)
+* **scan:** track portal health over time and surface coverage decay ([#1768](https://github.com/santifer/career-ops/issues/1768)) ([9bc82e2](https://github.com/santifer/career-ops/commit/9bc82e28620d1db6702b075f651a4ff991208bed)), closes [#1744](https://github.com/santifer/career-ops/issues/1744)
+
+
+### Bug Fixes
+
+* **cv-template:** keep role header with its bullets when a location line is present ([#1903](https://github.com/santifer/career-ops/issues/1903)) ([66b1024](https://github.com/santifer/career-ops/commit/66b102490943d93ed3afd384b6fbc1e47c5d7d48))
+* **doctor:** warn when Node is below 22.5 instead of passing silently ([#1831](https://github.com/santifer/career-ops/issues/1831)) ([30e470d](https://github.com/santifer/career-ops/commit/30e470dea58f06e077d920c0cf1f70f24f74bbbc)), closes [#1829](https://github.com/santifer/career-ops/issues/1829)
+* **envrc:** only load the Nix flake when Nix is installed ([#1863](https://github.com/santifer/career-ops/issues/1863)) ([ca23af6](https://github.com/santifer/career-ops/commit/ca23af67b40d83bac3f705467f1fb322a7cefe54))
+* **interview-redflag:** drop GitHub PR references from candidate-facing output templates ([aa35162](https://github.com/santifer/career-ops/commit/aa35162f47b09f92e892cb0d6aa9c59dffb8673b))
+* **ledger-bot:** make the first-contribution confirmation copy match what ships ([89e1741](https://github.com/santifer/career-ops/commit/89e17418bcf8d177f27a768c5282f0ecdb81cd85))
+* **ledger-bot:** restore the 'done' confirmation now that the certificate render is live ([9c033d2](https://github.com/santifer/career-ops/commit/9c033d20f319b412e879539cee4aef864582084a))
+* **onboarding:** relay the manifesto note in agent-mediated updates ([0a3abed](https://github.com/santifer/career-ops/commit/0a3abeddfa66ceb2f3e63f5f951fbbcb85481a4b))
+* **pdf:** drop empty Projects section instead of rendering a bare header ([#1879](https://github.com/santifer/career-ops/issues/1879)) ([a64d590](https://github.com/santifer/career-ops/commit/a64d59063d234ed65175491da37f83a47f0a35b4))
+* **role-matcher:** keep base titles distinct from specialized-suffix siblings ([#1922](https://github.com/santifer/career-ops/issues/1922)) ([723f727](https://github.com/santifer/career-ops/commit/723f727f739e56fe8ad147c124f01851d1649f4d)), closes [#1881](https://github.com/santifer/career-ops/issues/1881)
+* **scan-ats-full:** respect data/blacklist.md ([#1914](https://github.com/santifer/career-ops/issues/1914)) ([6512870](https://github.com/santifer/career-ops/commit/65128701a062d30c7754405c687eef4a710a49c8)), closes [#1911](https://github.com/santifer/career-ops/issues/1911)
+* **scan:** quiet dotenv so --json stdout stays parseable ([#1907](https://github.com/santifer/career-ops/issues/1907)) ([2e0b29e](https://github.com/santifer/career-ops/commit/2e0b29ebd1a8a2e67c249c65aa132749c99098f9)), closes [#1906](https://github.com/santifer/career-ops/issues/1906)
+* unify atomic report number allocation ([#1910](https://github.com/santifer/career-ops/issues/1910)) ([3b265cb](https://github.com/santifer/career-ops/commit/3b265cb765ed7f85aded5ef2daa30ffec0bf42f3)), closes [#1733](https://github.com/santifer/career-ops/issues/1733) [#1801](https://github.com/santifer/career-ops/issues/1801) [#1835](https://github.com/santifer/career-ops/issues/1835) [#1895](https://github.com/santifer/career-ops/issues/1895)
+* **update-system:** attribute the post-update manifesto link (utm_source=updater) ([a363ec4](https://github.com/santifer/career-ops/commit/a363ec45ec2fd101d80ca9cf5ba2f882f65cb029))
+* **update-system:** surface commit failures instead of silently swallowing them ([#1855](https://github.com/santifer/career-ops/issues/1855)) ([2ad3453](https://github.com/santifer/career-ops/commit/2ad3453980d49a44ce10470b21cd2434db9701fa)), closes [#1844](https://github.com/santifer/career-ops/issues/1844)
+* **upskill:** keep fetched JD text as a string in the targeted --url-text path ([#1917](https://github.com/santifer/career-ops/issues/1917)) ([c7e9ff5](https://github.com/santifer/career-ops/commit/c7e9ff5993026131c67fa69077f0b54c293bb059)), closes [#1894](https://github.com/santifer/career-ops/issues/1894)
+
 ## [1.20.0](https://github.com/santifer/career-ops/compare/career-ops-v1.19.0...career-ops-v1.20.0) (2026-07-14)
 
 
