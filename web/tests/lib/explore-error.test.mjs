@@ -2,11 +2,11 @@
 // Imports directly from explore-error.mjs (the single source of truth) so the
 // test and production code can never drift out of sync.
 //
-// Run:  node --test test-explore-error.mjs
+// Run:  node --test tests/lib/explore-error.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isScannerMissing } from "./src/lib/explore-error.mjs";
+import { isScannerMissing } from "../../src/lib/explore-error.mjs";
 
 // The data-only / pre-onboarding checkout has no scanner. /api/explore signals it
 // with an HTTP 400 BEFORE any stream starts. This is the only failure the
