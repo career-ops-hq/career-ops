@@ -17,9 +17,10 @@
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { resolve, dirname, basename, join } from 'path';
+import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { stripEmptySections } from './cv-sections-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
@@ -27,6 +28,15 @@ const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
 const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PHOTO_MIME_BY_EXT = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+]);
+const PHOTO_STYLES = new Set(['rounded', 'circle', 'square']);
+const IMAGE_DATA_URL_RE = /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
 
 const DEFAULT_SECTION_TITLES = {
   summary: 'Professional Summary',
@@ -74,6 +84,64 @@ function sanitizeUrl(url) {
     }
   }
   return escapeHtml(url);
+}
+
+function sanitizeImageSrc(src) {
+  if (typeof src !== 'string') return '';
+  const value = src.trim();
+  if (IMAGE_DATA_URL_RE.test(value)) return escapeHtml(value);
+  if (/^https?:\/\//i.test(value)) return sanitizeUrl(value);
+  return '';
+}
+
+async function prepareCandidatePhoto(candidate) {
+  const c = candidate && typeof candidate === 'object' ? { ...candidate } : {};
+  const photo = typeof c.photo === 'string' ? c.photo.trim() : '';
+  const style = c.photo_style || c.photoStyle || 'rounded';
+
+  if (!PHOTO_STYLES.has(style)) {
+    throw new Error(`Unsupported profile photo style: ${style} (expected rounded, circle, or square)`);
+  }
+  c.photo_style = style;
+  if (!photo) {
+    c.photo = '';
+    return c;
+  }
+
+  if (photo.startsWith('data:')) {
+    if (!IMAGE_DATA_URL_RE.test(photo)) {
+      throw new Error('Unsupported profile photo data URL (expected base64 PNG, JPEG, WebP, or GIF)');
+    }
+    c.photo = photo;
+    return c;
+  }
+
+  if (/^https?:\/\//i.test(photo)) {
+    c.photo = photo;
+    return c;
+  }
+
+  if (/^[a-z][a-z0-9+.-]+:/i.test(photo)) {
+    throw new Error(`Unsupported profile photo URL scheme: ${photo.split(':', 1)[0]}`);
+  }
+
+  const photoPath = isAbsolute(photo) ? photo : resolve(__dirname, photo);
+  const mime = PHOTO_MIME_BY_EXT.get(extname(photoPath).toLowerCase());
+  if (!mime) {
+    throw new Error(`Unsupported profile photo format: ${photo} (expected PNG, JPEG, WebP, or GIF)`);
+  }
+
+  let bytes;
+  try {
+    bytes = await readFile(photoPath);
+  } catch (err) {
+    throw new Error(`Profile photo not found or unreadable: ${photo} (${err.code || err.message})`);
+  }
+  if (bytes.length === 0) {
+    throw new Error(`Profile photo is empty: ${photo}`);
+  }
+  c.photo = `data:${mime};base64,${bytes.toString('base64')}`;
+  return c;
 }
 
 function joinItems(items) {
@@ -210,7 +278,8 @@ function buildContactRow(candidate) {
 function buildPhoto(candidate, name) {
   const photo = candidate && candidate.photo;
   if (!photo) return '';
-  return `<img class="cv-photo" src="${sanitizeUrl(photo)}" alt="${escapeHtml(name || '')}">`;
+  const style = PHOTO_STYLES.has(candidate.photo_style) ? candidate.photo_style : 'rounded';
+  return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
 function renderReport(payload) {
@@ -250,23 +319,9 @@ function renderHtml(template, payload) {
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
 
-  // Projects and education are the genuinely optional CV sections: a
-  // candidate's projects are often already covered under Work Experience, and
-  // not every candidate has a degree. Drop the whole block when there are no
-  // entries, instead of leaving a bare header with nothing under it.
-  //
-  // Both lookaheads match the *next* section marker generically rather than a
-  // named one. Education is followed by Certifications in cv-template.html but
-  // by Skills in resume-template.html, so no single name works there — and a
-  // named `<!-- EDUCATION -->` lookahead on the projects pattern would stop
-  // matching entirely once an empty education block had already been stripped,
-  // leaving the bare "Projects" header this is meant to remove.
-  if (!Array.isArray(payload.projects) || payload.projects.length === 0) {
-    html = html.replace(/<!-- PROJECTS -->[\s\S]*?(?=<!-- [A-Z])/, '');
-  }
-  if (!Array.isArray(payload.education) || payload.education.length === 0) {
-    html = html.replace(/<!-- EDUCATION -->[\s\S]*?(?=<!-- [A-Z])/, '');
-  }
+  // Drop the optional sections (projects, education) that have no entries, so
+  // an absent one leaves no bare header behind. See cv-sections-core.mjs.
+  html = stripEmptySections(html, payload, 'html');
 
   for (const [key, value] of Object.entries(substitutions)) {
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
@@ -317,6 +372,7 @@ async function main() {
   if (args.length === 0 || args.includes('--help')) {
     console.error('Usage:');
     console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html]');
+    console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
     console.error('  node build-cv-html.mjs --test');
     console.error('');
     console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
@@ -329,7 +385,10 @@ async function main() {
     return;
   }
 
-  const [inputPath, outputPath, templateArg] = args;
+  const preview = args[0] === '--preview';
+  const [inputPath, outputPath, templateArg] = preview
+    ? [args[1], resolve(__dirname, 'output', 'cv-preview.html'), args[2]]
+    : args;
   if (!inputPath || !outputPath) {
     console.error('Usage: node build-cv-html.mjs <input.json> <output.html> [template.html]');
     process.exit(1);
@@ -351,8 +410,9 @@ async function main() {
   let payload;
   try {
     payload = JSON.parse(await readFile(absInput, 'utf-8'));
+    payload.candidate = await prepareCandidatePhoto(payload.candidate);
   } catch (err) {
-    console.error(`Failed to parse input JSON: ${err.message}`);
+    console.error(`Failed to prepare CV input: ${err.message}`);
     process.exit(1);
   }
 
@@ -366,7 +426,7 @@ async function main() {
     process.exit(1);
   }
 
-  await writeAndReport(html, absOutput, payload);
+  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready' } : {});
   process.exit(0);
 }
 

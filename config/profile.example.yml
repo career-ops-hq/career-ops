@@ -20,6 +20,8 @@ candidate:
   # Switzerland) where a professional photo is expected. Use a local file path or
   # a data: URL — the PDF renderer inlines local images.
   photo: ""
+  # Optional framing for the CV photo: rounded (default), circle, or square.
+  photo_style: rounded
 
 target_roles:
   # Your North Star roles — what you're optimizing for
@@ -77,7 +79,8 @@ location:
 
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover
-  # letters, outreach, and form answers. Use an ISO language code.
+  # letters, outreach, and form answers. Use an ISO language code such as
+  # `en` or `zh-CN`; `zh-CN` also enables Chinese PDF typography rules.
   # This is separate from language.modes_dir: modes_dir selects market
   # vocabulary/rules, while output selects the prose language.
   output: en
@@ -112,6 +115,7 @@ cv:
   # templates/cv-template.html. You can also pick per-generation just by asking
   # (e.g. "use the modern template").
   # template: modern
+  # For a restrained Chinese technical CV, use: template: zh-minimal
 
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #

@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent-System für die Jobsuche" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Multi-Agent-System für die Jobsuche" width="800"></a>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Career-Ops auf Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops auf Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>BEKANNT AUS</sub></p>
@@ -35,7 +35,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="career-ops Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ Stellenanzeigen bewertet · 100+ personalisierte Lebensläufe · 1 Traumrolle bekommen</strong></p>
@@ -82,7 +82,7 @@
 
 ## Was ist das?
 
-Career-Ops ([career-ops.org](https://career-ops.org), auch **careerops**) macht jede KI-Coding-CLI zu einer Kommandozentrale für die Jobsuche. Statt Bewerbungen manuell in einer Tabelle zu verfolgen, bekommst du eine KI-gestützte Pipeline, die:
+career-ops ([career-ops.org](https://career-ops.org), auch **careerops**) macht jede KI-Coding-CLI zu einer Kommandozentrale für die Jobsuche. Statt Bewerbungen manuell in einer Tabelle zu verfolgen, bekommst du eine KI-gestützte Pipeline, die:
 
 - **Stellenanzeigen mit einer strukturierten A-F-Bewertung bewertet** (fünf Dimensionen, die zu einer Bewertung von 1,0–5,0 führen)
 - **maßgeschneiderte PDFs generiert** -- ATS-optimierte Lebensläufe, angepasst an jede Stellenanzeige
@@ -90,9 +90,9 @@ Career-Ops ([career-ops.org](https://career-ops.org), auch **careerops**) macht 
 - **Batch-Verarbeitung** ermöglicht -- 10+ Stellenanzeigen parallel mit Sub-Agents bewerten
 - **alles verfolgt** in einer einzigen Source of Truth mit Integritätsprüfungen
 
-> **Wichtig: Das ist KEIN Spray-and-Pray-Tool.** Career-ops ist ein Filter: Es hilft dir, aus hunderten Stellenanzeigen die wenigen zu finden, die deine Zeit wert sind. Das System rät deutlich davon ab, sich auf Rollen mit weniger als 4,0/5 zu bewerben. Deine Zeit ist wertvoll, die der Recruiter auch. Prüfe alles, bevor du etwas abschickst.
+> **Wichtig: Das ist KEIN Spray-and-Pray-Tool.** career-ops ist ein Filter: Es hilft dir, aus hunderten Stellenanzeigen die wenigen zu finden, die deine Zeit wert sind. Das System rät deutlich davon ab, sich auf Rollen mit weniger als 4,0/5 zu bewerben. Deine Zeit ist wertvoll, die der Recruiter auch. Prüfe alles, bevor du etwas abschickst.
 
-Career-ops ist agentisch: Die KI-Coding-CLI deiner Wahl navigiert mit Playwright durch Karriereseiten, bewertet den Fit zwischen Lebenslauf und Stellenanzeige durch echtes Reasoning statt Keyword-Matching und passt deinen Lebenslauf pro Stellenanzeige an.
+career-ops ist agentisch: Die KI-Coding-CLI deiner Wahl navigiert mit Playwright durch Karriereseiten, bewertet den Fit zwischen Lebenslauf und Stellenanzeige durch echtes Reasoning statt Keyword-Matching und passt deinen Lebenslauf pro Stellenanzeige an.
 
 > **Hinweis: Die ersten Bewertungen werden nicht perfekt sein.** Das System kennt dich noch nicht. Gib ihm Kontext: deinen Lebenslauf, deinen Werdegang, Proof Points, Präferenzen, Stärken und No-Gos. Je besser du es einarbeitest, desto besser wird es. Denk daran wie an das Onboarding eines neuen Recruiters: In der ersten Woche muss er dich kennenlernen, danach wird er wertvoll.
 
@@ -163,7 +163,7 @@ Siehe [docs/SETUP.md](docs/SETUP.md) für die vollständige Setup-Anleitung und 
 
 ## Nutzung
 
-Career-ops verwendet einen gemeinsamen Command-Router. In CLIs mit Slash-Command-Registrierung sieht das so aus:
+career-ops verwendet einen gemeinsamen Command-Router. In CLIs mit Slash-Command-Registrierung sieht das so aus:
 
 ```text
 /career-ops                → alle verfügbaren Befehle anzeigen

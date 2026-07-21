@@ -39,7 +39,7 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
-import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 
@@ -292,6 +292,19 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
   return { offers: kept, filteredBlacklist, annotatedBlacklisted };
 }
 
+// Title/location/content filter chain for one posting, used by runSeedScan().
+// The main ATS-directory loop below inlines the same three checks (it tracks
+// a droppedContent counter per stage for the run summary), but this shared,
+// pure, exported helper keeps the content_filter.by_title_keyword wiring
+// (#1846) unit-testable without mocking providers or duplicating the rule
+// order in two places for the caller that doesn't need per-stage counts.
+export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
+  if (!titleFilter(job.title)) return false;
+  if (!locationFilter(job.location)) return false;
+  if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
+  return true;
+}
+
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
 // prefix. With --shuffle: a random sample of `limit` companies, so a capped
 // scan isn't always biased to the same alphabetical-first slice. Pure; returns
@@ -378,10 +391,15 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
       const dateClass = classifyPostingDate(job, cutoff);
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) continue;
-      if (!opts.titleFilter(job.title)) continue;
-      if (!opts.locationFilter(job.location)) continue;
-      if (seenUrls.has(job.url)) continue;
-      seenUrls.add(job.url);
+      if (!passesFilters(job, {
+        titleFilter: opts.titleFilter,
+        locationFilter: opts.locationFilter,
+        contentFilter: opts.contentFilter,
+        titleFilterConfig: opts.titleFilterConfig,
+      })) continue;
+      const dedupUrl = normalizeUrlForDedup(job.url);
+      if (seenUrls.has(dedupUrl)) continue;
+      seenUrls.add(dedupUrl);
       offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   });
@@ -451,12 +469,19 @@ async function main() {
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const titleFilter = buildTitleFilter(config?.title_filter);
   const locationFilter = buildLocationFilter(config?.location_filter);
+  // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
+  // see #1846. Built once here from the same portals.yml config.
+  const contentFilter = buildContentFilter(config?.content_filter);
   if (!config?.title_filter?.positive?.length) {
     console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
   }
   // Attach filters to opts so runSeedScan can use them without extra parameters.
   opts.titleFilter = titleFilter;
   opts.locationFilter = locationFilter;
+  opts.contentFilter = contentFilter;
+  // Raw title_filter config, needed by matchedTitleKeywords() to scope
+  // content_filter.by_title_keyword the same way scan.mjs does.
+  opts.titleFilterConfig = config?.title_filter;
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
@@ -478,6 +503,7 @@ async function main() {
   let totalCompaniesAvailable = 0;
   let totalErrors = 0;
   let droppedNoDate = 0;
+  let droppedContent = 0;
   let capHit = false;
   // Aggregated from providers/workday.mjs's jobs.workdayNoDateSkip tag — see
   // there for why this is a counter instead of a per-company console.error
@@ -513,8 +539,10 @@ async function main() {
           if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
           if (!titleFilter(job.title)) continue;
           if (!locationFilter(job.location)) continue;
-          if (seenUrls.has(job.url)) continue;
-          seenUrls.add(job.url); // intra-scan dedup
+          if (!contentFilter(job.description, matchedTitleKeywords(job.title, config?.title_filter))) { droppedContent++; continue; }
+          const dedupUrl = normalizeUrlForDedup(job.url);
+          if (seenUrls.has(dedupUrl)) continue;
+          seenUrls.add(dedupUrl); // intra-scan dedup
           newOffers.push({ ...job, source: `${name}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
         }
       } catch (err) {
@@ -572,6 +600,7 @@ async function main() {
       log(`Blacklisted:      ${blacklistResult.filteredBlacklist} skipped (blacklist)`);
     }
   }
+  if (droppedContent) log(`Content-filtered:   ${droppedContent}`);
   log(`New matches:        ${offers.length}`);
 
   if (offers.length) {
@@ -633,6 +662,7 @@ async function main() {
       postingsDroppedNoDate: droppedNoDate,
       postingsFilteredBlacklist: blacklistResult.filteredBlacklist,
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
+      postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
       saved,
       offers: offers.map(o => ({

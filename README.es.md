@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Sistema Multi-Agente de Busqueda de Empleo" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Sistema Multi-Agente de Busqueda de Empleo" width="800"></a>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>APARECE EN</sub></p>
@@ -33,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="career-ops Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ ofertas evaluadas · 100+ CVs personalizados · 1 trabajo soñado conseguido</strong></p>
@@ -76,7 +76,7 @@
 
 ## Que es esto
 
-Career-Ops convierte cualquier CLI de IA en un centro de mando de busqueda de empleo. En vez de trackear aplicaciones en un spreadsheet, tienes un pipeline AI que:
+career-ops convierte cualquier CLI de IA en un centro de mando de busqueda de empleo. En vez de trackear aplicaciones en un spreadsheet, tienes un pipeline AI que:
 
 - **Evalúa ofertas** con una evaluación estructurada A-F (cinco dimensiones que alimentan una puntuación de 1.0-5.0)
 - **Genera PDFs personalizados** -- CVs ATS-optimizados por oferta
@@ -84,7 +84,7 @@ Career-Ops convierte cualquier CLI de IA en un centro de mando de busqueda de em
 - **Procesa en batch** -- evalua 10+ ofertas en paralelo con sub-agentes
 - **Trackea todo** en una fuente de verdad unica con checks de integridad
 
-> **Importante: Esto NO es para spamear empresas.** Career-ops es un filtro -- te ayuda a encontrar las pocas ofertas que merecen tu tiempo entre cientos. El sistema recomienda encarecidamente no aplicar a nada por debajo de 4.0/5. Tu tiempo es valioso, y el del recruiter tambien. Siempre revisa antes de enviar.
+> **Importante: Esto NO es para spamear empresas.** career-ops es un filtro -- te ayuda a encontrar las pocas ofertas que merecen tu tiempo entre cientos. El sistema recomienda encarecidamente no aplicar a nada por debajo de 4.0/5. Tu tiempo es valioso, y el del recruiter tambien. Siempre revisa antes de enviar.
 
 > **Aviso: las primeras evaluaciones no seran buenas.** El sistema no te conoce todavia. Dale contexto -- tu CV, tu historia profesional, tus proof points, tus preferencias, en que eres bueno, que quieres evitar. Cuanto mas lo nutras, mejor filtra. Piensa en ello como hacer onboarding a un recruiter nuevo: la primera semana necesita conocerte, luego se vuelve invaluable.
 
@@ -142,7 +142,7 @@ Guia completa en [docs/SETUP.md](docs/SETUP.md).
 
 ## Uso
 
-Career-ops es un unico slash command con multiples modos:
+career-ops es un unico slash command con multiples modos:
 
 ```
 /career-ops                → Mostrar todos los comandos

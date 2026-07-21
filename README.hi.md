@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Job Search System" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Multi-Agent Job Search System" width="800"></a>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>FEATURED IN</sub></p>
@@ -35,7 +35,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="career-ops Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
@@ -82,7 +82,7 @@
 
 ## यह क्या है
 
-Career-Ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहते हैं) किसी भी AI coding CLI को एक पूर्ण job search command center में बदल देता है। Applications को spreadsheet में manually track करने की जगह, आपको एक AI-powered pipeline मिलती है जो:
+career-ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहते हैं) किसी भी AI coding CLI को एक पूर्ण job search command center में बदल देता है। Applications को spreadsheet में manually track करने की जगह, आपको एक AI-powered pipeline मिलती है जो:
 
 - **Offers evaluate करती है** एक structured A-F evaluation के साथ (पाँच dimensions जो 1.0-5.0 का score देते हैं)
 - **Tailored PDFs generate करती है** -- job description के अनुसार customize किए गए ATS-optimized CVs
@@ -90,9 +90,9 @@ Career-Ops ([career-ops.org](https://career-ops.org), जिसे **careerops**
 - **Batch में process करती है** -- sub-agents के साथ parallel में 10+ offers evaluate करती है
 - **सब कुछ track करती है** integrity checks के साथ single source of truth में
 
-> **Important: यह spray-and-pray tool नहीं है।** Career-ops एक filter है -- यह सैकड़ों offers में से उन कुछ offers को ढूंढने में मदद करता है जो आपके समय के लायक हैं। System strongly recommend करता है कि 4.0/5 से कम score वाले offers पर apply न करें। आपका समय मूल्यवान है, और recruiter का भी। Submit करने से पहले हमेशा review करें।
+> **Important: यह spray-and-pray tool नहीं है।** career-ops एक filter है -- यह सैकड़ों offers में से उन कुछ offers को ढूंढने में मदद करता है जो आपके समय के लायक हैं। System strongly recommend करता है कि 4.0/5 से कम score वाले offers पर apply न करें। आपका समय मूल्यवान है, और recruiter का भी। Submit करने से पहले हमेशा review करें।
 
-Career-ops agentic है: जो भी AI coding CLI आप चुनें वह Playwright से career pages navigate करता है, आपके CV बनाम job description के बारे में reasoning करके fit evaluate करता है (keyword matching नहीं), और हर listing के लिए आपका resume adapt करता है।
+career-ops agentic है: जो भी AI coding CLI आप चुनें वह Playwright से career pages navigate करता है, आपके CV बनाम job description के बारे में reasoning करके fit evaluate करता है (keyword matching नहीं), और हर listing के लिए आपका resume adapt करता है।
 
 > **ध्यान दें: पहले कुछ evaluations बहुत अच्छे नहीं होंगे।** System अभी आपको नहीं जानता। इसे context दें -- आपका CV, आपकी career story, आपके proof points, आपकी preferences, आप किसमें अच्छे हैं, क्या avoid करना चाहते हैं। जितना ज़्यादा nurture करेंगे, उतना बेहतर होगा। इसे एक नए recruiter को onboard करने की तरह समझें: पहले हफ्ते उन्हें आपके बारे में सीखना है, फिर वे invaluable बन जाते हैं।
 
@@ -180,7 +180,7 @@ Full setup guide के लिए [docs/SETUP.md](docs/SETUP.md) देखें
 
 ## Antigravity CLI Integration
 
-Career-ops Antigravity CLI को natively support करता है, वैसे ही जैसे Claude Code और OpenCode को। सभी slash commands shared skill entrypoint के through available हैं, same `modes/*.md` evaluation logic use करके।
+career-ops Antigravity CLI को natively support करता है, वैसे ही जैसे Claude Code और OpenCode को। सभी slash commands shared skill entrypoint के through available हैं, same `modes/*.md` evaluation logic use करके।
 
 Google ने consumer Gemini CLI access को Antigravity CLI में transition किया है। `GEMINI.md` अब एक no-op compatibility guard है ताकि Antigravity `AGENTS.md` और `GEMINI.md` दोनों पढ़ने पर full project instructions duplicate न करे।
 
@@ -203,7 +203,7 @@ Skill open standard में `.agents/skills/career-ops/SKILL.md` में def
 
 ## Codex Integration
 
-Career-ops Codex को same shared router के through support करता है, लेकिन invocation model CLIs से अलग है जो slash commands auto-register करते हैं। Full guide के लिए [docs/CODEX.md](docs/CODEX.md) देखें।
+career-ops Codex को same shared router के through support करता है, लेकिन invocation model CLIs से अलग है जो slash commands auto-register करते हैं। Full guide के लिए [docs/CODEX.md](docs/CODEX.md) देखें।
 
 ### Interactive Codex
 
@@ -234,7 +234,7 @@ codex exec "Run career-ops tracker mode and summarize the current statuses."
 
 ## Grok Build CLI Integration
 
-Career-ops Grok Build CLI को natively support करता है, वैसे ही जैसे Claude Code और OpenCode को। `AGENTS.md` project rules के रूप में auto-load होता है, और सभी slash commands shared skill entrypoint के through available हैं।
+career-ops Grok Build CLI को natively support करता है, वैसे ही जैसे Claude Code और OpenCode को। `AGENTS.md` project rules के रूप में auto-load होता है, और सभी slash commands shared skill entrypoint के through available हैं।
 
 ### Native Grok Build CLI
 
@@ -273,7 +273,7 @@ npm run gemini:eval -- "JD text here"
 
 ## Usage
 
-Career-ops एक shared command router use करता है। CLIs में जो slash commands register करते हैं, यह इस तरह दिखता है:
+career-ops एक shared command router use करता है। CLIs में जो slash commands register करते हैं, यह इस तरह दिखता है:
 
 ```
 /career-ops                → सभी available commands दिखाएं

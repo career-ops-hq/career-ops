@@ -83,6 +83,17 @@ function makeSandbox(trackerContent, additions = {}) {
   return { dir, tracker, additions: additionsDir, lock };
 }
 
+// Pin scan.mjs's extra dedupe sources inside the sandbox. The module-level
+// paths are relative to process.cwd(), so an in-process call would otherwise
+// read the developer's real data/scan-history.tsv and data/pipeline.md — CI
+// only escapes that because both files are gitignored.
+function sandboxSources(sb) {
+  return {
+    scanHistoryPath: join(sb.dir, 'scan-history.tsv'),
+    pipelinePath: join(sb.dir, 'pipeline.md'),
+  };
+}
+
 // Return the data rows of a tracker (pipe lines that aren't header/separator).
 function dataRows(trackerPath) {
   return readFileSync(trackerPath, 'utf-8')
@@ -201,7 +212,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 {
   const { loadSeenCompanyRoles } = await import('./scan.mjs');
   const sb = makeSandbox(HEADER_10);
-  const seen = loadSeenCompanyRoles(sb.tracker);
+  const seen = loadSeenCompanyRoles(sb.tracker, undefined, sandboxSources(sb));
   if (seen.has('acme::engineer')) pass('scan.mjs: seen-set keys company::role on 10-col tracker');
   else fail(`scan.mjs: seen-set on 10-col tracker — got [${[...seen].join(', ')}]`);
   if (![...seen].some(k => k.includes('remote') || k.includes('4.0/5'))) {
@@ -242,7 +253,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
   }
 
   const { loadSeenCompanyRoles } = await import('./scan.mjs');
-  const seen = loadSeenCompanyRoles(sb.tracker);
+  const seen = loadSeenCompanyRoles(sb.tracker, undefined, sandboxSources(sb));
   if (seen.has('acme::engineer') && seen.size === 1) {
     pass('contract: scan.mjs seen-set skips an unknown extra column');
   } else {

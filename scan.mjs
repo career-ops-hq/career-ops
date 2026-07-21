@@ -193,6 +193,25 @@ export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
   };
 }
 
+// ── Absolute posted-date filter ─────────────────────────────────────
+// CLI-only (--posted-after / --posted-before), unlike the config-driven
+// relative max_posting_age_days above. Both bounds optional and inclusive
+// (before is treated as end-of-day). A job with no postedAt always passes —
+// same "don't penalize missing data" convention as buildPostingAgeFilter.
+export function buildPostedDateFilter(afterIso, beforeIso) {
+  const afterMs = afterIso ? Date.parse(afterIso) : NaN;
+  const beforeMs = beforeIso ? Date.parse(`${beforeIso}T23:59:59.999Z`) : NaN;
+  const hasAfter = Number.isFinite(afterMs);
+  const hasBefore = Number.isFinite(beforeMs);
+  if (!hasAfter && !hasBefore) return () => true;
+  return (postedAt) => {
+    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
+    if (hasAfter && postedAt < afterMs) return false;
+    if (hasBefore && postedAt > beforeMs) return false;
+    return true;
+  };
+}
+
 // ── Content filter ──────────────────────────────────────────────────
 // Optional. If `content_filter` is absent from portals.yml, all jobs pass.
 // Filters on the job DESCRIPTION text to separate same-titled roles with
@@ -627,6 +646,48 @@ function scanHistoryPolicy(config = {}) {
   };
 }
 
+// Query params that carry no identity information for a job posting — safe to
+// strip when computing the dedup key. Deliberately an allowlist rather than
+// "strip everything": several ATSes key the posting off a query param (e.g.
+// Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
+const DEDUP_STRIP_PARAMS = new Set([
+  'language', 'lang', 'locale',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
+]);
+
+/**
+ * Normalize a job posting URL into a stable dedup key.
+ *
+ * Strips cosmetic query params (locale/tracking), drops a trailing slash,
+ * and lowercases scheme + host. Only used to compute the *comparison* key —
+ * callers keep writing/displaying the original URL so links stay clickable
+ * and scan-history/pipeline.md stay faithful to what the provider returned.
+ *
+ * Falls back to the raw string when the URL is malformed, preserving the
+ * old byte-for-byte behavior for unparsable history rows.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function normalizeUrlForDedup(url) {
+  if (typeof url !== 'string' || !url) return url;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  for (const param of Array.from(parsed.searchParams.keys())) {
+    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
+      parsed.searchParams.delete(param);
+    }
+  }
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return parsed.toString();
+}
+
 export function loadSeenUrls(policy = {}) {
   const seen = new Set();
   let recheckEligible = 0;
@@ -637,7 +698,7 @@ export function loadSeenUrls(policy = {}) {
     for (const line of lines.slice(1)) { // skip header
       const [url, firstSeen, , , , status = 'added'] = line.split('\t');
       if (!url) continue;
-      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(url);
+      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
       else recheckEligible++;
     }
   }
@@ -646,7 +707,7 @@ export function loadSeenUrls(policy = {}) {
   if (existsSync(PIPELINE_PATH)) {
     const text = readFileSync(PIPELINE_PATH, 'utf-8');
     for (const match of text.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(match[1]);
+      seen.add(normalizeUrlForDedup(match[1]));
     }
   }
 
@@ -654,7 +715,7 @@ export function loadSeenUrls(policy = {}) {
   if (existsSync(APPLICATIONS_PATH)) {
     const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
     for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(match[0]);
+      seen.add(normalizeUrlForDedup(match[0]));
     }
   }
 
@@ -916,34 +977,119 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 }
 
 /**
- * Load company+role keys already present in the applications tracker.
+ * Build the seen-role set from the same three sources as `loadSeenUrls`.
  *
- * Existing tracker rows are canonicalized with the same company aliasing and
- * role-title normalization used for freshly scanned jobs. That lets URL-new
- * duplicates match older tracker entries instead of being evaluated again.
+ * Existing rows are canonicalized with the same company aliasing and role-title
+ * normalization used for freshly scanned jobs. That lets URL-new duplicates match
+ * older entries instead of being evaluated again.
  *
- * @param {string} [appsPath=APPLICATIONS_PATH] - Applications tracker path.
+ * Seeding from applications.md alone made the key effectively intra-run: a role
+ * added by a prior scan lives in scan-history and pipeline, and does not reach
+ * applications.md until the user evaluates and applies. Companies that open one req
+ * per city therefore leaked one city variant per scan — run 1 added the SF req
+ * (marking the key in memory only), run 2 re-seeded from applications.md, found the
+ * key absent, and the NY req cleared both the URL check and the role check.
+ *
+ * Two deliberate semantics on the scan-history source:
+ *
+ * - Only `added` rows seed a key. `skipped_expired` / `skipped_invalid_url` /
+ *   `skipped_blocked_host` are URL-level failures, not evidence the role was
+ *   surfaced; seeding from them would let a dead SF URL bury a live NY req. Because
+ *   an expired posting is recorded as `skipped_expired` rather than `added`, this
+ *   self-heals: when the canonical posting dies, its city variants become eligible
+ *   again on the next scan.
+ * - Seeding honours `scan_history.recheck_after_days` via the existing
+ *   `shouldDedupScanHistoryRow` predicate, so the role key cannot outlive the URL
+ *   key it mirrors.
+ *
+ * @param {{applicationsText?: string, scanHistoryText?: string, pipelineText?: string}} sources
+ *   Raw text of each dedupe source; absent sources default to empty.
+ * @param {{recheckAfterDays?: number|null, today?: string}} [policy] - Scan-history
+ *   recheck policy, shared with `loadSeenUrls`.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer shared with scan-side dedupe.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function loadSeenCompanyRoles(appsPath = APPLICATIONS_PATH, canonicalize = defaultCompanyNormalizer) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer) {
+  const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  if (existsSync(appsPath)) {
-    // Header-aware parse (tracker-parse.mjs, #954) — the old positional regex
-    // captured the wrong cells on customized layouts (e.g. with a Location
-    // column), so the seen-set keyed on garbage and dedup misfired.
-    const lines = readFileSync(appsPath, 'utf-8').split('\n');
+  const add = (company, role) => {
+    const c = String(company ?? '').trim();
+    const r = String(role ?? '').trim();
+    if (!c || !r) return;
+    // Header and markdown-separator cells are not roles.
+    if (c.toLowerCase() === 'company') return;
+    if (/^[-:]+$/.test(c) || /^[-:]+$/.test(r)) return;
+    seen.add(companyRoleDedupKey(c, r, canonicalize));
+  };
+
+  // applications.md — header-aware parse (tracker-parse.mjs, #954). The old
+  // positional regex captured the wrong cells on customized layouts (e.g. with a
+  // Location column), so the seen-set keyed on garbage and dedup misfired.
+  if (applicationsText) {
+    const lines = applicationsText.split('\n');
     const colmap = resolveColumns(lines);
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      const company = row.company.trim();
-      const role = row.role.trim();
-      if (company && role) seen.add(companyRoleDedupKey(company, role, canonicalize));
+      add(row.company, row.role);
     }
   }
+
+  // scan-history.tsv — url, first_seen, portal, title, company, status, location
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, firstSeen, , title, company, status = 'added'] = line.split('\t');
+    if (!url) continue;
+    if (status !== 'added') continue;
+    if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
+    add(company, title);
+  }
+
+  // pipeline.md — "- [ ] {url} | {company} | {title}" plus optional trailing
+  // columns (location, compensation, posted:/trust:/note: segments).
+  for (const match of pipelineText.matchAll(/^- \[[ x]\]\s+\S+\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?:\|[^\n]*)?$/gm)) {
+    add(match[1], match[2]);
+  }
+
   return seen;
+}
+
+function readIfExists(filePath) {
+  return existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+}
+
+/**
+ * Load company+role keys already surfaced by a prior scan or tracked by the user.
+ *
+ * Thin filesystem wrapper over {@link collectSeenCompanyRoles}, mirroring the
+ * source list `loadSeenUrls` already reads.
+ *
+ * The two leading positional parameters are unchanged, so existing callers keep
+ * working. The extra sources are injectable via the trailing options object: the
+ * module-level paths are relative to `process.cwd()`, so a test that passes only a
+ * sandbox tracker would otherwise pick up the developer's real scan-history and
+ * pipeline (CI only avoids this because those files are gitignored).
+ *
+ * @param {string} [appsPath=APPLICATIONS_PATH] - Applications tracker path.
+ * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
+ *   Company canonicalizer shared with scan-side dedupe.
+ * @param {object} [options] - Additional sources and policy.
+ * @param {{recheckAfterDays?: number|null, today?: string}} [options.policy] -
+ *   Scan-history recheck policy, shared with `loadSeenUrls`.
+ * @param {string} [options.scanHistoryPath=SCAN_HISTORY_PATH] - Scan-history path.
+ * @param {string} [options.pipelinePath=PIPELINE_PATH] - Pipeline inbox path.
+ * @returns {Set<string>} Existing company+role dedupe keys.
+ */
+export function loadSeenCompanyRoles(
+  appsPath = APPLICATIONS_PATH,
+  canonicalize = defaultCompanyNormalizer,
+  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH } = {},
+) {
+  return collectSeenCompanyRoles({
+    applicationsText: readIfExists(appsPath),
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+  }, policy, canonicalize);
 }
 
 // ── Pipeline writer ─────────────────────────────────────────────────
@@ -1237,7 +1383,7 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 // 'completed' in v1; a follow-up wires failure-path writes so trend stats can
 // exclude survivorship bias. Consumers MUST parse by header name, never by
 // position — columns may be appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\n';
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -1251,6 +1397,8 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredBlacklist ?? 0,
     // filtered_visa appended at the END for the same reason.
     c.filteredVisa ?? 0,
+    // filtered_posted_date appended at the END for the same reason.
+    c.filteredPostedDate ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
 }
@@ -1261,6 +1409,7 @@ const PORTAL_HEALTH_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
 export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
   if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
   let lines = '';
   for (const r of healthRecords) {
@@ -1458,6 +1607,26 @@ async function main() {
   const includeBlacklisted = args.includes('--include-blacklisted');
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
+  // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
+  // employer's real posting date (job.postedAt), gated against a typo since a
+  // silently-ignored bound would look like "no jobs matched" instead of an error.
+  const isValidIsoDate = (s) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  };
+  const postedAfterFlag = args.indexOf('--posted-after');
+  const postedAfter = postedAfterFlag !== -1 ? args[postedAfterFlag + 1] : null;
+  const postedBeforeFlag = args.indexOf('--posted-before');
+  const postedBefore = postedBeforeFlag !== -1 ? args[postedBeforeFlag + 1] : null;
+  if (postedAfter != null && !isValidIsoDate(postedAfter)) {
+    console.error(`Error: --posted-after expects YYYY-MM-DD, got "${postedAfter}"`);
+    process.exit(1);
+  }
+  if (postedBefore != null && !isValidIsoDate(postedBefore)) {
+    console.error(`Error: --posted-before expects YYYY-MM-DD, got "${postedBefore}"`);
+    process.exit(1);
+  }
 
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
@@ -1500,6 +1669,7 @@ async function main() {
 
   const locationFilter = buildLocationFilter(config.location_filter);
   const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
+  const postedDateFilter = buildPostedDateFilter(postedAfter, postedBefore);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
@@ -1573,7 +1743,7 @@ async function main() {
   const seenUrlState = loadSeenUrls(historyPolicy);
   const seenUrls = seenUrlState.seen;
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany);
+  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany, { policy: historyPolicy });
 
   // 5. Fetch from each target
   const date = new Date().toISOString().slice(0, 10);
@@ -1586,6 +1756,7 @@ async function main() {
   let totalFilteredTier = 0;
   let totalFilteredLocation = 0;
   let totalFilteredPostingAge = 0;
+  let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
   let totalFilteredBlacklist = 0;
@@ -1667,6 +1838,10 @@ async function main() {
           totalFilteredPostingAge++;
           continue;
         }
+        if (!postedDateFilter(job.postedAt)) {
+          totalFilteredPostedDate++;
+          continue;
+        }
         if (!salaryFilter(job.salary)) {
           totalFilteredSalary++;
           continue;
@@ -1679,7 +1854,8 @@ async function main() {
           totalFilteredVisa++;
           continue;
         }
-        if (seenUrls.has(job.url)) {
+        const dedupUrl = normalizeUrlForDedup(job.url);
+        if (seenUrls.has(dedupUrl)) {
           totalDupes++;
           continue;
         }
@@ -1698,7 +1874,7 @@ async function main() {
           continue;
         }
         // Mark as seen to avoid intra-scan dupes
-        seenUrls.add(job.url);
+        seenUrls.add(dedupUrl);
         seenCompanyRoles.add(key);
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
@@ -1816,10 +1992,17 @@ async function main() {
   if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
-  console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);
-  console.log(`Filtered by content:  ${totalFilteredContent} removed`);
+  if (postedAfter || postedBefore) {
+    console.log(`Filtered by posted date: ${totalFilteredPostedDate} removed`);
+  }
+  if (config.salary_filter || totalFilteredSalary > 0) {
+    console.log(`Filtered by salary:    ${totalFilteredSalary} removed`);
+  }
+  if (config.content_filter || totalFilteredContent > 0) {
+    console.log(`Filtered by content:   ${totalFilteredContent} removed`);
+  }
   if (visaEnabled) {
-    console.log(`Filtered by visa:     ${totalFilteredVisa} removed`);
+    console.log(`Filtered by visa:      ${totalFilteredVisa} removed`);
   }
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
@@ -1906,15 +2089,7 @@ async function main() {
   }
 
   const pastHealth = loadPortalHealth();
-  const currentStreaks = computeConsecutiveFailures(pastHealth);
-  
-  for (const r of healthRecords) {
-    if (r.status === 'slug_gone' || r.status === 'network') {
-      currentStreaks.set(r.company, (currentStreaks.get(r.company) || 0) + 1);
-    } else if (r.status === 'reachable' || r.status === 'empty') {
-      currentStreaks.set(r.company, 0);
-    }
-  }
+  const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
 
   const persistentlyDead = [];
   const newlyDeadSlug = [];
@@ -1988,6 +2163,7 @@ async function main() {
       dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
       filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa,
+      filteredPostedDate: totalFilteredPostedDate,
     });
   }
 

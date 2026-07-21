@@ -27,7 +27,11 @@
 18. Run the fact gate: `node verify-cv-facts.mjs output/cv-{candidate}-{company}.html`
     - This is a hard gate before PDF rendering.
     - If it fails, stop and fix the generated HTML by removing invented metrics or adding verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`.
-19. Execute: `node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --format={letter|a4} --report={report number}` — `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact PDF. Omit it only for one-off CVs with no tracker entry.
+19. Execute: `node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --format={letter|a4} --report={report number}`
+    - `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact PDF. Omit it only for one-off CVs with no tracker entry.
+    - The rendered PDF has a two-page warning threshold by default. `--max-pages=N` accepts a positive integer; pass `--max-pages=1` when the user or market prefers a one-page CV.
+    - If the rendered PDF exceeds its threshold, generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
+    - Pass `--strict-pages` only when the user or market requires a hard limit. Strict overflow leaves the draft available for inspection but does not report or index it as successful; trim lower-priority content and rerun.
 20. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
 
 ## ATS Rules (clean parsing)
@@ -112,7 +116,8 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
     "portfolio": { "url": "https://janesmith.dev", "display": "janesmith.dev" },
     "location": "San Francisco, CA",
-    "photo": ""
+    "photo": "",
+    "photo_style": "rounded"
   },
   "sections": {
     "summary": "Professional Summary",
@@ -154,7 +159,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `lang` | string | CV language code (`en`, `es`, `ja`, `ar`). Drives language-specific CSS: `ja` enables a CJK font fallback so Japanese renders instead of tofu (□); `ar` enables RTL + Arabic fonts. Defaults to `en`. |
+| `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
 | `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
 | `candidate.name` | string | From `profile.yml`. |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
@@ -163,6 +168,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `candidate.portfolio` | `{url, display}` | Optional — omit to drop the item and its separator. |
 | `candidate.location` | string | From `profile.yml`. |
 | `candidate.photo` | string | Opt-in profile photo (#264): a local path or `data:` URL. Empty/absent emits **no `<img>`**, rendering pixel-for-pixel identical to the photoless layout (US/UK/many-market ATS penalize photos; opt in for DACH/European markets). |
+| `candidate.photo_style` | string | Optional photo framing: `rounded` (default), `circle`, or `square`. Read it from `candidate.photo_style` in `config/profile.yml`; invalid values fail before HTML is written. |
 | `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
 | `summary` | string | Personalized summary with keywords. |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
@@ -182,6 +188,18 @@ The `{{PHOTO}}` slot is **off by default** and intentionally market-specific:
 - **US / UK / Canada / Australia and many ATS-first markets**: photos are discouraged and can trip bias-avoidance filters. Leave `candidate.photo` empty — the `{{PHOTO}}` line is dropped entirely, no `<img>` is emitted, and the CV renders **pixel-for-pixel identical** to today's photoless layout.
 
 When set, the photo floats into the top corner (mirrored for RTL/Arabic) and the header/summary text wraps beside it; `.cv-photo` in `cv-template.html` controls its size and framing.
+
+Local photo paths may be absolute or relative to the career-ops project root.
+The builder validates PNG, JPEG, WebP, and GIF inputs and inlines them as data
+URLs so the saved HTML remains portable. To inspect the result before PDF
+generation, run:
+
+```bash
+node build-cv-html.mjs --preview /tmp/cv-{candidate}-{company}.json {template}
+```
+
+The preview is written to `output/cv-preview.html`. A missing, unreadable, empty,
+or unsupported photo fails with an actionable error before any output is written.
 
 ## Canva CV Generation (optional)
 

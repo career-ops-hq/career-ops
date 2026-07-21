@@ -1,11 +1,99 @@
 package data
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+	_, trackerPath := writeTracker(t, insertedColumnTracker)
+	canonicalTracker, err := filepath.EvalSymlinks(trackerPath)
+	if err != nil {
+		t.Fatalf("canonical tracker: %v", err)
+	}
+	canonicalTemp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatalf("canonical temp dir: %v", err)
+	}
+	sum := sha256.Sum256([]byte(canonicalTracker))
+	want := filepath.Join(canonicalTemp, fmt.Sprintf("career-ops-merge-tracker-%x.lock", sum[:8]))
+
+	got, err := trackerLockDirFor(trackerPath)
+	if err != nil {
+		t.Fatalf("trackerLockDirFor: %v", err)
+	}
+	if got != want {
+		t.Fatalf("lock dir = %q, want Node-compatible %q", got, want)
+	}
+}
+
+func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+	tempDir, trackerPath := writeTracker(t, insertedColumnTracker)
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+
+	lock, err := acquireTrackerLock(trackerPath, trackerLockOptions{
+		timeout: 2 * time.Second,
+		retry:   10 * time.Millisecond,
+		stale:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("acquire first lock: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- UpdateApplicationStatus(tempDir, apps[0], "Interview")
+	}()
+
+	select {
+	case err := <-done:
+		lock.release()
+		t.Fatalf("dashboard update bypassed shared lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: the update is blocked before its tracker read.
+	}
+	concurrentRow := "| 99 | 2026-06-02 | Concurrent Co | Engineer | Remote | 4.0/5 | Evaluated | ❌ | [99](reports/099.md) | concurrent update |"
+	contentWhileLocked, err := os.ReadFile(trackerPath)
+	if err != nil {
+		lock.release()
+		t.Fatalf("read tracker while holding lock: %v", err)
+	}
+	updatedWhileLocked := strings.TrimRight(string(contentWhileLocked), "\n") + "\n" + concurrentRow + "\n"
+	if err := os.WriteFile(trackerPath, []byte(updatedWhileLocked), 0o644); err != nil {
+		lock.release()
+		t.Fatalf("simulate concurrent tracker update: %v", err)
+	}
+	lock.release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("update after lock release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dashboard update did not resume after lock release")
+	}
+
+	content, err := os.ReadFile(trackerPath)
+	if err != nil {
+		t.Fatalf("read tracker: %v", err)
+	}
+	if !strings.Contains(string(content), "| Interview |") {
+		t.Fatalf("status was not updated after lock release:\n%s", content)
+	}
+	if !strings.Contains(string(content), concurrentRow) {
+		t.Fatalf("dashboard update overwrote a row committed by the previous lock owner:\n%s", content)
+	}
+}
 
 // Regression for #1180: a status word appearing as a substring of an earlier
 // cell (Company "Applied Materials" contains "Applied") must not be rewritten;

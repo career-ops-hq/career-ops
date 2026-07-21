@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops 多代理求职系统" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops 多代理求职系统" width="800"></a>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>媒体报道</sub></p>
@@ -33,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops 演示" width="800">
+  <img src="docs/demo.gif" alt="career-ops 演示" width="800">
 </p>
 
 <p align="center"><strong>评估超过 740 个职位 · 生成超过 100 份个性化简历 · 成功拿下理想职位</strong></p>
@@ -65,7 +65,7 @@
 
 ## 这是什么
 
-Career-Ops 可以把任何 AI 编码 CLI 变成完整的求职指挥中心。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的管道，能够：
+career-ops 可以把任何 AI 编码 CLI 变成完整的求职指挥中心。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的管道，能够：
 
 - **评估职位**，使用结构化的 A-F 评估报告（五个维度得出 1.0-5.0 的评分）
 - **生成定制 PDF**，针对每份职位描述输出 ATS 优化简历

@@ -98,6 +98,11 @@
 # Absent, 0, or non-positive → disabled (all ages pass).
 #
 # max_posting_age_days: 45
+#
+# Need an ABSOLUTE date window instead (e.g. "only postings from the 17th to
+# the 20th") rather than a relative "N days old" cutoff? Use the CLI flags
+# instead of a portals.yml key: `node scan.mjs --posted-after 2026-07-17
+# --posted-before 2026-07-20`. Same "don't penalize missing data" rule.
 
 # -- Trust filter (optional) --
 # Enriches each scanned job with a trust score (0-100) and flags.
@@ -569,6 +574,7 @@ search_queries:
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
@@ -577,6 +583,7 @@ search_queries:
 #   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#   gem             jobs.gem.com/<boardId>
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -584,9 +591,9 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas, ibm, jobicy,
-# jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
-# weworkremotely, workingnomads. Examples for every built-in provider are below.
+# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas,
+# ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
+# weworkremotely, workingnomads, wttj. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -630,6 +637,13 @@ search_queries:
 #   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 #                                # omit keywords to pull the whole board
 #   max_pages: 30          # optional per-keyword page cap (100 posts/page, default 30)
+#   enabled: true
+#
+# - name: 阿里巴巴 (Alibaba)
+#   careers_url: https://talent.alibaba.com/off-campus/position-list   # any https://talent.alibaba.com URL
+#   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
+#                                # omit keywords to pull the whole board
+#   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
 #   enabled: true
 #
 # - name: Example Workday Co
@@ -831,6 +845,19 @@ search_queries:
 #   provider: larajobs
 #   enabled: true
 #
+# - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
+#   provider: wttj
+#   wttj:
+#     queries: ["ai engineer", "data platform engineer"]  # REQUIRED — the board is global,
+#                                 # so explicit searches must be configured; each query is a
+#                                 # separate Algolia search, results deduped across queries
+#     max_hits: 100        # optional per-query hit cap (default 100, max 200)
+#   enabled: true
+#
+# - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
+#   provider: agentic-jobs
+#   enabled: true
+#
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
 # branded careers page does not expose), so set it via the api: field — e.g.:
 #
@@ -965,9 +992,8 @@ tracked_companies:
   # -- AI-native platforms (FDE/SA teams) --
 
   - name: Retool
-    careers_url: https://retool.com/careers
-    scan_method: websearch
-    scan_query: 'site:retool.com/careers "Deployed" OR "AI" OR "Solutions"'
+    careers_url: https://jobs.gem.com/retool
+    provider: gem
     notes: "London. Popularized Deployed Engineer role."
     enabled: true
 

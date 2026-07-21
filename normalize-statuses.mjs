@@ -11,16 +11,15 @@
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { rebuildRow } from './tracker-utils.mjs';
+import {
+  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+} from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
@@ -93,7 +92,21 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
-const content = readFileSync(APPS_FILE, 'utf-8');
+
+let trackerTransaction = null;
+if (!DRY_RUN) {
+  try {
+    trackerTransaction = await openTrackerTransaction(APPS_FILE);
+  } catch (err) {
+    console.error(`Cannot acquire tracker lock: ${err.message}`);
+    process.exit(1);
+  }
+  process.once('exit', () => {
+    try { trackerTransaction.close(); } catch {}
+  });
+}
+try {
+const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
 let changes = 0;
@@ -159,11 +172,15 @@ console.log(`\n📊 ${changes} statuses normalized`);
 
 if (!DRY_RUN && changes > 0) {
   // Backup first
-  copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
-  console.log('✅ Written to applications.md (backup: applications.md.bak)');
+  const backupPath = `${APPS_FILE}.bak`;
+  copyFileSync(APPS_FILE, backupPath);
+  trackerTransaction.replace(lines.join('\n'));
+  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
   console.log('✅ No changes needed');
+}
+} finally {
+  trackerTransaction?.close();
 }
