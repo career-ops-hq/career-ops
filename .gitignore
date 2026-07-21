@@ -1,28 +1,21 @@
 # Personal data (user fills these)
 cv.md
-data/applications.md
-data/applications.db
-data/follow-ups.md
-data/salary-observations.tsv
-data/status-log.tsv
-data/assessments.tsv
-data/pipeline.md
-data/scan-history.tsv
-data/scan-runs.tsv
-data/portal-health.tsv
-data/blacklist.md
-data/pdf-index.tsv
-data/agent-inbox.md
-data/active-interviews.md
-data/reply-candidates.json
-data/parser-output/**/*.json
-!data/parser-output/.gitkeep
-!data/parser-output/**/.gitkeep
-data/cache/ats-companies/
+local/
+# Everything under data/ is generated or personal at runtime — only .gitkeep
+# placeholders are tracked (verify with `git ls-files data/`). A blanket rule
+# means a new generated file (e.g. a future log/cache addition) is covered
+# for every user automatically, with no per-filename .gitignore update needed.
+data/*
+!data/.gitkeep
+!data/offers/
+!data/parser-output/
 # Received offers/contracts, promise notes, prep reports (PII — never commit)
 data/offers/*
 !data/offers/.gitkeep
-data/upskill/
+data/parser-output/**
+!data/parser-output/**/
+!data/parser-output/.gitkeep
+!data/parser-output/**/.gitkeep
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -117,5 +110,5 @@ package-lock.json
 # Planning (local scratchpad)
 plan/
 
-# Web
-.career-ops-web/logo-cache/
+# Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
+.career-ops-web/

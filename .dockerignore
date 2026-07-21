@@ -9,6 +9,7 @@ jds/*
 !jds/.gitkeep
 reports/*.md
 .env
+local/
 .update-dismissed
 .update-lock
 *.log
