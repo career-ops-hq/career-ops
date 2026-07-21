@@ -189,10 +189,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(f),
       });
-      if (r.status === 400) {
+      if (isScannerMissing(r.status)) {
         const d = await r.json().catch(() => ({}));
         sawError = d.error || "The scanner isn't available.";
-        sawScannerMissing = isScannerMissing(r.status);
+        sawScannerMissing = true;
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -464,10 +464,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         setPhase("blocked");
         return;
       }
-      if (r.status === 400) {
+      if (isScannerMissing(r.status)) {
         const d = await r.json().catch(() => ({}));
         sawError = d.error || "AI search isn't available.";
-        sawScannerMissing = isScannerMissing(r.status);
+        sawScannerMissing = true;
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
