@@ -73,10 +73,10 @@ const MAX_PAGES_PER_KEYWORD = 50;
  * @returns {Promise<string|null>}
  */
 async function deriveKeyFromBundle(ctx) {
-  const html = await ctx.fetchText('https://www.vdab.be/vindeenjob/vacatures', { timeoutMs: 12_000 });
+  const html = await ctx.fetchText('https://www.vdab.be/vindeenjob/vacatures', { timeoutMs: 12_000, redirect: 'error' });
   const bundleUrl = html.match(BUNDLE_RE)?.[0];
   if (!bundleUrl) return null;
-  const js = await ctx.fetchText(bundleUrl, { timeoutMs: 15_000 });
+  const js = await ctx.fetchText(bundleUrl, { timeoutMs: 15_000, redirect: 'error' });
   return js.match(KEY_RE)?.[1] || null;
 }
 
