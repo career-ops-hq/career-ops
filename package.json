@@ -35,6 +35,7 @@
     "scan:seeds": "node scan-ats-full.mjs --seeds yc,a16z",
     "scan:yc": "node scan-ats-full.mjs --seeds yc",
     "scan:interamt": "node scan-interamt.mjs",
+    "company:funded": "node company-funded.mjs",
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",

@@ -172,6 +172,7 @@ const SYSTEM_PATHS = [
   'classify-tier.mjs',
   'scan-ats-full.mjs',
   'scan-interamt.mjs',
+  'company-funded.mjs',
   'match-star.mjs',
   'jd-skill-gap.mjs',
   'prepare-application.mjs',

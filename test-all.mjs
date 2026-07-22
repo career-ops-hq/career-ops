@@ -174,6 +174,7 @@ const scripts = [
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
+  { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
