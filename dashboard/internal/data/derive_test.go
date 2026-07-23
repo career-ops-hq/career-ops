@@ -247,6 +247,16 @@ func TestDeriveNoteFields(t *testing.T) {
 			paySrc:   "POSTED",
 			last:     "2026-06-08",
 		},
+		{
+			name: "billion-scale valuation alone is not pay",
+			app: model.CareerApplication{
+				Date:  "2026-04-11",
+				Notes: "Series H drone logistics, $7.6B valuation, Remote Canada",
+			},
+			workMode: "Remote",
+			payRange: "",
+			last:     "2026-04-11",
+		},
 	}
 
 	for _, tc := range cases {
@@ -309,27 +319,27 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 		{
 			name:    "single bare symbol ($)",
 			input:   []string{"$"},
-			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$))`,
+			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$))`,
 		},
 		{
 			name:    "single ISO code (PLN)",
 			input:   []string{"PLN"},
-			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN))`,
+			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN))`,
 		},
 		{
 			name:    "two ISO codes (PLN, UAH)",
 			input:   []string{"PLN", "UAH"},
-			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN|UAH))`,
+			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN|UAH))`,
 		},
 		{
 			name:    "mixed bare + ISO ($ bare, PLN ISO)",
 			input:   []string{"$", "PLN"},
-			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$|PLN))`,
+			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$|PLN))`,
 		},
 		{
 			name:    "metachar token (escaped via QuoteMeta)",
 			input:   []string{"A.B"},
-			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:A\.B))`,
+			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:A\.B))`,
 		},
 	}
 	for _, tc := range cases {
