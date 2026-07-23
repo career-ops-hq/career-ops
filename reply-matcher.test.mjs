@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { 
-  extractDomain, 
-  checkCompanyMatch, 
-  checkRoleMatch, 
+import {
+  extractDomain,
+  checkCompanyMatch,
+  checkRoleMatch,
+  getAppDomains,
   matchCandidates,
   classifyReply
 } from './reply-matcher.mjs';
@@ -33,6 +34,100 @@ test('checkRoleMatch', () => {
   // Chinese role matches
   assert.ok(checkRoleMatch('邀请您参加PY01_python开发工程师的面试', 'python开发工程师'));
   assert.ok(checkRoleMatch('邀请您参加python开发工程师的面试', 'PY01_python开发工程师'));
+});
+
+test('getAppDomains - drops prose tokens and filenames, keeps real hostnames', () => {
+  const app = {
+    num: 68,
+    company: 'Northwind',
+    role: 'VP, Demand Generation',
+    notes: 'Near-bullseye remote VP-DG at enterprise SaaS; no hard blockers (MBA/vertical-pod soft gaps).; Applied via careers.northwind.com, Remote-US. Comp expectation submitted before the screen. CV: output/cv-vp-demand-generation-2026-06-23.pdf'
+  };
+
+  const domains = getAppDomains(app, []);
+
+  assert.ok(domains.includes('northwind.com'), 'company-domain guess must survive');
+  assert.ok(domains.includes('careers.northwind.com'), 'employer subdomain in notes must survive');
+  for (const junk of ['gaps.', 'remote-us.', 'screen.', 'outputcv-vp-demand-generation-2026-06-23.pdf']) {
+    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+  }
+});
+
+test('getAppDomains - keeps an employer contact domain but skips the confidential-marker guess', () => {
+  const app = {
+    num: 270,
+    company: '?',
+    role: 'Vice President of Marketing - Franchisor',
+    notes: 'Recruiter search on behalf of an undisclosed franchisor client. Emailed resume to founder@franchise-search.example and asked whether the search is remote or location-tied. Their other posting (clientco.applytojob.com/apply/F2cqqwBuit) reads like a different client, so not applied to directly.'
+  };
+
+  const domains = getAppDomains(app, []);
+
+  assert.ok(domains.includes('franchise-search.example'), 'employer contact domain must survive');
+  for (const junk of ['client.', 'location-tied.', 'directly.', '?.com', '?.co', '?.io']) {
+    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+  }
+  assert.ok(
+    !domains.some(d => d.includes('applytojob')),
+    'a shared ATS host mentioned in notes must not become a candidate domain'
+  );
+});
+
+test('getAppDomains - drops a score delta and keeps the recruiter domain', () => {
+  const app = {
+    num: 234,
+    company: '?',
+    role: 'Vice President Marketing',
+    notes: 'Re-eval 2026-07-12, score 3.3/4.5. Build-from-scratch VP Mktg sourced via TalentPartners. Emailed resume to recruiter@talent-partners.example and asked about similar searches.'
+  };
+
+  const domains = getAppDomains(app, []);
+
+  assert.ok(domains.includes('talent-partners.example'), 'recruiter contact domain must survive');
+  for (const junk of ['3.34.5.', 'talentpartners.', 'searches.', '?.com', '?.co', '?.io']) {
+    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+  }
+});
+
+test('getAppDomains - rejects bare filenames whose extension parses as a TLD', () => {
+  const app = {
+    num: 30,
+    company: 'Initech',
+    role: 'Head of Growth',
+    notes: 'Tailored from cv.md. Proof points pulled from article-digest.md, cover draft saved as cover-letter.pdf. Recruiter is talent@initech-group.example.'
+  };
+
+  const domains = getAppDomains(app, []);
+
+  assert.ok(domains.includes('initech.com'), 'company-domain guess must survive');
+  assert.ok(domains.includes('initech-group.example'), 'employer contact domain must survive');
+  for (const filename of ['cv.md', 'article-digest.md', 'cover-letter.pdf']) {
+    assert.ok(!domains.includes(filename), `expected filename "${filename}" to be dropped`);
+  }
+});
+
+test('getAppDomains - drops shared ATS, job-board and webmail domains', () => {
+  const app = {
+    num: 12,
+    company: 'Globex',
+    role: 'Director of Marketing',
+    notes: 'Applied via LinkedIn.com; req tracked at greenhouse.io for this team. Screener wrote from screening@gmail.com, hiring manager is manager@globex-hq.example.'
+  };
+  const followups = [
+    {
+      appNum: 12,
+      contact: 'recruiter@outlook.com',
+      notes: 'Left a voicemail and also emailed talent@myworkday.com about scheduling.'
+    }
+  ];
+
+  const domains = getAppDomains(app, followups);
+
+  assert.ok(domains.includes('globex.com'), 'company-domain guess must survive');
+  assert.ok(domains.includes('globex-hq.example'), 'employer contact domain in notes must survive');
+  for (const shared of ['linkedin.com', 'greenhouse.io', 'gmail.com', 'outlook.com', 'myworkday.com']) {
+    assert.ok(!domains.includes(shared), `expected shared domain "${shared}" to be dropped`);
+  }
 });
 
 test('matchCandidates - high confidence with company + role', () => {
@@ -134,6 +229,32 @@ test('matchCandidates - no match', () => {
   assert.equal(results[0].application_num, null);
   assert.equal(results[0].confidence, 'low');
   assert.ok(results[0].signals.includes('no-match'));
+});
+
+test('matchCandidates - a shared ATS domain in one application does not capture unrelated mail', () => {
+  const apps = [
+    { num: 20, company: 'Initech', role: 'Head of Growth', notes: 'Applied through greenhouse.io for this req' },
+    { num: 21, company: 'Umbrella', role: 'Marketing Director', notes: '' }
+  ];
+
+  const candidates = [
+    {
+      message_id: 'msg6',
+      from: 'no-reply@greenhouse.io',
+      subject: 'Your application to Umbrella',
+      body_snippet: 'Thanks for your interest.',
+      signal: null
+    }
+  ];
+
+  const results = matchCandidates(candidates, apps, []);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].application_num, 21);
+  assert.ok(
+    !results[0].signals.includes('sender-domain'),
+    'a shared ATS sender must not score a domain match against an unrelated application'
+  );
 });
 
 test('classifyReply - high confidence interview fixtures', () => {

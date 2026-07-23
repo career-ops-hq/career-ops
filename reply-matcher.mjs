@@ -66,6 +66,52 @@ export function checkRoleMatch(text, role) {
   return false;
 }
 
+// Shared ATS, job board, and webmail hosts. Mail from one of these identifies a
+// vendor, never an employer, so it must never become a candidate domain: every
+// message from the host would then score a sender-domain match against whichever
+// application happened to mention it.
+const SHARED_DOMAINS = [
+  'linkedin.com',
+  'applytojob.com',
+  'greenhouse.io',
+  'lever.co',
+  'icims.com',
+  'myworkday.com',
+  'ashbyhq.com',
+  'smartrecruiters.com',
+  'taleo.net',
+  'successfactors.com',
+  'gmail.com',
+  'outlook.com',
+  'yahoo.com',
+  'hotmail.com'
+];
+
+// Dot-separated labels ending in a letters-only TLD. Rejects the shapes tracker
+// prose produces: sentence-final words ("gaps."), bare numerics ("3.34.5."), and
+// paths or filenames ("output/cv-2026-06-23.pdf").
+const DOMAIN_SHAPE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
+
+// Extensions of the artifacts career-ops writes into tracker notes. Several parse
+// as a valid TLD, so shape alone cannot tell a filename from a hostname: "cv.md"
+// would otherwise read as a Moldovan domain. Deliberately excludes extensions that
+// are common employer TLDs (io, co, ai, sh, me, dev, app).
+const FILE_EXTENSIONS = [
+  'pdf', 'md', 'doc', 'docx', 'txt', 'html', 'htm',
+  'png', 'jpg', 'jpeg', 'csv', 'tsv', 'json', 'yaml', 'yml', 'mjs'
+];
+
+function isUsableDomain(domain) {
+  if (!DOMAIN_SHAPE.test(domain)) return false;
+  if (FILE_EXTENSIONS.includes(domain.slice(domain.lastIndexOf('.') + 1))) return false;
+  return !SHARED_DOMAINS.some(shared => domain === shared || domain.endsWith(`.${shared}`));
+}
+
+function addDomain(domains, value) {
+  const domain = (value || '').toLowerCase();
+  if (isUsableDomain(domain)) domains.add(domain);
+}
+
 export function getAppDomains(app, followups) {
   const domains = new Set();
   
@@ -73,15 +119,16 @@ export function getAppDomains(app, followups) {
   if (app.notes) {
     const emails = app.notes.match(/[\w.-]+@[\w.-]+\.\w+/g) || [];
     for (const email of emails) {
-      const d = extractDomain(email);
-      if (d) domains.add(d);
+      addDomain(domains, extractDomain(email));
     }
     // Also look for explicit domains in notes (e.g. "ATS: lever.co")
     const words = app.notes.split(/\s+/);
     for (const w of words) {
       if (w.includes('.') && !w.includes('@')) {
-        // very rough domain check
-        domains.add(w.toLowerCase().replace(/[^a-z0-9.-]/g, ''));
+        // Notes are prose, so trim the punctuation wrapping the token rather than
+        // deleting every disallowed character: dropping "/" would splice a path
+        // like "output/cv-2026-06-23.pdf" into one plausible-looking hostname.
+        addDomain(domains, w.replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9]+$/, ''));
       }
     }
   }
@@ -90,27 +137,26 @@ export function getAppDomains(app, followups) {
   const appFollowups = followups.filter(f => f.appNum === app.num);
   for (const fu of appFollowups) {
     if (fu.contact) {
-      const d = extractDomain(fu.contact);
-      if (d) domains.add(d);
+      addDomain(domains, extractDomain(fu.contact));
     }
     if (fu.notes) {
        const emails = fu.notes.match(/[\w.-]+@[\w.-]+\.\w+/g) || [];
        for (const email of emails) {
-         const d = extractDomain(email);
-         if (d) domains.add(d);
+         addDomain(domains, extractDomain(email));
        }
     }
   }
 
-  // Add common company domain guess (companyname.com)
+  // Add common company domain guess (companyname.com). "?" is the structural
+  // marker for a confidential employer, not a name, so there is nothing to guess.
   const cNorm = normalizeStr(app.company);
-  if (cNorm) {
-    domains.add(`${cNorm}.com`);
-    domains.add(`${cNorm}.co`);
-    domains.add(`${cNorm}.io`);
+  if (cNorm && cNorm !== '?') {
+    addDomain(domains, `${cNorm}.com`);
+    addDomain(domains, `${cNorm}.co`);
+    addDomain(domains, `${cNorm}.io`);
   }
 
-  return Array.from(domains).filter(Boolean);
+  return Array.from(domains);
 }
 
 export function matchCandidates(candidates, apps, followups = []) {
