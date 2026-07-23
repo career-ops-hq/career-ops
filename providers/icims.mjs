@@ -76,9 +76,12 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     // The origin check below still rejects any link that resolves off-host.
     try { parsed = new URL(decodeEntities(href[1]), origin); } catch { continue; }
     if (parsed.origin !== origin) continue;
-    const title = card.match(/<h3\s*>\s*([\s\S]*?)<\/h3>/);
+    // Match the tags with attributes allowed: tenants theme their portals, and a
+    // themed <h3 class="..."> under a bare-tag-only regex would drop the card
+    // silently — zero jobs, no error, indistinguishable from an empty board.
+    const title = card.match(/<h3\b[^>]*>\s*([\s\S]*?)<\/h3>/);
     if (!title || !title[1].trim()) continue;
-    const location = card.match(/field-label">Location<\/span>\s*<span\s*>\s*([\s\S]*?)<\/span>/);
+    const location = card.match(/field-label">Location<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
     jobs.push({
       title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
       url: `${parsed.origin}${parsed.pathname}`,
