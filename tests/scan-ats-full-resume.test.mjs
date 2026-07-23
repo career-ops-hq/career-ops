@@ -7,7 +7,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nscan-ats-full — resume machinery');
 
 const mod = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-const { parallelEach, withTimeout } = mod;
+const { parallelEach, withTimeout, datasetFingerprint } = mod;
 
 // withTimeout: passes a fast promise through untouched.
 {
@@ -91,4 +91,21 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   if (loadCheckpoint(p)?.cutoffMs === 5) pass('loadCheckpoint reads a valid checkpoint');
   else fail('valid checkpoint not read');
   rmSync(dir, { recursive: true, force: true });
+}
+
+// datasetFingerprint: same content → same hash; any drift → different hash.
+// Guards --resume against a same-length dataset regenerated with different
+// members (which a bare length check would miss and silently mis-resume).
+{
+  const a = ['acme', 'globex', 'initech'];
+  if (datasetFingerprint(a) === datasetFingerprint(['acme', 'globex', 'initech'])) pass('datasetFingerprint stable for identical lists');
+  else fail('datasetFingerprint not stable for identical content');
+
+  // Same length, swapped member — the case a length-only check misses.
+  if (datasetFingerprint(a) !== datasetFingerprint(['acme', 'globex', 'umbrella'])) pass('datasetFingerprint detects same-length content drift');
+  else fail('datasetFingerprint missed same-length content drift');
+
+  // Reordering is drift too — resume offsets are order-dependent.
+  if (datasetFingerprint(a) !== datasetFingerprint(['globex', 'acme', 'initech'])) pass('datasetFingerprint detects reordering');
+  else fail('datasetFingerprint missed reordering');
 }

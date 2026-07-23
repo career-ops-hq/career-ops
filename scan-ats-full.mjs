@@ -32,6 +32,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync, unlinkSync } from 'fs';
 import { pathToFileURL } from 'url';
+import { createHash } from 'crypto';
 import path from 'path';
 import yaml from 'js-yaml';
 
@@ -91,6 +92,15 @@ function writeCheckpoint(cp) {
   const tmp = `${CHECKPOINT_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(cp), 'utf-8');
   renameSync(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint
+}
+
+// Cheap content fingerprint of a source's company list. --resume relies on the
+// dataset order being byte-for-byte reproducible; a same-length regeneration
+// with different members would pass a bare length check and silently resume at
+// the wrong offset (companies skipped or re-scanned). Hashing the list detects
+// that drift so we can fail loudly instead.
+export function datasetFingerprint(list) {
+  return createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 16);
 }
 
 // Dataset entries are external input destined for URL interpolation — reject
@@ -640,20 +650,29 @@ async function main() {
 
   for (const name of opts.ats) {
     const source = SOURCES[name];
-    if (completedSources.has(name)) {
-      log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping`);
-      continue;
-    }
+    // Stats are accumulated BEFORE the completed-source skip: on --resume a
+    // source finished before the checkpoint was written still contributed its
+    // companies to the sweep, so it must still count toward the availability /
+    // cap figures the final report and --json output show.
     const { list, status } = await loadCompanyList(name, source.dataset);
     datasetStatus[name] = status;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
+    if (completedSources.has(name)) {
+      log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping`);
+      continue;
+    }
+    const datasetHash = datasetFingerprint(list);
     const entriesAll = sampleCompanies(list, opts.limit, opts.shuffle).map(source.toEntry).filter(Boolean);
 
     let startAt = 0;
     if (checkpoint && checkpoint.current?.name === name) {
-      if (checkpoint.current.datasetLen !== list.length) {
-        console.error(`Error: ${name} company dataset changed since the checkpoint (${checkpoint.current.datasetLen} → ${list.length} entries) — resume order is no longer valid. Delete ${CHECKPOINT_PATH} and rerun.`);
+      // datasetHash is absent in checkpoints written before this guard existed;
+      // fall back to the length-only check for those rather than hard-failing.
+      const hashMismatch = checkpoint.current.datasetHash != null
+        && checkpoint.current.datasetHash !== datasetHash;
+      if (checkpoint.current.datasetLen !== list.length || hashMismatch) {
+        console.error(`Error: ${name} company dataset changed since the checkpoint — resume order is no longer valid. Delete ${CHECKPOINT_PATH} and rerun.`);
         process.exit(1);
       }
       startAt = checkpoint.current.resumeAt;
@@ -666,10 +685,15 @@ async function main() {
     const truncated = [];
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
-        const jobs = await withTimeout(source.provider.fetch(entry, ctx), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
-        if (jobs.workdayTruncated) truncated.push(entry);
-        if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
-        await processJobs(jobs, name, source.provider);
+        // The whole per-company unit — fetch AND processJobs (which may issue
+        // per-job detail-page requests via provider.enrichDate) — runs inside
+        // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
+        await withTimeout((async () => {
+          const jobs = await source.provider.fetch(entry, ctx);
+          if (jobs.workdayTruncated) truncated.push(entry);
+          if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
+          await processJobs(jobs, name, source.provider);
+        })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
@@ -683,7 +707,7 @@ async function main() {
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
         writeCheckpoint({
           ...checkpointBase(),
-          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length },
+          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
           counters: {
             ...snapshotCounters(),
             // totalCompaniesScanned was bumped by the FULL entries.length up
@@ -703,12 +727,14 @@ async function main() {
       log(`\n  ↻ retrying ${truncated.length} truncated board(s) sequentially...`);
       for (const entry of truncated) {
         try {
-          const jobs = await withTimeout(source.provider.fetch(entry, ctx), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
-          await processJobs(jobs, name, source.provider);
-          if (jobs.workdayTruncated) {
-            errors++; // still truncated on a quiet line — genuine board problem, move on
-            if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
-          }
+          await withTimeout((async () => {
+            const jobs = await source.provider.fetch(entry, ctx);
+            await processJobs(jobs, name, source.provider);
+            if (jobs.workdayTruncated) {
+              errors++; // still truncated on a quiet line — genuine board problem, move on
+              if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
+            }
+          })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {
           errors++;
           if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
