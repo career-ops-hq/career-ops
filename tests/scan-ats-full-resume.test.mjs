@@ -52,3 +52,43 @@ const { parallelEach, withTimeout } = mod;
   if (last.done === 10 && last.resumeAt === 10) pass('resumeAt reaches items.length on completion');
   else fail(`final event ${JSON.stringify(last)}`);
 }
+
+// ── Checkpoint compatibility rules (Task 3) ─────────────────────────
+const { loadCheckpoint, checkpointCompatible } = mod;
+
+{
+  const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false };
+  const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false };
+  if (checkpointCompatible(cp, opts)) pass('checkpoint compatible with identical settings');
+  else fail('identical settings judged incompatible');
+
+  if (!checkpointCompatible(cp, { ...opts, ats: ['greenhouse'] })) pass('ats mismatch rejected');
+  else fail('ats mismatch accepted');
+
+  if (!checkpointCompatible(cp, { ...opts, shuffle: true })) pass('--shuffle rejected for resume (order not reproducible)');
+  else fail('shuffle accepted');
+
+  if (!checkpointCompatible(cp, { ...opts, limit: 200 })) pass('limit mismatch rejected');
+  else fail('limit mismatch accepted');
+
+  if (!checkpointCompatible(null, opts)) pass('null checkpoint rejected');
+  else fail('null checkpoint accepted');
+}
+
+// loadCheckpoint: garbage and wrong-version files → null, never a throw.
+{
+  const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+  const dir = 'data/cache/.test-checkpoint';
+  mkdirSync(dir, { recursive: true });
+  const p = `${dir}/cp.json`;
+  writeFileSync(p, 'not json', 'utf-8');
+  if (loadCheckpoint(p) === null) pass('loadCheckpoint returns null on garbage JSON');
+  else fail('garbage JSON not rejected');
+  writeFileSync(p, JSON.stringify({ version: 99 }), 'utf-8');
+  if (loadCheckpoint(p) === null) pass('loadCheckpoint returns null on unknown version');
+  else fail('unknown version not rejected');
+  writeFileSync(p, JSON.stringify({ version: 1, cutoffMs: 5 }), 'utf-8');
+  if (loadCheckpoint(p)?.cutoffMs === 5) pass('loadCheckpoint reads a valid checkpoint');
+  else fail('valid checkpoint not read');
+  rmSync(dir, { recursive: true, force: true });
+}

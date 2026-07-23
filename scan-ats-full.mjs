@@ -26,10 +26,11 @@
  *   node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+ *   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync, unlinkSync } from 'fs';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import yaml from 'js-yaml';
@@ -57,6 +58,40 @@ const CACHE_TTL_HOURS = 24;
 // so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
 const CONCURRENCY = 20;
+
+// Crash insurance for multi-hour directory sweeps: progress + matches are
+// checkpointed every CHECKPOINT_EVERY companies so --resume can continue a
+// dead run (with its ORIGINAL date window) instead of restarting from zero.
+const CHECKPOINT_PATH = 'data/cache/ats-full-checkpoint.json';
+const CHECKPOINT_EVERY = 500;
+
+export function loadCheckpoint(file = CHECKPOINT_PATH) {
+  if (!existsSync(file)) return null;
+  try {
+    const cp = JSON.parse(readFileSync(file, 'utf-8'));
+    return cp?.version === 1 ? cp : null;
+  } catch {
+    return null;
+  }
+}
+
+// A checkpoint written under different scan settings must not be resumed —
+// silently mixing sources, caps, or undated policy would corrupt the run's
+// semantics. --shuffle is never resumable: the sampled order isn't reproducible.
+export function checkpointCompatible(cp, opts) {
+  return Boolean(cp)
+    && !opts.shuffle
+    && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
+    && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
+    && cp.includeUndated === opts.includeUndated;
+}
+
+function writeCheckpoint(cp) {
+  mkdirSync(CACHE_DIR, { recursive: true });
+  const tmp = `${CHECKPOINT_PATH}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cp), 'utf-8');
+  renameSync(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint
+}
 
 // Dataset entries are external input destined for URL interpolation — reject
 // anything outside a conservative slug charset.
@@ -120,7 +155,7 @@ const SOURCES = {
 const KNOWN_FLAGS = [
   '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
   '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
-  '--shuffle', '--help', '-h',
+  '--shuffle', '--resume', '--help', '-h',
 ];
 
 // Flags that consume the next argv token as a value (space-separated form —
@@ -137,6 +172,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
   node scan-ats-full.mjs --verbose            # log per-board fetch failures
   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+  node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
   node scan-ats-full.mjs --help               # print this usage block and exit`;
 
 function parseArgs(argv) {
@@ -209,6 +245,7 @@ function parseArgs(argv) {
     includeUndated: args.includes('--include-undated'),
     includeBlacklisted: args.includes('--include-blacklisted'),
     shuffle: args.includes('--shuffle'),
+    resume: args.includes('--resume'),
   };
 }
 
@@ -483,7 +520,24 @@ async function filterLive(offers) {
 
 async function main() {
   const opts = parseArgs(process.argv);
-  const cutoff = Date.now() - opts.sinceDays * 86_400_000;
+  let checkpoint = null;
+  if (opts.resume) {
+    const cp = loadCheckpoint();
+    if (!cp) {
+      console.error(`Error: --resume passed but no checkpoint found at ${CHECKPOINT_PATH}.`);
+      process.exit(1);
+    }
+    if (!checkpointCompatible(cp, opts)) {
+      console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
+      process.exit(1);
+    }
+    checkpoint = cp;
+  } else if (loadCheckpoint() && !opts.dryRun) {
+    console.error(`⚠️  Unfinished sweep checkpoint found at ${CHECKPOINT_PATH} — pass --resume to continue it; this fresh run will overwrite it.`);
+  }
+  // Resume reuses the ORIGINAL cutoff so the date window stays consistent
+  // across the interruption instead of silently sliding forward.
+  const cutoff = checkpoint ? checkpoint.cutoffMs : Date.now() - opts.sinceDays * 86_400_000;
   // In --json mode, stdout is reserved for the single machine-readable result,
   // so every human-facing line goes to stderr instead.
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
@@ -525,32 +579,65 @@ async function main() {
   const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
   const date = new Date().toISOString().slice(0, 10);
 
-  const newOffers = [];
-  let totalCompaniesScanned = 0;
+  const newOffers = checkpoint ? checkpoint.offers : [];
+  // Checkpointed matches were already deduped once — without re-seeding, a
+  // resumed run re-scanning the in-flight overlap would duplicate them.
+  for (const o of newOffers) seenUrls.add(normalizeUrlForDedup(o.url));
+  const completedSources = new Set(checkpoint?.completedSources || []);
+  const cc = checkpoint?.counters || {};
+  let totalCompaniesScanned = cc.totalCompaniesScanned || 0;
   let totalCompaniesAvailable = 0;
-  let totalErrors = 0;
-  let droppedNoDate = 0;
-  let droppedContent = 0;
+  let totalErrors = cc.totalErrors || 0;
+  let droppedNoDate = cc.droppedNoDate || 0;
+  let droppedContent = cc.droppedContent || 0;
   let capHit = false;
   // Aggregated from providers/workday.mjs's jobs.workdayNoDateSkip tag — see
   // there for why this is a counter instead of a per-company console.error
   // (thousands of tenants hit this on a full directory scan; one line each
   // would just be the same message repeated thousands of times).
-  let noDateSkipCompanies = 0;
-  let noDateSkipJobs = 0;
+  let noDateSkipCompanies = cc.noDateSkipCompanies || 0;
+  let noDateSkipJobs = cc.noDateSkipJobs || 0;
   const datasetStatus = {};
+
+  const snapshotCounters = () => ({
+    totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
+    noDateSkipCompanies, noDateSkipJobs,
+  });
+  const checkpointBase = () => ({
+    version: 1,
+    cutoffMs: cutoff,
+    ats: opts.ats,
+    limit: opts.limit === Infinity ? null : opts.limit,
+    includeUndated: opts.includeUndated,
+    completedSources: [...completedSources],
+    offers: newOffers,
+    savedAt: new Date().toISOString(),
+  });
 
   for (const name of opts.ats) {
     const source = SOURCES[name];
+    if (completedSources.has(name)) {
+      log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping`);
+      continue;
+    }
     const { list, status } = await loadCompanyList(name, source.dataset);
     datasetStatus[name] = status;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
-    const entries = sampleCompanies(list, opts.limit, opts.shuffle).map(source.toEntry).filter(Boolean);
-    totalCompaniesScanned += entries.length;
-    log(`\n⚙  ${name} — ${entries.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}`);
+    const entriesAll = sampleCompanies(list, opts.limit, opts.shuffle).map(source.toEntry).filter(Boolean);
 
-    let done = 0;
+    let startAt = 0;
+    if (checkpoint && checkpoint.current?.name === name) {
+      if (checkpoint.current.datasetLen !== list.length) {
+        console.error(`Error: ${name} company dataset changed since the checkpoint (${checkpoint.current.datasetLen} → ${list.length} entries) — resume order is no longer valid. Delete ${CHECKPOINT_PATH} and rerun.`);
+        process.exit(1);
+      }
+      startAt = checkpoint.current.resumeAt;
+    }
+    const entries = entriesAll.slice(startAt);
+    totalCompaniesScanned += entries.length;
+    log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
+
     let errors = 0;
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
@@ -578,12 +665,31 @@ async function main() {
         errors++;
         if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: ${err.message}`);
       }
-      done++;
+    }, ({ done, resumeAt }) => {
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
+      if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
+        writeCheckpoint({
+          ...checkpointBase(),
+          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length },
+          counters: {
+            ...snapshotCounters(),
+            // totalCompaniesScanned was bumped by the FULL entries.length up
+            // front; a checkpoint must store only work actually attempted, or
+            // a resumed run (which re-adds its own slice) double-counts the
+            // completed portion in the final summary.
+            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done),
+            totalErrors: totalErrors + errors,
+          },
+        });
+      }
     });
     totalErrors += errors;
+    completedSources.add(name);
+    if (!opts.dryRun) {
+      writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
+    }
     log(`\n  done (${errors} unreachable boards skipped)`);
   }
 
@@ -673,6 +779,9 @@ async function main() {
     }
   }
 
+  // Sweep completed — the checkpoint's job is done.
+  if (!opts.dryRun && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
+
   // The authoritative machine-readable result: lets a caller (e.g. the web)
   // tell a *degraded* scan (capped / stale dataset / undated dropped) apart
   // from a genuinely *empty* one. In --json mode stdout carries ONLY this.
@@ -680,6 +789,7 @@ async function main() {
     process.stdout.write(JSON.stringify({
       date,
       sources: opts.ats,
+      resumed: Boolean(checkpoint),
       sinceDays: opts.sinceDays,
       companiesAvailable: totalCompaniesAvailable,
       companiesScanned: totalCompaniesScanned,
