@@ -58,3 +58,62 @@ else fail(`icims.id is ${JSON.stringify(icims.id)}`);
     fail('garbage HTML did not parse to []');
   }
 }
+
+// ── fetch(): pagination ─────────────────────────────────────────────
+const mkCard = (id, title) => `
+<li class="iCIMS_JobCardItem"><div class="row">
+<div class="col-xs-6 header left"><span class="sr-only field-label">Location</span><span >US-TX-Austin</span></div>
+<div class="col-xs-12 title"><a href="${ORIGIN}/jobs/${id}/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/job?in_iframe=1" class="iCIMS_Anchor"><h3 >${title}</h3></a></div>
+</div></li>`;
+const page = (...cards) => `<ul class="iCIMS_JobsTable">${cards.join('')}</ul>`;
+
+const mkCtx = (pages) => ({
+  transport: 'http',
+  sleep: async () => {},
+  fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+  fetchText: async (url) => {
+    const pr = Number(new URL(url).searchParams.get('pr'));
+    mkCtx.calls.push(pr);
+    return pages[pr] ?? page(); // out-of-range → empty page
+  },
+});
+
+// Multi-page tenant: stops on the first empty page.
+{
+  mkCtx.calls = [];
+  const ctx = mkCtx([page(mkCard(1, 'Role A'), mkCard(2, 'Role B')), page(mkCard(3, 'Role C'))]);
+  const jobs = await icims.fetch({ name: 'acmefreight', careers_url: `${ORIGIN}/jobs/search?ss=1` }, ctx);
+  if (jobs.length === 3 && mkCtx.calls.join(',') === '0,1,2') pass('fetch paginates and stops on empty page');
+  else fail(`jobs=${jobs.length} calls=${mkCtx.calls.join(',')}`);
+}
+
+// Tenant that repeats the last page for out-of-range pr: repeat-content stop.
+{
+  mkCtx.calls = [];
+  const repeating = page(mkCard(9, 'Sticky Role'));
+  const ctx = mkCtx({ 0: page(mkCard(1, 'First')), 1: repeating, 2: repeating, 3: repeating });
+  const jobs = await icims.fetch({ name: 'acmefreight', careers_url: `${ORIGIN}/jobs/search?ss=1` }, ctx);
+  if (jobs.length === 2 && mkCtx.calls.length === 3) pass('fetch stops when a page repeats the previous first URL');
+  else fail(`jobs=${jobs.length} calls=${mkCtx.calls.length}`);
+}
+
+// ── enrichDate(): detail-page JSON-LD ───────────────────────────────
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<html><script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-20","title":"X"}</script></html>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-20')) pass('enrichDate sets postedAt from JSON-LD datePosted');
+  else fail(`postedAt: ${job.postedAt}`);
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  await icims.enrichDate(job, { fetchText: async () => '<html>no ldjson</html>' });
+  if (job.postedAt === undefined) pass('enrichDate leaves job undated when JSON-LD missing');
+  else fail(`postedAt unexpectedly set: ${job.postedAt}`);
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  await icims.enrichDate(job, { fetchText: async () => '<script type="application/ld+json">{broken json</script>' });
+  if (job.postedAt === undefined) pass('enrichDate tolerates malformed JSON-LD without throwing');
+  else fail(`postedAt unexpectedly set: ${job.postedAt}`);
+}

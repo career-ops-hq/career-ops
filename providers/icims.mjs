@@ -96,10 +96,37 @@ export default {
   },
 
   async fetch(entry, ctx) {
-    throw new Error('icims: not implemented yet');
+    const origin = resolveOrigin(entry);
+    if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
+    const all = [];
+    let prevFirstUrl = null;
+    for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
+      if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+      const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
+      const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
+      if (pageJobs.length === 0) break; // past the last page
+      // Some tenants serve the last real page again for an out-of-range pr
+      // instead of an empty one — a repeated first URL means we're looping.
+      if (pageJobs[0].url === prevFirstUrl) break;
+      prevFirstUrl = pageJobs[0].url;
+      all.push(...pageJobs);
+    }
+    return all;
   },
 
+  /**
+   * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
+   * `datePosted`) — the list pages carry no date at all. Any failure leaves
+   * the job undated; the caller's undated policy then applies as usual.
+   */
   async enrichDate(job, ctx) {
-    throw new Error('icims: not implemented yet');
+    const sep = job.url.includes('?') ? '&' : '?';
+    const html = await ctx.fetchText(`${job.url}${sep}in_iframe=1`, { headers: HEADERS, redirect: 'error' });
+    const block = String(html).match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    if (!block) return;
+    let data;
+    try { data = JSON.parse(block[1]); } catch { return; }
+    const ts = Date.parse(data?.datePosted || '');
+    if (!Number.isNaN(ts)) job.postedAt = ts;
   },
 };
