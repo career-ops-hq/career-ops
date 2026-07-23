@@ -9,6 +9,15 @@ import {
   classifyReply
 } from './reply-matcher.mjs';
 
+// getAppDomains returns an array of bare hostnames, so membership is already an
+// exact whole-string comparison. Assert it through `===` rather than
+// Array.prototype.includes: CodeQL's js/incomplete-url-substring-sanitization
+// reads any `.includes('<host>.<tld>')` as a substring test against a URL and
+// cannot see that the receiver is an array. The literal alone trips it — the
+// rule fired on the four `.com` fixtures below and ignored the structurally
+// identical `.example` ones on adjacent lines.
+const hasDomain = (domains, domain) => domains.some(d => d === domain);
+
 test('extractDomain', () => {
   assert.equal(extractDomain('notice@fundeliver.com'), 'fundeliver.com');
   assert.equal(extractDomain('Jane Doe <jane.doe@lever.co>'), 'lever.co');
@@ -46,10 +55,10 @@ test('getAppDomains - drops prose tokens and filenames, keeps real hostnames', (
 
   const domains = getAppDomains(app, []);
 
-  assert.ok(domains.includes('northwind.com'), 'company-domain guess must survive');
-  assert.ok(domains.includes('careers.northwind.com'), 'employer subdomain in notes must survive');
+  assert.ok(hasDomain(domains, 'northwind.com'), 'company-domain guess must survive');
+  assert.ok(hasDomain(domains, 'careers.northwind.com'), 'employer subdomain in notes must survive');
   for (const junk of ['gaps.', 'remote-us.', 'screen.', 'outputcv-vp-demand-generation-2026-06-23.pdf']) {
-    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+    assert.ok(!hasDomain(domains, junk), `expected junk token "${junk}" to be dropped`);
   }
 });
 
@@ -63,9 +72,9 @@ test('getAppDomains - keeps an employer contact domain but skips the confidentia
 
   const domains = getAppDomains(app, []);
 
-  assert.ok(domains.includes('franchise-search.example'), 'employer contact domain must survive');
+  assert.ok(hasDomain(domains, 'franchise-search.example'), 'employer contact domain must survive');
   for (const junk of ['client.', 'location-tied.', 'directly.', '?.com', '?.co', '?.io']) {
-    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+    assert.ok(!hasDomain(domains, junk), `expected junk token "${junk}" to be dropped`);
   }
   assert.ok(
     !domains.some(d => d.includes('applytojob')),
@@ -83,9 +92,9 @@ test('getAppDomains - drops a score delta and keeps the recruiter domain', () =>
 
   const domains = getAppDomains(app, []);
 
-  assert.ok(domains.includes('talent-partners.example'), 'recruiter contact domain must survive');
+  assert.ok(hasDomain(domains, 'talent-partners.example'), 'recruiter contact domain must survive');
   for (const junk of ['3.34.5.', 'talentpartners.', 'searches.', '?.com', '?.co', '?.io']) {
-    assert.ok(!domains.includes(junk), `expected junk token "${junk}" to be dropped`);
+    assert.ok(!hasDomain(domains, junk), `expected junk token "${junk}" to be dropped`);
   }
 });
 
@@ -99,10 +108,10 @@ test('getAppDomains - rejects bare filenames whose extension parses as a TLD', (
 
   const domains = getAppDomains(app, []);
 
-  assert.ok(domains.includes('initech.com'), 'company-domain guess must survive');
-  assert.ok(domains.includes('initech-group.example'), 'employer contact domain must survive');
+  assert.ok(hasDomain(domains, 'initech.com'), 'company-domain guess must survive');
+  assert.ok(hasDomain(domains, 'initech-group.example'), 'employer contact domain must survive');
   for (const filename of ['cv.md', 'article-digest.md', 'cover-letter.pdf']) {
-    assert.ok(!domains.includes(filename), `expected filename "${filename}" to be dropped`);
+    assert.ok(!hasDomain(domains, filename), `expected filename "${filename}" to be dropped`);
   }
 });
 
@@ -123,10 +132,10 @@ test('getAppDomains - drops shared ATS, job-board and webmail domains', () => {
 
   const domains = getAppDomains(app, followups);
 
-  assert.ok(domains.includes('globex.com'), 'company-domain guess must survive');
-  assert.ok(domains.includes('globex-hq.example'), 'employer contact domain in notes must survive');
+  assert.ok(hasDomain(domains, 'globex.com'), 'company-domain guess must survive');
+  assert.ok(hasDomain(domains, 'globex-hq.example'), 'employer contact domain in notes must survive');
   for (const shared of ['linkedin.com', 'greenhouse.io', 'gmail.com', 'outlook.com', 'myworkday.com']) {
-    assert.ok(!domains.includes(shared), `expected shared domain "${shared}" to be dropped`);
+    assert.ok(!hasDomain(domains, shared), `expected shared domain "${shared}" to be dropped`);
   }
 });
 
