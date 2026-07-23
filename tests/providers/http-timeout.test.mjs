@@ -16,11 +16,18 @@ const { fetchJson, fetchText } = await import(pathToFileURL(join(ROOT, 'provider
 // instead of reintroducing the very silent hang this suite guards against.
 // Set well above the 300ms request timeout but bounded far below a real hang.
 function hardTimeout(promise, ms, label) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label}: hard test timeout after ${ms}ms — regression suspected`)), ms)),
-  ]);
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}: hard test timeout after ${ms}ms — regression suspected`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));  // else the loser keeps the loop alive to `ms`
 }
+
+// Bounded allowance over the 300ms request timeout: loose enough for a slow CI
+// runner, tight enough that a multi-second stalled-body regression still fails.
+const MAX_ABORT_MS = 1_500;
 
 const sockets = new Set();
 const server = createServer((req, res) => {
@@ -44,7 +51,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
     fail('fetchJson resolved on a stalled body');
   } catch {
     const elapsed = Date.now() - t0;
-    if (elapsed < 5_000) pass(`fetchJson aborted stalled body read in ${elapsed}ms`);
+    if (elapsed < MAX_ABORT_MS) pass(`fetchJson aborted stalled body read in ${elapsed}ms`);
     else fail(`fetchJson took ${elapsed}ms to abort a stalled body (timeout not covering body read)`);
   }
 }
@@ -57,7 +64,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
     fail('fetchText resolved on a stalled body');
   } catch {
     const elapsed = Date.now() - t0;
-    if (elapsed < 5_000) pass(`fetchText aborted stalled body read in ${elapsed}ms`);
+    if (elapsed < MAX_ABORT_MS) pass(`fetchText aborted stalled body read in ${elapsed}ms`);
     else fail(`fetchText took ${elapsed}ms to abort a stalled body`);
   }
 }
