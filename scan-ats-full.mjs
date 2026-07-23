@@ -663,9 +663,11 @@ async function main() {
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     let errors = 0;
+    const truncated = [];
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
         const jobs = await withTimeout(source.provider.fetch(entry, ctx), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
+        if (jobs.workdayTruncated) truncated.push(entry);
         if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
         await processJobs(jobs, name, source.provider);
       } catch (err) {
@@ -694,6 +696,25 @@ async function main() {
         });
       }
     });
+    // Second chance for boards the parallel sweep truncated: retry alone on a
+    // quiet line. Re-processing the full board is safe — seenUrls already
+    // holds every match from the partial first pass.
+    if (truncated.length) {
+      log(`\n  ↻ retrying ${truncated.length} truncated board(s) sequentially...`);
+      for (const entry of truncated) {
+        try {
+          const jobs = await withTimeout(source.provider.fetch(entry, ctx), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
+          await processJobs(jobs, name, source.provider);
+          if (jobs.workdayTruncated) {
+            errors++; // still truncated on a quiet line — genuine board problem, move on
+            if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
+          }
+        } catch (err) {
+          errors++;
+          if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
+        }
+      }
+    }
     totalErrors += errors;
     completedSources.add(name);
     if (!opts.dryRun) {

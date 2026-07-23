@@ -330,6 +330,12 @@ export default {
     // times, so tag the array instead; scan-ats-full.mjs aggregates it into
     // one summary line.
     if (stopReason === 'no-date-skip') jobs.workdayNoDateSkip = true;
+    // 'fetch-error' means retries were exhausted mid-pagination while 19
+    // other tenants were hammering the same uplink. scan-ats-full.mjs
+    // collects tagged tenants and retries them sequentially after the
+    // parallel sweep, when the line is quiet — same array-tag pattern as
+    // workdayNoDateSkip (no extra per-tenant logging here).
+    if (stopReason === 'fetch-error') jobs.workdayTruncated = true;
 
     return jobs;
   },
