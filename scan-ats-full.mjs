@@ -5,7 +5,7 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings that match
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS) and surfaces fresh postings that match
  * your portals.yml `title_filter` / `location_filter` — no manual company
  * curation needed.
  *
@@ -41,6 +41,7 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
+import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -146,7 +147,7 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
-const SOURCES = {
+export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
@@ -181,6 +182,13 @@ const SOURCES = {
         h => h === `${tenant}.${instance}.myworkdayjobs.com` && h.endsWith('.myworkdayjobs.com'),
       );
     },
+  },
+  icims: {
+    provider: icims,
+    dataset: `${DATASET_BASE}/icims_companies.json`,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://careers-${slug}.icims.com/jobs/search?ss=1&in_iframe=1`, h => h === `careers-${String(slug).toLowerCase()}.icims.com`)
+      : null,
   },
 };
 
@@ -660,9 +668,20 @@ async function main() {
       // Confirmed-stale postings are always dropped. Undated postings are
       // dropped by default (a reverse scan targets *fresh* roles) but
       // COUNTED so callers see the gap; --include-undated keeps them, marked.
-      const dateClass = classifyPostingDate(job, cutoff);
+      let dateClass = classifyPostingDate(job, cutoff);
       if (dateClass === 'stale') continue;
-      if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
+      if (dateClass === 'undated' && !opts.includeUndated) {
+        // Providers whose list pages carry no date (icims) get one shot at
+        // dating the posting from its detail page — but only after the cheap
+        // title/location filters pass, so a 10k-tenant sweep never pays a
+        // detail-page request for noise.
+        if (provider.enrichDate && titleFilter(job.title) && locationFilter(job.location)) {
+          try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
+          dateClass = classifyPostingDate(job, cutoff);
+        }
+        if (dateClass === 'stale') continue;
+        if (dateClass === 'undated') { droppedNoDate++; continue; }
+      }
       if (!titleFilter(job.title)) continue;
       // job.url is passed so the location filter can fall back to the URL's own
       // location segment when the provider reports a rolled-up "N Locations" string.

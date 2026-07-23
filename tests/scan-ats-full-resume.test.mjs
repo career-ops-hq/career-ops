@@ -174,3 +174,24 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   if (datasetFingerprint(a) !== datasetFingerprint(['globex', 'acme', 'initech'])) pass('datasetFingerprint detects reordering');
   else fail('datasetFingerprint missed reordering');
 }
+
+// ── icims SOURCES wiring (Task 8) ───────────────────────────────────
+{
+  const { SOURCES } = mod;
+  if (!SOURCES) {
+    fail('SOURCES not exported from scan-ats-full.mjs');
+  } else if (!SOURCES.icims) {
+    fail('SOURCES.icims missing');
+  } else {
+    const good = SOURCES.icims.toEntry('acmefreight');
+    if (good && good.careers_url === 'https://careers-acmefreight.icims.com/jobs/search?ss=1&in_iframe=1' && good.name === 'acmefreight') {
+      pass('icims toEntry builds canonical portal URL');
+    } else {
+      fail(`icims toEntry: ${JSON.stringify(good)}`);
+    }
+    if (SOURCES.icims.toEntry('evil/..%2f') === null) pass('icims toEntry rejects non-slug input');
+    else fail('icims toEntry accepted a hostile slug');
+    if (SOURCES.icims.provider?.id === 'icims') pass('icims source wired to icims provider');
+    else fail('icims source provider mismatch');
+  }
+}
