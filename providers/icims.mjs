@@ -67,17 +67,21 @@ export function parseIcimsSearchPage(html, origin, companyName) {
   const jobs = [];
   const cards = String(html).split('iCIMS_JobCardItem').slice(1);
   for (const card of cards) {
-    const href = card.match(/href="(https:\/\/[^"]+\/jobs\/\d+\/[^"/]+\/job)[^"]*"/);
+    const href = card.match(/href="([^"]*\/jobs\/\d+\/[^"/]+\/job[^"]*)"/);
     if (!href) continue;
     let parsed;
-    try { parsed = new URL(href[1]); } catch { continue; }
+    // Resolve against the portal origin so a documented *relative* posting href
+    // (/jobs/{id}/{slug}/job) isn't silently dropped — some tenants emit those,
+    // and dropping them all would make fetch() return zero jobs with no error.
+    // The origin check below still rejects any link that resolves off-host.
+    try { parsed = new URL(decodeEntities(href[1]), origin); } catch { continue; }
     if (parsed.origin !== origin) continue;
     const title = card.match(/<h3\s*>\s*([\s\S]*?)<\/h3>/);
     if (!title || !title[1].trim()) continue;
     const location = card.match(/field-label">Location<\/span>\s*<span\s*>\s*([\s\S]*?)<\/span>/);
     jobs.push({
       title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
-      url: href[1],
+      url: `${parsed.origin}${parsed.pathname}`,
       company: companyName,
       location: location ? decodeEntities(location[1].replace(/\s+/g, ' ').trim()) : '',
       // no postedAt — iCIMS list pages have no date; see enrichDate.
@@ -122,11 +126,31 @@ export default {
   async enrichDate(job, ctx) {
     const sep = job.url.includes('?') ? '&' : '?';
     const html = await ctx.fetchText(`${job.url}${sep}in_iframe=1`, { headers: HEADERS, redirect: 'error' });
-    const block = String(html).match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
-    if (!block) return;
-    let data;
-    try { data = JSON.parse(block[1]); } catch { return; }
-    const ts = Date.parse(data?.datePosted || '');
+    const nodes = [];
+    for (const [, raw] of String(html).matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+      let data;
+      try { data = JSON.parse(raw); } catch { continue; }
+      // Flatten the JSON-LD shapes iCIMS / schema.org emit: a bare JobPosting
+      // object, an array of nodes, or a graph document ({"@graph":[...]}).
+      if (Array.isArray(data)) nodes.push(...data);
+      else if (Array.isArray(data?.['@graph'])) nodes.push(...data['@graph']);
+      else nodes.push(data);
+    }
+    const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
   },
 };
+
+// From flattened JSON-LD nodes, return the datePosted of the first JobPosting
+// node; if none carries a @type, fall back to the first node that has a
+// datePosted at all (preserves the original lenient single-object behavior).
+function pickDatePosted(nodes) {
+  let fallback = null;
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || !node.datePosted) continue;
+    const type = node['@type'];
+    if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node.datePosted;
+    if (fallback == null) fallback = node.datePosted;
+  }
+  return fallback;
+}

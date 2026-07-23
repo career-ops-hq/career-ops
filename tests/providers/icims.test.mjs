@@ -50,6 +50,22 @@ else fail(`icims.id is ${JSON.stringify(icims.id)}`);
   else fail(`second card: ${JSON.stringify(fork)}`);
 }
 
+// Relative posting hrefs must resolve against the origin, not be dropped.
+{
+  const relCard = `<li class="iCIMS_JobCardItem"><div class="col-xs-12 title">
+    <a href="/jobs/7777/relative-role/job?in_iframe=1" class="iCIMS_Anchor"><h3 >Relative Role</h3></a></div></li>`;
+  const jobs = parseIcimsSearchPage(`<ul>${relCard}</ul>`, ORIGIN, 'acmefreight');
+  if (jobs.length === 1 && jobs[0].url === `${ORIGIN}/jobs/7777/relative-role/job`) pass('relative href resolved against origin');
+  else fail(`relative href: ${JSON.stringify(jobs.map(j => j.url))}`);
+
+  // A relative href is still origin-checked once resolved — a protocol-relative
+  // link to another host must not sneak past.
+  const offHost = `<li class="iCIMS_JobCardItem"><div class="col-xs-12 title">
+    <a href="//evil.example.com/jobs/8888/x/job" class="iCIMS_Anchor"><h3 >Off Host</h3></a></div></li>`;
+  if (parseIcimsSearchPage(`<ul>${offHost}</ul>`, ORIGIN, 'acmefreight').length === 0) pass('resolved off-host href still dropped');
+  else fail('off-host protocol-relative href was not dropped');
+}
+
 // Empty/garbage input → [] not a throw.
 {
   if (parseIcimsSearchPage('', ORIGIN, 'x').length === 0 && parseIcimsSearchPage('<html>no cards</html>', ORIGIN, 'x').length === 0) {
@@ -110,6 +126,22 @@ const mkCtx = (pages) => ({
   await icims.enrichDate(job, { fetchText: async () => '<html>no ldjson</html>' });
   if (job.postedAt === undefined) pass('enrichDate leaves job undated when JSON-LD missing');
   else fail(`postedAt unexpectedly set: ${job.postedAt}`);
+}
+// @graph document: JobPosting node nested under @graph is still found.
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage"},{"@type":"JobPosting","datePosted":"2026-07-18"}]}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-18')) pass('enrichDate reads datePosted from an @graph JobPosting node');
+  else fail(`@graph postedAt: ${job.postedAt}`);
+}
+// Array-form JSON-LD: pick the JobPosting element, skip the non-JobPosting one.
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"Organization","datePosted":"2026-01-01"},{"@type":"JobPosting","datePosted":"2026-07-19"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19')) pass('enrichDate picks the JobPosting node from an array');
+  else fail(`array postedAt: ${job.postedAt}`);
 }
 {
   const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
