@@ -35,6 +35,10 @@ var (
 	// Estimate markers: "(est)", "(est;", "market est)" or "market" as its own
 	// word — but not "(EST/CST" timezones, "interest)" or "marketing".
 	reEstHint = regexp.MustCompile(`\(est[),;. ]|\best\)|\bmarket\b`)
+	// Funding/valuation context immediately after a money match: "$600M
+	// valuation", "$124M total raised", "$70M Series C" describe the company,
+	// not pay, and must not be picked up as the Pay column's figure.
+	reFundingContext = regexp.MustCompile(`(?i)^\s*(valuation|(total\s+)?raised|series\s|round\b)`)
 )
 
 // currencyTokens is the single source of truth for currencies the dashboard
@@ -155,8 +159,16 @@ func deriveNoteFields(app *model.CareerApplication) {
 	}
 
 	// Pay: prefer the first $-range; fall back to the first lone $-amount
-	// (e.g. "$170K min floor") only when no range exists.
-	matches := reMoneySpan.FindAllString(app.Notes, -1)
+	// (e.g. "$170K min floor") only when no range exists. Skip money spans
+	// that are actually funding/valuation figures ("$600M valuation", "$70M
+	// Series C") — they describe the company, not compensation.
+	var matches []string
+	for _, idx := range reMoneySpan.FindAllStringIndex(app.Notes, -1) {
+		if reFundingContext.MatchString(app.Notes[idx[1]:]) {
+			continue
+		}
+		matches = append(matches, app.Notes[idx[0]:idx[1]])
+	}
 	for _, mm := range matches {
 		if strings.ContainsAny(mm, "-–") {
 			app.PayRange = mm
