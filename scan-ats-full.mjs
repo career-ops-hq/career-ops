@@ -411,12 +411,37 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelEach(items, limit, fn) {
-  let i = 0;
+// One company's whole fetch may not exceed this — even with per-request
+// timeouts in _http.mjs, an unforeseen hang (DNS, a provider bug) must cost
+// one company, not freeze a worker slot for the rest of a 12k-company sweep.
+const COMPANY_TIMEOUT_MS = 5 * 60_000;
+
+export function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}: timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+export async function parallelEach(items, limit, fn, onItemDone = null) {
+  let next = 0;
+  let done = 0;
+  const inFlight = new Set();
   async function worker() {
-    while (i < items.length) {
-      const item = items[i++];
-      await fn(item);
+    while (next < items.length) {
+      const idx = next++;
+      inFlight.add(idx);
+      try {
+        await fn(items[idx], idx);
+      } finally {
+        inFlight.delete(idx);
+        done++;
+        // Lowest not-yet-finished index: everything below it is complete, so
+        // a resumed run can restart exactly here without skipping work.
+        const resumeAt = inFlight.size ? Math.min(...inFlight) : next;
+        if (onItemDone) onItemDone({ done, resumeAt });
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
@@ -529,7 +554,7 @@ async function main() {
     let errors = 0;
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
-        const jobs = await source.provider.fetch(entry, ctx);
+        const jobs = await withTimeout(source.provider.fetch(entry, ctx), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
         if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
         for (const job of jobs) {
           if (!job.url || !job.title) continue;
