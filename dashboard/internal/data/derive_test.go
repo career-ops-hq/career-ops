@@ -300,6 +300,7 @@ func TestPayCeiling(t *testing.T) {
 		"165-185K CHF":     185_000,
 		"120K €":           120_000,
 		"80-120K UAH":      120_000,
+		"$7.6B":            7_600_000_000,
 		"":                 0,
 	}
 	for span, want := range cases {
