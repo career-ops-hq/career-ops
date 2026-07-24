@@ -60,6 +60,9 @@ type ExploreCtx = {
   added: Set<string>;
   adding: Set<string>;
   discover: () => Promise<void>;
+  /** Load the SUPPLY-loop offers Today's "Fresh matches this week" already
+   *  fetched from /api/whats-new, straight into the results phase — no scan. */
+  loadFresh: () => Promise<void>;
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
   reset: () => void;
@@ -275,6 +278,37 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("degraded");
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
+    }
+  }, []);
+
+  // Today's "See all N" link (#84) routes here with ?view=fresh instead of leaving
+  // the user on a bare config form. Re-fetch the same free, zero-token /api/whats-new
+  // history the dashboard already reads and drop it straight into the results phase
+  // — no scan, so it never touches sources/companiesScanned like discover() does.
+  const loadFresh = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setOffers([]);
+    setMatchCount(0);
+    setCompaniesScanned(0);
+    setCompaniesAvailable(0);
+    setCapHit(false);
+    setDroppedNoDate(0);
+    setPartial(false);
+    setSources({});
+    setError("");
+    try {
+      const r = await fetch("/api/whats-new");
+      const d = await r.json().catch(() => ({}));
+      const list: DiscoveredOffer[] = Array.isArray(d.offers) ? d.offers : [];
+      setOffers(list);
+      setMatchCount(list.length);
+      setPhase(list.length > 0 ? "results" : "empty-current");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load fresh matches.");
+      setPhase("failed");
+    } finally {
+      runningRef.current = false;
     }
   }, []);
 
@@ -498,10 +532,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
       offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding,
-      discover, addToPipeline, applyPatch, reset,
+      discover, loadFresh, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
