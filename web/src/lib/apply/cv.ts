@@ -23,9 +23,19 @@ export function resolveTailoredCv(company?: string): string | null {
   // pattern that backtracks polynomially on adversarial input (CodeQL).
   const slug = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
   const first = slug.split("-")[0];
+  // Match the slug at a token boundary (delimited by non-alphanumerics) so "Meta"
+  // doesn't resolve "Metabase"'s CV — same guard cv-pdf/route.ts uses.
+  const boundary = (needle: string) =>
+    new RegExp(`(^|[^a-z0-9])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
+  const reSlug = boundary(slug);
+  const reFirst = first.length > 2 ? boundary(first) : null;
   const matches = files.filter((f) => {
     const l = f.toLowerCase();
-    return l.includes(slug) || (first.length > 2 && l.includes(first));
+    // Only the CV: `cover-…-{slug}-….pdf` matches the slug too, and the sort below
+    // is newest-first, so a cover regenerated after its CV would be attached to a
+    // real application in the CV slot.
+    if (!l.startsWith("cv-")) return false;
+    return reSlug.test(l) || (reFirst !== null && reFirst.test(l));
   });
   if (!matches.length) return null;
   matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);

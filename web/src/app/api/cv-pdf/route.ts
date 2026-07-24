@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
+      // Only the CV. `cover-…-{slug}-….pdf` also contains the slug, and the sort
+      // below is newest-first, so without this a cover regenerated after its CV
+      // wins and we serve the cover letter as the tailored CV.
+      .filter((f) => f.toLowerCase().startsWith("cv-"))
       .filter((f) => re.test(f.toLowerCase()));
   } catch {
     return new Response("no output directory", { status: 404 });
