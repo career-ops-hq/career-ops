@@ -540,10 +540,14 @@ Review-first discovery for companies that recently raised funding. It reads stru
 ```bash
 npm run company:funded -- --dry-run --limit 20
 npm run company:funded -- --dry-run --limit 20 --months 3 --json
+npm run company:funded -- --dry-run --sort score --limit 20
 npm run company:funded -- --sources techcrunch,prnewswire,guardian,hn
+npm run company:funded -- --self-test
 ```
 
-Defaults: last 3 months, sorted by newest funding date, sources `techcrunch,prnewswire,guardian,hn`.
+Defaults: last 3 months, `--sort date`, sources `techcrunch,prnewswire,guardian,hn`. `--sort score` ranks by source and funding-detail confidence instead.
+
+Runs without `--dry-run` write JSON under `output/` and a Markdown report under `reports/`.
 
 Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
 

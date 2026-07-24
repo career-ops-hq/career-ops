@@ -342,14 +342,27 @@ async function fetchTextMeta(url, { timeoutMs = 12_000, source = '' } = {}) {
   try {
     const res = await fetch(url, {
       headers: { 'user-agent': BROWSER_UA, accept: 'application/rss+xml,application/xml,text/xml,text/plain,*/*' },
-      redirect: 'error',
+      redirect: 'follow',
       signal: controller.signal,
     });
+    const finalUrl = res.url || url;
+    if (!trustedForSource(finalUrl, source)) {
+      return {
+        url,
+        finalUrl,
+        status: res.status,
+        ok: false,
+        contentType: res.headers.get('content-type') || '',
+        text: '',
+        blocked: false,
+        error: `untrusted final source URL: ${finalUrl}`,
+      };
+    }
     const text = await res.text().catch(() => '');
     const contentType = res.headers.get('content-type') || '';
     return {
       url,
-      finalUrl: res.url || url,
+      finalUrl,
       status: res.status,
       ok: res.ok,
       contentType,
@@ -468,7 +481,8 @@ function inferredDateFromText(text, now = new Date()) {
   const raw = String(text || '');
   const year = raw.match(/\b(20\d{2})\b/)?.[1];
   if (year) {
-    const date = new Date(`${year}-01-01T00:00:00Z`);
+    const currentYear = now.getUTCFullYear();
+    const date = Number(year) === currentYear ? new Date(now.getTime()) : new Date(`${year}-01-01T00:00:00Z`);
     return { value: String(year), precision: 'year', date };
   }
   return { value: now.toISOString().slice(0, 10), precision: 'observed', date: now };
@@ -565,17 +579,19 @@ export function buildCandidates(items, {
     return candidate;
   });
 
-  for (const diag of diagnostics) {
-    diag.candidate_count = candidates.filter((c) => c.funding.sources.some((s) => s.source === sourceNameForDiagnostic(diag.source))).length;
-  }
-
   candidates.sort((a, b) => {
     if (sort === 'score') return b.discovery_score - a.discovery_score || a.company.localeCompare(b.company);
     const ad = a.funding.sources[0]?.observed_date || '';
     const bd = b.funding.sources[0]?.observed_date || '';
     return bd.localeCompare(ad) || b.discovery_score - a.discovery_score || a.company.localeCompare(b.company);
   });
-  return candidates.slice(0, limit);
+  const finalCandidates = candidates.slice(0, limit);
+
+  for (const diag of diagnostics) {
+    diag.candidate_count = finalCandidates.filter((c) => c.funding.sources.some((s) => s.source === sourceNameForDiagnostic(diag.source))).length;
+  }
+
+  return finalCandidates;
 }
 
 function sourceNameForDiagnostic(source) {
@@ -636,9 +652,10 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = 
     for (const hit of hits) {
       const title = compact(hit.title || hit.story_title || '');
       if (!title) continue;
-      const itemUrl = trustedEvidenceUrl(hit.url || '', '') || `https://news.ycombinator.com/item?id=${encodeURIComponent(String(hit.objectID || ''))}`;
+      const fallbackUrl = `https://news.ycombinator.com/item?id=${encodeURIComponent(String(hit.objectID || ''))}`;
+      const itemUrl = trustedEvidenceUrl(hit.url || '', 'hacker_news') || trustedEvidenceUrl(fallbackUrl, 'hacker_news');
       const item = {
-        source: sourceFromUrl(itemUrl, 'hacker_news'),
+        source: 'hacker_news',
         title: xmlText(title),
         url: itemUrl,
         published_at: hit.created_at ? new Date(hit.created_at).toISOString() : '',

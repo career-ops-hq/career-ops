@@ -191,6 +191,20 @@ try {
     fail(`extended window excluded OldCo: ${JSON.stringify(extendedWindow.map((c) => c.company))}`);
   }
 
+  const currentYearInferred = mod.buildCandidates([{
+    source: 'hacker_news',
+    title: 'Acme raises $25M Series A in 2026',
+    url: 'https://news.ycombinator.com/item?id=77',
+    observedDate: null,
+    text: 'Acme raises funding.',
+    categories: [],
+  }], { now: new Date('2026-07-20T00:00:00Z'), months: 3, limit: 10 });
+  if (currentYearInferred[0]?.company === 'Acme' && currentYearInferred[0]?.funding.sources[0]?.observed_date === '2026') {
+    pass('buildCandidates keeps current-year inferred dates inside the recent window');
+  } else {
+    fail(`current-year inferred date was treated as stale: ${JSON.stringify(currentYearInferred)}`);
+  }
+
   const duplicateEvidence = mod.buildCandidates([
     {
       source: 'techcrunch',
@@ -271,17 +285,19 @@ try {
   const seenFetchOptions = [];
   globalThis.fetch = async (url, options) => {
     seenFetchOptions.push({ url, options });
-    return new Response(`<?xml version="1.0"?><rss><channel>
-      <item>
-        <title>Acme raises $25M Series A</title>
-        <link>https://techcrunch.com/acme</link>
-        <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
-        <description>Acme raises funding.</description>
-      </item>
-    </channel></rss>`, {
+    const res = new Response(`<?xml version="1.0"?><rss><channel>
+        <item>
+          <title>Acme raises $25M Series A</title>
+          <link>https://techcrunch.com/acme</link>
+          <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
+          <description>Acme raises funding.</description>
+        </item>
+      </channel></rss>`, {
       status: 200,
       headers: { 'content-type': 'application/rss+xml' },
     });
+    Object.defineProperty(res, 'url', { value: String(url).replace('/feed/', '/final-feed/') });
+    return res;
   };
   try {
     const result = await mod.discoverFundedCompanies({
@@ -290,10 +306,75 @@ try {
       months: 3,
       limit: 5,
     });
-    if (result.companies[0]?.company === 'Acme' && seenFetchOptions.every((call) => call.options?.redirect === 'error')) {
-      pass('discoverFundedCompanies fetches structured sources with redirect:error');
+    if (result.companies[0]?.company === 'Acme' && seenFetchOptions.every((call) => call.options?.redirect === 'follow')) {
+      pass('discoverFundedCompanies follows structured-source redirects after source validation');
     } else {
       fail(`structured fetch behavior wrong: ${JSON.stringify({ result, seenFetchOptions })}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async (url, options) => {
+    const res = new Response('not used', {
+      status: 200,
+      headers: { 'content-type': 'application/rss+xml' },
+    });
+    Object.defineProperty(res, 'url', { value: 'https://techcrunch.com.attacker.net/feed/' });
+    return res;
+  };
+  try {
+    const result = await mod.discoverFundedCompanies({
+      dryRun: true,
+      sources: ['techcrunch'],
+      months: 3,
+      limit: 5,
+    });
+    const diag = result.diagnostics.find((d) => d.source === 'techcrunch');
+    if (diag?.status === 'error' && diag.errors.some((err) => err.includes('untrusted final source URL')) && result.companies.length === 0) {
+      pass('discoverFundedCompanies rejects redirects to untrusted final source hosts');
+    } else {
+      fail(`untrusted final redirect was accepted: ${JSON.stringify(result)}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async (url, options) => {
+    const res = new Response(JSON.stringify({
+      hits: [{
+        title: 'Acme raises $25M Series A',
+        url: '',
+        objectID: '123',
+        created_at: '2026-07-19T12:00:00Z',
+        story_text: 'Acme raises funding.',
+      }],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    Object.defineProperty(res, 'url', { value: String(url) });
+    return res;
+  };
+  try {
+    const result = await mod.discoverFundedCompanies({
+      dryRun: true,
+      sources: ['hn'],
+      months: 3,
+      limit: 5,
+    });
+    const candidate = result.companies[0];
+    const evidence = candidate?.funding.sources[0];
+    const diag = result.diagnostics.find((d) => d.source === 'hn');
+    if (
+      candidate?.company === 'Acme' &&
+      evidence?.source === 'hacker_news' &&
+      evidence?.url === 'https://news.ycombinator.com/item?id=123' &&
+      diag?.candidate_count === 1
+    ) {
+      pass('discoverFundedCompanies handles Hacker News JSON and falls back to trusted item URLs');
+    } else {
+      fail(`Hacker News discovery path regressed: ${JSON.stringify(result)}`);
     }
   } finally {
     globalThis.fetch = originalFetch;
