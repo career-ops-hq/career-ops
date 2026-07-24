@@ -294,6 +294,47 @@ try {
     fail(`Closed mycareersfuture posting misclassified as ${closedMycareersfuture.result}`);
   }
 
+  // Welcome to the Jungle renders its closure banner with a typographic
+  // apostrophe (U+2019), not the ASCII one the pattern was spelled with, so the
+  // banner never matched and a closed posting came back "uncertain".
+  const closedWttjTypographicApostrophe = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://www.welcometothejungle.com/fr/companies/acme/jobs/graphiste_paris',
+    bodyText: [
+      'Cette offre n’est plus disponible.',
+      'ACME',
+      'Graphiste & Motion Designer',
+      'CDI    Paris    Télétravail fréquent',
+      'Descriptif du poste : conception d’identités visuelles et d’animations pour les campagnes de la marque.',
+      'Profil recherché : 3 ans d’expérience minimum, maîtrise de la suite Adobe et d’After Effects.',
+    ].join('\n'),
+    applyControls: [],
+  });
+  if (closedWttjTypographicApostrophe.result === 'expired') {
+    pass('Closure banners written with a typographic apostrophe are detected');
+  } else {
+    fail(`WTTJ closed posting misclassified as ${closedWttjTypographicApostrophe.result}`);
+  }
+
+  // Same normalization, accent side: the pattern is spelled "pourvu" but the
+  // page says "pourvue"/"déjà" with diacritics.
+  const closedAccentedBanner = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://example.fr/offres/directeur-artistique',
+    bodyText: [
+      'Offre déjà pourvue',
+      'Directeur artistique',
+      'Cette annonce est conservée à titre d’archive.',
+      'Missions : direction de création, suivi de production, relation client sur les campagnes annuelles.',
+    ].join('\n'),
+    applyControls: [],
+  });
+  if (closedAccentedBanner.result === 'expired') {
+    pass('Accented French closure banners are detected');
+  } else {
+    fail(`Accented French banner misclassified as ${closedAccentedBanner.result}`);
+  }
+
   const cloudflareChallenge = classifyLiveness({
     status: 403,
     finalUrl: 'https://www.pracuj.pl/praca/sap-consultant,oferta,1004870954',
