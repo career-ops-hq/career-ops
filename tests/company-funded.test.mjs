@@ -20,10 +20,13 @@ try {
     ['OpenAI in talks to raise funding that would value AI startup at up to $340B', 'OpenAI'],
     ['AI-powered travel agency Fora hits unicorn status, raises $60M', 'Fora'],
     ['Airbnb-backed WeRoad raises $58M to take its group travel platform to the US', 'WeRoad'],
+    ['Insurance startup Corgi reportedly raised more money at $4B — its third round in 8 weeks', 'Corgi'],
+    ['AI chip startup Etched defies skeptics, hits $10.3B valuation from big-name investors', 'Etched'],
     ['Ex-DeepMind David Silver Raises $1.1B for AI Startup Ineffable', 'Ineffable'],
     ['Travis Kalanick&#8217;s robotics company raises $1.7B, led by a16z', ''],
     ['AI startup valuations raise bubble fears as funding surges', ''],
     ["Yann LeCun's AI startup raises $1B seed round", ''],
+    ['Edtech platform raises $4.5M to help teach students how to vibe code', ''],
     ['Acme closes $25M Series A round - TechCrunch', 'Acme'],
     ['Ask HN: Who is hiring?', ''],
   ];
@@ -38,6 +41,27 @@ try {
     pass('extractFundingDetails reads amount and round');
   } else {
     fail(`extractFundingDetails returned ${JSON.stringify(details)}`);
+  }
+
+  if (
+    mod.matchesDomain('techcrunch.com', 'techcrunch.com') &&
+    mod.matchesDomain('www.techcrunch.com', 'techcrunch.com') &&
+    !mod.matchesDomain('techcrunch.com.attacker.net', 'techcrunch.com') &&
+    !mod.matchesDomain('eviltechcrunch.com', 'techcrunch.com')
+  ) {
+    pass('matchesDomain accepts exact/subdomain hosts and rejects suffix spoofs');
+  } else {
+    fail('matchesDomain hostname policy regressed');
+  }
+
+  if (
+    mod.sourceFromUrl('https://techcrunch.com/2026/acme') === 'techcrunch' &&
+    mod.sourceFromUrl('https://techcrunch.com.attacker.net/2026/acme') === 'web' &&
+    mod.sourceFromUrl('https://evil.example/path/techcrunch.com/story') === 'web'
+  ) {
+    pass('sourceFromUrl uses parsed hostnames, not URL substrings');
+  } else {
+    fail('sourceFromUrl accepted a spoofed hostname/path');
   }
 
   const techCrunchXml = `<?xml version="1.0"?><rss><channel>
@@ -78,12 +102,45 @@ try {
     fail(`parseRssItems returned ${JSON.stringify(rssItems)}`);
   }
 
+  const spoofedXml = `<?xml version="1.0"?><rss><channel>
+    <item>
+      <title>SpoofCo raises $50M Series A</title>
+      <link>https://techcrunch.com.attacker.net/spoof</link>
+      <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
+      <description>SpoofCo raises funding.</description>
+    </item>
+  </channel></rss>`;
+  const spoofedItem = mod.parseRssItems(spoofedXml, { source: 'techcrunch' })[0];
+  if (spoofedItem?.source === 'techcrunch' && spoofedItem.url === '') {
+    pass('parseRssItems strips spoofed evidence URLs while preserving source context');
+  } else {
+    fail(`spoofed RSS URL was not stripped: ${JSON.stringify(spoofedItem)}`);
+  }
+
   const rssCandidates = mod.buildCandidates(rssItems, { now: new Date('2026-07-20T00:00:00Z'), months: 3, limit: 10 });
   const rssNames = rssCandidates.map((c) => c.company);
   if (rssNames.includes('Prime Intellect') && rssNames.includes('Norm') && rssNames.includes('Resolve AI')) {
     pass('buildCandidates turns RSS funding items into candidates, including PRNewswire contributor company');
   } else {
     fail(`buildCandidates missed RSS candidates: ${JSON.stringify(rssNames)}`);
+  }
+
+  const authorFallbackItems = [
+    {
+      source: 'techcrunch',
+      title: 'ServiceNow bets $40 million on Indian banking software specialist to expand its financial services push',
+      url: 'https://techcrunch.com/servicenow-businessnext',
+      observedDate: { value: '2026-07-22', precision: 'day', date: new Date('2026-07-22T00:00:00Z') },
+      text: 'Businessnext funding story.',
+      categories: [],
+      source_company: 'Jagmeet Singh',
+    },
+  ];
+  const authorFallbackCandidates = mod.buildCandidates(authorFallbackItems, { now: new Date('2026-07-23T00:00:00Z'), months: 3, limit: 10 });
+  if (authorFallbackCandidates.length === 0) {
+    pass('buildCandidates does not treat publisher authors as company fallback outside PRNewswire');
+  } else {
+    fail(`author fallback accepted as company: ${JSON.stringify(authorFallbackCandidates)}`);
   }
 
   const negativeItems = [
@@ -134,81 +191,114 @@ try {
     fail(`extended window excluded OldCo: ${JSON.stringify(extendedWindow.map((c) => c.company))}`);
   }
 
-  const enrichmentItems = [
+  const duplicateEvidence = mod.buildCandidates([
     {
       source: 'techcrunch',
       title: 'Acme raises $25M Series A',
       url: 'https://techcrunch.com/acme',
       observedDate: { value: '2026-07-19', precision: 'day', date: new Date('2026-07-19T00:00:00Z') },
-      text: 'Acme raises $25M Series A funding.',
+      text: 'Acme raises funding.',
       categories: [],
     },
-  ];
-  const enrichedDefault = await mod.discoverFundedCompanies({
-    discoveryItems: enrichmentItems,
-    sources: ['techcrunch'],
+    {
+      source: 'techcrunch',
+      title: 'Acme raises $25M Series A',
+      url: 'https://techcrunch.com/acme',
+      observedDate: { value: '2026-07-19', precision: 'day', date: new Date('2026-07-19T00:00:00Z') },
+      text: 'Acme raises funding.',
+      categories: [],
+    },
+  ], { now: new Date('2026-07-20T00:00:00Z'), months: 3, limit: 10 });
+  if (duplicateEvidence[0]?.funding.sources.length === 1 && duplicateEvidence[0]?.discovery_score === 103) {
+    pass('buildCandidates deduplicates repeated feed evidence without inflating score');
+  } else {
+    fail(`duplicate evidence handling regressed: ${JSON.stringify(duplicateEvidence)}`);
+  }
+
+  const encodedXml = `<?xml version="1.0"?><rss><channel>
+    <item>
+      <title>Acme raises $25M Series A &amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;</title>
+      <link>https://techcrunch.com/acme</link>
+      <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
+      <description>Acme raises funding with &lt;/script &gt; text in the feed.</description>
+    </item>
+  </channel></rss>`;
+  const encodedCandidate = mod.buildCandidates(mod.parseRssItems(encodedXml, { source: 'techcrunch' }), {
+    now: new Date('2026-07-20T00:00:00Z'),
     months: 3,
-    limit: 5,
-    portalsPath: '.tmp-missing-portals.yml',
-    enrichCandidateFn: async (candidate) => ({
-      ...candidate,
-      website: 'https://acme.ai',
-      careers_url: 'https://jobs.acme.ai',
-      scanner_path: 'provider:greenhouse',
-      provider: 'greenhouse',
-      enrichment_status: 'found',
-      enrichment_error: '',
-      portals_entry: {
-        name: 'Acme',
-        careers_url: 'https://jobs.acme.ai',
-        enabled: true,
-        provider: 'greenhouse',
+    limit: 10,
+  })[0];
+  const encodedReport = mod.renderReport({
+    generated_at: '2026-07-20',
+    window_months: 3,
+    sort: 'date',
+    sources: ['techcrunch'],
+    diagnostics: [{ source: 'techcrunch', status: 'ok', fetched_items: 1, funding_like_items: 1, candidate_count: 1, errors: [] }],
+    companies: [encodedCandidate],
+  });
+  if (encodedReport.includes('&amp;lt;script&amp;gt;') && !encodedReport.includes('<script>') && !encodedReport.includes('</script >')) {
+    pass('renderReport does not double-decode or emit executable-looking feed markup');
+  } else {
+    fail(`unsafe report escaping: ${encodedReport}`);
+  }
+
+  const markdownReport = mod.renderReport({
+    generated_at: '2026-07-20',
+    window_months: 3,
+    sort: 'date',
+    sources: ['techcrunch'],
+    diagnostics: [{ source: 'techcrunch', status: 'ok', fetched_items: 1, funding_like_items: 1, candidate_count: 1, errors: ['bad | value \\ test [x]'] }],
+    companies: [{
+      company: 'Pipe | Co \\ [x]',
+      amount: '$25M',
+      round: 'Series A',
+      funding: {
+        status: 'recent_funding',
+        confidence: 'high',
+        sources: [{ source: 'techcrunch', title: 'Pipe | Co \\ [x] raises $25M', url: 'https://techcrunch.com/path', observed_date: '2026-07-20' }],
       },
-      portals_entry_yaml: '- name: Acme\n  careers_url: https://jobs.acme.ai\n  enabled: true\n  provider: greenhouse',
-      suggested_action: 'review_portals_entry',
-    }),
+      discovery_score: 1,
+      suggested_action: 'review_company_manually',
+    }],
   });
-  if (enrichedDefault.companies[0]?.enrichment_status === 'found' && enrichedDefault.companies[0]?.careers_url === 'https://jobs.acme.ai') {
-    pass('discoverFundedCompanies enriches careers/scanner by default');
+  if (markdownReport.includes('Pipe \\| Co \\\\ \\[x\\]') && markdownReport.includes('bad \\| value \\\\ test \\[x\\]')) {
+    pass('renderReport escapes Markdown table/control characters');
   } else {
-    fail(`default enrichment missing: ${JSON.stringify(enrichedDefault.companies[0])}`);
-  }
-
-  const skippedEnrichment = await mod.discoverFundedCompanies({
-    discoveryItems: enrichmentItems,
-    sources: ['techcrunch'],
-    months: 3,
-    limit: 5,
-    enrich: false,
-    portalsPath: '.tmp-missing-portals.yml',
-  });
-  if (skippedEnrichment.companies[0]?.enrichment_status === 'skipped' && skippedEnrichment.companies[0]?.scanner_path === '') {
-    pass('discoverFundedCompanies marks --no-enrich output as skipped, not not_found');
-  } else {
-    fail(`--no-enrich status wrong: ${JSON.stringify(skippedEnrichment.companies[0])}`);
-  }
-
-  const failingEnrichment = await mod.enrichCandidates(
-    [{ company: 'FailCo', funding: { sources: [] }, discovery_score: 1 }],
-    { enrichCandidateFn: async () => { throw new Error('resolver exploded'); }, timeoutMs: 100 },
-  );
-  if (failingEnrichment[0]?.enrichment_status === 'error' && failingEnrichment[0]?.scanner_path === 'resolution_failed') {
-    pass('enrichCandidates converts resolver errors into candidate diagnostics');
-  } else {
-    fail(`enrichCandidates error handling failed: ${JSON.stringify(failingEnrichment)}`);
-  }
-
-  const timeoutEnrichment = await mod.enrichCandidates(
-    [{ company: 'SlowCo', funding: { sources: [] }, discovery_score: 1 }],
-    { enrichCandidateFn: async () => new Promise(() => {}), timeoutMs: 10 },
-  );
-  if (timeoutEnrichment[0]?.enrichment_status === 'timeout' && timeoutEnrichment[0]?.scanner_path === 'resolution_timeout') {
-    pass('enrichCandidates converts resolver timeouts into candidate diagnostics');
-  } else {
-    fail(`enrichCandidates timeout handling failed: ${JSON.stringify(timeoutEnrichment)}`);
+    fail(`Markdown escaping regressed: ${markdownReport}`);
   }
 
   const originalFetch = globalThis.fetch;
+  const seenFetchOptions = [];
+  globalThis.fetch = async (url, options) => {
+    seenFetchOptions.push({ url, options });
+    return new Response(`<?xml version="1.0"?><rss><channel>
+      <item>
+        <title>Acme raises $25M Series A</title>
+        <link>https://techcrunch.com/acme</link>
+        <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
+        <description>Acme raises funding.</description>
+      </item>
+    </channel></rss>`, {
+      status: 200,
+      headers: { 'content-type': 'application/rss+xml' },
+    });
+  };
+  try {
+    const result = await mod.discoverFundedCompanies({
+      dryRun: true,
+      sources: ['techcrunch'],
+      months: 3,
+      limit: 5,
+    });
+    if (result.companies[0]?.company === 'Acme' && seenFetchOptions.every((call) => call.options?.redirect === 'error')) {
+      pass('discoverFundedCompanies fetches structured sources with redirect:error');
+    } else {
+      fail(`structured fetch behavior wrong: ${JSON.stringify({ result, seenFetchOptions })}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
   globalThis.fetch = async () => new Response('<html><title>Access denied</title><body>Verify you are human</body></html>', {
     status: 403,
     headers: { 'content-type': 'text/html' },
@@ -216,14 +306,11 @@ try {
   try {
     const result = await mod.discoverFundedCompanies({
       dryRun: true,
-      enrich: false,
-      sources: ['duckduckgo'],
+      sources: ['techcrunch'],
       months: 3,
       limit: 5,
-      queries: ['agentic AI Series A funding'],
-      portalsPath: '.tmp-missing-portals.yml',
     });
-    const diag = result.diagnostics.find((d) => d.source === 'duckduckgo');
+    const diag = result.diagnostics.find((d) => d.source === 'techcrunch');
     if (diag?.status === 'blocked' && diag.blocked && diag.errors.length > 0 && result.companies.length === 0) {
       pass('discoverFundedCompanies reports blocked/challenge pages in diagnostics');
     } else {

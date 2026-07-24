@@ -535,18 +535,17 @@ The cost is real: a full Workday + iCIMS sweep becomes DNS-bound at roughly 35 m
 
 ## company:funded
 
-Review-first discovery for companies that recently raised funding. It reads public RSS/API sources, enriches likely careers pages when possible, and prints candidates plus suggested `portals.yml` entries for manual review. It never edits `portals.yml`.
+Review-first discovery for companies that recently raised funding. It reads structured public RSS/API sources and prints a candidate report for manual review. It never edits `portals.yml` and does not probe company websites.
 
 ```bash
 npm run company:funded -- --dry-run --limit 20
 npm run company:funded -- --dry-run --limit 20 --months 3 --json
 npm run company:funded -- --sources techcrunch,prnewswire,guardian,hn
-npm run company:funded -- --sources duckduckgo --query "agentic AI Series A funding"
 ```
 
-Defaults: last 3 months, sorted by newest funding date, sources `techcrunch,prnewswire,guardian,hn`. DuckDuckGo search is opt-in via `--sources duckduckgo` or `--query`.
+Defaults: last 3 months, sorted by newest funding date, sources `techcrunch,prnewswire,guardian,hn`.
 
-Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found. Candidate enrichment is enabled by default; pass `--no-enrich` for a faster funding-only run.
+Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
 
 **Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
 
