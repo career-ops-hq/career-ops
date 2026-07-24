@@ -285,6 +285,14 @@ try {
   const seenFetchOptions = [];
   globalThis.fetch = async (url, options) => {
     seenFetchOptions.push({ url, options });
+    if (seenFetchOptions.length === 1) {
+      const redirect = new Response('', {
+        status: 302,
+        headers: { location: 'https://techcrunch.com/final-feed/' },
+      });
+      Object.defineProperty(redirect, 'url', { value: String(url) });
+      return redirect;
+    }
     const res = new Response(`<?xml version="1.0"?><rss><channel>
         <item>
           <title>Acme raises $25M Series A</title>
@@ -306,8 +314,13 @@ try {
       months: 3,
       limit: 5,
     });
-    if (result.companies[0]?.company === 'Acme' && seenFetchOptions.every((call) => call.options?.redirect === 'follow')) {
-      pass('discoverFundedCompanies follows structured-source redirects after source validation');
+    if (
+      result.companies[0]?.company === 'Acme' &&
+      seenFetchOptions.every((call) => call.options?.redirect === 'manual') &&
+      String(seenFetchOptions[0]?.url) === 'https://techcrunch.com/feed/' &&
+      seenFetchOptions.some((call) => String(call.url) === 'https://techcrunch.com/final-feed/')
+    ) {
+      pass('discoverFundedCompanies follows structured-source redirects after validating each hop');
     } else {
       fail(`structured fetch behavior wrong: ${JSON.stringify({ result, seenFetchOptions })}`);
     }
@@ -316,11 +329,11 @@ try {
   }
 
   globalThis.fetch = async (url, options) => {
-    const res = new Response('not used', {
-      status: 200,
-      headers: { 'content-type': 'application/rss+xml' },
+    const res = new Response('', {
+      status: 302,
+      headers: { location: 'https://techcrunch.com.attacker.net/feed/' },
     });
-    Object.defineProperty(res, 'url', { value: 'https://techcrunch.com.attacker.net/feed/' });
+    Object.defineProperty(res, 'url', { value: String(url) });
     return res;
   };
   try {
@@ -341,14 +354,48 @@ try {
   }
 
   globalThis.fetch = async (url, options) => {
+    const res = new Response('', {
+      status: 302,
+      headers: { location: 'https://127.0.0.1/feed/' },
+    });
+    Object.defineProperty(res, 'url', { value: String(url) });
+    return res;
+  };
+  try {
+    const result = await mod.discoverFundedCompanies({
+      dryRun: true,
+      sources: ['techcrunch'],
+      months: 3,
+      limit: 5,
+    });
+    const diag = result.diagnostics.find((d) => d.source === 'techcrunch');
+    if (diag?.status === 'error' && diag.errors.some((err) => err.includes('internal redirect target rejected')) && result.companies.length === 0) {
+      pass('discoverFundedCompanies rejects redirects to internal targets before following');
+    } else {
+      fail(`internal redirect was accepted: ${JSON.stringify(result)}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async (url, options) => {
     const res = new Response(JSON.stringify({
-      hits: [{
-        title: 'Acme raises $25M Series A',
-        url: '',
-        objectID: '123',
-        created_at: '2026-07-19T12:00:00Z',
-        story_text: 'Acme raises funding.',
-      }],
+      hits: [
+        {
+          title: 'Acme raises $25M Series A',
+          url: '',
+          objectID: '123',
+          created_at: '2026-07-19T12:00:00Z',
+          story_text: 'Acme raises funding.',
+        },
+        {
+          title: 'Beta raises $30M Series B',
+          url: 'https://techcrunch.com/beta',
+          objectID: '124',
+          created_at: '2026-07-19T13:00:00Z',
+          story_text: 'Beta raises funding.',
+        },
+      ],
     }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -363,16 +410,19 @@ try {
       months: 3,
       limit: 5,
     });
-    const candidate = result.companies[0];
-    const evidence = candidate?.funding.sources[0];
+    const acme = result.companies.find((c) => c.company === 'Acme');
+    const beta = result.companies.find((c) => c.company === 'Beta');
+    const acmeEvidence = acme?.funding.sources[0];
+    const betaEvidence = beta?.funding.sources[0];
     const diag = result.diagnostics.find((d) => d.source === 'hn');
     if (
-      candidate?.company === 'Acme' &&
-      evidence?.source === 'hacker_news' &&
-      evidence?.url === 'https://news.ycombinator.com/item?id=123' &&
-      diag?.candidate_count === 1
+      acmeEvidence?.source === 'hacker_news' &&
+      acmeEvidence?.url === 'https://news.ycombinator.com/item?id=123' &&
+      betaEvidence?.source === 'hacker_news' &&
+      betaEvidence?.url === 'https://techcrunch.com/beta' &&
+      diag?.candidate_count === 2
     ) {
-      pass('discoverFundedCompanies handles Hacker News JSON and falls back to trusted item URLs');
+      pass('discoverFundedCompanies handles Hacker News JSON with fallback and direct article URLs');
     } else {
       fail(`Hacker News discovery path regressed: ${JSON.stringify(result)}`);
     }

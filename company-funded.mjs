@@ -189,6 +189,44 @@ function trustedForSource(raw, source) {
   return domains.some((domain) => matchesDomain(url.hostname, domain));
 }
 
+function isPrivateOrInternalHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const parts = ipv4.slice(1).map(Number);
+  if (parts.some((part) => part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function untrustedSourceMeta(url, finalUrl, message, status = 0, contentType = '') {
+  return {
+    url,
+    finalUrl,
+    status,
+    ok: false,
+    contentType,
+    text: '',
+    blocked: false,
+    error: message,
+  };
+}
+
 export function sourceFromUrl(raw, fallback = 'web') {
   const url = parseHttpUrl(raw);
   if (!url) return fallback;
@@ -324,56 +362,64 @@ function detectBlockedContent(text, { status = 200, contentType = '' } = {}) {
 }
 
 async function fetchTextMeta(url, { timeoutMs = 12_000, source = '' } = {}) {
-  if (!trustedForSource(url, source)) {
-    return {
-      url,
-      finalUrl: url,
-      status: 0,
-      ok: false,
-      contentType: '',
-      text: '',
-      blocked: false,
-      error: `untrusted source URL: ${url}`,
-    };
+  const startUrl = String(url || '');
+  if (!trustedForSource(startUrl, source)) return untrustedSourceMeta(startUrl, startUrl, `untrusted source URL: ${startUrl}`);
+  if (isPrivateOrInternalHostname(new URL(startUrl).hostname)) {
+    return untrustedSourceMeta(startUrl, startUrl, `internal source URL rejected: ${startUrl}`);
   }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      headers: { 'user-agent': BROWSER_UA, accept: 'application/rss+xml,application/xml,text/xml,text/plain,*/*' },
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    const finalUrl = res.url || url;
-    if (!trustedForSource(finalUrl, source)) {
+    let currentUrl = startUrl;
+    for (let hops = 0; hops <= 5; hops++) {
+      const res = await fetch(currentUrl, {
+        headers: { 'user-agent': BROWSER_UA, accept: 'application/rss+xml,application/xml,text/xml,text/plain,*/*' },
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if ([301, 302, 303, 307, 308].includes(Number(res.status))) {
+        const location = res.headers.get('location') || '';
+        if (!location) return untrustedSourceMeta(startUrl, currentUrl, `redirect without Location: ${currentUrl}`, res.status, contentType);
+        let nextUrl;
+        try {
+          nextUrl = new URL(location, currentUrl).href;
+        } catch {
+          return untrustedSourceMeta(startUrl, currentUrl, `invalid redirect Location: ${location}`, res.status, contentType);
+        }
+        const nextHost = new URL(nextUrl).hostname;
+        if (isPrivateOrInternalHostname(nextHost)) {
+          return untrustedSourceMeta(startUrl, nextUrl, `internal redirect target rejected: ${nextUrl}`, res.status, contentType);
+        }
+        if (!trustedForSource(nextUrl, source)) {
+          return untrustedSourceMeta(startUrl, nextUrl, `untrusted final source URL: ${nextUrl}`, res.status, contentType);
+        }
+        currentUrl = nextUrl;
+        continue;
+      }
+
+      const finalUrl = res.url || currentUrl;
+      if (!trustedForSource(finalUrl, source)) {
+        return untrustedSourceMeta(startUrl, finalUrl, `untrusted final source URL: ${finalUrl}`, res.status, contentType);
+      }
+      const text = await res.text().catch(() => '');
       return {
-        url,
+        url: startUrl,
         finalUrl,
         status: res.status,
-        ok: false,
-        contentType: res.headers.get('content-type') || '',
-        text: '',
-        blocked: false,
-        error: `untrusted final source URL: ${finalUrl}`,
+        ok: res.ok,
+        contentType,
+        text,
+        blocked: detectBlockedContent(text, { status: res.status, contentType }),
+        error: res.ok ? '' : `HTTP ${res.status}`,
       };
     }
-    const text = await res.text().catch(() => '');
-    const contentType = res.headers.get('content-type') || '';
-    return {
-      url,
-      finalUrl,
-      status: res.status,
-      ok: res.ok,
-      contentType,
-      text,
-      blocked: detectBlockedContent(text, { status: res.status, contentType }),
-      error: res.ok ? '' : `HTTP ${res.status}`,
-    };
+    return untrustedSourceMeta(startUrl, startUrl, 'too many redirects');
   } catch (err) {
     return {
-      url,
-      finalUrl: url,
+      url: startUrl,
+      finalUrl: startUrl,
       status: 0,
       ok: false,
       contentType: '',
@@ -524,7 +570,7 @@ function candidateFromItem(item, { now }) {
     round: details.round,
     source: item.source || sourceFromUrl(item.url),
     title: compact(item.title || ''),
-    url: trustedEvidenceUrl(item.url || '', item.source || ''),
+    url: trustedEvidenceUrl(item.url || '', ''),
     observedDate: observed,
     confidence: confidenceFor(item, details),
   };
@@ -653,7 +699,7 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = 
       const title = compact(hit.title || hit.story_title || '');
       if (!title) continue;
       const fallbackUrl = `https://news.ycombinator.com/item?id=${encodeURIComponent(String(hit.objectID || ''))}`;
-      const itemUrl = trustedEvidenceUrl(hit.url || '', 'hacker_news') || trustedEvidenceUrl(fallbackUrl, 'hacker_news');
+      const itemUrl = trustedEvidenceUrl(hit.url || '', '') || trustedEvidenceUrl(fallbackUrl, 'hacker_news');
       const item = {
         source: 'hacker_news',
         title: xmlText(title),
