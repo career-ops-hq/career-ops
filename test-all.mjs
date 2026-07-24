@@ -5126,6 +5126,21 @@ try {
     fail('role matcher ignored a real short-acronym overlap');
   }
 
+  // 'product' is a baseline token: "ai" is dropped by the tokenizer (2-letter,
+  // not in SHORT_SPECIALTY), so without this these titles collapse to
+  // [product, manager] and merge-tracker skips one as a false duplicate.
+  if (!roleFuzzyMatch('Product Manager - Marketplace', 'Product Manager - AI')) {
+    pass('role matcher keeps Product Manager sibling specialties distinct');
+  } else {
+    fail('role matcher collapsed Product Manager - Marketplace into Product Manager - AI');
+  }
+
+  if (roleFuzzyMatch('Product Manager - Marketplace', 'Product Manager - Marketplace')) {
+    pass('role matcher still matches identical Product Manager titles');
+  } else {
+    fail('role matcher rejected an identical Product Manager title');
+  }
+
   // A generic base title (no suffix of its own) shares every one of its tokens
   // with a specialized sibling, so the shared tokens alone used to cross the
   // Jaccard threshold — even though the sibling's extra word is exactly the

@@ -54,6 +54,10 @@ export const BASELINE_TOKENS = new Set([
   'analyst', 'designer', 'consultant', 'specialist',
   'platform', 'systems', 'services',
   'backend', 'frontend', 'full', 'stack', 'fullstack',
+  // 'product' alone cannot identify an opening: "Product Manager - Marketplace"
+  // and "Product Manager - AI" must stay separate applications ("ai" is dropped
+  // by the tokenizer, leaving only [product, manager] to match on).
+  'product',
 ]);
 
 /**
