@@ -1610,7 +1610,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
 
 // ── Portal health persistence (#1744) ───────────────────────────────
 
-const PORTAL_HEALTH_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'portal-health.tsv');
+const PORTAL_HEALTH_PATH = 'data/portal-health.tsv';
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
 export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
