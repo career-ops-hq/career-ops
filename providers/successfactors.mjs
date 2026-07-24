@@ -68,7 +68,7 @@ const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
 const CSB_LOCALE_PRIORITY = ['de_DE', 'en_US', 'en_GB', 'en_EN'];
 
 /** @param {import('./_types.js').PortalEntry} entry */
-function resolveConfig(entry) {
+export function resolveConfig(entry) {
   const raw = entry.api || entry.careers_url || '';
   let u;
   try {
@@ -77,12 +77,32 @@ function resolveConfig(entry) {
     return null;
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // Preserve a brand/tenant path prefix when the configured URL carries one —
+  // some holding companies run several acquired brands off one shared RMK
+  // instance, disambiguated by a path segment instead of a separate domain
+  // (e.g. careers.nemetschek.com/Bluebeam/ vs. .../Vectorworks/). Strip a
+  // trailing known-endpoint segment — /search/ (the page tenants commonly
+  // configure as careers_url), or one of the API paths this module itself
+  // builds below (/tile-search-results/, /services/recruiting/v1/jobs), in
+  // case an `api:` override points straight at one — plus any trailing
+  // slash, so all of those collapse to the same brand-scoped base instead of
+  // doubling the endpoint segment onto itself. Single-domain tenants (the
+  // common case) have an empty pathname, so base === origin unchanged.
+  const path = u.pathname
+    .replace(/\/(?:search|tile-search-results|services\/recruiting\/v1\/jobs)\/?$/i, '')
+    .replace(/\/+$/, '');
+  const base = u.origin + path;
   return {
     origin: u.origin,
-    tileApi: `${u.origin}/tile-search-results/`,
+    base,
+    tileApi: `${base}/tile-search-results/`,
+    // jobBase stays origin-only: RMK tile data-url paths for a brand-scoped
+    // tenant already carry the brand segment (confirmed against Nemetschek's
+    // /Bluebeam/tile-search-results/ output), so prefixing base here would
+    // double it up.
     jobBase: u.origin,
-    jobsApi: `${u.origin}/services/recruiting/v1/jobs`,
-    searchPage: `${u.origin}/search/`,
+    jobsApi: `${base}/services/recruiting/v1/jobs`,
+    searchPage: `${base}/search/`,
   };
 }
 
@@ -247,7 +267,7 @@ export function cleanCsbLocation(raw) {
 // Map one CSB jobs-API response to raw {id, title, url, location, postedAt}.
 // Records nest the useful fields under `.response`; a record without an id or a
 // title is skipped (can't build a stable dedup key or a meaningful listing).
-/** @param {any} json @param {{origin:string}} cfg @param {string} locale */
+/** @param {any} json @param {{origin:string, base?:string}} cfg @param {string} locale */
 export function parseCsbJobs(json, cfg, locale) {
   const list = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult : [];
   const out = [];
@@ -267,7 +287,7 @@ export function parseCsbJobs(json, cfg, locale) {
     const slug = decodeEntities(String(r.unifiedUrlTitle || r.urlTitle || 'job'))
       .replace(/[?#&]+/g, '-')
       .replace(/-{2,}/g, '-');
-    const url = `${cfg.origin}/job/${slug}/${id}-${locale}`;
+    const url = `${cfg.base || cfg.origin}/job/${slug}/${id}-${locale}`;
     out.push({
       id,
       title,

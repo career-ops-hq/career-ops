@@ -1,10 +1,10 @@
 ---
 name: career-ops
-description: AI job search command center -- evaluate offers, generate CVs, scan portals, track applications
+description: AI job search command center -- evaluate offers, tailor CVs, scan portals, track applications. Use when the user pastes a job description or URL, asks to evaluate an offer, tailor a resume or cover letter, scan job boards, prepare for an interview, or track/update their applications.
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | latex-tex | cover | email | add | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | patterns | offer-prep | titles | upskill | followup | update]"
+argument-hint: "[scan | deep | pdf | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | update]"
 license: MIT
 ---
 
@@ -67,9 +67,10 @@ Determine the mode from `$mode`:
 | `titles` | `titles` |
 | `upskill` | `upskill` |
 | `followup` | `followup` |
+| `reply-watch` | `reply-watch` |
+| `interview-redflag` | `interview-redflag` |
 | `update` | `update` |
 | `cover` | `cover` |
-| `add` | `add` |
 
 **Auto-pipeline detection:** If `$mode` is not a known sub-command AND contains JD text (keywords: "responsibilities", "requirements", "qualifications", "about the role", "we're looking for", company name + role) or a URL to a JD, execute `auto-pipeline`.
 

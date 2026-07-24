@@ -174,6 +174,38 @@
 
 ---
 
+## Risk Summary (Block G 之后)
+
+在 Block G 之后、Block H 之前，用 `## Risk Summary` 块收尾报告正文 —— 每个风险信号一行，顺序固定 —— 让候选人真正关心的问题（"这家公司值得加入吗？"）在一屏之内得到回答，而不必自己去拼接 Block A、Block G 和外部文件。
+
+**只做聚合，不产生新判断。** 每一行都引用来源信号已经得出的结论。摘要绝不重新评分、重新加权或推翻原判断 —— 如果某一行看起来不对，应当修正来源信号，而不是改这里。
+
+每行三种状态：`✅ {明确结论}` / `⚠️ {发现的问题}` / `— not evaluated`。**`— not evaluated` 是一等状态：** 某个信号无法运行时必须显式写出该行，而不是省略，这样全 ✅ 的摘要才可信。**特例：** 面试红旗一行的未评估情况渲染为 `— no interview sessions yet`（同一"未评估"概念针对该行的更具体表述 —— 交叉引用检查确实运行了，只是没有找到红旗文件），并非第四种状态。
+
+行标签、`| Signal | Status |` 表头与状态词均为固定字面量，请勿翻译：Machine Summary 的 `risk_summary` 字段依赖它们。
+
+| 信号 | 来源 | 该行渲染方式 |
+|------|------|------------|
+| Posting legitimacy | Block G 的评级 | `✅ High Confidence`；Proceed with Caution / Suspicious 渲染为 `⚠️ {tier} — {一句话原因}` |
+| Employment classification | Block G 内的用工性质信号 | 检查已运行且无异常时 `✅ clear`；标记触发时 `⚠️ contractor-style language: "{引用原文}"`；无法运行时 `— not evaluated` |
+| Culture screen | Block A 的文化筛查字段 | `✅ pass`，或 `⚠️ caution — {证据}` / `⚠️ fail — {证据}`；未做筛查时 `— not evaluated` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（来自 `interview-redflag` 模式） | **交叉引用，不是复制：** 文件存在时写出其当前警告级别并附相对链接 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相对于 `reports/`）；否则 `— no interview sessions yet` |
+| AI claims vs. infrastructure | Block G 中的 AI/基础设施一致性检查（如果存在） | 本报告包含该检查时镜像其结论（`✅ consistent` / `⚠️ {发现}`）；否则 `— not evaluated`。该检查一旦存在此行自动启用，无顺序依赖 |
+
+块格式：
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Employment classification | ⚠️ contractor-style language: "{quoted phrase}" |
+| Culture screen | ⚠️ caution — {evidence} |
+| Interview red flags | — no interview sessions yet |
+| AI claims vs. infrastructure | — not evaluated |
+```
+
 ## 评估后处理流程 (Post-evaluation)
 
 **在生成 Block A-G 的评估结果后，必须无条件执行以下两个步骤：**
@@ -219,6 +251,9 @@
 
 ## G) 职位真实性评估
 (此处填入维度 G 的详细信号分析)
+
+## Risk Summary
+(每个风险信号一行，顺序固定 —— 见上文 Risk Summary 一节)
 
 ## H) 开放性问题拟答草稿
 (仅在综合评分 >= 4.5 且申请表单有问答框时生成)

@@ -203,7 +203,7 @@ function checkPrereq({ path, fix }) {
   if (prereqPresent(projectRoot, path)) {
     return { pass: true, label: `${path} found` };
   }
-  return { pass: false, label: `${path} not found`, fix };
+  return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
 
 function checkFonts() {

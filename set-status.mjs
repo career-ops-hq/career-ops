@@ -286,6 +286,41 @@ if (/^\d+$/.test(selector) && !flags.force) {
     );
   }
 }
+
+// --role is an explicit statement of which opening the caller means, but
+// resolveRow only consults it to break ties between 2+ candidates. A selector
+// matching exactly one row therefore returned that row without ever checking
+// it against --role, silently rewriting a status the caller never asked for.
+// That is the wrong-row mutation in #2009: the intended requisition may not be
+// in the tracker at all (fuzzy-deduped away, or never merged), so the lone
+// survivor for that company absorbs the update instead. Fail closed and let
+// --force record an explicit decision, matching the report-mismatch guard.
+// Exact-title equality must be checked separately: roleFuzzyMatch is a DEDUP
+// predicate, and it deliberately returns false for two titles whose overlap is
+// entirely baseline vocabulary (["platform","engineer"]) so that same-titled
+// sibling reqs never auto-merge. That makes it unusable on its own here — it
+// would reject --role "Platform Engineer" against a row that IS exactly that.
+const normalizeRoleText = s => String(s ?? '')
+  .toLowerCase()
+  // Preserve symbols that distinguish real titles before collapsing generic
+  // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
+  // "c engineer" and the exact-equality path treats them as the same row.
+  .replace(/\+\+/g, ' plusplus ')
+  .replace(/#/g, ' sharp ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+const roleMatchesTarget = normalizeRoleText(target.role) === normalizeRoleText(flags.role)
+  || roleFuzzyMatch(target.role, flags.role);
+
+if (flags.role && !flags.force && !roleMatchesTarget) {
+  failWith(
+    EXIT_AMBIGUOUS,
+    'role-mismatch',
+    `Tracker #${target.num} (${target.company}) is "${target.role}", which does not match --role "${flags.role}". ` +
+      'The row you meant may not be in the tracker. Re-run with --force to update this row anyway.',
+    { trackerNum: target.num, rowRole: target.role, requestedRole: flags.role },
+  );
+}
 const oldStatus = target.status;
 const note = flags.note != null ? cell(flags.note) : null;
 

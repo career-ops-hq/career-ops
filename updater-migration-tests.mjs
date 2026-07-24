@@ -160,6 +160,41 @@ const twoPassManifestChecks = [
     name: 'apply captures uncommitted work via git stash create before branching (#915)',
     pattern: /git\('stash',\s*'create'\)/,
   },
+  {
+    // A client whose manifest predates the target checks out only its own
+    // paths, so everything added upstream since is silently absent and apply
+    // still printed "Update complete" (#1998).
+    name: 'apply verifies the target manifest materialized before claiming success (#1998)',
+    pattern: /missingFromTargetManifest\(remoteSystemPaths\)/,
+  },
+  {
+    name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
+    pattern: /Update incomplete[\s\S]{0,600}?process\.exit\(1\)/,
+  },
+  {
+    // execFileSync inherits stderr, so an expected per-path skip printed git's
+    // raw pathspec error right before the success banner (#1998).
+    name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
+    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path\)/,
+  },
+  {
+    name: 'skipped upstream-absent paths are summarized explicitly (#1998)',
+    pattern: /Skipped \$\{skippedPaths\.length\} path\(s\) absent upstream/,
+  },
+  {
+    // existsSync on a pre-existing directory (docs/) would call it materialized
+    // even when the target added files under it — the verification must recurse
+    // into directory entries against FETCH_HEAD (#1998 CodeRabbit review).
+    name: 'manifest verification recurses into directory entries via ls-tree (#1998)',
+    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
+  },
+  {
+    // A checkout failure is only an expected skip when the path is truly absent
+    // from FETCH_HEAD; timeouts/permission errors must rethrow, not report
+    // success (#1998 CodeRabbit review).
+    name: 'a checkout failure only skips when the path is absent upstream, else rethrows (#1998)',
+    pattern: /catch \{ absentUpstream = true; \}\s*if \(!absentUpstream\) throw err;/,
+  },
 ];
 
 for (const check of twoPassManifestChecks) {

@@ -13,7 +13,7 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
 | `npm run img-to-pdf` | `img-to-pdf.mjs` | Convert a single screenshot/image into a single-page PDF |
-| `npm run build:latex` | `build-cv-latex.mjs` | Build .tex from structured JSON payload |
+| `node build-cv-latex.mjs` | `build-cv-latex.mjs` | Build .tex from structured JSON payload |
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
@@ -150,7 +150,7 @@ MVP scope: one image in, one PDF page out. Multi-image/multi-page conversion is 
 
 ---
 
-## build:latex
+## build-cv-latex.mjs
 
 Builds a `.tex` file from a structured JSON payload, handling template merge and LaTeX escaping automatically. The JSON is produced by the agent during evaluation — this script replaces the manual LaTeX generation step in `modes/latex.md`.
 

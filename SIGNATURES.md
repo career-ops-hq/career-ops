@@ -86,3 +86,8 @@ public commit with a stated reason.
 - @freitagdavid | David Freitag | 2026-07-20 | "This has been allowing me to not spam blast every single recruiter and instead carefully curate the best fit jobs for me. Especially using upskill to improve my knowledge for certain positions." | id:26885415 | src:https://github.com/santifer/career-ops/discussions/2071 | n:38
 - @Deep2003 | Deep Patel | 2026-07-21 | "Hiring has become a quantity game on either side of the aisle; it should really be a quality-based match." | id:33074675 | src:https://github.com/santifer/career-ops/discussions/2075 | n:39
 - @shilpaduruvasan-ai | 2026-07-21 | id:235786418 | src:https://github.com/santifer/career-ops/discussions/2076 | n:40
+- @youlia-denisov | Juls | 2026-07-21 | "This is a new cool toy for job searching, it upgraded my job search in a very delightful manner. Thank you!" | id:170363981 | src:https://github.com/santifer/career-ops/discussions/2090 | n:41
+- @rubicon | Dax Davis | 2026-07-22 | "Thirty years building demand-gen engines for other people. First time I've pointed one at my own job search." | id:98216 | src:https://github.com/santifer/career-ops/discussions/2106 | n:42
+- @minammar | 2026-07-22 | id:60332772 | src:https://github.com/santifer/career-ops/discussions/2114 | n:43
+- @arberbakalli | Arbër Bakalli | 2026-07-23 | "How hiring should have been" | id:15056487 | src:https://github.com/santifer/career-ops/discussions/2131 | n:44
+- @harsh-kotak | Harsh Kotak | 2026-07-23 | "career-ops helped me search with a plan." | id:9409440 | src:https://github.com/santifer/career-ops/discussions/2133 | n:45
