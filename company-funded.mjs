@@ -9,6 +9,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'fs';
+import { isIP } from 'net';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -189,17 +190,7 @@ function trustedForSource(raw, source) {
   return domains.some((domain) => matchesDomain(url.hostname, domain));
 }
 
-function isPrivateOrInternalHostname(hostname) {
-  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-  if (!host) return true;
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
-
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!ipv4) return false;
-  const parts = ipv4.slice(1).map(Number);
-  if (parts.some((part) => part < 0 || part > 255)) return true;
+function isPrivateIpv4(parts) {
   const [a, b] = parts;
   return (
     a === 0 ||
@@ -214,6 +205,63 @@ function isPrivateOrInternalHostname(hostname) {
   );
 }
 
+function parseIpv4Part(part) {
+  if (/^0x[0-9a-f]+$/i.test(part)) return Number.parseInt(part.slice(2), 16);
+  if (/^0[0-7]+$/.test(part)) return Number.parseInt(part, 8);
+  if (/^\d+$/.test(part)) return Number.parseInt(part, 10);
+  return NaN;
+}
+
+function parseIpv4Hostname(host) {
+  const parts = String(host || '').split('.');
+  if (parts.length < 1 || parts.length > 4 || parts.some((part) => part === '')) return null;
+  if (!parts.every((part) => /^(?:0x[0-9a-f]+|0[0-7]+|\d+)$/i.test(part))) return null;
+  const nums = parts.map(parseIpv4Part);
+  if (nums.some((num) => !Number.isSafeInteger(num) || num < 0)) return null;
+  const prefix = nums.slice(0, -1);
+  if (prefix.some((num) => num > 255)) return null;
+  const last = nums.at(-1);
+  const remainingBytes = 5 - nums.length;
+  if (last > 256 ** remainingBytes - 1) return null;
+  if (nums.length === 1) return [(last >>> 24) & 255, (last >>> 16) & 255, (last >>> 8) & 255, last & 255];
+  if (nums.length === 2) return [nums[0], (last >>> 16) & 255, (last >>> 8) & 255, last & 255];
+  if (nums.length === 3) return [nums[0], nums[1], (last >>> 8) & 255, last & 255];
+  return nums;
+}
+
+function parseIpv4MappedIpv6(host) {
+  const normalized = String(host || '').toLowerCase();
+  const dotted = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) return parseIpv4Hostname(dotted[1]);
+  const hex = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!hex) return null;
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  if (high > 0xffff || low > 0xffff) return null;
+  return [(high >>> 8) & 255, high & 255, (low >>> 8) & 255, low & 255];
+}
+
+function isPrivateOrInternalHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+
+  const ipv4 = parseIpv4Hostname(host);
+  if (ipv4) return isPrivateIpv4(ipv4);
+
+  const version = isIP(host);
+  if (version !== 6) return false;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+
+  const mappedIpv4 = parseIpv4MappedIpv6(host);
+  if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
+
+  const firstHextet = host.split(':')[0];
+  if (/^f[cd][0-9a-f]{0,2}$/i.test(firstHextet)) return true;
+  const first = Number.parseInt(firstHextet, 16);
+  return Number.isFinite(first) && first >= 0xfe80 && first <= 0xfebf;
+}
+
 function untrustedSourceMeta(url, finalUrl, message, status = 0, contentType = '') {
   return {
     url,
@@ -225,6 +273,15 @@ function untrustedSourceMeta(url, finalUrl, message, status = 0, contentType = '
     blocked: false,
     error: message,
   };
+}
+
+async function releaseResponseBody(res) {
+  try {
+    if (res?.bodyUsed) return;
+    await res?.arrayBuffer?.();
+  } catch {
+    // Best-effort cleanup for rejected responses.
+  }
 }
 
 export function sourceFromUrl(raw, fallback = 'web') {
@@ -381,26 +438,34 @@ async function fetchTextMeta(url, { timeoutMs = 12_000, source = '' } = {}) {
       const contentType = res.headers.get('content-type') || '';
       if ([301, 302, 303, 307, 308].includes(Number(res.status))) {
         const location = res.headers.get('location') || '';
-        if (!location) return untrustedSourceMeta(startUrl, currentUrl, `redirect without Location: ${currentUrl}`, res.status, contentType);
+        if (!location) {
+          await releaseResponseBody(res);
+          return untrustedSourceMeta(startUrl, currentUrl, `redirect without Location: ${currentUrl}`, res.status, contentType);
+        }
         let nextUrl;
         try {
           nextUrl = new URL(location, currentUrl).href;
         } catch {
+          await releaseResponseBody(res);
           return untrustedSourceMeta(startUrl, currentUrl, `invalid redirect Location: ${location}`, res.status, contentType);
         }
         const nextHost = new URL(nextUrl).hostname;
         if (isPrivateOrInternalHostname(nextHost)) {
+          await releaseResponseBody(res);
           return untrustedSourceMeta(startUrl, nextUrl, `internal redirect target rejected: ${nextUrl}`, res.status, contentType);
         }
         if (!trustedForSource(nextUrl, source)) {
+          await releaseResponseBody(res);
           return untrustedSourceMeta(startUrl, nextUrl, `untrusted final source URL: ${nextUrl}`, res.status, contentType);
         }
+        await releaseResponseBody(res);
         currentUrl = nextUrl;
         continue;
       }
 
       const finalUrl = res.url || currentUrl;
       if (!trustedForSource(finalUrl, source)) {
+        await releaseResponseBody(res);
         return untrustedSourceMeta(startUrl, finalUrl, `untrusted final source URL: ${finalUrl}`, res.status, contentType);
       }
       const text = await res.text().catch(() => '');

@@ -353,7 +353,9 @@ try {
     globalThis.fetch = originalFetch;
   }
 
+  const internalRedirectUrls = [];
   globalThis.fetch = async (url, options) => {
+    internalRedirectUrls.push(String(url));
     const res = new Response('', {
       status: 302,
       headers: { location: 'https://127.0.0.1/feed/' },
@@ -369,15 +371,22 @@ try {
       limit: 5,
     });
     const diag = result.diagnostics.find((d) => d.source === 'techcrunch');
-    if (diag?.status === 'error' && diag.errors.some((err) => err.includes('internal redirect target rejected')) && result.companies.length === 0) {
+    if (
+      diag?.status === 'error' &&
+      diag.errors.some((err) => err.includes('internal redirect target rejected')) &&
+      result.companies.length === 0 &&
+      !internalRedirectUrls.includes('https://127.0.0.1/feed/')
+    ) {
       pass('discoverFundedCompanies rejects redirects to internal targets before following');
     } else {
-      fail(`internal redirect was accepted: ${JSON.stringify(result)}`);
+      fail(`internal redirect was accepted: ${JSON.stringify({ result, internalRedirectUrls })}`);
     }
   } finally {
     globalThis.fetch = originalFetch;
   }
 
+  const recentAcme = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const recentBeta = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
   globalThis.fetch = async (url, options) => {
     const res = new Response(JSON.stringify({
       hits: [
@@ -385,14 +394,14 @@ try {
           title: 'Acme raises $25M Series A',
           url: '',
           objectID: '123',
-          created_at: '2026-07-19T12:00:00Z',
+          created_at: recentAcme,
           story_text: 'Acme raises funding.',
         },
         {
           title: 'Beta raises $30M Series B',
           url: 'https://techcrunch.com/beta',
           objectID: '124',
-          created_at: '2026-07-19T13:00:00Z',
+          created_at: recentBeta,
           story_text: 'Beta raises funding.',
         },
       ],
