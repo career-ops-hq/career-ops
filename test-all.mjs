@@ -5887,6 +5887,29 @@ try {
     pass('role matcher keeps distinct one-word-suffix MTS roles apart despite the "engineer" filler');
   }
 
+  // Slashed short acronyms used to vanish in tokenization ("(CI/CD)" → "ci cd"
+  // → both dropped by the length filter), so a sibling req whose ONLY
+  // distinguishing qualifier is a slashed acronym tokenized identically to the
+  // bare title — the #1881 subset guard never saw an extra token — and
+  // merge-tracker overwrote the Applied row's title/score/report (#2165).
+  if (!roleFuzzyMatch(
+    'Senior Software Engineer, Infrastructure',
+    'Senior Software Engineer, Infrastructure (CI/CD)'
+  )) {
+    pass('role matcher keeps a slash-acronym-qualified sibling req distinct (#2165)');
+  } else {
+    fail('role matcher still collapses sibling reqs whose only qualifier is a slashed acronym');
+  }
+
+  if (roleFuzzyMatch(
+    'Senior Software Engineer, Infrastructure (CI/CD)',
+    'Senior Software Engineer, Infrastructure CI/CD'
+  )) {
+    pass('role matcher still matches the same slash-acronym role across punctuation variants');
+  } else {
+    fail('role matcher stopped matching identical slash-acronym roles');
+  }
+
   const dedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-'));
   try {
     mkdirSync(join(dedupTmp, 'data'));
@@ -6272,6 +6295,127 @@ try {
   }
 } catch (e) {
   fail(`merge-tracker fuzzy dedup tests crashed: ${e.message}`);
+}
+
+// merge-tracker used to clobber an Applied row when a sibling req's only
+// distinguishing qualifier was a slashed acronym: "(CI/CD)" tokenized to
+// nothing, the fuzzy tier matched, and the update path rewrote the existing
+// row's title/score/date/report. Two guards now cover it: slashed acronyms
+// survive tokenization, and non-report-number matches never rewrite the title.
+console.log('\n🧪 Testing merge-tracker sibling-req clobber guard (slash acronyms + title preservation)...');
+try {
+  const clobberTmp = mkdtempSync(join(tmpdir(), 'career-ops-clobber-'));
+  try {
+    mkdirSync(join(clobberTmp, 'data'));
+    mkdirSync(join(clobberTmp, 'reports'));
+    const additionsDir = join(clobberTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(clobberTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-05 | Globex | Senior Software Engineer, Infrastructure | N/A | Applied | ❌ | - | source=applied |\n' +
+      '| 2 | 2026-01-08 | Acme | Senior Platform Engineer, Observability | 3.9/5 | Applied | ❌ | [2](../reports/002-acme-2026-01-08.md) | existing |\n');
+    for (const n of ['002-acme-2026-01-08', '003-globex-2026-01-09', '004-acme-2026-01-09']) {
+      writeFileSync(join(clobberTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // Sibling req whose only qualifier is a slashed acronym → must be ADDED.
+    writeFileSync(join(additionsDir, '003-globex.tsv'),
+      '3\t2026-01-09\tGlobex\tSenior Software Engineer, Infrastructure (CI/CD)\tEvaluated\t4.5/5\t✅\t[3](reports/003-globex-2026-01-09.md)\tdistinct req\n');
+    // True repost with reworded title → fuzzy update keeps the EXISTING title.
+    writeFileSync(join(additionsDir, '004-acme.tsv'),
+      '4\t2026-01-09\tAcme\tSr Platform Engineer, Observability (Remote)\tEvaluated\t4.2/5\t❌\t[4](reports/004-acme-2026-01-09.md)\trepost re-eval\n');
+
+    const clobberResult = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (clobberResult === null) {
+      fail('merge-tracker.mjs crashed during sibling-req clobber guard test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+
+      if (merged.includes('Senior Software Engineer, Infrastructure |') && merged.includes('Infrastructure (CI/CD)')) {
+        pass('slash-acronym sibling req added as its own row; Applied row untouched');
+      } else {
+        fail('slash-acronym sibling req clobbered the existing Applied row (regression)');
+      }
+
+      const acmeRows = merged.split('\n').filter(l => l.includes('Observability'));
+      if (acmeRows.length === 1 && acmeRows[0].includes('Senior Platform Engineer, Observability') && acmeRows[0].includes('4.2/5')) {
+        pass('fuzzy-tier update bumps score but preserves the existing role title');
+      } else {
+        fail(`fuzzy-tier title preservation broken: ${acmeRows.length} Observability rows: ${acmeRows.join(' // ')}`);
+      }
+    }
+  } finally {
+    rmSync(clobberTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker sibling-req clobber guard tests crashed: ${e.message}`);
+}
+
+// Tier-2 (entry num + company) title behavior, pinned deliberately (#2166 review).
+// The title-preservation guard keys on reportNumMatched, which only tier-1
+// (report number + company) sets — so tier-2 preserves the existing title too.
+// That is intentional: tier-2 fires only AFTER tier-1 failed, i.e. the addition
+// carries a report link that did NOT match the row's while the bare num did.
+// Report-file numbering and tracker-row numbering drift independently, so a
+// tier-2 hit is "these two numbers coincide at this company" — a coincidence,
+// not an expressed intent to retitle. Since date/score/report/notes are all
+// overwritten unconditionally on the update path, the title is the only field
+// left carrying the evidence that two reqs were distinct. This test exists so a
+// future refactor cannot flip that behavior silently.
+console.log('\n🧪 Testing merge-tracker tier-2 (entry num) title preservation...');
+try {
+  const tier2Tmp = mkdtempSync(join(tmpdir(), 'career-ops-tier2-'));
+  try {
+    mkdirSync(join(tier2Tmp, 'data'));
+    mkdirSync(join(tier2Tmp, 'reports'));
+    const additionsDir = join(tier2Tmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(tier2Tmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 7 | 2026-02-01 | Initech | Staff Data Engineer, Batch Pipelines | 3.6/5 | Applied | ❌ | [21](../reports/021-initech-2026-02-01.md) | existing |\n');
+    for (const n of ['021-initech-2026-02-01', '022-initech-2026-02-02']) {
+      writeFileSync(join(tier2Tmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // num 7 collides with the existing row at the same company, but the report
+    // link (22) does not match the row's (21) — so tier-1 misses and tier-2 is
+    // the only tier that can match: the roles are far too different to fuzzy
+    // match, which is what isolates tier-2 here.
+    writeFileSync(join(additionsDir, '007-initech.tsv'),
+      '7\t2026-02-02\tInitech\tTechnical Program Manager, Compliance\tEvaluated\t4.4/5\t❌\t[22](reports/022-initech-2026-02-02.md)\tnum collision, distinct role\n');
+
+    const tier2Result = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (tier2Result === null) {
+      fail('merge-tracker.mjs crashed during tier-2 title preservation test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+      const initechRows = merged.split('\n').filter(l => l.includes('Initech'));
+
+      // One row (not two) proves tier-2 matched rather than falling through to
+      // an add; the bumped score proves the update path actually ran.
+      if (initechRows.length === 1 && initechRows[0].includes('4.4/5')) {
+        pass('tier-2 (entry num + company) matches and applies the score upgrade');
+      } else {
+        fail(`tier-2 match/update broken: ${initechRows.length} Initech rows: ${initechRows.join(' // ')}`);
+      }
+
+      if (initechRows.length === 1
+          && initechRows[0].includes('Staff Data Engineer, Batch Pipelines')
+          && !initechRows[0].includes('Technical Program Manager')) {
+        pass('tier-2 update preserves the existing role title (only tier-1 may retitle)');
+      } else {
+        fail(`tier-2 title preservation broken: ${initechRows.join(' // ')}`);
+      }
+    }
+  } finally {
+    rmSync(tier2Tmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker tier-2 title preservation tests crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER CROSS-CHANNEL VIA GUARD: NON-LATIN AGENCIES (#1603) ─────
