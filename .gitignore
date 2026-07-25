@@ -112,3 +112,16 @@ plan/
 
 # Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
 .career-ops-web/
+
+# Local scrape/experiment artifacts (ephemeral, machine-local)
+*-snapshot.md
+page-*.yml
+ei-job.yml
+scrape-job-snapshot*.{md,yml}
+
+# Editor swap/backup files
+~*
+*~
+
+# Pi harness local config (machine-local, never commit)
+.pi/
