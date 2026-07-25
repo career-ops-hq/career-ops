@@ -591,9 +591,9 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas,
-# ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
-# weworkremotely, workingnomads, wttj. Examples for every built-in provider are below.
+# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
+# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
+# thehub, weworkremotely, workingnomads, wttj. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -719,6 +719,11 @@ search_queries:
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
 #   provider: arbeitnow
+#   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Flowxtra                        # board-wide, every company hosted on Flowxtra
+#   provider: flowxtra
 #   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
 #   enabled: true
 #
