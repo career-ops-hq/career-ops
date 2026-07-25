@@ -166,7 +166,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
 | `candidate.linkedin` | `{url, display}` | Optional — omit to drop the item and its separator. |
-| `candidate.github` | `{url, display}` | Optional — from `config/profile.yml`'s `github:` field. Omit to drop the item and its separator. |
+| `candidate.github` | `{url, display}` | Optional — omit to drop the item and its separator. |
 | `candidate.portfolio` | `{url, display}` | Optional — omit to drop the item and its separator. |
 | `candidate.location` | string | From `profile.yml`. |
 | `candidate.photo` | string | Opt-in profile photo (#264): a local path or `data:` URL. Empty/absent emits **no `<img>`**, rendering pixel-for-pixel identical to the photoless layout (US/UK/many-market ATS penalize photos; opt in for DACH/European markets). |

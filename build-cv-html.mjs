@@ -267,7 +267,10 @@ function buildContactRow(candidate) {
     items.push(`<a href="${sanitizeUrl(c.linkedin.url)}">${escapeHtml(c.linkedin.display || c.linkedin.url)}</a>`);
   }
   if (c.github && c.github.url) {
-    items.push(`<a href="${sanitizeUrl(c.github.url)}">${escapeHtml(c.github.display || c.github.url)}</a>`);
+    const githubHref = sanitizeUrl(c.github.url);
+    if (githubHref) {
+      items.push(`<a href="${githubHref}">${escapeHtml(c.github.display || c.github.url)}</a>`);
+    }
   }
   if (c.portfolio && c.portfolio.url) {
     items.push(`<a href="${sanitizeUrl(c.portfolio.url)}">${escapeHtml(c.portfolio.display || c.portfolio.url)}</a>`);
@@ -443,6 +446,7 @@ async function runSelfTest() {
       phone: '+1 234 567 8900',
       email: 'test@example.com',
       linkedin: { url: 'https://linkedin.com/in/test', display: 'linkedin.com/in/test' },
+      github: { url: 'https://github.com/test', display: 'github.com/test' },
       portfolio: { url: 'https://test.example.com', display: 'test.example.com' },
       location: 'City, State',
     },
@@ -500,6 +504,43 @@ async function runSelfTest() {
   }
   if (/Kubernetes & Docker/.test(html)) {
     console.error('Self-test failed: found an unescaped ampersand in output');
+    process.exit(1);
+  }
+
+  // Guard the github contact-row case added for #2170: the link must render
+  // with the sanitized href from the sample.
+  if (!html.includes('href="https://github.com/test"')) {
+    console.error('Self-test failed: github contact link missing from output');
+    process.exit(1);
+  }
+
+  // Guard the absent-field side of the same case: omitting candidate.github
+  // must drop both its anchor and its separator, leaving no dangling item.
+  const { github, ...candidateWithoutGithub } = sample.candidate;
+  const htmlWithoutGithub = renderHtml(template, { ...sample, candidate: candidateWithoutGithub });
+  const countSeparators = (h) => (h.match(/class="separator"/g) || []).length;
+  if (htmlWithoutGithub.includes('github.com/test')) {
+    console.error('Self-test failed: github contact link rendered when candidate.github is absent');
+    process.exit(1);
+  }
+  if (countSeparators(htmlWithoutGithub) !== countSeparators(html) - 1) {
+    console.error('Self-test failed: omitting candidate.github left a dangling separator in the contact row');
+    process.exit(1);
+  }
+
+  // Guard the rejected-scheme side: sanitizeUrl() must reject javascript:/data:
+  // github URLs, which must drop the item and separator exactly like an
+  // absent field, never fall through to an empty href="".
+  const htmlWithRejectedGithub = renderHtml(template, {
+    ...sample,
+    candidate: { ...sample.candidate, github: { url: 'javascript:alert(1)', display: 'github.com/test' } },
+  });
+  if (htmlWithRejectedGithub.includes('href=""') || htmlWithRejectedGithub.includes('github.com/test')) {
+    console.error('Self-test failed: rejected github URL still rendered a contact item');
+    process.exit(1);
+  }
+  if (countSeparators(htmlWithRejectedGithub) !== countSeparators(html) - 1) {
+    console.error('Self-test failed: rejected github URL left a dangling separator in the contact row');
     process.exit(1);
   }
 
