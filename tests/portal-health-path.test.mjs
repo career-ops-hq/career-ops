@@ -41,7 +41,7 @@ try {
     mod.appendPortalHealth([{ timestamp: '2026-01-01T00:00:00.000Z', company: ${JSON.stringify(marker)}, status: 'reachable' }]);
   `;
 
-  const res = spawnSync(NODE, ['-e', script], {
+  const res = spawnSync(NODE, ['--input-type=module', '-e', script], {
     cwd: sandboxCwd,
     encoding: 'utf-8',
     timeout: 30000,
