@@ -91,3 +91,4 @@ public commit with a stated reason.
 - @minammar | 2026-07-22 | id:60332772 | src:https://github.com/santifer/career-ops/discussions/2114 | n:43
 - @arberbakalli | Arbër Bakalli | 2026-07-23 | "How hiring should have been" | id:15056487 | src:https://github.com/santifer/career-ops/discussions/2131 | n:44
 - @harsh-kotak | Harsh Kotak | 2026-07-23 | "career-ops helped me search with a plan." | id:9409440 | src:https://github.com/santifer/career-ops/discussions/2133 | n:45
+- @asing44 | Adam Warsing | 2026-07-24 | "To approaching a turbulent space with real dignity, cheers!" | id:109570966 | src:https://github.com/santifer/career-ops/discussions/2168 | n:46
