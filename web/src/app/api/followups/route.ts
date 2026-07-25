@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return Response.json({ available: false, metadata: null, entries: [], nextUpcoming: null });
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
+    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
   });
   try {
     const start = stdout.indexOf("{");

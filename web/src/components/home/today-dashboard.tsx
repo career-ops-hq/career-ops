@@ -131,7 +131,10 @@ export function TodayDashboard({
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
             {followups.map((f) => (
-              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => setOverdue((n) => Math.max(0, n - 1))} />
+              // Refetch (not a local decrement) so the parent's followups/nextUpcoming
+              // stay in sync with the server — logging the LAST due item must flip this
+              // section over to "Next follow-up" instead of leaving it empty.
+              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={refetch} />
             ))}
           </div>
         </Section>
