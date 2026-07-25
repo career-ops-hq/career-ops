@@ -248,10 +248,11 @@ ${items}
 }
 
 // Rebuild the whole .contact-row block. Its markup uses fixed "|" separators
-// between phone / email / linkedin / portfolio / location, so an absent optional
-// field (phone, linkedin, portfolio) must drop BOTH its <a> and one separator.
-// Building the present items and joining them is more robust than excising
-// separators from the template one placeholder at a time.
+// between phone / email / linkedin / github / portfolio / location, so an
+// absent optional field (phone, linkedin, github, portfolio) must drop BOTH
+// its <a> and one separator. Building the present items and joining them is
+// more robust than excising separators from the template one placeholder at
+// a time.
 function buildContactRow(candidate) {
   const c = candidate || {};
   const items = [];
@@ -264,6 +265,9 @@ function buildContactRow(candidate) {
   }
   if (c.linkedin && c.linkedin.url) {
     items.push(`<a href="${sanitizeUrl(c.linkedin.url)}">${escapeHtml(c.linkedin.display || c.linkedin.url)}</a>`);
+  }
+  if (c.github && c.github.url) {
+    items.push(`<a href="${sanitizeUrl(c.github.url)}">${escapeHtml(c.github.display || c.github.url)}</a>`);
   }
   if (c.portfolio && c.portfolio.url) {
     items.push(`<a href="${sanitizeUrl(c.portfolio.url)}">${escapeHtml(c.portfolio.display || c.portfolio.url)}</a>`);
