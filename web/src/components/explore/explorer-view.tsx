@@ -70,6 +70,9 @@ export function ExplorerView({
       // Today's "See all N" (#84) hands off here instead of a bare config form —
       // load the SAME /api/whats-new offers it already showed, through the normal
       // results-phase UI. The config form (Refine search / Re-cast) stays reachable.
+      // Force scan mode: a session restored in "ai" mode (sessionStorage rehydrate)
+      // must not show the AI-search UI for this scan-only hand-off.
+      setMode("scan");
       initFilters(seed.filters);
       void loadFresh();
     } else {

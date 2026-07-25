@@ -288,6 +288,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const loadFresh = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
+    setPhase("casting");
+    setStatus("Loading fresh matches…");
     setOffers([]);
     setMatchCount(0);
     setCompaniesScanned(0);
@@ -299,8 +301,18 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setError("");
     try {
       const r = await fetch("/api/whats-new");
-      const d = await r.json().catch(() => ({}));
-      const list: DiscoveredOffer[] = Array.isArray(d.offers) ? d.offers : [];
+      if (!r.ok) {
+        setError(`Couldn't load fresh matches (${r.status}).`);
+        setPhase("failed");
+        return;
+      }
+      const d = await r.json().catch(() => null);
+      if (!d || !Array.isArray(d.offers)) {
+        setError("Couldn't load fresh matches — unexpected response.");
+        setPhase("failed");
+        return;
+      }
+      const list: DiscoveredOffer[] = d.offers;
       setOffers(list);
       setMatchCount(list.length);
       setPhase(list.length > 0 ? "results" : "empty-current");
