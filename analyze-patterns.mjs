@@ -323,7 +323,10 @@ risk_summary:
   // is the strongest positive outcome and the furthest advance — it must not be
   // mis-bucketed as 'pending' or dropped from channel yield / the funnel.
   if (classifyOutcome('Hired') !== 'positive') failures.push(`hired: classifyOutcome('Hired') → ${classifyOutcome('Hired')}, expected 'positive'`);
-  if (normalizeStatus('contratado') !== 'hired') failures.push(`hired: normalizeStatus('contratado') → ${normalizeStatus('contratado')}, expected 'hired'`);
+  // Every hired alias must resolve to 'hired' — testing only one lets the others regress silently.
+  for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
+    if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
+  }
   if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
   if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
   if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
