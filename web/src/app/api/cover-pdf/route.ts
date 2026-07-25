@@ -31,13 +31,24 @@ export async function GET(req: NextRequest) {
   }
   if (!files.length) return new Response("no tailored cover letter found for this offer", { status: 404 });
 
-  files.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  const file = path.join(dir, files[0]);
+  // Stat once up front instead of inside the comparator: a file deleted between
+  // readdirSync and statSync would otherwise throw ENOENT mid-sort (TOCTOU).
+  // Vanished files are dropped rather than crashing the lookup.
+  const withMtime = files.flatMap((f) => {
+    try {
+      return [{ f, mtime: fs.statSync(path.join(dir, f)).mtimeMs }];
+    } catch {
+      return [];
+    }
+  });
+  if (!withMtime.length) return new Response("no tailored cover letter found for this offer", { status: 404 });
+  withMtime.sort((a, b) => b.mtime - a.mtime);
+  const file = path.join(dir, withMtime[0].f);
   try {
     const buf = fs.readFileSync(file);
     return new Response(new Uint8Array(buf), {
       status: 200,
-      headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${files[0]}"`, "Cache-Control": "no-store" },
+      headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${withMtime[0].f}"`, "Cache-Control": "no-store" },
     });
   } catch {
     return new Response("could not read the PDF", { status: 500 });

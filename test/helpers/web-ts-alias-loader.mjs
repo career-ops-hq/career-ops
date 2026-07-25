@@ -4,7 +4,7 @@
 // Node 22 already type-strips .ts on import — this hook is ONLY about specifier
 // resolution, not transpilation.
 //
-// Usage: node --import test/helpers/web-ts-alias-loader.mjs --test test/some.test.mjs
+// Usage: node --import ./test/helpers/web-ts-alias-loader.mjs --test test/some.test.mjs
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";

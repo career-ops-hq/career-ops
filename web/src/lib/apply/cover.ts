@@ -29,6 +29,17 @@ export function resolveTailoredCover(company?: string): string | null {
   const re = new RegExp(`(^|[^a-z0-9])${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
   const matches = files.filter((f) => re.test(f.toLowerCase()));
   if (!matches.length) return null;
-  matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  return path.join(dir, matches[0]);
+  // Stat once up front instead of inside the comparator: a file deleted between
+  // readdirSync and statSync would otherwise throw ENOENT mid-sort (TOCTOU).
+  // Vanished files are dropped rather than crashing the lookup.
+  const withMtime = matches.flatMap((f) => {
+    try {
+      return [{ f, mtime: fs.statSync(path.join(dir, f)).mtimeMs }];
+    } catch {
+      return [];
+    }
+  });
+  if (!withMtime.length) return null;
+  withMtime.sort((a, b) => b.mtime - a.mtime);
+  return path.join(dir, withMtime[0].f);
 }
