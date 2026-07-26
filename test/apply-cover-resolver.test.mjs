@@ -97,6 +97,16 @@ test("resolveTailoredCover: empty/blank company returns null", () => {
   });
 });
 
+test("resolveTailoredCover: a punctuation-only company (\"!!!\") normalizes to an empty slug and returns null even when covers exist — the boundary regex must not leak the newest file", () => {
+  const root = fixture([
+    { name: "cover-acme-swe-2026-01-01.pdf", mtimeOffsetMs: -60_000 },
+    { name: "cover-globex-mktg-2026-02-01.pdf", mtimeOffsetMs: 0 },
+  ]);
+  withRoot(root, () => {
+    assert.equal(resolveTailoredCover("!!!"), null);
+  });
+});
+
 test("resolveTailoredCover: no output/ directory returns null instead of throwing", () => {
   const root = mkdtempSync(join(tmpdir(), "career-ops-cover-empty-"));
   withRoot(root, () => {

@@ -15,6 +15,10 @@ export async function GET(req: NextRequest) {
   // Token-extract instead of replace-then-trim: same slug, and no `-+$`-style
   // pattern that backtracks polynomially on adversarial input (CodeQL).
   const slug = (company.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
+  // A company that is all punctuation (e.g. "!!!") tokenizes to an empty slug; the
+  // boundary regex below would then match every cover-*.pdf and leak the newest one.
+  // Reject it, mirroring resolveTailoredCover() which returns null on an empty slug.
+  if (!slug) return new Response("company required", { status: 400 });
   const dir = path.join(careerOpsRoot(), "output");
   // Match the slug at a token boundary (delimited by non-alphanumerics) so "Meta"
   // doesn't serve "Metabase"'s cover letter. The pdf mode names files cover-…-{slug}-….
