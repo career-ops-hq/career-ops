@@ -41,8 +41,42 @@ const CV_PATH = 'cv.md';
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
 
-const REQUIREMENT_HEADER_RE =
-  /^#{0,4}\s*(required|requirements|qualifications|must[- ]have|preferred|nice[- ]to[- ]have)s?\b.*$/im;
+// Real postings rarely use the word "Requirements". The literal-only list
+// missed the phrasings most modern ATS boards actually ship ("What we're
+// looking for", "Who you are", "You may be a good fit if"), so a JD could
+// yield zero skills - which reads identically to "no gaps found" and is the
+// more dangerous of the two failure modes this file warns about.
+const REQUIREMENT_HEADER_RE = new RegExp(
+  '^#{0,4}\\s*(?:' + [
+    'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
+    "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
+    "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
+    'who\\s+you\\s+are',
+    'about\\s+you',
+    'your\\s+(?:background|experience|profile)',
+    'you\\s+may\\s+be\\s+a\\s+good\\s+fit',
+    'ideal\\s+candidate',
+    'skills\\s+(?:and|&)\\s+experience',
+  ].join('|') + ')s?\\b.*$',
+  'im'
+);
+
+// Headers that end a requirements block even when the posting uses no markdown
+// heading levels. Without this the block stayed open to end-of-file and swept
+// the benefits list into "required skills" - turning perks like "401k",
+// "Equity" and "Carrot" into reported skill gaps.
+const NON_REQUIREMENT_HEADER_RE = new RegExp(
+  '^#{0,4}\\s*(?:' + [
+    'benefits?', 'perks?', 'benefits\\s+and\\s+perks', 'compensation', 'salary', 'pay\\s+range',
+    'what\\s+we\\s+offer', 'why\\s+(?:join|work|this\\s+role)',
+    'about\\s+(?:us|the\\s+company|the\\s+team|the\\s+role)',
+    'how\\s+(?:and\\s+where\\s+)?we\\s+work',
+    'equal\\s+opportunity', 'eeo', 'diversity',
+    'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
+    'our\\s+(?:stack|process|values|mission)',
+  ].join('|') + ')\\b.*$',
+  'im'
+);
 
 const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)$/;
 
@@ -75,6 +109,11 @@ const STOPWORDS = new Set([
   'candidates', 'candidate', 'applicants', 'applicant', 'ideal', 'successful',
   'knowledge', 'understanding', 'familiarity', 'exposure', 'background',
   'skills', 'skill', 'communication', 'team', 'teams', 'work', 'working',
+  // Capitalized bullet-openers that read as skills but describe the candidate's
+  // disposition, not a technology ("Deep fluency in…", "Interest in…").
+  'deep', 'interest', 'genuine', 'solid', 'comfortable', 'passion', 'passionate',
+  'track', 'record', 'real', 'bonus', 'plus', 'hands', 'proficiency', 'fluency',
+  'expertise', 'demonstrated', 'extensive', 'practical', 'good', 'great', 'clear',
 ]);
 
 /**
@@ -88,6 +127,12 @@ function extractJdSkills(jdText) {
   let inRequirementsBlock = false;
 
   for (const line of lines) {
+    // Checked before the requirement test so a heading that satisfies both
+    // (e.g. "Why this role") closes the block rather than reopening it.
+    if (NON_REQUIREMENT_HEADER_RE.test(line)) {
+      inRequirementsBlock = false;
+      continue;
+    }
     if (REQUIREMENT_HEADER_RE.test(line)) {
       inRequirementsBlock = true;
       continue;
@@ -307,6 +352,55 @@ Python, Docker, Zookeeper
   eq('extracts F# standalone (symbol-edge boundary)', symbolEdgeSkills.includes('F#'), true);
   eq('sentence-ending token stays clean ("Docker", not "Docker.")', symbolEdgeSkills.includes('Docker'), true);
   eq('trailing period is not swallowed into the token', symbolEdgeSkills.includes('Docker.'), false);
+
+  // Regression: most real postings never write the word "Requirements". The
+  // literal-only header list matched none of these, so extraction returned an
+  // empty list - indistinguishable from "this JD has no skill gaps", which is
+  // the failure mode that silently skips the whole check.
+  for (const header of [
+    "What we're looking for",
+    'What you will bring',
+    'Who you are',
+    'About you',
+    'You may be a good fit if',
+  ]) {
+    const jd = `# Role\n\n${header}\n- Experience with Kubernetes and Terraform\n`;
+    const found = extractJdSkills(jd);
+    eq(`header "${header}" opens a requirements block`, found.includes('Kubernetes'), true);
+  }
+
+  // Regression: the block only closed on a markdown heading, so a posting whose
+  // benefits section is plain text kept the block open to end-of-file and
+  // reported perks as missing skills.
+  const perksJd = `
+# Role
+
+## Requirements
+- Experience with Kubernetes
+
+Benefits and Perks (US Only)
+- Competitive Equity and Healthcare
+- Carrot fertility benefits
+`;
+  const perksSkills = extractJdSkills(perksJd);
+  eq('requirement skill still extracted before the perks block', perksSkills.includes('Kubernetes'), true);
+  eq('benefit "Equity" is not reported as a skill', perksSkills.includes('Equity'), false);
+  eq('benefit "Healthcare" is not reported as a skill', perksSkills.includes('Healthcare'), false);
+  eq('benefit "Carrot" is not reported as a skill', perksSkills.includes('Carrot'), false);
+
+  // Regression: capitalized bullet-openers that describe disposition rather
+  // than technology were surfacing as gaps ("Deep fluency in…", "Interest in…").
+  const dispositionJd = `
+# Role
+
+## Requirements
+- Deep fluency in TypeScript
+- Interest in documentation as infrastructure
+`;
+  const dispositionSkills = extractJdSkills(dispositionJd);
+  eq('real skill still extracted alongside a disposition opener', dispositionSkills.includes('TypeScript'), true);
+  eq('does not extract "Deep" as a skill', dispositionSkills.includes('Deep'), false);
+  eq('does not extract "Interest" as a skill', dispositionSkills.includes('Interest'), false);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
