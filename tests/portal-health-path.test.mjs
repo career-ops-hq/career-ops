@@ -18,10 +18,11 @@
 // directory must be provably untouched.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
+import { applyScriptDirGuard } from './portal-health-guard.mjs';
 
 console.log('\nscan.mjs — portal-health.tsv resolves against cwd, not script dir');
 
@@ -33,9 +34,9 @@ const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-'));
 const scriptDirHealthPath = join(ROOT, 'data', 'portal-health.tsv');
 const scriptDirHealthExisted = existsSync(scriptDirHealthPath);
 const scriptDirHealthBackup = scriptDirHealthExisted ? readFileSync(scriptDirHealthPath, 'utf-8') : null;
+const marker = 'Portal Health CWD Fixture';
 
 try {
-  const marker = 'Portal Health CWD Fixture';
   const script = `
     const mod = await import(${scanUrl});
     mod.appendPortalHealth([{ timestamp: '2026-01-01T00:00:00.000Z', company: ${JSON.stringify(marker)}, status: 'reachable' }]);
@@ -75,12 +76,13 @@ try {
   }
 } finally {
   rmSync(sandboxCwd, { recursive: true, force: true });
-  // Defensive restore, matching the pattern in tests/scan-no-targets.test.mjs
+  // Defensive cleanup, matching the pattern in tests/scan-no-targets.test.mjs
   // and tests/intake-mutex.test.mjs -- never observed to trigger once the path
   // is fixed, but leaves the tree exactly as found if it somehow still does.
-  if (scriptDirHealthExisted) {
-    writeFileSync(scriptDirHealthPath, scriptDirHealthBackup, 'utf-8');
-  } else if (existsSync(scriptDirHealthPath)) {
-    rmSync(scriptDirHealthPath, { force: true });
-  }
+  // Uses applyScriptDirGuard() rather than a blind restore-from-backup: a
+  // straight write of scriptDirHealthBackup would silently discard any row a
+  // concurrent real process (e.g. a scheduled scan) appended to this same
+  // live file while the sandboxed child process ran. The guard instead
+  // removes only this test's own marker row and leaves everything else alone.
+  applyScriptDirGuard({ path: scriptDirHealthPath, existedBefore: scriptDirHealthExisted, marker });
 }
