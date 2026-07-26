@@ -1,16 +1,13 @@
 <!--
   skills.html — section partial for Skills (#2183).
 
-  Entry-level placeholders (filled once per skill category):
-    {{CATEGORY_BLOCK}} — conditional: rendered when category is present, removed otherwise.
-                          Contains {{CATEGORY}}.
-    {{CATEGORY}}       — category label including trailing colon (HTML-escaped, inside CATEGORY_BLOCK)
-    {{ITEMS_TEXT}}     — comma-joined items string (HTML-escaped)
+  Field placeholders filled per skill category:
+    CATEGORY_BLOCK — conditional: category label span when category is present; omitted otherwise
+    ITEMS_TEXT     — comma-joined items string
 
-  The outer wrapper (skills-grid div) lives in the main template; this partial
-  renders only the repeating per-category rows.
-
-  {{ITEMS}} receives the concatenated rendered entries.
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
+<!--ENTRY-->
 <div class="skill-item">{{CATEGORY_BLOCK}}{{ITEMS_TEXT}}</div>
 <!--CATEGORY_BLOCK--><span class="skill-category">{{CATEGORY}}: </span><!--/CATEGORY_BLOCK-->
+<!--/ENTRY-->

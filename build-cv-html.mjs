@@ -167,38 +167,56 @@ function joinItems(items) {
 // "templates/sections/" first (shared by all templates in that directory),
 // then fall back to the built-in builders.
 //
-// Partial file format:
-//   The file contains an HTML snippet and optional conditional-block markers
-//   encoded as HTML comments:
+// Partial file format (v2 — ENTRY zone):
+//   The file is split into two zones:
 //
-//     <!--BLOCK_NAME--><tag>{{PLACEHOLDER}}</tag><!--/BLOCK_NAME-->
+//   1. Documentation zone (before <!--ENTRY--> and after <!--/ENTRY-->):
+//      Free-form HTML comments or text. Completely ignored by the parser.
 //
-//   These are extracted from the partial before the entry template is used.
-//   The builder substitutes the correct content for BLOCK_NAME references
-//   ({{BLOCK_NAME}} in the entry template) based on whether the field is
-//   present in the payload entry. When the field is absent the entire block
-//   is replaced with '' (or with the <!--BLOCK_NAME_EMPTY-->...<!--/BLOCK_NAME_EMPTY-->
-//   fallback if one is defined, which the certifications partial uses for
-//   table-cell alignment).
+//   2. Entry zone (inside <!--ENTRY-->...<!--/ENTRY-->):
+//      Contains the per-entry HTML template. {{PLACEHOLDER}} references are
+//      filled by fillEntry(). Optional conditional-block *definitions* are
+//      placed here too, encoded as HTML comments:
+//
+//        <!--BLOCK_NAME--><tag>{{PLACEHOLDER}}</tag><!--/BLOCK_NAME-->
+//
+//      The builder extracts block definitions first, then the remaining markup
+//      becomes the entry template. When a field is absent the entire block is
+//      replaced with '' (or with the <!--BLOCK_NAME_EMPTY--> fallback if one
+//      is defined, which the certifications partial uses for alignment).
+//
+// By keeping documentation outside the ENTRY zone we never need to strip
+// arbitrary HTML comments from the entry template, which avoids the
+// CodeQL js/incomplete-multi-character-sanitization rule entirely.
 
-// Parse all <!--BLOCKNAME-->…<!--/BLOCKNAME--> markers out of a partial file
-// and return:
+// Parse a partial file and return:
 //   { entryTemplate: string, blocks: Map<name, {present: string, absent: string}> }
 //
-// Partial files may contain a leading HTML comment block for documentation (the
-// standard HTML convention). We strip all HTML comments from the entry template
-// after extracting named block markers so doc text never leaks into rendered markup
-// or triggers the unresolved-placeholder check.
+// The entry template is extracted from inside <!--ENTRY-->...<!--/ENTRY-->.
+// Named conditional-block definitions are extracted from the same zone and
+// removed to leave the clean entry template. No HTML comment stripping is
+// performed on arbitrary content (no CodeQL sanitization concern).
 function parsePartial(source) {
+  // Step 1: locate the ENTRY zone.
+  const entryZoneMatch = /<!--ENTRY-->([\s\S]*?)<!--\/ENTRY-->/.exec(source);
+  const entryZone = entryZoneMatch ? entryZoneMatch[1] : source;
+
+  // Step 2: extract named conditional-block definitions from the entry zone.
   const blockRe = /<!--([A-Z][A-Z0-9_]+)-->([\s\S]*?)<!--\/\1-->/g;
   const blocks = new Map();
+  // Collect the exact definition strings (open-tag + content + close-tag) so we
+  // can remove them verbatim from the entry zone in step 3, without needing any
+  // broad HTML-comment regex (which would trigger CodeQL).
+  const definitionStrings = [];
   let m;
-  while ((m = blockRe.exec(source)) !== null) {
+  while ((m = blockRe.exec(entryZone)) !== null) {
     const name = m[1];
     const content = m[2];
+    if (name === 'ENTRY') continue; // skip the sentinel itself
+    definitionStrings.push(m[0]); // full match, e.g. <!--FOO-->bar<!--/FOO-->
     // EMPTY variants are the absent-field fallback (e.g. <!--ORG_EMPTY-->).
     if (name.endsWith('_EMPTY')) {
-      const base = name.slice(0, -6); // strip _EMPTY suffix
+      const base = name.slice(0, -6);
       const existing = blocks.get(base) || { present: '', absent: '' };
       blocks.set(base, { ...existing, absent: content });
     } else {
@@ -207,17 +225,14 @@ function parsePartial(source) {
     }
   }
 
-  // Strip named block markers AND any remaining HTML comments (doc blocks).
-  // We use a loop to satisfy CodeQL's 'Incomplete multi-character sanitization'
-  // rule, ensuring that maliciously nested comments (e.g. <!--<!--foo-->-->)
-  // are fully removed. Block references ({{BLOCKNAME}}) stay in place.
-  let entryTemplate = source;
-  let previous = '';
-  while (entryTemplate !== previous) {
-    previous = entryTemplate;
-    entryTemplate = entryTemplate
-      .replace(/<!--[A-Z][A-Z0-9_]+-->[\s\S]*?<!--\/[A-Z][A-Z0-9_]+-->/g, () => '')
-      .replace(/<!--[\s\S]*?-->/g, () => '');
+  // Step 3: build the entry template by removing the captured block *definitions*
+  // verbatim. Block *references* ({{BLOCKNAME}}) remain and are resolved by
+  // fillEntry() at render time.
+  // We use split/join on the exact captured strings — no broad HTML-comment regex,
+  // so CodeQL js/incomplete-multi-character-sanitization cannot fire.
+  let entryTemplate = entryZone;
+  for (const def of definitionStrings) {
+    entryTemplate = entryTemplate.split(def).join('');
   }
   entryTemplate = entryTemplate.trim();
 
