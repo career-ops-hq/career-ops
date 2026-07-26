@@ -29,6 +29,7 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+ *   node scan.mjs --help                       # print usage and exit
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
@@ -1588,6 +1589,23 @@ function guardStatusFor(code) {
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  node scan.mjs [options]
+
+Options:
+  --dry-run                    Preview without writing files
+  --company <name>             Scan one configured company
+  --posted-after YYYY-MM-DD    Include jobs posted on/after this date
+  --posted-before YYYY-MM-DD   Include jobs posted on/before this date
+  --verify                     Verify new URLs before adding them
+  --headed-fallback            Retry anti-bot failures in headed Chromium
+  --throttle[=<ms>]            Jitter liveness requests
+  --rediscover-404             Search for moved roles during verification
+  --include-blacklisted        Include and annotate blacklist matches
+  --help, -h                   Show this help`);
+    return;
+  }
   const dryRun = args.includes('--dry-run');
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the

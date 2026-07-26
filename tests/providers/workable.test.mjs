@@ -8,7 +8,7 @@ console.log('\nProvider — workable');
 try {
   const workableModule = await import(pathToFileURL(join(ROOT, 'providers/workable.mjs')).href);
   const workable = workableModule.default;
-  const { parseWorkableMarkdown } = workableModule;
+  const { parseWorkableMarkdown, parseWorkableDetailMarkdown } = workableModule;
 
   // detect() — auto-detection from careers_url
   if (workable.id === 'workable') pass('workable.id is "workable"');
@@ -49,6 +49,22 @@ try {
     pass('parseWorkableMarkdown strips .md suffix from job URL');
   } else {
     fail(`parseWorkableMarkdown should strip .md; got url=${JSON.stringify(jobs[0]?.url)}`);
+  }
+
+  if (jobs[0]?.postedAt === Date.parse('2026-04-01')) {
+    pass('parseWorkableMarkdown preserves the provider posting date');
+  } else {
+    fail(`parseWorkableMarkdown postedAt wrong: ${JSON.stringify(jobs[0]?.postedAt)}`);
+  }
+
+  const enriched = parseWorkableDetailMarkdown(
+    '# Senior AI PM\n\n**Location:\u00a0Remote - Europe**\n\n## Description\n\nCrypto infrastructure',
+    jobs[0],
+  );
+  if (enriched.location === 'Remote - Europe' && enriched.description.includes('Crypto infrastructure')) {
+    pass('parseWorkableDetailMarkdown enriches remote scope and description');
+  } else {
+    fail(`parseWorkableDetailMarkdown enrichment wrong: ${JSON.stringify(enriched)}`);
   }
 
   // Robustness
@@ -138,7 +154,46 @@ try {
     fail(`expected only "Good Role" through, got ${JSON.stringify(filteredJobs.map(j => j.title))}`);
   }
 
+  // Large boards return instructions at the base endpoint. Configured queries
+  // fan out deterministically and deduplicate overlapping results by job URL.
+  const fetchedUrls = [];
+  const queryRow = '| Senior Backend Engineer | Engineering | Europe (Remote) | Full-time | — | 2026-07-23 | [View](https://apply.workable.com/large/jobs/view/BACKEND.md) |';
+  const largeJobs = await workable.fetch(
+    {
+      name: 'Large',
+      careers_url: 'https://apply.workable.com/large',
+      workable: {
+        queries: ['backend engineer', 'platform engineer', 'backend engineer'],
+        fetch_details: true,
+      },
+    },
+    {
+      transport: 'http',
+      fetchText: async (url) => {
+        fetchedUrls.push(url);
+        if (url.endsWith('.md') && url.includes('/jobs/view/')) {
+          return '# Senior Backend Engineer\n\n**Location: Remote - Europe**\n\n## Description\n\nBlockchain platform';
+        }
+        if (!url.includes('?')) return '# Large\n\n> Use the search endpoint to filter results.';
+        return `| Title | Department | Location | Type | Salary | Posted | Details |\n${queryRow}`;
+      },
+      fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+    },
+  );
+  if (
+    fetchedUrls.length === 4 &&
+    fetchedUrls.some(url => url.includes('query=backend+engineer')) &&
+    fetchedUrls.some(url => url.includes('query=platform+engineer')) &&
+    largeJobs.length === 1 &&
+    largeJobs[0].location === 'Remote - Europe' &&
+    largeJobs[0].description.includes('Blockchain platform') &&
+    largeJobs[0].postedAt === Date.parse('2026-07-23')
+  ) {
+    pass('workable large-board query fan-out is bounded, deduplicated, and date-aware');
+  } else {
+    fail(`workable query fan-out wrong: urls=${JSON.stringify(fetchedUrls)} jobs=${JSON.stringify(largeJobs)}`);
+  }
+
 } catch (e) {
   fail(`workable provider tests crashed: ${e.message}`);
 }
-

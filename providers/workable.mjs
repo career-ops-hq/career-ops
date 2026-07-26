@@ -6,6 +6,12 @@
 // is the only no-auth public surface. Auto-detects from careers_url pattern
 // `https://apply.workable.com/<slug>`. A tracked_companies entry can also
 // set `provider: workable` explicitly to bypass detection.
+//
+// Large boards return search instructions instead of a complete table. Configure
+// a bounded query fan-out for those boards:
+//   workable:
+//     queries: ["backend engineer", "platform engineer"]
+//     fetch_details: true
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
 
@@ -39,6 +45,34 @@ function resolveFeedUrl(entry) {
   return `https://apply.workable.com/${slug}/jobs.md`;
 }
 
+function resolveQueries(entry) {
+  const raw = entry?.workable && typeof entry.workable === 'object'
+    ? entry.workable.queries
+    : null;
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw
+    .filter(query => typeof query === 'string')
+    .map(query => query.trim())
+    .filter(Boolean))]
+    .slice(0, 20);
+}
+
+async function enrichWithDetails(jobs, entry, ctx) {
+  if (entry?.workable?.fetch_details !== true) return jobs;
+  const enriched = [];
+  for (const job of jobs) {
+    try {
+      const detailUrl = `${job.url}.md`;
+      assertWorkableUrl(detailUrl);
+      const detailText = await ctx.fetchText(detailUrl, { redirect: 'error' });
+      enriched.push(parseWorkableDetailMarkdown(detailText, job));
+    } catch {
+      enriched.push(job);
+    }
+  }
+  return enriched;
+}
+
 /** @type {Provider} */
 export default {
   id: 'workable',
@@ -55,7 +89,23 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertWorkableUrl above it guarantees the final hostname stays in the allowlist.
     const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
-    return parseWorkableMarkdown(text, entry.name);
+    const directJobs = parseWorkableMarkdown(text, entry.name);
+    if (directJobs.length > 0) return enrichWithDetails(directJobs, entry, ctx);
+
+    const queries = resolveQueries(entry);
+    if (queries.length === 0) return [];
+
+    const jobsByUrl = new Map();
+    for (const query of queries) {
+      const queryUrl = new URL(feedUrl);
+      queryUrl.searchParams.set('query', query);
+      assertWorkableUrl(queryUrl.toString());
+      const queryText = await ctx.fetchText(queryUrl.toString(), { redirect: 'error' });
+      for (const job of parseWorkableMarkdown(queryText, entry.name)) {
+        jobsByUrl.set(job.url, job);
+      }
+    }
+    return enrichWithDetails([...jobsByUrl.values()], entry, ctx);
   },
 };
 
@@ -70,7 +120,7 @@ export default {
  *
  * @param {string} text — markdown body
  * @param {string} companyName — value to write into job.company
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseWorkableMarkdown(text, companyName) {
   if (typeof text !== 'string') return [];
@@ -97,7 +147,32 @@ export function parseWorkableMarkdown(text, companyName) {
       continue;
     }
 
-    jobs.push({ title, url, location, company: companyName });
+    const postedAt = Date.parse(cols[6] || '');
+    jobs.push({
+      title,
+      url,
+      location,
+      company: companyName,
+      ...(Number.isNaN(postedAt) ? {} : { postedAt }),
+    });
   }
   return jobs;
+}
+
+/**
+ * Enrich a Workable list row with the public detail Markdown. The explicit
+ * `**Location:**` field is more accurate than the list row's office/country
+ * label for region-wide remote roles.
+ *
+ * @param {string} text
+ * @param {{title: string, url: string, company: string, location: string, postedAt?: number}} job
+ */
+export function parseWorkableDetailMarkdown(text, job) {
+  if (typeof text !== 'string' || !text.trim()) return job;
+  const locationMatch = text.match(/^\*\*Location:\s*([^*\r\n]+)\*\*\s*$/mi);
+  return {
+    ...job,
+    location: locationMatch?.[1]?.replace(/\u00a0/g, ' ').trim() || job.location,
+    description: text,
+  };
 }

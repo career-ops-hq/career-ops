@@ -179,6 +179,36 @@ export function parseA16zPayload(html) {
   /** @type {Map<string, SeedCompany>} */
   const seen = new Map();
 
+  // Strategy 0: the current WordPress/Alpine page embeds the complete portfolio
+  // as an HTML-escaped JSON array in a data-companies attribute.
+  const companiesAttr = html.match(/\bdata-companies=(["'])([\s\S]*?)\1/i);
+  if (companiesAttr?.[2]) {
+    try {
+      const decoded = companiesAttr[2]
+        .replace(/&quot;/gi, '"')
+        .replace(/&#(?:x27|39);/gi, "'")
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>');
+      const companies = JSON.parse(decoded);
+      if (Array.isArray(companies)) {
+        for (const item of companies) {
+          const name = typeof item?.name === 'string'
+            ? item.name.trim()
+            : (typeof item?.post_title === 'string' ? item.post_title.trim() : '');
+          if (!name) continue;
+          const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          if (!slug || !SLUG_RE.test(slug) || seen.has(slug)) continue;
+          const urlCandidates = [item?.company_url, item?.external_url, item?.url, item?.web];
+          const url = urlCandidates.find(value => typeof value === 'string' && /^https?:\/\//i.test(value)) || '';
+          seen.set(slug, { name, slug, url, source: 'a16z' });
+        }
+      }
+    } catch {
+      // Attribute may be truncated or malformed — continue through legacy fallbacks.
+    }
+  }
+
   // Strategy 1: JSON-LD embedded in the page (structured data block).
   // a16z sometimes embeds schema.org/Organization blocks — extract if present.
   const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
@@ -299,6 +329,26 @@ export function toPortalEntry(company) {
     careers_url,
     source: company.source,
   };
+}
+
+/**
+ * Build bounded ATS probe candidates for a seed company. Explicit ATS hints
+ * remain single-target. Without a hint, try the same validated slug against all
+ * supported seed ATS providers instead of treating Greenhouse detection as proof.
+ *
+ * @param {SeedCompany} company
+ * @returns {SeedPortalEntry[]}
+ */
+export function toPortalCandidates(company) {
+  const explicit = toPortalEntry(company);
+  if (company.ats && company.ats_id) return [explicit];
+  if (!company.slug || !SLUG_RE.test(company.slug)) return explicit.careers_url ? [explicit] : [];
+
+  return [
+    { name: company.name, careers_url: `https://job-boards.greenhouse.io/${company.slug}`, source: company.source },
+    { name: company.name, careers_url: `https://jobs.lever.co/${company.slug}`, source: company.source },
+    { name: company.name, careers_url: `https://jobs.ashbyhq.com/${company.slug}`, source: company.source },
+  ];
 }
 
 // ── Network fetchers ─────────────────────────────────────────────────

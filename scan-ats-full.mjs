@@ -40,7 +40,7 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
-import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
+import { SEED_SOURCES, toPortalCandidates } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -364,24 +364,43 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
   let errors = 0;
 
   await parallelEach(capped, CONCURRENCY, async (company) => {
-    const entry = toPortalEntry(company);
-    if (!entry.careers_url) return;
+    const candidates = toPortalCandidates(company);
+    let jobs = null;
+    let resolvedEntry = null;
+    const failures = [];
 
-    // Try each ATS provider's detect() — first hit wins.
-    let provider = null;
-    for (const p of SEED_PROVIDERS) {
+    for (const entry of candidates) {
+      let provider = null;
+      for (const p of SEED_PROVIDERS) {
+        try {
+          if (p.detect?.(entry)) { provider = p; break; }
+        } catch { /* no-op */ }
+      }
+      if (!provider) continue;
+
+      const directory = opts.seedAtsSlugs?.[provider.id];
+      if (directory instanceof Set) {
+        let candidateSlug = '';
+        try {
+          candidateSlug = new URL(entry.careers_url).pathname.split('/').filter(Boolean).pop()?.toLowerCase() || '';
+        } catch { /* provider detect already validates malformed URLs */ }
+        if (!candidateSlug || !directory.has(candidateSlug)) continue;
+      }
+
       try {
-        if (p.detect?.(entry)) { provider = p; break; }
-      } catch { /* no-op */ }
+        jobs = await provider.fetch(entry, ctx);
+        resolvedEntry = entry;
+        break;
+      } catch (err) {
+        failures.push(`${provider.id}: ${err.message}`);
+      }
     }
-    if (!provider) return; // No ATS detected — skip silently (or log in --verbose).
 
-    let jobs;
-    try {
-      jobs = await provider.fetch(entry, ctx);
-    } catch (err) {
-      errors++;
-      if (opts.verbose) console.error(`  ✗ ${seedId}/${entry.name}: ${err.message}`);
+    if (!jobs || !resolvedEntry) {
+      if (failures.length > 0) {
+        errors++;
+        if (opts.verbose) console.error(`  ✗ ${seedId}/${company.name}: ${failures.join(' | ')}`);
+      }
       return;
     }
 
@@ -561,6 +580,19 @@ async function main() {
   }
 
   // ── VC portfolio seed sources (--seeds flag) ───────────────────────
+  // Resolve seed slugs against the cached public ATS directories before making
+  // per-board requests. This turns three blind 404 probes per company into
+  // three shared directory reads plus requests only for plausible boards.
+  if (opts.seeds.length > 0) {
+    opts.seedAtsSlugs = {};
+    for (const providerId of ['greenhouse', 'lever', 'ashby']) {
+      const source = SOURCES[providerId];
+      const { list, status } = await loadCompanyList(providerId, source.dataset);
+      datasetStatus[`seed-${providerId}`] = status;
+      opts.seedAtsSlugs[providerId] = new Set(list.map(value => String(value).toLowerCase()));
+    }
+  }
+
   for (const seedId of opts.seeds) {
     const seedSource = SEED_SOURCES[seedId];
     log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);

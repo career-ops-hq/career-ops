@@ -56,7 +56,7 @@ are shared helpers and are not loaded as providers.
 | The Hub | API | Reads the board-wide `https://thehub.io/api/jobs` JSON feed (Nordic/EU startups). Configure with `provider: thehub`; paginates `?page=N` up to `max_pages` (default 3), then scanner filters apply. |
 | TKMS (thyssenkrupp Marine Systems) | API | Single-employer provider for `jobs.tkmsgroup.com` via the public `POST /api/filter/query` endpoint; the `subclient` and locale come from a config block. Select with `provider: tkms`. |
 | We Work Remotely | RSS | Reads the public `https://weworkremotely.com/remote-jobs.rss` feed and parses it in-process. |
-| Workable | Parser | Auto-detects `https://apply.workable.com/<slug>` and parses Workable's public markdown jobs feed. |
+| Workable | Parser | Auto-detects `https://apply.workable.com/<slug>` and parses Workable's public markdown jobs feed. Large boards that return search instructions can configure `workable.queries` (maximum 20). Set `workable.fetch_details: true` to enrich region-wide remote scope and descriptions from public detail Markdown. |
 | Workday | API | Auto-detects `<tenant>.<instance>.myworkdayjobs.com[/<locale>]/<site>` careers URLs and posts to the public CXS jobs endpoint; paginates via offset up to `max_pages` (default 100), warning if a tenant's postings exceed the cap. |
 | Working Nomads | API | Reads the board-wide `https://www.workingnomads.com/api/exposed_jobs/` JSON feed, then applies scanner filters. |
 

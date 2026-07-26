@@ -1962,6 +1962,17 @@ if (fileExists('providers/local-parser.mjs')) {
   fail('local-parser provider module is missing');
 }
 
+try {
+  const scanHelp = execFileSync(NODE, [join(ROOT, 'scan.mjs'), '--help'], { encoding: 'utf-8' });
+  if (scanHelp.includes('Usage:') && scanHelp.includes('--posted-after') && !scanHelp.includes('Portal Scan')) {
+    pass('scan.mjs --help prints usage without starting a scan');
+  } else {
+    fail('scan.mjs --help output is incomplete or started a scan');
+  }
+} catch (e) {
+  fail(`scan.mjs --help crashed: ${e.message}`);
+}
+
 // pipeline.md location column (B1): formatPipelineOffer appends location as a
 // 4th pipe-delimited column when present, and degrades to the original 3-column
 // form when the ATS exposes no location.
@@ -2520,6 +2531,7 @@ try {
     parseA16zPayload,
     parseSeedEntries,
     toPortalEntry,
+    toPortalCandidates,
     SEED_SOURCES,
     SLUG_RE,
   } = await import(pathToFileURL(join(ROOT, 'seeds/vc-portfolios.mjs')).href);
@@ -2571,6 +2583,18 @@ try {
   if (a16zOk) pass('parseA16zPayload: extracts companies from data-company-name HTML attributes');
   else fail(`parseA16zPayload: output wrong — got ${a16zEntries.length} entries: ${JSON.stringify(a16zEntries.map(e => e.name))}`);
 
+  const a16zEmbedded = `<section data-companies="[{&quot;name&quot;:&quot;Uniswap&quot;,&quot;company_url&quot;:&quot;https://uniswap.org&quot;},{&quot;post_title&quot;:&quot;Linera&quot;,&quot;external_url&quot;:&quot;https://linera.io&quot;}]"></section>`;
+  const embeddedEntries = parseA16zPayload(a16zEmbedded);
+  if (
+    embeddedEntries.length === 2 &&
+    embeddedEntries.some(e => e.name === 'Uniswap' && e.url === 'https://uniswap.org') &&
+    embeddedEntries.some(e => e.name === 'Linera' && e.url === 'https://linera.io')
+  ) {
+    pass('parseA16zPayload: parses the current HTML-escaped data-companies payload');
+  } else {
+    fail(`parseA16zPayload data-companies wrong: ${JSON.stringify(embeddedEntries)}`);
+  }
+
   // parseSeedEntries() delegating to a16z.
   const a16zViaGeneric = parseSeedEntries(a16zHtml, 'a16z');
   if (a16zViaGeneric.length === 3 && a16zViaGeneric.some(e => e.slug === 'github')) {
@@ -2618,6 +2642,18 @@ try {
     noHint.name === 'NewCo';
   if (noHintOk) pass('toPortalEntry: no ATS hint falls back to Greenhouse URL from slug (provider.detect() validates at scan time)');
   else fail(`toPortalEntry fallback wrong — got: ${noHint.careers_url}`);
+
+  const noHintCandidates = toPortalCandidates({ name: 'NewCo', slug: 'newco', url: 'https://newco.io', source: 'yc' });
+  if (
+    noHintCandidates.length === 3 &&
+    noHintCandidates[0].careers_url === 'https://job-boards.greenhouse.io/newco' &&
+    noHintCandidates[1].careers_url === 'https://jobs.lever.co/newco' &&
+    noHintCandidates[2].careers_url === 'https://jobs.ashbyhq.com/newco'
+  ) {
+    pass('toPortalCandidates probes Greenhouse, Lever, and Ashby when no ATS hint exists');
+  } else {
+    fail(`toPortalCandidates fallback wrong: ${JSON.stringify(noHintCandidates)}`);
+  }
 
   // ── 5b. toPortalEntry — website fallback when slug is empty ───────
   const noSlug = toPortalEntry({ name: 'Custom', slug: '', url: 'https://custom.com', source: 'a16z' });
@@ -3535,7 +3571,9 @@ console.log('\n12c. Materialized skill index mode');
     const skills = await import(pathToFileURL(join(ROOT, 'scaffolder/bin/skill-entrypoints.mjs')).href);
     const materialized = skills.materializeSkillEntrypoints(fixtureRoot);
     updater.prepareMaterializedSkillEntrypointsForStage(materialized, fixtureRoot);
-    gitRun(['add', '--', '.claude/skills/', '.opencode/skills/']);
+    // The developer's global excludes may ignore .claude/. Force-staging keeps
+    // this isolated fixture deterministic without depending on host Git config.
+    gitRun(['add', '-f', '--', '.claude/skills/', '.opencode/skills/']);
 
     const claudeIndex = gitRun(['ls-files', '-s', '--', '.claude/skills/career-ops/SKILL.md']);
     const opencodeIndex = gitRun(['ls-files', '-s', '--', '.opencode/skills/career-ops/SKILL.md']);
