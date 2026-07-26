@@ -208,12 +208,18 @@ function parsePartial(source) {
   }
 
   // Strip named block markers AND any remaining HTML comments (doc blocks).
-  // Block *references* ({{BLOCKNAME}}) stay in place — they will be filled
-  // at render time by fillEntry().
-  const entryTemplate = source
-    .replace(/<!--[A-Z][A-Z0-9_]+-->[\s\S]*?<!--\/[A-Z][A-Z0-9_]+-->/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim();
+  // We use a loop to satisfy CodeQL's 'Incomplete multi-character sanitization'
+  // rule, ensuring that maliciously nested comments (e.g. <!--<!--foo-->-->)
+  // are fully removed. Block references ({{BLOCKNAME}}) stay in place.
+  let entryTemplate = source;
+  let previous = '';
+  while (entryTemplate !== previous) {
+    previous = entryTemplate;
+    entryTemplate = entryTemplate
+      .replace(/<!--[A-Z][A-Z0-9_]+-->[\s\S]*?<!--\/[A-Z][A-Z0-9_]+-->/g, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+  }
+  entryTemplate = entryTemplate.trim();
 
   return { entryTemplate, blocks };
 }
