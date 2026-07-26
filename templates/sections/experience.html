@@ -1,20 +1,16 @@
 <!--
   experience.html — section partial for Work Experience (#2183).
 
-  The builder renders one copy of this template per experience entry,
-  then concatenates all rendered entries for the EXPERIENCE placeholder.
-
-  Field placeholders (filled once per entry):
+  Field placeholders filled per entry:
     COMPANY          — employer name
-    PERIOD           — date range, e.g. "June 2024 - Present"
+    PERIOD           — date range
     ROLE             — job title
-    BULLETS          — rendered <li> tags (produced by the builder)
-    LOCATION_BLOCK   — conditional: rendered as .job-location div when location
-                       is present; omitted entirely when absent
+    BULLETS          — rendered <li> tags
+    LOCATION_BLOCK   — conditional: .job-location div when location present; omitted when absent
 
-  Template packs: edit tag names, class names, and field order freely.
-  The builder fills the placeholders; it never dictates the HTML structure.
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
+<!--ENTRY-->
 <div class="job">
   <div class="job-header">
     <span class="job-company">{{COMPANY}}</span>
@@ -27,3 +23,4 @@
   </ul>
 </div>
 <!--LOCATION_BLOCK--><div class="job-location">{{LOCATION}}</div><!--/LOCATION_BLOCK-->
+<!--/ENTRY-->
