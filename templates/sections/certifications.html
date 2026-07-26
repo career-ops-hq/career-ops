@@ -1,0 +1,24 @@
+<!--
+  certifications.html — section partial for Certifications (#2183).
+
+  Entry-level placeholders (filled once per certification entry):
+    {{TITLE}}      — certification name (HTML-escaped)
+    {{ORG_BLOCK}}  — conditional: rendered when org is present, otherwise an empty
+                      <span class="cert-org"></span> is emitted for table-cell alignment.
+                      Contains {{ORG}}.
+    {{ORG}}        — issuing organization (HTML-escaped, inside ORG_BLOCK)
+    {{YEAR_BLOCK}} — conditional: same pattern as ORG_BLOCK for cert-year alignment.
+                      Contains {{YEAR}}.
+    {{YEAR}}       — year issued (HTML-escaped, inside YEAR_BLOCK)
+
+  {{ITEMS}} receives the concatenated rendered entries.
+-->
+<div class="cert-item">
+  <span class="cert-title">{{TITLE}}</span>
+  {{ORG_BLOCK}}
+  {{YEAR_BLOCK}}
+</div>
+<!--ORG_BLOCK--><span class="cert-org">{{ORG}}</span><!--/ORG_BLOCK-->
+<!--ORG_EMPTY--><span class="cert-org"></span><!--/ORG_EMPTY-->
+<!--YEAR_BLOCK--><span class="cert-year">{{YEAR}}</span><!--/YEAR_BLOCK-->
+<!--YEAR_EMPTY--><span class="cert-year"></span><!--/YEAR_EMPTY-->

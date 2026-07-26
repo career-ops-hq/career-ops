@@ -1,0 +1,25 @@
+<!--
+  projects.html — section partial for Projects (#2183).
+
+  Entry-level placeholders (filled once per project entry):
+    {{NAME}}         — project name (HTML-escaped)
+    {{BADGE_BLOCK}}  — conditional: rendered when badge is present, removed otherwise.
+                        Contains {{BADGE}}.
+    {{BADGE}}        — badge text (HTML-escaped, inside BADGE_BLOCK)
+    {{DESC_BLOCK}}   — conditional: rendered when description is present, removed otherwise.
+                        Contains {{DESC}}.
+    {{DESC}}         — description text (HTML-escaped, inside DESC_BLOCK)
+    {{TECH_BLOCK}}   — conditional: rendered when tech is present, removed otherwise.
+                        Contains {{TECH}}.
+    {{TECH}}         — tech stack string (HTML-escaped, inside TECH_BLOCK)
+
+  {{ITEMS}} receives the concatenated rendered entries.
+-->
+<div class="project">
+  <div class="project-title">{{NAME}}{{BADGE_BLOCK}}</div>
+  {{DESC_BLOCK}}
+  {{TECH_BLOCK}}
+</div>
+<!--BADGE_BLOCK--><span class="project-badge">{{BADGE}}</span><!--/BADGE_BLOCK-->
+<!--DESC_BLOCK--><div class="project-desc">{{DESC}}</div><!--/DESC_BLOCK-->
+<!--TECH_BLOCK--><div class="project-tech">{{TECH}}</div><!--/TECH_BLOCK-->
