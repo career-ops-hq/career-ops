@@ -1,6 +1,6 @@
 // Pure JS implementation of cleanChips — no TypeScript types so it can be
 // imported directly by both explore.ts (which re-exports it) and by
-// test-clean-chips.mjs (which can't import .ts without a runner).
+// clean-chips.test.mjs (which can't import .ts without a runner).
 // This is the single source of truth for the chip-cleaning logic.
 
 const CHIP_CAP = 16;

@@ -154,6 +154,7 @@ const SYSTEM_PATHS = [
   'tracker-aliases.json',
   'set-status.mjs',
   'set-status-tests.mjs',
+  'mark-pdf-ready.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'verify-cv-facts.mjs',

@@ -46,18 +46,14 @@ import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
-  rebuildRow, resolveTrackerPath, trackerLockDirFor, acquireTrackerLock,
-  writeFileAtomic, loadCanonicalStates, resolveCanonicalState, normalizeCompany, cell,
+  rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
+  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
-const EXIT_OK = 0;
-const EXIT_USAGE = 1;
-const EXIT_NOT_FOUND = 2;
-const EXIT_AMBIGUOUS = 3;
-const EXIT_LOCK_TIMEOUT = 4;
+const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS, LOCK_TIMEOUT: EXIT_LOCK_TIMEOUT } = CLI_EXIT;
 
 const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
 
@@ -100,25 +96,9 @@ if (positional.length !== 2) {
 
 const [selector, stateInput] = positional;
 
-/**
- * Emit a structured error and exit.
- *
- * With --json the error object goes to stdout so callers parse one stream; the
- * human-readable message always goes to stderr.
- *
- * @param {number} exitCode - Process exit code (see EXIT_* contract above).
- * @param {string} code - Stable machine-readable error code.
- * @param {string} message - Human-readable explanation.
- * @param {object} [extra] - Extra JSON fields (e.g. candidates).
- * @returns {never}
- */
-function failWith(exitCode, code, message, extra = {}) {
-  if (flags.json) {
-    console.log(JSON.stringify({ error: message, code, ...extra }));
-  }
-  console.error(`❌ ${message}`);
-  process.exit(exitCode);
-}
+// Shared with every other canonical tracker-writer CLI (tracker-utils.mjs) so
+// the JSON-vs-human error contract can't drift between them.
+const failWith = makeCliFailWith(flags.json);
 
 /**
  * Print usage (plus an optional specific complaint) and exit 1.
@@ -221,33 +201,10 @@ function resolveRow(rows) {
 
 // ── locked read-modify-write ─────────────────────────────────────
 
-// Dry-run never writes, so it must not hold the exclusive lock: a read-only
-// preview should not block (or be blocked by) merge-tracker or another
-// set-status writer. A stale read is acceptable for a preview.
-let lock = null;
-if (!flags.dryRun) {
-  try {
-    lock = await acquireTrackerLock(trackerLockDirFor(APPS_FILE), {
-      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
-      retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
-      staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
-      tracker: APPS_FILE,
-    });
-  } catch (err) {
-    // Exit 4 means "lock is busy — retry later" and must stay reserved for
-    // the actual timeout. Filesystem/configuration failures (EACCES on the
-    // lock dir, unwritable owner.json, …) are not retryable and fail as a
-    // config error instead.
-    if (err?.code === 'LOCK_TIMEOUT') {
-      failWith(EXIT_LOCK_TIMEOUT, 'lock-timeout', err.message);
-    }
-    failWith(EXIT_USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
-  }
-}
-// Safety net: failWith/failUsage/resolveRow call process.exit() directly and
-// skip the explicit release below. release() is idempotent, so both firing
-// on the happy path is fine.
-if (lock) process.once('exit', () => lock.release());
+// Shared with mark-pdf-ready.mjs (tracker-utils.mjs): dry-run never writes,
+// so it must not hold the exclusive lock — a read-only preview should not
+// block (or be blocked by) merge-tracker or another writer.
+const lock = await acquireTrackerLockForCli(APPS_FILE, { dryRun: flags.dryRun, failWith });
 
 let content;
 try {

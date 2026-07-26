@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
+import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
+import { renderAndMarkPdf } from "@/lib/pdf-render.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -15,7 +17,9 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // (reserve-report-num.mjs → reports/ → batch/tracker-additions/ → merge-tracker.mjs),
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
-function buildPrompt(kind: string, input: string, memory: string, today: string): string {
+type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths };
+
+function buildPrompt({ kind, input, memory, today, pdfPaths }: BuildPromptArgs): string {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
@@ -25,15 +29,19 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 Target: ${input}`;
   }
   if (kind === "pdf") {
-    return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
+    // The agent tailors content only — it never renders the PDF itself. Rendering
+    // launches a real browser, which an agent CLI's own sandbox may block with no
+    // human present to approve an escalation (headless/web-triggered run, #2172).
+    // The backend (a plain Node process, no CLI sandbox) renders after this closes.
+    return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step — follow modes/pdf.md EXACTLY for tailoring (do not improvise a format).
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to /tmp/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
-4. Render the PDF: \`node generate-pdf.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
-5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
-Do not submit anything anywhere.
+3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to EXACTLY this path: ${pdfPaths?.html}
+4. Decide the page format for this company (letter for US/Canada, else a4) and write EXACTLY this JSON (nothing else) to EXACTLY this path: ${pdfPaths?.meta}
+   {"format": "letter"} or {"format": "a4"}
+Do NOT run generate-pdf.mjs yourself and do NOT render a PDF — the platform renders it after you finish, from the HTML and format file you wrote. Do NOT touch data/applications.md — the platform updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
-End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
+End with EXACTLY one final line: VERDICT: {5 if the HTML and format file were written, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
@@ -107,18 +115,40 @@ export async function POST(req: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const prompt = buildPrompt(kind, input, readMemory(), today);
+
+  // Precompute deterministic scratch + final paths so the agent never chooses
+  // its own filenames — the backend owns naming and, later, rendering (#2172).
+  let pdfPaths: PdfPaths | undefined;
+  if (kind === "pdf") {
+    const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
+    if (!pathsResult.ok) {
+      return new Response(JSON.stringify({ error: pathsResult.error }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    pdfPaths = pathsResult.paths;
+  }
+
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
 
   const isClaude = cliId === "claude";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
-  // guardrail). 'evaluate' runs the REAL mode + persists canonical artifacts →
-  // it needs Write + Bash (reserve-report-num / merge-tracker / write the
-  // report). 'research' stays read-only. Task (sub-agents) is always blocked
-  // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
+  // guardrail). 'evaluate'/'fix-portal' run the REAL mode + persist canonical
+  // artifacts → they need Write + Bash (reserve-report-num / merge-tracker /
+  // verify-portals). 'pdf' only tailors content and writes the HTML + format
+  // sidecar (Write, no Bash — deliberately: the backend renders the PDF itself
+  // afterward via renderAndMarkPdf, see pdf-render.mjs; granting Bash here would
+  // let the agent improvise its own render/fallback exactly like the #2172
+  // incident this fix closes). 'research' stays fully read-only. Task
+  // (sub-agents) is always blocked (runaway cost). NEVER auto-submits — that is
+  // a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
-      : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
+      : kind === "pdf"
+        ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Glob,Grep", disallowed: "Bash,Task,NotebookEdit" }
+        : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
     ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
        "--permission-mode", "acceptEdits",
@@ -222,10 +252,58 @@ export async function POST(req: Request) {
           send({ type: "error", msg: s.trim().slice(0, 200) });
         }
       });
+      // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
+      // injected, unit-tested) so the render-then-mark orchestration isn't
+      // buried untested inside this transport-layer closure. Runs generate-
+      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes — no agent
+      // CLI or its sandbox involved — so a browser launch never depends on an
+      // interactive approval nobody is present to grant in a headless/web-
+      // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
+      // successful render, not optimistically — same honesty-gate discipline as
+      // the evaluate path below.
+      const renderPdf = async () => {
+        send({ type: "status", label: "Rendering PDF…" });
+        const result = await renderAndMarkPdf({
+          spawnFn: spawn,
+          execPath: process.execPath,
+          root: careerOpsRoot(),
+          pdfPaths: pdfPaths!,
+          reportNum: input,
+        });
+        if (result.kind === "render-failed") {
+          send({ type: "error", msg: result.error.slice(0, 200) });
+          return close();
+        }
+        // Non-fatal issues (missing format sidecar, tracker not marked) still
+        // surface here rather than only in a server log nobody sees.
+        for (const w of result.warnings) send({ type: "text", text: `⚠️ ${w}\n` });
+        send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+        close();
+      };
+
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
       child.on("close", (code) => {
-        const wroteReport = countReports() > reportsBefore;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
+
+        if (kind === "pdf") {
+          const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html);
+          // Same honesty-gate shape as below, plus the actual bug-fix check: verify
+          // a real HTML artifact exists before ever reporting success (previously
+          // nothing checked this, so an agent that improvised past a failure — e.g.
+          // falling back to wkhtmltopdf — could still report a fake "done").
+          if (!emittedText && !sawError && !cleanExit) {
+            send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
+          } else if (!emittedText && !sawError) {
+            send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
+          } else if (!wroteHtml || !cleanExit || sawError) {
+            send({ type: "error", msg: "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify." });
+          } else {
+            return renderPdf(); // close() happens once rendering finishes, not here
+          }
+          return close();
+        }
+
+        const wroteReport = countReports() > reportsBefore;
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
