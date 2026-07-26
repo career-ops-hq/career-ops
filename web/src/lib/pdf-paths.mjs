@@ -47,6 +47,14 @@ export function slugify(s) {
  * @returns {{ok: true, paths: PdfPaths} | {ok: false, error: string}}
  */
 export function resolvePdfPaths(input, today, root, findReportFile) {
+  // Reject anything but a bare report number before it ever reaches a path.
+  // findReportFile()'s parseInt-based matching can still resolve a crafted
+  // selector like "123/../../etc/passwd" to a legitimate report file, but the
+  // raw string is also used verbatim below to build cv-web-${input}.html —
+  // path.join would then honor those ".." segments and escape scratchDir.
+  if (!/^\d+$/.test(input)) {
+    return { ok: false, error: `Invalid report selector: "${input}"` };
+  }
   const reportFile = findReportFile(input);
   if (!reportFile) {
     return { ok: false, error: `No report #${input} found — evaluate this posting first.` };

@@ -187,8 +187,16 @@ export async function POST(req: Request) {
       let sawError = false;
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
-      // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 720_000 : 285_000;
+      // pdf-mode's agent only tailors content now (rendering moved to the
+      // backend, #2172) — but its killMs still has to leave real headroom
+      // inside the route's overall maxDuration (800s): the render+mark phase
+      // (renderPdf, below) starts only after this timer's window and has no
+      // timeout of its own, so an agent that runs close to its full budget
+      // would otherwise leave the platform's hard maxDuration cutoff to kill
+      // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
+      // a Chromium PDF render normally takes low tens of seconds even with a
+      // cold Playwright launch.
+      const killMs = kind === "pdf" ? 600_000 : 285_000;
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
@@ -261,13 +269,13 @@ export async function POST(req: Request) {
       // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
       // successful render, not optimistically — same honesty-gate discipline as
       // the evaluate path below.
-      const renderPdf = async () => {
+      const renderPdf = async (paths: PdfPaths) => {
         send({ type: "status", label: "Rendering PDF…" });
         const result = await renderAndMarkPdf({
           spawnFn: spawn,
           execPath: process.execPath,
           root: careerOpsRoot(),
-          pdfPaths: pdfPaths!,
+          pdfPaths: paths,
           reportNum: input,
         });
         if (result.kind === "render-failed") {
@@ -284,6 +292,14 @@ export async function POST(req: Request) {
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
       child.on("close", (code) => {
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
+        // Shared by both honesty gates below: a CLI that produced no output at
+        // all is the same failure mode whether it was evaluating or tailoring
+        // a PDF — one place for the condition/message pair instead of two.
+        const noOutputError = (): string | null => {
+          if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
+          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
+          return null;
+        };
 
         if (kind === "pdf") {
           const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html);
@@ -291,14 +307,13 @@ export async function POST(req: Request) {
           // a real HTML artifact exists before ever reporting success (previously
           // nothing checked this, so an agent that improvised past a failure — e.g.
           // falling back to wkhtmltopdf — could still report a fake "done").
-          if (!emittedText && !sawError && !cleanExit) {
-            send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
-          } else if (!emittedText && !sawError) {
-            send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
-          } else if (!wroteHtml || !cleanExit || sawError) {
+          const baseErr = noOutputError();
+          if (baseErr) {
+            send({ type: "error", msg: baseErr });
+          } else if (!wroteHtml || !cleanExit || sawError || !pdfPaths) {
             send({ type: "error", msg: "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify." });
           } else {
-            return renderPdf(); // close() happens once rendering finishes, not here
+            return renderPdf(pdfPaths); // close() happens once rendering finishes, not here
           }
           return close();
         }
@@ -307,10 +322,9 @@ export async function POST(req: Request) {
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
-        if (!emittedText && !sawError && !cleanExit) {
-          send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
-        } else if (!emittedText && !sawError) {
-          send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
+        const baseErr = noOutputError();
+        if (baseErr) {
+          send({ type: "error", msg: baseErr });
         } else if (persists && !wroteReport) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI
           // without file-write authorization) — surface it instead of a fake score.

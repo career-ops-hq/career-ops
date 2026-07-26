@@ -44,7 +44,9 @@ import {
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
-const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS, LOCK_TIMEOUT: EXIT_LOCK_TIMEOUT } = CLI_EXIT;
+// LOCK_TIMEOUT is not destructured here — that exit path is raised inside
+// acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
+const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS } = CLI_EXIT;
 
 const USAGE = `Usage: node mark-pdf-ready.mjs <report#> [--dry-run] [--json]
 

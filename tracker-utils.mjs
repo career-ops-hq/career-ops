@@ -566,8 +566,14 @@ export async function acquireTrackerLockForCli(appsFile, { dryRun, failWith }) {
     // config error instead.
     if (err?.code === 'LOCK_TIMEOUT') {
       failWith(CLI_EXIT.LOCK_TIMEOUT, 'lock-timeout', err.message);
+    } else {
+      failWith(CLI_EXIT.USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
     }
-    failWith(CLI_EXIT.USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
+    // failWith is documented (and, today, always) to exit the process — but
+    // this function is now shared, so don't let a future non-exiting failWith
+    // silently fall through to releasing/returning an undefined lock; fail
+    // loudly instead.
+    throw err;
   }
   process.once('exit', () => lock.release());
   return lock;

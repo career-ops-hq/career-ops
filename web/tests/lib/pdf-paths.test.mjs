@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { slugify, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
@@ -42,6 +42,26 @@ test("resolvePdfPaths: happy path builds html/meta/finalPdf from report + profil
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
     assert.equal(result.paths.meta, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.meta.json"));
     assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePdfPaths: path-traversal selector is rejected before any path is built", () => {
+  // Given a findReportFile that would (via parseInt-based matching) resolve a
+  // traversal-shaped selector to a real report, and a directory sentinel to
+  // prove no scratch dir gets created for this input
+  const root = makeRoot();
+  const scratchDir = join(root, ".career-ops-web", "pdf-tmp");
+  const findReportFile = () => join(root, "reports", "123-acme-2026-07-01.md");
+  try {
+    // When resolving paths for a crafted, non-canonical selector
+    const result = resolvePdfPaths("123/../../etc/passwd", "2026-07-26", root, findReportFile);
+
+    // Then it fails closed with a clear error, never calling findReportFile or touching disk
+    assert.equal(result.ok, false);
+    assert.match(result.error, /Invalid report selector/);
+    assert.equal(existsSync(scratchDir), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

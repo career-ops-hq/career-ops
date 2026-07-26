@@ -60,10 +60,14 @@ function makeScratchDir() {
 // ── resolveRenderFormat ──
 
 test("resolveRenderFormat: valid letter sidecar", () => {
+  // Given a sidecar file with a valid "letter" format
   const dir = makeScratchDir();
   try {
     const meta = join(dir, "cv-web-1.meta.json");
     writeFileSync(meta, JSON.stringify({ format: "letter" }));
+
+    // When resolving the render format
+    // Then it returns that format, ok:true
     assert.deepEqual(resolveRenderFormat(meta), { format: "letter", ok: true });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -71,10 +75,14 @@ test("resolveRenderFormat: valid letter sidecar", () => {
 });
 
 test("resolveRenderFormat: valid a4 sidecar", () => {
+  // Given a sidecar file with a valid "a4" format
   const dir = makeScratchDir();
   try {
     const meta = join(dir, "cv-web-1.meta.json");
     writeFileSync(meta, JSON.stringify({ format: "a4" }));
+
+    // When resolving the render format
+    // Then it returns that format, ok:true
     assert.deepEqual(resolveRenderFormat(meta), { format: "a4", ok: true });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -82,8 +90,11 @@ test("resolveRenderFormat: valid a4 sidecar", () => {
 });
 
 test("resolveRenderFormat: missing file -> defaults to letter, ok:false", () => {
+  // Given no sidecar file was ever written
   const dir = makeScratchDir();
   try {
+    // When resolving the render format
+    // Then it defaults to letter and reports ok:false (caller should warn)
     assert.deepEqual(resolveRenderFormat(join(dir, "does-not-exist.json")), { format: "letter", ok: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -91,10 +102,14 @@ test("resolveRenderFormat: missing file -> defaults to letter, ok:false", () => 
 });
 
 test("resolveRenderFormat: malformed JSON -> defaults to letter, ok:false", () => {
+  // Given a sidecar file that isn't valid JSON
   const dir = makeScratchDir();
   try {
     const meta = join(dir, "cv-web-1.meta.json");
     writeFileSync(meta, "{not json");
+
+    // When resolving the render format
+    // Then it defaults to letter and reports ok:false
     assert.deepEqual(resolveRenderFormat(meta), { format: "letter", ok: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -102,10 +117,14 @@ test("resolveRenderFormat: malformed JSON -> defaults to letter, ok:false", () =
 });
 
 test("resolveRenderFormat: valid JSON but invalid format value -> defaults to letter, ok:false", () => {
+  // Given a sidecar file with valid JSON but a format value that isn't letter/a4
   const dir = makeScratchDir();
   try {
     const meta = join(dir, "cv-web-1.meta.json");
     writeFileSync(meta, JSON.stringify({ format: "legal" }));
+
+    // When resolving the render format
+    // Then it defaults to letter and reports ok:false
     assert.deepEqual(resolveRenderFormat(meta), { format: "letter", ok: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -115,9 +134,14 @@ test("resolveRenderFormat: valid JSON but invalid format value -> defaults to le
 // ── spawnGeneratePdf ──
 
 test("spawnGeneratePdf: clean exit -> ok:true, invokes generate-pdf.mjs with --allow-reorder", async () => {
+  // Given generate-pdf.mjs will exit cleanly
   const calls = [];
   const spawnFn = (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild({ exitCode: 0 }); };
+
+  // When spawning the render
   const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "/root/x.html", finalPdf: "/root/output/x.pdf", format: "letter", reportNum: "018" });
+
+  // Then it reports ok:true and invoked generate-pdf.mjs with the expected args
   assert.deepEqual(result, { ok: true, stderr: "" });
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[0], /generate-pdf\.mjs$/);
@@ -126,14 +150,24 @@ test("spawnGeneratePdf: clean exit -> ok:true, invokes generate-pdf.mjs with --a
 });
 
 test("spawnGeneratePdf: non-zero exit -> ok:false, stderr surfaced", async () => {
+  // Given generate-pdf.mjs will exit non-zero with a stderr message
   const spawnFn = () => fakeChild({ exitCode: 1, stderr: "section order guard failed" });
+
+  // When spawning the render
   const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "a4", reportNum: "1" });
+
+  // Then it reports ok:false with that stderr
   assert.deepEqual(result, { ok: false, stderr: "section order guard failed" });
 });
 
 test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () => {
+  // Given the child process itself fails to spawn (e.g. missing binary)
   const spawnFn = () => fakeChild({ spawnError: new Error("ENOENT") });
+
+  // When spawning the render
   const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "letter", reportNum: "1" });
+
+  // Then it reports ok:false with a descriptive message, not a raw crash
   assert.equal(result.ok, false);
   assert.match(result.stderr, /PDF rendering failed to start: ENOENT/);
 });
@@ -141,32 +175,52 @@ test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () =
 // ── markTrackerReady ──
 
 test("markTrackerReady: clean exit with JSON stdout -> ok:true, data parsed", async () => {
+  // Given mark-pdf-ready.mjs succeeds and prints a --json payload
   const stdout = JSON.stringify({ changed: true, num: 5, company: "Acme" });
   const spawnFn = () => fakeChild({ exitCode: 0, stdout });
+
+  // When marking the tracker ready
   const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+
+  // Then it reports ok:true with the parsed payload
   assert.equal(result.ok, true);
   assert.deepEqual(result.data, { changed: true, num: 5, company: "Acme" });
 });
 
 test("markTrackerReady: failure exit with parseable --json error -> data.error available", async () => {
+  // Given mark-pdf-ready.mjs fails but still prints a structured --json error
   const stdout = JSON.stringify({ error: "No tracker row links report #5", code: "not-found" });
   const spawnFn = () => fakeChild({ exitCode: 2, stdout });
+
+  // When marking the tracker ready
   const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+
+  // Then it reports ok:false with the specific error available for callers to surface
   assert.equal(result.ok, false);
   assert.equal(result.data?.error, "No tracker row links report #5");
 });
 
 test("markTrackerReady: failure exit with no/garbled stdout -> data:null, raw stderr kept", async () => {
+  // Given mark-pdf-ready.mjs crashes before printing any JSON
   const spawnFn = () => fakeChild({ exitCode: 1, stderr: "unexpected crash" });
+
+  // When marking the tracker ready
   const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+
+  // Then it reports ok:false with data:null, falling back to the raw stderr
   assert.equal(result.ok, false);
   assert.equal(result.data, null);
   assert.equal(result.stderr, "unexpected crash");
 });
 
 test("markTrackerReady: spawn error -> ok:false, descriptive stderr", async () => {
+  // Given the child process itself fails to spawn
   const spawnFn = () => fakeChild({ spawnError: new Error("EACCES") });
+
+  // When marking the tracker ready
   const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
+
+  // Then it reports ok:false with a descriptive message
   assert.equal(result.ok, false);
   assert.match(result.stderr, /mark-pdf-ready\.mjs failed to start: EACCES/);
 });
@@ -193,16 +247,45 @@ test("cleanupPdfScratch: removes only files matching the prefix", () => {
 });
 
 test("cleanupPdfScratch: missing directory logs but does not throw", () => {
+  // Given the scratch directory itself doesn't exist
   const dir = join(makeScratchDir(), "does-not-exist");
   const originalError = console.error;
   const logged = [];
   console.error = (msg) => logged.push(msg);
   try {
+    // When cleaning up
+    // Then it logs the failure instead of throwing, so a caller can't crash on cleanup
     assert.doesNotThrow(() => cleanupPdfScratch(dir, "cv-web-1."));
     assert.equal(logged.length, 1);
     assert.match(logged[0], /pdf scratch cleanup: could not list/);
   } finally {
     console.error = originalError;
+  }
+});
+
+test("cleanupPdfScratch: a single file's removal failure logs but does not throw or stop cleanup", () => {
+  // Given one prefixed entry that can't be removed as a plain file (a
+  // subdirectory, which fs.rmSync without `recursive` refuses) alongside a
+  // normal prefixed file that CAN be removed
+  const dir = makeScratchDir();
+  const originalError = console.error;
+  const logged = [];
+  console.error = (msg) => logged.push(msg);
+  try {
+    mkdirSync(join(dir, "cv-web-3.stuck-dir"));
+    writeFileSync(join(dir, "cv-web-3.html"), "x");
+
+    // When cleaning up report #3's scratch files
+    assert.doesNotThrow(() => cleanupPdfScratch(dir, "cv-web-3."));
+
+    // Then the failure is logged, the removable file is still gone, and the
+    // unremovable directory is left behind rather than crashing the caller
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /pdf scratch cleanup: could not remove cv-web-3\.stuck-dir/);
+    assert.deepEqual(readdirSync(dir), ["cv-web-3.stuck-dir"]);
+  } finally {
+    console.error = originalError;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -285,7 +368,7 @@ test("renderAndMarkPdf: generate-pdf.mjs fails -> render-failed, mark-pdf-ready 
   }
 });
 
-test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails -> rendered with a specific warning", async () => {
+test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with a parseable error -> rendered with a specific warning", async () => {
   // Given generate-pdf.mjs succeeds but mark-pdf-ready.mjs fails with a --json error
   const dir = makeScratchDir();
   const pdfPaths = makePdfPaths(dir, "4");
@@ -303,6 +386,31 @@ test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails -> rendered wit
     assert.equal(result.kind, "rendered");
     assert.equal(result.warnings.length, 1);
     assert.match(result.warnings[0], /No tracker row links report #4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with no parseable stdout -> rendered with the generic fallback warning", async () => {
+  // Given generate-pdf.mjs succeeds but mark-pdf-ready.mjs crashes before printing any JSON
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "5");
+  writeFileSync(pdfPaths.html, "<html></html>");
+  writeFileSync(pdfPaths.meta, JSON.stringify({ format: "letter" }));
+  const { spawnFn } = makeRouterSpawn({
+    "generate-pdf.mjs": { exitCode: 0 },
+    "mark-pdf-ready.mjs": { exitCode: 1, stderr: "unexpected crash" },
+  });
+  try {
+    // When rendering and marking
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, reportNum: "5" });
+
+    // Then the PDF is still reported rendered, with the generic fallback
+    // warning (no mark.data.error to quote) rather than the crash text
+    assert.equal(result.kind, "rendered");
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0], /tracker's PDF column wasn't updated automatically/);
+    assert.match(result.warnings[0], /node mark-pdf-ready\.mjs 5/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
