@@ -223,12 +223,48 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// ── Test 6b: normalize-statuses maps Status/Score/Notes by header (#1955) ───
+// normalize-statuses.mjs read Status at parts[6], Score at parts[5] and Notes
+// at parts[9]. On a 10-column tracker every one of those lands a column early:
+// the Score cell was normalized as if it were a status — a `—` score (the
+// tracker's own "no evaluation" sentinel) mapped to Discarded and OVERWROTE
+// the Score column — while the real, non-canonical status was left untouched
+// and reported as an unknown status instead.
+{
+  const TEN_COL_MESSY = `# Applications Tracker
+
+| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|----------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | Remote | — | Aplicado 2026-01-02 | ✅ | — | backfilled, no eval |
+| 2 | 2026-01-03 | Globex | Manager | Berlin | 4.5/5 | DUPLICADO de #1 | ❌ | — | keep me |
+`;
+  const sb = makeSandbox(TEN_COL_MESSY);
+  const res = runScript('normalize-statuses.mjs', [], sb);
+  const rows = dataRows(sb.tracker);
+  const rowOf = (company) => rows.find(l => l.includes(company)) || '';
+  const cellsOf = (company) => rowOf(company).split('|').map(s => s.trim());
+  // cells: ['', num, date, company, role, location, score, status, pdf, report, notes, '']
+  const acme = cellsOf('Acme');
+  if (res.code === 0 && acme[7] === 'Applied' && acme[6] === '—') {
+    pass('normalize-statuses: Status normalized in place on 10-col tracker, Score not clobbered');
+  } else {
+    fail(`normalize-statuses on 10-col tracker (code ${res.code}) row: ${rowOf('Acme')}\n${res.stdout}`);
+  }
+  const globex = cellsOf('Globex');
+  if (globex[7] === 'Discarded' && globex[6] === '4.5/5'
+      && globex[10].includes('DUPLICADO de #1') && globex[10].includes('keep me')) {
+    pass('normalize-statuses: DUPLICADO provenance lands in the Notes column on 10-col tracker');
+  } else {
+    fail(`normalize-statuses DUPLICADO row on 10-col tracker: ${rowOf('Globex')}\n${res.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // ── Test 7: schema contract — every consumer maps an UNKNOWN extra column ───
 // The header-name contract (#1596): a column no consumer recognizes must be
 // skipped by ALL of them, never silently shifted into a known field. This is
 // the guard that makes the next column insertion a one-place change instead of
-// a repo-wide incident. normalize-statuses.mjs is excluded until PR #1114
-// (which retrofits it) lands — add it here when that merges.
+// a repo-wide incident.
 {
   const HEADER_UNKNOWN = `# Applications Tracker
 
@@ -258,6 +294,18 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
     pass('contract: scan.mjs seen-set skips an unknown extra column');
   } else {
     fail(`contract: scan.mjs seen-set on unknown-column tracker — [${[...seen].join(', ')}]`);
+  }
+
+  // The seed status is already canonical, so a header-aware run is a strict
+  // no-op: the file must come back byte-identical and nothing may be reported
+  // as an unknown status.
+  const before = readFileSync(sb.tracker, 'utf-8');
+  const norm = runScript('normalize-statuses.mjs', [], sb);
+  const after = readFileSync(sb.tracker, 'utf-8');
+  if (norm.code === 0 && after === before && !/unknown statuses/.test(norm.stdout)) {
+    pass('contract: normalize-statuses skips an unknown extra column');
+  } else {
+    fail(`contract: normalize-statuses on unknown-column tracker (code ${norm.code})\n${norm.stdout}`);
   }
 
   rmSync(sb.dir, { recursive: true, force: true });
