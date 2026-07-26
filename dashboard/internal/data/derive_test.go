@@ -165,6 +165,68 @@ func TestDeriveNoteFields(t *testing.T) {
 			paySrc:   "est",
 			last:     "2026-06-06",
 		},
+		{
+			name: "Poland hybrid with PLN estimate",
+			app: model.CareerApplication{
+				Date:  "2026-06-11",
+				Notes: "Warsaw (Hybrid). Comp ~PLN 150-200K (est). Via LinkedIn",
+			},
+			location: "Warsaw",
+			workMode: "Hybrid",
+			payRange: "~PLN 150-200K",
+			paySrc:   "est",
+			last:     "2026-06-11",
+		},
+		{
+			name: "Poland onsite with zł posted",
+			app: model.CareerApplication{
+				Date:  "2026-06-12",
+				Notes: "Krakow. Base zł 120-160K (POSTED)",
+			},
+			location: "Krakow",
+			workMode: "Full",
+			payRange: "zł 120-160K",
+			paySrc:   "POSTED",
+			last:     "2026-06-12",
+		},
+		{
+			name: "Symmetry test: PLN suffix range",
+			app: model.CareerApplication{
+				Date:  "2026-06-13",
+				Notes: "Warsaw. Comp 150-200K PLN (est)",
+			},
+			location: "Warsaw",
+			workMode: "Full",
+			payRange: "150-200K PLN",
+			paySrc:   "est",
+			last:     "2026-06-13",
+		},
+		{
+			// Confirms bare symbols share suffix behaviour (regression test only covers ISO).
+			name: "suffix form with bare symbol",
+			app: model.CareerApplication{
+				Date:  "2026-06-15",
+				Notes: "Berlin. Comp 90-110K € (POSTED)",
+			},
+			location: "Berlin",
+			workMode: "Full",
+			payRange: "90-110K €",
+			paySrc:   "POSTED",
+			last:     "2026-06-15",
+		},
+		{
+			// Suffix branch with a full range, not just lone amount + currency.
+			name: "suffix-form range with K on both sides",
+			app: model.CareerApplication{
+				Date:  "2026-06-16",
+				Notes: "Krakow. Base 120K-160K PLN (est)",
+			},
+			location: "Krakow",
+			workMode: "Full",
+			payRange: "120K-160K PLN",
+			paySrc:   "est",
+			last:     "2026-06-16",
+		},
 	}
 
 	for _, tc := range cases {
@@ -202,11 +264,113 @@ func TestPayCeiling(t *testing.T) {
 		"€130-170K":        170_000,
 		"£175-225K":        225_000,
 		"CHF 165-185K":     185_000,
+		"PLN 150-200K":     200_000,
+		"zł 120-160K":      160_000,
+		"150-200K PLN":     200_000,
+		"165-185K CHF":     185_000,
+		"120K €":           120_000,
+		"80-120K UAH":      120_000,
 		"":                 0,
 	}
 	for span, want := range cases {
 		if got := payCeiling(span); got != want {
 			t.Errorf("payCeiling(%q) = %v, want %v", span, got, want)
+		}
+	}
+}
+
+// TestBuildMoneySpanRegex pins builder output shape independent of production currencyTokens.
+func TestBuildMoneySpanRegex(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   []string
+		wantPat string
+	}{
+		{
+			name:    "single bare symbol ($)",
+			input:   []string{"$"},
+			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$))`,
+		},
+		{
+			name:    "single ISO code (PLN)",
+			input:   []string{"PLN"},
+			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN))`,
+		},
+		{
+			name:    "two ISO codes (PLN, UAH)",
+			input:   []string{"PLN", "UAH"},
+			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN|UAH))`,
+		},
+		{
+			name:    "mixed bare + ISO ($ bare, PLN ISO)",
+			input:   []string{"$", "PLN"},
+			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$|PLN))`,
+		},
+		{
+			name:    "metachar token (escaped via QuoteMeta)",
+			input:   []string{"A.B"},
+			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:A\.B))`,
+		},
+		{
+			name:    "empty slice (regex still builds, just matches no currency)",
+			input:   []string{},
+			wantPat: `~?(?:(?:)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:))`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := buildMoneySpanRegex(tc.input)
+			if got := re.String(); got != tc.wantPat {
+				t.Errorf("buildMoneySpanRegex(%v).String() =\n  %q\nwant:\n  %q", tc.input, got, tc.wantPat)
+			}
+		})
+	}
+}
+
+func TestBuildMoneySpanRegex_SuffixNoTrailingSpace(t *testing.T) {
+	re := buildMoneySpanRegex(currencyTokens)
+	cases := []struct {
+		name, input string
+	}{
+		{"PLN before paren", "Warsaw. Comp 150-200K PLN (est)"},
+		{"CHF before period", "Zurich. 165-185K CHF."},
+		{"EUR before period", "Berlin. 90-110K EUR."},
+		{"UAH before paren", "Kyiv. 80-120K UAH (POSTED)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := re.FindString(tc.input)
+			if got == "" {
+				t.Fatalf("no match for %q", tc.input)
+			}
+			if got[len(got)-1] == ' ' {
+				t.Errorf("matched span %q has trailing space", got)
+			}
+		})
+	}
+}
+
+func TestIsBareSymbol(t *testing.T) {
+	cases := []struct {
+		tok  string
+		want bool
+	}{
+		// Current bare symbols in currencyTokens
+		{"$", true}, {"€", true}, {"£", true}, {"zł", true}, {"₴", true},
+		// Current ISO codes in currencyTokens
+		{"CHF", false}, {"EUR", false}, {"USD", false}, {"GBP", false}, {"PLN", false}, {"UAH", false},
+		// Plausible future additions
+		{"¥", true}, {"₹", true}, {"kr", true}, {"R$", false},
+		{"JPY", false}, {"INR", false}, {"SEK", false}, {"BRL", false},
+		// Edge cases
+		{"", true},
+		{"A.B", false}, 
+		{"Chf", false},
+		{"123", true},
+	}
+	for _, tc := range cases {
+		if got := isBareSymbol(tc.tok); got != tc.want {
+			t.Errorf("isBareSymbol(%q) = %v, want %v", tc.tok, got, tc.want)
 		}
 	}
 }
