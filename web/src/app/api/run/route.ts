@@ -128,6 +128,24 @@ export async function POST(req: Request) {
       });
     }
     pdfPaths = pathsResult.paths;
+    // Clear any stale scratch artifacts left by an earlier run of this same
+    // report before the agent starts, so their existence after this run
+    // genuinely proves THIS run produced them. Without this, a re-run whose
+    // agent emits some output and exits cleanly but doesn't actually
+    // (re)write the HTML could pass the honesty gate on a leftover file from
+    // a prior attempt and render/report stale content as if it were fresh.
+    for (const p of [pdfPaths.html, pdfPaths.meta]) {
+      // force:true already suppresses "doesn't exist" internally, so anything
+      // reaching this catch is a real failure (permissions, etc.) — silently
+      // swallowing it would defeat the invariant this whole block exists for:
+      // an un-cleared stale file could then pass the later existence+non-empty
+      // check as if it were fresh.
+      try {
+        fs.rmSync(p, { force: true });
+      } catch (err) {
+        console.warn(`Failed to clear stale PDF scratch artifact ${p}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
@@ -284,22 +302,32 @@ export async function POST(req: Request) {
       // the evaluate path below.
       const renderPdf = async (paths: PdfPaths) => {
         send({ type: "status", label: "Rendering PDF…" });
-        const result = await renderAndMarkPdf({
-          spawnFn: spawn,
-          execPath: process.execPath,
-          root: careerOpsRoot(),
-          pdfPaths: paths,
-          reportNum: input,
-        });
-        if (result.kind === "render-failed") {
-          send({ type: "error", msg: result.error.slice(0, 200) });
-          return close();
+        // renderAndMarkPdf is designed to resolve, never throw — but this is
+        // the one place nothing else awaits or catches this promise (cancel()
+        // only attaches a .finally for the write-token release), so an
+        // unexpected exception here must still close the stream instead of
+        // leaving it — and the write-token — open until process shutdown.
+        try {
+          const result = await renderAndMarkPdf({
+            spawnFn: spawn,
+            execPath: process.execPath,
+            root: careerOpsRoot(),
+            pdfPaths: paths,
+            reportNum: input,
+          });
+          if (result.kind === "render-failed") {
+            send({ type: "error", msg: result.error.slice(0, 200) });
+            return;
+          }
+          // Non-fatal issues (missing format sidecar, tracker not marked) still
+          // surface here rather than only in a server log nobody sees.
+          for (const w of result.warnings) send({ type: "text", text: `⚠️ ${w}\n` });
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+        } catch (e) {
+          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+        } finally {
+          close();
         }
-        // Non-fatal issues (missing format sidecar, tracker not marked) still
-        // surface here rather than only in a server log nobody sees.
-        for (const w of result.warnings) send({ type: "text", text: `⚠️ ${w}\n` });
-        send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-        close();
       };
 
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
@@ -321,7 +349,11 @@ export async function POST(req: Request) {
         };
 
         if (kind === "pdf") {
-          const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html);
+          // Non-empty, not just existing: paired with clearing pdfPaths.html/meta
+          // before the agent started (above), this proves the file is both fresh
+          // (not a leftover from an earlier run of this same report) and real
+          // (not a zero-byte artifact from a half-finished write).
+          const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html) && fs.statSync(pdfPaths.html).size > 0;
           // Same honesty-gate shape as below, plus the actual bug-fix check: verify
           // a real HTML artifact exists before ever reporting success (previously
           // nothing checked this, so an agent that improvised past a failure — e.g.
