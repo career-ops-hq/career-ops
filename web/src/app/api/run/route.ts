@@ -180,6 +180,19 @@ export async function POST(req: Request) {
   // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
+  // after the agent child closes — and even after a client disconnect fires
+  // cancel(). Track its promise so cancel() can defer releasing writeToken
+  // until that work actually settles, instead of releasing the tracker-delete
+  // guard while mark-pdf-ready.mjs is still actively writing applications.md.
+  let pdfRenderPromise: Promise<void> | null = null;
+  let writeTokenReleased = false;
+  const releaseWriteTokenOnce = () => {
+    if (writeToken !== null && !writeTokenReleased) {
+      writeTokenReleased = true;
+      releaseTrackerWrite(writeToken);
+    }
+  };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -208,7 +221,7 @@ export async function POST(req: Request) {
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
-          if (writeToken !== null) releaseTrackerWrite(writeToken);
+          releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -291,6 +304,12 @@ export async function POST(req: Request) {
 
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
       child.on("close", (code) => {
+        // A client disconnect can fire cancel() (which kills `child`) before
+        // this event finally arrives — killing a process doesn't make its
+        // 'close' event disappear, just delays it. Without this guard a pdf
+        // run could still start a brand-new render (and re-touch the tracker)
+        // after the stream — and its writeToken guard — is already gone.
+        if (closed) return;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Shared by both honesty gates below: a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
@@ -313,7 +332,10 @@ export async function POST(req: Request) {
           } else if (!wroteHtml || !cleanExit || sawError || !pdfPaths) {
             send({ type: "error", msg: "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify." });
           } else {
-            return renderPdf(pdfPaths); // close() happens once rendering finishes, not here
+            // Tracked so cancel() can defer releasing writeToken until this
+            // settles; close() happens once rendering finishes, not here.
+            pdfRenderPromise = renderPdf(pdfPaths);
+            return;
           }
           return close();
         }
@@ -342,8 +364,15 @@ export async function POST(req: Request) {
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
-      if (writeToken !== null) releaseTrackerWrite(writeToken);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
+      if (pdfRenderPromise) {
+        // Render/mark keeps running after this client disconnects — wait for
+        // it to settle before releasing the guard, so a concurrent tracker
+        // delete can't race mark-pdf-ready.mjs's still-in-flight write.
+        pdfRenderPromise.finally(releaseWriteTokenOnce);
+      } else {
+        releaseWriteTokenOnce();
+      }
     },
   });
 
