@@ -148,4 +148,12 @@ if (!HAS_WEB) {
       assert.deepEqual(result, [basename(join(outputDir, 'exists.pdf'))]);
     });
   });
+
+  test('sortNewestFirst: drops a directory entry instead of returning it (readdirSync can list a dir named cv-*.pdf; a caller\'s later readFileSync on that path would 500)', () => {
+    withFixture([['exists.pdf', 0]], (outputDir) => {
+      mkdirSync(join(outputDir, 'cv-not-a-file.pdf'));
+      const result = sortNewestFirst(outputDir, ['exists.pdf', 'cv-not-a-file.pdf']);
+      assert.deepEqual(result, [basename(join(outputDir, 'exists.pdf'))]);
+    });
+  });
 }

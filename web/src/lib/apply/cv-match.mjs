@@ -64,5 +64,10 @@ export function sortNewestFirst(dir, files) {
 }
 
 function statMtime(dir, f) {
-  return fs.statSync(path.join(dir, f)).mtimeMs;
+  const stat = fs.statSync(path.join(dir, f));
+  // readdirSync can list a directory that happens to match the cv-*.pdf
+  // pattern; treat it the same as a vanished file (caught by the caller's
+  // try/catch) rather than returning a path whose later readFileSync 500s.
+  if (!stat.isFile()) throw new Error(`${f} is not a file`);
+  return stat.mtimeMs;
 }
