@@ -22,6 +22,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
+import { randomUUID } from 'crypto';
 import { applyScriptDirGuard } from './portal-health-guard.mjs';
 
 console.log('\nscan.mjs — portal-health.tsv resolves against cwd, not script dir');
@@ -34,12 +35,19 @@ const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-'));
 const scriptDirHealthPath = join(ROOT, 'data', 'portal-health.tsv');
 const scriptDirHealthExisted = existsSync(scriptDirHealthPath);
 const scriptDirHealthBackup = scriptDirHealthExisted ? readFileSync(scriptDirHealthPath, 'utf-8') : null;
-const marker = 'Portal Health CWD Fixture';
+// Keep in sync with PORTAL_HEALTH_HEADER in scan.mjs -- passed to the guard so
+// a header-only remainder (appendPortalHealth always writes the header before
+// the marker row) still counts as empty and the cleanup fully removes a
+// script-dir file it created rather than leaving a bare header behind.
+const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
+// Unique per test run so two concurrent CI/test runs can never remove each
+// other's fixture row from this shared fallback path.
+const marker = 'Portal Health CWD Fixture ' + randomUUID();
 
 try {
   const script = `
     const mod = await import(${scanUrl});
-    mod.appendPortalHealth([{ timestamp: '2026-01-01T00:00:00.000Z', company: ${JSON.stringify(marker)}, status: 'reachable' }]);
+    await mod.appendPortalHealth([{ timestamp: '2026-01-01T00:00:00.000Z', company: ${JSON.stringify(marker)}, status: 'reachable' }]);
   `;
 
   const res = spawnSync(NODE, ['--input-type=module', '-e', script], {
@@ -84,5 +92,10 @@ try {
   // concurrent real process (e.g. a scheduled scan) appended to this same
   // live file while the sandboxed child process ran. The guard instead
   // removes only this test's own marker row and leaves everything else alone.
-  applyScriptDirGuard({ path: scriptDirHealthPath, existedBefore: scriptDirHealthExisted, marker });
+  await applyScriptDirGuard({
+    path: scriptDirHealthPath,
+    existedBefore: scriptDirHealthExisted,
+    marker,
+    headerOnlyContent: PORTAL_HEALTH_HEADER,
+  });
 }

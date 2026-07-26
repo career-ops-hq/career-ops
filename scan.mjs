@@ -46,6 +46,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { withPortalHealthLock } from './portal-health-lock.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1613,14 +1614,19 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
 const PORTAL_HEALTH_PATH = 'data/portal-health.tsv';
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
-export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
-  let lines = '';
-  for (const r of healthRecords) {
-    lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
-  }
-  if (lines) appendFileSync(filePath, lines, 'utf-8');
+// Locked (portal-health-lock.mjs) so a concurrent read-modify-write of this
+// same file — e.g. tests/portal-health-guard.mjs's regression-cleanup path —
+// can never interleave with this append and silently discard one side.
+export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
+  await withPortalHealthLock(filePath, async () => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+    let lines = '';
+    for (const r of healthRecords) {
+      lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
+    }
+    if (lines) appendFileSync(filePath, lines, 'utf-8');
+  });
 }
 
 export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
@@ -2382,7 +2388,7 @@ async function main() {
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
   if (!dryRun) {
-    appendPortalHealth(healthRecords);
+    await appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
       companies: summaryCompanies, boards: summaryBoards, found: totalFound,
