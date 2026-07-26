@@ -1,0 +1,28 @@
+name: Python CLI CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile Python files
+        run: python -m compileall -q src tests
+
+      - name: Run tests
+        run: python -m pytest

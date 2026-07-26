@@ -1,0 +1,47 @@
+candidate:
+  candidate_id: mock-candidate-001
+  display_name: Alex Morgan
+  contact:
+    email: alex.morgan@example.invalid
+    location: Example City
+  target_roles:
+    - Python CLI Developer
+    - Workflow Automation Intern
+    - Developer Tools Working Student
+  skills:
+    - Python
+    - Typer
+    - pytest
+    - YAML
+    - JSON
+    - GitHub Actions
+    - documentation
+    - data validation
+  evidence:
+    - evidence_id: ev-cli-001
+      summary: Built a mock command-line task tracker with typed inputs, JSON output, and pytest coverage.
+      skills:
+        - Python
+        - Typer
+        - JSON
+        - pytest
+    - evidence_id: ev-docs-001
+      summary: Wrote setup documentation and troubleshooting notes for a fictional internal automation tool.
+      skills:
+        - documentation
+        - Markdown
+    - evidence_id: ev-safety-001
+      summary: Added a human approval prompt before exporting mock final documents.
+      skills:
+        - safety review
+        - workflow automation
+constraints:
+  allowed_outputs:
+    - draft_summary
+    - fit_score
+    - review_report
+    - tracker_update
+  blocked_actions:
+    - submit_application
+    - send_email
+    - auto_apply

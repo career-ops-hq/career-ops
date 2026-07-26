@@ -1,0 +1,36 @@
+applications:
+  - tracker_id: mock-track-001
+    job_id: mock-job-001
+    company: Northstar Widgets
+    role: Python Workflow Automation Intern
+    status: scanned
+    score: null
+    approval:
+      approved_for_export: false
+      reviewer: null
+    notes:
+      - Synthetic scan result awaiting scoring.
+
+  - tracker_id: mock-track-002
+    job_id: mock-job-002
+    company: Riverbend Analytics
+    role: Junior Data Tooling Engineer
+    status: scored
+    score: 82
+    approval:
+      approved_for_export: false
+      reviewer: null
+    notes:
+      - Synthetic scoring result for demo output.
+
+  - tracker_id: mock-track-003
+    job_id: mock-job-003
+    company: HelioGrid Systems
+    role: Developer Tools Working Student
+    status: review_blocked
+    score: 68
+    approval:
+      approved_for_export: false
+      reviewer: null
+    notes:
+      - Safety review blocked a draft that mentioned an unsupported production deployment.

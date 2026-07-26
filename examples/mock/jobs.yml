@@ -1,0 +1,60 @@
+jobs:
+  - job_id: mock-job-001
+    company: Northstar Widgets
+    role: Python Workflow Automation Intern
+    location: Remote
+    work_mode: remote
+    source: https://jobs.example.com/northstar-widgets/python-workflow-automation-intern
+    required_skills:
+      - Python
+      - CLI design
+      - YAML
+      - pytest
+    preferred_skills:
+      - Typer
+      - GitHub Actions
+      - documentation
+    responsibilities:
+      - Build command-line tools for internal workflow automation.
+      - Maintain structured YAML inputs and JSON tracker outputs.
+      - Add tests for scoring and export safety gates.
+
+  - job_id: mock-job-002
+    company: Riverbend Analytics
+    role: Junior Data Tooling Engineer
+    location: Hybrid - Example City
+    work_mode: hybrid
+    source: https://jobs.example.com/riverbend-analytics/data-tooling-engineer
+    required_skills:
+      - Python
+      - data validation
+      - JSON
+      - documentation
+    preferred_skills:
+      - pandas
+      - CI
+      - command-line UX
+    responsibilities:
+      - Turn messy operational data into repeatable CLI workflows.
+      - Explain scoring decisions with transparent rubric output.
+      - Keep generated artifacts reviewable by humans.
+
+  - job_id: mock-job-003
+    company: HelioGrid Systems
+    role: Developer Tools Working Student
+    location: Example City
+    work_mode: onsite
+    source: https://jobs.example.com/heliogrid-systems/developer-tools-working-student
+    required_skills:
+      - Python
+      - Git
+      - automation
+      - testing
+    preferred_skills:
+      - safety review
+      - structured logging
+      - Markdown
+    responsibilities:
+      - Improve developer workflows with small, reliable tools.
+      - Design approval gates before any final artifact leaves the system.
+      - Document assumptions and unsupported claims.

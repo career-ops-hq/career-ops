@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "career-ops-cli"
+version = "0.1.0"
+description = "Public-safe Python CLI for job-fit scoring, application drafting, and human-reviewed exports using mock-first data."
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Career-Ops Contributors" }
+]
+keywords = ["cli", "job-search", "workflow-automation", "python", "typer"]
+dependencies = [
+  "PyYAML>=6.0.1",
+  "typer>=0.12.5"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-cov>=5.0.0",
+  "ruff>=0.6.0"
+]
+
+[project.scripts]
+career-ops = "career_ops_cli.cli:app"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/career_ops_cli"]

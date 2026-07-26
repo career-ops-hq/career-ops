@@ -26,6 +26,58 @@ modes/_profile.md
 .resolved-prompt-*
 node_modules/
 
+# Python local/dev artifacts
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+htmlcov/
+coverage.xml
+exports/
+
+# Private/local career artifacts that must never be published
+cv.md
+article-digest.md
+raw_cvs/
+personal-portfolio/
+public-cli/
+output.backup-*/
+applications-tracker-*.xlsx
+.~lock.*.xlsx#
+career-ops-*.csv
+daily-sprint-*.csv
+tmp-cv-*.html
+data/*.json
+
+# Local prototypes and generated sprint scripts
+.agents/
+backup_ats_logic/
+ats-audit.mjs
+ats_integration.py
+ats_pipeline_*.mjs
+ats_pipeline_*.py
+batch-tailor.mjs
+daily-engine.mjs
+finalize-sprint.mjs
+generate-all-cl.mjs
+generate-everything.mjs
+generate-final-tracker.mjs
+generate-pilot-html.mjs
+generate-stable-tracker.mjs
+init-memory.mjs
+rebuild-all.mjs
+liveness_http.py
+local_ats_scorer.py
+web_ats_scorer.py
+STATE.md
+modes/daily.md
+templates/cv-template-high-score.html
+
 # OS
 .DS_Store
 *.mov

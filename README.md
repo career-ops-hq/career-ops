@@ -1,270 +1,145 @@
-# Career-Ops
+# Career-Ops CLI
 
-[English](README.md) | [Español](README.es.md)
+Career-Ops CLI is a public-safe Python developer tooling project for job-search
+workflow automation. It demonstrates CLI design, structured YAML/JSON data,
+explainable scoring, no-invention safety review, human approval gates, tracker
+output, and pytest coverage.
 
-<p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Multi-Agent Job Search System" width="800"></a>
-</p>
+The repository is designed for portfolio review. All bundled data is synthetic.
+It does not contain real CVs, real applications, private job memory, emails,
+phone numbers, addresses, transcripts, or submitted materials.
 
-<p align="center">
-  <em>I spent months applying to jobs the hard way. So I engineered the system I wish I had.</em><br>
-  Companies use AI to filter candidates. <strong>I gave candidates AI to <em>choose</em> companies.</strong><br>
-  <em>Now it's open source.</em>
-</p>
+## What It Proves
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  <br>
-  <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
-  <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
-  <img src="https://img.shields.io/badge/DE-grey?style=flat" alt="DE">
-  <img src="https://img.shields.io/badge/FR-blue?style=flat" alt="FR">
-  <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
-</p>
-
----
-
-<p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
-</p>
-
-<p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
-
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
-
-## What Is This
-
-Career-Ops turns any AI coding CLI into a full job search command center. Instead of manually tracking applications in a spreadsheet, you get an AI-powered pipeline that:
-
-- **Evaluates offers** with a structured A-F scoring system (10 weighted dimensions)
-- **Generates tailored PDFs** -- ATS-optimized CVs customized per job description
-- **Scans portals** automatically (Greenhouse, Ashby, Lever, company pages)
-- **Processes in batch** -- evaluate 10+ offers in parallel with sub-agents
-- **Tracks everything** in a single source of truth with integrity checks
-
-> **Important: This is NOT a spray-and-pray tool.** Career-ops is a filter -- it helps you find the few offers worth your time out of hundreds. The system strongly recommends against applying to anything scoring below 4.0/5. Your time is valuable, and so is the recruiter's. Always review before submitting.
-
-Career-ops is agentic: Claude Code navigates career pages with Playwright, evaluates fit by reasoning about your CV vs the job description (not keyword matching), and adapts your resume per listing.
-
-> **Heads up: the first evaluations won't be great.** The system doesn't know you yet. Feed it context -- your CV, your career story, your proof points, your preferences, what you're good at, what you want to avoid. The more you nurture it, the better it gets. Think of it as onboarding a new recruiter: the first week they need to learn about you, then they become invaluable.
-
-Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. [Read the full case study](https://santifer.io/career-ops-system).
-
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Auto-Pipeline** | Paste a URL, get a full evaluation + PDF + tracker entry |
-| **6-Block Evaluation** | Role summary, CV match, level strategy, comp research, personalization, interview prep (STAR+R) |
-| **Interview Story Bank** | Accumulates STAR+Reflection stories across evaluations -- 5-10 master stories that answer any behavioral question |
-| **Negotiation Scripts** | Salary negotiation frameworks, geographic discount pushback, competing offer leverage |
-| **ATS PDF Generation** | Keyword-injected CVs with Space Grotesk + DM Sans design |
-| **Portal Scanner** | 45+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom queries across Ashby, Greenhouse, Lever, Wellfound |
-| **Batch Processing** | Parallel evaluation with `claude -p` workers |
-| **Dashboard TUI** | Terminal UI to browse, filter, and sort your pipeline |
-| **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
-| **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
+- Python package structure under `src/career_ops_cli`
+- Typer CLI with `scan`, `score`, `tailor`, `review`, `tracker`, and `export`
+- Mock job scan input, mock candidate profile, and mock tracker data
+- Deterministic job-fit scoring with an explicit rubric
+- Evidence-backed drafting that labels gaps instead of hiding them
+- No-invention review before anything can be exported
+- Human approval gate before final artifact export
+- JSON and YAML outputs for automation and audit trails
+- pytest coverage for scoring, safety review, export gates, and CLI behavior
 
 ## Quick Start
 
-```bash
-# 1. Clone and install
-git clone https://github.com/santifer/career-ops.git
-cd career-ops && npm install
-npx playwright install chromium   # Required for PDF generation
-
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Personalize with Claude
-claude   # Open Claude Code in this directory
-
-# Then ask Claude to adapt the system to you:
-# "Change the archetypes to backend engineering roles"
-# "Translate the modes to English"
-# "Add these 5 companies to portals.yml"
-# "Update my profile with this CV I'm pasting"
-
-# 6. Start using
-# Paste a job URL or run /career-ops
+```powershell
+python -m pip install -e ".[dev]"; career-ops tracker --json
 ```
 
-> **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
+If you prefer not to install the console script:
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
-
-## Usage
-
-Career-ops is a single slash command with multiple modes:
-
-```
-/career-ops                → Show all available commands
-/career-ops {paste a JD}   → Full auto-pipeline (evaluate + PDF + tracker)
-/career-ops scan           → Scan portals for new offers
-/career-ops pdf            → Generate ATS-optimized CV
-/career-ops batch          → Batch evaluate multiple offers
-/career-ops tracker        → View application status
-/career-ops apply          → Fill application forms with AI
-/career-ops pipeline       → Process pending URLs
-/career-ops contacto       → LinkedIn outreach message
-/career-ops deep           → Deep company research
-/career-ops training       → Evaluate a course/cert
-/career-ops project        → Evaluate a portfolio project
+```powershell
+$env:PYTHONPATH='src'; python -m career_ops_cli.cli tracker --json
 ```
 
-Or just paste a job URL or description directly -- career-ops auto-detects it and runs the full pipeline.
+## Commands
 
-## How It Works
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-F Evaluation  │  Match, gaps, comp research, STAR stories
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf   .tsv
+```powershell
+career-ops scan --input examples/mock/jobs.yml
+career-ops score --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --json
+career-ops tailor --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --job-id mock-job-003
+career-ops review --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --job-id mock-job-003
+career-ops export --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --job-id mock-job-001 --approve APPROVE_EXPORT
 ```
 
-## Pre-configured Portals
+`export` refuses to write final artifacts unless the safety review passes and
+the approval phrase is exactly `APPROVE_EXPORT`.
 
-The scanner comes with **45+ companies** ready to scan and **19 search queries** across major job boards. Copy `templates/portals.example.yml` to `portals.yml` and add your own:
+## Demo Output
 
-**AI Labs:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
-**Voice AI:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
-**AI Platforms:** Retool, Airtable, Vercel, Temporal, Glean, Arize AI
-**Contact Center:** Ada, LivePerson, Sierra, Decagon, Talkdesk, Genesys
-**Enterprise:** Salesforce, Twilio, Gong, Dialpad
-**LLMOps:** Langfuse, Weights & Biases, Lindy, Cognigy, Speechmatics
-**Automation:** n8n, Zapier, Make.com
-**European:** Factorial, Attio, Tinybird, Clarity AI, Travelperk
+`career-ops score --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --job-id mock-job-003`
 
-**Job boards searched:** Ashby, Greenhouse, Lever, Wellfound, Workable, RemoteFront
-
-## Dashboard TUI
-
-The built-in terminal dashboard lets you browse your pipeline visually:
-
-```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+```text
+Scored 1 job(s) for Alex Morgan
+mock-job-003 | HelioGrid Systems | Developer Tools Working Student | 81.8/100 | good_match | required gaps: Git
 ```
 
-Features: 6 filter tabs, 4 sort modes, grouped/flat view, lazy-loaded previews, inline status changes.
+`career-ops tailor --jobs examples/mock/jobs.yml --profile examples/mock/profile.yml --job-id mock-job-003`
 
-## Project Structure
-
+```text
+Draft for HelioGrid Systems - Developer Tools Working Student
+Final: False; approval required: True
+Draft only: Alex Morgan is a good match for Developer Tools Working Student at HelioGrid Systems...
+- Known gaps to avoid claiming: Git, structured logging.
+- Human approval is required before any final artifact is exported.
 ```
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Mock jobs YAML"] --> B["scan"]
+    C["Mock profile YAML"] --> D["score"]
+    B --> D
+    D --> E["tailor draft"]
+    E --> F["review safety gate"]
+    F -->|"passed"| G["approval phrase"]
+    G -->|"APPROVE_EXPORT"| H["export JSON artifact"]
+    H --> I["tracker.yml"]
+    F -->|"blocked"| J["review issues"]
+```
+
+## Safety Philosophy
+
+Career-Ops CLI is a decision-support tool, not an application bot.
+
+- It never submits applications.
+- It never sends email.
+- It never scrapes live job boards in the public demo flow.
+- It uses synthetic fixtures by default.
+- It does not turn gaps into claims.
+- It keeps generated text draft-only until review passes.
+- It requires a human approval phrase before export.
+
+The most important design choice is that gaps remain visible. For example, if a
+job asks for `Git` and the mock profile only supports `GitHub Actions`, the tool
+does not treat that as equivalent. The draft says the gap exists.
+
+## Project Layout
+
+```text
 career-ops/
-├── CLAUDE.md                    # Agent instructions
-├── cv.md                        # Your CV (create this)
-├── article-digest.md            # Your proof points (optional)
-├── config/
-│   └── profile.example.yml      # Template for your profile
-├── modes/                       # 14 skill modes
-│   ├── _shared.md               # Shared context (customize this)
-│   ├── oferta.md                # Single evaluation
-│   ├── pdf.md                   # PDF generation
-│   ├── scan.md                  # Portal scanner
-│   ├── batch.md                 # Batch processing
-│   └── ...
-├── templates/
-│   ├── cv-template.html         # ATS-optimized CV template
-│   ├── portals.example.yml      # Scanner config template
-│   └── states.yml               # Canonical statuses
-├── batch/
-│   ├── batch-prompt.md          # Self-contained worker prompt
-│   └── batch-runner.sh          # Orchestrator script
-├── dashboard/                   # Go TUI pipeline viewer
-├── data/                        # Your tracking data (gitignored)
-├── reports/                     # Evaluation reports (gitignored)
-├── output/                      # Generated PDFs (gitignored)
-├── fonts/                       # Space Grotesk + DM Sans
-├── docs/                        # Setup, customization, architecture
-└── examples/                    # Sample CV, report, proof points
+  src/career_ops_cli/
+    cli.py          # Typer command surface
+    scanner.py      # mock scan fixture loading and filtering
+    scoring.py      # deterministic scoring rubric
+    tailoring.py    # draft-only evidence-backed tailoring
+    safety.py       # no-invention and blocked-action review
+    exporter.py     # approval-gated artifact export
+    tracker.py      # structured tracker records
+  examples/mock/
+    jobs.yml        # synthetic postings
+    profile.yml     # synthetic candidate profile
+    tracker.yml     # synthetic tracker sample
+  tests/
+    test_scan.py
+    test_score.py
+    test_tailor.py
+    test_review_export.py
 ```
 
-## Tech Stack
+## Development
 
-![Claude Code](https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
-![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
-![Bubble Tea](https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white)
+```powershell
+python -m pip install -e ".[dev]"
+python -m pytest
+python -m compileall -q src tests
+```
 
-- **Agent**: Claude Code with custom skills and modes
-- **PDF**: Playwright/Puppeteer + HTML template
-- **Scanner**: Playwright + Greenhouse API + WebSearch
-- **Dashboard**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha theme)
-- **Data**: Markdown tables + YAML config + TSV batch files
+Expected result:
 
-## Also Open Source
+```text
+21 passed
+```
 
-- **[cv-santiago](https://github.com/santifer/cv-santiago)** -- The portfolio website (santifer.io) with AI chatbot, LLMOps dashboard, and case studies. If you need a portfolio to showcase alongside your job search, fork it and make it yours.
+## Public-Safe Data Policy
 
-## About the Author
-
-I'm Santiago -- Head of Applied AI, former founder (built and sold a business that still runs with my name on it). I built career-ops to manage my own job search. It worked: I used it to land my current role.
-
-My portfolio and other open source projects → [santifer.io](https://santifer.io)
-
-☕ [Buy me a coffee](https://buymeacoffee.com/santifer) if career-ops helped your job search.
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
- </picture>
-</a>
-
-## Disclaimer
-
-**career-ops is a local, open-source tool — NOT a hosted service.** By using this software, you acknowledge:
-
-1. **You control your data.** Your CV, contact info, and personal data stay on your machine and are sent directly to the AI provider you choose (Anthropic, OpenAI, etc.). We do not collect, store, or have access to any of your data.
-2. **You control the AI.** The default prompts instruct the AI not to auto-submit applications, but AI models can behave unpredictably. If you modify the prompts or use different models, you do so at your own risk. **Always review AI-generated content for accuracy before submitting.**
-3. **You comply with third-party ToS.** You must use this tool in accordance with the Terms of Service of the career portals you interact with (Greenhouse, Lever, Workday, LinkedIn, etc.). Do not use this tool to spam employers or overwhelm ATS systems.
-4. **No guarantees.** Evaluations are recommendations, not truth. AI models may hallucinate skills or experience. The authors are not liable for employment outcomes, rejected applications, account restrictions, or any other consequences.
-
-See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software is provided under the [MIT License](LICENSE) "as is", without warranty of any kind.
+Only synthetic data belongs in this repository. Do not commit real CVs, real
+cover letters, real application trackers, private job-search memory, personal
+contact information, or generated submissions. Local export output is written to
+`exports/`, which is ignored by Git.
 
 ## License
 
 MIT
-
-## Let's Connect
-
-[![Website](https://img.shields.io/badge/santifer.io-000?style=for-the-badge&logo=safari&logoColor=white)](https://santifer.io)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/santifer)
-[![X](https://img.shields.io/badge/X-000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/santifer)
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/8pRpHETxa4)
-[![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:hi@santifer.io)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/santifer)
