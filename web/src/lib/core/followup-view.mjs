@@ -30,6 +30,20 @@ export function selectDueFollowups(entries, limit = 8) {
 }
 
 /**
+ * Sortable timestamp for an entry's nextFollowupDate, or Infinity when the
+ * date is missing/unparseable — never NaN, so it always sorts after every
+ * real date instead of corrupting comparator results. Ranking by the parsed
+ * date itself (rather than the precomputed daysUntilNext) means the order is
+ * correct even when daysUntilNext wasn't populated on some entries — with
+ * daysUntilNext, every such entry ties at Infinity and a stable sort just
+ * preserves input order instead of the nearer date.
+ */
+function nextDateValue(entry) {
+  const t = entry?.nextFollowupDate ? Date.parse(entry.nextFollowupDate) : NaN;
+  return Number.isNaN(t) ? Infinity : t;
+}
+
+/**
  * The single nearest not-yet-due follow-up, for the empty state ("nothing is
  * due, but here's what's next") — never mislabeled as due. Entries with no
  * nextFollowupDate (cold, or no cadence) are excluded. Returns null when
@@ -38,6 +52,6 @@ export function selectDueFollowups(entries, limit = 8) {
 export function pickNextUpcoming(entries) {
   const upcoming = (Array.isArray(entries) ? entries : [])
     .filter((e) => !isDue(e) && e?.nextFollowupDate)
-    .sort((a, b) => (a.daysUntilNext ?? Infinity) - (b.daysUntilNext ?? Infinity));
+    .sort((a, b) => nextDateValue(a) - nextDateValue(b));
   return upcoming[0] ?? null;
 }
