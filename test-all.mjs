@@ -2036,7 +2036,7 @@ try {
   try {
     mkdirSync(join(fixtureRoot, 'data'), { recursive: true });
     process.chdir(fixtureRoot);
-    appendToPipeline([{ url: 'https://jobs.example.com/1', company: 'Acme', title: 'Engineer' }]);
+    await appendToPipeline([{ url: 'https://jobs.example.com/1', company: 'Acme', title: 'Engineer' }]);
     const pipeline = readFileSync(join(fixtureRoot, 'data', 'pipeline.md'), 'utf-8');
     if (
       pipeline.includes('# Pipeline') &&
@@ -2053,6 +2053,36 @@ try {
   }
 } catch (err) {
   fail(`scan.mjs fresh-install pipeline test crashed: ${err.message}`);
+}
+
+try {
+  const { appendToPipeline } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { acquirePipelineLock, LockTimeoutError } = await import(pathToFileURL(join(ROOT, 'pipeline-lock.mjs')).href);
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-pipeline-lock-'));
+  const originalCwd = process.cwd();
+  try {
+    mkdirSync(join(fixtureRoot, 'data'), { recursive: true });
+    process.chdir(fixtureRoot);
+    const pipelinePath = join(fixtureRoot, 'data', 'pipeline.md');
+    // Hold the exact lock appendToPipeline() takes, then confirm it genuinely
+    // blocks on it (times out) rather than racing straight through to its
+    // read-modify-write.
+    const held = await acquirePipelineLock(pipelinePath);
+    try {
+      await appendToPipeline([{ url: 'https://jobs.example.com/1', company: 'Acme', title: 'Engineer' }]);
+      fail('appendToPipeline() proceeded while another holder had the pipeline lock — no shared exclusion');
+    } catch (e) {
+      if (e instanceof LockTimeoutError) pass('appendToPipeline() shares pipeline-lock.mjs — correctly blocked on a lock held elsewhere (LockTimeoutError)');
+      else fail(`appendToPipeline() lock sharing: expected LockTimeoutError, got: ${e?.constructor?.name}: ${e?.message}`);
+    } finally {
+      held.release();
+    }
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+} catch (err) {
+  fail(`pipeline-lock.mjs sharing test crashed: ${err.message}`);
 }
 
 // URL dedup normalization (#2065): a cosmetic query-suffix variant of an

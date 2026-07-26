@@ -44,6 +44,7 @@ import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1274,39 +1275,44 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
 const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 
-export function appendToPipeline(offers) {
+// Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
+// (pipeline mode) — the three current callers — can never interleave their
+// read-modify-write and silently drop each other's offers.
+export async function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
-  // Auto-create with standard skeleton if missing (fresh-install guard).
-  if (!existsSync(PIPELINE_PATH)) {
-    writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
-  }
+  await withPipelineLock(PIPELINE_PATH, async () => {
+    // Auto-create with standard skeleton if missing (fresh-install guard).
+    if (!existsSync(PIPELINE_PATH)) {
+      writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
+    }
 
-  let text = readFileSync(PIPELINE_PATH, 'utf-8');
+    let text = readFileSync(PIPELINE_PATH, 'utf-8');
 
-  const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
-  const idx = marker !== null ? text.indexOf(marker) : -1;
+    const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
+    const idx = marker !== null ? text.indexOf(marker) : -1;
 
-  if (idx === -1) {
-    // No Pending section found — insert one before Processed (or at end)
-    const procIdx = PROCESSED_MARKERS.reduce((found, m) => {
-      const i = text.indexOf(m);
-      return (found === -1 || (i !== -1 && i < found)) ? i : found;
-    }, -1);
-    const insertAt = procIdx === -1 ? text.length : procIdx;
-    const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
-    text = text.slice(0, insertAt) + block + text.slice(insertAt);
-  } else {
-    // Find the end of existing Pending content (next ## or end)
-    const afterMarker = idx + marker.length;
-    const nextSection = text.indexOf('\n## ', afterMarker);
-    const insertAt = nextSection === -1 ? text.length : nextSection;
+    if (idx === -1) {
+      // No Pending section found — insert one before Processed (or at end)
+      const procIdx = PROCESSED_MARKERS.reduce((found, m) => {
+        const i = text.indexOf(m);
+        return (found === -1 || (i !== -1 && i < found)) ? i : found;
+      }, -1);
+      const insertAt = procIdx === -1 ? text.length : procIdx;
+      const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
+      text = text.slice(0, insertAt) + block + text.slice(insertAt);
+    } else {
+      // Find the end of existing Pending content (next ## or end)
+      const afterMarker = idx + marker.length;
+      const nextSection = text.indexOf('\n## ', afterMarker);
+      const insertAt = nextSection === -1 ? text.length : nextSection;
 
-    const block = '\n' + offers.map(formatPipelineOffer).join('\n') + '\n';
-    text = text.slice(0, insertAt) + block + text.slice(insertAt);
-  }
+      const block = '\n' + offers.map(formatPipelineOffer).join('\n') + '\n';
+      text = text.slice(0, insertAt) + block + text.slice(insertAt);
+    }
 
-  writeFileSync(PIPELINE_PATH, text, 'utf-8');
+    writeFileSync(PIPELINE_PATH, text, 'utf-8');
+  });
 }
 
 export function appendToScanHistory(offers, date, status = 'added') {
@@ -1930,7 +1936,7 @@ async function main() {
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
-    appendToPipeline(verifiedOffers);
+    await appendToPipeline(verifiedOffers);
     appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
