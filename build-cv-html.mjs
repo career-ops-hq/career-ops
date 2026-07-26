@@ -216,8 +216,8 @@ function parsePartial(source) {
   while (entryTemplate !== previous) {
     previous = entryTemplate;
     entryTemplate = entryTemplate
-      .replace(/<!--[A-Z][A-Z0-9_]+-->[\s\S]*?<!--\/[A-Z][A-Z0-9_]+-->/g, '')
-      .replace(/<!--[\s\S]*?-->/g, '');
+      .replace(/<!--[A-Z][A-Z0-9_]+-->[\s\S]*?<!--\/[A-Z][A-Z0-9_]+-->/g, () => '')
+      .replace(/<!--[\s\S]*?-->/g, () => '');
   }
   entryTemplate = entryTemplate.trim();
 
