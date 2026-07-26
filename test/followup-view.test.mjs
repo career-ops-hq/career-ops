@@ -30,7 +30,44 @@ const HAS_WEB = existsSync(FOLLOWUP_VIEW);
 if (!HAS_WEB) {
   test('followup-view: skipped — web/ not present (core-only install; web/ is excluded from the auto-updater by design)', () => {});
 } else {
-  const { pickNextUpcoming } = await import(pathToFileURL(FOLLOWUP_VIEW).href);
+  const { pickNextUpcoming, isDue, selectDueFollowups } = await import(pathToFileURL(FOLLOWUP_VIEW).href);
+
+  test('isDue: keyed on urgency, not the tracker status field — a conflicting status must not override it', () => {
+    // status is the tracker status (applied/responded/interview...), never
+    // "overdue"/"urgent" — the bug this module exists to fix was filtering on
+    // status instead of urgency, so a conflicting status must have no effect.
+    assert.equal(isDue({ status: 'overdue', urgency: 'waiting' }), false);
+    assert.equal(isDue({ status: 'applied', urgency: 'urgent' }), true);
+    assert.equal(isDue({ status: 'applied', urgency: 'overdue' }), true);
+    assert.equal(isDue({ status: 'applied', urgency: 'cold' }), false);
+  });
+
+  test('selectDueFollowups: urgent entries sort before overdue entries', () => {
+    const overdue = { urgency: 'overdue', company: 'Overdue Co' };
+    const urgent = { urgency: 'urgent', company: 'Urgent Co' };
+    // overdue placed first in the input -- selectDueFollowups must still put
+    // urgent first in the output, proving it orders by urgency and doesn't
+    // just preserve input order.
+    const result = selectDueFollowups([overdue, urgent]);
+    assert.deepEqual(result, [urgent, overdue]);
+  });
+
+  test('selectDueFollowups: excludes non-due urgencies (waiting/cold) even when present', () => {
+    const urgent = { urgency: 'urgent', company: 'Urgent Co' };
+    const waiting = { urgency: 'waiting', company: 'Waiting Co' };
+    const cold = { urgency: 'cold', company: 'Cold Co' };
+    assert.deepEqual(selectDueFollowups([waiting, urgent, cold]), [urgent]);
+  });
+
+  test('selectDueFollowups: caps at the default limit of 8', () => {
+    const entries = Array.from({ length: 12 }, (_, i) => ({ urgency: 'overdue', company: `Co ${i}` }));
+    assert.equal(selectDueFollowups(entries).length, 8);
+  });
+
+  test('selectDueFollowups: honors an explicit limit override', () => {
+    const entries = Array.from({ length: 5 }, (_, i) => ({ urgency: 'urgent', company: `Co ${i}` }));
+    assert.equal(selectDueFollowups(entries, 3).length, 3);
+  });
 
   test('pickNextUpcoming: picks the actually-nearer date, not just the first entry, when daysUntilNext is missing on both candidates', () => {
     const far = { urgency: 'waiting', nextFollowupDate: '2026-12-01', daysUntilNext: null };
