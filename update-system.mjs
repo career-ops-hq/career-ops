@@ -344,6 +344,8 @@ const USER_PATHS = [
   'plugins.lock',
   '.claude/settings.json',
   '.claude/hooks/',
+  '.commandcode/',
+  'github-profile-readme.md',
 ];
 
 function parseVersionFile(raw) {
