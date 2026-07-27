@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -10,6 +10,7 @@ import { chromium } from 'playwright';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
+const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v'], { stdio: 'ignore' }).status === 0;
 
 test('Chinese Minimal template is discoverable and valid', () => {
   const listed = listTemplates('cv');
@@ -56,7 +57,66 @@ test('Chinese Minimal renders a complete mixed-language payload', () => {
   assert.match(rendered, /<html lang="zh-CN">/);
   assert.match(rendered, /测试候选人/);
   assert.match(rendered, /AI Agent 工作流/);
+  assert.doesNotMatch(rendered, /Certifications/);
   assert.doesNotMatch(rendered, /\{\{[A-Z_]+\}\}/);
+});
+
+test('Chinese Minimal preserves mixed-language and job order in PDF text extraction', {
+  skip: (!existsSync(chromium.executablePath()) || !HAS_PDFTOTEXT)
+    && 'Chromium or pdftotext is not installed',
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-extraction-'));
+  const input = join(dir, 'cv.json');
+  const output = join(dir, 'cv.html');
+  const pdf = join(dir, 'cv.pdf');
+  writeFileSync(input, JSON.stringify({
+    lang: 'zh-CN',
+    page_format: 'a4',
+    candidate: { name: '测试候选人', email: 'candidate@example.com', location: '深圳' },
+    sections: {
+      summary: '职业概述', competencies: '核心能力', experience: '工作经历',
+      projects: '项目', education: '教育背景', certifications: '认证', skills: '技能',
+    },
+    summary: '6 年企业数字化经验，服务 ACME、Globex、Initech、Umbrella、Hooli、Vandelay。',
+    competencies: ['项目交付'],
+    experience: [
+      {
+        company: '示例甲公司', role: '产品经理', dates: '2025 至今',
+        bullets: ['交付 AI agent 产品。'],
+      },
+      {
+        company: '示例乙公司', role: '客户经理', dates: '2022 - 2024',
+        bullets: ['主导 CRM 项目。'],
+      },
+    ],
+    projects: [],
+    education: [{ title: '管理学硕士', org: '示例大学', year: '2021' }],
+    certifications: [],
+    skills: [{ category: '工具', items: ['CRM', 'AI agent'] }],
+  }));
+  execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT });
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(pathToFileURL(output).href);
+    await page.pdf({
+      path: pdf,
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0.6in', right: '0.6in', bottom: '0.6in', left: '0.6in' },
+    });
+  } finally {
+    await browser.close();
+  }
+
+  const text = execFileSync('pdftotext', [pdf, '-'], { encoding: 'utf8' })
+    .replace(/\s+/g, ' ')
+    .trim();
+  assert.match(text, /6 年.*ACME.*Globex.*Initech.*Umbrella.*Hooli.*Vandelay/);
+  assert.match(text,
+    /示例甲公司 2025 至今.*产品经理.*交付 AI agent 产品.*示例乙公司 2022 - 2024.*客户经理.*主导 CRM 项目/);
+  assert.doesNotMatch(text, /Certifications/);
 });
 
 test('Chinese Minimal keeps long mixed-language contacts inside the A4 page', {
