@@ -173,7 +173,7 @@ node gemini-eval.mjs --file ./jds/my-job.txt
 npm run gemini:eval -- "Texte de la description de poste ici"
 ```
 
-> **Offre gratuite :** Les deux options fonctionnent sans facturation. Le CLI natif utilise l'authentification OAuth Google ; le script d'API utilise `gemini-2.5-flash` (15 requêtes/min, 1M de jetons/jour gratuits).
+> **Offre gratuite :** Les deux options fonctionnent sans facturation. Le CLI natif utilise l'authentification OAuth Google ; le script d'API utilise `gemini-3.6-flash` (les limites de requêtes dépendent du modèle et du niveau d'accès ; voir la documentation Google AI pour les quotas actuels).
 
 ## Utilisation
 
