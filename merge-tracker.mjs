@@ -699,6 +699,15 @@ console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${sk
 if (DRY_RUN) console.log('(dry-run — no changes written)');
 trackerLock.release();
 
+// Sync PDF flags (idempotent; uses its own lock/transaction)
+if (!DRY_RUN) {
+  try {
+    execFileSync('node', [join(CAREER_OPS, 'sync-pdf-flags.mjs')], { stdio: 'inherit' });
+  } catch (e) {
+    console.warn(`⚠️  Failed to sync PDF flags: ${e.message}`);
+  }
+}
+
 // Optional verify
 if (VERIFY && !DRY_RUN) {
   console.log('\n--- Running verification ---');

@@ -1984,11 +1984,15 @@ async function main() {
   console.log(`Companies scanned:     ${summaryCompanies}`);
   if (summaryBoards > 0) console.log(`Job boards scanned:    ${summaryBoards}`);
   console.log(`Total jobs found:      ${totalFound}`);
-  console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
+  if (config.title_filter || totalFilteredTitle > 0) {
+    console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
+  }
   if (skipTiers.length > 0) {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
   }
-  console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
+  if (config.location_filter || totalFilteredLocation > 0) {
+    console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
+  }
   if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
