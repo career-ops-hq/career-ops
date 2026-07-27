@@ -107,17 +107,23 @@ export default {
     if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
     const all = [];
     let prevFirstUrl = null;
+    // Distinguishes "walked the whole board" from "stopped at the page cap".
+    // Exhausting the cap silently would drop every later posting and look
+    // identical to a complete board — the same failure mode the Workday
+    // truncation tag exists to prevent.
+    let reachedEnd = false;
     for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
       if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
       const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
-      if (pageJobs.length === 0) break; // past the last page
+      if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
       // Some tenants serve the last real page again for an out-of-range pr
       // instead of an empty one — a repeated first URL means we're looping.
-      if (pageJobs[0].url === prevFirstUrl) break;
+      if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
       prevFirstUrl = pageJobs[0].url;
       all.push(...pageJobs);
     }
+    if (!reachedEnd) all.icimsTruncated = true;
     return all;
   },
 

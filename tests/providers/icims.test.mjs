@@ -113,6 +113,31 @@ const mkCtx = (pages) => ({
   else fail(`jobs=${jobs.length} calls=${mkCtx.calls.length}`);
 }
 
+// A board that ends naturally is NOT flagged — the flag must mean "capped",
+// not "finished", or the run summary cries wolf on every healthy tenant.
+{
+  mkCtx.calls = [];
+  const ctx = mkCtx([page(mkCard(1, 'Role A')), page(mkCard(2, 'Role B'))]);
+  const jobs = await icims.fetch({ name: 'acmefreight', careers_url: `${ORIGIN}/jobs/search?ss=1` }, ctx);
+  if (jobs.icimsTruncated === undefined) pass('complete board carries no truncation flag');
+  else fail(`complete board flagged truncated (${jobs.length} jobs)`);
+}
+
+// A board deeper than the page cap is flagged instead of silently truncated:
+// every page holds distinct jobs, so neither natural stop condition fires.
+{
+  mkCtx.calls = [];
+  const deep = {};
+  for (let i = 0; i < 60; i++) deep[i] = page(mkCard(100 + i, `Role ${i}`));
+  const ctx = mkCtx(deep);
+  const jobs = await icims.fetch({ name: 'bigtenant', careers_url: `${ORIGIN}/jobs/search?ss=1` }, ctx);
+  if (jobs.icimsTruncated === true && jobs.length === mkCtx.calls.length) {
+    pass(`fetch flags truncation at the page cap (${mkCtx.calls.length} pages)`);
+  } else {
+    fail(`icimsTruncated=${jobs.icimsTruncated} jobs=${jobs.length} pages=${mkCtx.calls.length}`);
+  }
+}
+
 // ── enrichDate(): detail-page JSON-LD ───────────────────────────────
 {
   const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
