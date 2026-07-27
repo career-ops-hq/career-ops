@@ -1,5 +1,5 @@
 // tests/cv-optional-sections.test.mjs — the optional CV sections (projects,
-// education) must vanish entirely when they have no entries, rather than
+// education, certifications) must vanish entirely when they have no entries, rather than
 // rendering a bare section header with nothing under it.
 //
 // #1879 fixed this for projects; the education half is the same bug (not every
@@ -13,8 +13,12 @@ import { stripEmptySections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
-const EMPTY = { projects: [], education: [] };
-const FULL = { projects: [{ name: 'P' }], education: [{ degree: 'D' }] };
+const EMPTY = { projects: [], education: [], certifications: [] };
+const FULL = {
+  projects: [{ name: 'P' }],
+  education: [{ degree: 'D' }],
+  certifications: [{ title: 'C' }],
+};
 
 function check(label, actual, expected) {
   if (actual === expected) pass(label);
@@ -25,21 +29,27 @@ function check(label, actual, expected) {
 // Assert against the shipped templates so a template edit that renames or
 // reorders a marker fails here instead of silently reviving the bare header.
 const TEMPLATES = [
-  { file: 'templates/cv-template.html', format: 'html', after: 'CERTIFICATIONS' },
-  { file: 'templates/resume-template.html', format: 'html', after: 'SKILLS' },
-  { file: 'templates/cv-template.tex', format: 'tex', after: 'Technical Skills' },
+  { file: 'templates/cv-template.html', format: 'html', after: 'SKILLS', hasCertifications: true },
+  { file: 'templates/cv-template.zh-minimal.html', format: 'html', after: 'SKILLS', hasCertifications: true },
+  { file: 'templates/resume-template.html', format: 'html', after: 'SKILLS', hasCertifications: false },
+  { file: 'templates/cv-template.tex', format: 'tex', after: 'Technical Skills', hasCertifications: false },
 ];
 
-for (const { file, format, after } of TEMPLATES) {
+for (const { file, format, after, hasCertifications } of TEMPLATES) {
   const template = readFileSync(join(ROOT, file), 'utf-8');
   const name = file.split('/').pop();
 
   const stripped = stripEmptySections(template, EMPTY, format);
   const projectsMarker = format === 'html' ? '<!-- PROJECTS -->' : 'PROJECTS  %';
   const educationMarker = format === 'html' ? '<!-- EDUCATION -->' : 'Education  %';
+  const certificationsMarker = '<!-- CERTIFICATIONS -->';
 
   check(`${name}: empty payload removes the projects block`, stripped.includes(projectsMarker), false);
   check(`${name}: empty payload removes the education block`, stripped.includes(educationMarker), false);
+  if (hasCertifications) {
+    check(`${name}: empty payload removes the certifications block`,
+      stripped.includes(certificationsMarker), false);
+  }
   check(`${name}: the section after education survives`, stripped.includes(after), true);
   check(`${name}: {{EXPERIENCE}} is untouched`, stripped.includes('{{EXPERIENCE}}'), true);
 
