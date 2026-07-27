@@ -50,7 +50,11 @@ var currencyTokens = []string{
 // buildMoneySpanRegex assembles the regex from an explicit currency list,
 // emitting each token in three positions (prefix, optional range-prefix,
 // suffix). Adding a new currency is a one-line append to currencyTokens;
+// An empty list produces a regex that matches nothing.
 func buildMoneySpanRegex(currencies []string) *regexp.Regexp {
+	if len(currencies) == 0 {
+		return regexp.MustCompile(`\b\B`)
+	}
 	prefixParts, rangePrefixParts, suffixParts := make([]string, 0, len(currencies)), make([]string, 0, len(currencies)), make([]string, 0, len(currencies))
 	for _, tok := range currencies {
 		// QuoteMeta: "$" is end-of-string anchor, "." is wildcard, etc.

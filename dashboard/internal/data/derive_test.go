@@ -311,11 +311,6 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 			input:   []string{"A.B"},
 			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:A\.B))`,
 		},
-		{
-			name:    "empty slice (regex still builds, just matches no currency)",
-			input:   []string{},
-			wantPat: `~?(?:(?:)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:))`,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -324,6 +319,15 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 				t.Errorf("buildMoneySpanRegex(%v).String() =\n  %q\nwant:\n  %q", tc.input, got, tc.wantPat)
 			}
 		})
+	}
+}
+
+func TestBuildMoneySpanRegex_EmptyMatchesNothing(t *testing.T) {
+	re := buildMoneySpanRegex([]string{})
+	for _, s := range []string{"150-200K", "$200K", "1,000", "PLN 100K", "€130-170K"} {
+		if got := re.FindString(s); got != "" {
+			t.Errorf("empty slice matched %q in %q; want no match", got, s)
+		}
 	}
 }
 
