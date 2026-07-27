@@ -78,7 +78,7 @@ Hard DQs override to ≤2.5.
 |-------|---------|
 | ≥ triage_threshold | **PASS** — proceed to full A-G evaluation |
 | 3.0–(threshold − 0.1) | **MARGINAL** — one-liner shown to user; skip full eval unless user overrides |
-| < 3.0 | **FAIL** — silently filtered; write minimal SKIP TSV only |
+| < 3.0 | **FAIL** — silently filtered by the pipeline; return the line and stop |
 | N/A | **SKIP** — inaccessible posting |
 
 (`triage_threshold` is `config/profile.yml → pipeline.triage_threshold`, default `3.5`.)

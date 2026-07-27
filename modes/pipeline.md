@@ -52,11 +52,31 @@ Launch one triage agent per surviving URL in parallel
 Each triage agent costs a small fraction of a full evaluation (it never reads
 `cv.md`, `modes/_shared.md`, `modes/_profile.md`, or `modes/oferta.md`).
 
-Collect all `TRIAGE:` lines. Partition results:
+Collect all `TRIAGE:` lines. **Triage workers write nothing** — every file write
+below is done here, by the pipeline, after the workers have returned. This is what
+makes the no-write contract in `modes/triage.md` true: a worker that times out or
+returns malformed output cannot leave partial tracker state behind.
+
+Partition results:
 - **PASS** (≥ triage_threshold) → queue for full evaluation (Pass 2)
 - **MARGINAL** (3.0–3.4) → show to user; skip full evaluation unless user overrides
-- **FAIL** (< 3.0) → mark `- [x] ~~URL | Company | Role~~ — FAIL triage ({score}/5: {reason})` in Processed; write a minimal SKIP TSV: `{next_num}\t{date}\t{company}\t{role}\tSKIP\t{score}/5\t❌\t\t{reason}`
+- **FAIL** (< 3.0) → mark `- [x] ~~URL | Company | Role~~ — FAIL triage ({score}/5: {reason})` in Processed, and record a SKIP row in the tracker (numbering below)
 - **SKIP** → mark as inaccessible in pipeline.md
+
+**Numbering the FAIL rows.** Claim one number per FAIL result in a single atomic
+call — `node reserve-report-num.mjs --count {n}` — and assign them in listed order.
+Never let the triage workers claim their own numbers and never compute `max+1` per
+row: concurrent claims against the same sequence are the #749 race, and here they
+would collide both with each other and with the Pass 2 reports. Then write one TSV
+per FAIL to `batch/tracker-additions/{num}-{company-slug}.tsv`:
+
+```text
+{reserved_num}\t{date}\t{company}\t{role}\tSKIP\t{score}/5\t❌\t\t{reason}
+```
+
+The report column is empty — a FAIL row is a tracker record, not a report. Release
+the range with `node reserve-report-num.mjs --release {first}-{last}` once
+`node merge-tracker.mjs` has merged the rows.
 
 Show the user a triage summary table before proceeding:
 ```
