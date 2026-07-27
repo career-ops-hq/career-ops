@@ -675,7 +675,9 @@ async function main() {
         // dating the posting from its detail page — but only after the cheap
         // title/location filters pass, so a 10k-tenant sweep never pays a
         // detail-page request for noise.
-        if (provider.enrichDate && titleFilter(job.title) && locationFilter(job.location)) {
+        // Same (location, url) pair as the real filter below — a stricter gate
+        // here would deny enrichment to jobs the final check would have kept.
+        if (provider.enrichDate && titleFilter(job.title) && locationFilter(job.location, job.url)) {
           try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
           dateClass = classifyPostingDate(job, cutoff);
         }
