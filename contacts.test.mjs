@@ -221,6 +221,11 @@ eq('CJK contact UID: same input -> same UID across two calls',
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0],
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0]);
 ok('CJK contact UID = careerops-{8-hex}--globex-{8-hex}', /UID:careerops-[0-9a-f]{8}--globex-[0-9a-f]{8}/.test(contactToVcard(taro, { rev: REV })));
+// Both name AND company fully non-ASCII: each slug is '' so BOTH uidParts fall
+// back to the bare 8-hex raw hash -> the dual-bare UID shape.
+const taroKk = { name: '山田 太郎', company: '株式会社', type: 'hiring-manager', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
+ok('both-non-ASCII name+company UID is dual-bare careerops-{8-hex}--{8-hex}',
+  /^careerops-[0-9a-f]{8}--[0-9a-f]{8}$/.test(contactToVcard(taroKk, { rev: REV }).match(/UID:([^\r]+)/)[1]));
 ok('ASCII UID = careerops-jane-doe-{8-hex}--acme-{8-hex}', /^careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}$/.test(contactUid(jane)));
 
 // ============================================================================
