@@ -78,7 +78,9 @@ const { loadCheckpoint, checkpointCompatible } = mod;
 // loadCheckpoint: garbage and wrong-version files → null, never a throw.
 {
   const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
-  const dir = 'data/cache/.test-checkpoint';
+  // Anchored to ROOT, not CWD: run from anywhere else and a relative path would
+  // create — and then rmSync — a directory outside the project.
+  const dir = join(ROOT, 'data/cache/.test-checkpoint');
   mkdirSync(dir, { recursive: true });
   const p = `${dir}/cp.json`;
   writeFileSync(p, 'not json', 'utf-8');
@@ -90,6 +92,29 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   writeFileSync(p, JSON.stringify({ version: 1, cutoffMs: 5 }), 'utf-8');
   if (loadCheckpoint(p)?.cutoffMs === 5) pass('loadCheckpoint reads a valid checkpoint');
   else fail('valid checkpoint not read');
+
+  // A malformed `current` is worse than no checkpoint: resumeAt is consumed
+  // unchecked, so it rescans from zero and then writes NaN offsets forever.
+  for (const [label, current] of [
+    ['missing resumeAt', { name: 'workday', datasetLen: 10 }],
+    ['non-numeric resumeAt', { name: 'workday', resumeAt: 'x', datasetLen: 10 }],
+    ['negative resumeAt', { name: 'workday', resumeAt: -1, datasetLen: 10 }],
+    ['missing name', { resumeAt: 5, datasetLen: 10 }],
+  ]) {
+    writeFileSync(p, JSON.stringify({ version: 1, current }), 'utf-8');
+    if (loadCheckpoint(p) === null) pass(`loadCheckpoint rejects malformed current (${label})`);
+    else fail(`malformed current accepted (${label})`);
+  }
+
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884 } }), 'utf-8');
+  if (loadCheckpoint(p)?.current?.resumeAt === 500) pass('loadCheckpoint accepts a well-formed current');
+  else fail('well-formed current rejected');
+
+  // current: null is the legitimate "source finished" marker, not malformed.
+  writeFileSync(p, JSON.stringify({ version: 1, current: null }), 'utf-8');
+  if (loadCheckpoint(p)?.version === 1) pass('loadCheckpoint accepts current: null');
+  else fail('current: null rejected');
+
   rmSync(dir, { recursive: true, force: true });
 }
 

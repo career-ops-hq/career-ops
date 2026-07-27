@@ -70,10 +70,24 @@ export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;
   try {
     const cp = JSON.parse(readFileSync(file, 'utf-8'));
-    return cp?.version === 1 ? cp : null;
+    if (cp?.version !== 1) return null;
+    // A version tag alone isn't enough: `current` is consumed unchecked below
+    // (`entriesAll.slice(resumeAt)`), so a truncated or hand-edited record with
+    // a missing/non-numeric resumeAt would silently rescan from zero and then
+    // persist `startAt + resumeAt === NaN` into every later checkpoint — a state
+    // no subsequent resume can recover from. Reject the malformed record instead.
+    if (cp.current !== null && cp.current !== undefined && !validCheckpointCurrent(cp.current)) return null;
+    return cp;
   } catch {
     return null;
   }
+}
+
+function validCheckpointCurrent(cur) {
+  return typeof cur === 'object'
+    && typeof cur.name === 'string'
+    && Number.isInteger(cur.resumeAt) && cur.resumeAt >= 0
+    && Number.isInteger(cur.datasetLen) && cur.datasetLen >= 0;
 }
 
 // A checkpoint written under different scan settings must not be resumed —
@@ -87,11 +101,21 @@ export function checkpointCompatible(cp, opts) {
     && cp.includeUndated === opts.includeUndated;
 }
 
+// Never throws: this runs from parallelEach's `finally`, so an escaping error
+// (ENOSPC, EACCES, read-only volume) would reject the whole sweep and discard
+// every in-memory match from a multi-hour run — the checkpoint killing the work
+// it exists to protect. A failed write costs resumability, not the results.
 function writeCheckpoint(cp) {
-  mkdirSync(CACHE_DIR, { recursive: true });
-  const tmp = `${CHECKPOINT_PATH}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cp), 'utf-8');
-  renameSync(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    const tmp = `${CHECKPOINT_PATH}.tmp`;
+    writeFileSync(tmp, JSON.stringify(cp), 'utf-8');
+    renameSync(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint
+    return true;
+  } catch (err) {
+    console.error(`\n⚠ checkpoint write failed (${err.message}) — sweep continues, --resume unavailable`);
+    return false;
+  }
 }
 
 // Cheap content fingerprint of a source's company list. --resume relies on the
