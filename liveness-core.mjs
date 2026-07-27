@@ -5,9 +5,11 @@ const HARD_EXPIRED_PATTERNS = [
   // phrasing SPA ATSs (Phenom, e.g. careers.icf.com) inject on a filled req —
   // "the job you are trying to apply for has been filled" — so those pages
   // returned HTTP 200 with a generic Apply control and were classified active.
-  // Requires a job noun within 60 chars, and the negative lookahead rejects
-  // "has been filled out" (a candidate completing a form, not a closed req).
-  /\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?\bhas been filled\b(?!\s+out)/i,
+  // A job noun within 60 chars, then "has been filled" — but NOT when the thing
+  // filled is an application/form (the lookbehind) or "filled out" (the
+  // lookahead). Both guards avoid the worse error: reading a LIVE posting whose
+  // copy says "once the application form has been filled…" as expired.
+  /\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?(?<!\b(?:application|form)\s)has been filled\b(?!\s+out)/i,
   /this job has expired/i,
   /job posting has expired/i,
   /no longer accepting applications/i,

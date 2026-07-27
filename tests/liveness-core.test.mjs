@@ -47,3 +47,15 @@ classifyLiveness({
 }).result !== 'expired'
   ? pass('"job application form has been filled out" is NOT expired (form, not req)')
   : fail('false positive: "filled out" (a form) read as an expired req');
+
+// False-positive guard (no "out"): "application form has been filled" must NOT
+// read as expired — "job" satisfies the noun but the thing filled is the form,
+// not the req. Reading a live posting as expired is the worse error.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careers.example.com/job/123',
+  bodyText: 'Please confirm the job application form has been filled and accurate before submitting. Apply',
+  applyControls: ['Apply'],
+}).result !== 'expired'
+  ? pass('"job application form has been filled" (no "out") is NOT expired')
+  : fail('false positive: "application form has been filled" read as an expired req');
