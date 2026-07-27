@@ -613,7 +613,10 @@ async function main() {
   const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
   const date = new Date().toISOString().slice(0, 10);
 
-  const newOffers = checkpoint ? checkpoint.offers : [];
+  // Same defensive default as completedSources/counters below: a version-1
+  // checkpoint that lost its offers array would otherwise set this to undefined
+  // and throw on the next line, instead of degrading to an empty resume.
+  const newOffers = checkpoint?.offers || [];
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   for (const o of newOffers) seenUrls.add(normalizeUrlForDedup(o.url));
