@@ -2092,13 +2092,19 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
 const upskillModeDoc = readFile('modes/upskill.md');
 
 // The phase-2 "coming later" placeholder must be gone — the plan ships now.
+// Reject ANY pending-wording variant about the learning plan (coming later,
+// pending, coming soon, TODO, ships in phase 2), not just one narrow phrasing,
+// so a regressing edit can't reintroduce a "not yet" placeholder.
+const upskillLearningPlanPending =
+  /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2)/i.test(upskillModeDoc) ||
+  /ships in phase 2/i.test(upskillModeDoc);
 if (
-  !/learning plan (?:is still|ships in) phase 2/i.test(upskillModeDoc) &&
+  !upskillLearningPlanPending &&
   upskillModeDoc.includes('## Learning Plan')
 ) {
-  pass('upskill: learning plan ships (no "phase 2 pending" placeholder; report template has a Learning Plan section)');
+  pass('upskill: learning plan ships (no "phase 2 pending"/"coming later"/TODO placeholder; report template has a Learning Plan section)');
 } else {
-  fail('upskill: learning plan still marked phase-2-pending or missing the Learning Plan template section');
+  fail('upskill: learning plan still marked pending (phase-2/coming-later/TODO variant) or missing the Learning Plan template section');
 }
 
 // Rule 1 — search-result-or-nothing grounding + explicit skip on weak/absent search.
