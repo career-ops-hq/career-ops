@@ -1,8 +1,28 @@
 # Personal data (user fills these)
 cv.md
 data/applications.md
+data/applications.db
+data/follow-ups.md
+data/salary-observations.tsv
+data/status-log.tsv
+data/assessments.tsv
 data/pipeline.md
 data/scan-history.tsv
+data/scan-runs.tsv
+data/portal-health.tsv
+data/blacklist.md
+data/pdf-index.tsv
+data/agent-inbox.md
+data/active-interviews.md
+data/reply-candidates.json
+data/parser-output/**/*.json
+!data/parser-output/.gitkeep
+!data/parser-output/**/.gitkeep
+data/cache/ats-companies/
+# Received offers/contracts, promise notes, prep reports (PII — never commit)
+data/offers/*
+!data/offers/.gitkeep
+data/upskill/
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -16,28 +36,88 @@ batch/tracker-additions/**/*.tsv
 jds/*
 !jds/.gitkeep
 
+# Personal documents — never commit scans or copies of these (PII).
+# Catches common identity/credential filenames so they can't be staged by accident.
+*passport*
+*diploma*
+*简历*
+*学位*
+*成绩单*
+
+# Interview prep (accumulated STAR+R stories — user data)
+interview-prep/*
+!interview-prep/
+!interview-prep/.gitkeep
+# Session transcripts hold real interviewer names/companies — ignore content,
+# ship only the system-owned scaffold (README + .gitkeep). #1242
+!interview-prep/sessions/
+interview-prep/sessions/*
+!interview-prep/sessions/.gitkeep
+!interview-prep/sessions/README.md
+
+# Writing samples (user's personal files — never committed)
+writing-samples/*
+!writing-samples/README.md
+
 # User config and customization (never auto-updated)
 config/profile.yml
+config/cv-facts.json
+config/benchmarks.yml
 portals.yml
 modes/_profile.md
+modes/_custom.md
 .update-dismissed
 .update-lock
+.manifesto-noted
+
+# Plugin layer — opt-in toggles + user-installed plugins + integrity lock (never auto-updated)
+config/plugins.yml
+plugins.local/
+plugins.lock
 
 # Secrets (never commit — use .env.example as template)
 .env
+# Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects
+# (e.g. web/ before it graduates to main). Never commit local env files or TS build caches.
+**/.env.local
+**/.env*.local
+**/*.tsbuildinfo
 
 # Generated
 .resolved-prompt-*
 node_modules/
 bun.lock
+# Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
+reports/*-RESERVED.md
+
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
+*.bak
+
+# OpenRouter runner — generated data (personal, never commit)
+data/model-blacklist.json
 
 # OS
 .DS_Store
 *.mov
 *.mp4
 
-# Claude Code local
+# CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
+.opencode/settings.local.json
+.opencode/memory/
 career-dashboard
+career-dashboard.exe
+package-lock.json
+!web/package-lock.json
+
+# Playwright MCP server run artifacts (ephemeral, machine-local)
+.playwright-mcp/
+
+# Planning (local scratchpad)
+plan/
+
+# Web
+.career-ops-web/logo-cache/
+# Claude Code local
 package-lock.json
