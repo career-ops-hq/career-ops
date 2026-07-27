@@ -123,7 +123,7 @@ claude   # افتح واجهة Claude Code في هذا المجلد
 ### الخيار أ — استخدام Gemini CLI الأصلي (موصى به)
 
 ```bash
-# 1. تثبيت Gemini CLI (يتطلب Node.js 20+)
+# 1. تثبيت Gemini CLI
 npm install -g @google/gemini-cli
 #    تتم المصادقة عبر حساب جوجل (مجانًا) عند أول تشغيل
 
