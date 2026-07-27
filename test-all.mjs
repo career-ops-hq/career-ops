@@ -2084,6 +2084,103 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
 }
 
+// ── upskill Learning Plan trust model (#1740, phase 2b) ──
+// The learning plan (Step 3) layers web-searched resources onto the phase-1 gap
+// heatmap. Its eight trust-model promises are load-bearing: each is frozen here
+// so a future edit to modes/upskill.md can't silently drop a guarantee. Match a
+// stable keyword phrase per rule, not whole paragraphs.
+const upskillModeDoc = readFile('modes/upskill.md');
+
+// The phase-2 "coming later" placeholder must be gone — the plan ships now.
+if (
+  !/learning plan (?:is still|ships in) phase 2/i.test(upskillModeDoc) &&
+  upskillModeDoc.includes('## Learning Plan')
+) {
+  pass('upskill: learning plan ships (no "phase 2 pending" placeholder; report template has a Learning Plan section)');
+} else {
+  fail('upskill: learning plan still marked phase-2-pending or missing the Learning Plan template section');
+}
+
+// Rule 1 — search-result-or-nothing grounding + explicit skip on weak/absent search.
+if (
+  upskillModeDoc.includes('Search-result-or-nothing') &&
+  upskillModeDoc.includes('skip the Learning Plan section')
+) {
+  pass('upskill trust rule 1: resources must come from a web-search result, else skip the section explicitly');
+} else {
+  fail('upskill trust rule 1 (search-result-or-nothing grounding) missing');
+}
+
+// Rule 2 — deterministic degradation: heatmap + Suggested Order still ship without resources.
+if (
+  upskillModeDoc.includes('Deterministic degradation') &&
+  upskillModeDoc.includes('heatmap + Suggested Order still ship')
+) {
+  pass('upskill trust rule 2: deterministic degradation — heatmap + Suggested Order ship without the plan');
+} else {
+  fail('upskill trust rule 2 (deterministic degradation) missing');
+}
+
+// Rule 3 — ephemeral, non-versioned resources; only gap tiers stable across runs.
+if (upskillModeDoc.includes('regenerated fresh every run, never diffed')) {
+  pass('upskill trust rule 3: resources are ephemeral (regenerated fresh, never diffed across runs)');
+} else {
+  fail('upskill trust rule 3 (ephemeral / non-versioned resources) missing');
+}
+
+// Rule 4 — write-time URL liveness via the check-liveness pattern; dead links excluded.
+if (
+  upskillModeDoc.includes('Write-time URL liveness') &&
+  upskillModeDoc.includes('liveness-core.mjs') &&
+  upskillModeDoc.includes('dead links never enter the report')
+) {
+  pass('upskill trust rule 4: write-time URL liveness via check-liveness pattern; dead links excluded');
+} else {
+  fail('upskill trust rule 4 (write-time URL liveness) missing');
+}
+
+// Rule 5 — hard search budget: 2/gap, ~12/run, include the current year.
+if (
+  upskillModeDoc.includes('Max 2 searches per gap') &&
+  upskillModeDoc.includes('~12 searches per aggregate run') &&
+  upskillModeDoc.includes('current year in queries')
+) {
+  pass('upskill trust rule 5: hard search budget (max 2/gap, ~12/run, current year in queries)');
+} else {
+  fail('upskill trust rule 5 (hard search budget) missing');
+}
+
+// Rule 6 — free-first with explicit failure; never silently substitute a paid resource.
+if (
+  upskillModeDoc.includes('Free-first with explicit failure') &&
+  upskillModeDoc.includes('never silently substitutes a paid resource')
+) {
+  pass('upskill trust rule 6: free-first with explicit failure (no silent paid substitution)');
+} else {
+  fail('upskill trust rule 6 (free-first with explicit failure) missing');
+}
+
+// Rule 7 — effort estimates only from the resource's own stated length.
+if (
+  upskillModeDoc.includes("resource's own stated length") &&
+  upskillModeDoc.includes('never invented')
+) {
+  pass('upskill trust rule 7: effort estimates only from the resource\'s own stated length, never invented');
+} else {
+  fail('upskill trust rule 7 (effort from stated length only) missing');
+}
+
+// Rule 8 — scope boundary: link to /career-ops training; never run training's scoring.
+if (
+  upskillModeDoc.includes('/career-ops training {name}') &&
+  upskillModeDoc.includes('6-dimension scoring') &&
+  upskillModeDoc.includes('`upskill` finds; `training` judges')
+) {
+  pass('upskill trust rule 8: scope boundary — links to /career-ops training, never runs training scoring');
+} else {
+  fail('upskill trust rule 8 (scope boundary: upskill finds, training judges) missing');
+}
+
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
 console.log('\n9. Local parser contract');
