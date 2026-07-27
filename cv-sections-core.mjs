@@ -1,12 +1,10 @@
 // Shared optional-section stripping for the CV builders (build-cv-html.mjs,
 // build-cv-latex.mjs).
 //
-// Projects and education are the genuinely optional CV sections: a candidate's
-// projects are often already covered under Work Experience, and not every
-// candidate has a degree. The templates wrap both unconditionally, so a payload
-// with no entries renders a bare section header with nothing under it. The
-// builders' buildProjects()/buildEducation() correctly return '' — nothing
-// removes the surrounding wrapper, which is what this module does.
+// Projects, education, and certifications are optional CV sections: projects
+// may already be covered under Work Experience, and not every candidate has a
+// degree or certification. The templates wrap them unconditionally, so an
+// empty payload otherwise renders a bare section header.
 //
 // The section body is delimited by markers rather than parsed, so the boundary
 // pattern carries the whole correctness burden and is easy to get subtly wrong:
@@ -33,6 +31,7 @@ const PATTERNS = {
   html: {
     projects: new RegExp(String.raw`<!--\s+PROJECTS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     education: new RegExp(String.raw`<!--\s+EDUCATION\s+-->[\s\S]*?` + HTML_BOUNDARY),
+    certifications: new RegExp(String.raw`<!--\s+CERTIFICATIONS\s+-->[\s\S]*?` + HTML_BOUNDARY),
   },
   tex: {
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
@@ -40,7 +39,11 @@ const PATTERNS = {
   },
 };
 
-export const OPTIONAL_SECTIONS = ['projects', 'education'];
+export const OPTIONAL_SECTIONS = ['projects', 'education', 'certifications'];
+const OPTIONAL_SECTIONS_BY_FORMAT = {
+  html: OPTIONAL_SECTIONS,
+  tex: ['projects', 'education'],
+};
 
 export function isEmptySection(payload, section) {
   const entries = payload?.[section];
@@ -54,7 +57,7 @@ export function stripEmptySections(template, payload, format) {
   if (!patterns) throw new Error(`Unknown template format: ${format}`);
 
   let out = template;
-  for (const section of OPTIONAL_SECTIONS) {
+  for (const section of OPTIONAL_SECTIONS_BY_FORMAT[format]) {
     if (isEmptySection(payload, section)) {
       out = out.replace(patterns[section], '');
     }
