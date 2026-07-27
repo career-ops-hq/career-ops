@@ -15,6 +15,17 @@ Last full skim: _never_
 | **StepInX** | https://jobs.stepinx.com/ | General recruiting agency (crypto + iGaming + exec) | Small board (~10 roles), mixes eng with C-suite/BD/marketing. **No posting dates** - ask the recruiter. Filter to Crypto/Web3 + Remote + eng. On-site roles excluded per remote policy. |
 | **Agora4** | https://agora4.xyz/jobs | Web3 recruiting / talent firm (Agora Group) | Lower confidence. Live with anonymous #SOLANA #RUST #DEFI roles + comp, but site chrome is stale (© 2025), platform half-launched ("ACCESS_TALENT COMING_SOON"), and JD text has AI-gen artifacts (`[cite: N]` leaks). Re-verify freshness on each skim. |
 | **JobStash** | https://jobstash.xyz/jobs | Crypto-native job aggregator (not an agency) | The one aggregator worth a manual skim: date-stamped every listing (solves the freshness-gate), salary visible, investor/funding metadata, faceted filtering (`cl-smartcontracts`). NOT auto-scanned (own platform, no clean per-employer API). Employers are named, so it's a true discovery feed - any strong role can go through the normal pipeline. |
+| **X (Twitter) / X Hiring** | https://x.com/jobs | Social platform + verified-org jobs board. TWO value modes: (1) the structured Jobs board, (2) founders/companies tweeting "hiring a Solana eng, DM me" - the warm-lead gold that actually converts. | **LOGIN-GATED: cannot be wired into `scan.mjs`** (no public fetch, no free jobs API, authenticated scraping breaks ToS + is fragile). Discovery is manual: skim X search (queries below) + followed accounts, then **DM the poster directly** (best-fit for the warm/inbound strategy). Individual `x.com/i/jobs/{id}` links are NOT agent-fetchable - paste the JD text or a screenshot for triage (image-sourced postings are valid input). Verify-before-adding still applies. |
+
+## X (Twitter) discovery - search queries to skim
+
+X is the warm/inbound channel (your cold-apply advance rate is ~3%, 0/8 on Ashby - see `analyze-patterns.mjs`). Run these in X search sorted by **Latest**; skim for remote-compatible Solana/Rust/SC roles, then **DM the poster** or paste the link/screenshot here for evaluation:
+
+- `("solana" OR "anchor" OR "SVM") ("hiring" OR "we're hiring" OR "join us") (engineer OR developer) -is:retweet`
+- `("smart contract" OR "rust") ("hiring" OR "DM me") (solana OR web3) -is:retweet`
+- `("solana engineer" OR "anchor developer") (remote OR contract)`
+
+Follow for hiring signal: Solana-ecosystem job accounts, VC talent accounts, and the founder / eng-lead handles of your target companies - they post roles on X *before* the ATS, and a reply/DM lands warmer than a cold form.
 
 ## Not added (for the record)
 
