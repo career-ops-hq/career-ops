@@ -580,3 +580,21 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 		t.Fatalf("expected cursor to be within [0, %d], got %d", len(reloaded.filtered)-1, reloaded.cursor)
 	}
 }
+
+func TestPipelineTabsIncludeSpeculative(t *testing.T) {
+	found := false
+	for _, tab := range getPipelineTabs() {
+		if tab.filter == filterSpeculative {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pipeline tabs to include the speculative filter")
+	}
+}
+
+func TestStatusLabelSpeculative(t *testing.T) {
+	if got := statusLabel("speculative"); got != "Speculative" {
+		t.Fatalf("statusLabel(speculative) = %q, want Speculative", got)
+	}
+}

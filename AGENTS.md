@@ -257,6 +257,7 @@ Two separate axes:
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a ≤300-char message tailored to the contact type (recruiter / hiring manager / peer / interviewer) |
 | Wants a formal application email | `email` — draft-only subject, body, attachment checklist, and contact block from a report or JD; never sends, submits, or clicks anything |
+| Wants to create/pitch a role that doesn't exist yet at a target company | `gambit` — researches an evidenced unmet need, builds a role thesis, and drafts the pitch package; records the pursuit as `Speculative` and holds a stricter conviction bar than a normal application |
 | Asks for company research | `deep` — structured 6-axis research prompt (AI strategy, recent moves, engineering culture, likely challenges, competitors, candidate's angle) |
 | Preps for interview at specific company | `interview-prep` |
 | Wants a time-blocked prep plan for an upcoming interview | `interview/plan` |
@@ -382,6 +383,7 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 | State | When to use |
 |-------|-------------|
 | `Evaluated` | Report completed, pending decision |
+| `Speculative` | Create-a-role gambit pitch in flight (no posting yet) |
 | `Applied` | Application sent |
 | `Responded` | Company responded |
 | `Interview` | In interview process |

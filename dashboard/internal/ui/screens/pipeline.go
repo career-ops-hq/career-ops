@@ -124,14 +124,15 @@ const (
 
 // Filter modes
 const (
-	filterAll       = "all"
-	filterEvaluated = "evaluated"
-	filterApplied   = "applied"
-	filterInterview = "interview"
-	filterSkip      = "skip"
-	filterRejected  = "rejected"
-	filterDiscarded = "discarded"
-	filterTop       = "top"
+	filterAll         = "all"
+	filterEvaluated   = "evaluated"
+	filterSpeculative = "speculative"
+	filterApplied     = "applied"
+	filterInterview   = "interview"
+	filterSkip        = "skip"
+	filterRejected    = "rejected"
+	filterDiscarded   = "discarded"
+	filterTop         = "top"
 )
 
 type pipelineTab struct {
@@ -143,6 +144,7 @@ func getPipelineTabs() []pipelineTab {
 	return []pipelineTab{
 		{filterAll, i18n.Current.TabAll},
 		{filterEvaluated, i18n.Current.TabEvaluated},
+		{filterSpeculative, i18n.Current.TabSpeculative},
 		{filterApplied, i18n.Current.TabApplied},
 		{filterInterview, i18n.Current.TabInterview},
 		{filterTop, i18n.Current.TabTop},
@@ -195,6 +197,7 @@ type StatusPair struct {
 func getStatusPairs() []StatusPair {
 	return []StatusPair{
 		{i18n.Current.StatusEvaluated, "Evaluated"},
+		{i18n.Current.StatusSpeculative, "Speculative"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
 		{i18n.Current.StatusInterview, "Interview"},
@@ -207,7 +210,10 @@ func getStatusPairs() []StatusPair {
 }
 
 // statusGroupOrder defines display order for grouped view.
-var statusGroupOrder = []string{"hired", "interview", "offer", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
+// speculative sits just after evaluated: a gambit pitch is pre-application, so
+// it outranks nothing that has actually been sent, but it is live work and
+// belongs above skip/rejected/discarded.
+var statusGroupOrder = []string{"hired", "interview", "offer", "responded", "applied", "evaluated", "speculative", "skip", "rejected", "discarded"}
 
 // PipelineModel implements the career pipeline dashboard screen.
 type PipelineModel struct {
@@ -2035,14 +2041,15 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
-		"interview": m.theme.Green,
-		"offer":     m.theme.Green,
-		"applied":   m.theme.Sky,
-		"responded": m.theme.Blue,
-		"evaluated": m.theme.Text,
-		"skip":      m.theme.Red,
-		"rejected":  m.theme.Subtext,
-		"discarded": m.theme.Subtext,
+		"interview":   m.theme.Green,
+		"offer":       m.theme.Green,
+		"applied":     m.theme.Sky,
+		"responded":   m.theme.Blue,
+		"evaluated":   m.theme.Text,
+		"speculative": m.theme.Mauve,
+		"skip":        m.theme.Red,
+		"rejected":    m.theme.Subtext,
+		"discarded":   m.theme.Subtext,
 	}
 }
 

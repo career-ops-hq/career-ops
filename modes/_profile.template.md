@@ -43,6 +43,24 @@
 | Forward Deployed Engineer | Fast delivery, client-facing, prototype to prod | cv.md + article-digest.md |
 | AI Transformation Lead | Change management, team enablement, adoption | cv.md + article-digest.md |
 
+## Your Natural Level & Company-Stage Calibration
+
+<!-- Read by the `gambit` (create-a-role) mode and useful for evaluations.
+     The same title means different things at a 20-person seed startup vs a
+     5,000-person public company. Fill in YOUR natural level per stage so the
+     system pitches you at the right altitude. Replace the example rows. -->
+
+| Company stage | Title that fits you | Why (your evidence) |
+|---------------|---------------------|---------------------|
+| Seed / Series A | [e.g. Founding <Function> / Head of X] | Small team -- you'd stand up the function 0->1 |
+| Series B-C | [e.g. Director / Senior Staff] | Function exists -- you'd scale and systematize it |
+| Series D+ / public | [e.g. Senior / Staff IC or Sr. Manager] | Established org -- calibrate to their leveling |
+
+**Rule of thumb:** the earlier the stage, the more "build it from nothing" your
+pitch should be; the later the stage, the more it should map to their existing
+ladder. When unsure, pitch one level *below* your ceiling -- easier to negotiate
+up than to recover from an over-reach.
+
 ## Your Exit Narrative
 
 <!-- Replace with YOUR story. This frames everything. -->
@@ -100,3 +118,29 @@ If you have a live demo/dashboard (check profile.yml), offer access in applicati
 **In evaluations (scoring):**
 - Remote dimension for hybrid outside your country: score **3.0** (not 1.0)
 - Only score 1.0 if JD says "must be on-site 4-5 days/week, no exceptions"
+
+## Gambit Playbook
+
+<!-- Read by the `gambit` (create-a-role) mode: pitching a role that doesn't
+     exist yet at a company that needs it. This is how YOU run that play.
+     Replace every [placeholder] with your own specifics. -->
+
+**Your gambit superpower:** [What can you credibly claim to have *built* -- not
+just done? The gambit pitch is *"I'll build the function you don't have yet,"*
+which only lands if you've stood up that function before. State yours, e.g.
+"two-time 0->1 <function> builder with an exit."]
+
+**Strongest gambit archetypes** (highest hit-rate for create-a-role):
+- **[Archetype 1]** -- [the kind of company gap it targets]. Proof: [your evidence].
+- **[Archetype 2]** -- [company gap]. Proof: [your evidence].
+- **[Archetype 3]** -- [company gap]. Proof: [your evidence].
+
+**Gambit conviction bar (stricter than a normal application):** only recommend
+SEND when the unmet need is *evidenced* (cited, not invented), the fit is strong
+(>=4.0), AND a specific exec who could create the role is reachable. A speculative
+cold pitch is the highest-annoyance-risk move in the system -- hold it to the
+highest bar.
+
+**Who you pitch:** the founder/CEO at seed-Series A; the owning exec (VP / C-level
+of the relevant function) at Series B+. Never a recruiter -- recruiters fill
+posted reqs, they do not invent them.

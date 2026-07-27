@@ -13,6 +13,12 @@ states:
     description: Offer evaluated with report, pending decision
     dashboard_group: evaluated
 
+  - id: speculative
+    label: Speculative
+    aliases: [spec, gambit]
+    description: Create-a-role pitch in flight (no posting); pre-response
+    dashboard_group: speculative
+
   - id: applied
     label: Applied
     aliases: [aplicado, enviada, aplicada, sent]

@@ -17,14 +17,15 @@ type Catalog struct {
 	LoadingPreview string
 
 	// Tabs & filters
-	TabAll       string
-	TabEvaluated string
-	TabApplied   string
-	TabInterview string
-	TabTop       string
-	TabSkip      string
-	TabRejected  string
-	TabDiscarded string
+	TabAll         string
+	TabEvaluated   string
+	TabSpeculative string
+	TabApplied     string
+	TabInterview   string
+	TabTop         string
+	TabSkip        string
+	TabRejected    string
+	TabDiscarded   string
 
 	// Table column headers
 	ColFit      string
@@ -64,15 +65,16 @@ type Catalog struct {
 	TimeDaysAgo   string
 
 	// Status display names
-	StatusEvaluated string
-	StatusApplied   string
-	StatusResponded string
-	StatusInterview string
-	StatusOffer     string
-	StatusRejected  string
-	StatusDiscarded string
-	StatusSkip      string
-	StatusHired     string
+	StatusEvaluated   string
+	StatusSpeculative string
+	StatusApplied     string
+	StatusResponded   string
+	StatusInterview   string
+	StatusOffer       string
+	StatusRejected    string
+	StatusDiscarded   string
+	StatusSkip        string
+	StatusHired       string
 
 	// Additional UI strings
 	NoData        string
@@ -183,6 +185,8 @@ func (c *Catalog) StatusLabel(norm string) string {
 		return c.StatusApplied
 	case "evaluated":
 		return c.StatusEvaluated
+	case "speculative":
+		return c.StatusSpeculative
 	case "skip":
 		return c.StatusSkip
 	case "rejected":
@@ -227,14 +231,15 @@ var En = Catalog{
 	LoadingPreview: "Loading preview...",
 
 	// Tabs & filters
-	TabAll:       "ALL",
-	TabEvaluated: "EVALUATED",
-	TabApplied:   "APPLIED",
-	TabInterview: "INTERVIEW",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "SKIP",
-	TabRejected:  "REJECTED",
-	TabDiscarded: "DISCARDED",
+	TabAll:         "ALL",
+	TabEvaluated:   "EVALUATED",
+	TabSpeculative: "SPEC",
+	TabApplied:     "APPLIED",
+	TabInterview:   "INTERVIEW",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "SKIP",
+	TabRejected:    "REJECTED",
+	TabDiscarded:   "DISCARDED",
 
 	// Table column headers
 	ColFit:      "FIT",
@@ -274,15 +279,16 @@ var En = Catalog{
 	TimeDaysAgo:   "%dd ago",
 
 	// Status display names
-	StatusEvaluated: "Evaluated",
-	StatusApplied:   "Applied",
-	StatusResponded: "Responded",
-	StatusInterview: "Interview",
-	StatusOffer:     "Offer",
-	StatusRejected:  "Rejected",
-	StatusDiscarded: "Discarded",
-	StatusSkip:      "SKIP",
-	StatusHired:     "Hired",
+	StatusEvaluated:   "Evaluated",
+	StatusSpeculative: "Speculative",
+	StatusApplied:     "Applied",
+	StatusResponded:   "Responded",
+	StatusInterview:   "Interview",
+	StatusOffer:       "Offer",
+	StatusRejected:    "Rejected",
+	StatusDiscarded:   "Discarded",
+	StatusSkip:        "SKIP",
+	StatusHired:       "Hired",
 
 	// Additional UI strings
 	NoData:        "No data",
@@ -354,14 +360,15 @@ var Tr = Catalog{
 	LoadingPreview: "Önizleme yükleniyor...",
 
 	// Tabs & filters
-	TabAll:       "TÜMÜ",
-	TabEvaluated: "DEĞERLENDİRİLDİ",
-	TabApplied:   "BAŞVURULDU",
-	TabInterview: "MÜLAKAT",
-	TabTop:       "EN İYİ ≥4",
-	TabSkip:      "UYGUN DEĞİL",
-	TabRejected:  "REDDEDİLDİ",
-	TabDiscarded: "İPTAL",
+	TabAll:         "TÜMÜ",
+	TabEvaluated:   "DEĞERLENDİRİLDİ",
+	TabSpeculative: "SPEKÜLATİF",
+	TabApplied:     "BAŞVURULDU",
+	TabInterview:   "MÜLAKAT",
+	TabTop:         "EN İYİ ≥4",
+	TabSkip:        "UYGUN DEĞİL",
+	TabRejected:    "REDDEDİLDİ",
+	TabDiscarded:   "İPTAL",
 
 	// Table column headers
 	ColFit:      "UYUM",
@@ -401,15 +408,16 @@ var Tr = Catalog{
 	TimeDaysAgo:   "%d gün önce",
 
 	// Status display names
-	StatusEvaluated: "Değerlendirildi",
-	StatusApplied:   "Başvuruldu",
-	StatusResponded: "Yanıt Verildi",
-	StatusInterview: "Mülakat",
-	StatusOffer:     "Teklif",
-	StatusRejected:  "Reddedildi",
-	StatusDiscarded: "İptal Edildi",
-	StatusSkip:      "Uygun Değil",
-	StatusHired:     "İşe Alındı",
+	StatusEvaluated:   "Değerlendirildi",
+	StatusSpeculative: "Spekülatif",
+	StatusApplied:     "Başvuruldu",
+	StatusResponded:   "Yanıt Verildi",
+	StatusInterview:   "Mülakat",
+	StatusOffer:       "Teklif",
+	StatusRejected:    "Reddedildi",
+	StatusDiscarded:   "İptal Edildi",
+	StatusSkip:        "Uygun Değil",
+	StatusHired:       "İşe Alındı",
 
 	// Additional UI strings
 	NoData:        "Veri yok",
@@ -481,14 +489,15 @@ var Es = Catalog{
 	LoadingPreview: "Cargando vista previa...",
 
 	// Tabs & filters
-	TabAll:       "TODAS",
-	TabEvaluated: "EVALUADAS",
-	TabApplied:   "APLICADAS",
-	TabInterview: "ENTREVISTA",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "OMITIR",
-	TabRejected:  "RECHAZADAS",
-	TabDiscarded: "DESCARTADAS",
+	TabAll:         "TODAS",
+	TabEvaluated:   "EVALUADAS",
+	TabSpeculative: "ESPECULATIVAS",
+	TabApplied:     "APLICADAS",
+	TabInterview:   "ENTREVISTA",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "OMITIR",
+	TabRejected:    "RECHAZADAS",
+	TabDiscarded:   "DESCARTADAS",
 
 	// Table column headers
 	ColFit:      "AJUSTE",
@@ -528,15 +537,16 @@ var Es = Catalog{
 	TimeDaysAgo:   "hace %dd",
 
 	// Status display names
-	StatusEvaluated: "Evaluada",
-	StatusApplied:   "Aplicada",
-	StatusResponded: "Respondida",
-	StatusInterview: "Entrevista",
-	StatusOffer:     "Oferta",
-	StatusRejected:  "Rechazada",
-	StatusDiscarded: "Descartada",
-	StatusSkip:      "OMITIR",
-	StatusHired:     "Contratada",
+	StatusEvaluated:   "Evaluada",
+	StatusSpeculative: "Especulativa",
+	StatusApplied:     "Aplicada",
+	StatusResponded:   "Respondida",
+	StatusInterview:   "Entrevista",
+	StatusOffer:       "Oferta",
+	StatusRejected:    "Rechazada",
+	StatusDiscarded:   "Descartada",
+	StatusSkip:        "OMITIR",
+	StatusHired:       "Contratada",
 
 	// Additional UI strings
 	NoData:        "Sin datos",

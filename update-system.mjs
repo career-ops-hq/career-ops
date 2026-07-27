@@ -74,6 +74,7 @@ const SYSTEM_PATHS = [
   'modes/auto-pipeline.md',
   'modes/contacto.md',
   'modes/deep.md',
+  'modes/gambit.md',
   'modes/ofertas.md',
   'modes/pipeline.md',
   'modes/project.md',

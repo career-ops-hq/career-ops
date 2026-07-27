@@ -240,6 +240,20 @@ func TestParseApplicationsResolvesTrackerRelativeReportLinks(t *testing.T) {
 	}
 }
 
+func TestNormalizeStatusSpeculative(t *testing.T) {
+	cases := map[string]string{
+		"Speculative": "speculative",
+		"speculative": "speculative",
+		"gambit":      "speculative",
+		"spec":        "speculative",
+	}
+	for in, want := range cases {
+		if got := NormalizeStatus(in); got != want {
+			t.Fatalf("NormalizeStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // writeTracker writes applications.md under data/ and returns the temp root and
 // the tracker path.
 func writeTracker(t *testing.T, body string) (string, string) {
@@ -445,5 +459,11 @@ func TestNormalizeStatus(t *testing.T) {
 				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStatusPrioritySpeculativeBeatsTerminal(t *testing.T) {
+	if StatusPriority("Speculative") >= StatusPriority("skip") {
+		t.Fatalf("Speculative should sort ahead of skip/rejected/discarded")
 	}
 }

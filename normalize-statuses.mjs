@@ -66,7 +66,7 @@ function normalizeStatus(raw) {
 
   // Already canonical (English, per states.yml) — just fix casing/bold
   const canonical = [
-    'Evaluated', 'Applied', 'Responded', 'Interview',
+    'Evaluated', 'Speculative', 'Applied', 'Responded', 'Interview',
     'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP',
   ];
   for (const c of canonical) {
@@ -82,6 +82,7 @@ function normalizeStatus(raw) {
   if (['contratado', 'contratada', 'hired', 'accepted', 'accept'].includes(lower)) return { status: 'Hired' };
   if (['cerrada', 'descartada'].includes(lower)) return { status: 'Discarded' };
   if (['no aplicar', 'no_aplicar', 'skip'].includes(lower)) return { status: 'SKIP' };
+  if (['speculative', 'spec', 'gambit'].includes(lower)) return { status: 'Speculative' };
 
   // Unknown — flag it
   return { status: null, unknown: true };

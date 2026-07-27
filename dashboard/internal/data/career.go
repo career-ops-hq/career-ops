@@ -522,6 +522,8 @@ func NormalizeStatus(raw string) string {
 	case strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
 		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi"):
 		return "discarded"
+	case strings.Contains(s, "speculative") || s == "spec" || s == "gambit":
+		return "speculative"
 	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "monitor" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi"):
 		return "evaluated"
 	default:
@@ -879,6 +881,9 @@ func StatusPriority(status string) int {
 	case "applied":
 		return 3
 	case "evaluated":
+		return 4
+	// tie with "evaluated": speculative rows sort in the same band
+	case "speculative":
 		return 4
 	case "skip":
 		return 5
