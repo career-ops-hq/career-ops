@@ -346,8 +346,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-4-8" ;;
-    standard|*) echo "claude-sonnet-4-6" ;;
+    premium) echo "claude-opus-5" ;;
+    standard|*) echo "claude-sonnet-5" ;;
   esac
 }
 
