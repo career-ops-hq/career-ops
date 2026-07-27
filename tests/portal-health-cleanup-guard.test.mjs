@@ -69,12 +69,18 @@ try {
   }
 
   // 5. The guard's read-modify-write must share the SAME lock appendPortalHealth()
-  //    takes (pipeline-lock.mjs, keyed by the file path) — proven here by holding
-  //    that exact lock manually and confirming the guard genuinely blocks on it
-  //    (times out) rather than racing straight through to a read/write.
+  //    takes (portal-health-lock.mjs, keyed by the file path) — proven here by
+  //    holding that exact lock manually and confirming the guard genuinely
+  //    blocks on it (times out) rather than racing straight through to a
+  //    read/write. The env overrides keep this assertion in the milliseconds
+  //    range instead of waiting out the lock's real default timeout.
   {
     const p = join(dir, 'locked.tsv');
     writeFileSync(p, HEADER + '2026-01-01\t' + marker + '\treachable\n', 'utf-8');
+    const prevTimeout = process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_TIMEOUT_MS;
+    const prevRetry = process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_RETRY_MS;
+    process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_TIMEOUT_MS = '200';
+    process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_RETRY_MS = '20';
     const held = await acquirePortalHealthLock(p);
     try {
       await applyScriptDirGuard({ path: p, existedBefore: false, marker });
@@ -84,6 +90,10 @@ try {
       else fail(`lock sharing: expected LockTimeoutError, got: ${e?.constructor?.name}: ${e?.message}`);
     } finally {
       held.release();
+      if (prevTimeout === undefined) delete process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_TIMEOUT_MS;
+      else process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_TIMEOUT_MS = prevTimeout;
+      if (prevRetry === undefined) delete process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_RETRY_MS;
+      else process.env.CAREER_OPS_PORTAL_HEALTH_LOCK_RETRY_MS = prevRetry;
     }
   }
 } finally {
