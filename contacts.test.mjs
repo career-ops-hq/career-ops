@@ -6,8 +6,9 @@
  * - vCard escaping (backslash-first order, semicolon, comma, newline)
  * - 75-octet byte-counted line folding (ASCII, umlaut, CJK — never splitting
  *   a multibyte UTF-8 sequence)
- * - UID slug determinism + 8-hex hash fallback for empty (non-ASCII) slugs,
- *   caller-id FN variant, optional-field omission, duplicate last-wins export
+ * - UID determinism: each part is {slug}-{8-hex raw-value hash} (bare hash when
+ *   the slug is empty/non-ASCII), collision-resistant even for lossy-equal slugs
+ *   (José/Josè); caller-id FN variant, optional-field omission, dup last-wins
  * - CLI behavior (JSON/--summary/--vcf/--caller-id, empty store, path guard)
  *
  * Expected vCard strings are built in code on purpose — a committed .vcf
@@ -135,7 +136,7 @@ const dupPair = parseContacts([
 ].join('\n'));
 eq('duplicate pair: both rows kept in JSON', dupPair.contacts.length, 2);
 eq('duplicate pair: one quality.duplicates entry', dupPair.quality.duplicates,
-  [{ uid: 'careerops-jane-doe--acme', name: 'Jane Doe', company: 'Acme', count: 2 }]);
+  [{ uid: 'careerops-jane-doe-cac7bbb6--acme-ed099798', name: 'Jane Doe', company: 'Acme', count: 2 }]);
 
 // ============================================================================
 // 4. escapeVcard — backslash first, then ; , then newline
@@ -197,23 +198,30 @@ eq('leading/trailing dashes trimmed', slug('--Acme  Inc.--'), 'acme-inc');
 eq('slug is deterministic', slug('Jane Doe'), slug('Jane Doe'));
 
 const jane = { name: 'Jane Doe', company: 'Acme', type: 'recruiter', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
-ok('UID = careerops-{slug(name)}--{slug(company)}', contactToVcard(jane, { rev: REV }).includes('UID:careerops-jane-doe--acme'));
+ok('UID = careerops-{uidPart(name)}--{uidPart(company)}', /UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}\r\n/.test(contactToVcard(jane, { rev: REV })));
 eq('same contact -> identical card under pinned REV', contactToVcard(jane, { rev: REV }), contactToVcard(jane, { rev: REV }));
 
-// Hash fallback: a fully non-ASCII value slugs to '' — an empty UID part would
-// collide every same-company CJK contact. uidPart substitutes a deterministic
-// 8-hex sha1 of the raw value instead.
-eq('uidPart keeps the pretty ASCII slug', uidPart('Jane Doe'), 'jane-doe');
-ok('uidPart CJK fallback is 8 hex chars', /^[0-9a-f]{8}$/.test(uidPart('山田 太郎')));
-eq('uidPart CJK fallback is deterministic', uidPart('山田 太郎'), uidPart('山田 太郎'));
+// Each UID part is {slug}-{8-hex sha1 of the raw value}, or the bare 8-hex hash
+// when the slug is empty (a fully non-ASCII value slugs to ''). The raw-value
+// hash — not the lossy slug — is what keeps distinct inputs distinct.
+ok('uidPart = pretty ASCII slug + raw-value hash', /^jane-doe-[0-9a-f]{8}$/.test(uidPart('Jane Doe')));
+ok('uidPart CJK part is the bare 8 hex chars', /^[0-9a-f]{8}$/.test(uidPart('山田 太郎')));
+eq('uidPart is deterministic', uidPart('山田 太郎'), uidPart('山田 太郎'));
 ok('different CJK names at the same company do NOT collide',
   contactUid({ name: '山田 太郎', company: 'Globex' }) !== contactUid({ name: '佐藤 花子', company: 'Globex' }));
+// Lossy-slug collision guard: "José" and "Josè" both slug to "jos" (the accented
+// char drops out), but the raw hash keeps their UID parts — and full contact
+// UIDs — distinct.
+eq('distinct accented names slug identically', slug('José'), slug('Josè'));
+ok('lossy-equal slugs get distinct uidParts', uidPart('José') !== uidPart('Josè'));
+ok('distinct raw names that slug the same -> different contact UIDs',
+  contactUid({ name: 'José', company: 'Acme' }) !== contactUid({ name: 'Josè', company: 'Acme' }));
 const taro = { name: '山田 太郎', company: 'Globex', type: 'hiring-manager', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
 eq('CJK contact UID: same input -> same UID across two calls',
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0],
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0]);
-ok('CJK contact UID = careerops-{8-hex}--globex', /UID:careerops-[0-9a-f]{8}--globex/.test(contactToVcard(taro, { rev: REV })));
-ok('ASCII UID path unchanged by the fallback', contactUid(jane) === 'careerops-jane-doe--acme');
+ok('CJK contact UID = careerops-{8-hex}--globex-{8-hex}', /UID:careerops-[0-9a-f]{8}--globex-[0-9a-f]{8}/.test(contactToVcard(taro, { rev: REV })));
+ok('ASCII UID = careerops-jane-doe-{8-hex}--acme-{8-hex}', /^careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}$/.test(contactUid(jane)));
 
 // ============================================================================
 // 7. contactToVcard — structure, expected string built in code (no fixture)
@@ -228,7 +236,7 @@ const fullContact = {
 const expectedCard = [
   'BEGIN:VCARD',
   'VERSION:3.0',
-  'UID:careerops-jane-doe--acme',
+  'UID:careerops-jane-doe-cac7bbb6--acme-ed099798',
   'FN:Jane Doe',
   'N:Doe;Jane;;;',
   'ORG:Acme',
@@ -331,7 +339,7 @@ try {
   ok('--vcf writes output/contacts.vcf by default', existsSync(vcfPath));
   const written = readFileSync(vcfPath, 'utf-8');
   ok('written vcf uses CRLF', written.includes('\r\n') && !/[^\r]\n/.test(written));
-  ok('written vcf carries UIDs', written.includes('UID:careerops-jane-doe--acme'));
+  ok('written vcf carries UIDs', /UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}/.test(written));
   ok('written vcf keeps the CJK name intact', written.includes('山田 太郎'));
   ok('default FN has no caller-id suffix', written.includes('FN:Jane Doe\r\n'));
 
@@ -349,15 +357,24 @@ try {
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
 
-  let escaped = false;
+  // Path-traversal guard: the escaped target must never be written. Clean up the
+  // stray file on BOTH paths (guard held -> nothing written; guard failed -> a
+  // real file leaked into tmpdir) so the test never pollutes the temp dir.
+  const escapePath = join(tmpdir(), 'contacts-escape.vcf');
   try {
-    execFileSync('node', [tmpScript, '--vcf', join(tmpdir(), 'contacts-escape.vcf')], { encoding: 'utf-8', timeout: 10000 });
-    escaped = true;
-  } catch (e) {
-    ok('--vcf refuses a path escaping the project dir (exit 1)', e.status === 1);
-    ok('refusal names the offending path', String(e.stderr).includes('Refusing to write'));
+    let escaped = false;
+    try {
+      execFileSync('node', [tmpScript, '--vcf', escapePath], { encoding: 'utf-8', timeout: 10000 });
+      escaped = true;
+    } catch (e) {
+      ok('--vcf refuses a path escaping the project dir (exit 1)', e.status === 1);
+      ok('refusal names the offending path', String(e.stderr).includes('Refusing to write'));
+    }
+    if (escaped) ok('--vcf refuses a path escaping the project dir (exit 1)', false);
+    ok('--vcf traversal guard leaves no file outside the project dir', !existsSync(escapePath));
+  } finally {
+    rmSync(escapePath, { force: true });
   }
-  if (escaped) ok('--vcf refuses a path escaping the project dir (exit 1)', false);
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });
 }

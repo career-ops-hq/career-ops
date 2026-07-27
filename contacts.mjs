@@ -21,11 +21,12 @@
  * vCard output is VERSION:3.0 (iOS/Android import compat; 4.0 support is
  * still patchy): CRLF line endings, 75-octet line folding counted in BYTES
  * that never splits a multibyte UTF-8 sequence, and a stable deterministic
- * UID (careerops-{slug(name)}--{slug(company)}; a slug that comes out empty —
- * e.g. a fully CJK name — falls back to an 8-hex sha1 of the raw value) so
- * re-importing UPDATES existing entries instead of duplicating them on
- * platforms that honor UID (iOS fallback: assign imports to a group, delete
- * the group to bulk-remove).
+ * UID (careerops-{uidPart(name)}--{uidPart(company)}, where each part is
+ * {slug}-{8-hex sha1 of the raw value}, or just the bare 8-hex hash when the
+ * slug is empty — e.g. a fully CJK name; the raw-value hash keeps values that
+ * slug identically, like "José"/"Josè", from colliding) so re-importing UPDATES
+ * existing entries instead of duplicating them on platforms that honor UID (iOS
+ * fallback: assign imports to a group, delete the group to bulk-remove).
  *
  * Malformed rows (too few cells, missing name/company, off-enum type) are
  * collected into a `quality` object — reported loudly, never dropped
@@ -146,19 +147,29 @@ export function slug(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-// UID building block: the pretty slug when it survives, else an 8-hex sha1 of
-// the raw value — slug('山田 太郎') is empty (every char is non-alphanumeric),
-// and an empty part would collide every same-company CJK contact into one
-// UID. The hash is deterministic, so the UID stays stable across exports.
+// UID building block: an 8-hex sha1 of the RAW value, prefixed with the pretty
+// slug when it survives. The hash — not the slug — is what makes the part
+// collision-resistant: slug() is lossy (accented chars drop out, e.g. "José"
+// and "Josè" both slug to "jos"; punctuation and spacing collapse, e.g. "Acme
+// Inc" and "Acme, Inc." both to "acme-inc"), so two distinct raw values can
+// share a slug and would otherwise collide into one UID. Hashing the raw value
+// keeps distinct inputs distinct while the readable slug prefix stays for
+// humans. slug('山田 太郎') is empty (every char is non-alphanumeric), so a
+// fully non-ASCII part is just the bare hash. The hash is deterministic, so the
+// UID stays stable across exports.
 export function uidPart(raw) {
-  return slug(raw) || createHash('sha1').update(String(raw ?? ''), 'utf8').digest('hex').slice(0, 8);
+  const s = slug(raw);
+  const h = createHash('sha1').update(String(raw ?? ''), 'utf8').digest('hex').slice(0, 8);
+  return s ? `${s}-${h}` : h;
 }
 
-// Join the name and company parts with a DOUBLE dash: slug() collapses every
-// non-alphanumeric run to a single dash and never emits `--`, so a double dash
-// is an unambiguous boundary. A single dash would be indistinguishable from an
-// internal slug dash, letting different pairs collide — e.g. ("Van Der Berg",
-// "Acme") and ("Van", "Der Berg Acme") would both slug to the same UID.
+// Join the name and company parts with a DOUBLE dash: each part is a slug (only
+// single dashes, never `--`) optionally suffixed with a hex hash (no dashes at
+// all), so a double dash is the one unambiguous name/company boundary. A single
+// dash would be indistinguishable from an internal slug dash, letting different
+// pairs collide — e.g. ("Van Der Berg", "Acme") and ("Van", "Der Berg Acme").
+// The per-part raw-value hash (see uidPart) is the collision guard; the `--`
+// join keeps the boundary readable and unambiguous on top of that.
 export function contactUid(c) {
   return `careerops-${uidPart(c.name)}--${uidPart(c.company)}`;
 }
@@ -236,7 +247,7 @@ function selfTest() {
   assert(quality.invalidTypes.length === 1 && quality.invalidTypes[0].type === 'recruter', 'off-enum type reported');
   assert(contacts.some(c => c.name === 'Typo Type'), 'off-enum type contact kept, not dropped');
   assert(contacts.find(c => c.name === 'Tab Note').notes === 'part one part two', 'tab inside notes folds back (tab -> space), tail cells never dropped');
-  assert(quality.duplicates.length === 1 && quality.duplicates[0].uid === 'careerops-jane-doe--acme' && quality.duplicates[0].count === 2,
+  assert(quality.duplicates.length === 1 && /^careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}$/.test(quality.duplicates[0].uid) && quality.duplicates[0].count === 2,
     'duplicate name+company reported in quality.duplicates');
 
   // escaping — backslash first, then ; , then newline
@@ -256,17 +267,28 @@ function selfTest() {
   assert(cjkLines.every(l => Buffer.byteLength(l, 'utf-8') <= 75), 'every folded CJK line <= 75 octets');
   assert(cjkLines.map((l, i) => (i ? l.slice(1) : l)).join('') === 'NOTE:' + 'あ'.repeat(40), 'CJK content survives folding intact');
 
-  // UID — stable, deterministic slugs with hash fallback for empty slugs
+  // UID — stable, deterministic {slug}-{8-hex raw hash} parts (bare hash when
+  // the slug is empty), joined with a double dash.
   assert(slug('Jörg Müller') === 'j-rg-m-ller', 'slug collapses non-alphanumerics');
   assert(slug('--Acme  Inc.--') === 'acme-inc', 'slug trims dashes');
-  assert(uidPart('Jane Doe') === 'jane-doe', 'uidPart keeps the pretty slug for ASCII');
-  assert(/^[0-9a-f]{8}$/.test(uidPart('山田 太郎')), 'empty slug (CJK) falls back to 8-hex sha1');
-  assert(uidPart('山田 太郎') === uidPart('山田 太郎'), 'hash fallback deterministic');
+  assert(/^jane-doe-[0-9a-f]{8}$/.test(uidPart('Jane Doe')), 'uidPart = pretty slug + raw-value hash for ASCII');
+  assert(/^[0-9a-f]{8}$/.test(uidPart('山田 太郎')), 'empty slug (CJK) is the bare 8-hex sha1');
+  const taroPart1 = uidPart('山田 太郎');
+  const taroPart2 = uidPart('山田 太郎');
+  assert(taroPart1 === taroPart2, 'uidPart deterministic across two calls');
   assert(uidPart('山田 太郎') !== uidPart('佐藤 花子'), 'different CJK names never collide');
+  // Lossy-slug collision guard: distinct accented names that slug identically
+  // ("José" and "Josè" both -> "jos", since slug drops the accented char) must
+  // still get DIFFERENT UIDs via the raw-value hash — the point of hashing the
+  // raw, not the slug.
+  assert(slug('José') === slug('Josè'), 'distinct accented names slug identically');
+  assert(uidPart('José') !== uidPart('Josè'), 'lossy-equal slugs still get distinct UID parts');
+  assert(contactUid({ name: 'José', company: 'Acme' }) !== contactUid({ name: 'Josè', company: 'Acme' }),
+    'distinct raw names that slug the same produce different contact UIDs');
   const cjkCard = contactToVcard(contacts[1], { rev: '2026-07-09T00:00:00.000Z' });
-  assert(new RegExp(`UID:careerops-[0-9a-f]{8}--globex\r\n`).test(cjkCard), 'CJK contact UID uses the hash fallback for the name part');
+  assert(/UID:careerops-[0-9a-f]{8}--globex-[0-9a-f]{8}\r\n/.test(cjkCard), 'CJK contact UID: bare hash name part, slug+hash company part');
   const card = contactToVcard(contacts[0], { rev: '2026-07-09T00:00:00.000Z' });
-  assert(card.includes('UID:careerops-jane-doe--acme'), 'UID = careerops-{slug(name)}--{slug(company)}');
+  assert(/UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}\r\n/.test(card), 'UID = careerops-{uidPart(name)}--{uidPart(company)}');
   assert(card === contactToVcard(contacts[0], { rev: '2026-07-09T00:00:00.000Z' }), 'card deterministic under pinned REV');
   assert(card.includes('FN:Jane Doe\r\n'), 'default FN is the plain name');
   assert(card.includes('N:Doe;Jane;;;'), 'N best-effort Last;First split');
