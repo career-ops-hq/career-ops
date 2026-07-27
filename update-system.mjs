@@ -261,6 +261,7 @@ const SYSTEM_PATHS = [
   'CHANGELOG.md',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTORS.md',
+  '.all-contributorsrc',
   'GOVERNANCE.md',
   'LEGAL_DISCLAIMER.md',
   'SECURITY.md',

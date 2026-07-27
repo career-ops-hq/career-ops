@@ -466,6 +466,10 @@ See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software i
   <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
 </a>
 
+Every person who has shipped code, docs, translations or tests is listed in
+[CONTRIBUTORS.md](CONTRIBUTORS.md) — including non-code contributions, which
+the graph above cannot show.
+
 Got hired using career-ops? [Share your story!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
 
 ## License & Trademark
