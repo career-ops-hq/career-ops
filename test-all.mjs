@@ -5724,7 +5724,7 @@ try {
 // application states from fuzzy-only deletion.
 console.log('\n🧪 Testing shared role matcher and dedup-tracker safety...');
 try {
-  const { roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
+  const { roleFuzzyMatch, roleTokens } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
 
   if (!roleFuzzyMatch('Full Stack Engineer, Foundation', 'Full Stack Engineer, Guarded Releases')) {
     pass('role matcher keeps Full Stack Engineer sibling teams distinct (#947)');
@@ -5885,6 +5885,89 @@ try {
     fail('role matcher collapsed distinct one-word-suffix MTS roles via the "engineer" filler');
   } else {
     pass('role matcher keeps distinct one-word-suffix MTS roles apart despite the "engineer" filler');
+  }
+
+  // Accented Latin titles used to split at the accent instead of folding it, so
+  // "Sênior" tokenized to ["s", "nior"]: "s" fell to the length filter and
+  // "nior" survived as a phantom token that is in no stopword list. Every
+  // downstream rule then misfired at once (#2207).
+  // Assert the whole token list, not just the absence of "nior": a fix that
+  // merely deleted non-ASCII would still leave a phantom ("snior") and pass a
+  // negative check.
+  const accentTokens = roleTokens('Software Engineer Node.js Sênior');
+  const plainTokens = roleTokens('Software Engineer Node.js Senior');
+  if (JSON.stringify(accentTokens) === JSON.stringify(plainTokens)) {
+    pass('role tokenizer folds accents onto the plain-ASCII token list (#2207)');
+  } else {
+    fail(`accented title tokenized differently from its plain spelling: ${JSON.stringify(accentTokens)} vs ${JSON.stringify(plainTokens)}`);
+  }
+
+  // Folding must delete combining marks only. Standalone characters such as
+  // "·" are separators in a title; deleting them would glue two words into a
+  // single token and turn a real repost into a duplicate row.
+  const separatorTokens = roleTokens('Backend Engineer·Payments');
+  if (separatorTokens.includes('payments') && !separatorTokens.some(w => w.includes('engineerpayments'))) {
+    pass('accent folding leaves standalone separator characters splitting words (#2207)');
+  } else {
+    fail(`accent folding swallowed a separator character: ${JSON.stringify(separatorTokens)}`);
+  }
+
+  // The phantom token is shared by every accented title, so it acted as a
+  // discriminating overlap and pushed two unrelated roles past the Jaccard
+  // threshold — exactly what the baseline-token guard exists to prevent.
+  if (!roleFuzzyMatch('Software Engineer Node.js Sênior', 'Software Engineer Flutter Sênior')) {
+    pass('role matcher keeps accented sibling roles distinct (#2207)');
+  } else {
+    fail('role matcher collapsed two accented sibling roles via the phantom accent token');
+  }
+
+  // Worse than a generic collision: "Sênior" and "Júnior" both reduce to the
+  // same "nior" phantom, so opposite seniority levels matched each other while
+  // the seniority-disagreement gate saw no seniority token at all.
+  if (!roleFuzzyMatch('Engenheiro de Dados Sênior', 'Engenheiro de Dados Júnior')) {
+    pass('role matcher keeps accented Sênior and Júnior requisitions distinct (#2207)');
+  } else {
+    fail('role matcher merged an accented Sênior req into an accented Júnior req');
+  }
+
+  // The same defect also caused false negatives: a genuine repost written once
+  // with the accent and once without tokenized differently and never matched.
+  if (roleFuzzyMatch('Engenheiro de Software Sênior, Pagamentos', 'Engenheiro de Software Senior, Pagamentos')) {
+    pass('role matcher matches a repost across accented and unaccented spellings (#2207)');
+  } else {
+    fail('role matcher missed a repost that differs only by an accent');
+  }
+
+  // Folding must not over-merge: accented specialty words have to survive as
+  // their own distinct tokens, not collapse into one another.
+  if (!roleFuzzyMatch('Ingeniero de Software Sênior, Búsqueda', 'Ingeniero de Software Sênior, Pagos')) {
+    pass('role matcher keeps accented specialty suffixes distinct after folding (#2207)');
+  } else {
+    fail('accent folding collapsed two distinct accented specialty suffixes');
+  }
+
+  // Folding is what lets the seniority gate see an accented qualifier at all.
+  // Before it, "Sênior"/"Júnior" both reduced to the same "nior" phantom, which
+  // survived as a non-baseline token on the qualified side only — so the
+  // specialization-marker rule (strict subset + extra non-baseline word) fired
+  // and returned false for BOTH. The gate itself never ran: extractSeniorities
+  // saw no seniority token either way. That produced a right answer for the
+  // wrong reason on "Júnior" and a plain false negative on "Sênior".
+  //
+  // After folding, the two cases separate on their actual meaning (#2009's
+  // SUB_BASELINE_SENIORITY rule): "senior" is routinely added or dropped
+  // between reposts of one req, while "junior" marks a genuinely lower-level
+  // req with its own scope and req ID.
+  if (roleFuzzyMatch('Sênior Product Manager, Marketplace', 'Product Manager, Marketplace')) {
+    pass('accent folding lets a lone accented "Sênior" be read as the same req (#2207)');
+  } else {
+    fail('accented "Sênior" still blocked a repost of the same requisition');
+  }
+
+  if (!roleFuzzyMatch('Júnior Product Manager, Marketplace', 'Product Manager, Marketplace')) {
+    pass('accent folding routes a lone accented "Júnior" through the sub-baseline gate (#2207)');
+  } else {
+    fail('accented "Júnior" collapsed a sub-baseline req into the bare title');
   }
 
   const dedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-'));

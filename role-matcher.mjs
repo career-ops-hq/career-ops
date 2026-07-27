@@ -81,6 +81,33 @@ export const BASELINE_TOKENS = new Set([
 ]);
 
 /**
+ * Lowercase a title and fold accented Latin letters onto their ASCII base.
+ *
+ * Every rule below matches against ASCII vocabulary, so an accent used to act
+ * as a word separator rather than a letter: "Sênior" became ["s", "nior"],
+ * leaving a phantom "nior" token that no stopword list covers. Folding first
+ * keeps the accented spelling in the same vocabulary as the plain one.
+ *
+ * Only accents that NFD decomposes are folded. Letters with no canonical
+ * decomposition (ø, ł, ß, đ) still reach the ASCII filter unchanged, exactly
+ * as before.
+ *
+ * `\p{Mn}` (nonspacing mark), not `\p{Diacritic}`: the latter also matches
+ * standalone characters such as "·", "^" and "`", which are separators in a
+ * title. Deleting those would glue neighbouring words into one token.
+ *
+ * @param {unknown} value - Raw title, possibly not a string.
+ * @returns {string} Lowercased, accent-folded text.
+ */
+function normalizeTitle(value) {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '');
+}
+
+/**
  * Convert a role title into content tokens used for fuzzy matching.
  *
  * The tokenizer keeps long descriptive words and a narrow set of short
@@ -92,9 +119,7 @@ export const BASELINE_TOKENS = new Set([
  * @returns {string[]} Ordered role-title tokens.
  */
 export function roleTokens(role) {
-  const text = typeof role === 'string' ? role : String(role ?? '');
-  return text
-    .toLowerCase()
+  return normalizeTitle(role)
     // Replace with a generic baseline token, not empty space: a bare "Member
     // of Technical Staff" (no suffix) or a one-word-suffix MTS title (e.g.
     // "...Staff, Backend") would otherwise tokenize to 0 or 1 words, and
@@ -109,10 +134,8 @@ export function roleTokens(role) {
 }
 
 function extractSeniorities(title) {
-  const text = typeof title === 'string' ? title : String(title ?? '');
   return new Set(
-    text
-      .toLowerCase()
+    normalizeTitle(title)
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
       .filter(w => SENIORITY_TOKENS.has(w))
