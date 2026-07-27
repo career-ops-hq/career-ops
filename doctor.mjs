@@ -30,14 +30,29 @@ const yellow = (s) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const dim = (s) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 
 function checkNodeVersion() {
-  const major = parseInt(process.versions.node.split('.')[0]);
-  if (major >= 18) {
-    return { pass: true, label: `Node.js >= 18 (v${process.versions.node})` };
+  const versionStr = process.versions.node;
+  const [major, minor] = versionStr.split('.').map(Number);
+  const hasSqlite = major > 22 || (major === 22 && minor >= 5);
+
+  if (hasSqlite) {
+    return { pass: true, label: `Node.js >= 22.5 (v${versionStr})` };
   }
+
+  if (major >= 18) {
+    return {
+      warn: true,
+      label: `Node.js v${versionStr} detected. Node >= 22.5.0 is highly recommended because tracker.mjs (SQLite database indexing) requires node:sqlite.`,
+      fix: [
+        'Upgrade Node.js to v22.5.0 or later to enable full tracker database support.',
+        'The markdown tracker keeps working without it — the index is optional.',
+      ],
+    };
+  }
+
   return {
     pass: false,
-    label: `Node.js >= 18 (found v${process.versions.node})`,
-    fix: 'Install Node.js 18 or later from https://nodejs.org',
+    label: `Node.js >= 18 (found v${versionStr})`,
+    fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
   };
 }
 
@@ -188,7 +203,7 @@ function checkPrereq({ path, fix }) {
   if (prereqPresent(projectRoot, path)) {
     return { pass: true, label: `${path} found` };
   }
-  return { pass: false, label: `${path} not found`, fix };
+  return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
 
 function checkFonts() {
@@ -376,6 +391,7 @@ async function main() {
     console.log(`Result: All checks passed${warnNote}. You're ready to go! Run \`claude\` (or \`opencode\`) to start.`);
     console.log('');
     console.log('Join the community: https://discord.gg/8pRpHETxa4');
+    console.log('Read the manifesto: `npm run manifesto` — a new way of job searching is taking shape, and you are now part of it.');
     process.exit(0);
   }
 }

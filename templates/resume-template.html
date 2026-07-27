@@ -152,6 +152,10 @@
     border: 1px solid #e2e2e2;
   }
 
+  .cv-photo--rounded { border-radius: 8px; }
+  .cv-photo--circle { border-radius: 50%; aspect-ratio: 1; height: 80px; }
+  .cv-photo--square { border-radius: 0; aspect-ratio: 1; height: 80px; }
+
   /* === SECTIONS === */
   .section {
     margin-bottom: 18px;
@@ -429,6 +433,46 @@
     font-family: 'Space Grotesk', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
+  }
+
+  /* === Simplified Chinese typography === */
+  html[lang="zh-CN"] body,
+  html[lang="zh"] body,
+  html[lang="zh-CN"] .contact-row,
+  html[lang="zh"] .contact-row,
+  html[lang="zh-CN"] .competency-tag,
+  html[lang="zh"] .competency-tag {
+    font-family: 'DM Sans', 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC',
+      'Source Han Sans SC', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .section-title,
+  html[lang="zh-CN"] .job-company,
+  html[lang="zh-CN"] .project-title,
+  html[lang="zh"] .header h1,
+  html[lang="zh"] .section-title,
+  html[lang="zh"] .job-company,
+  html[lang="zh"] .project-title {
+    font-family: 'Space Grotesk', 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC',
+      'Source Han Sans SC', sans-serif;
+  }
+
+  html[lang="zh-CN"] .summary-text,
+  html[lang="zh"] .summary-text,
+  html[lang="zh-CN"] .job li,
+  html[lang="zh"] .job li {
+    line-height: 1.7;
+  }
+
+  html[lang="zh-CN"] .section-title,
+  html[lang="zh"] .section-title {
+    letter-spacing: 0.03em;
   }
 </style>
 </head>

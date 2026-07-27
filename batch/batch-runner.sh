@@ -346,8 +346,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-4-8" ;;
-    standard|*) echo "claude-sonnet-4-6" ;;
+    premium) echo "claude-opus-5" ;;
+    standard|*) echo "claude-sonnet-5" ;;
   esac
 }
 
@@ -692,6 +692,12 @@ print_summary() {
     local avg
     avg=$(awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
     echo "Average score: $avg/5 ($score_count scored)"
+  fi
+
+  if [[ -f "$BATCH_DIR/aggregate-tokens.mjs" ]]; then
+    if ! node "$BATCH_DIR/aggregate-tokens.mjs"; then
+      echo "Warning: token aggregation failed." >&2
+    fi
   fi
 }
 

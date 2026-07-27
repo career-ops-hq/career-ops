@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
 import { resolveTemplate } from './cv-templates.mjs';
+import { stripEmptySections } from './cv-sections-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -115,6 +116,10 @@ async function main() {
   }
 
   let template = await readFile(TEMPLATE_PATH_RESOLVED, 'utf-8');
+
+  // Drop the optional sections (projects, education) that have no entries, so
+  // an absent one leaves no bare header behind. See cv-sections-core.mjs.
+  template = stripEmptySections(template, payload, 'tex');
 
   const emailUrl = sanitizeUrl(payload.email?.url || '');
   const emailDisplay = payload.email?.display || emailUrl;

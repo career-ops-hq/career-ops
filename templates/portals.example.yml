@@ -98,6 +98,11 @@
 # Absent, 0, or non-positive → disabled (all ages pass).
 #
 # max_posting_age_days: 45
+#
+# Need an ABSOLUTE date window instead (e.g. "only postings from the 17th to
+# the 20th") rather than a relative "N days old" cutoff? Use the CLI flags
+# instead of a portals.yml key: `node scan.mjs --posted-after 2026-07-17
+# --posted-before 2026-07-20`. Same "don't penalize missing data" rule.
 
 # -- Trust filter (optional) --
 # Enriches each scanned job with a trust score (0-100) and flags.
@@ -169,6 +174,38 @@
 #         - "gpt"
 #         - "llm"
 #         - "claude"
+
+# -- Visa / work-authorization filter (optional) --
+# Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
+# the generic "visa sponsorship" wording) and drops roles that explicitly refuse
+# it. Like content_filter it reads the job DESCRIPTION text, so it only has
+# signal for providers whose list API ships a description (Lever today).
+# Semantics (case-insensitive substring):
+#   - Any `negative` keyword present → reject (an explicit "no sponsorship")
+#   - require_mention: false (default) → after clearing negatives, pass — jobs
+#     with no description included. Use this to only weed out explicit rejections.
+#   - require_mention: true → keep only jobs whose description advertises
+#     sponsorship (contains a `positive` keyword); missing description → reject.
+#   - `positive`/`negative` default to a curated US-sponsorship vocabulary when
+#     omitted, so `visa_filter: { enabled: true }` works out of the box.
+#   - If this entire block is absent, jobs are not filtered on sponsorship.
+#
+# Minimal: drop only the postings that say they won't sponsor
+# visa_filter:
+#   enabled: true
+#
+# Strict: only surface postings that explicitly advertise US sponsorship
+# visa_filter:
+#   enabled: true
+#   require_mention: true
+#   positive:
+#     - "visa sponsorship"
+#     - "h-1b"
+#     - "h1b1"
+#     - "will sponsor"
+#   negative:
+#     - "no sponsorship"
+#     - "unable to sponsor"
 
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
@@ -257,6 +294,23 @@ title_filter:
 # The scanner extracts title, URL, and company from results.
 
 search_queries:
+  # -- Visa sponsorship (US) --
+  # Explicitly hunt for roles that sponsor a US work visa. Pair these with the
+  # `visa_filter` block above (require_mention: true) so the scan-side filter
+  # double-checks the description for sponsorship wording. Disabled by default —
+  # flip enabled: true if you need sponsorship.
+  - name: Greenhouse — AI + visa sponsorship
+    query: 'site:boards.greenhouse.io ("AI Engineer" OR "ML Engineer") ("visa sponsorship" OR "H-1B" OR "H1B1")'
+    enabled: false
+
+  - name: Ashby — AI + visa sponsorship
+    query: 'site:jobs.ashbyhq.com ("AI Engineer" OR "LLM Engineer") ("visa sponsorship" OR "will sponsor")'
+    enabled: false
+
+  - name: Lever — AI + visa sponsorship
+    query: 'site:jobs.lever.co ("AI Engineer" OR "Machine Learning") ("visa sponsorship" OR "H-1B")'
+    enabled: false
+
   # -- Ashby --
   - name: Ashby — AI PM
     query: 'site:jobs.ashbyhq.com "AI Product Manager" OR "Senior Product Manager AI" remote'
@@ -520,11 +574,16 @@ search_queries:
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
+#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
+#                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
+#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#   gem             jobs.gem.com/<boardId>
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -532,9 +591,9 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas, ibm, jobicy,
-# jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
-# weworkremotely, workingnomads. Examples for every built-in provider are below.
+# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
+# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
+# thehub, weworkremotely, workingnomads, wttj. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -580,11 +639,36 @@ search_queries:
 #   max_pages: 30          # optional per-keyword page cap (100 posts/page, default 30)
 #   enabled: true
 #
+# - name: 阿里巴巴 (Alibaba)
+#   careers_url: https://talent.alibaba.com/off-campus/position-list   # any https://talent.alibaba.com URL
+#   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
+#                                # omit keywords to pull the whole board
+#   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
+#   enabled: true
+#
 # - name: Example Workday Co
 #   careers_url: https://exampleco.wd5.myworkdayjobs.com/en-US/exampleco-careers  # any <tenant>.wd<N>.myworkdayjobs.com
 #   max_pages: 100         # optional page cap (20 jobs/page, default 100, max 1500) —
 #                          # raise it for a tenant with 2000+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Oracle Recruiting Cloud Co
+#   # Oracle Recruiting Cloud / Fusion Candidate Experience. Auto-detects any
+#   # <tenant>.fa[.<region>][.ocs].oraclecloud.com host and derives siteNumber
+#   # from the /sites/<siteNumber>/ path segment (default CX_1).
+#   careers_url: https://exampleco.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs
+#   max_pages: 25          # optional page cap (200 jobs/page, default 25 ≈ 5000 jobs, max 25)
+#   enabled: true
+#
+# - name: JPMorgan Chase                    # worked override example
+#   # Override form: pin the host + siteNumber explicitly (useful when the public
+#   # careers link is branded or the /sites/<n>/ segment isn't in the URL you have).
+#   careers_url: https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1002/jobs
+#   provider: oraclecloud
+#   siteNumber: CX_1002    # the site number after /sites/ (JPMC's external site)
+#   # locationId: 300000000123456   # optional — some tenants (BNY, Amex) need it to scope results
+#   max_pages: 25
 #   enabled: true
 #
 # - name: Example Avature Co
@@ -635,6 +719,11 @@ search_queries:
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
 #   provider: arbeitnow
+#   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Flowxtra                        # board-wide, every company hosted on Flowxtra
+#   provider: flowxtra
 #   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
 #   enabled: true
 #
@@ -759,6 +848,19 @@ search_queries:
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
 #   provider: larajobs
+#   enabled: true
+#
+# - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
+#   provider: wttj
+#   wttj:
+#     queries: ["ai engineer", "data platform engineer"]  # REQUIRED — the board is global,
+#                                 # so explicit searches must be configured; each query is a
+#                                 # separate Algolia search, results deduped across queries
+#     max_hits: 100        # optional per-query hit cap (default 100, max 200)
+#   enabled: true
+#
+# - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
+#   provider: agentic-jobs
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
@@ -895,9 +997,8 @@ tracked_companies:
   # -- AI-native platforms (FDE/SA teams) --
 
   - name: Retool
-    careers_url: https://retool.com/careers
-    scan_method: websearch
-    scan_query: 'site:retool.com/careers "Deployed" OR "AI" OR "Solutions"'
+    careers_url: https://jobs.gem.com/retool
+    provider: gem
     notes: "London. Popularized Deployed Engineer role."
     enabled: true
 

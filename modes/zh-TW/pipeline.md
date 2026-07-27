@@ -45,6 +45,7 @@
 ## 智慧解析 URL 職缺描述
 
 1. **Playwright（首選）**：`browser_navigate` + `browser_snapshot`。能穩定處理所有單頁式應用 (SPA)。
+   - **可選 — CLI 擷取器（`config/profile.yml` 中的 `scan.extractor: cli`）：** 改為執行 `node browser-extract.mjs <url>`（`--mode jd`）——精簡的 `{ "url", "title", "text" }`，更少 token（視職缺網站而定）。發生錯誤或缺少時**靜默**回退至 `browser_navigate` + `browser_snapshot`。
 2. **WebFetch（次選）**：適用於靜態頁面，或在 Playwright 環境不可用時作為後備。
 3. **WebSearch（最終手段）**：在第三方求職聚合平台上找同名職缺的快照。
 

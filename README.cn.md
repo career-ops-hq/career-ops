@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops 多代理求职系统" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops 多代理求职系统" width="800"></a>
 </p>
 
 <p align="center">
@@ -15,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>媒体报道</sub></p>
@@ -29,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops 演示" width="800">
+  <img src="docs/demo.gif" alt="career-ops 演示" width="800">
 </p>
 
 <p align="center"><strong>评估超过 740 个职位 · 生成超过 100 份个性化简历 · 成功拿下理想职位</strong></p>
@@ -61,9 +65,9 @@
 
 ## 这是什么
 
-Career-Ops 可以把任何 AI 编码 CLI 变成完整的求职指挥中心。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的管道，能够：
+career-ops 可以把任何 AI 编码 CLI 变成完整的求职指挥中心。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的管道，能够：
 
-- **评估职位**，使用结构化的 A-F 评分系统（10 个加权维度）
+- **评估职位**，使用结构化的 A-F 评估报告（五个维度得出 1.0-5.0 的评分）
 - **生成定制 PDF**，针对每份职位描述输出 ATS 优化简历
 - **自动扫描招聘平台**（Greenhouse、Ashby、Lever、公司招聘页）
 - **批量处理**，通过子代理并行评估 10 份以上职位
@@ -291,11 +295,33 @@ career-ops/
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**：作者的作品集网站（santifer.io），包含 AI 聊天机器人、LLMOps Dashboard 和案例研究。如果你也需要一个能在求职时展示的作品集，可以 fork 它然后改成自己的版本。
 
+## 常见问题（FAQ）
+
+**career-ops 是什么？**
+career-ops 是一个开源且不受特定 CLI 限制的求职命令中心。它能把任意 AI 编程 CLI 变成一套求职流程：根据你的 CV 评估职位，生成适配 ATS 的 PDF，查找合适的联系人，并在一个地方记录所有进展，最终决定仍由你作出。它是 CareerOps Manifesto 的首个参考实现，详情见 [career-ops.org](https://career-ops.org)。
+
+**我可以免费运行 career-ops，或使用更便宜的本地模型吗？**
+可以。career-ops 不受特定 CLI 限制，可通过 OpenRouter 免费模型、Ollama 或任何兼容 OpenAI 的端点使用免费或本地模型，因此无需依赖付费订阅。完整设置方法见 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)。
+
+**career-ops 支持哪些 AI CLI？**
+career-ops 支持主流 AI 编程 CLI，包括 Claude Code、Codex、Gemini / Antigravity、OpenCode、Grok、Qwen 等。它通过开放的 Agent Skill Standard 运行，不受单一厂商限制，你可以继续使用现有 CLI。
+
+**如何在 Windows 上安装 career-ops？**
+career-ops 可以在 Windows 上运行。如果安装时因符号链接（symlink）错误导致 skills 无法加载，请按 [docs/FAQ.md](docs/FAQ.md) 中的方法处理；完整安装步骤见 [docs/SETUP.md](docs/SETUP.md)。
+
+**career-ops 会替我自动申请职位吗？**
+不会。career-ops 用来筛选职位，而不是盲目批量申请；AI 负责评估、排序和起草，你负责审阅与决定。它不会自行提交、发送或点击任何内容，最终决定始终在你手中。这正是保留人工审核的意义。
+
+**career-ops 是免费开源软件吗？**
+是。career-ops 是免费开源软件，而且对求职者会一直免费；它是 [CareerOps Manifesto](https://career-ops.org/manifesto) 的首个参考实现。欢迎阅读这份宣言，如果认同其内容，也可以签名支持。
+
 ## 关于作者
 
-我是 Santiago，现任 Head of Applied AI，也曾是一名创业者（创建并出售过一家公司，那家公司至今仍以我的名字运营）。我构建 career-ops 是为了管理我自己的求职流程，而它确实奏效了：我用它拿到了现在这份工作。
+我是 [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about)（santifer），现任 Head of Applied AI，也曾是一名创业者（创建并出售过一家公司，那家公司至今仍以我的名字运营）。我构建 career-ops 是为了管理我自己的求职流程，而它确实奏效了：我用它拿到了现在这份工作。
 
 我的作品集和其他开源项目 → [santifer.io](https://santifer.io)
+
+Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/wiki/Q138710224) · [career-ops](https://www.wikidata.org/wiki/Q139007988).
 
 ## Star 历史
 

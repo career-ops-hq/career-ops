@@ -8,12 +8,13 @@ Given a job description and interview date/time, build a structured, time-blocke
 
 1. **Job description** (required) — paste inline or provide URL
 2. **Interview date and time** (required) — to calculate hours available
-3. **Interviewer name and role** (if known) — shapes depth and tone of prep
+3. **Interviewer name and role** (if known) — shapes depth and tone of prep. Later rounds (panel / onsite loop) often name several interviewers at once — from the user directly, a pasted calendar invite, or a pasted scheduling email. When more than one panelist is named, see the Panel Intel note in Step 2.
 4. **Round type** (if known) — screening, technical/domain-specific, design/case study, behavioral panel
 5. **CV** at `cv.md` + `article-digest.md` (if present) — read for experience, skills, proof points
 6. **Profile** at `config/profile.yml` + `modes/_profile.md` — read for narrative, archetypes, and targets
 7. **Story bank** at `interview-prep/story-bank.md` — existing STAR+R stories
 8. **Question bank** at `interview-prep/question-bank.md` — existing gaps (if file exists)
+9. **Prior stated compensation** — if the tracker# is known, run `node salary-gap.mjs --stated-for <tracker#>` (zero tokens). Any prior `stated` observation is a number the candidate already committed to, in an earlier round, to a specific interviewer — feed it into Step 4's quick-reference so the candidate stays consistent instead of accidentally renegotiating.
 
 ---
 
@@ -60,6 +61,8 @@ Identify what this round is actually evaluating based on:
 - Senior-level: set constraints, ask clarifying questions, drive the conversation
 
 Calibrate the plan to the round. Over-preparing depth for a screening wastes time and creates the wrong mindset.
+
+**Panel Intel (when panelists are named).** If two or more interviewers are named for this round — from the user directly, a pasted calendar invite, or a pasted scheduling email — build the Panel Intel table before moving to Step 3. See `modes/interview-prep.md` § "Panel Intel table" (under Step 4 → `panel-mixed`) for the full table format and the three sub-behaviors (decision-maker weighting against the JD's reporting line, career-trajectory signal reading, per-panelist tailored closing question) — apply that same logic here, then use the resulting audience tags to size Step 3's blocks per panelist instead of prepping one generic pack. A single named interviewer doesn't need the table; go straight to Step 3 calibrated to that person's round type above.
 
 ---
 
@@ -126,6 +129,8 @@ At the end of the plan, produce a one-page quick-reference the candidate can ski
 1. [most important message to leave the interviewer with]
 2. [most likely question and your first sentence of the answer]
 3. [the connection between your history and their domain]
+
+**Compensation — already discussed:** [only if `--stated-for` returned prior observations] "You stated {amount} {currency} to {interviewer} on {date} in {round}. Stay consistent unless something material changed." Omit this block entirely if there are no prior `stated` observations for this tracker# — don't invent a number that was never said.
 
 **Your questions to ask:**
 1. [question 1]

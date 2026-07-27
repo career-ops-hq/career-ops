@@ -36,6 +36,7 @@
 ## URL से Offer की Intelligent Detection
 
 1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`। सभी SPAs के साथ काम करता है।
+   - **वैकल्पिक — CLI एक्सट्रैक्टर (`config/profile.yml` में `scan.extractor: cli`):** इसके बजाय `node browser-extract.mjs <url>` (`--mode jd`) चलाएँ — कॉम्पैक्ट `{ "url", "title", "text" }`, कम टोकन (पोर्टल पर निर्भर)। त्रुटि या अनुपलब्ध होने पर **चुपचाप** `browser_navigate` + `browser_snapshot` पर लौटें।
 2. **WebFetch (fallback):** Static pages के लिए या जब Playwright available न हो।
 3. **WebSearch (last resort):** Secondary portals पर search करें जो offer index करते हैं।
 

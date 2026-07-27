@@ -10,6 +10,31 @@ When the user asks to prep for an interview at a specific company+role, or when 
 4. **CV** at `cv.md` + `article-digest.md` — read for proof points
 5. **Profile** at `config/profile.yml` + `modes/_profile.md` — read for candidate context
 6. **Recruiter-side risk map** from the evaluation/PDF/application flow if present — use `modes/heuristics/recruiter-side.md` for the risk categories the interview process must resolve
+7. **Coffee chat notes** for this company, if the user has any (optional — see "Coffee Chat Cross-Reference" below)
+8. **Prior stated compensation** — if the tracker# is known, run `node salary-gap.mjs --stated-for <tracker#>` (zero tokens). Any prior `stated` observation is a number already committed to a specific interviewer in an earlier round — surface it in the Process Overview (Step 2) or Recruiter/HR pack (Step 4) as a "already discussed" reminder so the candidate stays consistent.
+
+## Coffee Chat Cross-Reference (optional, North America-specific)
+
+Before generating prep for a company, check whether the user has a coffee chat note for that company — an off-the-record informational-interview conversation with someone already inside the target company. This is common North American (especially US/CA) job-search practice, grounded in university-career-services norms; other regions may have different or no equivalent informal-networking practice. **This step is additive/opt-in — "if a coffee chat note exists for this company, use it" — never a required step, and never implies every candidate should have coffee chat notes.** If none exists, or the user doesn't do coffee chats, skip this section silently and move on to Step 1.
+
+**How to get it:** the same pasted-in input pattern the Panel Intel table below already relies on (Step 4, `panel-mixed`) — the user references or pastes the note inline. This mode does not scan the filesystem or any external location for it.
+
+If a coffee chat note exists for this company, cross-reference it against:
+
+- **What's known/expected about the interview itself** — the JD, named interviewers (Step 1 research, Panel Intel table in Step 4), and the Step 2 Process Overview.
+- **Any existing interview transcript for the same company** — prior rounds already captured in `interview-prep/{company-slug}-{role-slug}.md`, and structured session records in `interview-prep/sessions/` (written by `modes/interview/debrief.md` Step 9).
+
+Surface explicitly whether the coffee chat **corroborates** or **contradicts** something known or suspected about the interview process:
+
+```markdown
+## Coffee Chat Cross-Reference
+| Coffee chat signal | Cross-referenced against | Read |
+|---------------------|---------------------------|------|
+| {what the contact said} | {JD line / named interviewer / prior transcript} | Corroborates — {why, e.g. "confirms this is a consistent screening focus, not a one-off tangent"} / Contradicts — {why} |
+```
+
+- **One coffee chat is one data point, not proof.** Use corroborating language ("this is consistent with…", "this lines up with…"), never "confirmed" or "fact" language — unless a second independent source (a second coffee chat, or a matching pattern already recorded across two transcripts) exists for the same claim.
+- **Contradictions matter as much as corroborations.** If the coffee chat conflicts with the JD or a prior transcript, say so plainly and flag it for the candidate to probe — don't silently trust either source over the other.
 
 ## URL entry — prep for a role that was never evaluated
 

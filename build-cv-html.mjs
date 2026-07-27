@@ -17,9 +17,10 @@
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { resolve, dirname, basename, join } from 'path';
+import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { stripEmptySections } from './cv-sections-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
@@ -27,6 +28,15 @@ const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
 const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PHOTO_MIME_BY_EXT = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+]);
+const PHOTO_STYLES = new Set(['rounded', 'circle', 'square']);
+const IMAGE_DATA_URL_RE = /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=\s]+$/i;
 
 const DEFAULT_SECTION_TITLES = {
   summary: 'Professional Summary',
@@ -74,6 +84,64 @@ function sanitizeUrl(url) {
     }
   }
   return escapeHtml(url);
+}
+
+function sanitizeImageSrc(src) {
+  if (typeof src !== 'string') return '';
+  const value = src.trim();
+  if (IMAGE_DATA_URL_RE.test(value)) return escapeHtml(value);
+  if (/^https?:\/\//i.test(value)) return sanitizeUrl(value);
+  return '';
+}
+
+async function prepareCandidatePhoto(candidate) {
+  const c = candidate && typeof candidate === 'object' ? { ...candidate } : {};
+  const photo = typeof c.photo === 'string' ? c.photo.trim() : '';
+  const style = c.photo_style || c.photoStyle || 'rounded';
+
+  if (!PHOTO_STYLES.has(style)) {
+    throw new Error(`Unsupported profile photo style: ${style} (expected rounded, circle, or square)`);
+  }
+  c.photo_style = style;
+  if (!photo) {
+    c.photo = '';
+    return c;
+  }
+
+  if (photo.startsWith('data:')) {
+    if (!IMAGE_DATA_URL_RE.test(photo)) {
+      throw new Error('Unsupported profile photo data URL (expected base64 PNG, JPEG, WebP, or GIF)');
+    }
+    c.photo = photo;
+    return c;
+  }
+
+  if (/^https?:\/\//i.test(photo)) {
+    c.photo = photo;
+    return c;
+  }
+
+  if (/^[a-z][a-z0-9+.-]+:/i.test(photo)) {
+    throw new Error(`Unsupported profile photo URL scheme: ${photo.split(':', 1)[0]}`);
+  }
+
+  const photoPath = isAbsolute(photo) ? photo : resolve(__dirname, photo);
+  const mime = PHOTO_MIME_BY_EXT.get(extname(photoPath).toLowerCase());
+  if (!mime) {
+    throw new Error(`Unsupported profile photo format: ${photo} (expected PNG, JPEG, WebP, or GIF)`);
+  }
+
+  let bytes;
+  try {
+    bytes = await readFile(photoPath);
+  } catch (err) {
+    throw new Error(`Profile photo not found or unreadable: ${photo} (${err.code || err.message})`);
+  }
+  if (bytes.length === 0) {
+    throw new Error(`Profile photo is empty: ${photo}`);
+  }
+  c.photo = `data:${mime};base64,${bytes.toString('base64')}`;
+  return c;
 }
 
 function joinItems(items) {
@@ -180,10 +248,11 @@ ${items}
 }
 
 // Rebuild the whole .contact-row block. Its markup uses fixed "|" separators
-// between phone / email / linkedin / portfolio / location, so an absent optional
-// field (phone, linkedin, portfolio) must drop BOTH its <a> and one separator.
-// Building the present items and joining them is more robust than excising
-// separators from the template one placeholder at a time.
+// between phone / email / linkedin / github / portfolio / location, so an
+// absent optional field (phone, linkedin, github, portfolio) must drop BOTH
+// its <a> and one separator. Building the present items and joining them is
+// more robust than excising separators from the template one placeholder at
+// a time.
 function buildContactRow(candidate) {
   const c = candidate || {};
   const items = [];
@@ -196,6 +265,12 @@ function buildContactRow(candidate) {
   }
   if (c.linkedin && c.linkedin.url) {
     items.push(`<a href="${sanitizeUrl(c.linkedin.url)}">${escapeHtml(c.linkedin.display || c.linkedin.url)}</a>`);
+  }
+  if (c.github && c.github.url) {
+    const githubHref = sanitizeUrl(c.github.url);
+    if (githubHref) {
+      items.push(`<a href="${githubHref}">${escapeHtml(c.github.display || c.github.url)}</a>`);
+    }
   }
   if (c.portfolio && c.portfolio.url) {
     items.push(`<a href="${sanitizeUrl(c.portfolio.url)}">${escapeHtml(c.portfolio.display || c.portfolio.url)}</a>`);
@@ -210,7 +285,8 @@ function buildContactRow(candidate) {
 function buildPhoto(candidate, name) {
   const photo = candidate && candidate.photo;
   if (!photo) return '';
-  return `<img class="cv-photo" src="${sanitizeUrl(photo)}" alt="${escapeHtml(name || '')}">`;
+  const style = PHOTO_STYLES.has(candidate.photo_style) ? candidate.photo_style : 'rounded';
+  return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
 function renderReport(payload) {
@@ -249,6 +325,10 @@ function renderHtml(template, payload) {
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+
+  // Drop the optional sections (projects, education) that have no entries, so
+  // an absent one leaves no bare header behind. See cv-sections-core.mjs.
+  html = stripEmptySections(html, payload, 'html');
 
   for (const [key, value] of Object.entries(substitutions)) {
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
@@ -299,6 +379,7 @@ async function main() {
   if (args.length === 0 || args.includes('--help')) {
     console.error('Usage:');
     console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html]');
+    console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
     console.error('  node build-cv-html.mjs --test');
     console.error('');
     console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
@@ -311,7 +392,10 @@ async function main() {
     return;
   }
 
-  const [inputPath, outputPath, templateArg] = args;
+  const preview = args[0] === '--preview';
+  const [inputPath, outputPath, templateArg] = preview
+    ? [args[1], resolve(__dirname, 'output', 'cv-preview.html'), args[2]]
+    : args;
   if (!inputPath || !outputPath) {
     console.error('Usage: node build-cv-html.mjs <input.json> <output.html> [template.html]');
     process.exit(1);
@@ -333,8 +417,9 @@ async function main() {
   let payload;
   try {
     payload = JSON.parse(await readFile(absInput, 'utf-8'));
+    payload.candidate = await prepareCandidatePhoto(payload.candidate);
   } catch (err) {
-    console.error(`Failed to parse input JSON: ${err.message}`);
+    console.error(`Failed to prepare CV input: ${err.message}`);
     process.exit(1);
   }
 
@@ -348,7 +433,7 @@ async function main() {
     process.exit(1);
   }
 
-  await writeAndReport(html, absOutput, payload);
+  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready' } : {});
   process.exit(0);
 }
 
@@ -361,6 +446,7 @@ async function runSelfTest() {
       phone: '+1 234 567 8900',
       email: 'test@example.com',
       linkedin: { url: 'https://linkedin.com/in/test', display: 'linkedin.com/in/test' },
+      github: { url: 'https://github.com/test', display: 'github.com/test' },
       portfolio: { url: 'https://test.example.com', display: 'test.example.com' },
       location: 'City, State',
     },
@@ -418,6 +504,43 @@ async function runSelfTest() {
   }
   if (/Kubernetes & Docker/.test(html)) {
     console.error('Self-test failed: found an unescaped ampersand in output');
+    process.exit(1);
+  }
+
+  // Guard the github contact-row case added for #2170: the link must render
+  // with the sanitized href from the sample.
+  if (!html.includes('href="https://github.com/test"')) {
+    console.error('Self-test failed: github contact link missing from output');
+    process.exit(1);
+  }
+
+  // Guard the absent-field side of the same case: omitting candidate.github
+  // must drop both its anchor and its separator, leaving no dangling item.
+  const { github, ...candidateWithoutGithub } = sample.candidate;
+  const htmlWithoutGithub = renderHtml(template, { ...sample, candidate: candidateWithoutGithub });
+  const countSeparators = (h) => (h.match(/class="separator"/g) || []).length;
+  if (htmlWithoutGithub.includes('github.com/test')) {
+    console.error('Self-test failed: github contact link rendered when candidate.github is absent');
+    process.exit(1);
+  }
+  if (countSeparators(htmlWithoutGithub) !== countSeparators(html) - 1) {
+    console.error('Self-test failed: omitting candidate.github left a dangling separator in the contact row');
+    process.exit(1);
+  }
+
+  // Guard the rejected-scheme side: sanitizeUrl() must reject javascript:/data:
+  // github URLs, which must drop the item and separator exactly like an
+  // absent field, never fall through to an empty href="".
+  const htmlWithRejectedGithub = renderHtml(template, {
+    ...sample,
+    candidate: { ...sample.candidate, github: { url: 'javascript:alert(1)', display: 'github.com/test' } },
+  });
+  if (htmlWithRejectedGithub.includes('href=""') || htmlWithRejectedGithub.includes('github.com/test')) {
+    console.error('Self-test failed: rejected github URL still rendered a contact item');
+    process.exit(1);
+  }
+  if (countSeparators(htmlWithRejectedGithub) !== countSeparators(html) - 1) {
+    console.error('Self-test failed: rejected github URL left a dangling separator in the contact row');
     process.exit(1);
   }
 

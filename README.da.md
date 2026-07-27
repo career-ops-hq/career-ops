@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Multi-agent jobsøgningssystem" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops — Multi-agent jobsøgningssystem" width="800"></a>
 </p>
 
 <p align="center">
@@ -27,7 +31,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="career-ops Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ vurderede stillinger · 100+ skræddersyede CV'er · 1 drømmerolle landet</strong></p>
@@ -57,17 +61,17 @@
 
 ## Hvad er det
 
-Career-Ops ([career-ops.org](https://career-ops.org), også kendt som **careerops**) forvandler et hvilket som helst AI-CLI til en komplet kommandocentral for jobsøgning. I stedet for manuelt at spore ansøgninger i et regneark får du en AI-drevet pipeline, der:
+career-ops ([career-ops.org](https://career-ops.org), også kendt som **careerops**) forvandler et hvilket som helst AI-CLI til en komplet kommandocentral for jobsøgning. I stedet for manuelt at spore ansøgninger i et regneark får du en AI-drevet pipeline, der:
 
-- **Vurderer stillinger** med et struktureret A–F-system (10 vægtede dimensioner)
+- **Vurderer stillinger** med et struktureret A–F-system (fem dimensioner, der giver en score på 1,0-5,0)
 - **Genererer skræddersyede PDF'er** — ATS-optimerede CV'er tilpasset hver stilling
 - **Skanner portaler** automatisk (Greenhouse, Ashby, Lever, virksomheders karrieresider)
 - **Batch-behandler** — vurderer 10+ stillinger parallelt via sub-agenter
 - **Sporer alt** i én kilde til sandhed med datakonsistenstjek
 
-> **Vigtigt: dette er IKKE et værktøj til masseudsendelse af ansøgninger.** Career-ops er et filter — det hjælper dig med at finde de få stillinger blandt hundredvis, der er din tid værd. Systemet fraråder kraftigt at ansøge stillinger med en vurdering under 4,0/5. Din tid er værdifuld, og det samme er rekrutterens. Tjek altid efter, før du sender.
+> **Vigtigt: dette er IKKE et værktøj til masseudsendelse af ansøgninger.** career-ops er et filter — det hjælper dig med at finde de få stillinger blandt hundredvis, der er din tid værd. Systemet fraråder kraftigt at ansøge stillinger med en vurdering under 4,0/5. Din tid er værdifuld, og det samme er rekrutterens. Tjek altid efter, før du sender.
 
-Career-ops arbejder agentisk: Claude Code navigerer karrieresider med Playwright, vurderer match ved at ræsonnere over dit CV kontra stillingsopslaget (ikke via søgeordsmatchning) og tilpasser CV'et til hvert opslag.
+career-ops arbejder agentisk: Claude Code navigerer karrieresider med Playwright, vurderer match ved at ræsonnere over dit CV kontra stillingsopslaget (ikke via søgeordsmatchning) og tilpasser CV'et til hvert opslag.
 
 > **Bemærk: de første vurderinger bliver ikke perfekte.** Systemet kender dig endnu ikke. Giv det kontekst — dit CV, din karrierehistorik, eksempler på resultater, præferencer, styrker, hvad du vil undgå. Jo mere du giver det, jo bedre virker det. Betragt det som onboarding af en ny rekrutter: i den første uge skal den lære, hvem du er — derefter bliver den uvurderlig.
 
@@ -126,7 +130,7 @@ Fuld opsætningsguide: [docs/SETUP.md](docs/SETUP.md).
 
 ## Brug
 
-Career-ops er én slash-kommando med flere tilstande:
+career-ops er én slash-kommando med flere tilstande:
 
 ```text
 /career-ops                    → Vis alle tilgængelige kommandoer

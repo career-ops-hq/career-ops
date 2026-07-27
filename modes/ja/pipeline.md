@@ -57,6 +57,7 @@ Pending lines are `- [ ] {url} | {company} | {title} | {location}`. Scanner は 
 ## Intelligent JD detection from URL
 
 1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`. すべての SPA で動く。
+   - **オプション — CLI 抽出 (`config/profile.yml` の `scan.extractor: cli`):** 代わりに `node browser-extract.mjs <url>`（`--mode jd`）を実行 — コンパクトな `{ "url", "title", "text" }`、トークン数が少ない（ポータル依存）。エラー時や未導入時は**静かに** `browser_navigate` + `browser_snapshot` へフォールバック。
 2. **WebFetch (fallback):** Static pages または Playwright が unavailable な場合。
 3. **WebSearch (last resort):** JD を index している secondary portals で検索。
 

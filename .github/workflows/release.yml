@@ -2,6 +2,10 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Manual re-publish: when a release was tagged but the npm publish failed,
+  # dispatch this workflow to publish the scaffolder at its current version
+  # without cutting a new release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,23 +18,29 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
+        if: ${{ github.event_name == 'push' }}
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Publish the npm scaffolder only when a release was just created.
-      # Runs in the same job because a release created via GITHUB_TOKEN does
-      # not trigger separate `on: release` workflows.
+      # Publish the npm scaffolder when a release was just created, OR on a
+      # manual dispatch (to recover from a failed publish). Runs in the same job
+      # because a release created via GITHUB_TOKEN does not trigger separate
+      # `on: release` workflows.
       - uses: actions/checkout@v7
-        if: ${{ steps.release.outputs.release_created }}
-      - uses: actions/setup-node@v6
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+      - uses: actions/setup-node@v7
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
+      # Trusted Publishing (OIDC): npm >= 11.5.1 authenticates via the workflow's
+      # id-token against the trusted publisher configured on npmjs.com — no token.
+      # setup-node ships an older npm, so upgrade before publishing.
+      - name: Upgrade npm for trusted publishing
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+        run: npm install -g npm@latest
       - name: Publish scaffolder to npm
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         run: npm publish --provenance --access public
         working-directory: scaffolder
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

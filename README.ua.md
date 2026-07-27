@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Система Пошуку Роботи" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Multi-Agent Система Пошуку Роботи" width="800"></a>
 </p>
 
 <p align="center">
@@ -15,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>Згадані у</sub></p>
@@ -29,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Демо Career-Ops" width="800">
+  <img src="docs/demo.gif" alt="Демо career-ops" width="800">
 </p>
 
 <p align="center"><strong>740+ вакансій оцінено · 100+ персоналізованих резюме · 1 роботу мрії отримано</strong></p>
@@ -63,17 +67,17 @@
 
 ## Що це таке
 
-Career-Ops перетворює будь-який AI-кодинг CLI на повноцінний командний центр для пошуку роботи. Замість ручного відстеження заявок у таблиці, ви отримуєте AI-pipeline, який:
+career-ops перетворює будь-який AI-кодинг CLI на повноцінний командний центр для пошуку роботи. Замість ручного відстеження заявок у таблиці, ви отримуєте AI-pipeline, який:
 
-- **Оцінює вакансії** за структурованою системою балів A-F (10 зважених параметрів)
+- **Оцінює вакансії** за структурованою оцінкою A-F (п'ять параметрів, що формують оцінку 1.0–5.0)
 - **Генерує персоналізовані PDF** — ATS-оптимізовані резюме під кожен опис вакансії
 - **Сканує портали** автоматично (Greenhouse, Ashby, Lever, сторінки компаній)
 - **Пакетна обробка** — оцінка 10+ вакансій паралельно суб-агентами
 - **Відстежує все** в єдиному джерелі даних з перевіркою цілісності
 
-> **Важливо: це НЕ інструмент для масової розсилки.** Career-ops — це фільтр, який допомагає знайти кілька вакансій, вартих вашого часу, серед сотень. Система наполегливо рекомендує не подаватися на вакансії з балом нижче 4.0/5. Ваш час цінний, як і час рекрутера. Завжди перевіряйте все перед подачею заявки.
+> **Важливо: це НЕ інструмент для масової розсилки.** career-ops — це фільтр, який допомагає знайти кілька вакансій, вартих вашого часу, серед сотень. Система наполегливо рекомендує не подаватися на вакансії з балом нижче 4.0/5. Ваш час цінний, як і час рекрутера. Завжди перевіряйте все перед подачею заявки.
 
-Career-ops працює агентно: Claude Code переходить на кар'єрні сторінки за допомогою Playwright, оцінює відповідність, аналізуючи ваше резюме відносно опису вакансії (не за ключовими словами), та адаптує ваше резюме під кожну вакансію.
+career-ops працює агентно: Claude Code переходить на кар'єрні сторінки за допомогою Playwright, оцінює відповідність, аналізуючи ваше резюме відносно опису вакансії (не за ключовими словами), та адаптує ваше резюме під кожну вакансію.
 
 > **Зверніть увагу: перші оцінки будуть не ідеальними.** Система ще не знає вас. Дайте їй контекст — ваше резюме, вашу кар'єрну історію, ваші досягнення, уподобання, сильні сторони, що хочете уникати. Чим більше ви її "навчаєте", тим краще вона стає. Уявіть, що ви вводите в курс справ нового рекрутера: перший тиждень він вивчає вас, а потім стає незамінним.
 
@@ -134,7 +138,7 @@ claude
 
 ## Використання
 
-Career-ops — це одна слеш-команда з кількома режимами:
+career-ops — це одна слеш-команда з кількома режимами:
 
 ```text
 /career-ops                → Показати всі доступні команди

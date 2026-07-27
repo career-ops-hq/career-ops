@@ -6,6 +6,11 @@
 
 Track follow-up cadence for active applications. Flag overdue follow-ups, extract contacts from notes, and generate tailored follow-up email/LinkedIn drafts using report context.
 
+**Not in scope here:** a same-day follow-up after a recruiter/interviewer
+confirmed a specific call time and then didn't call. That's not an
+elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
+(`/career-ops email noshow`) instead.
+
 ## Inputs
 
 - `data/applications.md` — Application tracker

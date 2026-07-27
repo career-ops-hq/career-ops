@@ -47,7 +47,9 @@ import { normalizeCompany } from './tracker-utils.mjs';
 
 try {
   const { config } = await import('dotenv');
-  config();
+  // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
+  // single JSON object (#1906).
+  config({ quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -191,6 +193,25 @@ export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
   };
 }
 
+// ── Absolute posted-date filter ─────────────────────────────────────
+// CLI-only (--posted-after / --posted-before), unlike the config-driven
+// relative max_posting_age_days above. Both bounds optional and inclusive
+// (before is treated as end-of-day). A job with no postedAt always passes —
+// same "don't penalize missing data" convention as buildPostingAgeFilter.
+export function buildPostedDateFilter(afterIso, beforeIso) {
+  const afterMs = afterIso ? Date.parse(afterIso) : NaN;
+  const beforeMs = beforeIso ? Date.parse(`${beforeIso}T23:59:59.999Z`) : NaN;
+  const hasAfter = Number.isFinite(afterMs);
+  const hasBefore = Number.isFinite(beforeMs);
+  if (!hasAfter && !hasBefore) return () => true;
+  return (postedAt) => {
+    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
+    if (hasAfter && postedAt < afterMs) return false;
+    if (hasBefore && postedAt > beforeMs) return false;
+    return true;
+  };
+}
+
 // ── Content filter ──────────────────────────────────────────────────
 // Optional. If `content_filter` is absent from portals.yml, all jobs pass.
 // Filters on the job DESCRIPTION text to separate same-titled roles with
@@ -252,6 +273,82 @@ export function buildContentFilter(contentFilter) {
     }
 
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (positive.length === 0) return true;
+    return positive.some(k => lower.includes(k));
+  };
+}
+
+// ── Visa / work-authorization filter ────────────────────────────────
+// Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
+// Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
+// the generic "visa sponsorship" wording) and drops roles that explicitly
+// refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
+// it only has signal for providers whose list API ships a description (Lever
+// today); jobs without one fall back to the require_mention rule below.
+//
+// Semantics (case-insensitive substring):
+//   - any `negative` keyword present → reject (an explicit "no sponsorship")
+//   - require_mention: false (default) → after clearing negatives, PASS —
+//     including jobs with no description. Use this to only weed out the
+//     explicit rejections while keeping everything unstated.
+//   - require_mention: true → keep only jobs whose description contains at least
+//     one `positive` keyword; a missing/empty description is rejected. Use this
+//     to surface *only* postings that actively advertise sponsorship.
+//
+// `positive` / `negative` default to a curated US-sponsorship vocabulary when
+// omitted, so `visa_filter: { enabled: true }` works out of the box; supplying
+// either list overrides that default.
+
+export const DEFAULT_VISA_POSITIVE = [
+  'visa sponsorship',
+  'sponsor a visa',
+  'sponsor visas',
+  'will sponsor',
+  'sponsorship available',
+  'sponsorship is available',
+  'eligible for sponsorship',
+  'provide sponsorship',
+  'offer sponsorship',
+  'immigration support',
+  'h-1b',
+  'h1b',
+  'h-1b1',
+  'h1b1',
+  'o-1 visa',
+];
+
+export const DEFAULT_VISA_NEGATIVE = [
+  'no visa sponsorship',
+  'no sponsorship',
+  'without sponsorship',
+  'unable to sponsor',
+  'not able to sponsor',
+  'cannot sponsor',
+  'do not sponsor',
+  'does not sponsor',
+  'not offer sponsorship',
+  'not provide sponsorship',
+  'sponsorship is not available',
+  'sponsorship not available',
+  'not offer visa sponsorship',
+];
+
+export function buildVisaFilter(visaFilter) {
+  if (!visaFilter || visaFilter.enabled === false) return () => true;
+  const positive = visaFilter.positive != null
+    ? normalizeKeywordList(visaFilter.positive)
+    : DEFAULT_VISA_POSITIVE.slice();
+  const negative = visaFilter.negative != null
+    ? normalizeKeywordList(visaFilter.negative)
+    : DEFAULT_VISA_NEGATIVE.slice();
+  const requireMention = visaFilter.require_mention === true;
+
+  return (description) => {
+    const hasText = typeof description === 'string' && description.trim() !== '';
+    if (!hasText) return !requireMention;
+    const lower = description.toLowerCase();
+    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (!requireMention) return true;
     if (positive.length === 0) return true;
     return positive.some(k => lower.includes(k));
   };
@@ -549,6 +646,48 @@ function scanHistoryPolicy(config = {}) {
   };
 }
 
+// Query params that carry no identity information for a job posting — safe to
+// strip when computing the dedup key. Deliberately an allowlist rather than
+// "strip everything": several ATSes key the posting off a query param (e.g.
+// Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
+const DEDUP_STRIP_PARAMS = new Set([
+  'language', 'lang', 'locale',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
+]);
+
+/**
+ * Normalize a job posting URL into a stable dedup key.
+ *
+ * Strips cosmetic query params (locale/tracking), drops a trailing slash,
+ * and lowercases scheme + host. Only used to compute the *comparison* key —
+ * callers keep writing/displaying the original URL so links stay clickable
+ * and scan-history/pipeline.md stay faithful to what the provider returned.
+ *
+ * Falls back to the raw string when the URL is malformed, preserving the
+ * old byte-for-byte behavior for unparsable history rows.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function normalizeUrlForDedup(url) {
+  if (typeof url !== 'string' || !url) return url;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  for (const param of Array.from(parsed.searchParams.keys())) {
+    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
+      parsed.searchParams.delete(param);
+    }
+  }
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return parsed.toString();
+}
+
 export function loadSeenUrls(policy = {}) {
   const seen = new Set();
   let recheckEligible = 0;
@@ -559,7 +698,7 @@ export function loadSeenUrls(policy = {}) {
     for (const line of lines.slice(1)) { // skip header
       const [url, firstSeen, , , , status = 'added'] = line.split('\t');
       if (!url) continue;
-      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(url);
+      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
       else recheckEligible++;
     }
   }
@@ -568,7 +707,7 @@ export function loadSeenUrls(policy = {}) {
   if (existsSync(PIPELINE_PATH)) {
     const text = readFileSync(PIPELINE_PATH, 'utf-8');
     for (const match of text.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(match[1]);
+      seen.add(normalizeUrlForDedup(match[1]));
     }
   }
 
@@ -576,7 +715,7 @@ export function loadSeenUrls(policy = {}) {
   if (existsSync(APPLICATIONS_PATH)) {
     const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
     for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(match[0]);
+      seen.add(normalizeUrlForDedup(match[0]));
     }
   }
 
@@ -838,34 +977,119 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 }
 
 /**
- * Load company+role keys already present in the applications tracker.
+ * Build the seen-role set from the same three sources as `loadSeenUrls`.
  *
- * Existing tracker rows are canonicalized with the same company aliasing and
- * role-title normalization used for freshly scanned jobs. That lets URL-new
- * duplicates match older tracker entries instead of being evaluated again.
+ * Existing rows are canonicalized with the same company aliasing and role-title
+ * normalization used for freshly scanned jobs. That lets URL-new duplicates match
+ * older entries instead of being evaluated again.
  *
- * @param {string} [appsPath=APPLICATIONS_PATH] - Applications tracker path.
+ * Seeding from applications.md alone made the key effectively intra-run: a role
+ * added by a prior scan lives in scan-history and pipeline, and does not reach
+ * applications.md until the user evaluates and applies. Companies that open one req
+ * per city therefore leaked one city variant per scan — run 1 added the SF req
+ * (marking the key in memory only), run 2 re-seeded from applications.md, found the
+ * key absent, and the NY req cleared both the URL check and the role check.
+ *
+ * Two deliberate semantics on the scan-history source:
+ *
+ * - Only `added` rows seed a key. `skipped_expired` / `skipped_invalid_url` /
+ *   `skipped_blocked_host` are URL-level failures, not evidence the role was
+ *   surfaced; seeding from them would let a dead SF URL bury a live NY req. Because
+ *   an expired posting is recorded as `skipped_expired` rather than `added`, this
+ *   self-heals: when the canonical posting dies, its city variants become eligible
+ *   again on the next scan.
+ * - Seeding honours `scan_history.recheck_after_days` via the existing
+ *   `shouldDedupScanHistoryRow` predicate, so the role key cannot outlive the URL
+ *   key it mirrors.
+ *
+ * @param {{applicationsText?: string, scanHistoryText?: string, pipelineText?: string}} sources
+ *   Raw text of each dedupe source; absent sources default to empty.
+ * @param {{recheckAfterDays?: number|null, today?: string}} [policy] - Scan-history
+ *   recheck policy, shared with `loadSeenUrls`.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer shared with scan-side dedupe.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function loadSeenCompanyRoles(appsPath = APPLICATIONS_PATH, canonicalize = defaultCompanyNormalizer) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer) {
+  const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  if (existsSync(appsPath)) {
-    // Header-aware parse (tracker-parse.mjs, #954) — the old positional regex
-    // captured the wrong cells on customized layouts (e.g. with a Location
-    // column), so the seen-set keyed on garbage and dedup misfired.
-    const lines = readFileSync(appsPath, 'utf-8').split('\n');
+  const add = (company, role) => {
+    const c = String(company ?? '').trim();
+    const r = String(role ?? '').trim();
+    if (!c || !r) return;
+    // Header and markdown-separator cells are not roles.
+    if (c.toLowerCase() === 'company') return;
+    if (/^[-:]+$/.test(c) || /^[-:]+$/.test(r)) return;
+    seen.add(companyRoleDedupKey(c, r, canonicalize));
+  };
+
+  // applications.md — header-aware parse (tracker-parse.mjs, #954). The old
+  // positional regex captured the wrong cells on customized layouts (e.g. with a
+  // Location column), so the seen-set keyed on garbage and dedup misfired.
+  if (applicationsText) {
+    const lines = applicationsText.split('\n');
     const colmap = resolveColumns(lines);
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      const company = row.company.trim();
-      const role = row.role.trim();
-      if (company && role) seen.add(companyRoleDedupKey(company, role, canonicalize));
+      add(row.company, row.role);
     }
   }
+
+  // scan-history.tsv — url, first_seen, portal, title, company, status, location
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, firstSeen, , title, company, status = 'added'] = line.split('\t');
+    if (!url) continue;
+    if (status !== 'added') continue;
+    if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
+    add(company, title);
+  }
+
+  // pipeline.md — "- [ ] {url} | {company} | {title}" plus optional trailing
+  // columns (location, compensation, posted:/trust:/note: segments).
+  for (const match of pipelineText.matchAll(/^- \[[ x]\]\s+\S+\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?:\|[^\n]*)?$/gm)) {
+    add(match[1], match[2]);
+  }
+
   return seen;
+}
+
+function readIfExists(filePath) {
+  return existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+}
+
+/**
+ * Load company+role keys already surfaced by a prior scan or tracked by the user.
+ *
+ * Thin filesystem wrapper over {@link collectSeenCompanyRoles}, mirroring the
+ * source list `loadSeenUrls` already reads.
+ *
+ * The two leading positional parameters are unchanged, so existing callers keep
+ * working. The extra sources are injectable via the trailing options object: the
+ * module-level paths are relative to `process.cwd()`, so a test that passes only a
+ * sandbox tracker would otherwise pick up the developer's real scan-history and
+ * pipeline (CI only avoids this because those files are gitignored).
+ *
+ * @param {string} [appsPath=APPLICATIONS_PATH] - Applications tracker path.
+ * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
+ *   Company canonicalizer shared with scan-side dedupe.
+ * @param {object} [options] - Additional sources and policy.
+ * @param {{recheckAfterDays?: number|null, today?: string}} [options.policy] -
+ *   Scan-history recheck policy, shared with `loadSeenUrls`.
+ * @param {string} [options.scanHistoryPath=SCAN_HISTORY_PATH] - Scan-history path.
+ * @param {string} [options.pipelinePath=PIPELINE_PATH] - Pipeline inbox path.
+ * @returns {Set<string>} Existing company+role dedupe keys.
+ */
+export function loadSeenCompanyRoles(
+  appsPath = APPLICATIONS_PATH,
+  canonicalize = defaultCompanyNormalizer,
+  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH } = {},
+) {
+  return collectSeenCompanyRoles({
+    applicationsText: readIfExists(appsPath),
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+  }, policy, canonicalize);
 }
 
 // ── Pipeline writer ─────────────────────────────────────────────────
@@ -919,6 +1143,31 @@ export function formatCompensation(salary) {
   return sanitizeMarkdownField(currency ? `${range} ${currency}` : range);
 }
 
+// Trust/legitimacy signal (#1743): the scanner sets offer.trustScore (0-100) +
+// offer.trustFlags on every job (see buildTrustValidator). Surface it only when
+// it's meaningful — a score below 100 means the validator penalized the posting
+// (e.g. missing_apply_url, invalid_url, suspicious_domain). A clean posting
+// (score 100) or a scan without trust_filter configured stays byte-identical
+// (empty), exactly like the posted:/note: segments.
+export function trustIsFlagged(offer) {
+  return typeof offer.trustScore === 'number' && Number.isFinite(offer.trustScore) && offer.trustScore < 100;
+}
+
+function trustFlagList(offer) {
+  return Array.isArray(offer.trustFlags)
+    ? offer.trustFlags.filter((f) => typeof f === 'string' && f.trim())
+    : [];
+}
+
+// Labeled pipeline segment, e.g. `trust: 60 missing_apply_url,suspicious_domain`.
+// '' when the posting isn't flagged, so an unflagged offer produces no segment.
+export function formatTrustSegment(offer) {
+  if (!trustIsFlagged(offer)) return '';
+  const flags = trustFlagList(offer);
+  const body = flags.length ? `${offer.trustScore} ${flags.join(',')}` : String(offer.trustScore);
+  return sanitizeMarkdownField(`trust: ${body}`);
+}
+
 export function formatPipelineOffer(offer) {
   const url = sanitizePipelineUrl(offer.url);
   const company = sanitizeMarkdownField(offer.company);
@@ -940,6 +1189,11 @@ export function formatPipelineOffer(offer) {
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
   if (posted) line = `${line} | posted: ${posted}`;
+  // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted
+  // only when the scanner flagged the posting (score < 100). Ordered after
+  // posted:, before note:, for a stable serialization.
+  const trust = formatTrustSegment(offer);
+  if (trust) line = `${line} | ${trust}`;
   // Optional free-text ranking signal (e.g. a curated-list flag an importer
   // attaches). Labeled — not positional like location/compensation — so it can
   // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
@@ -971,6 +1225,12 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // New trailing column: posting date. Existing readers index by position up to
     // col 7, so appending col 8 is backward-compatible.
     postedAtIsoDate(offer.postedAt),
+    // Trust/legitimacy signal (#1743): score (only when the scanner flagged the
+    // posting, i.e. < 100) + comma-joined flags. Trailing cols 9-10, so existing
+    // index-based readers (fingerprint@7, postedAt@8) are unaffected; a clean
+    // posting or a scan without trust_filter leaves both empty.
+    trustIsFlagged(offer) ? String(offer.trustScore) : '',
+    trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
   ].map(sanitizeTsvField).join('\t');
 }
 
@@ -1123,7 +1383,7 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 // 'completed' in v1; a follow-up wires failure-path writes so trend stats can
 // exclude survivorship bias. Consumers MUST parse by header name, never by
 // position — columns may be appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\n';
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -1135,8 +1395,54 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     // contract above: files created with an older header keep parsing (the
     // extra trailing cell is simply not named there).
     c.filteredBlacklist ?? 0,
+    // filtered_visa appended at the END for the same reason.
+    c.filteredVisa ?? 0,
+    // filtered_posted_date appended at the END for the same reason.
+    c.filteredPostedDate ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
+}
+
+// ── Portal health persistence (#1744) ───────────────────────────────
+
+const PORTAL_HEALTH_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'portal-health.tsv');
+export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
+
+export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+  let lines = '';
+  for (const r of healthRecords) {
+    lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
+  }
+  if (lines) appendFileSync(filePath, lines, 'utf-8');
+}
+
+export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
+  if (!existsSync(filePath)) return [];
+  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const records = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length >= 3) {
+      records.push({ timestamp: parts[0], company: parts[1], status: parts[2] });
+    }
+  }
+  return records;
+}
+
+export function computeConsecutiveFailures(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    if (r.status === 'slug_gone' || r.status === 'network') {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
+    } else if (r.status === 'reachable' || r.status === 'empty') {
+      streaks.set(r.company, 0);
+    }
+  }
+  return streaks;
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -1301,6 +1607,26 @@ async function main() {
   const includeBlacklisted = args.includes('--include-blacklisted');
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
+  // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
+  // employer's real posting date (job.postedAt), gated against a typo since a
+  // silently-ignored bound would look like "no jobs matched" instead of an error.
+  const isValidIsoDate = (s) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  };
+  const postedAfterFlag = args.indexOf('--posted-after');
+  const postedAfter = postedAfterFlag !== -1 ? args[postedAfterFlag + 1] : null;
+  const postedBeforeFlag = args.indexOf('--posted-before');
+  const postedBefore = postedBeforeFlag !== -1 ? args[postedBeforeFlag + 1] : null;
+  if (postedAfter != null && !isValidIsoDate(postedAfter)) {
+    console.error(`Error: --posted-after expects YYYY-MM-DD, got "${postedAfter}"`);
+    process.exit(1);
+  }
+  if (postedBefore != null && !isValidIsoDate(postedBefore)) {
+    console.error(`Error: --posted-before expects YYYY-MM-DD, got "${postedBefore}"`);
+    process.exit(1);
+  }
 
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
@@ -1343,9 +1669,12 @@ async function main() {
 
   const locationFilter = buildLocationFilter(config.location_filter);
   const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
+  const postedDateFilter = buildPostedDateFilter(postedAfter, postedBefore);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
+  const visaFilter = buildVisaFilter(config.visa_filter);
+  const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -1414,7 +1743,7 @@ async function main() {
   const seenUrlState = loadSeenUrls(historyPolicy);
   const seenUrls = seenUrlState.seen;
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany);
+  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany, { policy: historyPolicy });
 
   // 5. Fetch from each target
   const date = new Date().toISOString().slice(0, 10);
@@ -1427,10 +1756,12 @@ async function main() {
   let totalFilteredTier = 0;
   let totalFilteredLocation = 0;
   let totalFilteredPostingAge = 0;
+  let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
+  let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
   const errors = [...resolveErrors];
@@ -1507,6 +1838,10 @@ async function main() {
           totalFilteredPostingAge++;
           continue;
         }
+        if (!postedDateFilter(job.postedAt)) {
+          totalFilteredPostedDate++;
+          continue;
+        }
         if (!salaryFilter(job.salary)) {
           totalFilteredSalary++;
           continue;
@@ -1515,7 +1850,12 @@ async function main() {
           totalFilteredContent++;
           continue;
         }
-        if (seenUrls.has(job.url)) {
+        if (!visaFilter(job.description)) {
+          totalFilteredVisa++;
+          continue;
+        }
+        const dedupUrl = normalizeUrlForDedup(job.url);
+        if (seenUrls.has(dedupUrl)) {
           totalDupes++;
           continue;
         }
@@ -1534,7 +1874,7 @@ async function main() {
           continue;
         }
         // Mark as seen to avoid intra-scan dupes
-        seenUrls.add(job.url);
+        seenUrls.add(dedupUrl);
         seenCompanyRoles.add(key);
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
@@ -1652,8 +1992,18 @@ async function main() {
   if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
-  console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);
-  console.log(`Filtered by content:  ${totalFilteredContent} removed`);
+  if (postedAfter || postedBefore) {
+    console.log(`Filtered by posted date: ${totalFilteredPostedDate} removed`);
+  }
+  if (config.salary_filter || totalFilteredSalary > 0) {
+    console.log(`Filtered by salary:    ${totalFilteredSalary} removed`);
+  }
+  if (config.content_filter || totalFilteredContent > 0) {
+    console.log(`Filtered by content:   ${totalFilteredContent} removed`);
+  }
+  if (visaEnabled) {
+    console.log(`Filtered by visa:      ${totalFilteredVisa} removed`);
+  }
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
@@ -1720,17 +2070,59 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
+  
+  const STREAK_THRESHOLD = config.portal_health_threshold || 3;
+  const nowStr = new Date().toISOString();
+  const healthRecords = [];
+  
+  for (const t of targets) {
+    const isUnreachable = unreachableTargets.some(e => e.company === t.name);
+    const isNetwork = networkTargets.some(e => e.company === t.name);
+    const isEmpty = emptyTargets.includes(t.name);
+    
+    let status = 'reachable';
+    if (isUnreachable) status = 'slug_gone';
+    else if (isNetwork) status = 'network';
+    else if (isEmpty) status = 'empty';
+    
+    healthRecords.push({ timestamp: nowStr, company: t.name, status });
+  }
 
-  if (unreachableTargets.length > 0) {
-    const names = unreachableTargets.map((e) => e.company).join(', ');
-    console.log(`\n⚠️  ${unreachableTargets.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
+  const pastHealth = loadPortalHealth();
+  const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
+
+  const persistentlyDead = [];
+  const newlyDeadSlug = [];
+  const newlyDeadNetwork = [];
+  
+  for (const e of [...unreachableTargets, ...networkTargets]) {
+    const streak = currentStreaks.get(e.company) || 1;
+    if (streak >= STREAK_THRESHOLD) {
+      if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
+    } else {
+      if (e.kind === 'slug_gone') {
+        if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
+      } else {
+        newlyDeadNetwork.push(e);
+      }
+    }
+  }
+
+  if (persistentlyDead.length > 0) {
+    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`   ${persistentlyDead.join(', ')}`);
+    console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
+  }
+  if (newlyDeadSlug.length > 0) {
+    const names = newlyDeadSlug.map(x => x.company).join(', ');
+    console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
   }
-  if (networkTargets.length > 0) {
-    console.log(`\nNetwork errors (${networkTargets.length}):`);
-    for (const e of networkTargets) {
+  if (newlyDeadNetwork.length > 0) {
+    console.log(`\nNetwork errors (${newlyDeadNetwork.length}):`);
+    for (const e of newlyDeadNetwork) {
       console.log(`  ✗ ${e.company}: ${e.error}`);
     }
   }
@@ -1760,6 +2152,7 @@ async function main() {
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
   if (!dryRun) {
+    appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
       companies: summaryCompanies, boards: summaryBoards, found: totalFound,
@@ -1769,11 +2162,30 @@ async function main() {
       filteredContent: totalFilteredContent, filteredCooldown: totalFilteredCooldown,
       dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
       filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa,
+      filteredPostedDate: totalFilteredPostedDate,
     });
   }
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
+
+  // One-time-ever manifesto note: first successful REAL run only. The state
+  // file keeps it from ever repeating; --dry-run must leave no trace, and a
+  // piped/quiet run is not the moment for it.
+  if (!dryRun && process.stdout.isTTY && !process.argv.includes('--quiet') && !existsSync('.manifesto-noted')) {
+    // OSC 8 hyperlink where support is known, so the click attributes as
+    // utm_source=cli while the visible text stays clean; otherwise print the
+    // URL with the utm so typed visits attribute too.
+    const osc8 = ['iTerm.app', 'WezTerm', 'vscode', 'ghostty', 'Hyper', 'Tabby'].includes(process.env.TERM_PROGRAM)
+      || !!process.env.WT_SESSION || !!process.env.KITTY_WINDOW_ID
+      || parseInt(process.env.VTE_VERSION || '0', 10) >= 5000;
+    const link = osc8
+      ? '\x1b]8;;https://career-ops.org/manifesto?utm_source=cli\x1b\\career-ops.org/manifesto\x1b]8;;\x1b\\'
+      : 'career-ops.org/manifesto?utm_source=cli';
+    console.log(`\nthe practice behind this tool has a name and a manifesto: ${link}`);
+    try { writeFileSync('.manifesto-noted', new Date().toISOString() + '\n'); } catch { /* best-effort */ }
+  }
 }
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.

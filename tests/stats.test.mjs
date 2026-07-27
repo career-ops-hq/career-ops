@@ -26,6 +26,22 @@ try {
     fail(`computeTrackerStats wrong output: ${JSON.stringify(t)}`);
   }
 
+  // Hired rows must classify as Hired (a canonical status per states.yml), not
+  // collapse into an "Unknown" bucket, and must feed avgScoreApplied — a landed
+  // job is the fullest pursuit, so its fit score belongs in that average.
+  const hiredMd = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme | Eng | 4.5/5 | Hired | ✅ | ❌ | landed |',
+    '| 2 | 2026-06-02 | Beta | Eng | 3.5/5 | Applied | ✅ | ❌ | sent |',
+  ].join('\n');
+  const th = stats.computeTrackerStats(hiredMd);
+  if (th.byStatus.Hired === 1 && th.byStatus.Unknown === undefined && th.avgScoreApplied === 4) {
+    pass('computeTrackerStats recognizes Hired and folds it into avgScoreApplied');
+  } else {
+    fail(`computeTrackerStats mishandles Hired: ${JSON.stringify(th.byStatus)} avgScoreApplied=${th.avgScoreApplied}`);
+  }
+
   // Funnel — Rejected counts into everApplied (mirrors dashboard ComputeProgressMetrics).
   const f = stats.computeFunnel({ Applied: 4, Responded: 2, Interview: 1, Offer: 1, Rejected: 2, Evaluated: 9 });
   if (f.everApplied === 10 && f.everResponded === 4 && f.everInterview === 2 && f.everOffer === 1
@@ -33,6 +49,15 @@ try {
     pass('computeFunnel cumulative ever* stages match the dashboard math');
   } else {
     fail(`computeFunnel wrong output: ${JSON.stringify(f)}`);
+  }
+
+  // Hired is a canonical status (states.yml) and the fullest success — it must
+  // count through everOffer, not fall out of the funnel as "Unknown".
+  const fh = stats.computeFunnel({ Applied: 2, Interview: 1, Hired: 1 });
+  if (fh.everApplied === 4 && fh.everResponded === 2 && fh.everInterview === 2 && fh.everOffer === 1) {
+    pass('computeFunnel counts Hired into every stage through everOffer');
+  } else {
+    fail(`computeFunnel mishandles Hired: ${JSON.stringify(fh)}`);
   }
   if (stats.computeFunnel({ Applied: 3 }).smallSample === true) {
     pass('computeFunnel flags small samples (everApplied < 10)');

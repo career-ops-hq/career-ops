@@ -23,6 +23,7 @@
  *   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
  *   node scan-ats-full.mjs --dry-run            # preview without writing files
  *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+ *   node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
  *   node scan-ats-full.mjs --help               # print this usage block and exit
@@ -38,8 +39,9 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
-import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -117,8 +119,8 @@ const SOURCES = {
 
 const KNOWN_FLAGS = [
   '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
-  '--verbose', '--md-out', '--json', '--include-undated', '--shuffle',
-  '--help', '-h',
+  '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
+  '--shuffle', '--help', '-h',
 ];
 
 // Flags that consume the next argv token as a value (space-separated form —
@@ -132,6 +134,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
   node scan-ats-full.mjs --dry-run            # preview without writing files
   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+  node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
   node scan-ats-full.mjs --verbose            # log per-board fetch failures
   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
   node scan-ats-full.mjs --help               # print this usage block and exit`;
@@ -204,6 +207,7 @@ function parseArgs(argv) {
     mdOut: valueOf('--md-out'),
     json: args.includes('--json'),
     includeUndated: args.includes('--include-undated'),
+    includeBlacklisted: args.includes('--include-blacklisted'),
     shuffle: args.includes('--shuffle'),
   };
 }
@@ -250,11 +254,62 @@ export function classifyPostingDate(job, cutoff) {
   return 'keep';
 }
 
+// Apply the same user-owned do-not-apply gate as scan.mjs to reverse-scan
+// results. Absent/empty blacklist is a no-op. Default skips are counted and
+// never silent; --include-blacklisted keeps matches but marks them for audit.
+export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted = false } = {}) {
+  if (!blacklist || blacklist.size === 0) {
+    return { offers, filteredBlacklist: 0, annotatedBlacklisted: 0 };
+  }
+
+  const kept = [];
+  let filteredBlacklist = 0;
+  let annotatedBlacklisted = 0;
+
+  for (const offer of offers) {
+    const entry = blacklist.get(normalizeCompany(offer.company || ''));
+    if (!entry) {
+      kept.push(offer);
+      continue;
+    }
+
+    if (!includeBlacklisted) {
+      filteredBlacklist++;
+      continue;
+    }
+
+    annotatedBlacklisted++;
+    const label = `blacklisted${entry.reason ? `: ${entry.reason}` : ''}`;
+    kept.push({
+      ...offer,
+      blacklisted: true,
+      note: typeof offer.note === 'string' && offer.note.trim()
+        ? `${label} — ${offer.note}`
+        : label,
+    });
+  }
+
+  return { offers: kept, filteredBlacklist, annotatedBlacklisted };
+}
+
+// Title/location/content filter chain for one posting, used by runSeedScan().
+// The main ATS-directory loop below inlines the same three checks (it tracks
+// a droppedContent counter per stage for the run summary), but this shared,
+// pure, exported helper keeps the content_filter.by_title_keyword wiring
+// (#1846) unit-testable without mocking providers or duplicating the rule
+// order in two places for the caller that doesn't need per-stage counts.
+export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
+  if (!titleFilter(job.title)) return false;
+  if (!locationFilter(job.location)) return false;
+  if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
+  return true;
+}
+
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
 // prefix. With --shuffle: a random sample of `limit` companies, so a capped
 // scan isn't always biased to the same alphabetical-first slice. Pure; returns
 // a new array and never mutates `list`.
-export function sampleCompanies(list, limit, shuffle) {
+export function sampleCompanies(list, limit, shuffle = false) {
   if (!shuffle || limit >= list.length) return list.slice(0, limit);
   const copy = list.slice();
   for (let i = copy.length - 1; i > 0; i--) {
@@ -336,10 +391,15 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
       const dateClass = classifyPostingDate(job, cutoff);
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) continue;
-      if (!opts.titleFilter(job.title)) continue;
-      if (!opts.locationFilter(job.location)) continue;
-      if (seenUrls.has(job.url)) continue;
-      seenUrls.add(job.url);
+      if (!passesFilters(job, {
+        titleFilter: opts.titleFilter,
+        locationFilter: opts.locationFilter,
+        contentFilter: opts.contentFilter,
+        titleFilterConfig: opts.titleFilterConfig,
+      })) continue;
+      const dedupUrl = normalizeUrlForDedup(job.url);
+      if (seenUrls.has(dedupUrl)) continue;
+      seenUrls.add(dedupUrl);
       offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   });
@@ -409,12 +469,19 @@ async function main() {
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const titleFilter = buildTitleFilter(config?.title_filter);
   const locationFilter = buildLocationFilter(config?.location_filter);
+  // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
+  // see #1846. Built once here from the same portals.yml config.
+  const contentFilter = buildContentFilter(config?.content_filter);
   if (!config?.title_filter?.positive?.length) {
     console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
   }
   // Attach filters to opts so runSeedScan can use them without extra parameters.
   opts.titleFilter = titleFilter;
   opts.locationFilter = locationFilter;
+  opts.contentFilter = contentFilter;
+  // Raw title_filter config, needed by matchedTitleKeywords() to scope
+  // content_filter.by_title_keyword the same way scan.mjs does.
+  opts.titleFilterConfig = config?.title_filter;
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
@@ -422,6 +489,7 @@ async function main() {
   log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   const { seen: seenUrls } = loadSeenUrls();
+  const blacklist = loadBlacklist();
   // sinceMs and includeUndated let providers (currently only workday.mjs)
   // stop paginating a tenant early instead of always walking to max_pages:
   // sinceMs once postings are confidently past the --since window, and
@@ -435,6 +503,7 @@ async function main() {
   let totalCompaniesAvailable = 0;
   let totalErrors = 0;
   let droppedNoDate = 0;
+  let droppedContent = 0;
   let capHit = false;
   // Aggregated from providers/workday.mjs's jobs.workdayNoDateSkip tag — see
   // there for why this is a counter instead of a per-company console.error
@@ -470,8 +539,10 @@ async function main() {
           if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
           if (!titleFilter(job.title)) continue;
           if (!locationFilter(job.location)) continue;
-          if (seenUrls.has(job.url)) continue;
-          seenUrls.add(job.url); // intra-scan dedup
+          if (!contentFilter(job.description, matchedTitleKeywords(job.title, config?.title_filter))) { droppedContent++; continue; }
+          const dedupUrl = normalizeUrlForDedup(job.url);
+          if (seenUrls.has(dedupUrl)) continue;
+          seenUrls.add(dedupUrl); // intra-scan dedup
           newOffers.push({ ...job, source: `${name}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
         }
       } catch (err) {
@@ -502,8 +573,9 @@ async function main() {
     }
   }
 
-  let offers = newOffers;
-  if (offers.length && opts.liveness) offers = await filterLive(newOffers);
+  const blacklistResult = filterBlacklistedOffers(newOffers, blacklist, { includeBlacklisted: opts.includeBlacklisted });
+  let offers = blacklistResult.offers;
+  if (offers.length && opts.liveness) offers = await filterLive(offers);
   offers.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
 
   log(`\n${'━'.repeat(45)}`);
@@ -521,13 +593,22 @@ async function main() {
       : '';
     log(`Undated dropped: ${droppedNoDate}${breakdown}${opts.includeUndated ? '' : '. Use --include-undated to keep'}`);
   }
+  if (blacklist.size > 0) {
+    if (opts.includeBlacklisted) {
+      log(`Blacklisted:      ${blacklistResult.annotatedBlacklisted} let through annotated (--include-blacklisted)`);
+    } else {
+      log(`Blacklisted:      ${blacklistResult.filteredBlacklist} skipped (blacklist)`);
+    }
+  }
+  if (droppedContent) log(`Content-filtered:   ${droppedContent}`);
   log(`New matches:        ${offers.length}`);
 
   if (offers.length) {
     log('\nNew offers:');
     for (const o of offers) {
       const posted = o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : 'n/a';
-      log(`  + [${o.source}] ${posted} | ${o.company} | ${o.title} | ${o.location || 'N/A'}\n    ${o.url}`);
+      const blacklistSuffix = o.blacklisted ? ' [BLACKLISTED — on your do-not-apply list]' : '';
+      log(`  + [${o.source}] ${posted} | ${o.company} | ${o.title} | ${o.location || 'N/A'}${blacklistSuffix}\n    ${o.url}`);
     }
   }
 
@@ -579,6 +660,9 @@ async function main() {
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,
+      postingsFilteredBlacklist: blacklistResult.filteredBlacklist,
+      postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
+      postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
       saved,
       offers: offers.map(o => ({
@@ -588,6 +672,8 @@ async function main() {
         location: o.location || null,
         postedAt: o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : null,
         dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
+        blacklisted: Boolean(o.blacklisted),
+        note: o.note || null,
         source: o.source,
       })),
     }) + '\n');

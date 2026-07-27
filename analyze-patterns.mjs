@@ -48,6 +48,7 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'advertised_comp',
   'via',
   'company_confidential',
+  'risk_summary',
 ]);
 
 // --- CLI args ---
@@ -216,6 +217,38 @@ company_confidential: true
   if (summary?.next_action !== 'Follow up on ticket #42 with tailored CV') failures.push('hash-containing scalar field was not parsed');
   if (summary?.via !== 'Hays') failures.push('via was not preserved from Machine Summary');
   if (summary?.company_confidential !== true) failures.push('company_confidential boolean was not preserved from Machine Summary');
+
+  // Backward compat (#1737): summaries without risk_summary parse as before, key simply absent.
+  if ('risk_summary' in (summary ?? {})) failures.push('summary without risk_summary must not gain the key');
+
+  // risk_summary preservation (#1737): the nested map must survive the
+  // MACHINE_SUMMARY_FIELDS allowlist intact — nested keys preserved, not
+  // flattened or dropped.
+  const riskSummary = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+legitimacy_tier: "High Confidence"
+risk_summary:
+  legitimacy: high_confidence
+  classification: clear
+  culture: caution
+  interview_redflags: not_evaluated
+  ai_infra: not_evaluated
+\`\`\`
+`)?.risk_summary;
+  if (!riskSummary || typeof riskSummary !== 'object' || Array.isArray(riskSummary)) {
+    failures.push('risk_summary nested map was dropped or not parsed as a map');
+  } else {
+    if (riskSummary.legitimacy !== 'high_confidence') failures.push('risk_summary.legitimacy was not preserved');
+    if (riskSummary.classification !== 'clear') failures.push('risk_summary.classification was not preserved');
+    if (riskSummary.culture !== 'caution') failures.push('risk_summary.culture was not preserved');
+    if (riskSummary.interview_redflags !== 'not_evaluated') failures.push('risk_summary.interview_redflags was not preserved');
+    if (riskSummary.ai_infra !== 'not_evaluated') failures.push('risk_summary.ai_infra was not preserved');
+  }
 
   // Vendor detection (community ATS only; white-labeled → null)
   const vendorCases = [
