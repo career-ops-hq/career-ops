@@ -943,6 +943,32 @@ for (const f of skillEntrypoints) {
   }
 }
 
+// The Dockerfile pins playwright to the exact version baked into its base
+// image so the npm-installed package matches the bundled Chromium. Nothing
+// enforced that pin against package.json's own playwright version, so it
+// silently drifted for months (#2221) — this keeps the two in sync going
+// forward instead of relying on whoever next reads the Dockerfile noticing.
+{
+  const pkgPlaywright = JSON.parse(readFile('package.json')).dependencies?.playwright;
+  const dockerfile = readFile('Dockerfile');
+  const runPinMatch = dockerfile.match(/--save-exact playwright@([\d.]+)/);
+  const commentPinMatch = dockerfile.match(/matches playwright@([\d.]+) in package\.json/);
+  if (!pkgPlaywright) {
+    fail('package.json missing dependencies.playwright — cannot check Dockerfile pin against it');
+  } else if (!runPinMatch) {
+    fail('Dockerfile missing the expected "--save-exact playwright@X" RUN line');
+  } else if (runPinMatch[1] !== pkgPlaywright) {
+    fail(`Dockerfile pins playwright@${runPinMatch[1]} but package.json depends on playwright@${pkgPlaywright} — bump the Dockerfile's --save-exact pin`);
+  } else {
+    pass(`Dockerfile's playwright pin (${runPinMatch[1]}) matches package.json`);
+  }
+  if (commentPinMatch && pkgPlaywright && commentPinMatch[1] !== pkgPlaywright) {
+    fail(`Dockerfile's line-2 comment claims playwright@${commentPinMatch[1]} but package.json depends on playwright@${pkgPlaywright} — update the comment`);
+  } else if (commentPinMatch) {
+    pass('Dockerfile\'s line-2 comment version matches package.json');
+  }
+}
+
 // Check user files are NOT tracked (gitignored)
 const userFiles = [
   'config/profile.yml', 'modes/_profile.md', 'portals.yml',
