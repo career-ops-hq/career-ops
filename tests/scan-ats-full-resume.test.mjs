@@ -27,6 +27,46 @@ const { parallelEach, withTimeout, datasetFingerprint } = mod;
   }
 }
 
+// withTimeout: a loser that rejects AFTER the race is over must not surface as
+// an unhandled rejection — Node terminates the process on those, so the
+// watchdog meant to cost one company would take down the whole sweep.
+//
+// This passes against the current implementation and is meant to: Promise.race
+// attaches a rejection handler to every participant (ECMA-262 PerformPromiseRace),
+// so the losers cannot leak. It is a regression guard for a future refactor that
+// replaces the race with a hand-rolled then-chain, where they could.
+//
+// The control arm is load-bearing. Without it, a listener that silently stopped
+// working would make the real assertion pass vacuously — the failure mode that
+// makes "no event fired" a weak signal on its own.
+{
+  const seen = [];
+  const onUnhandled = (err) => seen.push(err.message);
+  process.on('unhandledRejection', onUnhandled);
+  const settle = () => new Promise((r) => setTimeout(r, 160));
+
+  // CONTROL: a genuinely orphaned rejection. Detection must see this one.
+  { new Promise((_, reject) => setTimeout(() => reject(new Error('ORPHAN')), 20)); }
+  await settle();
+  const controlFired = seen.includes('ORPHAN');
+
+  // SUBJECT: the timeout wins, then the loser rejects well afterwards.
+  seen.length = 0;
+  const late = new Promise((_, reject) => setTimeout(() => reject(new Error('LATE_LOSER')), 40));
+  try {
+    await withTimeout(late, 15, 'acme/board');
+    fail('withTimeout resolved when the timeout should have won');
+  } catch (err) {
+    if (!/acme\/board: timed out after/.test(err.message)) fail(`unexpected error: ${err.message}`);
+  }
+  await settle();
+  process.off('unhandledRejection', onUnhandled);
+
+  if (!controlFired) fail('unhandledRejection listener never fired on the control — test is vacuous');
+  else if (seen.length === 0) pass('withTimeout: late rejection from the losing promise stays handled');
+  else fail(`losing promise leaked an unhandled rejection: ${seen.join(', ')}`);
+}
+
 // parallelEach: resumeAt is the lowest UNFINISHED index — a slow early item
 // holds resumeAt down even while later items complete (resuming at plain
 // `done` count would skip the slow item's work).
