@@ -24,6 +24,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeReportLink } from './tracker-links.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -226,7 +227,8 @@ for (let i = pendStart + 1; i < pendEnd; i++) {
   const pdf = resolvePdf(reportFile);
   const num = parseInt(done.reportNum, 10);
 
-  movedProcLines.push(`- [x] [${num}](reports/${reportFile}) | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
+  const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
+  movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
   moved.push({ url, company, role, num, score });
   procUrls.add(url);
   removeIdx.add(i);

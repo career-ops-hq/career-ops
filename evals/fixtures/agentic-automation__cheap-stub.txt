@@ -1,0 +1,14 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case agentic-automation]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Multi-agent orchestration with HITL checkpoints and tool-calling integrations —
+a clear agentic/automation build role.
+
+---SCORE_SUMMARY---
+COMPANY: Northwind AI
+ROLE: Agent Engineer
+SCORE: 4.1
+ARCHETYPE: Agentic / Automation
+LEGITIMACY: High Confidence
+---END_SUMMARY---

@@ -74,7 +74,7 @@ export default {
       .filter(j => j && typeof j === 'object' && typeof j.url === 'string' && j.url.trim() !== '')
       .map(j => ({
         title: j.title || '',
-        url: /** @type {string} */ j.url || '',
+        url: /** @type {string} */ (j.url || '').trim(),
         company: j.company || entry.name,
         location: Array.isArray(j.locations) ? j.locations.join(', ') : (typeof j.locations === 'string' ? j.locations : ''),
       }));

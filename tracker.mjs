@@ -28,16 +28,21 @@
  *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
  *   node tracker.mjs history --id N             # status transition log observed across syncs
  *   node tracker.mjs export [--out FILE]        # inverse: applications.db → canonical markdown (stdout by default)
+ *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
  *
  * query/history auto-resync when applications.md changed since the last sync,
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, resolve } from 'path';
+import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { resolveColumns } from './tracker-parse.mjs';
+import {
+  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+} from './tracker-utils.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -142,7 +147,7 @@ function normalizeStatus(raw, states) {
   return states.byKey.get(cleaned) || null;
 }
 
-const SCORE_RE = /^\*{0,2}(\d(?:\.\d)?\/5)\*{0,2}$/;
+const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
@@ -156,20 +161,59 @@ function repairPlaceholder(cell) {
 // ── Markdown parsing ────────────────────────────────────────────────
 
 function parseMarkdownRows(text, diag) {
+  const lines = text.split('\n');
+  // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
+  // (e.g. an inserted Location column) can't shift Score into Status. Falls back
+  // to the legacy fixed 9-column layout when no header row is found.
+  const colmap = resolveColumns(lines);
+  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
+  const width = Math.max(...Object.values(colmap)) + 2;
   const rows = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim().startsWith('|')) continue;
-    let cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-    if (cells.length < 2) continue;
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) continue; // header / separator
-    if (cells.length > 9) {
-      cells = [...cells.slice(0, 8), cells.slice(8).join(' | ')]; // stray pipes → notes
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    let parts = t.split('|').map(c => c.trim());
+    if (parts.length < 3) continue; // needs at least one real cell
+    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    if (parts.length > width && colmap.notes === width - 2) {
+      // Stray pipes inside the trailing free-text column → fold back into notes.
+      parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
-    while (cells.length < 9) cells.push('');
-    rows.push(cells);
+    const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
+    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
   }
   return rows;
+}
+
+// Remove every table row whose first cell (the application number) equals `num`,
+// preserving the rest of the file (header, separators, spacing, other rows)
+// byte-for-byte. Pure: returns { removed, removedCount, report, newContent }.
+// `report` is the report-column value of the first removed row, so callers can
+// surface the now-orphaned report file. Numbers are unique in practice, but any
+// duplicates are all removed.
+export function removeRowByNum(content, num) {
+  const target = String(num).trim();
+  const lines = content.split('\n');
+  // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
+  // cell on customized layouts (e.g. with a Location column).
+  const colmap = resolveColumns(lines);
+  let removedCount = 0;
+  let report = null;
+  const kept = lines.filter((line) => {
+    const t = line.trim();
+    if (!t.startsWith('|')) return true; // non-table line — keep verbatim
+    const parts = t.split('|').map((c) => c.trim());
+    const numCell = parts[colmap.num] ?? '';
+    if (numCell === '#' || /^[-: ]*$/.test(parts.join(''))) return true; // header / separator
+    if (numCell === target) {
+      removedCount++;
+      if (report === null) report = (colmap.report != null ? parts[colmap.report] : '') || null;
+      return false;
+    }
+    return true;
+  });
+  return { removed: removedCount > 0, removedCount, report, newContent: kept.join('\n') };
 }
 
 // Parse + normalize the markdown into index-ready rows. The markdown itself is
@@ -396,47 +440,116 @@ async function history(args) {
 // applications.md unless explicitly asked to via --out.
 
 async function exportMd(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
-  const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-  const out = [
-    '# Applications Tracker',
-    '',
-    HEADER,
-    SEPARATOR,
-    ...rows.map(rowToMarkdown),
-    '',
-  ].join('\n');
-
   const outPath = flagValue(args, '--out');
-  if (!outPath) {
-    process.stdout.write(out);
-    return;
-  }
-  if (existsSync(outPath) && statSync(outPath).isDirectory()) {
+  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
     console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
     process.exit(1);
   }
-  mkdirSync(dirname(outPath) || '.', { recursive: true });
-  // Never silently clobber — whatever was there is backed up first.
-  if (existsSync(outPath)) {
-    copyFileSync(outPath, outPath + '.bak');
-    console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+
+  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const writesTracker = outPath
+    ? canonicalizeTrackerPath(outPath) === trackerPath
+    : false;
+  const trackerTransaction = writesTracker
+    ? await openTrackerTransaction(trackerPath)
+    : null;
+
+  try {
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    ensureFresh(db, loadStates());
+    const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
+    const out = [
+      '# Applications Tracker',
+      '',
+      HEADER,
+      SEPARATOR,
+      ...rows.map(rowToMarkdown),
+      '',
+    ].join('\n');
+
+    if (!outPath) {
+      process.stdout.write(out);
+      return;
+    }
+    mkdirSync(dirname(outPath) || '.', { recursive: true });
+    // Never silently clobber — whatever was there is backed up first.
+    const writeTarget = writesTracker ? trackerPath : outPath;
+    if (existsSync(writeTarget)) {
+      copyFileSync(writeTarget, writeTarget + '.bak');
+      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+    }
+    if (trackerTransaction) trackerTransaction.replace(out);
+    else writeFileAtomic(outPath, out);
+    console.error(`Exported ${rows.length} applications to ${outPath}`);
+  } finally {
+    trackerTransaction?.close();
   }
-  writeFileSync(outPath, out, 'utf-8');
-  console.error(`Exported ${rows.length} applications to ${outPath}`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
 
-const COMMANDS = { sync, query, history, export: exportMd };
+// `delete --num N` removes one application row from applications.md and rebuilds
+// the derived index. The markdown stays the source of truth: callers (incl. the
+// web) orchestrate this script rather than editing applications.md directly.
+// The read and atomic replacement share merge-tracker's cross-process lock.
+async function deleteApp(args) {
+  const num = flagValue(args, '--num');
+  if (!num) {
+    console.error('Usage: node tracker.mjs delete --num <N> [--dry-run]   (remove one application row by its number)');
+    process.exit(1);
+  }
+  if (!existsSync(MD_PATH)) {
+    console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
+    process.exit(1);
+  }
+  if (args.includes('--dry-run')) {
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    if (!removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
+    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
+    if (report) console.error(`(report file would be orphaned: ${report})`);
+    return;
+  }
+
+  const trackerTransaction = await openTrackerTransaction(MD_PATH);
+
+  let removal;
+  try {
+    removal = removeRowByNum(trackerTransaction.read(), num);
+    if (!removal.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exitCode = 1;
+      return;
+    }
+    trackerTransaction.replace(removal.newContent);
+  } finally {
+    trackerTransaction.close();
+  }
+
+  const { removedCount, report } = removal;
+  // Rebuild the derived SQLite index from the now-updated markdown.
+  try {
+    const states = loadStates();
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    syncIndex(db, states);
+  } catch (e) {
+    console.error(`(row removed; index resync skipped: ${e.message})`);
+  }
+  console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
+  if (report) console.error(`Note: report file may now be orphaned — ${report}`);
+}
+
+const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const fn = COMMANDS[command];
   if (!fn) {
-    console.log('Usage: node tracker.mjs <sync|query|history|export> [flags]');
+    console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
     console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
     process.exit(command ? 1 : 0);
   }

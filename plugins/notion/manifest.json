@@ -1,0 +1,13 @@
+{
+  "id": "notion",
+  "name": "Notion",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Mirror your tracker to a Notion database and read records back as job leads.",
+  "hooks": ["export", "search"],
+  "requiredEnv": ["NOTION_ACCESS_TOKEN", "NOTION_PARENT_PAGE_ID"],
+  "allowedHosts": ["api.notion.com"],
+  "skill": "skill.md",
+  "humanInTheLoop": true,
+  "homepage": "https://developers.notion.com"
+}

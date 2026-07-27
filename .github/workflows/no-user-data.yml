@@ -1,0 +1,64 @@
+name: No user data in PRs
+
+# Hard-blocks any PR that adds or modifies user-layer (private data) files.
+# These live ONLY on the candidate's machine per DATA_CONTRACT.md and must never
+# enter the repo — they are personal job-search data. Sample/fixture data belongs
+# under examples/. Tracked scaffolding (.gitkeep keepers, dir READMEs) is exempt.
+# Paths mirror USER_PATHS in update-system.mjs. Uses the API (listFiles) so it
+# works for fork PRs too.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number, per_page: 100,
+            });
+
+            // User-layer paths from DATA_CONTRACT.md and update-system.mjs.
+            // voice-dna.md is omitted on purpose: it ships as a populated
+            // system default, so edits to it are legit.
+            const USER_PATHS = [
+              /^cv\.md$/,
+              /^config\/profile\.yml$/,
+              /^modes\/_profile\.md$/,
+              /^modes\/_custom\.md$/,
+              /^portals\.yml$/,
+              /^article-digest\.md$/,
+              /^interview-prep\//,
+              /^data\//,
+              /^reports\//,
+              /^output\//,
+              /^jds\//,
+              /^writing-samples\//,
+            ];
+            // Tracked scaffolding that legitimately lives under those dirs.
+            const isScaffold = (f) => /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f);
+
+            const bad = files
+              .filter((f) => f.status !== 'removed')
+              .map((f) => f.filename)
+              .filter((f) => USER_PATHS.some((re) => re.test(f)) && !isScaffold(f));
+
+            if (bad.length) {
+              core.setFailed(
+                'This PR adds/modifies user-layer (private data) files. These live ONLY on your ' +
+                'machine per DATA_CONTRACT.md and must never be committed — use examples/ for ' +
+                'sample data.\nOffending files:\n  ' + bad.join('\n  ')
+              );
+            } else {
+              core.info('OK — no user-layer (private data) files touched.');
+            }

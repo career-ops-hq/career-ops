@@ -1,0 +1,15 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case platform-agentic-hybrid]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Observability, evals, and reliability pipelines for a fleet of agents — the
+agentic surface is the domain, but the mandate is platform. Candidate model
+resolves the hybrid to the platform archetype here.
+
+---SCORE_SUMMARY---
+COMPANY: Fathom AI
+ROLE: Staff Engineer, Agent Reliability
+SCORE: 4.0
+ARCHETYPE: AI Platform / LLMOps
+LEGITIMACY: High Confidence
+---END_SUMMARY---

@@ -1,0 +1,13 @@
+{
+  "id": "gmail",
+  "name": "Gmail ingest",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Pull job leads from a Gmail label into your pipeline (read-only, your OAuth token).",
+  "hooks": ["ingest"],
+  "requiredEnv": ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"],
+  "allowedHosts": ["oauth2.googleapis.com", "gmail.googleapis.com"],
+  "skill": "skill.md",
+  "humanInTheLoop": true,
+  "homepage": "https://developers.google.com/gmail/api"
+}

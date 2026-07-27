@@ -9,7 +9,7 @@ Utilise `modes/fr/` si au moins une de ces conditions est remplie :
 - Tu postules principalement a des **offres d'emploi en francais** (Welcome to the Jungle, Indeed FR, APEC, Pole emploi / France Travail, LinkedIn FR, sites carrieres)
 - Ton **CV est en francais** ou tu alternes entre FR et EN selon l'offre
 - Tu as besoin de reponses et lettres de motivation en **francais tech naturel**, pas traduit par une machine
-- Tu dois gerer des **specificites contractuelles francophones** : convention collective, RTT, mutuelle, prevoyance, 13e mois, periode d'essai, preavis, cheques-dejeuner, interessement/participation
+- Tu dois gerer des **specificites contractuelles francophones** : convention collective, RTT, mutuelle, prevoyance, 13e mois, periode d'essai, preavis, cheques-dejeuner, interessement/participation, portage salarial
 
 Si la plupart de tes offres sont en anglais, reste sur les modes standard dans `modes/`. Les modes anglais fonctionnent pour les offres francophones, mais ne connaissent pas les specificites du marche francophone en detail.
 

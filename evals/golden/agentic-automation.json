@@ -1,0 +1,10 @@
+{
+  "id": "agentic-automation",
+  "synthetic": true,
+  "jd": "Agent Engineer — Northwind AI (Remote, EU hours)\n\nWe are building multi-agent automation for back-office operations. You will design and orchestrate agent workflows with human-in-the-loop (HITL) checkpoints, build tool-calling integrations, and ship orchestration logic that keeps long-running agents reliable. Expect to work on planning loops, retries, and guardrails for autonomous workflows that take real actions. We value people who have shipped production agentic systems and understand where to put a human approval step. Strong TypeScript or Python, experience with orchestration frameworks, and a healthy respect for failure modes in autonomous workflows.",
+  "label": {
+    "archetype": "Agentic / Automation",
+    "score": 3.9,
+    "provenance": "reference-frozen-v1"
+  }
+}

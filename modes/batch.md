@@ -21,6 +21,16 @@ Conductor (headed browser mode)
 
 Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the **Headless / Batch Mode** table in `AGENTS.md` for the correct command per CLI.
 
+## Pre-screen gate (standard / premium tiers only)
+
+Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tier section; defaults to `standard` if absent).
+
+- **`standard` or `premium` tier:** Before a worker runs the full A-F evaluation on a JD, run a cheap pre-screen pass using the tier's economy-equivalent model (see the mapping table in `modes/_shared.md`) against the candidate's North Star archetypes (`modes/_profile.md`). If the JD is an obvious mismatch (wrong domain, wrong seniority band, disqualifying location/visa conflict), skip the full evaluation: mark the job `skipped` in `batch-state.tsv` with a one-line reason, and move to the next job.
+- **`economy` tier:** No gate. The tier is already the cheapest available -- running a pre-screen on top of it adds latency without saving spend. Every job goes straight to the full evaluation.
+- This gate only applies to batch/pipeline processing. It never applies to a single interactive evaluation (the user already decided the JD is worth a look by pasting/sharing it).
+
+**Discard log (auditable):** Every posting the gate filters out MUST be logged with a one-line reason so pre-filtering is never a silent black box. Append one line to `batch/logs/discard.log` (create the file/dir if absent) in the format `{ISO8601 timestamp}\t{job id}\t{url}\t{reason}`, in addition to the `skipped` row already written to `batch-state.tsv`. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax.
+
 ## Files
 
 ```text
@@ -41,7 +51,7 @@ batch/
 4. **For each pending URL**:
    a. Chrome: click on the job → read JD text from the DOM
    b. Save JD to `/tmp/batch-jd-{id}.txt`
-   c. Calculate next sequential REPORT_NUM
+   c. Reserve the next REPORT_NUM atomically: `node reserve-report-num.mjs` (release with `--release {num}` after the worker writes the report; stale sentinels are GC'd automatically)
    d. Execute via Bash:
 
       ```bash
@@ -63,6 +73,26 @@ During a conductor run, the operator has two primary live interfaces to monitor:
 
 The individual worker tasks spawn headlessly in the background and write their stdout/stderr logs to `batch/logs/{report_num}-{id}.log`, which can be inspected on demand.
 
+### Manual multi-agent fan-out
+
+Orchestrating N parallel evaluators by hand (multiple agent windows / subagents, outside `batch-runner.sh`)? Reserve the whole range FIRST, then hand each worker its own number — never let workers compute `max+1` themselves:
+
+```bash
+node reserve-report-num.mjs --count 8
+# stdout: 042-049  → worker 1 gets 042, worker 2 gets 043, ...
+```
+
+Each number is backed by a sentinel file in `reports/`, so concurrent reservations from other windows cannot collide. After all reports are written, release leftovers in one call:
+
+```bash
+node reserve-report-num.mjs --release 042-049
+```
+
+**Two things to know:**
+
+- **4-hour protection window.** Sentinels older than 4h are garbage-collected (`verify-pipeline.mjs` triggers this). Reserve the range immediately before spawning workers, not at the start of a long session. Once a worker writes its real report, that slot is permanently safe — only slow or unstarted slots are at risk after 4h.
+- **Gaps are normal.** If a reservation collides and restarts, skipped numbers (e.g. `006`) are never reused. Report numbers are opaque IDs; a gap is not corruption.
+
 ## Mode B: Standalone script
 
 ```bash
@@ -74,6 +104,7 @@ Options:
 - `--retry-failed` — retry only failed jobs
 - `--resume-paused` — resume jobs paused after a Claude session/rate limit
 - `--start-from N` — start from ID N
+- `--limit N` — max number of jobs to process in this run
 - `--parallel N` — N workers in parallel
 - `--max-retries N` — attempts per job (default: 2)
 - `--rate-limit-sleep N` — seconds to wait before retrying a transient rate-limited worker (default: 300; use 0 to pause the batch immediately)

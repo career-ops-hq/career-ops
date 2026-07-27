@@ -2,7 +2,7 @@ package screens
 
 import (
 	"fmt"
-	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
@@ -24,11 +25,36 @@ type PipelineOpenReportMsg struct {
 	Path   string
 	Title  string
 	JobURL string
+	App    model.CareerApplication
 }
 
 // PipelineOpenURLMsg is emitted when a job URL should be opened in browser.
 type PipelineOpenURLMsg struct {
 	URL string
+}
+
+// PipelineOpenPDFMsg is emitted when a generated CV PDF should be opened
+// with the OS default handler. Path is absolute.
+type PipelineOpenPDFMsg struct {
+	Path string
+}
+
+// PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
+// from the application's recorded source HTML. Paths are relative to
+// CareerOpsPath (as recorded in the manifest).
+type PipelineGeneratePDFMsg struct {
+	CareerOpsPath string
+	ReportNumber  string
+	HTMLPath      string
+	PDFPath       string
+	Format        string
+}
+
+// PipelinePDFGeneratedMsg reports the outcome of a regeneration. On success
+// Err is empty and Path holds the absolute path of the (already opened) PDF.
+type PipelinePDFGeneratedMsg struct {
+	Err  string
+	Path string
 }
 
 // PipelineLoadReportMsg requests lazy loading of a report summary.
@@ -44,11 +70,37 @@ type PipelineUpdateStatusMsg struct {
 	NewStatus     string
 }
 
+// PipelineUpdateStatusAndNotesMsg requests an atomic status + notes update.
+// Used by the discard reason picker (Issue 1380) to commit both changes in a
+// single tracker write.
+type PipelineUpdateStatusAndNotesMsg struct {
+	CareerOpsPath string
+	App           model.CareerApplication
+	NewStatus     string
+	NotesAppend   string // text to append to the Notes cell, e.g. "DISCARD: salary_too_low"
+}
+
+// PipelineDiscardReasonsLoadedMsg delivers predicted discard reasons from a
+// report back to the pipeline model so the picker can show them.
+type PipelineDiscardReasonsLoadedMsg struct {
+	Reasons []string
+}
+
 // PipelineRefreshMsg requests a full tracker reload from disk.
 type PipelineRefreshMsg struct{}
 
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
+
+var canonicalDiscardReasons = []string{
+	"salary_too_low",
+	"hybrid_required",
+	"tech_stack_mismatch",
+	"seniority_mismatch",
+	"geo_restriction",
+	"size_mismatch",
+	"company_culture",
+}
 
 type reportSummary struct {
 	archetype string
@@ -56,6 +108,8 @@ type reportSummary struct {
 	remote    string
 	comp      string
 }
+
+const storyTemplateURL = "https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml"
 
 // Sort modes
 const (
@@ -85,15 +139,17 @@ type pipelineTab struct {
 	label  string
 }
 
-var pipelineTabs = []pipelineTab{
-	{filterAll, "ALL"},
-	{filterEvaluated, "EVALUATED"},
-	{filterApplied, "APPLIED"},
-	{filterInterview, "INTERVIEW"},
-	{filterTop, "TOP ≥4"},
-	{filterSkip, "SKIP"},
-	{filterRejected, "REJECTED"},
-	{filterDiscarded, "DISCARDED"},
+func getPipelineTabs() []pipelineTab {
+	return []pipelineTab{
+		{filterAll, i18n.Current.TabAll},
+		{filterEvaluated, i18n.Current.TabEvaluated},
+		{filterApplied, i18n.Current.TabApplied},
+		{filterInterview, i18n.Current.TabInterview},
+		{filterTop, i18n.Current.TabTop},
+		{filterSkip, i18n.Current.TabSkip},
+		{filterRejected, i18n.Current.TabRejected},
+		{filterDiscarded, i18n.Current.TabDiscarded},
+	}
 }
 
 var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
@@ -113,26 +169,45 @@ const (
 
 // colDef describes one optional column for the picker UI.
 type colDef struct {
-	id     ColumnID
-	header string
-	hint   string
-	width  int
+	id          ColumnID
+	header      string
+	hint        string
+	width       int
 	onByDefault bool
 }
 
-var optionalCols = []colDef{
-	{ColDate, "APPLIED", "", 10, true},
-	{ColLocation, "LOCATION", "", 20, true},
-	{ColPay, "PAY", "", 16, true},
-	{ColHasReport, "RPT", "✓/—", 4, false},
-	{ColHasPDF, "PDF", "✓/—", 4, false},
-	{ColLastContact, "LAST", "", 10, false},
+func getOptionalCols() []colDef {
+	return []colDef{
+		{ColDate, i18n.Current.ColApplied, "", 10, true},
+		{ColLocation, i18n.Current.ColLocation, "", 20, true},
+		{ColPay, i18n.Current.ColPay, "", 16, true},
+		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
+		{ColHasPDF, i18n.Current.ColPDF, "✓/—", 4, false},
+		{ColLastContact, i18n.Current.ColLast, "", 10, false},
+	}
 }
 
-var statusOptions = []string{"Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded", "SKIP"}
+type StatusPair struct {
+	Display   string
+	Canonical string
+}
+
+func getStatusPairs() []StatusPair {
+	return []StatusPair{
+		{i18n.Current.StatusEvaluated, "Evaluated"},
+		{i18n.Current.StatusApplied, "Applied"},
+		{i18n.Current.StatusResponded, "Responded"},
+		{i18n.Current.StatusInterview, "Interview"},
+		{i18n.Current.StatusOffer, "Offer"},
+		{i18n.Current.StatusHired, "Hired"},
+		{i18n.Current.StatusRejected, "Rejected"},
+		{i18n.Current.StatusDiscarded, "Discarded"},
+		{i18n.Current.StatusSkip, "Skip"},
+	}
+}
 
 // statusGroupOrder defines display order for grouped view.
-var statusGroupOrder = []string{"interview", "offer", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
+var statusGroupOrder = []string{"hired", "interview", "offer", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
 
 // PipelineModel implements the career pipeline dashboard screen.
 type PipelineModel struct {
@@ -151,6 +226,26 @@ type PipelineModel struct {
 	// Status picker sub-state
 	statusPicker bool
 	statusCursor int
+	// Discard reason picker sub-state (Issue 1380) — opens when status
+	// transitions to Discarded or SKIP, pre-populated from the report's
+	// predicted discard_reasons, plus canonical fallback options.
+	discardPicker         bool
+	discardCursor         int
+	discardOptions        []string                // predicted + canonical options shown to user
+	discardCustomInput    bool                    // true when "Other…" is selected and user is typing
+	discardCustomText     string                  // free-text typed for "Other…" reason
+	discardPendingApp     model.CareerApplication // app awaiting the reason pick
+	discardPendingStatus  string                  // new status to commit with the reason
+	discardPredictedCount int                     // count of predicted reasons (from report)
+
+	// PDF picker sub-state — shown when one application matches several
+	// generated CVs (role variants from the same company).
+	pdfPicker  bool
+	pdfCursor  int
+	pdfChoices []string // root-relative paths, newest first
+	// flash is a one-shot notice rendered in place of the help bar; any
+	// keypress clears it.
+	flash string
 	// Search sub-state — narrows the active tab by substring on company/role/notes.
 	searchInput bool   // true while the user is typing the query
 	searchQuery string // committed (or in-progress) lowercased query
@@ -158,12 +253,21 @@ type PipelineModel struct {
 	colPicker    bool
 	colPickerIdx int
 	visibleCols  map[ColumnID]bool
+
+	// Hired win flow sub-state (Issue 1447)
+	hiredApp  model.CareerApplication
+	hiredStep int // 0 = inactive, 1 = celebration, 2 = story invite, 3 = anonymous stat
+}
+
+// IsTextInputActive returns true if the search or any other text input is currently focused
+func (m PipelineModel) IsTextInputActive() bool {
+	return m.searchInput || m.discardCustomInput
 }
 
 // NewPipelineModel creates a new pipeline screen.
 func NewPipelineModel(t theme.Theme, apps []model.CareerApplication, metrics model.PipelineMetrics, careerOpsPath string, width, height int) PipelineModel {
 	visible := make(map[ColumnID]bool)
-	for _, col := range optionalCols {
+	for _, col := range getOptionalCols() {
 		visible[col.id] = col.onByDefault
 	}
 	m := PipelineModel{
@@ -282,11 +386,21 @@ func (m PipelineModel) CurrentApp() (model.CareerApplication, bool) {
 func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		m.flash = ""
+		if m.hiredStep > 0 {
+			return m.handleHiredFlow(msg)
+		}
 		if m.colPicker {
 			return m.handleColPicker(msg)
 		}
 		if m.statusPicker {
 			return m.handleStatusPicker(msg)
+		}
+		if m.discardPicker {
+			return m.handleDiscardPicker(msg)
+		}
+		if m.pdfPicker {
+			return m.handlePDFPicker(msg)
 		}
 		if m.searchInput {
 			return m.handleSearchInput(msg)
@@ -295,6 +409,42 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+	case PipelinePDFGeneratedMsg:
+		if msg.Err != "" {
+			m.flash = "PDF regeneration failed: " + msg.Err
+		} else {
+			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
+		}
+		return m, nil
+	case pipelineStartDiscardPickerMsg:
+		// Issue 1380: initialise the discard reason picker state.
+		// Merge predicted reasons (from report) with canonical fallback options.
+		seen := make(map[string]bool)
+		var opts []string
+		numPredicted := 0
+		for _, r := range msg.predictedReasons {
+			if !seen[r] {
+				opts = append(opts, r)
+				seen[r] = true
+				numPredicted++
+			}
+		}
+		for _, c := range canonicalDiscardReasons {
+			if !seen[c] {
+				opts = append(opts, c)
+				seen[c] = true
+			}
+		}
+		opts = append(opts, "Other…")
+		m.discardPicker = true
+		m.discardCursor = 0
+		m.discardOptions = opts
+		m.discardPredictedCount = numPredicted
+		m.discardCustomInput = false
+		m.discardCustomText = ""
+		m.discardPendingApp = msg.app
+		m.discardPendingStatus = msg.newStatus
 		return m, nil
 	}
 	return m, nil
@@ -357,7 +507,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "f", "right", "l":
 		m.activeTab++
-		if m.activeTab >= len(pipelineTabs) {
+		if m.activeTab >= len(getPipelineTabs()) {
 			m.activeTab = 0
 		}
 		m.applyFilterAndSort()
@@ -367,7 +517,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	case "left", "h":
 		m.activeTab--
 		if m.activeTab < 0 {
-			m.activeTab = len(pipelineTabs) - 1
+			m.activeTab = len(getPipelineTabs()) - 1
 		}
 		m.applyFilterAndSort()
 		m.cursor = 0
@@ -386,7 +536,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 			title := fmt.Sprintf("%s — %s", app.Company, app.Role)
 			jobURL := app.JobURL
 			return m, func() tea.Msg {
-				return PipelineOpenReportMsg{Path: fullPath, Title: title, JobURL: jobURL}
+				return PipelineOpenReportMsg{Path: fullPath, Title: title, JobURL: jobURL, App: app}
 			}
 		}
 
@@ -394,6 +544,61 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		if app, ok := m.CurrentApp(); ok && app.JobURL != "" {
 			return m, func() tea.Msg {
 				return PipelineOpenURLMsg{URL: app.JobURL}
+			}
+		}
+
+	case "m":
+		return m, func() tea.Msg {
+			return PipelineOpenURLMsg{URL: "https://career-ops.org/manifesto?utm_source=dashboard-shortcut"}
+		}
+
+	case "d":
+		if app, ok := m.CurrentApp(); ok {
+			manifest := data.LoadPDFManifest(m.careerOpsPath)
+			candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+			if len(candidates) == 0 {
+				m.flash = "No CV PDF found for this application — generate one with /career-ops pdf"
+			} else {
+				return m, m.openPDFCmd(candidates[0]) // newest first
+			}
+		}
+
+	case "D":
+		if app, ok := m.CurrentApp(); ok {
+			manifest := data.LoadPDFManifest(m.careerOpsPath)
+			entry, found := manifest.Lookup(app)
+			// Manifest lookup requires a report number; fall back to PDF-path
+			// index when the manifest was written without --report (common case).
+			if !found || entry.HTMLPath == "" {
+				byPath := data.LoadPDFEntriesByPath(m.careerOpsPath)
+				candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
+				for _, c := range candidates {
+					if e, ok := byPath[c]; ok && e.HTMLPath != "" {
+						entry = e
+						found = true
+						break
+					}
+				}
+			}
+			if !found || entry.HTMLPath == "" {
+				m.flash = "No source HTML found for this application — run /career-ops pdf first"
+				return m, nil
+			}
+			if _, err := os.Stat(filepath.Join(m.careerOpsPath, filepath.FromSlash(entry.HTMLPath))); err != nil {
+				m.flash = "Source HTML missing: " + entry.HTMLPath
+				return m, nil
+			}
+			m.flash = "Regenerating PDF via generate-pdf.mjs — this takes a few seconds..."
+			path, report := m.careerOpsPath, entry.ReportNumber
+			html, pdf, format := entry.HTMLPath, entry.PDFPath, entry.Format
+			return m, func() tea.Msg {
+				return PipelineGeneratePDFMsg{
+					CareerOpsPath: path,
+					ReportNumber:  report,
+					HTMLPath:      html,
+					PDFPath:       pdf,
+					Format:        format,
+				}
 			}
 		}
 
@@ -524,8 +729,8 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(statusOptions) {
-			m.statusCursor = len(statusOptions) - 1
+		if m.statusCursor >= len(getStatusPairs()) {
+			m.statusCursor = len(getStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -537,7 +742,24 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	case "enter":
 		m.statusPicker = false
 		if app, ok := m.CurrentApp(); ok {
-			newStatus := statusOptions[m.statusCursor]
+			newStatus := getStatusPairs()[m.statusCursor].Canonical
+			norm := data.NormalizeStatus(newStatus)
+			if norm == "hired" {
+				m.hiredApp = app
+				m.hiredStep = 1
+				return m, func() tea.Msg {
+					return PipelineUpdateStatusMsg{
+						CareerOpsPath: m.careerOpsPath,
+						App:           app,
+						NewStatus:     newStatus,
+					}
+				}
+			}
+			if norm == "discarded" || norm == "skip" {
+				return m, func() tea.Msg {
+					return m.startDiscardFlow(app, newStatus)
+				}
+			}
 			return m, func() tea.Msg {
 				return PipelineUpdateStatusMsg{
 					CareerOpsPath: m.careerOpsPath,
@@ -550,6 +772,235 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	return m, nil
 }
 
+// startDiscardFlow loads predicted reasons from the report (if any), merges
+// them with the canonical fallback list, and returns a message that triggers
+// the discard picker overlay. Called synchronously inside a Cmd so it can do
+// file I/O without blocking the Bubble Tea event loop.
+func (m PipelineModel) startDiscardFlow(app model.CareerApplication, newStatus string) tea.Msg {
+	predicted := data.LoadReportDiscardReasons(m.careerOpsPath, app.ReportPath)
+	return pipelineStartDiscardPickerMsg{
+		app:              app,
+		newStatus:        newStatus,
+		predictedReasons: predicted,
+	}
+}
+
+// pipelineStartDiscardPickerMsg is an internal message that initialises the
+// discard reason picker state on the model. It is dispatched from startDiscardFlow.
+type pipelineStartDiscardPickerMsg struct {
+	app              model.CareerApplication
+	newStatus        string
+	predictedReasons []string
+}
+
+// handlePDFPicker consumes keys while the PDF picker overlay is open.
+func (m PipelineModel) handlePDFPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.pdfPicker = false
+		return m, nil
+
+	case "down", "j":
+		m.pdfCursor++
+		if m.pdfCursor >= len(m.pdfChoices) {
+			m.pdfCursor = len(m.pdfChoices) - 1
+		}
+
+	case "up", "k":
+		m.pdfCursor--
+		if m.pdfCursor < 0 {
+			m.pdfCursor = 0
+		}
+
+	case "enter", "d":
+		m.pdfPicker = false
+		if m.pdfCursor >= 0 && m.pdfCursor < len(m.pdfChoices) {
+			return m, m.openPDFCmd(m.pdfChoices[m.pdfCursor])
+		}
+	}
+	return m, nil
+}
+
+// handleDiscardPicker consumes keys while the discard reason picker is open
+// (Issue 1380). When "Other…" is focused and Enter is pressed, it enters a
+// free-text sub-mode where the user types a custom reason and confirms with
+// Enter again. Esc at any point skips tagging and just commits the status.
+func (m PipelineModel) handleDiscardPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	// Free-text sub-mode for "Other…"
+	if m.discardCustomInput {
+		switch msg.String() {
+		case "enter":
+			reason := strings.TrimSpace(m.discardCustomText)
+			reason = strings.ReplaceAll(reason, ",", " ")
+			reason = strings.ReplaceAll(reason, ";", " ")
+			reason = strings.ReplaceAll(reason, "\n", " ")
+			reason = strings.ReplaceAll(reason, "\r", " ")
+			reason = strings.ReplaceAll(reason, "\t", " ")
+			reason = strings.Join(strings.Fields(reason), " ")
+			reason = strings.TrimSpace(reason)
+			if reason == "" {
+				reason = "other"
+			}
+			return m.commitDiscardReason(reason)
+		case "esc":
+			m.discardCustomInput = false
+			m.discardCustomText = ""
+		case "backspace", "ctrl+h":
+			if len(m.discardCustomText) > 0 {
+				m.discardCustomText = m.discardCustomText[:len(m.discardCustomText)-1]
+			}
+		default:
+			if len(msg.Runes) > 0 {
+				m.discardCustomText += string(msg.Runes)
+			}
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		// Skip reason tagging — still commit the status change.
+		m.discardPicker = false
+		return m, func() tea.Msg {
+			return PipelineUpdateStatusMsg{
+				CareerOpsPath: m.careerOpsPath,
+				App:           m.discardPendingApp,
+				NewStatus:     m.discardPendingStatus,
+			}
+		}
+
+	case "down", "j":
+		m.discardCursor++
+		if m.discardCursor >= len(m.discardOptions) {
+			m.discardCursor = len(m.discardOptions) - 1
+		}
+
+	case "up", "k":
+		m.discardCursor--
+		if m.discardCursor < 0 {
+			m.discardCursor = 0
+		}
+
+	case "enter":
+		if m.discardCursor < 0 || m.discardCursor >= len(m.discardOptions) {
+			break
+		}
+		chosen := m.discardOptions[m.discardCursor]
+		if chosen == "Other…" {
+			m.discardCustomInput = true
+			m.discardCustomText = ""
+			return m, nil
+		}
+		return m.commitDiscardReason(chosen)
+	}
+	return m, nil
+}
+
+func (m PipelineModel) StartHiredFlow(app model.CareerApplication) (PipelineModel, tea.Cmd) {
+	m.hiredApp = app
+	m.hiredStep = 1
+	return m, nil
+}
+
+func (m PipelineModel) StartDiscardReasonFlow(app model.CareerApplication, status string) (PipelineModel, tea.Cmd) {
+	predicted := data.LoadReportDiscardReasons(m.careerOpsPath, app.ReportPath)
+	seen := make(map[string]bool)
+	var opts []string
+	numPredicted := 0
+	for _, r := range predicted {
+		if !seen[r] {
+			opts = append(opts, r)
+			seen[r] = true
+			numPredicted++
+		}
+	}
+	for _, c := range canonicalDiscardReasons {
+		if !seen[c] {
+			opts = append(opts, c)
+			seen[c] = true
+		}
+	}
+	opts = append(opts, "Other…")
+	m.discardPicker = true
+	m.discardCursor = 0
+	m.discardOptions = opts
+	m.discardPredictedCount = numPredicted
+	m.discardCustomInput = false
+	m.discardCustomText = ""
+	m.discardPendingApp = app
+	m.discardPendingStatus = status
+	return m, nil
+}
+
+func (m PipelineModel) handleHiredFlow(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch m.hiredStep {
+	case 1: // win screen
+		if msg.String() == "enter" {
+			m.hiredStep = 2
+		}
+	case 2: // story invite
+		switch msg.String() {
+		case "y", "Y":
+			m.hiredStep = 3
+			return m, func() tea.Msg {
+				return PipelineOpenURLMsg{URL: storyTemplateURL}
+			}
+		case "n", "N", "enter", "esc":
+			m.hiredStep = 3
+		}
+	case 3: // anonymous stat
+		switch msg.String() {
+		case "y", "Y":
+			weeks := m.calculateWeeksToHire()
+			if err := data.SaveAnonymousStat(m.careerOpsPath, m.hiredApp.Role, weeks); err != nil {
+				m.flash = "Could not record anonymous stat: " + err.Error()
+			}
+			m.hiredStep = 0
+		case "n", "N", "enter", "esc":
+			m.hiredStep = 0
+		}
+	}
+	return m, nil
+}
+
+// commitDiscardReason closes the picker and emits PipelineUpdateStatusAndNotesMsg
+// to atomically persist the new status plus a DISCARD/SKIP tag in Notes.
+func (m PipelineModel) commitDiscardReason(reason string) (PipelineModel, tea.Cmd) {
+	m.discardPicker = false
+	m.discardCustomInput = false
+	app := m.discardPendingApp
+	newStatus := m.discardPendingStatus
+	prefix := "DISCARD"
+	if strings.ToLower(newStatus) == "skip" {
+		prefix = "SKIP"
+	}
+	notesTag := fmt.Sprintf("%s: %s", prefix, reason)
+	return m, func() tea.Msg {
+		return PipelineUpdateStatusAndNotesMsg{
+			CareerOpsPath: m.careerOpsPath,
+			App:           app,
+			NewStatus:     newStatus,
+			NotesAppend:   notesTag,
+		}
+	}
+}
+
+func (m PipelineModel) calculateWeeksToHire() int {
+	if m.hiredApp.Date == "" {
+		return 1
+	}
+	appDate, err := time.Parse("2006-01-02", m.hiredApp.Date)
+	if err != nil {
+		return 1
+	}
+	days := int(time.Since(appDate).Hours() / 24)
+	weeks := (days + 3) / 7
+	if weeks < 1 {
+		weeks = 1
+	}
+	return weeks
+}
+
 // handleColPicker consumes keys while the column picker overlay is open.
 func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	switch msg.String() {
@@ -559,8 +1010,8 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 
 	case "down", "j":
 		m.colPickerIdx++
-		if m.colPickerIdx >= len(optionalCols) {
-			m.colPickerIdx = len(optionalCols) - 1
+		if m.colPickerIdx >= len(getOptionalCols()) {
+			m.colPickerIdx = len(getOptionalCols()) - 1
 		}
 
 	case "up", "k":
@@ -570,10 +1021,18 @@ func (m PipelineModel) handleColPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 		}
 
 	case " ":
-		col := optionalCols[m.colPickerIdx]
+		col := getOptionalCols()[m.colPickerIdx]
 		m.visibleCols[col.id] = !m.visibleCols[col.id]
 	}
 	return m, nil
+}
+
+// openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
+func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
+	fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(relPath))
+	return func() tea.Msg {
+		return PipelineOpenPDFMsg{Path: fullPath}
+	}
 }
 
 func (m PipelineModel) loadCurrentReport() tea.Cmd {
@@ -615,7 +1074,7 @@ func matchesSearch(app model.CareerApplication, query string) bool {
 func (m *PipelineModel) applyFilterAndSort() {
 	var filtered []model.CareerApplication
 
-	currentFilter := pipelineTabs[m.activeTab].filter
+	currentFilter := getPipelineTabs()[m.activeTab].filter
 	for _, app := range m.apps {
 		if !matchesSearch(app, m.searchQuery) {
 			continue
@@ -693,6 +1152,7 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 
 // workModeRank orders work modes remote-first for the location sort.
 func workModeRank(mode string) int {
+	// Internal language-neutral representations.
 	switch mode {
 	case "Remote":
 		return 0
@@ -768,6 +1228,10 @@ func (m PipelineModel) cursorLineEstimate() int {
 
 // View renders the pipeline screen.
 func (m PipelineModel) View() string {
+	if m.hiredStep > 0 {
+		return m.overlayHiredFlow()
+	}
+
 	header := m.renderHeader()
 	tabs := m.renderTabs()
 	metricsBar := m.renderMetrics()
@@ -804,6 +1268,16 @@ func (m PipelineModel) View() string {
 		body = m.overlayStatusPicker(body)
 	}
 
+	// PDF picker overlay
+	if m.pdfPicker {
+		body = m.overlayPDFPicker(body)
+	}
+
+	// Discard reason picker overlay
+	if m.discardPicker {
+		body = m.overlayDiscardPicker(body)
+	}
+
 	sections := []string{header, tabs, metricsBar, sortBar}
 	if searchBar != "" {
 		sections = append(sections, searchBar)
@@ -834,14 +1308,14 @@ func (m PipelineModel) renderSearchBar() string {
 		display += lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
 	}
 
-	tabFiltered := m.countForFilter(pipelineTabs[m.activeTab].filter)
-	matchInfo := hintStyle.Render(fmt.Sprintf("  %d/%d matching", len(m.filtered), tabFiltered))
+	tabFiltered := m.countForFilter(getPipelineTabs()[m.activeTab].filter)
+	matchInfo := hintStyle.Render(fmt.Sprintf(i18n.Current.SearchMatching, len(m.filtered), tabFiltered))
 
 	hint := ""
 	if m.searchInput {
-		hint = hintStyle.Render("   Enter: keep   Esc: cancel   Ctrl+U: clear")
+		hint = hintStyle.Render(i18n.Current.SearchHintInput)
 	} else {
-		hint = hintStyle.Render("   Esc: clear   /: edit")
+		hint = hintStyle.Render(i18n.Current.SearchHintNormal)
 	}
 
 	return style.Render(prompt + " " + display + matchInfo + hint)
@@ -857,9 +1331,9 @@ func (m PipelineModel) renderHeader() string {
 
 	right := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 	avg := fmt.Sprintf("%.1f", m.metrics.AvgScore)
-	info := right.Render(fmt.Sprintf("%d offers | Avg %s/5", m.metrics.Total, avg))
+	info := right.Render(fmt.Sprintf(i18n.Current.OffersSummary, m.metrics.Total, avg))
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render("CAREER PIPELINE")
+	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Blue).Render(i18n.Current.AppTitle)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
 	if gap < 1 {
 		gap = 1
@@ -872,7 +1346,7 @@ func (m PipelineModel) renderTabs() string {
 	var tabs []string
 	var underParts []string
 
-	for i, tab := range pipelineTabs {
+	for i, tab := range getPipelineTabs() {
 		// Count items for this tab
 		count := m.countForFilter(tab.filter)
 		label := fmt.Sprintf(" %s (%d) ", tab.label, count)
@@ -948,9 +1422,9 @@ func (m PipelineModel) renderSortBar() string {
 		Width(m.width).
 		Padding(0, 2)
 
-	sortLabel := fmt.Sprintf("[Sort: %s]", m.sortMode)
-	viewLabel := fmt.Sprintf("[View: %s]", m.viewMode)
-	count := fmt.Sprintf("%d shown", len(m.filtered))
+	sortLabel := fmt.Sprintf(i18n.Current.SortLabel, i18n.Current.SortModeLabel(m.sortMode))
+	viewLabel := fmt.Sprintf(i18n.Current.ViewLabel, i18n.Current.ViewModeLabel(m.viewMode))
+	count := fmt.Sprintf(i18n.Current.ShownCount, len(m.filtered))
 
 	return style.Render(fmt.Sprintf("%s  %s  %s", sortLabel, viewLabel, count))
 }
@@ -960,7 +1434,7 @@ func (m PipelineModel) renderBody() string {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(m.theme.Subtext).
 			Padding(1, 2)
-		return emptyStyle.Render("No offers match this filter")
+		return emptyStyle.Render(i18n.Current.NoOffersMatch)
 	}
 
 	var lines []string
@@ -1002,7 +1476,7 @@ type colWidths struct {
 func (m PipelineModel) colVisible(id ColumnID) bool {
 	if m.visibleCols == nil {
 		// Fall back to default for callers before init (tests, etc.)
-		for _, col := range optionalCols {
+		for _, col := range getOptionalCols() {
 			if col.id == id {
 				return col.onByDefault
 			}
@@ -1013,7 +1487,7 @@ func (m PipelineModel) colVisible(id ColumnID) bool {
 }
 
 func (m PipelineModel) columnWidths() colWidths {
-	c := colWidths{num: 5, score: 5, company: 16, status: 12}
+	c := colWidths{num: 5, score: 5, company: 16, status: 16}
 	if m.colVisible(ColDate) {
 		c.date = 10
 	}
@@ -1110,28 +1584,28 @@ func (m PipelineModel) renderColumnHeader() string {
 
 	segments := []string{
 		cell("#", cw.num),
-		h.Render("FIT"), // score cell is unpadded, always 3 runes wide
+		h.Render(i18n.Current.ColFit), // score cell is unpadded, always 3 runes wide
 	}
-	if cw.date > 0 {
-		segments = append(segments, cell("APPLIED", cw.date))
+	if cw.date != 0 {
+		segments = append(segments, cell(i18n.Current.ColApplied, cw.date))
 	}
-	segments = append(segments, cell("COMPANY", cw.company))
-	segments = append(segments, cell("ROLE", cw.role))
-	segments = append(segments, cell("STATUS", cw.status))
+	segments = append(segments, cell(i18n.Current.ColCompany, cw.company))
+	segments = append(segments, cell(i18n.Current.ColRole, cw.role))
+	segments = append(segments, cell(i18n.Current.ColStatus, cw.status))
 	if cw.loc > 0 {
-		segments = append(segments, cell("LOCATION", cw.loc))
+		segments = append(segments, cell(i18n.Current.ColLocation, cw.loc))
 	}
 	if cw.pay > 0 {
-		segments = append(segments, cell("PAY", cw.pay))
+		segments = append(segments, cell(i18n.Current.ColPay, cw.pay))
 	}
 	if cw.rpt > 0 {
-		segments = append(segments, cell("RPT", cw.rpt))
+		segments = append(segments, cell(i18n.Current.ColReport, cw.rpt))
 	}
 	if cw.pdf > 0 {
-		segments = append(segments, cell("PDF", cw.pdf))
+		segments = append(segments, cell(i18n.Current.ColPDF, cw.pdf))
 	}
 	if cw.last > 0 {
-		segments = append(segments, cell("LAST", cw.last))
+		segments = append(segments, cell(i18n.Current.ColLast, cw.last))
 	}
 
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
@@ -1172,7 +1646,7 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	norm := data.NormalizeStatus(app.Status)
 	statusColor := m.statusColorMap()[norm]
 	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Width(cw.status)
-	statusText := statusStyle.Render(statusLabel(norm))
+	statusText := statusStyle.Render(truncateRunes(statusLabel(norm), cw.status))
 
 	segments := []string{
 		numStyle.Render(truncateRunes(numText, cw.num)),
@@ -1248,17 +1722,17 @@ func (m PipelineModel) renderPreview() string {
 				loc = app.Location
 			}
 		}
-		facts = append(facts, labelStyle.Render("Loc: ")+valueStyle.Render(loc))
+		facts = append(facts, labelStyle.Render(i18n.Current.LabelLoc)+valueStyle.Render(loc))
 	}
 	if app.PayRange != "" {
 		pay := app.PayRange
 		if app.PaySource != "" {
 			pay += " (" + app.PaySource + ")"
 		}
-		facts = append(facts, labelStyle.Render("Pay: ")+valueStyle.Render(pay))
+		facts = append(facts, labelStyle.Render(i18n.Current.LabelPay)+valueStyle.Render(pay))
 	}
 	if app.LastContact != "" {
-		facts = append(facts, labelStyle.Render("Last contact: ")+
+		facts = append(facts, labelStyle.Render(i18n.Current.LabelLast)+
 			valueStyle.Render(fmt.Sprintf("%s (%s)", app.LastContact, formatTimeAgo(app.LastContact))))
 	}
 	if len(facts) > 0 {
@@ -1283,24 +1757,24 @@ func (m PipelineModel) renderPreview() string {
 		}
 		if summary.remote != "" {
 			lines = append(lines, padStyle.Render(
-				labelStyle.Render("Remote: ")+valueStyle.Render(summary.remote)))
+				labelStyle.Render(i18n.Current.LabelRemote)+valueStyle.Render(summary.remote)))
 		}
 	} else if app.Notes != "" && outcome == "" {
 		// Fallback: show notes (the outcome line below already carries them)
 		notes := truncateRunes(app.Notes, m.width-10)
 		lines = append(lines, padStyle.Render(dimStyle.Render(notes)))
 	} else if outcome == "" {
-		lines = append(lines, padStyle.Render(dimStyle.Render("Loading preview...")))
+		lines = append(lines, padStyle.Render(dimStyle.Render(i18n.Current.LoadingPreview)))
 	}
 
 	// Closed-out postings: surface what happened as the last preview line.
 	// The notes-only fallback above disappears once a report summary is
 	// cached, which is exactly when the discard reason got lost (#787).
 	if outcome != "" {
-		// Width budget: 4 cols padding + 9 for the "Outcome: " label + slack,
+		// Width budget: 4 cols padding + 9 for the i18n.Current.LabelOutcome label + slack,
 		// mirroring the m.width-10 budget of the notes fallback above.
 		lines = append(lines, padStyle.Render(
-			labelStyle.Render("Outcome: ")+valueStyle.Render(truncateRunes(outcome, m.width-14))))
+			labelStyle.Render(i18n.Current.LabelOutcome)+valueStyle.Render(truncateRunes(outcome, m.width-14))))
 	}
 
 	return strings.Join(lines, "\n")
@@ -1332,44 +1806,62 @@ func (m PipelineModel) renderHelp() string {
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
-	if m.colPicker {
-		return style.Render(
-			keyStyle.Render("↑↓/jk") + descStyle.Render(" navigate  ") +
-				keyStyle.Render("SPACE") + descStyle.Render(" toggle  ") +
-				keyStyle.Render("Esc/C") + descStyle.Render(" close"))
+	if m.flash != "" {
+		flashStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Yellow).
+			Background(m.theme.Surface).
+			Width(m.width).
+			Padding(0, 1)
+		return flashStyle.Render(m.flash)
 	}
 
-	if m.statusPicker {
+	if m.colPicker {
 		return style.Render(
-			keyStyle.Render("↑↓/jk") + descStyle.Render(" navigate  ") +
-				keyStyle.Render("Enter") + descStyle.Render(" confirm  ") +
-				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
+			keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNavigate) +
+				keyStyle.Render("SPACE") + descStyle.Render(i18n.Current.HelpToggle) +
+				keyStyle.Render("Esc/C") + descStyle.Render(i18n.Current.HelpClose))
+	}
+
+	if m.statusPicker || m.pdfPicker {
+		return style.Render(
+			keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNavigate) +
+				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpConfirm) +
+				keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpCancel))
 	}
 
 	if m.searchInput {
 		return style.Render(
-			keyStyle.Render("type") + descStyle.Render(" filter live  ") +
-				keyStyle.Render("Enter") + descStyle.Render(" keep  ") +
-				keyStyle.Render("Ctrl+U") + descStyle.Render(" clear  ") +
-				keyStyle.Render("Esc") + descStyle.Render(" cancel"))
+			keyStyle.Render("type") + descStyle.Render(i18n.Current.HelpFilterLive) +
+				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpKeep) +
+				keyStyle.Render("Ctrl+U") + descStyle.Render(i18n.Current.HelpClear) +
+				keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpCancel))
 	}
 
-	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render("career-ops by santifer.io")
+	// The manifesto segment is an OSC 8 hyperlink (utm_source=dashboard);
+	// terminals without support show the same text, just not clickable. The
+	// gap math uses the plain text so the escapes never skew the layout.
+	const brandPlain = "built on the CareerOps Manifesto · career-ops by santifer.io"
+	manifestoLink := "\x1b]8;;https://career-ops.org/manifesto?utm_source=dashboard\x1b\\built on the CareerOps Manifesto\x1b]8;;\x1b\\"
+	brand := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(manifestoLink + " · career-ops by santifer.io")
 
-	keys := keyStyle.Render("↑↓/jk") + descStyle.Render(" nav  ") +
-		keyStyle.Render("←→/hl") + descStyle.Render(" tabs  ") +
-		keyStyle.Render("/") + descStyle.Render(" search  ") +
-		keyStyle.Render("s") + descStyle.Render(" sort  ") +
-		keyStyle.Render("r") + descStyle.Render(" refresh  ") +
-		keyStyle.Render("Enter") + descStyle.Render(" report  ") +
-		keyStyle.Render("o") + descStyle.Render(" open URL  ") +
-		keyStyle.Render("c") + descStyle.Render(" change  ") +
-		keyStyle.Render("C") + descStyle.Render(" columns  ") +
-		keyStyle.Render("v") + descStyle.Render(" view  ") +
-		keyStyle.Render("p") + descStyle.Render(" progress  ") +
-		keyStyle.Render("q") + descStyle.Render(" quit")
+	keys := keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNav) +
+		keyStyle.Render("←→/hl") + descStyle.Render(i18n.Current.HelpTabs) +
+		keyStyle.Render("/") + descStyle.Render(i18n.Current.HelpSearch) +
+		keyStyle.Render("s") + descStyle.Render(i18n.Current.HelpSort) +
+		keyStyle.Render("r") + descStyle.Render(i18n.Current.HelpRefresh) +
+		keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpReport) +
+		keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL) +
+		keyStyle.Render("d") + descStyle.Render(i18n.Current.HelpOpenPDF) +
+		keyStyle.Render("D") + descStyle.Render(i18n.Current.HelpRegenPDF) +
+		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) +
+		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
+		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +
+		keyStyle.Render("p") + descStyle.Render(i18n.Current.HelpProgress) +
+		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
+		keyStyle.Render("m") + descStyle.Render(i18n.Current.HelpManifesto) +
+		keyStyle.Render("q") + descStyle.Render(i18n.Current.HelpQuit)
 
-	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brand) - 2
+	gap := m.width - lipgloss.Width(keys) - lipgloss.Width(brandPlain) - 2
 	if gap < 1 {
 		gap = 1
 	}
@@ -1388,21 +1880,103 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 		Bold(true)
 
 	var picker []string
-	picker = append(picker, padStyle.Render(borderStyle.Render("Change status:")))
+	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, opt := range statusOptions {
+	for i, pair := range getStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
 		}
 		prefix := "  "
 		if i == m.statusCursor {
-			prefix = "> "
+			prefix = " >"
 		}
-		picker = append(picker, padStyle.Render(style.Render(prefix+opt)))
+		picker = append(picker, padStyle.Render(prefix+style.Render(pair.Display)))
 	}
 
 	// Append picker to body
+	bodyLines = append(bodyLines, picker...)
+	return strings.Join(bodyLines, "\n")
+}
+
+func (m PipelineModel) overlayHiredFlow() string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(m.theme.Blue).
+		Padding(1, 2)
+
+	var winContent string
+	switch m.hiredStep {
+	case 1:
+		winContent = lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(m.theme.Green).Bold(true).Render("🎉 CONGRATULATIONS! 🎉"),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render("You landed the job!"),
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render(fmt.Sprintf("%s @ %s", m.hiredApp.Role, m.hiredApp.Company)),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Subtext).Render("This moment belongs entirely to you. Celebrate the win!"),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Blue).Render("Press [ Enter ] to continue..."),
+		)
+	case 2:
+		winContent = lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(m.theme.Green).Bold(true).Render("Share your story? 🚀"),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render("We'd love to hear your story on GitHub!"),
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render("Your story helps others in the community see what's possible."),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Blue).Render("Press [ Y ] to open template in browser / [ N ] to skip"),
+		)
+	case 3:
+		weeks := m.calculateWeeksToHire()
+		winContent = lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(m.theme.Green).Bold(true).Render("Opt-in Anonymous Stat? 📊"),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render("Help us count community hires in the public README:"),
+			lipgloss.NewStyle().Foreground(m.theme.Subtext).Render(fmt.Sprintf("- Role: %s", m.hiredApp.Role)),
+			lipgloss.NewStyle().Foreground(m.theme.Subtext).Render(fmt.Sprintf("- Weeks to hire: %d", weeks)),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Text).Render("No names, no companies, and no salaries are shared."),
+			"",
+			lipgloss.NewStyle().Foreground(m.theme.Blue).Render("Press [ Y ] to opt-in / [ N ] to keep completely local"),
+		)
+	}
+
+	box := borderStyle.Render(winContent)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// overlayPDFPicker renders the PDF chooser inline at the bottom of the body,
+// mirroring overlayStatusPicker. Choices show the PDF filename only — the
+// directory is always output/ and the role variant lives in the name.
+func (m PipelineModel) overlayPDFPicker(body string) string {
+	bodyLines := strings.Split(body, "\n")
+
+	pickerWidth := m.width - 8
+	if pickerWidth < 30 {
+		pickerWidth = 30
+	}
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	borderStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Blue).
+		Bold(true)
+
+	var picker []string
+	picker = append(picker, padStyle.Render(borderStyle.Render("Open CV PDF:")))
+
+	for i, choice := range m.pdfChoices {
+		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
+		if i == m.pdfCursor {
+			style = style.Background(m.theme.Overlay).Bold(true)
+		}
+		prefix := "  "
+		if i == m.pdfCursor {
+			prefix = "> "
+		}
+		name := truncateRunes(filepath.Base(filepath.FromSlash(choice)), pickerWidth-2)
+		picker = append(picker, padStyle.Render(style.Render(prefix+name)))
+	}
+
 	bodyLines = append(bodyLines, picker...)
 	return strings.Join(bodyLines, "\n")
 }
@@ -1417,9 +1991,9 @@ func (m PipelineModel) overlayColPicker(body string) string {
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
 	var picker []string
-	picker = append(picker, padStyle.Render(borderStyle.Render("─── Columns (SPACE toggle · ESC close) ───")))
+	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerColumnsTitle)))
 
-	for i, col := range optionalCols {
+	for i, col := range getOptionalCols() {
 		on := m.visibleCols[col.id]
 		check := "[ ]"
 		checkColor := m.theme.Subtext
@@ -1483,28 +2057,12 @@ func (m PipelineModel) countByNormStatus(status string) int {
 }
 
 // formatTimeAgo renders an ISO date as a relative duration in calendar days:
-// "today", "yesterday", or "Nd ago". Tracker dates are day-granular (no
+// i18n.Current.TimeToday, i18n.Current.TimeYesterday, or "Nd ago". Tracker dates are day-granular (no
 // time-of-day), so we never report sub-day hours — doing so would fabricate
 // precision the data doesn't have (e.g. an entry dated today would otherwise
 // read "13h ago" simply because it's 1pm, not because contact was 13h back).
 func formatTimeAgo(dateStr string) string {
-	t, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
-	if err != nil {
-		return dateStr // not a date — show it untouched rather than lie
-	}
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	contactDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
-	// Round to the nearest day so DST transitions don't skew the count.
-	days := int(math.Round(today.Sub(contactDay).Hours() / 24))
-	switch {
-	case days <= 0:
-		return "today"
-	case days == 1:
-		return "yesterday"
-	default:
-		return fmt.Sprintf("%dd ago", days)
-	}
+	return i18n.Current.FormatTimeAgo(dateStr)
 }
 
 // truncateRunes truncates a string to at most maxRunes runes, appending "..." if truncated.
@@ -1520,24 +2078,61 @@ func truncateRunes(s string, maxRunes int) string {
 }
 
 func statusLabel(norm string) string {
-	switch norm {
-	case "interview":
-		return "Interview"
-	case "offer":
-		return "Offer"
-	case "responded":
-		return "Responded"
-	case "applied":
-		return "Applied"
-	case "evaluated":
-		return "Evaluated"
-	case "skip":
-		return "Skip"
-	case "rejected":
-		return "Rejected"
-	case "discarded":
-		return "Discarded"
-	default:
-		return norm
+	return i18n.Current.StatusLabel(norm)
+}
+
+// overlayDiscardPicker renders the discard reason picker inline at the bottom
+// of the body (Issue 1380). Predicted reasons (from the report) are listed
+// first, followed by the canonical fallback options, with an "Other…" entry
+// that switches to free-text input when selected.
+func (m PipelineModel) overlayDiscardPicker(body string) string {
+	bodyLines := strings.Split(body, "\n")
+
+	pickerWidth := m.width - 8
+	if pickerWidth < 36 {
+		pickerWidth = 36
 	}
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	titleStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+	inputStyle := lipgloss.NewStyle().Foreground(m.theme.Yellow).Bold(true)
+
+	var picker []string
+
+	if m.discardCustomInput {
+		// Free-text sub-mode
+		picker = append(picker, padStyle.Render(titleStyle.Render("─── Reason (type + Enter) ───────────────")))
+		cursor := lipgloss.NewStyle().Foreground(m.theme.Blue).Render("█")
+		picker = append(picker, padStyle.Render(inputStyle.Render("> "+m.discardCustomText+cursor)))
+		picker = append(picker, padStyle.Render(hintStyle.Render("Enter: confirm   Esc: back")))
+	} else {
+		numPredicted := m.discardPredictedCount
+
+		heading := "─── Discard reason (↑↓ navigate · Enter confirm · Esc skip) ─"
+		picker = append(picker, padStyle.Render(titleStyle.Render(heading)))
+		if numPredicted > 0 {
+			picker = append(picker, padStyle.Render(hintStyle.Render("  ★ Predicted by agent:")))
+		}
+		for i, opt := range m.discardOptions {
+			if i == numPredicted && numPredicted > 0 {
+				picker = append(picker, padStyle.Render(hintStyle.Render("  ── Other options:")))
+			}
+			style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
+			if i == m.discardCursor {
+				style = style.Background(m.theme.Overlay).Bold(true)
+			}
+			prefix := "  "
+			if i == m.discardCursor {
+				prefix = "> "
+			}
+			label := opt
+			if i < numPredicted {
+				label = "★ " + opt
+			}
+			picker = append(picker, padStyle.Render(style.Render(prefix+label)))
+		}
+	}
+
+	bodyLines = append(bodyLines, picker...)
+	return strings.Join(bodyLines, "\n")
 }
