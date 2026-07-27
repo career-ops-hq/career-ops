@@ -413,7 +413,16 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
     const tracker = join(roDir, 'applications.md');
     writeFileSync(tracker, TRACKER_9);
     const lock = join(dir, 'career-ops-merge-tracker-wf.lock');
-    chmodSync(roDir, 0o555);
+    // On Windows, directory read-only bits don't block file creation — deny
+    // write-data/append-data for Everyone (*S-1-1-0) via icacls instead
+    // (mirrors set-status-tests.mjs's write-failure test).
+    const denyWrite = () => process.platform === 'win32'
+      ? execFileSync('icacls', [roDir, '/deny', '*S-1-1-0:(WD,AD)'])
+      : chmodSync(roDir, 0o555);
+    const restore = () => process.platform === 'win32'
+      ? execFileSync('icacls', [roDir, '/remove:d', '*S-1-1-0'])
+      : chmodSync(roDir, 0o755);
+    denyWrite();
     try {
       // When mark-pdf-ready tries to flip report #1's PDF cell
       const r = runMarkPdfReady(['1', '--json'], { tracker, lock });
@@ -427,7 +436,7 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
         fail(`write-failure: code=${r.code} json=${parsed?.code}\n${r.stdout}${r.stderr}`);
       }
     } finally {
-      chmodSync(roDir, 0o755);
+      restore();
       rmSync(dir, { recursive: true, force: true });
     }
   }
