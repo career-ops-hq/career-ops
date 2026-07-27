@@ -24,13 +24,14 @@
  *   - follow-ups:    data/follow-ups.md
  *   - scan-history:  data/scan-history.tsv (-> detectReposts clusters)
  *   - status-log:    ./funnel-velocity.mjs, loaded ONLY via a dynamic
- *                     `await import(...)` in try/catch. This module does not
- *                     exist on this branch — the import always fails and the
- *                     statusLog source reports false. The try-path is written
- *                     defensively so it degrades the same way if the module
- *                     is absent OR present-but-shaped differently than
- *                     expected in a future branch/install: every extraction
- *                     from it is guarded by `typeof x === 'function'`.
+ *                     `await import(...)` in try/catch. The module ships on
+ *                     main, but the optional applied-date/median helpers this
+ *                     hook probes for are not part of its export surface, so
+ *                     the statusLog source still reports false. The try-path is
+ *                     written defensively so it degrades the same way whether
+ *                     the module is absent OR present-but-shaped differently
+ *                     than expected: every extraction from it is guarded by
+ *                     `typeof x === 'function'`.
  *
  * Run: node company-history.mjs                    (JSON to stdout)
  *      node company-history.mjs --summary           (human-readable cards)
@@ -158,9 +159,9 @@ function parseArgs(argv) {
 
 // --- Default silence-window resolution ---
 //
-// templates/benchmarks.yml does not exist on this branch, but a user install
-// may ship it (days_first_response.range_days[1] * 2). Try it, fall back to
-// the hardcoded default. Any parse failure degrades silently to the default
+// templates/benchmarks.yml ships on main and a user install may also carry it
+// (days_first_response.range_days[1] * 2). Try it, fall back to the hardcoded
+// default. A missing file or any parse failure degrades silently to the default
 // — this is a nice-to-have default source, never a hard dependency.
 export function resolveDefaultSilenceWindow(rootDir = CAREER_OPS) {
   try {
@@ -216,11 +217,12 @@ export function loadRepostClusters(rootDir = CAREER_OPS, overridePath) {
   return { clusters: detectReposts(rows), loaded: true };
 }
 
-// Dynamic-only dependency: funnel-velocity.mjs does not exist on this branch.
+// Dynamic-only dependency: funnel-velocity.mjs ships on main, but the
+// applied-date/median helpers probed below are not part of its export surface.
 // Loaded exclusively through a try/catch'd dynamic import so a missing (or
 // differently-shaped) module never crashes this script. Every extraction
-// below is guarded with typeof checks for the same reason — we cannot verify
-// the real export surface of a module that isn't present yet.
+// below is guarded with typeof checks for the same reason — the module may be
+// absent in a bare install, or present but without these optional helpers.
 export async function loadStatusLogSource() {
   let mod = null;
   try {
