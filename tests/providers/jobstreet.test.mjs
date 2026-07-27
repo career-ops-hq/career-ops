@@ -33,7 +33,7 @@ try {
   };
   const parsed = parseJobstreetItem(sampleItem, 'https://id.jobstreet.com', 'FallbackCo');
   if (parsed && parsed.title === 'Facility Engineer'
-      && parsed.url === 'https://id.jobstreet.com/id/job/92996157'
+      && parsed.url === 'https://id.jobstreet.com/job/92996157'
       && parsed.company === 'PT YOFC International Indonesia'
       && parsed.location === 'Karawang, West Java'
       && parsed.postedAt != null) {

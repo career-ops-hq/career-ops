@@ -119,7 +119,7 @@ export function parseJobstreetItem(item, origin, fallbackCompany) {
   // Build job URL from the job ID
   const jobId = (item.id || '').trim();
   if (!jobId) return null;
-  const url = `${origin}/id/job/${jobId}`;
+  const url = `${origin}/job/${jobId}`;
 
   // Validate URL hostname belongs to allowed set
   try {
