@@ -21,7 +21,7 @@
  * vCard output is VERSION:3.0 (iOS/Android import compat; 4.0 support is
  * still patchy): CRLF line endings, 75-octet line folding counted in BYTES
  * that never splits a multibyte UTF-8 sequence, and a stable deterministic
- * UID (careerops-{slug(name)}-{slug(company)}; a slug that comes out empty —
+ * UID (careerops-{slug(name)}--{slug(company)}; a slug that comes out empty —
  * e.g. a fully CJK name — falls back to an 8-hex sha1 of the raw value) so
  * re-importing UPDATES existing entries instead of duplicating them on
  * platforms that honor UID (iOS fallback: assign imports to a group, delete
@@ -154,8 +154,13 @@ export function uidPart(raw) {
   return slug(raw) || createHash('sha1').update(String(raw ?? ''), 'utf8').digest('hex').slice(0, 8);
 }
 
+// Join the name and company parts with a DOUBLE dash: slug() collapses every
+// non-alphanumeric run to a single dash and never emits `--`, so a double dash
+// is an unambiguous boundary. A single dash would be indistinguishable from an
+// internal slug dash, letting different pairs collide — e.g. ("Van Der Berg",
+// "Acme") and ("Van", "Der Berg Acme") would both slug to the same UID.
 export function contactUid(c) {
-  return `careerops-${uidPart(c.name)}-${uidPart(c.company)}`;
+  return `careerops-${uidPart(c.name)}--${uidPart(c.company)}`;
 }
 
 // One contact -> one folded, CRLF-joined VCARD block (no trailing CRLF).
@@ -231,7 +236,7 @@ function selfTest() {
   assert(quality.invalidTypes.length === 1 && quality.invalidTypes[0].type === 'recruter', 'off-enum type reported');
   assert(contacts.some(c => c.name === 'Typo Type'), 'off-enum type contact kept, not dropped');
   assert(contacts.find(c => c.name === 'Tab Note').notes === 'part one part two', 'tab inside notes folds back (tab -> space), tail cells never dropped');
-  assert(quality.duplicates.length === 1 && quality.duplicates[0].uid === 'careerops-jane-doe-acme' && quality.duplicates[0].count === 2,
+  assert(quality.duplicates.length === 1 && quality.duplicates[0].uid === 'careerops-jane-doe--acme' && quality.duplicates[0].count === 2,
     'duplicate name+company reported in quality.duplicates');
 
   // escaping — backslash first, then ; , then newline
@@ -259,9 +264,9 @@ function selfTest() {
   assert(uidPart('山田 太郎') === uidPart('山田 太郎'), 'hash fallback deterministic');
   assert(uidPart('山田 太郎') !== uidPart('佐藤 花子'), 'different CJK names never collide');
   const cjkCard = contactToVcard(contacts[1], { rev: '2026-07-09T00:00:00.000Z' });
-  assert(new RegExp(`UID:careerops-[0-9a-f]{8}-globex\r\n`).test(cjkCard), 'CJK contact UID uses the hash fallback for the name part');
+  assert(new RegExp(`UID:careerops-[0-9a-f]{8}--globex\r\n`).test(cjkCard), 'CJK contact UID uses the hash fallback for the name part');
   const card = contactToVcard(contacts[0], { rev: '2026-07-09T00:00:00.000Z' });
-  assert(card.includes('UID:careerops-jane-doe-acme'), 'UID = careerops-{slug(name)}-{slug(company)}');
+  assert(card.includes('UID:careerops-jane-doe--acme'), 'UID = careerops-{slug(name)}--{slug(company)}');
   assert(card === contactToVcard(contacts[0], { rev: '2026-07-09T00:00:00.000Z' }), 'card deterministic under pinned REV');
   assert(card.includes('FN:Jane Doe\r\n'), 'default FN is the plain name');
   assert(card.includes('N:Doe;Jane;;;'), 'N best-effort Last;First split');

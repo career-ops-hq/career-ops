@@ -135,7 +135,7 @@ const dupPair = parseContacts([
 ].join('\n'));
 eq('duplicate pair: both rows kept in JSON', dupPair.contacts.length, 2);
 eq('duplicate pair: one quality.duplicates entry', dupPair.quality.duplicates,
-  [{ uid: 'careerops-jane-doe-acme', name: 'Jane Doe', company: 'Acme', count: 2 }]);
+  [{ uid: 'careerops-jane-doe--acme', name: 'Jane Doe', company: 'Acme', count: 2 }]);
 
 // ============================================================================
 // 4. escapeVcard — backslash first, then ; , then newline
@@ -197,7 +197,7 @@ eq('leading/trailing dashes trimmed', slug('--Acme  Inc.--'), 'acme-inc');
 eq('slug is deterministic', slug('Jane Doe'), slug('Jane Doe'));
 
 const jane = { name: 'Jane Doe', company: 'Acme', type: 'recruiter', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
-ok('UID = careerops-{slug(name)}-{slug(company)}', contactToVcard(jane, { rev: REV }).includes('UID:careerops-jane-doe-acme'));
+ok('UID = careerops-{slug(name)}--{slug(company)}', contactToVcard(jane, { rev: REV }).includes('UID:careerops-jane-doe--acme'));
 eq('same contact -> identical card under pinned REV', contactToVcard(jane, { rev: REV }), contactToVcard(jane, { rev: REV }));
 
 // Hash fallback: a fully non-ASCII value slugs to '' — an empty UID part would
@@ -212,8 +212,8 @@ const taro = { name: '山田 太郎', company: 'Globex', type: 'hiring-manager',
 eq('CJK contact UID: same input -> same UID across two calls',
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0],
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0]);
-ok('CJK contact UID = careerops-{8-hex}-globex', /UID:careerops-[0-9a-f]{8}-globex/.test(contactToVcard(taro, { rev: REV })));
-ok('ASCII UID path unchanged by the fallback', contactUid(jane) === 'careerops-jane-doe-acme');
+ok('CJK contact UID = careerops-{8-hex}--globex', /UID:careerops-[0-9a-f]{8}--globex/.test(contactToVcard(taro, { rev: REV })));
+ok('ASCII UID path unchanged by the fallback', contactUid(jane) === 'careerops-jane-doe--acme');
 
 // ============================================================================
 // 7. contactToVcard — structure, expected string built in code (no fixture)
@@ -228,7 +228,7 @@ const fullContact = {
 const expectedCard = [
   'BEGIN:VCARD',
   'VERSION:3.0',
-  'UID:careerops-jane-doe-acme',
+  'UID:careerops-jane-doe--acme',
   'FN:Jane Doe',
   'N:Doe;Jane;;;',
   'ORG:Acme',
@@ -331,7 +331,7 @@ try {
   ok('--vcf writes output/contacts.vcf by default', existsSync(vcfPath));
   const written = readFileSync(vcfPath, 'utf-8');
   ok('written vcf uses CRLF', written.includes('\r\n') && !/[^\r]\n/.test(written));
-  ok('written vcf carries UIDs', written.includes('UID:careerops-jane-doe-acme'));
+  ok('written vcf carries UIDs', written.includes('UID:careerops-jane-doe--acme'));
   ok('written vcf keeps the CJK name intact', written.includes('山田 太郎'));
   ok('default FN has no caller-id suffix', written.includes('FN:Jane Doe\r\n'));
 
