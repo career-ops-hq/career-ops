@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "scripts": {

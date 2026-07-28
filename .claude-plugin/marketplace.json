@@ -2,7 +2,7 @@
   "name": "career-ops",
   "metadata": {
     "description": "AI job search command center — evaluate offers, tailor CVs, scan portals, track applications",
-    "version": "1.22.0"
+    "version": "1.23.0"
   },
   "owner": {
     "name": "santifer",
@@ -14,7 +14,7 @@
       "source": "./",
       "description": "AI job search pipeline — evaluate offers, tailor CVs, scan portals, track applications",
       "category": "productivity",
-      "version": "1.22.0"
+      "version": "1.23.0"
     }
   ]
 }
