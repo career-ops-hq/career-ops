@@ -5,7 +5,7 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings that match
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS) and surfaces fresh postings that match
  * your portals.yml `title_filter` / `location_filter` — no manual company
  * curation needed.
  *
@@ -41,6 +41,7 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
+import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -146,7 +147,7 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
-const SOURCES = {
+export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
@@ -181,6 +182,13 @@ const SOURCES = {
         h => h === `${tenant}.${instance}.myworkdayjobs.com` && h.endsWith('.myworkdayjobs.com'),
       );
     },
+  },
+  icims: {
+    provider: icims,
+    dataset: `${DATASET_BASE}/icims_companies.json`,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://careers-${slug}.icims.com/jobs/search?ss=1&in_iframe=1`, h => h === `careers-${String(slug).toLowerCase()}.icims.com`)
+      : null,
   },
 };
 
@@ -634,11 +642,16 @@ async function main() {
   // would just be the same message repeated thousands of times).
   let noDateSkipCompanies = cc.noDateSkipCompanies || 0;
   let noDateSkipJobs = cc.noDateSkipJobs || 0;
+  // Boards that hit a provider's hard page cap (icims). Unlike a Workday
+  // truncation this isn't a network hiccup, so a sequential retry would just
+  // re-hit the cap — it's reported, not retried, so capped coverage is visible
+  // instead of passing for a fully-walked board.
+  let cappedBoards = cc.cappedBoards || 0;
   const datasetStatus = {};
 
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
-    noDateSkipCompanies, noDateSkipJobs,
+    noDateSkipCompanies, noDateSkipJobs, cappedBoards,
   });
   const checkpointBase = () => ({
     version: 1,
@@ -660,7 +673,25 @@ async function main() {
       // Confirmed-stale postings are always dropped. Undated postings are
       // dropped by default (a reverse scan targets *fresh* roles) but
       // COUNTED so callers see the gap; --include-undated keeps them, marked.
-      const dateClass = classifyPostingDate(job, cutoff);
+      let dateClass = classifyPostingDate(job, cutoff);
+      if (dateClass === 'stale') continue;
+      // Providers whose list pages carry no date (icims) get one shot at dating
+      // the posting from its detail page — but only after the cheap title and
+      // location filters pass, so a 10k-tenant sweep never pays a detail-page
+      // request for noise. The same (location, url) pair as the real filter
+      // below: a stricter gate here would deny enrichment to jobs the final
+      // check would have kept.
+      //
+      // Deliberately OUTSIDE the includeUndated branch. Gating enrichment on
+      // !includeUndated meant --include-undated left every icims posting
+      // undated, and since classifyPostingDate can never call an undated
+      // posting stale, --since was silently ignored for the entire source.
+      // Enrich first, then let the undated policy decide.
+      if (dateClass === 'undated' && provider.enrichDate
+          && titleFilter(job.title) && locationFilter(job.location, job.url)) {
+        try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
+        dateClass = classifyPostingDate(job, cutoff);
+      }
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
       if (!titleFilter(job.title)) continue;
@@ -718,6 +749,10 @@ async function main() {
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
           if (jobs.workdayTruncated) truncated.push(entry);
+          if (jobs.icimsTruncated) {
+            cappedBoards++;
+            if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
+          }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name, source.provider);
         })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
@@ -799,6 +834,7 @@ async function main() {
   log(`${'━'.repeat(45)}`);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
+  if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
   // noDateSkipJobs is a subset of droppedNoDate, not a separate pool: every
   // no-postedOn workday posting counted here also hits the per-job undated
   // filter in the scan loop above and gets dropped there too. Report it as
@@ -884,6 +920,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      cappedBoards,
       saved,
       offers: offers.map(o => ({
         company: o.company,

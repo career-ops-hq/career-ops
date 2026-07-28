@@ -266,10 +266,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     }
     const streaks = new Map();
     for (const r of healthRecords) {
-      if (r.status === 'slug_gone' || r.status === 'network') {
-        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-      } else if (r.status === 'reachable' || r.status === 'empty') {
+      // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
+      // every other status (slug_gone/network/auth/server/unknown) counts.
+      if (r.status === 'reachable' || r.status === 'empty') {
         streaks.set(r.company, 0);
+      } else {
+        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
     }
     const threshold = cfg.portal_health_threshold || 3;

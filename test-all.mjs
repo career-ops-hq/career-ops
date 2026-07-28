@@ -3947,6 +3947,45 @@ console.log('\n12a. Skill entrypoint materialization');
   }
 }
 
+// Every CLI skill entrypoint tracked in git MUST also be listed in
+// SKILL_ENTRYPOINTS, because that array is the only thing that materializes
+// these files on filesystems without symlink support. A tracked-but-unlisted
+// entrypoint checks out as a pointer text file on Windows and stays that way:
+// the user opens their CLI and the skill is the literal string
+// "../../../.agents/skills/career-ops/SKILL.md". That is bug #1051, and it hit
+// a second time because Kimi shipped after the list was written and nobody
+// compared the two. Adding a CLI touches five wiring points; this asserts the
+// sixth instead of trusting a reviewer to remember it.
+console.log('\n12a-bis. Every tracked skill entrypoint is materializable');
+
+{
+  try {
+    const tracked = execSync('git ls-files', { cwd: ROOT, encoding: 'utf-8' })
+      .split('\n')
+      .filter((p) => /^\.[^/]+\/skills\/career-ops\/SKILL\.md$/.test(p))
+      .filter((p) => !p.startsWith('.agents/')) // the canonical target, not an entrypoint
+      .sort();
+
+    // An empty list means git could not see the tree, not that there is nothing
+    // to check (#2240): a guard that cannot look must never pass.
+    if (tracked.length === 0) {
+      fail('git ls-files returned no skill entrypoints — this check could not inspect anything');
+    } else {
+      const skills = await import(pathToFileURL(join(ROOT, 'scaffolder/bin/skill-entrypoints.mjs')).href);
+      const listed = new Set(skills.SKILL_ENTRYPOINTS.map((e) => e.path));
+      const unlisted = tracked.filter((p) => !listed.has(p));
+
+      if (unlisted.length === 0) {
+        pass(`all ${tracked.length} tracked skill entrypoints are in SKILL_ENTRYPOINTS`);
+      } else {
+        fail(`skill entrypoint(s) tracked in git but missing from SKILL_ENTRYPOINTS — broken on filesystems without symlinks: ${unlisted.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    fail(`skill entrypoint coverage check crashed: ${e.message}`);
+  }
+}
+
 console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
 {
@@ -3964,14 +4003,13 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
     const skills = await import(pathToFileURL(join(ROOT, 'scaffolder/bin/skill-entrypoints.mjs')).href);
     const touched = skills.ensureSkillEntrypoints(fixtureRoot).sort();
-    const expectedTouched = [
-      '.antigravitycli/skills/career-ops/SKILL.md',
-      '.claude/skills/career-ops/SKILL.md',
-      '.cursor/skills/career-ops/SKILL.md',
-      '.grok/skills/career-ops/SKILL.md',
-      '.opencode/skills/career-ops/SKILL.md',
-      '.qwen/skills/career-ops/SKILL.md',
-    ];
+    // Derived from SKILL_ENTRYPOINTS, never hand-listed. A literal array here is
+    // a second copy of the same list, and a second copy goes stale: adding Kimi
+    // to the registry turned this assertion red for the correct behaviour, which
+    // teaches whoever hits it to edit the expectation without reading it. The
+    // assertion that matters is "bootstraps everything in the registry", and
+    // that one holds whatever the registry contains.
+    const expectedTouched = skills.SKILL_ENTRYPOINTS.map((e) => e.path).sort();
 
     if (JSON.stringify(touched) === JSON.stringify(expectedTouched)) {
       pass('ensureSkillEntrypoints bootstraps all CLI skill entrypoints');
@@ -4628,7 +4666,7 @@ try {
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const historyColumns = historyRow.split('\t');
   if (
-    historyColumns.length === 11 && // 7 metadata + fingerprint (#1597) + postedAt + trust score/flags (#1743)
+    historyColumns.length === 12 && // 7 metadata + fingerprint (#1597) + postedAt + trust score/flags (#1743) + normalized_company (#2093)
     historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
     historyColumns[9] === '' && historyColumns[10] === '' && // no trust signal → empty trailing cols
     !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
@@ -4659,10 +4697,12 @@ try {
   const datedHistory = formatScanHistoryRow(datedOffer, '2026-07-09').split('\t');
   const noDateHistory = formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09').split('\t');
   if (
-    datedHistory.length === 11 &&
+    datedHistory.length === 12 &&
     datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the trailing column
-    noDateHistory.length === 11 &&
-    noDateHistory[8] === '' // missing postedAt → empty trailing column, never a bogus date
+    datedHistory[11] === 'acme' && // normalized company key (#2093), trailing col 12
+    noDateHistory.length === 12 &&
+    noDateHistory[8] === '' && // missing postedAt → empty trailing column, never a bogus date
+    noDateHistory[11] === 'acme'
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {
@@ -4696,9 +4736,10 @@ try {
   const flaggedHist = formatScanHistoryRow(flaggedOffer, '2026-07-09').split('\t');
   const cleanHist = formatScanHistoryRow(cleanOffer, '2026-07-09').split('\t');
   if (
-    flaggedHist.length === 11 &&
+    flaggedHist.length === 12 &&
     flaggedHist[9] === '60' && flaggedHist[10] === 'missing_apply_url,suspicious_domain' &&
-    cleanHist.length === 11 && cleanHist[9] === '' && cleanHist[10] === '' // score 100 → not flagged → empty
+    flaggedHist[11] === 'acme' && // normalized company key (#2093), after the trust cols
+    cleanHist.length === 12 && cleanHist[9] === '' && cleanHist[10] === '' // score 100 → not flagged → empty
   ) {
     pass('scan-history writer appends trust score + flags trailing columns when flagged, empty otherwise (#1743)');
   } else {
@@ -9842,7 +9883,7 @@ try {
     '2026-07-06',
   );
   const cols = withBody.split('\t');
-  if (cols.length === 11 && /^[0-9a-f]{16}$/.test(cols[7])) {
+  if (cols.length === 12 && /^[0-9a-f]{16}$/.test(cols[7]) && cols[11] === 'acme') {
     pass('formatScanHistoryRow appends a fingerprint column for described offers');
   } else {
     fail(`formatScanHistoryRow columns: ${cols.length}, fingerprint=${JSON.stringify(cols[7])}`);
@@ -9852,7 +9893,7 @@ try {
     '2026-07-06',
   );
   const cols2 = withoutBody.split('\t');
-  if (cols2.length === 11 && cols2[7] === '') {
+  if (cols2.length === 12 && cols2[7] === '' && cols2[11] === 'acme') {
     pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
   } else {
     fail(`formatScanHistoryRow (no body) columns: ${cols2.length}, last=${JSON.stringify(cols2[7])}`);
@@ -10210,6 +10251,44 @@ try {
     pass('computePortalStats gracefully handles null portalHealthTsv');
   } else {
     fail('computePortalStats failed on null portalHealthTsv');
+  }
+
+  // auth/server/unknown statuses count toward the persistent-dead streak too
+  // (previously they were recorded as 'reachable' and never escalated): a WAF
+  // 403ing the scanner every run is coverage decay exactly like a dead slug.
+  const portalsYml2 = 'tracked_companies:\n  - name: WafBlocked\n  - name: FlakyServer\njob_boards: []';
+  const authHealthTsv = 'timestamp\tcompany\tstatus\n' +
+    '2026-07-01\tWafBlocked\tauth\n' +
+    '2026-07-02\tWafBlocked\tauth\n' +
+    '2026-07-03\tWafBlocked\tauth\n' +
+    '2026-07-01\tFlakyServer\tserver\n' +
+    '2026-07-02\tFlakyServer\treachable\n' + // recovery resets the streak
+    '2026-07-03\tFlakyServer\tserver\n';
+  const p2 = stats.computePortalStats(portalsYml2, null, [], authHealthTsv);
+  if (p2 && p2.persistentlyDead === 1) {
+    pass('computePortalStats counts auth/server streaks as persistently dead; recovery resets');
+  } else {
+    fail(`computePortalStats auth/server streaks wrong: ${JSON.stringify(p2?.persistentlyDead)}`);
+  }
+
+  // scan.mjs computeConsecutiveFailures — same inverted rule at the source:
+  // any non-healthy status increments, reachable/empty reset, and a legacy
+  // 4-status TSV computes identical streaks to before the change.
+  const { computeConsecutiveFailures } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const streaks = computeConsecutiveFailures([
+    { company: 'A', status: 'auth' },
+    { company: 'A', status: 'auth' },
+    { company: 'A', status: 'auth' },
+    { company: 'B', status: 'server' },
+    { company: 'B', status: 'empty' },     // empty is healthy → resets
+    { company: 'C', status: 'slug_gone' }, // legacy status still counts
+    { company: 'C', status: 'network' },
+    { company: 'D', status: 'reachable' },
+  ]);
+  if (streaks.get('A') === 3 && streaks.get('B') === 0 && streaks.get('C') === 2 && streaks.get('D') === 0) {
+    pass('computeConsecutiveFailures: auth/server/unknown count, reachable/empty reset, legacy statuses unchanged');
+  } else {
+    fail(`computeConsecutiveFailures wrong streaks: ${JSON.stringify([...streaks])}`);
   }
 } catch (e) {
   fail(`test layout guard: ${e.message}`);
