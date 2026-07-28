@@ -54,8 +54,9 @@ const searchUrl = (origin, page) => `${origin}/jobs/search?ss=1&pr=${page}&in_if
  *
  * Postings are `<li class="iCIMS_JobCardItem">` cards: posting URL in an
  * `iCIMS_Anchor` href (`/jobs/{id}/{title-slug}/job`, query stripped), title
- * in the anchor's `<h3>`, location in the card's `field-label">Location`
- * span. Cards whose href resolves off-origin are dropped (defense in depth —
+ * in the anchor's `<h3>`, location in the span following the card's
+ * `field-label` "Location" label. Cards whose href resolves off-origin are
+ * dropped (defense in depth —
  * a portal page should never link a posting on another host).
  *
  * @param {string} html
@@ -81,7 +82,13 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     // silently — zero jobs, no error, indistinguishable from an empty board.
     const title = card.match(/<h3\b[^>]*>\s*([\s\S]*?)<\/h3>/);
     if (!title || !title[1].trim()) continue;
-    const location = card.match(/field-label">Location<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
+    // `field-label` is one token in a themed class list, not reliably the last
+    // one, so anchoring on the literal `field-label">` read an empty location
+    // off any tenant that appended a class. An empty location then fails
+    // location_filter and the posting is dropped with nothing to explain it.
+    // The lookarounds keep `field-label` a whole token, so a longer hyphenated
+    // class like `field-label-inline` still doesn't count as a match.
+    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\s*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
     jobs.push({
       title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
       url: `${parsed.origin}${parsed.pathname}`,
@@ -136,7 +143,11 @@ export default {
     const sep = job.url.includes('?') ? '&' : '?';
     const html = await ctx.fetchText(`${job.url}${sep}in_iframe=1`, { headers: HEADERS, redirect: 'error' });
     const nodes = [];
-    for (const [, raw] of String(html).matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    // `type` is not reliably the first attribute: a tenant running CSP emits a
+    // nonce on every inline script. Requiring it first found no date at all,
+    // leaving every posting on that board undated — the undated policy then
+    // drops them and a working board looks identical to an empty one.
+    for (const [, raw] of String(html).matchAll(/<script\b[^>]*(?<![\w-])type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
       let data;
       try { data = JSON.parse(raw); } catch { continue; }
       // Flatten the JSON-LD shapes iCIMS / schema.org emit: a bare JobPosting

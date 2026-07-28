@@ -174,3 +174,41 @@ const mkCtx = (pages) => ({
   if (job.postedAt === undefined) pass('enrichDate tolerates malformed JSON-LD without throwing');
   else fail(`postedAt unexpectedly set: ${job.postedAt}`);
 }
+
+// ── attribute ordering must not change what we extract ──────────────
+// Tenants theme their portals, so `field-label` is one token in a class list,
+// not reliably the last one. A matcher anchored on `field-label">` reads an
+// empty location off a card that plainly has one, and an empty location fails
+// location_filter — the posting is dropped with no error to explain it.
+{
+  const locCard = (cls) => `<li class="iCIMS_JobCardItem"><div class="row">
+    <div class="col-xs-6 header left"><span class="${cls}">Location</span><span >US-TX-Austin</span></div>
+    <div class="col-xs-12 title"><a href="${ORIGIN}/jobs/4242/themed-role/job" class="iCIMS_Anchor"><h3 >Themed Role</h3></a></div>
+  </div></li>`;
+  for (const cls of ['field-label', 'sr-only field-label', 'field-label sr-only', 'a field-label b']) {
+    const [j] = parseIcimsSearchPage(locCard(cls), ORIGIN, 'acmefreight');
+    if (j && j.location === 'US-TX-Austin') pass(`location extracted with class="${cls}"`);
+    else fail(`class="${cls}" → location ${JSON.stringify(j?.location)}`);
+  }
+}
+
+// Same failure mode on the detail page. A tenant running Content-Security-
+// Policy emits a nonce on every inline script, which pushes `type` off the
+// front of the tag. If the matcher requires `type` first, enrichment finds no
+// date, every posting on that board stays undated, the undated policy drops
+// them, and a working board is indistinguishable from an empty one.
+{
+  const ld = '{"@type":"JobPosting","datePosted":"2026-07-17"}';
+  const variants = {
+    'a nonce before type': `<script nonce="r4nd0m" type="application/ld+json">${ld}</script>`,
+    'an attribute after type': `<script type="application/ld+json" id="jobposting">${ld}</script>`,
+    'a single-quoted type': `<script type='application/ld+json'>${ld}</script>`,
+    'extra whitespace': `<script  type="application/ld+json" >${ld}</script>`,
+  };
+  for (const [label, detail] of Object.entries(variants)) {
+    const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+    await icims.enrichDate(job, { fetchText: async () => detail });
+    if (job.postedAt === Date.parse('2026-07-17')) pass(`enrichDate reads JSON-LD with ${label}`);
+    else fail(`JSON-LD with ${label}: postedAt ${job.postedAt}`);
+  }
+}
