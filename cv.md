@@ -52,7 +52,7 @@ Jan 2023 - Jan 2025
 **Technical Project Manager**
 Nov 2022 - Jan 2024
 
-- Managed high-visibility software implementations for Department of Energy, defense, and regulated-industry clients with budgets ranging from $245K to $2.2M.
+- Managed high-visibility SaaS software implementations for Department of Energy, defense, and regulated-industry clients with budgets ranging from $245K to $2.2M.
 - Acted as primary client contact for scope, schedule, status reporting, and issue resolution, increasing customer satisfaction by 25%.
 - Kept cross-functional teams aligned across sales, development, and customer environments to deliver complex solutions on time.
 - Translated technical requirements into practical business decisions and maintained strong executive communication throughout project lifecycles.
