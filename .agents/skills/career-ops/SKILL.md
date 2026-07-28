@@ -1,6 +1,10 @@
 ---
 name: career-ops
-description: AI job search command center -- evaluate offers, tailor CVs, scan portals, track applications. Use when the user pastes a job description or URL, asks to evaluate an offer, tailor a resume or cover letter, scan job boards, prepare for an interview, or track/update their applications.
+description: >-
+  AI job search command center -- evaluate offers, generate CVs, scan portals,
+  track applications. Use when the user pastes a job URL or JD, asks to scan
+  portals, generate a CV/PDF, track applications, prepare for interviews, draft
+  outreach/emails, or run any career-ops mode.
 arguments: mode
 user_invocable: true
 user-invocable: true
@@ -15,6 +19,7 @@ career-ops is a multi-CLI job-search command center. The routing below is shared
 ## Invocation Notes
 
 - CLIs with slash-command registration can expose this router as `/career-ops`.
+- In Cursor, this skill lives at `.cursor/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
 - The routing semantics below stay the same regardless of whether the entrypoint is a slash command or a natural-language prompt.

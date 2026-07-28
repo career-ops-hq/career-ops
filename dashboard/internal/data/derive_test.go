@@ -227,6 +227,36 @@ func TestDeriveNoteFields(t *testing.T) {
 			paySrc:   "est",
 			last:     "2026-06-16",
 		},
+		{
+			name: "valuation and funding figures are not pay",
+			app: model.CareerApplication{
+				Date:  "2026-07-16",
+				Notes: "Series C, $600M valuation (not pay) — real hiring signal; $70M Series C closed 8mo ago; $124M total raised; advertised comp range is broken data, confirm real number",
+			},
+			payRange: "",
+			last:     "2026-07-16",
+		},
+		{
+			name: "pay range still wins over an adjacent valuation figure",
+			app: model.CareerApplication{
+				Date:  "2026-06-08",
+				Notes: "$7.6B valuation, Remote. $122-149K (POSTED)",
+			},
+			workMode: "Remote",
+			payRange: "$122-149K",
+			paySrc:   "POSTED",
+			last:     "2026-06-08",
+		},
+		{
+			name: "billion-scale valuation alone is not pay",
+			app: model.CareerApplication{
+				Date:  "2026-04-11",
+				Notes: "Series H drone logistics, $7.6B valuation, Remote Canada",
+			},
+			workMode: "Remote",
+			payRange: "",
+			last:     "2026-04-11",
+		},
 	}
 
 	for _, tc := range cases {
@@ -270,6 +300,7 @@ func TestPayCeiling(t *testing.T) {
 		"165-185K CHF":     185_000,
 		"120K €":           120_000,
 		"80-120K UAH":      120_000,
+		"$7.6B":            7_600_000_000,
 		"":                 0,
 	}
 	for span, want := range cases {
@@ -289,27 +320,27 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 		{
 			name:    "single bare symbol ($)",
 			input:   []string{"$"},
-			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$))`,
+			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$))`,
 		},
 		{
 			name:    "single ISO code (PLN)",
 			input:   []string{"PLN"},
-			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN))`,
+			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN))`,
 		},
 		{
 			name:    "two ISO codes (PLN, UAH)",
 			input:   []string{"PLN", "UAH"},
-			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN|UAH))`,
+			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN|UAH))`,
 		},
 		{
 			name:    "mixed bare + ISO ($ bare, PLN ISO)",
 			input:   []string{"$", "PLN"},
-			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$|PLN))`,
+			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$|PLN))`,
 		},
 		{
 			name:    "metachar token (escaped via QuoteMeta)",
 			input:   []string{"A.B"},
-			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:A\.B))`,
+			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:A\.B))`,
 		},
 	}
 	for _, tc := range cases {
@@ -368,7 +399,7 @@ func TestIsBareSymbol(t *testing.T) {
 		{"JPY", false}, {"INR", false}, {"SEK", false}, {"BRL", false},
 		// Edge cases
 		{"", true},
-		{"A.B", false}, 
+		{"A.B", false},
 		{"Chf", false},
 		{"123", true},
 	}

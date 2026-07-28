@@ -163,6 +163,7 @@ const scripts = [
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
+  { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'salary-gap.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
@@ -186,10 +187,15 @@ const scripts = [
   { name: 'discover-ats.test.mjs', expectExit: 0 },
   { name: 'followup-cadence.test.mjs', expectExit: 0 },
   { name: 'process-quality.test.mjs', expectExit: 0 },
+  { name: 'company-history.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
-  { name: 'validate-system-paths-coverage.mjs', expectExit: 0 },
+  // The bare coverage run is NOT here on purpose: this section executes each
+  // script from a throwaway copy of the repo, and the coverage check needs
+  // `git ls-files` on the REAL tree. Running it here validated nothing and
+  // exited 0 no matter what, which is how five unregistered files shipped.
+  // It now runs from ROOT in section 5.
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -892,6 +898,7 @@ const systemFiles = [
   'modes/heuristics/recruiter-side.md',
   'templates/states.yml', 'templates/cv-template.html',
   '.claude/skills/career-ops/SKILL.md',
+  '.cursor/skills/career-ops/SKILL.md',
   '.opencode/skills/career-ops/SKILL.md',
   '.qwen/skills/career-ops/SKILL.md',
   '.antigravitycli/skills/career-ops/SKILL.md',
@@ -922,6 +929,56 @@ for (const f of skillEntrypoints) {
     pass(`Entrypoint is a real symlink in git: ${f}`);
   } else {
     fail(`Entrypoint committed as a REGULAR file (mode ${staged.split(' ')[0]}) — users of this CLI get a broken skill: ${f}`);
+  }
+}
+
+// The SYSTEM_PATHS coverage guard must FAIL when it cannot inspect the tree,
+// not report success.
+//
+// For as long as that guard existed it was a no-op in CI. The script-execution
+// section above runs each script from a throwaway copy created inside the repo,
+// and `git ls-files` from an untracked directory returns zero paths — so the
+// guard printed "OK: 0 tracked files covered" and exited 0 while the real tree
+// had an unregistered top-level file. `update-system` never ships an
+// unregistered file, so every user who updates silently loses it. That class has
+// landed five times with this check green throughout.
+//
+// This asserts the opposite behaviour directly: invoked where git sees nothing,
+// the guard must exit non-zero.
+{
+  const probeDir = join(ROOT, '.tmp-coverage-guard-probe');
+  try {
+    mkdirSync(probeDir, { recursive: true });
+    copyFileSync(join(ROOT, 'validate-system-paths-coverage.mjs'), join(probeDir, 'validate-system-paths-coverage.mjs'));
+    copyFileSync(join(ROOT, 'update-system.mjs'), join(probeDir, 'update-system.mjs'));
+    const probe = spawnSync(process.execPath, [join(probeDir, 'validate-system-paths-coverage.mjs')], {
+      cwd: probeDir,
+      encoding: 'utf-8',
+    });
+    if (probe.status !== 0) {
+      pass('SYSTEM_PATHS coverage guard fails when it cannot inspect the tree (not a silent pass)');
+    } else {
+      fail('SYSTEM_PATHS coverage guard exited 0 from an untracked dir — it is a no-op in CI again');
+    }
+  } catch (err) {
+    fail(`could not probe the SYSTEM_PATHS coverage guard: ${err.message} (a failed probe is not a pass)`);
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+
+// And the check itself, run where it can actually see the tree. This is the
+// assertion that was missing: every tracked file must be claimed by SYSTEM_PATHS
+// or USER_PATHS, or `update-system` silently stops shipping it.
+{
+  const cov = spawnSync(process.execPath, [join(ROOT, 'validate-system-paths-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (cov.status === 0) {
+    pass('every tracked file is covered by SYSTEM_PATHS or USER_PATHS');
+  } else {
+    fail(`SYSTEM_PATHS coverage gap — a new file is unregistered and update-system will not ship it:\n${(cov.stderr || cov.stdout || '').trim()}`);
   }
 }
 
@@ -2290,11 +2347,22 @@ const upskillModeDoc = readFile('modes/upskill.md');
 
 // The phase-2 "coming later" placeholder must be gone — the plan ships now.
 // Reject ANY pending-wording variant about the learning plan (coming later,
-// pending, coming soon, TODO, ships in phase 2), not just one narrow phrasing,
-// so a regressing edit can't reintroduce a "not yet" placeholder.
+// pending, coming soon, not yet, unavailable/not available, TBD, WIP, in
+// progress, TODO, ships in phase 2), not just one narrow phrasing, and ALSO
+// catch standalone pending-phase wording near the plan (e.g. "phase 2b
+// pending", "planned for phase 2b"), so a regressing edit can't reintroduce a
+// "not yet" placeholder in either form.
+// Scope the negative pending-checks to ONLY the `## Learning Plan` section
+// (heading → next `## ` or EOF), so unrelated changelog/example content
+// elsewhere in the doc can't falsely trigger a pending failure. The positive
+// "section exists" check below still runs against the whole doc.
+const upskillLpMatch = upskillModeDoc.match(/^## Learning Plan\b[\s\S]*?(?=^## |(?![\s\S]))/m);
+const upskillLpSection = upskillLpMatch ? upskillLpMatch[0] : '';
 const upskillLearningPlanPending =
-  /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2)/i.test(upskillModeDoc) ||
-  /ships in phase 2/i.test(upskillModeDoc);
+  /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2|not yet|not available|unavailable|tbd|wip|in progress)/i.test(upskillLpSection) ||
+  /ships in phase 2/i.test(upskillLpSection) ||
+  /phase\s*2b?\b[^\n]*(?:pending|coming|planned|later|tbd)/i.test(upskillLpSection) ||
+  /(?:pending|planned|upcoming)\b[^\n]*phase\s*2b?/i.test(upskillLpSection);
 if (
   !upskillLearningPlanPending &&
   upskillModeDoc.includes('## Learning Plan')
@@ -2383,6 +2451,52 @@ if (
 } else {
   fail('upskill trust rule 8 (scope boundary: upskill finds, training judges) missing');
 }
+
+// --- company-history.mjs wiring across mode docs (Task 6) ---
+const followupModeDoc = readFile('modes/followup.md');
+
+if (
+  ofertaMode.includes('company-history.mjs') &&
+  ofertaMode.includes('Prior-contact FYI') &&
+  ofertaMode.includes('Not a legitimacy signal')
+) {
+  pass('oferta mode wires company-history.mjs and keeps the prior-contact FYI out of the legitimacy tier');
+} else {
+  fail('oferta mode missing company-history.mjs reference, the "Prior-contact FYI" block, or the "Not a legitimacy signal" guardrail');
+}
+
+// Hygiene must not just be mentioned — it must be documented BEFORE the
+// aged-Applied cards are consumed (the documented precedence is the guard
+// against drawing conclusions from stale tracker rows). Anchor to the exact
+// cue line so an unrelated "hygiene" mention elsewhere cannot satisfy this.
+const patternsHygieneIdx = patternsModeDoc.indexOf('Hygiene first, always.');
+const patternsAgedIdx = patternsModeDoc.indexOf('aged-Applied');
+if (
+  patternsModeDoc.includes('company-history.mjs') &&
+  patternsHygieneIdx !== -1 && patternsAgedIdx !== -1 &&
+  patternsHygieneIdx < patternsAgedIdx
+) {
+  pass('patterns mode adds the company-history lens with hygiene documented before aged-Applied cards');
+} else {
+  fail('patterns mode missing company-history.mjs lens, the "Hygiene first, always." cue, aged-Applied mention, or hygiene-before-aged-Applied ordering');
+}
+
+if (followupModeDoc.includes('company-history.mjs') && followupModeDoc.includes('silent-on-you')) {
+  pass('followup mode references both company-history.mjs and the silent-on-you label when setting expectations');
+} else {
+  fail('followup mode must reference BOTH company-history.mjs and silent-on-you');
+}
+
+if (trackerModeDoc.includes('company-history.mjs') && trackerModeDoc.includes('silent-on-you')) {
+  pass('tracker mode offers company-history.mjs when a silent-on-you company is present');
+} else {
+  fail('tracker mode missing company-history.mjs reference or the silent-on-you trigger');
+}
+
+// Note: Block G's reposting signal in _shared.md/oferta.md is intentionally
+// sourced from scan-history.tsv (agent-observable), NOT routed through
+// company-history.mjs — every legitimacy Source must be observable without
+// executing a script that could silently fail. See PR #1712 review.
 
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
@@ -3696,6 +3810,7 @@ console.log('\n12. Skill symlink integrity');
 const canonicalSkill = '.agents/skills/career-ops/SKILL.md';
 const symlinks = [
   '.claude/skills/career-ops/SKILL.md',
+  '.cursor/skills/career-ops/SKILL.md',
   '.opencode/skills/career-ops/SKILL.md',
   '.qwen/skills/career-ops/SKILL.md',
   '.antigravitycli/skills/career-ops/SKILL.md',
@@ -3852,6 +3967,7 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
     const expectedTouched = [
       '.antigravitycli/skills/career-ops/SKILL.md',
       '.claude/skills/career-ops/SKILL.md',
+      '.cursor/skills/career-ops/SKILL.md',
       '.grok/skills/career-ops/SKILL.md',
       '.opencode/skills/career-ops/SKILL.md',
       '.qwen/skills/career-ops/SKILL.md',
@@ -5724,7 +5840,7 @@ try {
 // application states from fuzzy-only deletion.
 console.log('\n🧪 Testing shared role matcher and dedup-tracker safety...');
 try {
-  const { roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
+  const { roleFuzzyMatch, roleTokens } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
 
   if (!roleFuzzyMatch('Full Stack Engineer, Foundation', 'Full Stack Engineer, Guarded Releases')) {
     pass('role matcher keeps Full Stack Engineer sibling teams distinct (#947)');
@@ -5908,6 +6024,89 @@ try {
     pass('role matcher still matches the same slash-acronym role across punctuation variants');
   } else {
     fail('role matcher stopped matching identical slash-acronym roles');
+  }
+
+  // Accented Latin titles used to split at the accent instead of folding it, so
+  // "Sênior" tokenized to ["s", "nior"]: "s" fell to the length filter and
+  // "nior" survived as a phantom token that is in no stopword list. Every
+  // downstream rule then misfired at once (#2207).
+  // Assert the whole token list, not just the absence of "nior": a fix that
+  // merely deleted non-ASCII would still leave a phantom ("snior") and pass a
+  // negative check.
+  const accentTokens = roleTokens('Software Engineer Node.js Sênior');
+  const plainTokens = roleTokens('Software Engineer Node.js Senior');
+  if (JSON.stringify(accentTokens) === JSON.stringify(plainTokens)) {
+    pass('role tokenizer folds accents onto the plain-ASCII token list (#2207)');
+  } else {
+    fail(`accented title tokenized differently from its plain spelling: ${JSON.stringify(accentTokens)} vs ${JSON.stringify(plainTokens)}`);
+  }
+
+  // Folding must delete combining marks only. Standalone characters such as
+  // "·" are separators in a title; deleting them would glue two words into a
+  // single token and turn a real repost into a duplicate row.
+  const separatorTokens = roleTokens('Backend Engineer·Payments');
+  if (separatorTokens.includes('payments') && !separatorTokens.some(w => w.includes('engineerpayments'))) {
+    pass('accent folding leaves standalone separator characters splitting words (#2207)');
+  } else {
+    fail(`accent folding swallowed a separator character: ${JSON.stringify(separatorTokens)}`);
+  }
+
+  // The phantom token is shared by every accented title, so it acted as a
+  // discriminating overlap and pushed two unrelated roles past the Jaccard
+  // threshold — exactly what the baseline-token guard exists to prevent.
+  if (!roleFuzzyMatch('Software Engineer Node.js Sênior', 'Software Engineer Flutter Sênior')) {
+    pass('role matcher keeps accented sibling roles distinct (#2207)');
+  } else {
+    fail('role matcher collapsed two accented sibling roles via the phantom accent token');
+  }
+
+  // Worse than a generic collision: "Sênior" and "Júnior" both reduce to the
+  // same "nior" phantom, so opposite seniority levels matched each other while
+  // the seniority-disagreement gate saw no seniority token at all.
+  if (!roleFuzzyMatch('Engenheiro de Dados Sênior', 'Engenheiro de Dados Júnior')) {
+    pass('role matcher keeps accented Sênior and Júnior requisitions distinct (#2207)');
+  } else {
+    fail('role matcher merged an accented Sênior req into an accented Júnior req');
+  }
+
+  // The same defect also caused false negatives: a genuine repost written once
+  // with the accent and once without tokenized differently and never matched.
+  if (roleFuzzyMatch('Engenheiro de Software Sênior, Pagamentos', 'Engenheiro de Software Senior, Pagamentos')) {
+    pass('role matcher matches a repost across accented and unaccented spellings (#2207)');
+  } else {
+    fail('role matcher missed a repost that differs only by an accent');
+  }
+
+  // Folding must not over-merge: accented specialty words have to survive as
+  // their own distinct tokens, not collapse into one another.
+  if (!roleFuzzyMatch('Ingeniero de Software Sênior, Búsqueda', 'Ingeniero de Software Sênior, Pagos')) {
+    pass('role matcher keeps accented specialty suffixes distinct after folding (#2207)');
+  } else {
+    fail('accent folding collapsed two distinct accented specialty suffixes');
+  }
+
+  // Folding is what lets the seniority gate see an accented qualifier at all.
+  // Before it, "Sênior"/"Júnior" both reduced to the same "nior" phantom, which
+  // survived as a non-baseline token on the qualified side only — so the
+  // specialization-marker rule (strict subset + extra non-baseline word) fired
+  // and returned false for BOTH. The gate itself never ran: extractSeniorities
+  // saw no seniority token either way. That produced a right answer for the
+  // wrong reason on "Júnior" and a plain false negative on "Sênior".
+  //
+  // After folding, the two cases separate on their actual meaning (#2009's
+  // SUB_BASELINE_SENIORITY rule): "senior" is routinely added or dropped
+  // between reposts of one req, while "junior" marks a genuinely lower-level
+  // req with its own scope and req ID.
+  if (roleFuzzyMatch('Sênior Product Manager, Marketplace', 'Product Manager, Marketplace')) {
+    pass('accent folding lets a lone accented "Sênior" be read as the same req (#2207)');
+  } else {
+    fail('accented "Sênior" still blocked a repost of the same requisition');
+  }
+
+  if (!roleFuzzyMatch('Júnior Product Manager, Marketplace', 'Product Manager, Marketplace')) {
+    pass('accent folding routes a lone accented "Júnior" through the sub-baseline gate (#2207)');
+  } else {
+    fail('accented "Júnior" collapsed a sub-baseline req into the bare title');
   }
 
   const dedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-'));

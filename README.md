@@ -183,7 +183,7 @@ claude   # or codex / opencode / qwen / agy / grok
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions.
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models, [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions.
 
 ## Antigravity CLI Integration
 
@@ -206,7 +206,7 @@ agy
 /career-ops tracker
 ```
 
-The skill is defined using the open standard in `.agents/skills/career-ops/SKILL.md` and symlinked/referenced for each supported CLI (e.g. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+The skill is defined using the open standard in `.agents/skills/career-ops/SKILL.md` and symlinked/referenced for each supported CLI (e.g. `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
 
 ## Codex Integration
 

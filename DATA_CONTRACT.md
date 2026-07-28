@@ -74,6 +74,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/fr/*` | French language modes |
 | `modes/hi/*` | Hindi language modes |
 | `modes/ja/*` | Japanese language modes |
+| `modes/nl/*` | Dutch language modes |
 | `modes/pl/*` | Polish language modes |
 | `modes/pt/*` | Portuguese language modes |
 | `modes/ru/*` | Russian language modes |
@@ -94,6 +95,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `templates/*` | Base templates |
 | `fonts/*` | Self-hosted fonts |
 | `.claude/skills/*` | Skill definitions (Claude Code) |
+| `.cursor/skills/*` | Skill definitions (Cursor) |
 | `.opencode/skills/*` | Skill definitions (OpenCode) |
 | `.qwen/skills/*` | Skill definitions (Qwen Code) |
 | `.antigravitycli/skills/*` | Skill definitions (Antigravity CLI) |

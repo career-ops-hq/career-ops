@@ -342,6 +342,17 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 
 **Context Notes:** Any caveats (niche role, government job, evergreen position, etc.) that explain potentially concerning signals.
 
+### Prior-contact FYI (non-scoring)
+
+Check the `responsiveness` axis of the `node company-history.mjs --company <company>` card, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. Branch on `responsiveness.label` and append ONE informational line to the report. The `facts` array can hold several applications to the same company, so fill placeholders deterministically **per category**: for each placeholder use the most recent application matching THAT placeholder's own condition — fill a responded placeholder from the most recent responded fact, a silent placeholder from the most recent silent fact — rather than forcing one fact to serve both groups. When more than one application matches a category, append a separate count for that category (e.g. ", and {K} earlier applications with the same pattern") so no history is omitted or misrepresented:
+
+- `silent-on-you` (fill from the most recent silent fact; if more than one silent application exists, append the count of the others):
+> Note: you applied to {company} on {date}; no response in {N}d after {M} follow-ups. Not a legitimacy signal — factor into how much effort to invest.
+- `mixed` (they answered at least one of your applications and went silent on another — a flat "no response" would be inaccurate). Fill the responded placeholders from the most recent **responded** fact and the silent placeholders from the most recent **silent** fact — two different applications — and give a separate count per category when more than one matches:
+> Note: mixed history with {company} — they responded on #{responded_num} ({responded_date}) but went silent on #{silent_num} (applied {silent_date}, {N}d). Not a legitimacy signal — factor into how much effort to invest.
+
+This is information about **your own history** with the company, not about this posting. It must NOT alter the 1-5 score and must NOT alter the Assessment tier above — those are driven exclusively by the `postingChurn` axis and the other Block G signals. If the label is `responded-before` or `no-history`, say nothing (silence is fine; no note needed).
+
 ### Edge case handling:
 - **Government/academic postings:** Longer timelines are standard. Adjust thresholds (60-90 days is normal).
 - **Evergreen/continuous hire postings:** If the JD explicitly says "ongoing" or "rolling," note it as context -- this is not a ghost job, it is a pipeline role.

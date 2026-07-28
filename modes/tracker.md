@@ -52,3 +52,5 @@ Also show statistics:
 For the full lifetime stats view (cumulative funnel, scanner totals, portal
 coverage, follow-up compliance), run `node stats.mjs --summary` and present its
 output. Zero tokens — never recompute these numbers manually.
+
+If any company in the tracker shows a `silent-on-you` responsiveness label, also offer `node company-history.mjs --summary` — the per-company evidence cards (hygiene nudge first, then silent-first) give the user the underlying facts before they decide how to prioritize.
