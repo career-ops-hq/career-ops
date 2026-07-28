@@ -24,7 +24,7 @@ Strategic program and operations leader with 16+ years of experience translating
 
 ## Professional Experience
 
-### Wellstar Health System — Atlanta, GA
+### Wellstar Health System, Atlanta, GA
 **Technical Program Manager - Total Rewards**
 Jan 2025 - Present
 
@@ -35,7 +35,7 @@ Jan 2025 - Present
 - Coordinate across multiple stakeholders to streamline reporting, reduce data silos, and create repeatable processes that improve visibility across teams.
 - Serve as a connector between technical, operational, and leadership audiences, translating business questions into actionable analysis and next-step recommendations.
 
-### Harvard Medical School — Remote
+### Harvard Medical School, Remote
 **Program Manager**
 Jan 2023 - Jan 2025
 
@@ -46,7 +46,7 @@ Jan 2023 - Jan 2025
 - Managed politically sensitive priorities with tact and structure, ensuring the right stakeholders had the right information at the right time.
 - Strengthened systems and workflows related to learning operations, curriculum mapping, and fiscal planning.
 
-### Ideagen DevonWay — Remote
+### Ideagen DevonWay, Remote
 **Technical Project Manager**
 Nov 2022 - Jan 2024
 
@@ -55,7 +55,7 @@ Nov 2022 - Jan 2024
 - Kept cross-functional teams aligned across sales, development, and customer environments to deliver complex solutions on time.
 - Translated technical requirements into practical business decisions and maintained strong executive communication throughout project lifecycles.
 
-### Warrior Body Spa — Tucker, GA
+### Warrior Body Spa, Tucker, GA
 **Director of Operations**
 2014 - 2022
 
@@ -64,7 +64,7 @@ Nov 2022 - Jan 2024
 - Introduced process improvements across CRM, marketing, scheduling, and service workflows to support growth and a more consistent end-to-end experience.
 - Balanced day-to-day execution with long-range planning, automation, and employee support during periods of business expansion.
 
-### KSW Real Estate — Atlanta, GA
+### KSW Real Estate, Atlanta, GA
 **Project Manager, Real Estate Operations**
 2010 - 2014
 
@@ -73,9 +73,9 @@ Nov 2022 - Jan 2024
 
 ## Education And Credentials
 
-- Harvard University — Graduate Certificate, Corporate Sustainability and Innovation
-- Augusta University — Master of Public Administration
-- Paine College — Bachelor of Arts, Philosophy
+- Harvard University, Graduate Certificate, Corporate Sustainability and Innovation
+- Augusta University, Master of Public Administration
+- Paine College, Bachelor of Arts, Philosophy
 - Certifications: Project Management Professional (PMP), Certified ScrumMaster (CSM)
 
 ## Technical Tools

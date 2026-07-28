@@ -25,7 +25,9 @@ batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
 batch/batch-input.tsv
+batch/tracker-additions/*.tsv
 batch/tracker-additions/**/*.tsv
+batch/tracker-additions/merged/
 !batch/tracker-additions/.gitkeep
 jds/*
 !jds/.gitkeep
@@ -58,6 +60,8 @@ config/profile.yml
 portals.yml
 modes/_profile.md
 modes/_custom.md
+article-digest.md
+reference/
 .update-dismissed
 .update-lock
 
