@@ -2299,7 +2299,7 @@ const upskillModeDoc = readFile('modes/upskill.md');
 // (heading → next `## ` or EOF), so unrelated changelog/example content
 // elsewhere in the doc can't falsely trigger a pending failure. The positive
 // "section exists" check below still runs against the whole doc.
-const upskillLpMatch = upskillModeDoc.match(/^## Learning Plan\b[\s\S]*?(?=^## |\Z)/m);
+const upskillLpMatch = upskillModeDoc.match(/^## Learning Plan\b[\s\S]*?(?=^## |(?![\s\S]))/m);
 const upskillLpSection = upskillLpMatch ? upskillLpMatch[0] : '';
 const upskillLearningPlanPending =
   /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2|not yet|not available|unavailable|tbd|wip|in progress)/i.test(upskillLpSection) ||
