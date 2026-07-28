@@ -122,8 +122,8 @@ try {
     clock += 1_000;
     try { setTimer.fireAll(); } catch (e) { /* Expected: thrower throws. */ }
 
-    // Second callback should have run during the first pump(). Advance again
-    // for the third callback.
+    // The thrower spent that token, so nothing else ran in the first pump.
+    // Each later refill releases exactly one queued callback.
     clock += 1_000;
     try { setTimer.fireAll(); } catch (e) { /* Expected: should not throw again. */ }
 
