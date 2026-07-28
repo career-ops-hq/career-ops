@@ -4,10 +4,11 @@ Rapid first-pass evaluation of a single job URL or JD text. Returns a score and
 go/no-go verdict. Writes NO files — no report, no TSV, no cover letter, no STAR
 stories. This is a filter gate; roles that pass go to full A-G evaluation.
 
-Used by `modes/pipeline.md` (two-pass mode) to keep expensive full evaluations
-for roles that actually clear the bar. Reading the full evaluation context
-(`cv.md` + `_shared.md` + `_profile.md` + `profile.yml` + `oferta.md`) costs
-tens of thousands of tokens; triage reads one compact file instead.
+Invoke it directly on a batch of postings to see which are worth a full
+evaluation: you get a verdict table, and you decide what to promote. Nothing is
+filtered on your behalf. Reading the full evaluation context (`cv.md` +
+`_shared.md` + `_profile.md` + `profile.yml` + `oferta.md`) costs tens of
+thousands of tokens; triage reads one compact file instead.
 
 ## Context
 
@@ -78,7 +79,7 @@ Hard DQs override to ≤2.5.
 |-------|---------|
 | ≥ triage_threshold | **PASS** — proceed to full A-G evaluation |
 | 3.0–(threshold − 0.1) | **MARGINAL** — one-liner shown to user; skip full eval unless user overrides |
-| < 3.0 | **FAIL** — silently filtered by the pipeline; return the line and stop |
+| < 3.0 | **FAIL** — clear no-go; return the line and stop |
 | N/A | **SKIP** — inaccessible posting |
 
 (`triage_threshold` is `config/profile.yml → pipeline.triage_threshold`, default `3.5`.)
