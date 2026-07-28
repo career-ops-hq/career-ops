@@ -67,6 +67,8 @@ To configure OpenCode with a custom provider:
    ```
 ### Kimi K2.5 via OpenCode (Verified)
 
+> **Kimi the model, not Kimi the CLI.** This recipe runs the Kimi K2.5 *model* through the **OpenCode** CLI. That is a different thing from using the standalone **Kimi CLI** as your host (see [Supported CLIs](SUPPORTED_CLIS.md)). The names collide; the setups don't. Follow the steps below inside OpenCode.
+
 The following configuration was verified with Career-Ops using OpenCode and Moonshot AI's OpenAI-compatible API.
 
 #### opencode.json
