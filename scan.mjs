@@ -1428,6 +1428,7 @@ export function appendToScanHistory(offers, date, status = 'added') {
   // backward-compatible. `status` is parameterized so callers can record verify
   // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
   if (!existsSync(SCAN_HISTORY_PATH)) {
+    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
     writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
   }
 
