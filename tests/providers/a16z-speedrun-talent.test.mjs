@@ -119,12 +119,22 @@ try {
   if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() falls back to joined keywords[] when q: is absent');
   else fail(`keywords fallback q = ${JSON.stringify(new URL(kwCalls[0]).searchParams.get('q'))}`);
 
-  // MAX_PAGES_CAP: an oversized max_pages is clamped to 120.
+  // MAX_PAGES_CAP: an oversized max_pages is clamped to 120, and the
+  // truncation warning fires (spied via console.error, restored in finally).
   const bigCalls = [];
   const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 100 }, (_, i) => mk(i)), total_pages: 500 }; } };
-  await provider.fetch({ max_pages: 9999 }, bigCtx);
+  const warnings = [];
+  const realConsoleError = console.error;
+  try {
+    console.error = (...args) => warnings.push(args.join(' '));
+    await provider.fetch({ max_pages: 9999 }, bigCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
   if (bigCalls.length === 120) pass('fetch() clamps max_pages to the 120-page cap');
   else fail(`cap clamp fetched ${bigCalls.length} pages`);
+  if (warnings.some((w) => w.includes('truncated at max_pages=120'))) pass('fetch() warns when the cap truncates the feed');
+  else fail(`cap warning missing; captured = ${JSON.stringify(warnings)}`);
 
   // fetch(): malformed payload throws with a useful message.
   let threw = false;
