@@ -147,15 +147,13 @@ career-ops prend en charge [Gemini CLI](https://github.com/google-gemini/gemini-
 # 1. Installez Gemini CLI
 npm install -g @google/gemini-cli
 # ou : npx @google/gemini-cli --version
+#    L'authentification se fait via votre compte Google (gratuit) au premier lancement
 
-# 2. Authentifiez-vous (gratuit, utilise votre compte Google)
-gemini auth
-
-# 3. Exécutez dans le dossier career-ops
+# 2. Exécutez dans le dossier career-ops
 cd career-ops
 gemini
 
-# 4. Utilisez la commande unifiée /career-ops avec ses sous-commandes :
+# 3. Utilisez la commande unifiée /career-ops avec ses sous-commandes :
 /career-ops "Senior AI Engineer at Anthropic..."
 /career-ops pipeline
 /career-ops scan
