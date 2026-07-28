@@ -346,8 +346,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-4-8" ;;
-    standard|*) echo "claude-sonnet-4-6" ;;
+    premium) echo "claude-opus-5" ;;
+    standard|*) echo "claude-sonnet-5" ;;
   esac
 }
 
@@ -502,10 +502,10 @@ process_offer() {
   # Build the prompt with placeholders replaced
   local prompt
   if [[ "$SKIP_PDF" == "true" ]]; then
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline: evaluación A-F + report .md + tracker line. NO generes PDF; en el tracker escribe ❌ en la columna PDF y en el JSON final establece \"pdf\": null."
+    prompt="Process this job offer. Run the pipeline: A-G evaluation + report .md + tracker line. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
     echo "    ⏭️  --skip-pdf set — skipping PDF generation for #$id ($url)"
   else
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline completo: evaluación A-F + report .md + PDF + tracker line."
+    prompt="Process this job offer. Run the full pipeline: A-G evaluation + report .md + optional PDF + tracker line."
   fi
   prompt="$prompt URL: $url"
   prompt="$prompt JD file: $jd_file"
@@ -692,6 +692,12 @@ print_summary() {
     local avg
     avg=$(awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
     echo "Average score: $avg/5 ($score_count scored)"
+  fi
+
+  if [[ -f "$BATCH_DIR/aggregate-tokens.mjs" ]]; then
+    if ! node "$BATCH_DIR/aggregate-tokens.mjs"; then
+      echo "Warning: token aggregation failed." >&2
+    fi
   fi
 }
 
@@ -1012,4 +1018,3 @@ main() {
 }
 
 main "$@"
-

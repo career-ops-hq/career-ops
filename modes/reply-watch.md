@@ -17,6 +17,8 @@ Local-first, human-in-the-loop: **nothing here auto-updates without user confirm
 - `data/applications.md` — Application tracker (source of truth)
 - `data/follow-ups.md` — Follow-up history (for contact matching)
 
+**Populating `data/reply-candidates.json` manually:** if you don't want to grant any tool mailbox access, run `node paste-reply.mjs` and paste (or point `--file` at) the raw text of a reply email. It normalizes the subject/from/body into the exact candidate shape above and appends it — it never classifies the reply itself and never runs `reply-watch.mjs` or touches the tracker.
+
 ## Invocation
 
 Run the reply-watch command:

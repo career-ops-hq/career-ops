@@ -166,6 +166,26 @@ try {
   const emptyHealed = await avature.fetch({ name: 'X', api: base }, emptyP1Ctx);
   if (emptyHealed.length === 14 && emptyP1Ctx.calls.some((u) => /[?&]offset=/.test(u))) pass('avature.fetch() self-heals when the inert key returns an empty page 1');
   else fail(`avature.fetch() failed to heal empty page 1: ${emptyHealed.length} jobs`);
+
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseArticles now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const badFrag = `
+    <article class="article article--result" id="article--bad">
+      <h3 class="title"><a class="link" href="https://acme.avature.net/careers/JobDetail/Bad-Entity-Role/778899">Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;</a></h3>
+    </article>`;
+    let badArts, badThrew = null;
+    try { badArts = parseArticles(badFrag, origin); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`avature.parseArticles() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (badArts.length === 1 && badArts[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('avature.parseArticles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
+    else fail(`avature.parseArticles() out-of-range entity wrong: ${JSON.stringify(badArts)}`);
+  }
 } catch (e) {
   fail(`avature provider tests crashed: ${e.message}`);
 }

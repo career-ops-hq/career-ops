@@ -312,6 +312,46 @@ try {
     fail(`workday fetch-error stop should not also warn about max_pages: ${JSON.stringify(flakyWarnings)}`);
   }
 
+  // fetch-error truncation must TAG the returned array so scan-ats-full.mjs
+  // can queue the tenant for a calm sequential retry (the workdayNoDateSkip
+  // pattern — no per-tenant logging beyond the existing truncation warning).
+  {
+    const entry = { name: 'TagCo', careers_url: 'https://tagco.wd1.myworkdayjobs.com/jobs' };
+    const page0 = {
+      total: 60,
+      jobPostings: Array.from({ length: 20 }, (_, i) => ({
+        title: `Role ${i}`, externalPath: `/job/City/role-${i}`, postedOn: 'Posted Today',
+      })),
+    };
+    let calls = 0;
+    const ctx = mkWorkdayCtx(async () => {
+      calls++;
+      if (calls === 1) return page0;
+      throw new Error('fetch failed'); // every page-2 attempt dies
+    });
+    const { result: jobs } = await captureConsoleErrors(() => workday.fetch(entry, ctx));
+    if (jobs.workdayTruncated === true && jobs.length === 20) {
+      pass('fetch-error truncation tags jobs.workdayTruncated');
+    } else {
+      fail(`expected workdayTruncated tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
+    }
+  }
+
+  // A clean complete fetch must NOT carry the tag.
+  {
+    const entry = { name: 'CleanCo', careers_url: 'https://cleanco.wd1.myworkdayjobs.com/jobs' };
+    const ctx = mkWorkdayCtx(async () => ({
+      total: 2,
+      jobPostings: [
+        { title: 'A', externalPath: '/job/X/a', postedOn: 'Posted Today' },
+        { title: 'B', externalPath: '/job/X/b', postedOn: 'Posted Today' },
+      ],
+    }));
+    const jobs = await workday.fetch(entry, ctx);
+    if (jobs.workdayTruncated === undefined) pass('complete fetch carries no workdayTruncated tag');
+    else fail('workdayTruncated set on a complete fetch');
+  }
+
   // fetch() retry — a 429 that succeeds on a later attempt is transparent to
   // the caller (no jobs lost, no error surfaced) and respects Retry-After.
   let retrySleepCalls = [];

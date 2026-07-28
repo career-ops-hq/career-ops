@@ -167,6 +167,9 @@ function parseTracker() {
 //   2. Legacy bullets written by early web builds: `- YYYY-MM-DD · #NUM Company — note`
 // Bullets carry no channel/contact/role (mapped to Other/''/''), and bullets
 // without a `#NUM` are skipped — they can't be attributed to an application.
+// Pin-directive lines (`- next #...`) and the header/separator rows are also
+// excluded — the header's `num` cell isn't numeric and the separator's dashes
+// aren't either, so both fail the `isNaN` check below and never enter `entries`.
 const BULLET_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+·\s+#(\d+)\s+(.+?)(?:\s+—\s+(.*))?$/;
 
 export function parseFollowupsContent(content) {
@@ -207,10 +210,15 @@ export function parseFollowupsContent(content) {
   return entries;
 }
 
-function parseFollowups() {
+function readFollowups() {
   if (!existsSync(FOLLOWUPS_FILE)) return [];
   return parseFollowupsContent(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
 }
+
+// `parseFollowups` is the name origin/main callers use (company-history.mjs,
+// followup-cadence.test.mjs, followup-seed.mjs); `parseFollowupsContent` is the
+// name the branch's test-all.mjs uses. Both point at the same content parser.
+export { parseFollowupsContent as parseFollowups };
 
 // --- Next-date overrides (pins) ---
 // A user can PIN an application's next follow-up date, taking precedence over
@@ -336,7 +344,7 @@ function analyze() {
     return { error: 'No applications found in tracker.' };
   }
 
-  const followups = parseFollowups();
+  const followups = readFollowups();
   const overrides = parseOverrides();
 
   // Group follow-ups by app number

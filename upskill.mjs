@@ -45,109 +45,11 @@ export const SCHEMA_VERSION = 1;
 // gaps matter most. Matches the apply threshold in Ethical Use (CLAUDE.md).
 const LOW_FIT_SCORE = 4.0;
 
-// Skill tokenizer. Superset of the tech regex in analyze-patterns.mjs
-// (deliberately duplicated — see #1520 discussion: extracting a shared module
-// from a tested core script is a follow-up once both call sites are stable).
-const SKILL_TOKENS = [
-  // Languages
-  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Golang', 'Rust', 'PHP',
-  'Kotlin', 'Swift', 'Scala', 'Elixir', 'C\\+\\+', 'C#', '\\.NET', 'SQL',
-  // Frontend / frameworks
-  'React Native', 'React', 'Angular', 'Vue\\.?js', 'Svelte', 'Next\\.?js',
-  'Django', 'Flask', 'FastAPI', 'Rails', 'Laravel', 'Symfony', 'Spring',
-  'Node\\.?js', 'NodeJS',
-  // Data stores
-  'MongoDB', 'MySQL', 'PostgreSQL', 'Postgres', 'Redis', 'Elasticsearch',
-  'Snowflake', 'BigQuery', 'Databricks', 'DynamoDB', 'Cassandra',
-  // APIs / messaging
-  'GraphQL', 'gRPC', 'Kafka', 'RabbitMQ',
-  // Cloud / infra
-  'AWS', 'GCP', 'Azure', 'Docker', 'Kubernetes', 'k8s', 'Terraform',
-  'Ansible', 'Helm', 'Jenkins', 'GitHub Actions', 'GitLab CI', 'CI/CD',
-  'Prometheus', 'Grafana', 'Datadog', 'Supabase', 'Inngest',
-  // Data / ML / AI
-  'PyTorch', 'TensorFlow', 'scikit-learn', 'Pandas', 'NumPy', 'Spark',
-  'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
-  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering', 'Fine-?tuning',
-  'Computer Vision', 'NLP',
-  // Analytics / enterprise
-  'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
-];
-
-// \b fails at symbol edges (\bC\+\+\b needs a word char AFTER the +, \b\.NET
-// needs one BEFORE the dot), so C++/C#/.NET would never match standalone.
-// (?<!\w)/(?!\w) are equivalent to \b for word-char edges and correct for
-// symbol edges.
-const SKILL_PATTERN = new RegExp(
-  '(?<!\\w)(?:' + SKILL_TOKENS.join('|') + ')(?!\\w)',
-  'gi'
-);
-
-// "Go" is an everyday English word, so it can't join the case-insensitive
-// token list ("go the extra mile" would register a skill). Match it in a
-// separate CASE-SENSITIVE pass: only the exact standalone token "Go" counts
-// as the language; prose "go"/"GO" never do. "Golang" still resolves to "Go"
-// via the main pattern + CANONICAL. A trailing hyphen also disqualifies:
-// capitalized business phrases like "Go-to-market" and "Go-live" are not the
-// language (punctuation like "Go," "Go/Rust" "(Go)" still counts).
-const GO_SKILL_PATTERN = /(?<!\w)Go(?![\w-])/;
-
-// lowercase → canonical display casing, derived from SKILL_TOKENS by stripping
-// regex syntax ('Vue\\.?js' → 'Vue.js'). Keeps case-insensitive matches like
-// "graphql" resolving to the same key ("GraphQL") as the CV-known-skills set.
-const DISPLAY = Object.fromEntries(
-  SKILL_TOKENS.map(t => {
-    const display = t.replace(/\\/g, '').replace(/\?/g, '');
-    return [display.toLowerCase(), display];
-  })
-);
-
-// Exact-alias canonicalization ONLY (lowercased match → display name).
-// Deliberately no umbrella aliases: "cloud" must never count as knowing
-// AWS/GCP/Azure — a generous map silently suppresses real gaps, and the
-// "cv skill never appears as gap" acceptance test rewards exactly that
-// failure mode. Every entry here maps spellings of the SAME skill.
-const CANONICAL = {
-  'k8s': 'Kubernetes',
-  'golang': 'Go',
-  'postgres': 'PostgreSQL',
-  'nodejs': 'Node.js', 'node.js': 'Node.js', 'nodejs.': 'Node.js',
-  'vuejs': 'Vue.js', 'vue.js': 'Vue.js',
-  'nextjs': 'Next.js', 'next.js': 'Next.js',
-  'llm': 'LLMs', 'llms': 'LLMs',
-  'finetuning': 'Fine-tuning', 'fine-tuning': 'Fine-tuning',
-  'power bi': 'Power BI',
-  'github actions': 'GitHub Actions',
-  'gitlab ci': 'GitLab CI',
-  'ci/cd': 'CI/CD',
-  'hugging face': 'Hugging Face',
-  'react native': 'React Native',
-  'prompt engineering': 'Prompt Engineering',
-  'computer vision': 'Computer Vision',
-  'scikit-learn': 'scikit-learn',
-  'c++': 'C++', 'c#': 'C#', '.net': '.NET',
-  'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
-  'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
-};
-
-function canonicalize(token) {
-  const key = token.toLowerCase();
-  // Alias map first (k8s → Kubernetes), then display casing from the token
-  // list (graphql → GraphQL, pytorch → PyTorch) — never title-case, which
-  // manufactures keys like "Graphql" that miss the known-skills set.
-  return CANONICAL[key] || DISPLAY[key] || token;
-}
-
-/** Extract the set of canonical skill names present in a free-text blob. */
-export function extractSkills(text) {
-  if (!text) return new Set();
-  const found = new Set();
-  for (const m of text.matchAll(SKILL_PATTERN)) {
-    found.add(canonicalize(m[0]));
-  }
-  if (GO_SKILL_PATTERN.test(text)) found.add('Go');
-  return found;
-}
+// Skill vocabulary + canonical extractor moved to skill-extract.mjs (#1896) so
+// upskill, jd-skill-gap, and analyze-patterns share ONE source of truth. Re-
+// exported here so existing importers of extractSkills keep working unchanged.
+import { extractSkills } from './skill-extract.mjs';
+export { extractSkills };
 
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
@@ -263,6 +165,32 @@ export function aggregateGaps(reports, knownSkills) {
   return { gaps, excludedAsKnown, totalLowFit };
 }
 
+/**
+ * Targeted-mode gap analysis for a single JD (#1739): which JD skills are gaps
+ * vs. already known from the CV/profile.
+ *
+ * Uses the SAME canonicalization as the aggregate path (extractSkills on both
+ * sides, canonical-to-canonical comparison) so a known CV skill is suppressed
+ * and a real gap surfaces. The previous inline implementation matched raw
+ * lowercased regex tokens with substring `.includes()`, which (a) never matched
+ * symbol skills like `c\+\+`/`\.net` and (b) over-suppressed via substrings
+ * (`go` ⊂ `mongodb`, `sql` ⊂ `postgresql`, `java` ⊂ `javascript`) — inverting the
+ * result on every skill (#1851). Emits canonical names, matching aggregate mode.
+ *
+ * @param {string} jdText - the target job description text
+ * @param {string} knownText - cv + profile text (already-known skills)
+ * @returns {{ gaps: string[], excludedAsKnown: string[], knownSkills: string[] }}
+ */
+export function computeTargetedGaps(jdText, knownText) {
+  const known = extractSkills(knownText);
+  const gaps = [];
+  const excludedAsKnown = [];
+  for (const skill of extractSkills(jdText)) {
+    (known.has(skill) ? excludedAsKnown : gaps).push(skill);
+  }
+  return { gaps, excludedAsKnown, knownSkills: [...known].sort() };
+}
+
 // --- Main ---
 function analyze(minReports) {
   if (!existsSync(APPS_FILE)) {
@@ -361,38 +289,9 @@ function printSummary(result) {
 function runSelfTest() {
   const failures = [];
 
-  // extractSkills: canonicalization
-  const s1 = extractSkills('Needs k8s, golang and Postgres experience; NodeJS a plus');
-  for (const expected of ['Kubernetes', 'Go', 'PostgreSQL', 'Node.js']) {
-    if (!s1.has(expected)) failures.push(`extractSkills missing canonical ${expected} (got ${[...s1].join(',')})`);
-  }
-
-  // Symbol-terminated skills: \b-style boundaries would drop all three
-  const s1b = extractSkills('Requires C++ and C# on .NET, plus SQL.');
-  for (const expected of ['C++', 'C#', '.NET', 'SQL']) {
-    if (!s1b.has(expected)) failures.push(`extractSkills missing symbol skill ${expected} (got ${[...s1b].join(',')})`);
-  }
-
-  // Standalone "Go" is matched case-SENSITIVELY: a capitalized token in a
-  // skills list counts, but prose "go"/"GO" must never register as a skill
-  // (the global pattern is case-insensitive, so Go lives outside it).
-  const s1d = extractSkills('Skills: Go, Rust, TypeScript');
-  if (!s1d.has('Go')) failures.push(`extractSkills missing standalone Go (got ${[...s1d].join(',')})`);
-  const s1e = extractSkills('willing to go the extra mile; ready to GO live');
-  if (s1e.has('Go')) failures.push('prose "go"/"GO" wrongly matched as Go skill');
-  // Capitalized hyphenated business phrases must not register as the language
-  const s1f = extractSkills('Own the Go-to-market strategy and Go-live support');
-  if (s1f.has('Go')) failures.push('hyphenated "Go-to-market"/"Go-live" wrongly matched as Go skill');
-  // ...but ordinary punctuation after the token still counts
-  const s1g = extractSkills('Backend in Go/Rust (Go preferred). We ship Go.');
-  if (!s1g.has('Go')) failures.push('punctuation-adjacent standalone Go missed');
-
-  // Lowercase mentions of mixed-case skills must resolve to canonical casing,
-  // or knownSkills.has() misses them (Graphql !== GraphQL)
-  const s1c = extractSkills('familiar with graphql, pytorch and postgresql');
-  for (const expected of ['GraphQL', 'PyTorch', 'PostgreSQL']) {
-    if (!s1c.has(expected)) failures.push(`extractSkills lowercase mention not canonical ${expected} (got ${[...s1c].join(',')})`);
-  }
+  // The extractSkills canonicalization/boundary fixtures now live with the
+  // module in tests/skill-extract.test.mjs (#1896). upskill's self-test keeps
+  // the aggregation/suppression/targeted checks that are upskill's own logic.
 
   // Over-suppression guard: cv "Java" must NOT swallow a "JavaScript" gap,
   // and cv "AWS" must not swallow GCP/Azure. This is the failure mode the
@@ -467,6 +366,48 @@ soft_gaps:
   if (!/Kafka/.test(parsed.gapText)) failures.push('Gap table row not captured');
   if (!/Airflow/.test(parsed.gapText)) failures.push('soft_gaps not captured');
 
+  // Targeted mode (#1851): known-skill suppression must be canonical-to-canonical,
+  // never raw-token substring matching. The old inline path inverted every skill —
+  // CV skills shown as gaps, real gaps hidden. This is the exact reproduction from
+  // the bug report.
+  {
+    const { gaps, excludedAsKnown } = computeTargetedGaps(
+      'Kubernetes, C++, .NET, Java, SQL, Go, LLMs',        // JD asks for
+      'k8s, C++, .NET, JavaScript, PostgreSQL, MongoDB, LLMs' // CV already has
+    );
+    const gapSet = new Set(gaps);
+    const exSet = new Set(excludedAsKnown);
+    for (const g of ['Java', 'SQL', 'Go']) {
+      if (!gapSet.has(g)) failures.push(`targeted: ${g} should be a gap (got ${gaps.join(',')})`);
+      if (exSet.has(g)) failures.push(`targeted: real gap ${g} wrongly suppressed as known`);
+    }
+    for (const k of ['Kubernetes', 'C++', '.NET', 'LLMs']) {
+      if (!exSet.has(k)) failures.push(`targeted: ${k} should be excluded as known (got ${excludedAsKnown.join(',')})`);
+      if (gapSet.has(k)) failures.push(`targeted: known skill ${k} wrongly reported as gap`);
+    }
+  }
+
+  // Targeted --url-text path (#1894): the fetched page text must reach
+  // computeTargetedGaps as a plain STRING. It used to be run through normalizeJd
+  // (which wants the { title, text } DOM object), yielding { text: '' } and then
+  // a `text.matchAll is not a function` crash. Guard both halves: a realistic
+  // multi-line JD string produces the right gaps, and the source no longer feeds
+  // the raw string to normalizeJd.
+  {
+    const jdText = 'Requirements:\n- Kubernetes and Go\n- 5+ years experience';
+    const { gaps } = computeTargetedGaps(jdText, 'Python, AWS'); // must not throw on a string
+    if (!gaps.includes('Kubernetes') || !gaps.includes('Go')) {
+      failures.push(`url-text: multi-line JD string should yield Kubernetes+Go gaps (got ${gaps.join(',')})`);
+    }
+    const selfSrc = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    if (/normalizeJd\(\s*targetText/.test(selfSrc)) {
+      failures.push('url-text: upskill.mjs still passes the raw fetched string to normalizeJd (regression, #1894)');
+    }
+    if (!/compactText\(targetText\)/.test(selfSrc)) {
+      failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -476,19 +417,158 @@ soft_gaps:
 }
 
 // --- CLI ---
+// --- CLI ---
 const args = process.argv.slice(2);
 if (args.includes('--self-test')) runSelfTest();
 
-const minReportsIdx = args.indexOf('--min-reports');
-const MIN_REPORTS = (() => {
-  if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-  const n = parseInt(args[minReportsIdx + 1], 10);
-  return Number.isNaN(n) || n < 1 ? 5 : n;
-})();
+// ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
+const urlTextIdx = args.indexOf('--url-text');
+const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-const result = analyze(MIN_REPORTS);
-if (args.includes('--summary')) {
-  printSummary(result);
+// Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
+const dnsCache = new Map();
+
+async function validateUrlSecurity(urlString) {
+  const dns = await import('dns/promises');
+  const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
+  const hostname = url.hostname;
+
+  if (hostname === 'localhost' || hostname.endsWith('.local')) {
+    throw new Error('Access denied: Localhost or internal domain target detected.');
+  }
+
+  let addresses;
+  if (dnsCache.has(hostname)) {
+    addresses = dnsCache.get(hostname);
+  } else {
+    addresses = await dns.resolve(hostname).catch(() => []);
+    const lookupRes = await dns.lookup(hostname).catch(() => null);
+    if (lookupRes) addresses.push(lookupRes.address);
+    dnsCache.set(hostname, addresses);
+  }
+
+  for (const ip of addresses) {
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169\.254\.)/.test(ip)) {
+      throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
+    }
+    if (ip === '::1' || ip.startsWith('fe80:') || ip.startsWith('fc00:') || ip.startsWith('fd00:')) {
+      throw new Error(`Access denied: Egress guard blocked private target IPv6 ${ip}`);
+    }
+  }
+  return url.toString();
+}
+
+if (urlTextIdx !== -1 || directUrl) {
+  (async () => {
+    let targetText = '';
+    const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+
+    if (!inputSource) {
+      console.error('Error: Please provide a valid URL or file path after --url-text');
+      process.exit(1);
+    }
+
+    if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
+      let browser;
+      try {
+        const secureUrl = await validateUrlSecurity(inputSource);
+        const { chromium } = await import('playwright');
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+
+        await page.route('**/*', async (route) => {
+          const requestUrl = route.request().url();
+          try {
+            await validateUrlSecurity(requestUrl);
+            await route.continue();
+          } catch (err) {
+            console.error(`Security Violation on Redirect: ${err.message}`);
+            await route.abort('blockedbyclient');
+            process.exit(1);
+          }
+        });
+
+        await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        targetText = await page.innerText('body');
+      } catch (err) {
+        console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
+        try {
+          const secureUrl = await validateUrlSecurity(inputSource);
+          // validateUrlSecurity only vets the initial URL; a redirect could still
+          // steer the fetch at an internal host (SSRF). The Playwright path
+          // re-validates per hop, but this plain fetch must refuse redirects
+          // outright — fail closed rather than follow an unvetted Location (#1851).
+          const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
+          if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+          targetText = await res.text();
+        } catch (fetchErr) {
+          console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
+          process.exit(1);
+        }
+      } finally {
+        if (browser) await browser.close();
+      }
+
+      // Whitespace-collapse + length-cap the fetched page text. Use compactText
+      // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
+      // text } DOM-read object and returns { url, title, text }, so feeding it
+      // the innerText/fetch STRING silently produced { text: '' } — destroying
+      // the JD and then throwing `text.matchAll is not a function` downstream
+      // (#1894). compactText is the string-in/string-out helper this wants.
+      try {
+        const { compactText } = await import('./browser-extract.mjs');
+        targetText = compactText(targetText);
+      } catch (e) {}
+    } else {
+      if (existsSync(inputSource)) {
+        targetText = readFileSync(inputSource, 'utf-8');
+      } else {
+        console.error(`Fatal: Target file not found at path: ${inputSource}`);
+        process.exit(1);
+      }
+    }
+
+    // Assemble the known-skills text (cv + profile), matching aggregate mode.
+    // Targeted mode additionally falls back to cv-example.md when cv.md is absent
+    // so a fresh checkout still produces a meaningful comparison.
+    const knownTextChunks = [];
+    if (existsSync(PROFILE_FILE)) {
+      try { knownTextChunks.push(readFileSync(PROFILE_FILE, 'utf-8')); } catch (e) {}
+    }
+    let activeCvFile = CV_FILE;
+    if (!existsSync(activeCvFile)) {
+      activeCvFile = join(CAREER_OPS, 'cv-example.md');
+    }
+    if (existsSync(activeCvFile)) {
+      try { knownTextChunks.push(readFileSync(activeCvFile, 'utf-8')); } catch (e) {}
+    }
+
+    const { gaps: gapList, excludedAsKnown, knownSkills } =
+      computeTargetedGaps(targetText, knownTextChunks.join('\n'));
+
+    console.log(JSON.stringify({
+      mode: 'targeted',
+      source: inputSource,
+      gaps: gapList.map(skill => ({ skill })),
+      excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
+      knownSkills,
+    }, null, 2));
+
+    process.exit(0);
+  })();
 } else {
-  console.log(JSON.stringify(result, null, 2));
+  // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
+  const minReportsIdx = args.indexOf('--min-reports');
+  const MIN_REPORTS = (() => {
+    if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
+    const n = parseInt(args[minReportsIdx + 1], 10);
+    return Number.isNaN(n) || n < 1 ? 5 : n;
+  })();
+
+  const result = analyze(MIN_REPORTS);
+  if (args.includes('--summary')) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
 }

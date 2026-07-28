@@ -17,6 +17,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, basename, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
+import { resolveTemplate } from "./cv-templates.mjs";
 
 const OUTPUT_ROOT = resolve("output");
 
@@ -103,16 +104,30 @@ function buildFootnotesBlock(footnotes) {
   return `<div class="footnotes">\n${lines}\n  </div>`;
 }
 
-export function buildHtml(payload) {
+// Resolve the cover-letter template through the shared resolver so a
+// `cover_letter.template` profile default, an explicit `payload.template`, and
+// installed template packs are all honored. Any resolver failure (no profile,
+// no templates dir, bad config) falls back to the base template, preserving the
+// original hardcoded behavior.
+export function resolveCoverTemplatePath(payload = {}, opts = {}) {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const base = resolve(scriptDir, "templates", "cover-letter-template.html");
+  try {
+    return resolveTemplate("cover", payload.template, { format: "html", fallback: true, ...opts });
+  } catch {
+    return base;
+  }
+}
+
+export function buildHtml(payload, templatePath) {
   _require(payload, ["candidate", "letter"], "payload");
   const candidate = payload.candidate;
   const letter = payload.letter;
   _require(candidate, ["name"], "candidate");
   _require(letter, ["role_title", "opening", "profile_intro"], "letter");
 
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const templatePath = resolve(scriptDir, "templates", "cover-letter-template.html");
-  let html = readFileSync(templatePath, "utf-8");
+  const resolvedPath = templatePath || resolveCoverTemplatePath(payload);
+  let html = readFileSync(resolvedPath, "utf-8");
 
   // Optional salutation (e.g. "Dear Jane Smith,"). Omitted -> no salutation,
   // preserving the original behavior for payloads that don't set it.
@@ -152,6 +167,8 @@ async function main() {
     options: {
       payload: { type: "string" },
       out:     { type: "string" },
+      format:  { type: "string" },
+      report:  { type: "string" },
       help:    { type: "boolean", short: "h" },
     },
     strict: false,
@@ -160,10 +177,12 @@ async function main() {
   if (args.help || !args.payload) {
     console.log(`
 Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf]
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--report NNN]
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
+  --format    Override output PDF page format (letter|a4, default: a4)
+  --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
   }
@@ -196,7 +215,11 @@ Usage:
   try {
     const html = buildHtml(payload);
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, { format: "a4" });
+    await renderHtmlToPdf(html, outputPath, {
+      format: args.format || "a4",
+      reportNum: args.report,
+      inputPath: payloadPath,
+    });
     console.log(`\nCover letter PDF: ${payload.output_path}`);
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");

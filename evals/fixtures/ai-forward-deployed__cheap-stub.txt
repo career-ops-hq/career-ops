@@ -1,0 +1,14 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case ai-forward-deployed]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Client-facing, embedded, prototype-and-deploy in the field with fast cycles — a
+forward-deployed engineering role.
+
+---SCORE_SUMMARY---
+COMPANY: Ridgeline
+ROLE: Forward Deployed AI Engineer
+SCORE: 4.2
+ARCHETYPE: AI Forward Deployed
+LEGITIMACY: High Confidence
+---END_SUMMARY---

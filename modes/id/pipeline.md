@@ -36,6 +36,7 @@ Memproses URL lowongan yang menumpuk di `data/pipeline.md`. Kandidat menambahkan
 ## Deteksi cerdas lowongan dari URL
 
 1. **Playwright (diutamakan):** `browser_navigate` + `browser_snapshot`. Berfungsi dengan semua SPA.
+   - **Opsional — ekstraktor CLI (`scan.extractor: cli` di `config/profile.yml`):** jalankan `node browser-extract.mjs <url>` (`--mode jd`) sebagai gantinya — `{ "url", "title", "text" }` ringkas, lebih sedikit token (bergantung portal). **Kembali diam-diam** ke `browser_navigate` + `browser_snapshot` jika gagal atau tidak ada.
 2. **WebFetch (fallback):** Untuk halaman statis atau ketika Playwright tidak tersedia.
 3. **WebSearch (upaya terakhir):** Cari di portal sekunder yang mengindeks lowongan.
 

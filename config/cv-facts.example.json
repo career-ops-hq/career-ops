@@ -1,0 +1,9 @@
+{
+  "allow_metrics": [
+    "10 users"
+  ],
+  "forbidden_phrases": [
+    "Fortune 500",
+    "patented"
+  ]
+}

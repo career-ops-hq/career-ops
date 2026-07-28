@@ -9,10 +9,72 @@ console.log('\nProvider — successfactors (SAP RMK tile parser)');
 try {
   const successfactorsModule = await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href);
   const sf = successfactorsModule.default;
-  const { parseTiles, cityFromSlug } = successfactorsModule;
+  const { parseTiles, cityFromSlug, resolveConfig } = successfactorsModule;
 
   if (sf.id === 'successfactors') pass('successfactors.id is "successfactors"');
   else fail(`successfactors.id is ${JSON.stringify(sf.id)}`);
+
+  // resolveConfig — multi-brand RMK tenants (#2010): a brand/tenant path
+  // segment in the configured URL (careers.nemetschek.com/Bluebeam/) must
+  // survive into tileApi/jobsApi/searchPage, not collapse to the shared
+  // origin (which would silently return the parent brand's postings).
+  const single = resolveConfig({ name: 'ZF', careers_url: 'https://jobs.zf.com' });
+  if (single.base === 'https://jobs.zf.com' && single.tileApi === 'https://jobs.zf.com/tile-search-results/') {
+    pass('resolveConfig: single-domain tenant is unaffected (base === origin, #2010)');
+  } else {
+    fail(`resolveConfig single-domain wrong: base=${single.base} tileApi=${single.tileApi}`);
+  }
+
+  const brandSearch = resolveConfig({ name: 'Bluebeam', api: 'https://careers.nemetschek.com/Bluebeam/search/' });
+  if (
+    brandSearch.base === 'https://careers.nemetschek.com/Bluebeam' &&
+    brandSearch.tileApi === 'https://careers.nemetschek.com/Bluebeam/tile-search-results/' &&
+    brandSearch.jobsApi === 'https://careers.nemetschek.com/Bluebeam/services/recruiting/v1/jobs' &&
+    brandSearch.searchPage === 'https://careers.nemetschek.com/Bluebeam/search/'
+  ) {
+    pass('resolveConfig: multi-brand tenant keeps the brand path in tileApi/jobsApi/searchPage (#2010)');
+  } else {
+    fail(`resolveConfig multi-brand wrong: ${JSON.stringify(brandSearch)}`);
+  }
+  // jobBase deliberately stays origin-only: live RMK data-url paths for a
+  // brand-scoped tenant already carry the brand segment (confirmed against
+  // Nemetschek's own /Bluebeam/tile-search-results/ output), so prefixing
+  // base there would double it up.
+  if (brandSearch.jobBase === 'https://careers.nemetschek.com') {
+    pass('resolveConfig: jobBase stays origin-only for a brand-scoped tenant (#2010)');
+  } else {
+    fail(`resolveConfig jobBase wrong: ${brandSearch.jobBase}`);
+  }
+
+  const brandNoSearch = resolveConfig({ name: 'Bluebeam', careers_url: 'https://careers.nemetschek.com/Bluebeam/' });
+  if (brandNoSearch.base === 'https://careers.nemetschek.com/Bluebeam') {
+    pass('resolveConfig: a brand path without a trailing /search/ segment still resolves correctly (#2010)');
+  } else {
+    fail(`resolveConfig brand-no-search wrong: base=${brandNoSearch.base}`);
+  }
+
+  if (resolveConfig({ name: 'X', careers_url: 'not a url' }) === null) {
+    pass('resolveConfig: returns null for an unparseable URL');
+  } else {
+    fail('resolveConfig should return null for an unparseable URL');
+  }
+
+  // An `api:` override pointing straight at one of the endpoints this module
+  // itself builds (rather than at the brand root or /search/) must not
+  // double the segment onto the derived base (e.g. …/tile-search-results/
+  // tile-search-results/).
+  const brandTileEndpoint = resolveConfig({ name: 'Bluebeam', api: 'https://careers.nemetschek.com/Bluebeam/tile-search-results/' });
+  if (brandTileEndpoint.base === 'https://careers.nemetschek.com/Bluebeam' && brandTileEndpoint.tileApi === 'https://careers.nemetschek.com/Bluebeam/tile-search-results/') {
+    pass('resolveConfig: api: pointing at tile-search-results/ directly does not double the segment (#2010)');
+  } else {
+    fail(`resolveConfig tile-endpoint-as-api wrong: base=${brandTileEndpoint.base} tileApi=${brandTileEndpoint.tileApi}`);
+  }
+  const brandJobsEndpoint = resolveConfig({ name: 'Bluebeam', api: 'https://careers.nemetschek.com/Bluebeam/services/recruiting/v1/jobs' });
+  if (brandJobsEndpoint.base === 'https://careers.nemetschek.com/Bluebeam' && brandJobsEndpoint.jobsApi === 'https://careers.nemetschek.com/Bluebeam/services/recruiting/v1/jobs') {
+    pass('resolveConfig: api: pointing at services/recruiting/v1/jobs directly does not double the segment (#2010)');
+  } else {
+    fail(`resolveConfig jobs-endpoint-as-api wrong: base=${brandJobsEndpoint.base} jobsApi=${brandJobsEndpoint.jobsApi}`);
+  }
 
   // detect() — literal SF hosts auto-claim; branded RMK hosts (jobs.zf.com) do
   // NOT (they carry no "successfactors" string and rely on explicit provider:).
@@ -162,6 +224,37 @@ try {
   const c2 = csbJobs[1];
   if (c2 && !/[?#&]|&amp;/.test(new URL(c2.url).pathname)) pass('parseCsbJobs sanitizes &amp; / URL-structural chars out of the slug');
   else fail(`parseCsbJobs slug not sanitized: ${JSON.stringify(c2 && c2.url)}`);
+
+  // parseCsbJobs (#2010): a brand-scoped cfg.base (from resolveConfig) must
+  // flow into the built job URL, for a hypothetical multi-brand CSB tenant.
+  const csbBrandCfg = { origin: 'https://careers.example.com', base: 'https://careers.example.com/Acme' };
+  const csbBrandJobs = parseCsbJobs(csbJson, csbBrandCfg, 'en_US');
+  if (csbBrandJobs[0]?.url === 'https://careers.example.com/Acme/job/Analytical-Lab-Technician/31099-en_US') {
+    pass('parseCsbJobs uses cfg.base (brand-scoped) when present (#2010)');
+  } else {
+    fail(`parseCsbJobs did not honor cfg.base: ${JSON.stringify(csbBrandJobs[0]?.url)}`);
+  }
+
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseTiles now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const badFrag2 = `<ul>
+      <li class="job-tile job-id-9001" data-url="/job/City-Bad-Entity/9001/">
+        <a class="jobTitle-link fontcolorx" href="/x">Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;</a>
+      </li>
+    </ul>`;
+    let badTiles, badThrew = null;
+    try { badTiles = parseTiles(badFrag2, 'https://jobs.example.com'); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`successfactors.parseTiles() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
+    else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }

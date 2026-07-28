@@ -92,8 +92,12 @@ export default {
  * - location: prefer `fullLocation`; else assemble from city/region/country
  *   parts (skipping empties); append "Remote" when `location.remote` is true.
  * - url: `j.ref` is an `api.smartrecruiters.com/v1/companies/<slug>/postings/<id>`
- *   URL — rewrite to the public `jobs.smartrecruiters.com/<slug>/postings/<id>`.
- *   If `ref` is missing, synthesise a URL from the company slug + posting id.
+ *   URL — rewrite to the public `jobs.smartrecruiters.com/<slug>/<id>-<title-slug>`.
+ *   The public site has no `/postings/` segment; carrying it over yields a 404,
+ *   which the liveness checker then reports as an expired posting (#1612).
+ *   SmartRecruiters resolves the page by id alone, so the trailing title slug is
+ *   cosmetic. If `ref` is missing or untrusted, synthesise the same shape from
+ *   the company slug + posting id.
  *
  * @param {any} json
  * @param {string} companyName
@@ -116,14 +120,20 @@ export function parseSmartRecruitersResponse(json, companyName) {
           && parsedRef.protocol === 'https:'
           && parsedRef.hostname === 'api.smartrecruiters.com'
           && parsedRef.pathname.startsWith('/v1/companies/')) {
-        const restOfPath = parsedRef.pathname.slice('/v1/companies/'.length);
-        url = `https://jobs.smartrecruiters.com/${restOfPath}`;
+        // /v1/companies/<slug>/postings/<id> → <slug>, <id>
+        const [refSlug, postings, refId] = parsedRef.pathname
+          .slice('/v1/companies/'.length)
+          .split('/')
+          .filter(Boolean);
+        if (refSlug && postings === 'postings' && refId) {
+          url = `https://jobs.smartrecruiters.com/${refSlug}/${refId}${slugified ? `-${slugified}` : ''}`;
+        }
       }
     }
     if (!url && j.id) {
       const companySlug = (companyName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       if (companySlug) {
-        url = `https://jobs.smartrecruiters.com/${companySlug}/${j.id}-${slugified}`;
+        url = `https://jobs.smartrecruiters.com/${companySlug}/${j.id}${slugified ? `-${slugified}` : ''}`;
       }
     }
     return { title: j.name || '', url, location, company: companyName };

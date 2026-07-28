@@ -1,7 +1,7 @@
 // tests/helpers.mjs — shared assertion helpers + counters for the test suite.
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -70,24 +70,52 @@ export function finish() {
   }
 }
 
+// The only executables the test harness is allowed to spawn. run() maps its
+// cmd argument onto these literals (never passing the argument itself through
+// to the OS), so a test can never be tricked into executing an arbitrary
+// binary — and CodeQL's uncontrolled-command-line finding is closed by
+// construction rather than dismissed (alerts #36/#41/#42).
+const WINDOWS_BASH_CANDIDATES = [
+  'C:\\Program Files\\Git\\bin\\bash.exe',
+  'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+];
+
 /**
- * Run a shell command or executable and return trimmed stdout on success.
+ * Map a requested executable onto the harness allowlist, returning the
+ * trusted literal (not the caller-supplied string).
  *
- * Array-form arguments use execFileSync to avoid shell parsing. String-only
- * commands use execSync for existing simple checks. Failures return null so the
- * caller can decide whether to count the result as a failure or warning.
+ * @param {string} cmd - Requested executable.
+ * @returns {string} Allowlisted executable path/name.
+ */
+function resolveAllowedExecutable(cmd) {
+  if (cmd === process.execPath || cmd === 'node') return process.execPath;
+  if (cmd === 'bash') return 'bash';
+  if (cmd === 'git') return 'git';
+  if (cmd === 'go') return 'go';
+  if (cmd === 'wsl') return 'wsl';
+  for (const candidate of WINDOWS_BASH_CANDIDATES) {
+    if (cmd === candidate) return candidate;
+  }
+  throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
+}
+
+/**
+ * Run an allowlisted executable and return trimmed stdout on success.
  *
- * @param {string} cmd - Command or executable to run.
- * @param {string[]} [args=[]] - Optional argument vector for execFileSync.
+ * Always execFileSync with an argument vector — no shell is ever involved, so
+ * arguments are never shell-parsed. The string-command/execSync form was
+ * removed (it had no callers). Failures return null so the caller decides
+ * whether to count the result as a failure or warning.
+ *
+ * @param {string} cmd - Executable to run (must be on the allowlist above).
+ * @param {string[]} [args=[]] - Argument vector.
  * @param {object} [opts={}] - Extra child_process options.
  * @returns {string|null} Trimmed stdout, or null when the command fails.
  */
 export function run(cmd, args = [], opts = {}) {
+  const exe = resolveAllowedExecutable(cmd);
   try {
-    if (Array.isArray(args) && args.length > 0) {
-      return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
-    }
-    return execSync(cmd, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
     return null;
   }
@@ -117,18 +145,20 @@ let bashCache = null;
 export function getBash() {
   if (bashCache !== null) return bashCache;
   if (process.platform !== 'win32') return (bashCache = 'bash');
+  for (const cmd of WINDOWS_BASH_CANDIDATES) {
+    try {
+      execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      return (bashCache = cmd);
+    } catch {}
+  }
   try {
-    execSync('wsl -e bash -c "true"', { stdio: 'ignore' });
+    // Probe via argv vector — no shell string, nothing to interpolate.
+    execFileSync('wsl', ['-e', 'bash', '-c', 'true'], { stdio: 'ignore' });
     return (bashCache = 'bash');
   } catch {}
-  const candidates = [
-    'C:\\Program Files\\Git\\bin\\bash.exe',
-    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-    'bash'
-  ];
-  for (const cmd of candidates) {
+  for (const cmd of ['bash']) {
     try {
-      execSync(`"${cmd}" -c "true"`, { stdio: 'ignore' });
+      execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
       return (bashCache = cmd);
     } catch {}
   }

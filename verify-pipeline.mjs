@@ -22,6 +22,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { looksLikeScoreCell } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -188,8 +189,7 @@ if (brokenReports === 0) ok('All report links valid');
 // --- Check 4: Score format ---
 let badScores = 0;
 for (const e of entries) {
-  const s = e.score.replace(/\*\*/g, '').trim();
-  if (!/^\d+\.?\d*\/5$/.test(s) && s !== 'N/A' && s !== 'DUP') {
+  if (!looksLikeScoreCell(e.score)) {
     error(`#${e.num}: Invalid score format: "${e.score}"`);
     badScores++;
   }
