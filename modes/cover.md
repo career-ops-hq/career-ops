@@ -199,7 +199,7 @@ Select 4-5 achievement bullets from `cv.md` only (`article-digest.md` may be rea
 4. Use the exact wording and metrics from cv.md — never paraphrase or invent
 5. Apply keyword mirroring from Step 4 to the vocabulary around each bullet (not the metrics)
 
-Format: `**Bold lead phrase,** one sentence of impact with metric.`
+Format: `**Bold lead phrase,** one sentence of impact with metric.` This describes the *rendered* bullet only — the `lead` value in the JSON payload (Step 9) must be a bare phrase with no trailing punctuation; `generate-cover-letter.mjs` appends the comma automatically when building the bullet.
 
 ---
 
@@ -299,6 +299,8 @@ Assemble the JSON payload:
     "profile_intro": "{approved profile intro}",
     "achievements": [
       {"lead": "...", "impact": "..."}
+      // "lead" is a bare phrase, no trailing comma or other punctuation —
+      // generate-cover-letter.mjs appends the comma when rendering
     ],
     "problems_section": "{approved problems paragraph}",
     "closing": "{approved closing}",
