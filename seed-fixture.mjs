@@ -21,7 +21,9 @@ const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
 export const DEFAULT_STATE = 'state-v1.18';
 
 function walk(dir, base = dir, out = []) {
-  for (const name of readdirSync(dir)) {
+  // Sort so files[] and the manifest key order are deterministic across
+  // platforms (readdirSync returns filesystem order, which varies).
+  for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p, base, out);
     else out.push(relative(base, p).split(sep).join('/'));
@@ -31,7 +33,9 @@ function walk(dir, base = dir, out = []) {
 
 export function listStates() {
   if (!existsSync(FIXTURES)) return [];
-  return readdirSync(FIXTURES).filter((n) => statSync(join(FIXTURES, n)).isDirectory());
+  // Sort for deterministic state ordering across platforms (readdirSync
+  // returns filesystem order, which varies).
+  return readdirSync(FIXTURES).sort().filter((n) => statSync(join(FIXTURES, n)).isDirectory());
 }
 
 // Strict allowlist: a state must be one of the real fixture subdirectories.
