@@ -209,7 +209,10 @@ const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
-    if (exclude.includes(name)) return;
+    // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
+    // Match by basename ONLY at the repo root so nested fixture subdirs such as
+    // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+    if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
       mkdirSync(dest, { recursive: true });
