@@ -920,6 +920,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      cappedBoards,
       saved,
       offers: offers.map(o => ({
         company: o.company,
