@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="slides-format" content="viewport">
+<title>Aaliya Bashir - Intuit Service Operations Portfolio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23070d1c%27/%3E%3Ctext x=%2732%27 y=%2742%27 text-anchor=%27middle%27 font-size=%2734%27%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0f172a;
+  --bg-deep: #070d1c;
+  --surface: #1e293b;
+  --text: #f1f5f9;
+  --text-sec: #cbd5e1;
+  --text-muted: #94a3b8;
+  --accent1: #38bdf8;
+  --accent2: #818cf8;
+  --accent3: #e2e8f0;
+  --glass-bg: rgba(255,255,255,0.05);
+  --glass-border: rgba(255,255,255,0.09);
+  --vignette: rgba(0,0,0,0.45);
+  --glow-rgb: 56,189,248;
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--bg);overflow:hidden;height:100vh;width:100vw;-webkit-font-smoothing:antialiased;}
+body{font-family:var(--font-body);color:var(--text);}
+
+/* === DECK === */
+.deck{width:100vw;height:100vh;position:relative;}
+.slide{position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;transform:scale(0.96);transition:opacity 0.65s ease,transform 0.65s ease;pointer-events:none;overflow:hidden;}
+.slide.active{opacity:1;transform:scale(1);pointer-events:all;}
+.slide>.content{position:relative;z-index:2;width:100%;max-width:1100px;padding:clamp(1.5rem,4vw,3.5rem);}
+
+/* slide-dark variant */
+.slide-dark{background:var(--bg-deep);}
+
+/* === NAV === */
+.nav-controls{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;z-index:100;background:var(--glass-bg);backdrop-filter:blur(12px);padding:9px 22px;border-radius:40px;border:1px solid var(--glass-border);}
+.nav-btn{width:38px;height:38px;border:none;background:var(--glass-bg);color:var(--accent1);border-radius:50%;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;}
+.nav-btn:hover{background:var(--glass-border);}
+.slide-dots{display:flex;gap:7px;}
+.slide-dots .dot{width:9px;height:9px;border-radius:50%;background:var(--glass-border);cursor:pointer;transition:background 0.25s,transform 0.25s;}
+.slide-dots .dot.active{background:var(--accent1);transform:scale(1.35);}
+.slide-counter{font-size:0.78rem;color:var(--text-muted);min-width:38px;text-align:center;font-family:var(--font-body);}
+
+/* === REVEAL === */
+.reveal{opacity:0;transform:translateY(18px);}
+
+/* === GRADIENT MESH === */
+.gradient-mesh{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;}
+.blob{position:absolute;border-radius:50%;filter:blur(80px);}
+@keyframes float-slow{0%{transform:translate(0,0) scale(1);}33%{transform:translate(50px,-40px) scale(1.1);}66%{transform:translate(-30px,35px) scale(0.92);}100%{transform:translate(0,0) scale(1);}}
+@keyframes float-drift{0%{transform:translate(0,0) scale(1) rotate(0deg);}33%{transform:translate(-45px,-55px) scale(1.14) rotate(3deg);}66%{transform:translate(38px,28px) scale(0.88) rotate(-2deg);}100%{transform:translate(0,0) scale(1) rotate(0deg);}}
+.blob:nth-child(1){animation:float-slow 12s ease-in-out infinite;}
+.blob:nth-child(2){animation:float-drift 16s ease-in-out infinite;}
+.blob:nth-child(3){animation:float-slow 20s ease-in-out infinite reverse;}
+
+/* === NOISE + VIGNETTE === */
+.slide::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");background-repeat:repeat;background-size:256px 256px;opacity:0.03;mix-blend-mode:overlay;}
+.slide::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse at center,transparent 50%,var(--vignette) 100%);}
+
+/* === MOUSE SPOTLIGHT === */
+.mouse-spotlight{position:fixed;inset:0;z-index:99;pointer-events:none;}
+
+/* === PARTICLE CANVAS === */
+canvas.particle-canvas,canvas.particle-canvas-ambient{position:absolute;inset:0;z-index:1;}
+
+/* === GLOW === */
+.text-glow{text-shadow:0 0 22px rgba(var(--glow-rgb),0.55),0 0 44px rgba(var(--glow-rgb),0.22);}
+.stat-glow{text-shadow:0 0 32px rgba(var(--glow-rgb),0.65),0 0 64px rgba(var(--glow-rgb),0.28);}
+@keyframes glow-pulse{0%,100%{text-shadow:0 0 22px rgba(var(--glow-rgb),0.5),0 0 44px rgba(var(--glow-rgb),0.2);}50%{text-shadow:0 0 34px rgba(var(--glow-rgb),0.8),0 0 66px rgba(var(--glow-rgb),0.32);}}
+.glow-pulse{animation:glow-pulse 3s ease-in-out infinite;}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-14px);}}
+
+/* === GLASS CARD === */
+.glass-card{background:var(--glass-bg);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-radius:14px;padding:1.5rem 1.75rem;transition:transform 0.2s,box-shadow 0.2s;}
+.glass-card:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(0,0,0,0.28);}
+
+/* === ACCENT BORDER CARD === */
+.accent-card{background:rgba(255,255,255,0.03);border:1px solid var(--glass-border);border-left:3.5px solid var(--accent1);border-radius:10px;padding:1.1rem 1.4rem;}
+
+/* === DECO SHAPES === */
+.deco-shape{position:absolute;border-radius:50%;pointer-events:none;z-index:1;}
+
+/* === GRADIENT TEXT === */
+.grad-text{background:linear-gradient(135deg,var(--accent1),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+
+/* === DIVIDER === */
+.divider{width:60px;height:3px;background:linear-gradient(90deg,var(--accent1),var(--accent2));border-radius:2px;margin:1rem 0 1.4rem 0;}
+
+/* === HORIZONTAL BAR === */
+.bar-track{background:rgba(255,255,255,0.07);border-radius:6px;height:10px;width:100%;overflow:hidden;}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent1),var(--accent2));width:0%;transition:width 0.7s ease;}
+
+/* === BADGE === */
+.badge{display:inline-block;padding:0.2rem 0.75rem;border-radius:999px;font-size:0.72rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;background:rgba(56,189,248,0.12);color:var(--accent1);border:1px solid rgba(56,189,248,0.22);}
+
+
+
+/* === EXECUTIVE VISUAL ENHANCEMENTS === */
+.arch-wrap{margin-top:1rem;display:grid;grid-template-columns:1fr;gap:0.8rem;}
+.arch-diagram{display:grid;grid-template-columns:1fr 44px 1.15fr 44px 1.15fr 44px 1fr;align-items:center;gap:0.25rem;margin-top:0.35rem;}
+.arch-node{min-height:92px;border-radius:16px;border:1px solid rgba(56,189,248,0.18);background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.032));backdrop-filter:blur(10px);padding:1rem;text-align:center;box-shadow:0 12px 30px rgba(0,0,0,0.20);}
+.arch-node .icon{font-size:1.5rem;margin-bottom:0.35rem;}
+.arch-node h4{font-size:0.84rem;font-weight:700;color:var(--text);margin-bottom:0.15rem;}
+.arch-node p{font-size:0.72rem;color:var(--text-sec);line-height:1.35;}
+.arch-arrow{font-size:1.8rem;color:var(--accent1);text-align:center;text-shadow:0 0 16px rgba(56,189,248,0.45);}
+.arch-note{font-size:0.78rem;color:var(--text-muted);text-align:center;margin-top:0.15rem;}
+.agent-map{display:grid;grid-template-columns:repeat(6,1fr);gap:0.45rem;margin-top:0.65rem;}
+.agent-pill{border:1px solid var(--glass-border);border-radius:999px;background:rgba(255,255,255,0.04);padding:0.38rem 0.45rem;text-align:center;font-size:0.7rem;color:var(--text-sec);}
+.value-flow{display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.8rem;}
+.value-chip{border:1px solid rgba(56,189,248,0.2);background:rgba(56,189,248,0.09);color:var(--text);border-radius:999px;padding:0.45rem 0.8rem;font-size:0.76rem;font-weight:700;letter-spacing:0.02em;}
+.value-arrow{color:var(--accent1);font-size:1.1rem;}
+.trace-lens{display:grid;grid-template-columns:0.82fr 1.1fr;gap:1rem;align-items:start;}
+.before-after{display:grid;grid-template-columns:1fr;gap:0.65rem;margin-bottom:0.85rem;}
+.ba-card{border-radius:12px;border:1px solid var(--glass-border);background:rgba(255,255,255,0.035);padding:0.82rem 0.95rem;}
+.ba-card.before{border-left:3.5px solid #f87171;}
+.ba-card.after{border-left:3.5px solid #34d399;}
+.ba-label{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.09em;font-weight:700;margin-bottom:0.25rem;}
+.ba-card.before .ba-label{color:#f87171;}.ba-card.after .ba-label{color:#34d399;}
+.ba-card p{font-size:0.78rem;color:var(--text-sec);line-height:1.45;}
+.metric-title{display:flex;align-items:center;gap:0.55rem;}
+.metric-icon{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);font-size:1rem;}
+.intuit-accent{background:linear-gradient(135deg,#2ca01c,#38bdf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.resume-grid{display:grid;grid-template-columns:1.35fr 0.85fr;gap:1.1rem;align-items:start;}
+.throughline{display:flex;flex-direction:column;gap:0.75rem;}
+.through-card{border-radius:14px;border:1px solid rgba(56,189,248,0.18);background:rgba(255,255,255,0.04);padding:1rem 1.1rem;}
+.through-card h4{font-size:0.84rem;color:var(--accent1);margin-bottom:0.25rem;}
+.through-card p{font-size:0.76rem;color:var(--text-sec);line-height:1.45;}
+.closing-flow{display:flex;align-items:center;justify-content:center;gap:0.65rem;margin:1rem auto 1.1rem;flex-wrap:wrap;}
+.closing-step{padding:0.48rem 0.82rem;border-radius:999px;border:1px solid rgba(56,189,248,0.22);background:rgba(255,255,255,0.045);font-size:0.78rem;font-weight:700;color:var(--text);}
+.closing-arrow{color:var(--accent1);font-weight:900;}
+
+/* === SLIDE-SPECIFIC === */
+/* Slide 1 hero */
+.hero-emoji{font-size:80px;animation:float 3.5s ease-in-out infinite;display:inline-block;margin-bottom:1.2rem;}
+
+/* Timeline */
+.timeline{display:flex;flex-direction:column;gap:1rem;position:relative;}
+.timeline::before{content:"";position:absolute;left:11px;top:6px;bottom:6px;width:2px;background:linear-gradient(to bottom,var(--accent1),var(--accent2));border-radius:2px;}
+.tl-item{display:flex;gap:1.2rem;align-items:flex-start;padding-left:0.2rem;}
+.tl-dot{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--accent1),var(--accent2));flex-shrink:0;box-shadow:0 0 10px rgba(56,189,248,0.5);margin-top:2px;}
+.tl-body h4{font-size:0.9rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;}
+.tl-body p{font-size:0.82rem;color:var(--text-sec);line-height:1.5;}
+
+/* Execution trace mockup */
+.trace-box{font-family:monospace;font-size:0.75rem;background:rgba(0,0,0,0.35);border:1px solid rgba(56,189,248,0.15);border-radius:10px;padding:1rem 1.25rem;color:#94a3b8;line-height:1.7;}
+.trace-box .ok{color:#34d399;}
+.trace-box .warn{color:#fbbf24;}
+.trace-box .err{color:#f87171;}
+.trace-box .dim{color:#475569;}
+.trace-box .hi{color:#38bdf8;}
+</style>
+</head>
+<body>
+<div class="mouse-spotlight"></div>
+<div class="deck">
+
+<!-- ─── SLIDE 1: TITLE ─── -->
+<div class="slide slide-dark active" data-slide="1">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:520px;height:520px;top:-120px;right:-80px;background:var(--accent1);opacity:0.11;"></div>
+    <div class="blob" style="width:320px;height:320px;bottom:-90px;left:-60px;background:var(--accent2);opacity:0.1;"></div>
+    <div class="blob" style="width:200px;height:200px;top:40%;left:12%;background:var(--accent1);opacity:0.07;"></div>
+  </div>
+  <canvas class="particle-canvas"></canvas>
+  <div class="content" style="text-align:center;">
+    <div class="hero-emoji reveal">⚙️</div>
+    <h1 class="reveal" style="font-family:var(--font-display);font-size:clamp(2rem,5vw,4rem);font-weight:900;line-height:1.15;margin-bottom:1rem;">
+      <span class="grad-text">Turning messy executive work</span><br>into a controllable, auditable execution loop
+    </h1>
+    <p class="reveal" style="font-size:clamp(0.9rem,1.4vw,1.15rem);color:var(--text-muted);letter-spacing:0.12em;text-transform:uppercase;margin-top:0.6rem;"><strong style="color:var(--text);">Aaliya Bashir</strong> · Business Operations &amp; Strategy · AI-Supported Operations Sandbox</p>
+  </div>
+</div>
+
+<!-- ─── SLIDE 2: THE PROBLEM ─── -->
+<div class="slide" data-slide="2">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:380px;height:380px;top:-80px;right:-60px;background:var(--accent1);opacity:0.07;"></div>
+    <div class="blob" style="width:240px;height:240px;bottom:-60px;left:-40px;background:var(--accent2);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">The Problem</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.7rem,3.5vw,2.6rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.5rem;">Execution doesn't fail from lack of effort.<br>It fails from lack of structure.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-top:0.5rem;">
+      <div class="glass-card reveal">
+        <div style="font-size:1.6rem;margin-bottom:0.5rem;">📥</div>
+        <h4 style="font-size:0.9rem;font-weight:600;margin-bottom:0.4rem;color:var(--text);">No unified intake</h4>
+        <p style="font-size:0.82rem;color:var(--text-sec);line-height:1.5;">Tasks arrive across Telegram, email, cron, and hooks - with no single system to capture, assign, or track them.</p>
+      </div>
+      <div class="glass-card reveal">
+        <div style="font-size:1.6rem;margin-bottom:0.5rem;">🔇</div>
+        <h4 style="font-size:0.9rem;font-weight:600;margin-bottom:0.4rem;color:var(--text);">Silent failures</h4>
+        <p style="font-size:0.82rem;color:var(--text-sec);line-height:1.5;">When jobs don't fire, stale data quietly accumulates - no alert, no trace, no blocker log. Recovery is reactive.</p>
+      </div>
+      <div class="glass-card reveal">
+        <div style="font-size:1.6rem;margin-bottom:0.5rem;">🧠</div>
+        <h4 style="font-size:0.9rem;font-weight:600;margin-bottom:0.4rem;color:var(--text);">Memory-dependent follow-through</h4>
+        <p style="font-size:0.82rem;color:var(--text-sec);line-height:1.5;">Follow-through depends on who remembers - not on a documented, repeatable operating model.</p>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:1.2rem;font-size:0.88rem;color:var(--accent1);font-weight:500;">The shift required: from AI assistance to <strong>operational follow-through</strong> - a system that guarantees accountability and clear decision pathways.</p>
+  </div>
+</div>
+
+<!-- ─── SLIDE 3: THE SYSTEM DESIGN ─── -->
+<div class="slide" data-slide="3">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:350px;height:350px;top:-70px;right:-50px;background:var(--accent2);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;left:-30px;background:var(--accent1);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">System Design</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.6rem,3vw,2.4rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.15rem;">A private AI-supported operations sandbox with a clear operating contract</h2>
+    <p class="reveal" style="font-size:clamp(0.85rem,1.2vw,1rem);color:var(--accent1);letter-spacing:0.06em;font-style:italic;margin-bottom:0.25rem;">a glimpse into my homelab build</p>
+    <div class="divider reveal"></div>
+    <div class="arch-wrap reveal">
+      <div class="arch-diagram">
+        <div class="arch-node">
+          <div class="icon">📥</div>
+          <h4>Inputs</h4>
+          <p>Email, Telegram, cron, hooks, executive requests</p>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <div class="icon">🧭</div>
+          <h4>Routing Layer</h4>
+          <p>Classifies work, assigns ownership, filters noise</p>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <div class="icon">🤖</div>
+          <h4>Specialist Agents</h4>
+          <p>Execute within clear domain boundaries</p>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <div class="icon">📜</div>
+          <h4>Audit + Escalation</h4>
+          <p>Logs actions; escalates only material decisions</p>
+        </div>
+      </div>
+      <div class="agent-map">
+        <div class="agent-pill">Executive</div>
+        <div class="agent-pill">Finance</div>
+        <div class="agent-pill">Comms</div>
+        <div class="agent-pill">Research</div>
+        <div class="agent-pill">Intel</div>
+        <div class="agent-pill">Gateway</div>
+      </div>
+      <p class="arch-note">The operating contract: every request has a path, an owner, a trace, and a decision rule.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 4: AGENT ARCHITECTURE ─── -->
+<div class="slide" data-slide="4">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;left:-60px;background:var(--accent1);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;right:-40px;background:var(--accent2);opacity:0.07;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Architecture</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.6rem,3vw,2.4rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.3rem;">Six specialists. One routing contract.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.85rem;margin-top:0.3rem;">
+      <div class="accent-card reveal" style="border-left-color:var(--accent1);">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">🧭</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Executive</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">Priority triage, escalation gate, irreversible-decision filter</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#34d399;">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">💰</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Finance</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">Budget tracking, invoice processing, financial signal monitoring</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:var(--accent2);">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">📣</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Comms</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">Drafting, message routing, stakeholder updates, delivery confirmation</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#fbbf24;">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">🔍</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Research</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">Market signals, competitive intel, synthesis and briefing</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#f87171;">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">🛡️</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Intel</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">Status reads, blocker tracking, health-check artifact generation</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#a78bfa;">
+        <div style="font-size:1.2rem;margin-bottom:0.35rem;">🔌</div>
+        <h4 style="font-size:0.86rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">Gateway</h4>
+        <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.5;">IMAP, Telegram, cron hooks - unified intake and delivery layer</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 5: EXECUTION TRACE ─── -->
+<div class="slide" data-slide="5">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:340px;height:340px;top:-60px;right:-50px;background:var(--accent1);opacity:0.07;"></div>
+    <div class="blob" style="width:210px;height:210px;bottom:-50px;left:-30px;background:var(--accent2);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Live Execution Trace</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">The system doesn't just run - it proves it ran.</h2>
+    <div class="divider reveal"></div>
+    <div class="trace-lens">
+      <div class="reveal">
+        <div class="before-after">
+          <div class="ba-card before">
+            <div class="ba-label">Before: silent failure</div>
+            <p>Jobs could miss, stale data could accumulate, and the executive only discovered issues after they became visible.</p>
+          </div>
+          <div class="ba-card after">
+            <div class="ba-label">After: controlled execution loop</div>
+            <p>The system logs state, refreshes stale artifacts, evaluates material change, and escalates only when a decision is required.</p>
+          </div>
+        </div>
+        <p style="font-size:0.82rem;color:var(--text-sec);line-height:1.6;">A cron job fires, reads <code style="background:rgba(255,255,255,0.07);padding:0.1rem 0.4rem;border-radius:4px;font-size:0.75rem;">status.json</code>, captures the blocker, compares against history, and writes a health artifact. The business value is a provable operating rhythm.</p>
+      </div>
+      <div class="trace-box reveal">
+        <div><span class="dim">[CRON]</span> <span class="hi">shopify-monitor</span> triggered</div>
+        <div><span class="dim">[READ]</span> status.json → <span class="err">ok: false</span></div>
+        <div><span class="dim">[READ]</span> snapshot age: <span class="warn">stale (72h)</span></div>
+        <div><span class="dim">[RUN]</span>  refresh_snapshot.sh → <span class="ok">complete</span></div>
+        <div><span class="dim">[BLOCKER]</span> <span class="err">[API] Access disabled</span></div>
+        <div><span class="dim">[COMPARE]</span> blockers.md → <span class="warn">NO_REPLY unchanged</span></div>
+        <div><span class="dim">[LOG]</span>  bot_impact recorded</div>
+        <div><span class="dim">[EVAL]</span> material change? <span class="err">NO</span> → suppress escalation</div>
+        <div><span class="dim">[ARTIFACT]</span> <span class="ok">health-check.md written</span></div>
+        <div class="dim">────────────────────────────────</div>
+        <div><span class="ok">✓</span> cycle complete · next run: <span class="hi">+6h</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 6: OPERATIONAL RELIABILITY ─── -->
+<div class="slide" data-slide="6">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;right:-60px;background:var(--accent2);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;left:-30px;background:var(--accent1);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Operational Reliability</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">Reliability is visible - not assumed.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:flex;flex-direction:column;gap:0.7rem;margin-top:0.3rem;">
+      <div class="accent-card reveal" style="border-left-color:var(--accent1);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+          <div class="metric-title"><span class="metric-icon">💓</span><h4 style="font-size:0.86rem;font-weight:600;color:var(--text);">Heartbeat &amp; Watchdog Coverage</h4></div>
+          <span style="font-size:0.82rem;font-weight:700;color:var(--accent1);" data-count="100" data-suffix="%">0%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" data-width="100"></div></div>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#34d399;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+          <div class="metric-title"><span class="metric-icon">🧱</span><h4 style="font-size:0.86rem;font-weight:600;color:var(--text);">Blocker Registry Coverage</h4></div>
+          <span style="font-size:0.82rem;font-weight:700;color:#34d399;" data-count="100" data-suffix="%">0%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" data-width="100" style="background:linear-gradient(90deg,#34d399,#059669);"></div></div>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#fbbf24;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+          <div class="metric-title"><span class="metric-icon">🔕</span><h4 style="font-size:0.86rem;font-weight:600;color:var(--text);">Escalation Noise Suppression</h4></div>
+          <span style="font-size:0.82rem;font-weight:700;color:#fbbf24;" data-count="94" data-suffix="%">0%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" data-width="94" style="background:linear-gradient(90deg,#fbbf24,#d97706);"></div></div>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:var(--accent2);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+          <div class="metric-title"><span class="metric-icon">🧾</span><h4 style="font-size:0.86rem;font-weight:600;color:var(--text);">Artifact Freshness Checks Active</h4></div>
+          <span style="font-size:0.82rem;font-weight:700;color:var(--accent2);" data-count="100" data-suffix="%">0%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" data-width="100" style="background:linear-gradient(90deg,var(--accent2),#6366f1);"></div></div>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:0.9rem;font-size:0.8rem;color:var(--text-muted);">Healthy silence is distinguished from dead jobs, stale data, broken delivery paths, and unresolved dependency failures.</p>
+  </div>
+</div>
+
+<!-- ─── SLIDE 7: INFRASTRUCTURE LAYER ─── -->
+<div class="slide" data-slide="7">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:340px;height:340px;top:-60px;left:-50px;background:var(--accent2);opacity:0.07;"></div>
+    <div class="blob" style="width:210px;height:210px;bottom:-50px;right:-30px;background:var(--accent1);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Infrastructure Layer</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.15rem;">The homelab runs on infrastructure I built and operate myself.</h2>
+    <p class="reveal" style="font-size:clamp(0.85rem,1.2vw,1rem);color:var(--accent1);letter-spacing:0.06em;font-style:italic;margin-bottom:0.25rem;">a dual-network DNS/DHCP appliance on repurposed hardware — corporate sustainability, practiced</p>
+    <div class="divider reveal"></div>
+    <div class="trace-lens">
+      <div class="reveal">
+        <div style="display:flex;flex-direction:column;gap:0.65rem;">
+          <div class="accent-card" style="border-left-color:#34d399;padding:0.82rem 0.95rem;">
+            <h4 style="font-size:0.84rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">🌱 Sustainability as strategy, not slideware</h4>
+            <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.45;">A retired 2013 MacBook Pro rebuilt as a production Debian/Pi-hole appliance serving DNS and DHCP across two independent ISP networks. Resourcefulness and ingenuity over procurement — the circular-value lens from my Harvard Corporate Sustainability &amp; Innovation training, applied to real infrastructure.</p>
+          </div>
+          <div class="accent-card" style="border-left-color:var(--accent1);padding:0.82rem 0.95rem;">
+            <h4 style="font-size:0.84rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">🔬 Ground truth over misleading signals</h4>
+            <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.45;">Diagnosed a degraded WiFi link by separating bogus driver-reported values from real radio statistics — the fault was physical placement, not configuration. Boot persistence was verified <em>before</em> the move, not hoped for after.</p>
+          </div>
+          <div class="accent-card" style="border-left-color:#fbbf24;padding:0.82rem 0.95rem;">
+            <h4 style="font-size:0.84rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">🔁 Lease migration, verified from both sides</h4>
+            <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.45;">Migrated DHCP authority from the ISP gateway using authoritative lease reclaim and tag-scoped dnsmasq ranges — then verified the full DHCP handshake in server logs <em>and</em> from the client side, proving ad-blocking end-to-end on both networks. Zero data loss.</p>
+          </div>
+          <div class="accent-card" style="border-left-color:var(--accent2);padding:0.82rem 0.95rem;">
+            <h4 style="font-size:0.84rem;font-weight:600;color:var(--text);margin-bottom:0.2rem;">🌐 Remote-only, including the failure case</h4>
+            <p style="font-size:0.78rem;color:var(--text-sec);line-height:1.45;">Administered entirely over SSH and Tailscale — and when the box went dark after relocation, diagnosed the root cause (static-only WiFi, no default route → no VPN either) and reasoned back in from the client side via a second machine on the same LAN.</p>
+          </div>
+        </div>
+      </div>
+      <div class="trace-box reveal">
+        <div><span class="dim">[DIAG]</span> iw station dump → signal <span class="err">-97 dBm</span> · retries <span class="warn">48/64</span></div>
+        <div><span class="dim">[EVAL]</span> driver value bogus → <span class="hi">trust radio stats</span></div>
+        <div><span class="dim">[FIX]</span>  clean poweroff → relocate hardware</div>
+        <div><span class="dim">[SSH]</span>  <span class="hi">debby</span> dark: wifi static-only, <span class="err">no route</span></div>
+        <div><span class="dim">[RECOVER]</span> 2nd machine on LAN → ssh static IP → <span class="ok">in</span></div>
+        <div><span class="dim">[VERIFY]</span> signal <span class="ok">-41 dBm</span> → link stable</div>
+        <div><span class="dim">[DHCP]</span> authoritative → stale gateway leases <span class="warn">NAK'd</span></div>
+        <div><span class="dim">[VERIFY]</span> DISCOVER→OFFER→REQUEST→ACK → <span class="ok">pihole answers</span></div>
+        <div><span class="dim">[VERIFY]</span> blocked domain → <span class="ok">0.0.0.0 on both networks</span></div>
+        <div class="dim">────────────────────────────────</div>
+        <div><span class="ok">✓</span> dual-network migration complete · <span class="hi">zero data loss</span></div>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:0.9rem;font-size:0.8rem;color:var(--text-muted);">Same discipline as the operating system above: real signals over assumed ones, reversible changes, verification before declaring done — and no hardware sent to landfill to get there.</p>
+  </div>
+</div>
+
+<!-- ─── SLIDE 8: WHAT I DEMONSTRATED ─── -->
+<div class="slide" data-slide="8">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;left:-60px;background:var(--accent1);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;right:-40px;background:var(--accent2);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Why I Fit Intuit</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.6rem,3vw,2.4rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">These skills are the exact disciplines <span class="intuit-accent">Intuit</span> needs at director level.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.9rem;margin-top:0.3rem;">
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.87rem;font-weight:600;color:var(--accent1);margin-bottom:0.4rem;">Systems Design at Scale</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Intuit operates complex, multi-product service lines. I design operating models with defined ownership boundaries and routing contracts that survive real organizational complexity.</p>
+      </div>
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.87rem;font-weight:600;color:var(--accent1);margin-bottom:0.4rem;">Strategy to Execution Fluency</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Directors at Intuit translate vision into delivery. I close that gap - converting ambiguous strategic mandates into concrete, accountable operating cadences.</p>
+      </div>
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.87rem;font-weight:600;color:var(--accent1);margin-bottom:0.4rem;">Cross-Functional Leadership</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Services strategy requires alignment across finance, product, comms, and ops. I build the handoff infrastructure that keeps cross-functional work moving without constant executive intervention.</p>
+      </div>
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.87rem;font-weight:600;color:var(--accent1);margin-bottom:0.4rem;">AI as an Operational Discipline</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Intuit is betting on AI-powered growth. I have built and operated a private AI-supported sandbox - giving me a practitioner's instinct for where AI creates leverage, where it creates risk, and where humans must stay accountable.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 9: WHY THIS MAPS TO INTUIT ─── -->
+<div class="slide" data-slide="9">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;right:-60px;background:var(--accent1);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;left:-30px;background:var(--accent2);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Intuit Alignment</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">The same disciplines map directly to <span class="intuit-accent">Services strategy</span>.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.3rem;">
+      <div class="accent-card reveal" style="border-left-color:var(--accent1);">
+        <h4 style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:0.25rem;">Clearer ownership</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Domain-bounded agents → cross-functional clarity across Services initiatives. No relay, no ambiguity.</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#34d399;">
+        <h4 style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:0.25rem;">Better signals</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Watchdogs and freshness checks → KPI visibility and operational readiness at director level.</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:#fbbf24;">
+        <h4 style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:0.25rem;">Faster recovery</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Blocker tracking and health artifacts → proactive issue resolution before escalation is required.</p>
+      </div>
+      <div class="accent-card reveal" style="border-left-color:var(--accent2);">
+        <h4 style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:0.25rem;">Stronger execution</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;">Operational reporting, program governance, and enterprise delivery applied at director-level scale.</p>
+      </div>
+    </div>
+    <div class="value-flow reveal">
+      <span class="value-chip">Ownership</span><span class="value-arrow">→</span>
+      <span class="value-chip">Signals</span><span class="value-arrow">→</span>
+      <span class="value-chip">Recovery</span><span class="value-arrow">→</span>
+      <span class="value-chip">Execution</span>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 10: ROLE APPLICATION ─── -->
+<div class="slide" data-slide="10">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;left:-60px;background:var(--accent2);opacity:0.08;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;right:-40px;background:var(--accent1);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Role Application</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">How I would apply the same operating model at Intuit.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.9rem;margin-top:0.3rem;">
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.9rem;font-weight:700;color:var(--accent1);margin-bottom:0.45rem;">Director, Service Delivery</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;margin-bottom:0.55rem;">Use the model for expert onboarding, service readiness, exception routing, compliance-aware handoffs, and leadership visibility.</p>
+        <div class="trace-box" style="font-size:0.68rem;line-height:1.55;padding:0.75rem 0.9rem;">
+          <div><span class="dim">[INTAKE]</span> expert / workforce request</div>
+          <div><span class="dim">[ROUTE]</span> onboarding · quality · compliance</div>
+          <div><span class="dim">[CHECK]</span> readiness, blockers, SLA risk</div>
+          <div><span class="dim">[ESCALATE]</span> only decision-grade exceptions</div>
+        </div>
+      </div>
+      <div class="glass-card reveal">
+        <h4 style="font-size:0.9rem;font-weight:700;color:var(--accent1);margin-bottom:0.45rem;">Principal CX Strategy, AI Onboarding</h4>
+        <p style="font-size:0.8rem;color:var(--text-sec);line-height:1.55;margin-bottom:0.55rem;">Use AI to clarify the next step, summarize context, draft responses, and surface human handoffs when customer progress stalls.</p>
+        <div class="trace-box" style="font-size:0.68rem;line-height:1.55;padding:0.75rem 0.9rem;">
+          <div><span class="dim">[JOURNEY]</span> activate → adopt → retain</div>
+          <div><span class="dim">[SIGNAL]</span> stuck step, stale task, missing owner</div>
+          <div><span class="dim">[AI]</span> classify, summarize, recommend</div>
+          <div><span class="dim">[HUMAN]</span> judgment, policy, trust moments</div>
+        </div>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:0.9rem;font-size:0.8rem;color:var(--text-muted);">Truthful boundary: this is a private homelab and portfolio case study, not an enterprise production platform. The transferable proof is the operating discipline: intake, ownership, signals, recovery, and human judgment.</p>
+  </div>
+</div>
+
+<!-- ─── SLIDE 11: RESUME SNAPSHOT ─── -->
+<div class="slide slide-dark" data-slide="11">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:500px;height:500px;top:-100px;right:-80px;background:var(--accent2);opacity:0.1;"></div>
+    <div class="blob" style="width:300px;height:300px;bottom:-80px;left:-50px;background:var(--accent1);opacity:0.08;"></div>
+  </div>
+  <canvas class="particle-canvas-ambient"></canvas>
+  <div class="content">
+    <span class="badge reveal">Experience</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">Aaliya Bashir · Career Snapshot</h2>
+    <div class="divider reveal"></div>
+    <div class="timeline reveal">
+      <div class="tl-item">
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <h4>Director, Business Operations &amp; Strategy <span style="color:var(--text-muted);font-weight:400;">· Intuit &nbsp;|&nbsp; Target Role</span></h4>
+          <p>Partnering with Services leadership to define the 3-year vision, operationalize the business rhythm, and drive AI-enabled growth initiatives across Product, Engineering, and Go-To-Market.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot" style="background:linear-gradient(135deg,var(--accent2),#6366f1);box-shadow:0 0 10px rgba(129,140,248,0.5);"></div>
+        <div class="tl-body">
+          <h4>Technical Program Manager, Total Rewards <span style="color:var(--text-muted);font-weight:400;">· Wellstar Health System &nbsp;|&nbsp; Jan 2025 - Present</span></h4>
+          <p>Distilling complex workforce data into executive dashboards and leadership insights. Connecting people-program investments to ROI, utilization, and operational impact across technical and business stakeholders.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot" style="background:linear-gradient(135deg,#34d399,#059669);box-shadow:0 0 10px rgba(52,211,153,0.5);"></div>
+        <div class="tl-body">
+          <h4>Program Manager <span style="color:var(--text-muted);font-weight:400;">· Harvard Medical School &nbsp;|&nbsp; Jan 2023 - Jan 2025</span></h4>
+          <p>Led a record-setting $4.5M initiative across 10+ institutions. Designed operating rhythms, governance structures, and communications plans that reduced ambiguity and improved execution discipline.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot" style="background:linear-gradient(135deg,#fbbf24,#d97706);box-shadow:0 0 10px rgba(251,191,36,0.5);"></div>
+        <div class="tl-body">
+          <h4>Technical Project Manager <span style="color:var(--text-muted);font-weight:400;">· Ideagen DevonWay &nbsp;|&nbsp; Nov 2022 - Jan 2024</span></h4>
+          <p>Managed complex software implementations for regulated-industry clients. Maintained cross-functional execution across technical and business stakeholders, contributing to a 25% customer satisfaction increase.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot" style="background:linear-gradient(135deg,#f87171,#dc2626);box-shadow:0 0 10px rgba(248,113,113,0.5);"></div>
+        <div class="tl-body">
+          <h4>Director of Operations <span style="color:var(--text-muted);font-weight:400;">· Warrior Body Spa &nbsp;|&nbsp; 2014 - 2022</span></h4>
+          <p>Directed business operations and team performance for a growing wellness business. Led a 17-member team, improving customer satisfaction by 34% through tighter workflows and stronger accountability.</p>
+        </div>
+      </div>
+    </div>
+    <div class="reveal" style="margin-top:0.8rem;font-size:0.78rem;color:var(--text-muted);">Harvard University - Graduate Certificate, Corporate Sustainability and Innovation &nbsp;·&nbsp; Augusta University MPA &nbsp;·&nbsp; PMP &nbsp;·&nbsp; CSM</div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 12: COMPETENCIES ─── -->
+<div class="slide" data-slide="12">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:360px;height:360px;top:-70px;left:-60px;background:var(--accent1);opacity:0.07;"></div>
+    <div class="blob" style="width:220px;height:220px;bottom:-50px;right:-40px;background:var(--accent2);opacity:0.06;"></div>
+  </div>
+  <div class="content">
+    <span class="badge reveal">Core Competencies</span>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.5rem,2.8vw,2.2rem);font-weight:700;margin-top:0.6rem;margin-bottom:0.4rem;">Eight disciplines. Demonstrated through the portfolio and homelab.</h2>
+    <div class="divider reveal"></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.7rem;margin-top:0.4rem;">
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">🎯</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Strategy-to-Execution Translation</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">📊</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Operating Cadence Design</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">🔑</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Ownership Clarity</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">📡</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">KPI &amp; Signal Visibility</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">⚡</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Escalation Discipline</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">🤝</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Cross-Functional Alignment</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">🤖</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">AI-Enabled Growth Design</p>
+      </div>
+      <div class="glass-card reveal" style="padding:1rem;text-align:center;">
+        <div style="font-size:1.4rem;margin-bottom:0.4rem;">🔄</div>
+        <p style="font-size:0.78rem;font-weight:600;color:var(--text);">Repeatable Systems Thinking</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SLIDE 13: CLOSING ─── -->
+<div class="slide slide-dark" data-slide="13">
+  <div class="gradient-mesh">
+    <div class="blob" style="width:520px;height:520px;top:-100px;right:-80px;background:var(--accent1);opacity:0.13;"></div>
+    <div class="blob" style="width:340px;height:340px;bottom:-90px;left:-60px;background:var(--accent2);opacity:0.11;"></div>
+    <div class="blob" style="width:200px;height:200px;top:35%;left:10%;background:var(--accent1);opacity:0.07;"></div>
+  </div>
+  <canvas class="particle-canvas"></canvas>
+  <div class="content" style="text-align:center;">
+    <div style="font-size:64px;animation:float 3.5s ease-in-out infinite;display:inline-block;margin-bottom:1rem;" class="reveal">🚀</div>
+    <h2 class="reveal" style="font-family:var(--font-display);font-size:clamp(1.8rem,4vw,3.2rem);font-weight:900;margin-bottom:0.8rem;">
+      <span class="grad-text">A strategic systems thinker.<br>A builder of intelligent organizations.</span>
+    </h2>
+    <div class="closing-flow reveal">
+      <span class="closing-step">Strategy</span><span class="closing-arrow">→</span>
+      <span class="closing-step">Systems</span><span class="closing-arrow">→</span>
+      <span class="closing-step">Signals</span><span class="closing-arrow">→</span>
+      <span class="closing-step">Scale</span>
+    </div>
+    <p class="reveal" style="font-size:clamp(1rem,1.6vw,1.25rem);color:var(--text-sec);max-width:700px;margin:0 auto 1.2rem;line-height:1.65;">I design operating models that make complex work easier to route, monitor, recover, and explain.</p>
+    <div class="divider reveal" style="margin:1rem auto;"></div>
+    <div class="reveal" style="display:flex;flex-wrap:wrap;gap:0.5rem;justify-content:center;margin-bottom:1.2rem;">
+      <span class="badge">Strategy-to-execution translation</span>
+      <span class="badge">Operating cadence</span>
+      <span class="badge">Ownership clarity</span>
+      <span class="badge">KPI &amp; signal visibility</span>
+      <span class="badge">Escalation discipline</span>
+    </div>
+    <p class="reveal" style="font-size:0.82rem;color:var(--text-muted);letter-spacing:0.08em;text-transform:uppercase;">Aaliya Bashir · Business Operations &amp; Strategy</p>
+  </div>
+</div>
+
+</div><!-- end .deck -->
+
+<!-- NAV -->
+<div class="nav-controls">
+  <button class="nav-btn" onclick="changeSlide(-1)">&#8249;</button>
+  <div class="slide-dots" id="dots"></div>
+  <button class="nav-btn" onclick="changeSlide(1)">&#8250;</button>
+  <span class="slide-counter" id="counter">1 / 13</span>
+</div>
+
+<script>
+/* === DECK NAV === */
+let current = 1;
+const total = document.querySelectorAll('.slide').length;
+const dotsEl = document.getElementById('dots');
+const counterEl = document.getElementById('counter');
+for(let i=1;i<=total;i++){const d=document.createElement('div');d.className='dot'+(i===1?' active':'');d.onclick=()=>goToSlide(i);dotsEl.appendChild(d);}
+function goToSlide(n){
+  const prev=document.querySelector('.slide.active');
+  const next=document.querySelector('.slide[data-slide="'+n+'"]');
+  if(prev)prev.classList.remove('active');
+  if(next){next.classList.add('active');animateSlide(next);}
+  current=n;updateNav();
+}
+function changeSlide(d){let n=current+d;if(n<1)n=total;if(n>total)n=1;goToSlide(n);}
+function updateNav(){document.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i+1===current));counterEl.textContent=current+' / '+total;}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();changeSlide(1);}if(e.key==='ArrowLeft'){e.preventDefault();changeSlide(-1);}});
+let tx=0;document.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;});
+document.addEventListener('touchend',e=>{const d=tx-e.changedTouches[0].clientX;if(Math.abs(d)>50)changeSlide(d>0?1:-1);});
+
+/* === REVEAL ANIMATIONS === */
+function animateSlide(slide){
+  slide.querySelectorAll('.reveal').forEach((el,i)=>{
+    el.style.transition='none';el.style.opacity='0';el.style.transform='translateY(18px)';
+    el.offsetHeight;
+    const delay=i*0.07;
+    el.style.transition='opacity 0.38s ease '+delay+'s, transform 0.38s ease '+delay+'s';
+    el.style.opacity='1';el.style.transform='translateY(0)';
+  });
+  animateEffects(slide);
+}
+
+/* === EFFECTS === */
+function animateEffects(slide){
+  slide.querySelectorAll('[data-count]:not(.counted)').forEach(el=>{
+    el.classList.add('counted');
+    const target=parseInt(el.dataset.count),suffix=el.dataset.suffix||'',prefix=el.dataset.prefix||'';
+    let cur=0;const step=target/40;
+    const t=setInterval(()=>{cur+=step;if(cur>=target){cur=target;clearInterval(t);}el.textContent=prefix+Math.round(cur)+suffix;},30);
+  });
+  slide.querySelectorAll('.bar-fill:not(.filled)').forEach((bar,i)=>{
+    bar.classList.add('filled');
+    bar.style.width='0%';bar.style.transition='width 0.6s ease '+(i*0.1)+'s';
+    bar.offsetHeight;bar.style.width=(bar.dataset.width||'0')+'%';
+  });
+}
+
+/* === MOUSE SPOTLIGHT === */
+document.addEventListener('mousemove',e=>{
+  const s=document.querySelector('.mouse-spotlight');
+  if(s)s.style.background='radial-gradient(600px circle at '+e.clientX+'px '+e.clientY+'px, rgba(56,189,248,0.055), transparent 40%)';
+});
+
+/* === PARTICLES === */
+window.initParticles=function(canvas,opts){
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  canvas.width=canvas.offsetWidth||window.innerWidth;
+  canvas.height=canvas.offsetHeight||window.innerHeight;
+  const interactive=opts.interactive!==false,count=opts.count||(interactive?55:18);
+  let mx=-1000,my=-1000;
+  const particles=Array.from({length:count},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,size:Math.random()*2.4+0.7,alpha:Math.random()*0.32+0.08}));
+  if(interactive){canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();mx=e.clientX-r.left;my=e.clientY-r.top;});canvas.addEventListener('mouseleave',()=>{mx=-1000;my=-1000;});}
+  (function animate(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    particles.forEach(p=>{
+      if(interactive){const dx=p.x-mx,dy=p.y-my,dist=Math.sqrt(dx*dx+dy*dy);if(dist<120){const f=(120-dist)/120*2;p.vx+=(dx/dist)*f*0.1;p.vy+=(dy/dist)*f*0.1;}}
+      p.vx*=0.98;p.vy*=0.98;p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0)p.x=canvas.width;if(p.x>canvas.width)p.x=0;
+      if(p.y<0)p.y=canvas.height;if(p.y>canvas.height)p.y=0;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fillStyle='rgba(56,189,248,'+p.alpha+')';ctx.fill();
+    });
+    requestAnimationFrame(animate);
+  })();
+};
+document.querySelectorAll('.particle-canvas').forEach(c=>window.initParticles(c,{interactive:true,count:55}));
+document.querySelectorAll('.particle-canvas-ambient').forEach(c=>window.initParticles(c,{interactive:false,count:18}));
+
+/* Animate first slide */
+try{animateSlide(document.querySelector('.slide.active'));}catch(e){}
+</script>
+</body>
+</html>
