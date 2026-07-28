@@ -40,6 +40,42 @@ try {
     fail('ashby.detect() should return null when careers_url is absent');
   }
 
+  // detect() — api: takes precedence over careers_url and is used verbatim
+  // when its host is on the allowlist. Lets an entry keep a human-facing
+  // corporate careers_url (e.g. https://openai.com/careers) while pinning
+  // the Ashby board explicitly.
+  const hitApi = ashby.detect({
+    name: 'Pinned',
+    careers_url: 'https://openai.com/careers',
+    api: 'https://api.ashbyhq.com/posting-api/job-board/openai?includeCompensation=true',
+  });
+  if (hitApi && hitApi.url === 'https://api.ashbyhq.com/posting-api/job-board/openai?includeCompensation=true') {
+    pass('ashby.detect() honors an allowlisted api: over a branded careers_url');
+  } else {
+    fail(`ashby.detect(api-pinned) returned ${JSON.stringify(hitApi)}`);
+  }
+
+  // detect() — api: with an untrusted host must NOT be claimed (SSRF guard).
+  if (ashby.detect({ name: 'Evil', api: 'https://evil.example/posting-api/job-board/acme' }) === null) {
+    pass('ashby.detect() returns null for an api: on an untrusted host');
+  } else {
+    fail('ashby.detect() must reject an untrusted api: host');
+  }
+
+  // detect() — api: must be HTTPS.
+  if (ashby.detect({ name: 'Insecure', api: 'http://api.ashbyhq.com/posting-api/job-board/acme' }) === null) {
+    pass('ashby.detect() returns null for a non-HTTPS api:');
+  } else {
+    fail('ashby.detect() must reject an http:// api:');
+  }
+
+  // detect() — malformed api: URL → null, not a crash.
+  if (ashby.detect({ name: 'Broken', api: 'not a url' }) === null) {
+    pass('ashby.detect() returns null for a malformed api: URL');
+  } else {
+    fail('ashby.detect() must reject a malformed api: URL');
+  }
+
   // parseCompensation() — annualization, coercion, and rejection paths.
   const annual = parseCompensation({ compensation: { interval: '1 YEAR', minValue: 90000, maxValue: 120000, currency: 'usd' } });
   if (annual && annual.min === 90000 && annual.max === 120000 && annual.currency === 'USD') {
@@ -205,6 +241,34 @@ try {
       pass('ashby.fetch() exhausts 3 attempts (ASHBY_RETRIES=2) and rethrows the last error');
     } else {
       fail(`ashby.fetch() retry exhaustion: attempts=${exhaustAttempts}, error=${e.message}`);
+    }
+  }
+
+  // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
+  let pinnedUrl = null;
+  await ashby.fetch(
+    { name: 'OpenAI', careers_url: 'https://openai.com/careers', api: 'https://api.ashbyhq.com/posting-api/job-board/openai?includeCompensation=true' },
+    { fetchJson: async (url) => { pinnedUrl = url; return { jobs: [] }; } },
+  );
+  if (pinnedUrl === 'https://api.ashbyhq.com/posting-api/job-board/openai?includeCompensation=true') {
+    pass('ashby.fetch() honors a pinned api: over a non-ashby careers_url');
+  } else {
+    fail(`ashby.fetch() pinned api: requested ${JSON.stringify(pinnedUrl)}`);
+  }
+
+  // fetch() — an untrusted api: host throws before any request (SSRF guard).
+  let evilFetchCalled = false;
+  try {
+    await ashby.fetch(
+      { name: 'Evil', api: 'https://evil.example/posting-api/job-board/acme' },
+      { fetchJson: async () => { evilFetchCalled = true; return { jobs: [] }; } },
+    );
+    fail('ashby.fetch() should throw for an untrusted api: host');
+  } catch (e) {
+    if (!evilFetchCalled && /untrusted hostname/.test(e.message)) {
+      pass('ashby.fetch() rejects an untrusted api: host before fetching');
+    } else {
+      fail(`ashby.fetch() untrusted api: fetchCalled=${evilFetchCalled}, error=${e.message}`);
     }
   }
 

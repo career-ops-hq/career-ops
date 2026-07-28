@@ -28,12 +28,14 @@ jobs:
               owner, repo, pull_number, per_page: 100,
             });
 
-            // USER_PATHS (update-system.mjs). voice-dna.md is omitted on purpose:
-            // it ships as a populated system default, so edits to it are legit.
+            // User-layer paths from DATA_CONTRACT.md and update-system.mjs.
+            // voice-dna.md is omitted on purpose: it ships as a populated
+            // system default, so edits to it are legit.
             const USER_PATHS = [
               /^cv\.md$/,
               /^config\/profile\.yml$/,
               /^modes\/_profile\.md$/,
+              /^modes\/_custom\.md$/,
               /^portals\.yml$/,
               /^article-digest\.md$/,
               /^interview-prep\//,

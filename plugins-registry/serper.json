@@ -1,0 +1,14 @@
+{
+  "id": "serper",
+  "name": "career-ops-plugin-serper",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Google Search provider via Serper.dev — drop-in replacement for the discontinued serpapi provider, with isFallback detect so free ATS providers are never shadowed.",
+  "repo": "https://github.com/uelkerd/career-ops-plugin-serper",
+  "sha": "ed769c59601d26b6cf2e48cf5e621f7b4f9e5aa5",
+  "hooks": ["provider"],
+  "requiredEnv": ["SERPER_API_KEY"],
+  "allowedHosts": ["google.serper.dev"],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1645",
+  "addedAt": "2026-07-07"
+}

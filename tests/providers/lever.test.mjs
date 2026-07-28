@@ -67,6 +67,50 @@ try {
     fail('lever.detect() should treat non-string careers_url as missing');
   }
 
+  // detect() — api: takes precedence over careers_url and is used verbatim
+  // when its host is on the allowlist. Lets an entry keep a human-facing
+  // corporate careers_url (e.g. https://www.coalfire.com/careers) while
+  // pinning the Lever board explicitly.
+  const hitApi = lever.detect({
+    name: 'Pinned',
+    careers_url: 'https://www.coalfire.com/careers',
+    api: 'https://api.lever.co/v0/postings/coalfire',
+  });
+  if (hitApi && hitApi.url === 'https://api.lever.co/v0/postings/coalfire') {
+    pass('lever.detect() honors an allowlisted api: over a branded careers_url');
+  } else {
+    fail(`lever.detect(api-pinned) returned ${JSON.stringify(hitApi)}`);
+  }
+
+  // detect() — api: on the EU host is also allowlisted.
+  const hitApiEu = lever.detect({ name: 'PinnedEu', api: 'https://api.eu.lever.co/v0/postings/euco' });
+  if (hitApiEu && hitApiEu.url === 'https://api.eu.lever.co/v0/postings/euco') {
+    pass('lever.detect() honors an allowlisted api: on the EU host');
+  } else {
+    fail(`lever.detect(api-pinned-eu) returned ${JSON.stringify(hitApiEu)}`);
+  }
+
+  // detect() — api: with an untrusted host must NOT be claimed (SSRF guard).
+  if (lever.detect({ name: 'Evil', api: 'https://evil.example/v0/postings/acme' }) === null) {
+    pass('lever.detect() returns null for an api: on an untrusted host');
+  } else {
+    fail('lever.detect() must reject an untrusted api: host');
+  }
+
+  // detect() — api: must be HTTPS.
+  if (lever.detect({ name: 'Insecure', api: 'http://api.lever.co/v0/postings/acme' }) === null) {
+    pass('lever.detect() returns null for a non-HTTPS api:');
+  } else {
+    fail('lever.detect() must reject an http:// api:');
+  }
+
+  // detect() — malformed api: URL → null, not a crash.
+  if (lever.detect({ name: 'Broken', api: 'not a url' }) === null) {
+    pass('lever.detect() returns null for a malformed api: URL');
+  } else {
+    fail('lever.detect() must reject a malformed api: URL');
+  }
+
   // fetch() — request URL, SSRF guard, and normalization from the real v0
   // postings shape: [{ text, hostedUrl, categories: {location}, descriptionPlain, createdAt }].
   const sample = [
@@ -132,6 +176,34 @@ try {
     if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
   }
   if (emptyOk) pass('lever.fetch() returns [] for non-array response bodies (null / {} / string)');
+
+  // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
+  let pinnedUrl = null;
+  await lever.fetch(
+    { name: 'Coalfire', careers_url: 'https://www.coalfire.com/careers', api: 'https://api.lever.co/v0/postings/coalfire' },
+    { fetchJson: async (url) => { pinnedUrl = url; return []; } },
+  );
+  if (pinnedUrl === 'https://api.lever.co/v0/postings/coalfire') {
+    pass('lever.fetch() honors a pinned api: over a non-lever careers_url');
+  } else {
+    fail(`lever.fetch() pinned api: requested ${JSON.stringify(pinnedUrl)}`);
+  }
+
+  // fetch() — an untrusted api: host throws before any request (SSRF guard).
+  let evilFetchCalled = false;
+  try {
+    await lever.fetch(
+      { name: 'Evil', api: 'https://evil.example/v0/postings/acme' },
+      { fetchJson: async () => { evilFetchCalled = true; return []; } },
+    );
+    fail('lever.fetch() should throw for an untrusted api: host');
+  } catch (e) {
+    if (!evilFetchCalled && /untrusted hostname/.test(e.message)) {
+      pass('lever.fetch() rejects an untrusted api: host before fetching');
+    } else {
+      fail(`lever.fetch() untrusted api: fetchCalled=${evilFetchCalled}, error=${e.message}`);
+    }
+  }
 
   // Underivable entry → typed error before any request.
   try {

@@ -1,0 +1,47 @@
+# Career-Ops — Market Calibration Benchmarks
+#
+# Directional calibration references, not targets. Sources are recruiter-industry
+# and aggregated survey data (not peer-reviewed); mostly US, cross-industry.
+# Every metric here is CANDIDATE-side. Employer-side metrics (time-to-fill,
+# per-process interview pass rates) are deliberately absent — their denominators
+# don't match anything a candidate can compute from their own tracker, and
+# comparing across denominators fabricates precision.
+#
+# Users can override this file without losing changes on system updates:
+#   1. --benchmarks <path> flag on funnel-velocity.mjs
+#   2. config/benchmarks.yml (user layer — copy this file there and edit)
+#   3. this file (shipped default)
+# Non-US markets: copy to config/benchmarks.yml and localize ranges/sources.
+
+benchmarks:
+  response_rate:
+    denominator: per-application          # any employer response / applications sent
+    range_pct: [2, 13]                    # 2-3% cross-platform typical; platform spread up to ~13% (LinkedIn)
+    typical_pct: 3
+    source: "HiringThing 2025-2026 application statistics; scale.jobs 2025"
+    year: 2025
+    caveat: "Mass-application platform data; hand-targeted applications should beat this."
+
+  application_to_interview:
+    denominator: per-application
+    range_pct: [2, 4]                     # ~3% (2024), down from 8.4% (2023); ≈30-40 applications per interview
+    typical_pct: 3
+    source: "HiringThing / resutrack 2026 aggregate"
+    year: 2026
+    caveat: "Mass-application platform data; hand-targeted applications should beat this."
+
+  days_first_response:
+    denominator: per-application-with-response   # censored: ghosted applications never enter this metric
+    range_days: [5, 14]                   # typical ~5 days; 40% of recruiters take >2 weeks
+    typical_days: 7
+    source: "estimate (no citable published aggregate for this window; conservative midpoint of recruiter-survey reporting)"
+    year: 2025
+    caveat: "Among applications that got a response at all (61% of candidates report post-interview ghosting)."
+
+  days_interview_to_offer:
+    denominator: per-successful-process
+    range_days: [20, 28]
+    typical_days: 24
+    source: "NACE Recruiting Benchmarks (2019 — stale, directional only)"
+    year: 2019
+    caveat: "Old data; treat as order-of-magnitude."

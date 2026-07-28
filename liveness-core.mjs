@@ -1,7 +1,31 @@
+// Portals write closure banners with typographic punctuation and accents:
+// WTTJ renders "Cette offre n’est plus disponible." with U+2019, not ASCII "'".
+// A pattern spelled with a plain apostrophe silently never matches, so a clearly
+// expired posting fell through to `no_apply_control` → uncertain → never filtered.
+// Normalize once at the entry point and spell every pattern below in the
+// normalized alphabet: ASCII quotes, no diacritics, collapsed whitespace.
+function normalizeForMatch(text = '') {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/[‘’ʼ′´`]/g, "'")
+    .replace(/[“”″]/g, '"')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
 const HARD_EXPIRED_PATTERNS = [
   /job (is )?no longer available/i,
   /job.*no longer open/i,
-  /position has been filled/i,
+  // Generalized "filled" signal. The old /position has been filled/ missed the
+  // phrasing SPA ATSs (Phenom, e.g. careers.icf.com) inject on a filled req —
+  // "the job you are trying to apply for has been filled" — so those pages
+  // returned HTTP 200 with a generic Apply control and were classified active.
+  // A job noun within 60 chars, then "has been filled" — but NOT when the thing
+  // filled is an application/form (the lookbehind) or "filled out" (the
+  // lookahead). Both guards avoid the worse error: reading a LIVE posting whose
+  // copy says "once the application form has been filled…" as expired.
+  /\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?(?<!\b(?:application|form)\s)has been filled\b(?!\s+out)/i,
   /this job has expired/i,
   /job posting has expired/i,
   /no longer accepting applications/i,
@@ -13,7 +37,15 @@ const HARD_EXPIRED_PATTERNS = [
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
-  /offre (expirée|n'est plus disponible)/i,
+  // French closure banners. Spelled accent-free on purpose: normalizeForMatch
+  // strips diacritics, so "expiree" here matches "expirée" on the page.
+  /offre (expiree|n'est plus disponible)/i,
+  /(cette )?offre n'est plus (disponible|en ligne|active)/i,
+  /(offre|poste|annonce) (deja )?pourvu(e)?/i,
+  /offre (cloturee|desactivee|terminee)/i,
+  /ce poste n'est plus (disponible|a pourvoir|ouvert)/i,
+  /recrutement (termine|cloture)/i,
+  /candidatures (closes|cloturees)/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
@@ -57,10 +89,21 @@ const APPLY_PATTERNS = [
   // Polish posting has no recognized apply control and falls to no_apply_control.
   /\baplikuj\b/i,
   /panelu aplikowania/i,
-  /wyślij (cv|aplikacj)/i,
+  // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
+  /wyslij (cv|aplikacj)/i,
 ];
 
 const MIN_CONTENT_CHARS = 300;
+
+// A job-detail URL almost always carries the posting's identity: a numeric req id
+// (Greenhouse, Workday pid, Microsoft) or a UUID (Lever, Ashby). If the requested
+// URL had one and the final URL lost it, the browser landed somewhere else.
+const JOB_ID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{5,}/gi;
+
+function jobIdToken(url = '') {
+  const matches = url.match(JOB_ID_TOKEN);
+  return matches ? matches[matches.length - 1].toLowerCase() : null;
+}
 
 function firstMatch(patterns, text = '') {
   return patterns.find((pattern) => pattern.test(text));
@@ -70,7 +113,10 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
-export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
+  const bodyText = normalizeForMatch(rawBodyText);
+  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map(normalizeForMatch);
+
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
   }
@@ -95,6 +141,22 @@ export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', app
   const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
+  }
+
+  // A dead permalink that 301s to a generic search/listing page still shows
+  // "Apply" buttons — on OTHER jobs' cards (seen when jobs.careers.microsoft.com
+  // permalinks migrated to apply.careers.microsoft.com). When the requested URL
+  // carried a job identifier and the final URL lost it, the page being read is
+  // not the posting, so apply controls are not evidence of liveness. Uncertain,
+  // not expired: a portal migration can 301 live postings too, and a false
+  // "expired" permanently filters a real job out of scans.
+  const jobId = jobIdToken(requestedUrl);
+  if (jobId && finalUrl && !finalUrl.toLowerCase().includes(jobId)) {
+    return {
+      result: 'uncertain',
+      code: 'redirected_off_posting',
+      reason: `redirected to ${finalUrl} — job id "${jobId}" missing from final URL`,
+    };
   }
 
   if (hasApplyControl(applyControls)) {

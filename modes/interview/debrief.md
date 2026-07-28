@@ -151,6 +151,8 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 **Next steps:** [what the interviewer said happens next and by when]
 ```
 
+**If a compensation number was verbally stated this round** (the candidate gave a figure, not just "comp came up"), append one `stated` line to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap) with the tracker#, this round's date, the amount/currency, source `user`, a short note, the round label, and the interviewer's name. This is what lets `interview/plan` remind the candidate of it before the next round — see Inputs #9 there.
+
 ---
 
 ## Step 9 — Write Session Transcript

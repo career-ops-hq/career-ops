@@ -6,6 +6,11 @@
 
 Track follow-up cadence for active applications. Flag overdue follow-ups, extract contacts from notes, and generate tailored follow-up email/LinkedIn drafts using report context.
 
+**Not in scope here:** a same-day follow-up after a recruiter/interviewer
+confirmed a specific call time and then didn't call. That's not an
+elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
+(`/career-ops email noshow`) instead.
+
 ## Inputs
 
 - `data/applications.md` — Application tracker
@@ -117,6 +122,10 @@ Do NOT generate another follow-up. Instead suggest:
 > - Updating status to `Discarded` if the role seems filled
 > - Trying a different contact via `/career-ops contacto`
 > - Keeping in `Applied` status but deprioritizing"
+
+### Company history context (optional)
+
+Before drafting, check the company's card. Skip this lookup entirely when the tracker's company field is `?` (the unknown-employer marker — there is no meaningful card to fetch). Otherwise run `node company-history.mjs --company <company>`, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. If `responsiveness.label` is `silent-on-you`, set expectations rather than discouraging the follow-up: many processes are genuinely just slow, so mention this plainly and suggest capping further time investment in this company if it stays silent after this attempt. The decision to send — and how many more times — stays the user's; never skip or downgrade a follow-up because of this label. Follow-up compliance is never punished.
 
 ## Step 4 — Present Drafts
 

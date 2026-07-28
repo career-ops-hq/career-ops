@@ -1,11 +1,99 @@
 package data
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+	_, trackerPath := writeTracker(t, insertedColumnTracker)
+	canonicalTracker, err := filepath.EvalSymlinks(trackerPath)
+	if err != nil {
+		t.Fatalf("canonical tracker: %v", err)
+	}
+	canonicalTemp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatalf("canonical temp dir: %v", err)
+	}
+	sum := sha256.Sum256([]byte(canonicalTracker))
+	want := filepath.Join(canonicalTemp, fmt.Sprintf("career-ops-merge-tracker-%x.lock", sum[:8]))
+
+	got, err := trackerLockDirFor(trackerPath)
+	if err != nil {
+		t.Fatalf("trackerLockDirFor: %v", err)
+	}
+	if got != want {
+		t.Fatalf("lock dir = %q, want Node-compatible %q", got, want)
+	}
+}
+
+func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+	tempDir, trackerPath := writeTracker(t, insertedColumnTracker)
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+
+	lock, err := acquireTrackerLock(trackerPath, trackerLockOptions{
+		timeout: 2 * time.Second,
+		retry:   10 * time.Millisecond,
+		stale:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("acquire first lock: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- UpdateApplicationStatus(tempDir, apps[0], "Interview")
+	}()
+
+	select {
+	case err := <-done:
+		lock.release()
+		t.Fatalf("dashboard update bypassed shared lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: the update is blocked before its tracker read.
+	}
+	concurrentRow := "| 99 | 2026-06-02 | Concurrent Co | Engineer | Remote | 4.0/5 | Evaluated | ❌ | [99](reports/099.md) | concurrent update |"
+	contentWhileLocked, err := os.ReadFile(trackerPath)
+	if err != nil {
+		lock.release()
+		t.Fatalf("read tracker while holding lock: %v", err)
+	}
+	updatedWhileLocked := strings.TrimRight(string(contentWhileLocked), "\n") + "\n" + concurrentRow + "\n"
+	if err := os.WriteFile(trackerPath, []byte(updatedWhileLocked), 0o644); err != nil {
+		lock.release()
+		t.Fatalf("simulate concurrent tracker update: %v", err)
+	}
+	lock.release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("update after lock release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dashboard update did not resume after lock release")
+	}
+
+	content, err := os.ReadFile(trackerPath)
+	if err != nil {
+		t.Fatalf("read tracker: %v", err)
+	}
+	if !strings.Contains(string(content), "| Interview |") {
+		t.Fatalf("status was not updated after lock release:\n%s", content)
+	}
+	if !strings.Contains(string(content), concurrentRow) {
+		t.Fatalf("dashboard update overwrote a row committed by the previous lock owner:\n%s", content)
+	}
+}
 
 // Regression for #1180: a status word appearing as a substring of an earlier
 // cell (Company "Applied Materials" contains "Applied") must not be rewritten;
@@ -273,8 +361,9 @@ func TestResolveTrackerColumnsDuplicateHeaderLastWins(t *testing.T) {
 |---|-------|---------|------|-------|--------|-----|--------|-------|
 | 1 | stray | Acme | Engineer | 4.0/5 | Applied | ✅ | — | real note |`, "\n")
 	cols := resolveTrackerColumns(dup)
+	// Verify that the last "Notes" column wins
 	if cols["notes"] != 8 {
-		t.Errorf("notes index = %d, want 8 (last occurrence wins, like tracker-parse.mjs)", cols["notes"])
+		t.Fatalf("notes index = %d, expected 8 (tracker-parse.mjs parity)", cols["notes"])
 	}
 }
 
@@ -293,5 +382,160 @@ func TestResolveTrackerColumnsVia(t *testing.T) {
 	}
 	if cols["status"] != 6 {
 		t.Errorf("status index = %d, want 6", cols["status"])
+	}
+}
+
+// TestNormalizeStatus verifies that localized string variants map to the canonical English form.
+func TestNormalizeStatus(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Turkish status strings
+		{"değerlendirildi", "evaluated"},
+		{"Değerlendirildi", "evaluated"},
+		{"DEĞERLENDİRİLDİ", "evaluated"},
+		{"başvuruldu", "applied"},
+		{"Başvuruldu", "applied"},
+		{"BAŞVURULDU", "applied"},
+		{"yanıt verildi", "responded"},
+		{"yanıt_verildi", "responded"},
+		{"YANIT VERİLDİ", "responded"},
+		{"mülakat", "interview"},
+		{"Mülakat", "interview"},
+		{"MÜLAKAT", "interview"},
+		{"teklif", "offer"},
+		{"Teklif", "offer"},
+		{"TEKLİF", "offer"},
+		{"reddedildi", "rejected"},
+		{"Reddedildi", "rejected"},
+		{"REDDEDİLDİ", "rejected"},
+		{"iptal edildi", "discarded"},
+		{"iptal_edildi", "discarded"},
+		{"İPTAL EDİLDİ", "discarded"},
+		{"uygun değil", "skip"},
+		{"uygun_değil", "skip"},
+		{"UYGUN DEĞİL", "skip"},
+
+		// No-diacritic variants
+		{"degerlendirildi", "evaluated"},
+		{"DEGERLENDIRILDI", "evaluated"},
+		{"basvuruldu", "applied"},
+		{"BASVURULDU", "applied"},
+		{"yanit verildi", "responded"},
+		{"mulakat", "interview"},
+		{"uygun degil", "skip"},
+
+		// English status strings
+		{"Evaluated", "evaluated"},
+		{"Applied", "applied"},
+		{"Responded", "responded"},
+		{"Interview", "interview"},
+		{"Offer", "offer"},
+		{"Rejected", "rejected"},
+		{"Discarded", "discarded"},
+		{"SKIP", "skip"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			if got := NormalizeStatus(tt.input); got != tt.want {
+				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// Regression: when an external writer (set-status.mjs, merge-tracker.mjs,
+// another session) changes a row's status while the dashboard is open, the
+// in-memory "old" status no longer matches the file. The update must still
+// land in the Status column — identified via the header — rather than
+// silently no-opping.
+func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|-----|------|-------|--------|-----|--------|-------|
+| 28 | 2026-07-10 | ? | DaCodes | Backend Engineer | 3.1/5 | Evaluated | ✅ | [28](../reports/028-dacodes.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Simulate an external writer changing the status on disk after parse.
+	stale := strings.Replace(applications, "| Evaluated |", "| Applied |", 1)
+	if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	// apps[0].Status is still "Evaluated" (stale) — the update must still work.
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err != nil {
+		t.Fatalf("UpdateApplicationStatus with stale status: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(out), "| Interview |") {
+		t.Errorf("status not updated, file now:\n%s", string(out))
+	}
+	if strings.Contains(string(out), "| Applied |") || strings.Contains(string(out), "| Evaluated |") {
+		t.Errorf("old status still present, file now:\n%s", string(out))
+	}
+}
+
+// A row whose canonical status column holds something unrecognizable must NOT
+// be guessed at — the update fails loudly instead of corrupting a cell.
+func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 3 | 2026-07-10 | Acme | Engineer | 3.1/5 | Evaluated | ✅ | [3](reports/003.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Corrupt the status cell into something that is not a status.
+	broken := strings.Replace(applications, "| Evaluated |", "| ??? |", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err == nil {
+		t.Fatal("expected an error when the status cell is unrecognizable, got nil")
+	}
+
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), "| ??? |") {
+		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
 	}
 }

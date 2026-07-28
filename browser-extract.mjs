@@ -12,7 +12,10 @@
  * fills — that boundary is exactly what keeps this separate from `apply`.
  *
  * Usage:
- *   node browser-extract.mjs <url> [--mode jd|listing] [--max N] [--timeout MS]
+ *   node browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N] [--timeout MS]
+ *
+ * `--max-chars` overrides the jd-mode text cap (default 12000) — raise it when a
+ * long JD would otherwise be truncated at the tail, at the cost of more tokens.
  *
  * Modes:
  *   jd (default) — one posting page → { url, title, text }. `text` is the main
@@ -80,11 +83,11 @@ export function compactText(s, cap = JD_TEXT_CAP) {
  * @param {{ title?: string, text?: string }} raw
  * @param {string} finalUrl
  */
-export function normalizeJd(raw, finalUrl) {
+export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
   return {
     url: finalUrl,
     title: compactText(raw?.title || '', 300),
-    text: compactText(raw?.text || ''),
+    text: compactText(raw?.text || '', textCap),
   };
 }
 
@@ -127,10 +130,11 @@ export function normalizeListing(anchors, finalUrl, max = DEFAULT_LISTING_MAX) {
  * @param {string[]} argv - process.argv.slice(2)
  */
 export function parseArgs(argv) {
-  const FLAGS = new Set(['--mode', '--max', '--timeout']);
+  const FLAGS = new Set(['--mode', '--max', '--max-chars', '--timeout']);
   let url;
   let mode = 'jd';
   let max = DEFAULT_LISTING_MAX;
+  let maxChars = JD_TEXT_CAP;
   let timeout = DEFAULT_TIMEOUT_MS;
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
@@ -139,12 +143,13 @@ export function parseArgs(argv) {
       const n = Number(val);
       if (tok === '--mode' && val != null) mode = val;
       else if (tok === '--max' && Number.isInteger(n) && n >= 0) max = n;
+      else if (tok === '--max-chars' && Number.isInteger(n) && n > 0) maxChars = n;
       else if (tok === '--timeout' && Number.isInteger(n) && n > 0) timeout = n;
     } else if (!tok.startsWith('--') && url === undefined) {
       url = tok;
     }
   }
-  return { url, mode, max, timeout };
+  return { url, mode, max, maxChars, timeout };
 }
 
 // Read the raw DOM inside the page: title, main visible text, and visible
@@ -177,10 +182,10 @@ async function readDom(page) {
 }
 
 async function main() {
-  const { url, mode, max, timeout } = parseArgs(process.argv.slice(2));
+  const { url, mode, max, maxChars, timeout } = parseArgs(process.argv.slice(2));
 
   if (!url) {
-    console.error(JSON.stringify({ error: 'usage: browser-extract.mjs <url> [--mode jd|listing] [--max N]', code: 'no_url' }));
+    console.error(JSON.stringify({ error: 'usage: browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N]', code: 'no_url' }));
     process.exit(1);
   }
   if (mode !== 'jd' && mode !== 'listing') {
@@ -230,7 +235,7 @@ async function main() {
 
     const result = mode === 'listing'
       ? normalizeListing(raw.anchors, finalUrl, max)
-      : normalizeJd(raw, finalUrl);
+      : normalizeJd(raw, finalUrl, maxChars);
     process.stdout.write(JSON.stringify(result));
   } catch (err) {
     console.error(JSON.stringify({ error: `navigation error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' }));
