@@ -288,9 +288,8 @@ try {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
-  // 13. opencode.json is scanned for the opencode CLI. This pins the
-  //     strict-JSON contract so a future change to the scanned file list
-  //     fails loudly here.
+  // 13. opencode.json with Playwright under the `mcp` bucket, --cli opencode:
+  //     no warning. Pins that the opencode CLI's MCP files are scanned.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-13-'));
     try {
