@@ -312,6 +312,7 @@ const SYSTEM_PATHS = [
   'plugin-audit.mjs',
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
+  'opencode.example.json',
 ];
 
 const BOOTSTRAP_PATHS = [
@@ -362,6 +363,8 @@ const USER_PATHS = [
   'config/plugins.yml',
   'plugins.local/',
   'plugins.lock',
+  'opencode.json',
+  'opencode.jsonc',
   '.claude/settings.json',
   '.claude/hooks/',
 ];
