@@ -481,6 +481,20 @@ and probes those companies via the ATS providers instead of (or in addition
 to) the directory walk. Other flags: `--verbose`, `--json`, `--include-undated`,
 `--shuffle`.
 
+### DNS pacing
+
+A full sweep resolves one hostname per Workday and iCIMS tenant — 13,892 distinct hostnames across the current datasets, against 3 for Greenhouse, Lever and Ashby combined. Those lookups are irreducible (nothing to cache: every hostname is distinct), and issued unpaced they trip the per-client rate limit on a resolver like Pi-hole, which then refuses queries for the whole machine — the scan reports thousands of misleading `fetch failed` lines while the boards themselves are fine (#2229).
+
+Lookups that reach the resolver are therefore rate-limited to **400 per minute** by default. Node ≥ 20 resolves A and AAAA per lookup, so that is roughly 800 upstream queries/minute — under a stock Pi-hole's 1,000/minute, with headroom for the rest of the machine. Cache hits and lookups that coalesce onto an in-flight one are free, so only *new* hostnames count against the ceiling.
+
+```bash
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=800 npm run scan:full   # raise the ceiling
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=0 npm run scan:full     # no pacing (pre-#2229 behaviour)
+CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pacing
+```
+
+The cost is real: a full Workday + iCIMS sweep becomes DNS-bound at roughly 35 minutes. Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
+
 **Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
 
 ---
