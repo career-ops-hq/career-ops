@@ -31,6 +31,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`) |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/offers/*` | Your received offers/contracts, promise notes, prep reports, and reply drafts (PII — gitignored, written by the `offer-prep` mode) |
+| `data/outcomes/*` | Your application outcome logs and archived application artifacts (written by the `outcome` mode) |
 | `data/salary-observations.tsv` | Your append-only compensation observation log: `{tracker#}\t{date}\t{desired\|advertised\|actual}\t{amount}\t{currency}\t{source}\t{note}`. Written by interactive modes when a figure is stated/confirmed; never edited in place. Advertised figures come from reports' `advertised_comp` instead — reports are themselves observation sources. Read by `salary-gap.mjs` |
 | `data/status-log.tsv` | Your append-only status transition ledger: `{tracker#}\t{date}\t{from}\t{to}\t{source}\t{note}`. Appended by `set-status.mjs` on every real status change (the tracker stays the source of truth for *state*; the ledger records *when* transitions happened; the `set-status.mjs` append path lands with #1695 — until then this file may simply not exist); never edited in place — corrections are new `correction`-source lines. Read by `funnel-velocity.mjs` |
 | `data/upskill/*` | Your skill-gap analysis reports (written by the `upskill` mode) |
@@ -69,6 +70,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/upskill.md` | Skill-gap analysis instructions |
 | `modes/followup.md` | Follow-up cadence instructions |
 | `modes/offer-prep.md` | Offer-stage contract reading companion instructions |
+| `modes/outcome.md` | Application outcome instructions |
 | `modes/interview/*` | Interview prep planning, practice, and debrief skills |
 | `modes/de/*` | German language modes |
 | `modes/fr/*` | French language modes |
