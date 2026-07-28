@@ -110,8 +110,14 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       console.error('Missing value for --state');
       process.exit(1);
     }
-    const res = seedFixture(args[0], stateIdx > -1 ? { state: args[stateIdx + 1] } : {});
-    console.log(JSON.stringify(res, null, 2));
+    try {
+      const res = seedFixture(args[0], stateIdx > -1 ? { state: args[stateIdx + 1] } : {});
+      console.log(JSON.stringify(res, null, 2));
+    } catch (err) {
+      // Concise, actionable message — never leak a raw stack trace to the CLI.
+      console.error(`seed-fixture: ${err.message}`);
+      process.exit(1);
+    }
   } else {
     console.error('Usage: node seed-fixture.mjs <targetDir> [--state name] | --self-test');
     process.exit(1);
