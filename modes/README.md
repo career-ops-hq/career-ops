@@ -24,6 +24,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `pdf.md` | `pdf` | ATS-optimized PDF generation |
 | `latex.md` | `latex` | LaTeX/Overleaf CV export |
 | `cover.md` | `cover` | Cover letter generator |
+| `cv-hm-audit.md` | `cv-hm-audit` | Hiring-manager audit of a tailored CV |
 | `email.md` | `email` | Application email drafts (draft-only) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
