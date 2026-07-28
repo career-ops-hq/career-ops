@@ -2290,11 +2290,16 @@ const upskillModeDoc = readFile('modes/upskill.md');
 
 // The phase-2 "coming later" placeholder must be gone — the plan ships now.
 // Reject ANY pending-wording variant about the learning plan (coming later,
-// pending, coming soon, TODO, ships in phase 2), not just one narrow phrasing,
-// so a regressing edit can't reintroduce a "not yet" placeholder.
+// pending, coming soon, not yet, unavailable/not available, TBD, WIP, in
+// progress, TODO, ships in phase 2), not just one narrow phrasing, and ALSO
+// catch standalone pending-phase wording near the plan (e.g. "phase 2b
+// pending", "planned for phase 2b"), so a regressing edit can't reintroduce a
+// "not yet" placeholder in either form.
 const upskillLearningPlanPending =
-  /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2)/i.test(upskillModeDoc) ||
-  /ships in phase 2/i.test(upskillModeDoc);
+  /learning plan[^\n]*(?:coming|later|pending|soon|todo|phase 2|not yet|not available|unavailable|tbd|wip|in progress)/i.test(upskillModeDoc) ||
+  /ships in phase 2/i.test(upskillModeDoc) ||
+  /phase\s*2b?\b[^\n]*(?:pending|coming|planned|later|tbd)/i.test(upskillModeDoc) ||
+  /(?:pending|planned|upcoming)\b[^\n]*phase\s*2b?/i.test(upskillModeDoc);
 if (
   !upskillLearningPlanPending &&
   upskillModeDoc.includes('## Learning Plan')
