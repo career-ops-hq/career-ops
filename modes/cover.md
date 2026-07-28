@@ -299,8 +299,6 @@ Assemble the JSON payload:
     "profile_intro": "{approved profile intro}",
     "achievements": [
       {"lead": "...", "impact": "..."}
-      // "lead" is a bare phrase, no trailing comma or other punctuation —
-      // generate-cover-letter.mjs appends the comma when rendering
     ],
     "problems_section": "{approved problems paragraph}",
     "closing": "{approved closing}",
@@ -309,6 +307,8 @@ Assemble the JSON payload:
   "output_path": "output/{company-slug}-{role-slug}-cover.pdf"
 }
 ```
+
+Each `achievements[].lead` must be a bare phrase with no trailing comma or other punctuation — `generate-cover-letter.mjs` appends the comma when rendering (see Step 7).
 
 Write payload to `/tmp/cover-payload-{company-slug}.json`.
 
