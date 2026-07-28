@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — DNS lookup pacing');
 
 try {
-  const { createTokenBucket } = await import(
+  const { createTokenBucket, createCachedLookup } = await import(
     pathToFileURL(join(ROOT, 'providers/_dns-cache.mjs')).href
   );
 
@@ -135,6 +135,88 @@ try {
       pass('a throwing callback does not strand the queue');
     } else {
       fail(`queue stranded: ran=[${ran.join(',')}]`);
+    }
+  }
+
+  const mkResolver = (result = [null, '93.184.216.34', 4]) => {
+    const calls = [];
+    const resolver = (hostname, opts, cb) => { calls.push({ hostname, opts, cb }); };
+    resolver.calls = calls;
+    resolver.flush = () => { for (const c of calls.splice(0)) c.cb(...result); };
+    return resolver;
+  };
+
+  const lookupOnce = (fn, hostname, opts = {}) =>
+    new Promise((resolve) => fn(hostname, opts, (...args) => resolve(args)));
+
+  // --- distinct hostnames are metered ---
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const resolver = mkResolver();
+    const lookup = createCachedLookup(resolver, {
+      lookupsPerMin: 60, burst: 2, now: () => clock, setTimer,
+    });
+
+    for (let i = 0; i < 5; i++) lookupOnce(lookup, `h${i}.example.com`);
+    const duringBurst = resolver.calls.length;
+
+    clock += 1_000;
+    setTimer.fireAll();
+    const afterRefill = resolver.calls.length;
+    resolver.flush();
+
+    if (duringBurst === 2 && afterRefill === 3) {
+      pass('5 distinct hostnames: 2 resolved on the burst, 1 more per refill');
+    } else {
+      fail(`hostname pacing wrong: duringBurst=${duringBurst} afterRefill=${afterRefill}`);
+    }
+  }
+
+  // --- coalesced waiters and cache hits are free ---
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const resolver = mkResolver();
+    const lookup = createCachedLookup(resolver, {
+      lookupsPerMin: 60, burst: 1, now: () => clock, setTimer,
+    });
+
+    // 20 concurrent callers, one hostname: only the leader reaches the
+    // resolver, so only the leader may spend the single available token.
+    const pending = Array.from({ length: 20 }, () => lookupOnce(lookup, 'one.example.com'));
+    const leaderOnly = resolver.calls.length === 1 && setTimer.pending() === 0;
+    resolver.flush();
+    await Promise.all(pending);
+
+    // And a warm cache hit must not queue behind the (now empty) bucket.
+    await lookupOnce(lookup, 'one.example.com');
+    const hitWasFree = resolver.calls.length === 0 && setTimer.pending() === 0;
+
+    if (leaderOnly && hitWasFree) {
+      pass('coalesced waiters and cache hits take no tokens — pacing tracks distinct hostnames');
+    } else {
+      fail(`token accounting wrong: leaderOnly=${leaderOnly} hitWasFree=${hitWasFree}`);
+    }
+  }
+
+  // --- pacing can be switched off entirely ---
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const resolver = mkResolver();
+    const lookup = createCachedLookup(resolver, {
+      lookupsPerMin: 0, now: () => clock, setTimer,
+    });
+
+    for (let i = 0; i < 50; i++) lookupOnce(lookup, `off${i}.example.com`);
+    const all = resolver.calls.length === 50 && setTimer.pending() === 0;
+    resolver.flush();
+
+    if (all) {
+      pass('lookupsPerMin: 0 disables pacing — every miss goes straight to the resolver');
+    } else {
+      fail(`disable wrong: calls=${resolver.calls.length} timers=${setTimer.pending()}`);
     }
   }
 } catch (e) {

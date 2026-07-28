@@ -209,6 +209,9 @@ export function createTokenBucket(options = {}) {
  * @param {number} [options.ttlMs] - How long a successful result stays fresh.
  * @param {number} [options.maxEntries] - Cap on distinct cached keys.
  * @param {() => number} [options.now] - Clock source, injectable for tests.
+ * @param {number} [options.lookupsPerMin] - Ceiling on resolver-bound lookups; 0 disables pacing.
+ * @param {number} [options.burst] - Tokens available at once before pacing bites.
+ * @param {(fn: Function, ms: number) => void} [options.setTimer] - Timer, injectable for tests.
  * @returns {Function} A drop-in replacement for `dns.lookup`.
  */
 export function createCachedLookup(realLookup, options = {}) {
@@ -216,6 +219,16 @@ export function createCachedLookup(realLookup, options = {}) {
   const negativeTtlMs = options.negativeTtlMs ?? DEFAULT_NEGATIVE_TTL_MS;
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const now = options.now ?? Date.now;
+  const lookupsPerMin = options.lookupsPerMin ?? DEFAULT_LOOKUPS_PER_MIN;
+  // No bucket at all when pacing is off, so the disabled path costs nothing.
+  const bucket = lookupsPerMin > 0
+    ? createTokenBucket({
+      ratePerMin: lookupsPerMin,
+      capacity: options.burst ?? DEFAULT_BURST,
+      now,
+      setTimer: options.setTimer,
+    })
+    : null;
 
   /** @type {Map<string, { expires: number, args: any[] }>} */
   const cache = new Map();
@@ -250,7 +263,16 @@ export function createCachedLookup(realLookup, options = {}) {
     }
     inflight.set(key, [callback]);
 
-    realLookup(hostname, opts, (err, ...rest) => {
+    // Only the leader of a coalesced group reaches the resolver, so only the
+    // leader spends a token: cache hits and queued waiters are free. That is
+    // what keeps pacing proportional to *distinct hostnames* rather than to
+    // request volume — greenhouse's 8,333 boards still cost one lookup, while
+    // workday's 3,781 tenants and icims's 10,108 are metered (#2229).
+    //
+    // The key stays in `inflight` while the thunk waits for a token, so a
+    // later caller for the same hostname coalesces onto it instead of queueing
+    // a second one.
+    const resolve = () => realLookup(hostname, opts, (err, ...rest) => {
       const callbacks = inflight.get(key) ?? [];
       inflight.delete(key);
 
@@ -270,6 +292,8 @@ export function createCachedLookup(realLookup, options = {}) {
 
       for (const cb of callbacks) cb(err, ...rest);
     });
+
+    if (bucket) bucket.take(resolve); else resolve();
   }
 
   // dns.lookup carries an internal symbol telling util.promisify which
@@ -278,6 +302,9 @@ export function createCachedLookup(realLookup, options = {}) {
   for (const sym of Object.getOwnPropertySymbols(realLookup)) {
     cachedLookup[sym] = realLookup[sym];
   }
+
+  /** @returns {{ delayed: number, waitedMs: number }} How much pacing cost this process. */
+  cachedLookup.pacingStats = () => (bucket ? bucket.stats() : { delayed: 0, waitedMs: 0 });
 
   return cachedLookup;
 }
