@@ -1,0 +1,41 @@
+{
+  "name": "@career-ops/web",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Official web experience for career-ops — local-first.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test-clean-chips.mjs"
+  },
+  "dependencies": {
+    "@paper-design/shaders-react": "^0.0.78",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "js-yaml": "^4.2.0",
+    "lucide-react": "^1.8.0",
+    "next": "16.2.12",
+    "playwright-core": "^1.61.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.18",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.2"
+  },
+  "overrides": {
+    "postcss": "^8.5.18",
+    "sharp": "^0.35.0"
+  }
+}

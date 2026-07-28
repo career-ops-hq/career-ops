@@ -11,16 +11,16 @@
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { rebuildRow } from './tracker-utils.mjs';
+import {
+  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+} from './tracker-utils.mjs';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
@@ -68,7 +68,7 @@ function normalizeStatus(raw) {
   // Already canonical (English, per states.yml) — just fix casing/bold
   const canonical = [
     'Evaluated', 'Applied', 'Responded', 'Interview',
-    'Offer', 'Rejected', 'Discarded', 'SKIP',
+    'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP',
   ];
   for (const c of canonical) {
     if (lower === c.toLowerCase()) return { status: c };
@@ -80,6 +80,7 @@ function normalizeStatus(raw) {
   if (['respondido'].includes(lower)) return { status: 'Responded' };
   if (['entrevista'].includes(lower)) return { status: 'Interview' };
   if (['oferta'].includes(lower)) return { status: 'Offer' };
+  if (['contratado', 'contratada', 'hired', 'accepted', 'accept'].includes(lower)) return { status: 'Hired' };
   if (['cerrada', 'descartada'].includes(lower)) return { status: 'Discarded' };
   if (['no aplicar', 'no_aplicar', 'skip'].includes(lower)) return { status: 'SKIP' };
 
@@ -92,25 +93,41 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
-const content = readFileSync(APPS_FILE, 'utf-8');
+
+let trackerTransaction = null;
+if (!DRY_RUN) {
+  try {
+    trackerTransaction = await openTrackerTransaction(APPS_FILE);
+  } catch (err) {
+    console.error(`Cannot acquire tracker lock: ${err.message}`);
+    process.exit(1);
+  }
+  process.once('exit', () => {
+    try { trackerTransaction.close(); } catch {}
+  });
+}
+try {
+const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
 let changes = 0;
 let unknowns = [];
 
+// Map columns by header name (tracker-parse.mjs, #954/#1596). Fixed indices
+// assumed the original 9-column layout, so a customized tracker — an inserted
+// Location or Via column — shifted every field one to the left: the Score cell
+// was normalized as if it were the status and overwritten, while the real
+// status was left alone and reported as unknown (#1955).
+const COLS = resolveColumns(lines);
+
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
-  if (!line.startsWith('|')) continue;
+  const row = parseTrackerRow(line, COLS);
+  if (!row) continue; // header, separator, non-row, or a row missing cells
 
   const parts = line.split('|').map(s => s.trim());
-  // Format: ['', '#', 'fecha', 'empresa', 'rol', 'score', 'STATUS', 'pdf', 'report', 'notas', '']
-  if (parts.length < 9) continue;
-  if (parts[1] === '#' || parts[1] === '---' || parts[1] === '') continue;
-
-  const num = parseInt(parts[1]);
-  if (isNaN(num)) continue;
-
-  const rawStatus = parts[6];
+  const num = row.num;
+  const rawStatus = row.status;
   const result = normalizeStatus(rawStatus);
 
   if (result.unknown) {
@@ -122,21 +139,21 @@ for (let i = 0; i < lines.length; i++) {
 
   // Apply change
   const oldStatus = rawStatus;
-  parts[6] = result.status;
+  parts[COLS.status] = result.status;
 
-  // Move DUPLICADO info to notes if needed
-  if (result.moveToNotes && parts[9]) {
-    const existing = parts[9] || '';
+  // Move DUPLICADO info to notes if needed. A layout without a Notes column
+  // has nowhere to put it — dropping the provenance beats appending a cell the
+  // table has no header for.
+  if (result.moveToNotes && COLS.notes != null) {
+    const existing = parts[COLS.notes] || '';
     if (!existing.includes(result.moveToNotes)) {
-      parts[9] = result.moveToNotes + (existing ? '. ' + existing : '');
+      parts[COLS.notes] = result.moveToNotes + (existing ? '. ' + existing : '');
     }
-  } else if (result.moveToNotes && !parts[9]) {
-    parts[9] = result.moveToNotes;
   }
 
   // Also strip bold from score field
-  if (parts[5]) {
-    parts[5] = parts[5].replace(/\*\*/g, '');
+  if (parts[COLS.score]) {
+    parts[COLS.score] = parts[COLS.score].replace(/\*\*/g, '');
   }
 
   // Reconstruct line
@@ -158,11 +175,15 @@ console.log(`\n📊 ${changes} statuses normalized`);
 
 if (!DRY_RUN && changes > 0) {
   // Backup first
-  copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
-  console.log('✅ Written to applications.md (backup: applications.md.bak)');
+  const backupPath = `${APPS_FILE}.bak`;
+  copyFileSync(APPS_FILE, backupPath);
+  trackerTransaction.replace(lines.join('\n'));
+  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
   console.log('✅ No changes needed');
+}
+} finally {
+  trackerTransaction?.close();
 }

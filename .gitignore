@@ -1,13 +1,21 @@
 # Personal data (user fills these)
 cv.md
-data/applications.md
-data/applications.db
-data/pipeline.md
-data/scan-history.tsv
-data/parser-output/**/*.json
+local/
+# Everything under data/ is generated or personal at runtime — only .gitkeep
+# placeholders are tracked (verify with `git ls-files data/`). A blanket rule
+# means a new generated file (e.g. a future log/cache addition) is covered
+# for every user automatically, with no per-filename .gitignore update needed.
+data/*
+!data/.gitkeep
+!data/offers/
+!data/parser-output/
+# Received offers/contracts, promise notes, prep reports (PII — never commit)
+data/offers/*
+!data/offers/.gitkeep
+data/parser-output/**
+!data/parser-output/**/
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
-data/cache/ats-companies/
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -21,9 +29,24 @@ batch/tracker-additions/**/*.tsv
 jds/*
 !jds/.gitkeep
 
+# Personal documents — never commit scans or copies of these (PII).
+# Catches common identity/credential filenames so they can't be staged by accident.
+*passport*
+*diploma*
+*简历*
+*学位*
+*成绩单*
+
 # Interview prep (accumulated STAR+R stories — user data)
 interview-prep/*
+!interview-prep/
 !interview-prep/.gitkeep
+# Session transcripts hold real interviewer names/companies — ignore content,
+# ship only the system-owned scaffold (README + .gitkeep). #1242
+!interview-prep/sessions/
+interview-prep/sessions/*
+!interview-prep/sessions/.gitkeep
+!interview-prep/sessions/README.md
 
 # Writing samples (user's personal files — never committed)
 writing-samples/*
@@ -31,10 +54,19 @@ writing-samples/*
 
 # User config and customization (never auto-updated)
 config/profile.yml
+config/cv-facts.json
+config/benchmarks.yml
 portals.yml
 modes/_profile.md
+modes/_custom.md
 .update-dismissed
 .update-lock
+.manifesto-noted
+
+# Plugin layer — opt-in toggles + user-installed plugins + integrity lock (never auto-updated)
+config/plugins.yml
+plugins.local/
+plugins.lock
 
 # Secrets (never commit — use .env.example as template)
 .env
@@ -54,6 +86,9 @@ reports/*-RESERVED.md
 # Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
 *.bak
 
+# OpenRouter runner — generated data (personal, never commit)
+data/model-blacklist.json
+
 # OS
 .DS_Store
 *.mov
@@ -65,10 +100,15 @@ reports/*-RESERVED.md
 .opencode/settings.local.json
 .opencode/memory/
 career-dashboard
+career-dashboard.exe
 package-lock.json
+!web/package-lock.json
 
-# Playwright MCP server run artifacts (ephemeral, machine-local — never commit)
+# Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/
 
 # Planning (local scratchpad)
 plan/
+
+# Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
+.career-ops-web/

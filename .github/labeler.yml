@@ -13,6 +13,7 @@
           - modes/*.md
           - modes/**/*.md
           - .claude/skills/**
+          - .cursor/skills/**
           - .opencode/skills/**
           - .qwen/skills/**
           - .antigravitycli/skills/**
@@ -41,6 +42,7 @@
           - "README.*.md"
           - modes/de/**
           - modes/fr/**
+          - modes/hi/**
           - modes/ja/**
           - modes/ru/**
 

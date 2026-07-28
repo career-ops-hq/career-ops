@@ -1,0 +1,11 @@
+{
+  "id": "platform-agentic-hybrid",
+  "synthetic": true,
+  "jd": "Staff Engineer, Agent Reliability — Fathom AI (Remote)\n\nOur product is a fleet of production agents, and this role keeps them trustworthy. You will build the observability and evals layer for multi-agent workflows: tracing across orchestration steps, regression monitoring for agent behavior, and the reliability pipelines that catch a bad model swap before it ships. There is real agentic surface here — you will understand HITL checkpoints and orchestration internals — but the mandate is platform: instrument, measure, and harden the systems other teams' agents run on. You are the team that makes 'is this agent still behaving?' a dashboard, not a guess. Strong Python, distributed-systems instincts, and prior work on eval/monitoring for ML or LLM systems. Base $200k–$235k, equity, remote-first.",
+  "label": {
+    "archetype": "AI Platform / LLMOps",
+    "score": 4.1,
+    "provenance": "reference-frozen-v1",
+    "edge_note": "hybrid platform+agentic; reference resolves to the platform mandate (observability/evals/reliability) — agentic is the domain, not the job"
+  }
+}

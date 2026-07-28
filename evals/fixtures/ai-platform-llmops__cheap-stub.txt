@@ -1,0 +1,14 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case ai-platform-llmops]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+This role centers on reliability, observability, and eval/monitoring of LLM
+inference pipelines — a platform mandate rather than research.
+
+---SCORE_SUMMARY---
+COMPANY: Meridian Labs
+ROLE: Senior AI Platform Engineer
+SCORE: 4.0
+ARCHETYPE: AI Platform / LLMOps
+LEGITIMACY: High Confidence
+---END_SUMMARY---

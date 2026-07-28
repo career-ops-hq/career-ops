@@ -1,0 +1,11 @@
+{
+  "id": "forward-deployed-vs-architect",
+  "synthetic": true,
+  "jd": "Field AI Engineer — Solstice Systems (On-site rotations)\n\nYou are the person we send to the customer. Embedded on-site, you prototype against their real data, deploy the solution into their environment, and iterate in the field until it sticks. Part of the job is designing how our platform integrates with the client's existing architecture — you will sketch the integration and make systems-level calls — but this is not a back-office architect seat: you are client-facing, delivery is fast, and success is a working deployment the customer relies on, not a diagram. Heavy travel during deployment rotations. Generalist engineering strength, calm in messy client environments, and a bias toward shipping a rough prototype over perfecting a design doc. Base $180k–$205k; travel and per-diem covered. Note: on-site rotations can run three weeks at a stretch.",
+  "label": {
+    "archetype": "AI Forward Deployed",
+    "score": 3.9,
+    "provenance": "reference-frozen-v1",
+    "edge_note": "architecture/integration signals present, but reference resolves to Forward Deployed — client-facing + field delivery + prototype-first is the core; travel intensity is a mild fit drag"
+  }
+}

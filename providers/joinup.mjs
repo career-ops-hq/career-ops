@@ -16,7 +16,19 @@
 //
 // Auto-detects from a careers_url whose host is joinup.ch.
 
-import { toEpochMs } from './_http.mjs';
+// joinup.ch's __NEXT_DATA__ carries `created` as an ISO string, with numeric
+// epochs seen on a few older records; both shapes are handled. Non-positive
+// values are treated as missing rather than dating the posting to 1970.
+function toEpochMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    // Values below 1e12 are Unix seconds; at or above, already ms.
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) || ms <= 0 ? null : ms;
+}
 
 const BROWSE_URL = 'https://joinup.ch/browse/jobs';
 

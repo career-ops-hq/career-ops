@@ -1,0 +1,10 @@
+{
+  "id": "ai-solutions-architect",
+  "synthetic": true,
+  "jd": "AI Solutions Architect — Halgate Consulting (Hybrid, client sites)\n\nHalgate is a systems-integration vendor delivering AI programs for enterprise clients. As Solutions Architect you own the technical architecture end to end: you design the integration between the client's existing systems and our AI stack, produce the reference architecture and system diagrams, and make the build-vs-buy calls across a multi-quarter engagement. You will work across several client accounts at once, so billability and context-switching are part of the job. Enterprise integration experience is required — identity, data pipelines, security review, and the usual procurement gauntlet. This is an architecture and design role, not a delivery-engineer seat: you set the technical direction and hand implementation to the account's build team. Compensation is described as a 'comprehensive package' tied to utilization; base is not separately stated in the posting.",
+  "label": {
+    "archetype": "AI Solutions Architect",
+    "score": 3.4,
+    "provenance": "reference-frozen-v1"
+  }
+}

@@ -1,0 +1,211 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Design tokens — inherited from career-ops-docs. Brand burnt-orange #dd7627
+   (mode-invariant), zinc neutrals, light + dark (Fumadocs neutral values).
+   ────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-brand: hsl(26 73% 51%);
+  --color-brand-200: hsl(33 100% 60%); /* hover / lighter */
+  /* Near-black on the brand orange: 5.2:1 on brand, 8.3:1 on brand-200 hover
+     (white was 3.14:1, an AA fail in BOTH themes since the button is the same).
+     The brand orange itself is untouched — only what sits on top of it. */
+  --color-brand-foreground: hsl(24 30% 12%);
+  --color-brand-soft: hsl(26 73% 51% / 0.12);
+  --color-brand-secondary: #fc7744;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  --font-display: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+/* Semantic surfaces reference runtime vars so they swap with the theme class. */
+@theme inline {
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-foreground: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-landing: var(--landing); /* editorial olive (light) / cream (dark) — docs landing-foreground */
+  /* Brand as SMALL TEXT: the raw orange only passes AA in dark (4.95); in light
+     it's 2.6-3.1 on cream/white. brand-text darkens it for light and keeps the
+     raw brand in dark. Use for small text/badges; brand stays for accents,
+     surfaces, icons and large headings (≥24px passes at 3:1). */
+  --color-brand-text: var(--brand-text);
+}
+
+:root {
+  --bg: #f7f6f3; /* warm off-white (docs stone tone) */
+  --surface: #ffffff;
+  --surface-hover: #efeeea;
+  --border: hsl(40 9% 86%);
+  --fg: hsl(30 10% 11%); /* warm near-black, high legibility */
+  --muted: hsl(35 9% 34%); /* darker than before for readable body text */
+  --faint: hsl(35 7% 42%); /* AA: ~4.6:1 on #fff (was 50% ≈ 3.9:1, failed small text) */
+  --landing: #59592a; /* olive editorial headline */
+  --brand-text: hsl(26 80% 36%); /* darkened brand for small text: 5.5 white / 5.1 cream / 4.7 surface-hover */
+  --dot: 40 8% 42% / 0.09;
+  --pre-bg: #f2f1ed;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0a0a0a;
+  --surface: #161616;
+  --surface-hover: #232323;
+  --border: #262626;
+  --fg: #fafafa;
+  --muted: #a1a1aa;
+  --faint: #8b8b95; /* AA: ~4.6:1 on #161616 (was #71717a ≈ 3.7:1, failed small text) */
+  --landing: #e4e2d0; /* cream editorial headline */
+  --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
+  --dot: 240 5% 65% / 0.10;
+  --pre-bg: #111111;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+html {
+  scrollbar-gutter: stable;
+}
+
+@layer utilities {
+  .font-serif-italic {
+    font-family: var(--font-instrument-serif-italic), var(--font-serif);
+    font-style: italic;
+  }
+  /* Ambient dot grid — adapts to the theme via --dot. Pure CSS, 0 DOM. */
+  .dot-bg {
+    background-image: radial-gradient(circle, hsl(var(--dot)) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+/* ── Animations ported from the docs home ───────────────────────────────── */
+@keyframes fade-in-delayed {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in-delayed { animation: fade-in-delayed 700ms ease 200ms both; }
+
+@keyframes cli-cursor-pulse {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+.cli-cursor { animation: cli-cursor-pulse 1s infinite; }
+
+@keyframes terminal-popup-in {
+  from { opacity: 0; transform: translateY(-2.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-terminal-popup { animation: terminal-popup-in 300ms ease both; }
+
+/* Worker-pill indeterminate progress bar — a brand sweep (hero aesthetic). */
+@keyframes job-progress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(320%); }
+}
+.job-indeterminate { position: relative; overflow: hidden; }
+.job-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--color-brand), transparent);
+  animation: job-progress 1.3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cli-cursor,
+  .animate-terminal-popup,
+  .animate-fade-in-delayed {
+    animation: none;
+  }
+  .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
+}
+
+/* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
+.report-prose {
+  color: color-mix(in srgb, var(--fg) 88%, transparent);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+.report-prose > :first-child { margin-top: 0; }
+.report-prose h1, .report-prose h2, .report-prose h3, .report-prose h4 {
+  color: var(--fg);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.report-prose h1 { font-family: var(--font-display); font-size: 1.7rem; margin: 2rem 0 0.75rem; }
+.report-prose h2 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  margin: 2.25rem 0 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.report-prose h3 { font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
+.report-prose h4 { font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 1.25rem 0 0.4rem; }
+.report-prose p { margin: 0.9rem 0; }
+.report-prose strong { color: var(--fg); font-weight: 600; }
+.report-prose a { color: var(--color-brand); text-decoration: none; }
+.report-prose a:hover { text-decoration: underline; }
+.report-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-brand);
+  background: var(--surface-hover);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+}
+.report-prose pre {
+  background: var(--pre-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.report-prose pre code { background: none; color: var(--fg); padding: 0; }
+.report-prose ul, .report-prose ol { margin: 0.9rem 0; padding-left: 1.4rem; }
+.report-prose ul { list-style: disc; }
+.report-prose ol { list-style: decimal; }
+.report-prose li { margin: 0.35rem 0; }
+.report-prose li::marker { color: var(--faint); }
+.report-prose blockquote {
+  border-left: 3px solid var(--color-brand);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: var(--muted);
+}
+.report-prose hr { border: none; border-top: 1px solid var(--border); margin: 1.75rem 0; }
+.report-prose table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+.report-prose thead { border-bottom: 1px solid var(--border); }
+.report-prose th { text-align: left; font-weight: 600; color: var(--fg); padding: 0.5rem 0.75rem; vertical-align: top; }
+.report-prose td {
+  padding: 0.55rem 0.75rem;
+  vertical-align: top;
+  border-top: 1px solid var(--border);
+  word-break: break-word;
+}
+.report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.report-prose img { border-radius: 0.5rem; }
+
+/* CostBadge (co-located → global): cost color-semantics, see cost-badge.tsx */
+.co-cost{display:inline-flex;align-items:center;gap:.28rem;border-radius:999px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid transparent}
+.co-cost[data-size="xs"]{font-size:10.5px;padding:.16rem .4rem;letter-spacing:.04em;text-transform:uppercase}
+.co-cost[data-size="sm"]{font-size:11px;padding:.24rem .5rem}
+.co-cost[data-tone="free"]{color:hsl(162 91% 24%);background:hsl(160 64% 46% / .12);border-color:hsl(160 64% 46% / .28)}
+html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 64% 52% / .13);border-color:hsl(158 64% 52% / .26)}
+.co-cost[data-tone="spend"]{color:hsl(35 9% 34%);background:hsl(35 8% 46% / .12);border-color:hsl(35 8% 46% / .26)}
+html.dark .co-cost[data-tone="spend"]{color:hsl(35 8% 70%);background:hsl(35 6% 60% / .12);border-color:hsl(35 6% 60% / .24)}
+.co-cost svg{width:.85em;height:.85em}

@@ -2,25 +2,45 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Lever provider — hits the public postings endpoint.
-// Auto-detects from a careers_url whose host is jobs.lever.co (US) or
-// jobs.eu.lever.co (EU); the company slug is the first path segment.
+// Auto-detects from careers_url via jobs.(eu.)?lever.co/<slug>.
+// Handles both explicit `api:` URLs and auto-detection from `careers_url`.
 
-function resolveApiUrl(entry) {
+const ALLOWED_LEVER_HOSTS = new Set(['api.lever.co', 'api.eu.lever.co']);
+
+/** @param {string} url */
+function assertLeverUrl(url) {
   let parsed;
   try {
-    parsed = new URL(entry.careers_url || '');
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`lever: invalid URL: ${url}`);
+  }
+  if (parsed.protocol !== 'https:') throw new Error(`lever: URL must use HTTPS: ${url}`);
+  if (!ALLOWED_LEVER_HOSTS.has(parsed.hostname))
+    throw new Error(`lever: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_LEVER_HOSTS].join(', ')}`);
+  return url;
+}
+
+/** @param {import('./_types.js').PortalEntry} entry */
+function resolveApiUrl(entry) {
+  // Explicit api: wins — lets an entry keep a human-facing corporate
+  // careers_url (e.g. https://www.coalfire.com/careers) while still pinning
+  // the Lever postings board (mirrors greenhouse's api: precedence).
+  if (entry.api) {
+    assertLeverUrl(entry.api);
+    return entry.api;
+  }
+  let url;
+  try {
+    url = new URL(entry.careers_url || '');
   } catch {
     return null;
   }
-  // Lever has a US instance (jobs.lever.co / api.lever.co) and an EU instance
-  // (jobs.eu.lever.co / api.eu.lever.co). Match on the hostname, not a loose
-  // substring, then take the company slug from the path.
-  const host = parsed.hostname.toLowerCase();
-  if (host !== 'jobs.lever.co' && host !== 'jobs.eu.lever.co') return null;
-  const slug = parsed.pathname.split('/').filter(Boolean)[0];
+  const host = url.hostname.match(/^jobs\.((?:eu\.)?lever\.co)$/);
+  if (!host) return null;
+  const slug = url.pathname.split('/').filter(Boolean)[0];
   if (!slug) return null;
-  const apiHost = host === 'jobs.eu.lever.co' ? 'api.eu.lever.co' : 'api.lever.co';
-  return `https://${apiHost}/v0/postings/${slug}`;
+  return `https://api.${host[1]}/v0/postings/${slug}`;
 }
 
 /** @type {Provider} */
@@ -28,13 +48,18 @@ export default {
   id: 'lever',
 
   detect(entry) {
-    const apiUrl = resolveApiUrl(entry);
-    return apiUrl ? { url: apiUrl } : null;
+    try {
+      const apiUrl = resolveApiUrl(entry);
+      return apiUrl ? { url: apiUrl } : null;
+    } catch {
+      return null;
+    }
   },
 
   async fetch(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`lever: cannot derive API URL for ${entry.name}`);
+    assertLeverUrl(apiUrl);
     const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
     if (!Array.isArray(json)) return [];
     return json.map(j => ({

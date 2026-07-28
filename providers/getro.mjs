@@ -29,11 +29,28 @@
 // hard safety cap. Jobs with no created_at are kept ("missing data = pass",
 // same rule as the location filter).
 
-import { toEpochMs } from './_http.mjs';
+// Getro returns `created_at` as Unix seconds, but older boards have been seen
+// emitting ISO strings, so both shapes are handled. Non-positive values return
+// null: the pagination cutoff below treats null as "undated, keep", whereas a
+// 0 would read as 1970 and stop the walk on the first malformed row.
+function toEpochMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    // Values below 1e12 are Unix seconds; at or above, already ms.
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) || ms <= 0 ? null : ms;
+}
 
 const API_BASE = 'https://api.getro.com/api/v2/collections';
 const HITS_PER_PAGE = 20;          // API hard-caps page size at 20
 const DEFAULT_MAX_PAGES = 40;      // safety cap: 40 x 20 = 800 newest jobs/board
+// Ceiling on the per-entry `getro_max_pages` override. Without it a typo'd or
+// hostile portals.yml value (getro_max_pages: 10000) turns one board into
+// 10k sequential API calls against a third party.
+const HARD_MAX_PAGES = 200;        // 200 x 20 = 4000 newest jobs/board
 const DEFAULT_MAX_AGE_DAYS = 90;   // pagination bound only; global filter does the real cut
 
 function resolveCollection(entry) {
@@ -58,7 +75,7 @@ export default {
     if (!id) throw new Error(`getro: ${entry.name} needs a numeric 'getro_collection' in portals.yml`);
     const apiUrl = `${API_BASE}/${id}/search/jobs`;
     const maxPages = Number.isInteger(entry.getro_max_pages) && entry.getro_max_pages > 0
-      ? entry.getro_max_pages : DEFAULT_MAX_PAGES;
+      ? Math.min(entry.getro_max_pages, HARD_MAX_PAGES) : DEFAULT_MAX_PAGES;
     const maxAgeDays = Number.isFinite(entry.getro_max_age_days) && entry.getro_max_age_days >= 0
       ? entry.getro_max_age_days : DEFAULT_MAX_AGE_DAYS;
     const cutoffMs = maxAgeDays > 0 ? Date.now() - maxAgeDays * 86_400_000 : 0;

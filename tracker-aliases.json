@@ -1,0 +1,16 @@
+{
+  "#": "num",
+  "num": "num",
+  "date": "date",
+  "company": "company",
+  "empresa": "company",
+  "via": "via",
+  "role": "role",
+  "puesto": "role",
+  "location": "location",
+  "score": "score",
+  "status": "status",
+  "pdf": "pdf",
+  "report": "report",
+  "notes": "notes"
+}

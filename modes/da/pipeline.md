@@ -36,6 +36,7 @@ Behandler URL'er til opslag, der er samlet i `data/pipeline.md`. Kandidaten tilf
 ## Intelligent detektion af opslaget fra URL'en
 
 1. **Playwright (foretrukket):** `browser_navigate` + `browser_snapshot`. Fungerer med alle SPAs.
+   - **Tilvalg — CLI-udtrækker (`scan.extractor: cli` i `config/profile.yml`):** kør `node browser-extract.mjs <url>` (`--mode jd`) i stedet — kompakt `{ "url", "title", "text" }`, færre tokens (afhænger af jobportalen). **Fald stille tilbage** til `browser_navigate` + `browser_snapshot` ved fejl eller hvis den mangler.
 2. **WebFetch (fallback):** Til statiske sider, eller når Playwright ikke er tilgængelig.
 3. **WebSearch (sidste udvej):** Søg på sekundære portaler, der indekserer opslaget.
 

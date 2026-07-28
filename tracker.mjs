@@ -34,11 +34,15 @@
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, resolve, join, basename } from 'path';
+import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { resolveColumns } from './tracker-parse.mjs';
+import {
+  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+} from './tracker-utils.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -77,9 +81,14 @@ async function loadSqlite() {
   }
 }
 
-function openDb(DatabaseSync) {
+export function openDb(DatabaseSync) {
   mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
   const db = new DatabaseSync(DB_PATH);
+  // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+  // contention. The index is read by concurrent callers — a CLI query, a
+  // `set-status` write and the Go TUI dashboard can all hit the same db at
+  // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+  db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
   db.exec(`
     CREATE TABLE IF NOT EXISTS applications (
@@ -143,7 +152,7 @@ function normalizeStatus(raw, states) {
   return states.byKey.get(cleaned) || null;
 }
 
-const SCORE_RE = /^\*{0,2}(\d(?:\.\d)?\/5)\*{0,2}$/;
+const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
@@ -157,18 +166,27 @@ function repairPlaceholder(cell) {
 // ── Markdown parsing ────────────────────────────────────────────────
 
 function parseMarkdownRows(text, diag) {
+  const lines = text.split('\n');
+  // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
+  // (e.g. an inserted Location column) can't shift Score into Status. Falls back
+  // to the legacy fixed 9-column layout when no header row is found.
+  const colmap = resolveColumns(lines);
+  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
+  const width = Math.max(...Object.values(colmap)) + 2;
   const rows = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim().startsWith('|')) continue;
-    let cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-    if (cells.length < 2) continue;
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) continue; // header / separator
-    if (cells.length > 9) {
-      cells = [...cells.slice(0, 8), cells.slice(8).join(' | ')]; // stray pipes → notes
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    let parts = t.split('|').map(c => c.trim());
+    if (parts.length < 3) continue; // needs at least one real cell
+    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    if (parts.length > width && colmap.notes === width - 2) {
+      // Stray pipes inside the trailing free-text column → fold back into notes.
+      parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
-    while (cells.length < 9) cells.push('');
-    rows.push(cells);
+    const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
+    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
   }
   return rows;
 }
@@ -181,16 +199,21 @@ function parseMarkdownRows(text, diag) {
 // duplicates are all removed.
 export function removeRowByNum(content, num) {
   const target = String(num).trim();
+  const lines = content.split('\n');
+  // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
+  // cell on customized layouts (e.g. with a Location column).
+  const colmap = resolveColumns(lines);
   let removedCount = 0;
   let report = null;
-  const kept = content.split('\n').filter((line) => {
+  const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t.startsWith('|')) return true; // non-table line — keep verbatim
-    const cells = t.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) return true; // header / separator
-    if (cells[0] === target) {
+    const parts = t.split('|').map((c) => c.trim());
+    const numCell = parts[colmap.num] ?? '';
+    if (numCell === '#' || /^[-: ]*$/.test(parts.join(''))) return true; // header / separator
+    if (numCell === target) {
       removedCount++;
-      if (report === null) report = cells[7] || null; // report column (index 7)
+      if (report === null) report = (colmap.report != null ? parts[colmap.report] : '') || null;
       return false;
     }
     return true;
@@ -422,60 +445,59 @@ async function history(args) {
 // applications.md unless explicitly asked to via --out.
 
 async function exportMd(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
-  const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-  const out = [
-    '# Applications Tracker',
-    '',
-    HEADER,
-    SEPARATOR,
-    ...rows.map(rowToMarkdown),
-    '',
-  ].join('\n');
-
   const outPath = flagValue(args, '--out');
-  if (!outPath) {
-    process.stdout.write(out);
-    return;
-  }
-  if (existsSync(outPath) && statSync(outPath).isDirectory()) {
+  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
     console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
     process.exit(1);
   }
-  mkdirSync(dirname(outPath) || '.', { recursive: true });
-  // Never silently clobber — whatever was there is backed up first.
-  if (existsSync(outPath)) {
-    copyFileSync(outPath, outPath + '.bak');
-    console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+
+  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const writesTracker = outPath
+    ? canonicalizeTrackerPath(outPath) === trackerPath
+    : false;
+  const trackerTransaction = writesTracker
+    ? await openTrackerTransaction(trackerPath)
+    : null;
+
+  try {
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    ensureFresh(db, loadStates());
+    const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
+    const out = [
+      '# Applications Tracker',
+      '',
+      HEADER,
+      SEPARATOR,
+      ...rows.map(rowToMarkdown),
+      '',
+    ].join('\n');
+
+    if (!outPath) {
+      process.stdout.write(out);
+      return;
+    }
+    mkdirSync(dirname(outPath) || '.', { recursive: true });
+    // Never silently clobber — whatever was there is backed up first.
+    const writeTarget = writesTracker ? trackerPath : outPath;
+    if (existsSync(writeTarget)) {
+      copyFileSync(writeTarget, writeTarget + '.bak');
+      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+    }
+    if (trackerTransaction) trackerTransaction.replace(out);
+    else writeFileAtomic(outPath, out);
+    console.error(`Exported ${rows.length} applications to ${outPath}`);
+  } finally {
+    trackerTransaction?.close();
   }
-  writeFileSync(outPath, out, 'utf-8');
-  console.error(`Exported ${rows.length} applications to ${outPath}`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
 
-// Atomic file replace via a same-directory temp file + rename, so a reader never
-// sees a partially written applications.md (mirrors merge-tracker's writer).
-function writeFileAtomic(filePath, content) {
-  const tmp = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    writeFileSync(tmp, content);
-    renameSync(tmp, filePath);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
-// web) orchestrate this script rather than editing applications.md directly, so
-// the write-gate holds. The write is atomic; callers should still avoid running
-// a delete concurrently with a scan-merge (they share the same file — serialize
-// at the orchestration layer; a shared lock is a follow-up once merge-tracker is
-// import-safe).
+// web) orchestrate this script rather than editing applications.md directly.
+// The read and atomic replacement share merge-tracker's cross-process lock.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -486,17 +508,33 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
-  const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
-  if (!removed) {
-    console.error(`No application numbered ${num} in ${MD_PATH}.`);
-    process.exit(1);
-  }
   if (args.includes('--dry-run')) {
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    if (!removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
     console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
     if (report) console.error(`(report file would be orphaned: ${report})`);
     return;
   }
-  writeFileAtomic(MD_PATH, newContent);
+
+  const trackerTransaction = await openTrackerTransaction(MD_PATH);
+
+  let removal;
+  try {
+    removal = removeRowByNum(trackerTransaction.read(), num);
+    if (!removal.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exitCode = 1;
+      return;
+    }
+    trackerTransaction.replace(removal.newContent);
+  } finally {
+    trackerTransaction.close();
+  }
+
+  const { removedCount, report } = removal;
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
     const states = loadStates();

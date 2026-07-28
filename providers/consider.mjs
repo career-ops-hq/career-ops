@@ -24,7 +24,20 @@
 // `consider_size` (default 500) caps how many newest/featured jobs are pulled in
 // the single request. Boards larger than that are truncated (rare for VC boards).
 
-import { toEpochMs } from './_http.mjs';
+// Consider's `timeStamp` arrives as epoch ms on some boards and an ISO string
+// on others, so both shapes are handled. Non-positive values are treated as
+// missing rather than as 1970 — a 0/negative stamp is a board bug, and dating
+// the posting to the epoch would make it permanently stale to the age filter.
+function toEpochMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    // Values below 1e12 are Unix seconds; at or above, already ms.
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) || ms <= 0 ? null : ms;
+}
 
 const ENDPOINT_PATH = '/api-boards/search-jobs';
 const DEFAULT_SIZE = 500;

@@ -1,0 +1,103 @@
+# Personal data (user fills these)
+cv.md
+data/applications.md
+data/applications.db
+data/follow-ups.md
+data/pipeline.md
+data/scan-history.tsv
+data/pdf-index.tsv
+data/parser-output/**/*.json
+!data/parser-output/.gitkeep
+!data/parser-output/**/.gitkeep
+data/cache/ats-companies/
+reports/*.md
+!reports/.gitkeep
+output/*
+!output/.gitkeep
+batch/logs/*
+!batch/logs/.gitkeep
+batch/batch-state.tsv
+batch/batch-input.tsv
+batch/tracker-additions/**/*.tsv
+!batch/tracker-additions/.gitkeep
+jds/*
+!jds/.gitkeep
+
+# Personal documents — never commit scans or copies of these (PII).
+# Catches common identity/credential filenames so they can't be staged by accident.
+*passport*
+*diploma*
+*简历*
+*学位*
+*成绩单*
+
+# Interview prep (accumulated STAR+R stories — user data)
+interview-prep/*
+!interview-prep/.gitkeep
+# Session transcripts hold real interviewer names/companies — ignore content,
+# ship only the system-owned scaffold (README + .gitkeep). #1242
+!interview-prep/sessions/
+interview-prep/sessions/*
+!interview-prep/sessions/.gitkeep
+!interview-prep/sessions/README.md
+
+# Writing samples (user's personal files — never committed)
+writing-samples/*
+!writing-samples/README.md
+
+# User config and customization (never auto-updated)
+config/profile.yml
+portals.yml
+modes/_profile.md
+modes/_custom.md
+.update-dismissed
+.update-lock
+
+# Plugin layer — opt-in toggles + user-installed plugins + integrity lock (never auto-updated)
+config/plugins.yml
+plugins.local/
+plugins.lock
+
+# Secrets (never commit — use .env.example as template)
+.env
+# Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects
+# (e.g. web/ before it graduates to main). Never commit local env files or TS build caches.
+**/.env.local
+**/.env*.local
+**/*.tsbuildinfo
+
+# Generated
+.resolved-prompt-*
+node_modules/
+bun.lock
+# Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
+reports/*-RESERVED.md
+
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
+*.bak
+
+# OpenRouter runner — generated data (personal, never commit)
+data/model-blacklist.json
+
+# OS
+.DS_Store
+*.mov
+*.mp4
+
+# CLI-specific local config
+.claude/settings.local.json
+.claude/memory/
+.opencode/settings.local.json
+.opencode/memory/
+career-dashboard
+career-dashboard.exe
+package-lock.json
+
+# Playwright MCP server run artifacts (ephemeral, machine-local)
+.playwright-mcp/
+
+# Planning (local scratchpad)
+plan/
+
+# The experimental web UI ships via its own component, never in the npm package
+web/

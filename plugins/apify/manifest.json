@@ -1,0 +1,13 @@
+{
+  "id": "apify",
+  "name": "Apify",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Keyed job source: run an Apify actor and map its results into the scanner.",
+  "hooks": ["provider"],
+  "requiredEnv": ["APIFY_TOKEN"],
+  "allowedHosts": ["api.apify.com"],
+  "skill": "skill.md",
+  "humanInTheLoop": true,
+  "homepage": "https://apify.com"
+}

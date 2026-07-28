@@ -50,9 +50,9 @@ language:
 | ファイル | 翻訳元 | 用途 |
 |---------|-------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | 共通コンテキスト、アーキタイプ、グローバルルール、日本市場の特記事項 |
-| `kyujin.md` | `modes/oferta.md` (ES) | 求人の完全評価（A-F ブロック） |
+| `kyujin.md` | `modes/oferta.md` (EN) | 求人の完全評価（A-F + G legitimacy ブロック） |
 | `oubo.md` | `modes/apply.md` (EN) | 応募フォーム記入のライブアシスタント |
-| `pipeline.md` | `modes/pipeline.md` (ES) | URL のインボックス / 求人の Second Brain |
+| `pipeline.md` | `modes/pipeline.md` (EN) | URL のインボックス / 求人の Second Brain |
 
 残りのモード（`scan`、`batch`、`pdf`、`tracker`、`auto-pipeline`、`deep`、`contacto`、`ofertas`、`project`、`training`）は意図的にこの PR に含めていません。これらは主にツール配管、パス、設定コマンドで構成されており、言語非依存であるべきだからです。
 
@@ -110,5 +110,5 @@ language:
 1. `CONTRIBUTING.md` に沿って issue を立てて提案する
 2. トーンの一貫性のため上記の用語集に従う
 3. 自然で慣用的な翻訳を行う — 一語一語の直訳はしない
-4. 構造要素（A-F ブロック、テーブル、コードブロック、ツール指示）は原文と完全に一致させる
+4. 構造要素（A-F + G ブロック、テーブル、コードブロック、ツール指示）は原文と完全に一致させる
 5. PR を出す前に実際の日本の求人（Wantedly や LinkedIn JP など）でテストする

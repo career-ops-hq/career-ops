@@ -1,0 +1,14 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case forward-deployed-vs-architect]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Despite the integration-design language, the client-facing / embedded / field-
+delivery core dominates — candidate model resolves to forward-deployed.
+
+---SCORE_SUMMARY---
+COMPANY: Solstice Systems
+ROLE: Field AI Engineer
+SCORE: 3.9
+ARCHETYPE: AI Forward Deployed
+LEGITIMACY: High Confidence
+---END_SUMMARY---

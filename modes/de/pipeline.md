@@ -36,6 +36,7 @@ Verarbeitet URLs von Stellenanzeigen, die in `data/pipeline.md` gesammelt wurden
 ## Intelligente Erkennung der Stellenanzeige aus der URL
 
 1. **Playwright (bevorzugt):** `browser_navigate` + `browser_snapshot`. Funktioniert mit allen SPAs.
+   - **Opt-in — CLI-Extraktor (`scan.extractor: cli` in `config/profile.yml`):** stattdessen `node browser-extract.mjs <url>` (`--mode jd`) ausführen — kompaktes `{ "url", "title", "text" }`, weniger Tokens (je nach Jobportal). Bei Fehler oder wenn es fehlt **still** auf `browser_navigate` + `browser_snapshot` zurückfallen.
 2. **WebFetch (Fallback):** Für statische Seiten oder wenn Playwright nicht verfügbar ist.
 3. **WebSearch (letzter Ausweg):** In sekundären Portalen suchen, die die Stellenanzeige indexieren.
 

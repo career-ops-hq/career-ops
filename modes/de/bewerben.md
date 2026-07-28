@@ -102,7 +102,7 @@ Hinweise:
 ## Schritt 6 — Nach dem Absenden (optional)
 
 Wenn der Kandidat bestätigt, dass die Bewerbung raus ist:
-1. Status in `applications.md` von "Evaluated" auf "Applied" setzen
+1. Status mit dem kanonischen CLI auf "Applied" setzen: `node set-status.mjs <report#> Applied` (die Tabelle in `applications.md` nie von Hand editieren)
 2. Block G im Report mit den finalen Antworten aktualisieren
 3. Nächsten Schritt vorschlagen: `/career-ops contacto` für LinkedIn-Outreach an den Personalleiter / Hiring Manager
 

@@ -19,8 +19,34 @@
         {
           "type": "generic",
           "path": "VERSION"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/marketplace.json",
+          "jsonpath": "$.metadata.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/marketplace.json",
+          "jsonpath": "$.plugins[0].version"
+        },
+        {
+          "type": "json",
+          "path": ".github/plugin/plugin.json",
+          "jsonpath": "$.version"
         }
       ]
+    },
+    "web": {
+      "release-type": "node",
+      "package-name": "career-ops-web",
+      "component": "web",
+      "include-component-in-tag": true
     }
   }
 }
