@@ -6353,7 +6353,8 @@ try {
   fail(`merge-tracker sibling-req clobber guard tests crashed: ${e.message}`);
 }
 
-// Tier-2 (entry num + company) title behavior, pinned deliberately (#2166 review).
+// Tier-2 (entry num + company): pins the TITLE FIELD ONLY (#2166 review).
+//
 // The title-preservation guard keys on reportNumMatched, which only tier-1
 // (report number + company) sets — so tier-2 preserves the existing title too.
 // That is intentional: tier-2 fires only AFTER tier-1 failed, i.e. the addition
@@ -6364,8 +6365,22 @@ try {
 // overwritten unconditionally on the update path, the title is the only field
 // left carrying the evidence that two reqs were distinct. This test exists so a
 // future refactor cannot flip that behavior silently.
+//
+// SCOPE — read before extending this test. The fixture below is a deliberately
+// pathological isolation case, and the row it produces is internally
+// inconsistent: the preserved title describes one req while the overwritten
+// report link points at another req's evaluation. That inconsistency is
+// PRE-EXISTING tier-2 behavior, not something this change introduces — before
+// the guard, the same collision overwrote the title as well, which loses
+// strictly more information (the tracker no longer records that the original
+// req was ever applied to). This test therefore asserts ONLY that the title
+// survives; it does NOT endorse the rest of the merged row as correct. The
+// underlying question — whether an uncorroborated num+company collision should
+// update in place at all, versus adding the row or surfacing a conflict — is a
+// tier-2 redesign, deliberately out of scope for this #2165 bugfix.
 console.log('\n🧪 Testing merge-tracker tier-2 (entry num) title preservation...');
 try {
+  const { roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
   const tier2Tmp = mkdtempSync(join(tmpdir(), 'career-ops-tier2-'));
   try {
     mkdirSync(join(tier2Tmp, 'data'));
@@ -6388,6 +6403,15 @@ try {
     writeFileSync(join(additionsDir, '007-initech.tsv'),
       '7\t2026-02-02\tInitech\tTechnical Program Manager, Compliance\tEvaluated\t4.4/5\t❌\t[22](reports/022-initech-2026-02-02.md)\tnum collision, distinct role\n');
 
+    // The isolation above is load-bearing: if these two titles ever DID fuzzy
+    // match, tier-3 could satisfy the assertions below and this would silently
+    // stop testing tier-2. Assert the premise rather than assuming it.
+    if (!roleFuzzyMatch('Staff Data Engineer, Batch Pipelines', 'Technical Program Manager, Compliance')) {
+      pass('tier-2 fixture roles do not fuzzy-match, so tier-2 is the only tier that can fire');
+    } else {
+      fail('tier-2 fixture roles now fuzzy-match — this test no longer isolates tier-2');
+    }
+
     const tier2Result = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
     if (tier2Result === null) {
       fail('merge-tracker.mjs crashed during tier-2 title preservation test');
@@ -6395,10 +6419,12 @@ try {
       const merged = readFileSync(tracker, 'utf-8');
       const initechRows = merged.split('\n').filter(l => l.includes('Initech'));
 
-      // One row (not two) proves tier-2 matched rather than falling through to
-      // an add; the bumped score proves the update path actually ran.
+      // Characterization only — this pins that the update path RAN (one row,
+      // not two, and the score moved), which is what makes the title assertion
+      // below non-vacuous. It is not a claim that in-place update is the right
+      // outcome for an uncorroborated tier-2 collision; see SCOPE above.
       if (initechRows.length === 1 && initechRows[0].includes('4.4/5')) {
-        pass('tier-2 (entry num + company) matches and applies the score upgrade');
+        pass('tier-2 collision takes the in-place update path (pre-existing behavior)');
       } else {
         fail(`tier-2 match/update broken: ${initechRows.length} Initech rows: ${initechRows.join(' // ')}`);
       }
