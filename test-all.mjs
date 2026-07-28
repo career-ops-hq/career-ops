@@ -9842,6 +9842,44 @@ try {
   } else {
     fail('computePortalStats failed on null portalHealthTsv');
   }
+
+  // auth/server/unknown statuses count toward the persistent-dead streak too
+  // (previously they were recorded as 'reachable' and never escalated): a WAF
+  // 403ing the scanner every run is coverage decay exactly like a dead slug.
+  const portalsYml2 = 'tracked_companies:\n  - name: WafBlocked\n  - name: FlakyServer\njob_boards: []';
+  const authHealthTsv = 'timestamp\tcompany\tstatus\n' +
+    '2026-07-01\tWafBlocked\tauth\n' +
+    '2026-07-02\tWafBlocked\tauth\n' +
+    '2026-07-03\tWafBlocked\tauth\n' +
+    '2026-07-01\tFlakyServer\tserver\n' +
+    '2026-07-02\tFlakyServer\treachable\n' + // recovery resets the streak
+    '2026-07-03\tFlakyServer\tserver\n';
+  const p2 = stats.computePortalStats(portalsYml2, null, [], authHealthTsv);
+  if (p2 && p2.persistentlyDead === 1) {
+    pass('computePortalStats counts auth/server streaks as persistently dead; recovery resets');
+  } else {
+    fail(`computePortalStats auth/server streaks wrong: ${JSON.stringify(p2?.persistentlyDead)}`);
+  }
+
+  // scan.mjs computeConsecutiveFailures — same inverted rule at the source:
+  // any non-healthy status increments, reachable/empty reset, and a legacy
+  // 4-status TSV computes identical streaks to before the change.
+  const { computeConsecutiveFailures } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const streaks = computeConsecutiveFailures([
+    { company: 'A', status: 'auth' },
+    { company: 'A', status: 'auth' },
+    { company: 'A', status: 'auth' },
+    { company: 'B', status: 'server' },
+    { company: 'B', status: 'empty' },     // empty is healthy → resets
+    { company: 'C', status: 'slug_gone' }, // legacy status still counts
+    { company: 'C', status: 'network' },
+    { company: 'D', status: 'reachable' },
+  ]);
+  if (streaks.get('A') === 3 && streaks.get('B') === 0 && streaks.get('C') === 2 && streaks.get('D') === 0) {
+    pass('computeConsecutiveFailures: auth/server/unknown count, reachable/empty reset, legacy statuses unchanged');
+  } else {
+    fail(`computeConsecutiveFailures wrong streaks: ${JSON.stringify([...streaks])}`);
+  }
 } catch (e) {
   fail(`test layout guard: ${e.message}`);
 }

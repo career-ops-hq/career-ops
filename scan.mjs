@@ -1525,10 +1525,14 @@ export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
 export function computeConsecutiveFailures(healthRecords) {
   const streaks = new Map();
   for (const r of healthRecords) {
-    if (r.status === 'slug_gone' || r.status === 'network') {
-      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-    } else if (r.status === 'reachable' || r.status === 'empty') {
+    // Healthy statuses reset the streak; every other status counts toward it.
+    // Inverted (vs. listing failure statuses) so the newer error kinds
+    // (auth/server/unknown) can't silently fall outside the streak again.
+    // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
+    if (r.status === 'reachable' || r.status === 'empty') {
       streaks.set(r.company, 0);
+    } else {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
   }
   return streaks;
@@ -2168,16 +2172,21 @@ async function main() {
   const nowStr = new Date().toISOString();
   const healthRecords = [];
   
+  // Record each errored target under its real classifyFetchError kind. Before
+  // this, only slug_gone/network were recorded and auth (401/403), server
+  // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
+  // every run was logged as healthy forever and never reached the 🚨 streak
+  // escalation. The TSV status vocabulary is additive: auth/server/unknown
+  // join the existing reachable|slug_gone|network|empty.
+  const errorKindByCompany = new Map(
+    errors.filter((e) => e.kind).map((e) => [e.company, e.kind])
+  );
   for (const t of targets) {
-    const isUnreachable = unreachableTargets.some(e => e.company === t.name);
-    const isNetwork = networkTargets.some(e => e.company === t.name);
     const isEmpty = emptyTargets.includes(t.name);
-    
-    let status = 'reachable';
-    if (isUnreachable) status = 'slug_gone';
-    else if (isNetwork) status = 'network';
-    else if (isEmpty) status = 'empty';
-    
+
+    let status = errorKindByCompany.get(t.name) || 'reachable';
+    if (status === 'reachable' && isEmpty) status = 'empty';
+
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
 
@@ -2188,16 +2197,18 @@ async function main() {
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
   
-  for (const e of [...unreachableTargets, ...networkTargets]) {
+  // All error kinds can reach the 🚨 persistent list (auth/server/unknown
+  // included — a WAF that 403s the scanner every run is coverage decay too).
+  // Below threshold, only slug_gone/network keep their dedicated warnings;
+  // auth/server/unknown stay in the one-off `Errors (N):` print below.
+  for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind)]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
       if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
-    } else {
-      if (e.kind === 'slug_gone') {
-        if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
-      } else {
-        newlyDeadNetwork.push(e);
-      }
+    } else if (e.kind === 'slug_gone') {
+      if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
+    } else if (e.kind === 'network') {
+      newlyDeadNetwork.push(e);
     }
   }
 
