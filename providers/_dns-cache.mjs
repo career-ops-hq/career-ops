@@ -87,6 +87,113 @@ const DEFAULT_MAX_ENTRIES = 512;
 // resolver otherwise feeds (see #2229), short enough that a resolver coming
 // back is picked up almost immediately.
 const DEFAULT_NEGATIVE_TTL_MS = 30_000;
+// Pacing defaults. The ceiling counts *lookups*; Node ≥20's autoSelectFamily
+// turns each one into an A and an AAAA query, so 400 lookups/min is ~800
+// upstream queries/min — comfortably under a stock Pi-hole's 1000/min, with
+// headroom left for the rest of the machine (#2229).
+const DEFAULT_LOOKUPS_PER_MIN = 400;
+// One sweep worker per token, so a cold start of CONCURRENCY=20 workers
+// (scan-ats-full.mjs) is admitted at once and pacing only bites afterwards.
+// Small runs against a handful of hostnames are therefore never slowed.
+const DEFAULT_BURST = 20;
+
+/**
+ * A token bucket: `capacity` calls may run at once, refilling at `ratePerMin`.
+ *
+ * The cache in this file collapses *repeat* lookups of one hostname, which is
+ * total for greenhouse/lever/ashby (1 host each) and structurally inert for
+ * workday and icims, where every tenant has its own hostname. Those lookups
+ * are all genuinely distinct — nothing to deduplicate — so the only remaining
+ * lever is how fast they are issued (#2229).
+ *
+ * Clock and timer are injectable so the tests are deterministic and offline.
+ *
+ * @param {object} [options] - Bucket tuning.
+ * @param {number} [options.ratePerMin] - Sustained calls per minute. Must be > 0.
+ * @param {number} [options.capacity] - Burst size, in tokens.
+ * @param {() => number} [options.now] - Clock source, injectable for tests.
+ * @param {(fn: Function, ms: number) => void} [options.setTimer] - Timer, injectable for tests.
+ * @returns {{ take: (fn: Function) => void, pending: number, stats: () => { delayed: number, waitedMs: number } }}
+ */
+export function createTokenBucket(options = {}) {
+  const ratePerMin = options.ratePerMin ?? DEFAULT_LOOKUPS_PER_MIN;
+  const capacity = options.capacity ?? DEFAULT_BURST;
+  const now = options.now ?? Date.now;
+  const setTimer = options.setTimer ?? setTimeout;
+
+  // Caller-supplied, so validate rather than assert: a zero or negative rate
+  // would make the refill interval Infinity and hang every queued lookup.
+  if (!Number.isFinite(ratePerMin) || ratePerMin <= 0) {
+    throw new RangeError(`ratePerMin must be a finite number > 0, got ${ratePerMin}`);
+  }
+  if (!Number.isFinite(capacity) || capacity < 1) {
+    throw new RangeError(`capacity must be a finite number >= 1, got ${capacity}`);
+  }
+
+  const tokensPerMs = ratePerMin / 60_000;
+  let tokens = capacity;
+  let lastRefill = now();
+  /** @type {{ fn: Function, queuedAt: number }[]} */
+  const queue = [];
+  let timerPending = false;
+  let delayed = 0;
+  let waitedMs = 0;
+
+  function refill() {
+    const t = now();
+    tokens = Math.min(capacity, tokens + (t - lastRefill) * tokensPerMs);
+    lastRefill = t;
+  }
+
+  function schedule() {
+    if (timerPending || queue.length === 0) return;
+    timerPending = true;
+    // At least 1ms: a fractional token left over must not schedule a 0ms spin.
+    setTimer(pump, Math.max(1, Math.ceil((1 - tokens) / tokensPerMs)));
+  }
+
+  function pump() {
+    timerPending = false;
+    refill();
+    // Bounded by queue length and by the tokens available this tick — both
+    // finite, so this cannot spin.
+    while (queue.length > 0 && tokens >= 1) {
+      tokens -= 1;
+      const { fn, queuedAt } = /** @type {{ fn: Function, queuedAt: number }} */ (queue.shift());
+      delayed++;
+      waitedMs += now() - queuedAt;
+      fn();
+    }
+    schedule();
+  }
+
+  return {
+    /**
+     * Run `fn` as soon as a token allows. FIFO: a queued call is never
+     * overtaken by a later one, so no hostname can be starved.
+     *
+     * The queue needs no cap of its own — it holds at most one entry per
+     * in-flight connection, and the sweep's own CONCURRENCY bounds that.
+     *
+     * @param {Function} fn - Work to admit.
+     * @returns {void}
+     */
+    take(fn) {
+      refill();
+      if (queue.length === 0 && tokens >= 1) {
+        tokens -= 1;
+        fn();
+        return;
+      }
+      queue.push({ fn, queuedAt: now() });
+      schedule();
+    },
+    /** @returns {number} Calls queued but not yet run. */
+    get pending() { return queue.length; },
+    /** @returns {{ delayed: number, waitedMs: number }} Counters for operator reporting. */
+    stats() { return { delayed, waitedMs }; },
+  };
+}
 
 /**
  * Build a caching wrapper around a callback-style `dns.lookup`.
