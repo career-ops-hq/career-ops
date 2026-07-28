@@ -193,6 +193,7 @@ career-ops est accessible via une commande slash unique avec plusieurs modes :
 /career-ops batch          → Évaluer plusieurs offres en lot
 /career-ops tracker        → Consulter l'état des candidatures
 /career-ops apply          → Remplir des formulaires de candidature avec l'IA
+/career-ops outcome        → Enregistrer le résultat et archiver la candidature
 /career-ops pipeline       → Traiter les URL en attente
 /career-ops contacto       → Message d'approche LinkedIn
 /career-ops deep           → Recherche approfondie sur une entreprise

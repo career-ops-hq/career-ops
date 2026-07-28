@@ -51,6 +51,9 @@ node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback ".
 - `--role "..."`: Disambiguate when multiple applications share the same company
 - `--cv "..."`: Custom CV file path (defaults to `cv.md`)
 - `--cover "..."`: Custom cover letter file path (if available)
+- `--url "..."`: Job posting URL (overrides auto-detection from tracker notes)
+- `--dry-run`: Preview outcome logging steps and tracker updates without writing files
+- `--json`: Format the stdout output as machine-readable JSON
 
 ## Archived Artifacts
 

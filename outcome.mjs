@@ -19,7 +19,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
@@ -77,6 +77,7 @@ const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options
   --role "..."       Disambiguate company match
   --cv "..."         Path to submitted CV (defaults to cv.md)
   --cover "..."      Path to submitted cover letter
+  --url "..."        Job posting URL (overrides auto-detection from tracker notes)
   --dry-run          Preview outcome logging without writing
   --json             Machine-readable JSON output`;
 
@@ -91,16 +92,24 @@ const flags = {
   cover: null,
   url: null,
   dryRun: false,
-  json: false,
+  json: rawArgs.includes('--json'),
 };
+
+function failExit(msg, code, exitCode) {
+  if (flags.json) {
+    console.log(JSON.stringify({ error: msg, code }));
+  } else {
+    console.error(`❌ ${msg}`);
+  }
+  process.exit(exitCode);
+}
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
   if (['--stage', '--feedback', '--note', '--role', '--cv', '--cover', '--url'].includes(a)) {
     const val = rawArgs[i + 1];
     if (val === undefined || val.startsWith('--')) {
-      console.error(`❌ Missing value for ${a}`);
-      process.exit(EXIT_USAGE);
+      failExit(`Missing value for ${a}`, 'usage', EXIT_USAGE);
     }
     const key = a.slice(2);
     flags[key] = val;
@@ -113,20 +122,14 @@ for (let i = 0; i < rawArgs.length; i++) {
     console.log(USAGE);
     process.exit(EXIT_OK);
   } else if (a.startsWith('--')) {
-    console.error(`❌ Unknown flag: ${a}`);
-    process.exit(EXIT_USAGE);
+    failExit(`Unknown flag: ${a}`, 'usage', EXIT_USAGE);
   } else {
     positional.push(a);
   }
 }
 
 if (positional.length < 2) {
-  if (flags.json) {
-    console.log(JSON.stringify({ error: 'Expected 2 positional arguments: <selector> <outcome_type>', code: 'usage' }));
-  } else {
-    console.error(`❌ Expected 2 positional arguments: <selector> <outcome_type>\n\n${USAGE}`);
-  }
-  process.exit(EXIT_USAGE);
+  failExit(`Expected 2 positional arguments: <selector> <outcome_type>\n\n${USAGE}`, 'usage', EXIT_USAGE);
 }
 
 const [selector, rawOutcomeType] = positional;
@@ -135,18 +138,12 @@ const outcomeConfig = OUTCOME_MAP[normalizedOutcomeKey];
 
 if (!outcomeConfig) {
   const validTypes = Object.keys(OUTCOME_MAP).join(' · ');
-  if (flags.json) {
-    console.log(JSON.stringify({ error: `Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`, code: 'invalid-outcome' }));
-  } else {
-    console.error(`❌ Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`);
-  }
-  process.exit(EXIT_USAGE);
+  failExit(`Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`, 'invalid-outcome', EXIT_USAGE);
 }
 
 const appsFile = resolveTrackerPath(CAREER_OPS);
 if (!existsSync(appsFile)) {
-  console.error(`❌ Tracker not found at ${appsFile}`);
-  process.exit(EXIT_NOT_FOUND);
+  failExit(`Tracker not found at ${appsFile}`, 'tracker-not-found', EXIT_NOT_FOUND);
 }
 
 const content = readFileSync(appsFile, 'utf-8');
@@ -160,47 +157,43 @@ for (let i = 0; i < lines.length; i++) {
 }
 
 if (rows.length === 0) {
-  console.error(`❌ Tracker at ${appsFile} is empty`);
-  process.exit(EXIT_NOT_FOUND);
+  failExit(`Tracker at ${appsFile} is empty`, 'tracker-empty', EXIT_NOT_FOUND);
 }
 
 let matchedRow = null;
+let candidates = [];
+
 if (/^\d+$/.test(selector)) {
   const num = parseInt(selector, 10);
-  let matches = rows.filter(r => r.num === num);
-  if (matches.length === 0) {
-    console.error(`❌ No tracker row with #${num}`);
-    process.exit(EXIT_NOT_FOUND);
+  candidates = rows.filter(r => r.num === num);
+  if (candidates.length === 0) {
+    failExit(`No tracker row with #${num}`, 'row-not-found', EXIT_NOT_FOUND);
   }
-  if (matches.length > 1 && flags.role) {
-    const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
-    if (narrowed.length === 1) matches = narrowed;
-  }
-  if (matches.length > 1) {
-    console.error(`❌ Ambiguous tracker #${num} match`);
-    process.exit(EXIT_AMBIGUOUS);
-  }
-  matchedRow = matches[0];
 } else {
   const key = normalizeCompany(selector);
-  let matches = rows.filter(r => normalizeCompany(r.company) === key);
-  if (matches.length === 0) {
-    matches = rows.filter(r => normalizeCompany(r.company).includes(key) || key.includes(normalizeCompany(r.company)));
+  candidates = rows.filter(r => normalizeCompany(r.company) === key);
+  if (candidates.length === 0) {
+    candidates = rows.filter(r => normalizeCompany(r.company).includes(key) || key.includes(normalizeCompany(r.company)));
   }
-  if (matches.length === 0) {
-    console.error(`❌ No tracker row for company matching "${selector}"`);
-    process.exit(EXIT_NOT_FOUND);
+  if (candidates.length === 0) {
+    failExit(`No tracker row for company matching "${selector}"`, 'company-not-found', EXIT_NOT_FOUND);
   }
-  if (matches.length > 1 && flags.role) {
-    const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
-    if (narrowed.length === 1) matches = narrowed;
-  }
-  if (matches.length > 1) {
-    console.error(`❌ Multiple tracker rows for company "${selector}" — pass --role or row #`);
-    process.exit(EXIT_AMBIGUOUS);
-  }
-  matchedRow = matches[0];
 }
+
+// Disambiguate if multiple rows are found
+if (candidates.length > 1 && flags.role) {
+  const narrowed = candidates.filter(r => roleFuzzyMatch(r.role, flags.role));
+  if (narrowed.length === 1) {
+    candidates = narrowed;
+  }
+}
+
+if (candidates.length > 1) {
+  const listMsg = candidates.map(c => `#${c.num}: ${c.company} (${c.role})`).join(', ');
+  failExit(`Multiple tracker rows matched "${selector}" (${listMsg}) — pass --role or row #`, 'ambiguous-match', EXIT_AMBIGUOUS);
+}
+
+matchedRow = candidates[0];
 
 const companySlug = slugify(matchedRow.company);
 const roleSlug = slugify(matchedRow.role);
@@ -279,30 +272,51 @@ if (flags.cv) {
   }
 }
 
-// Write or copy resolved CV artifact to outcomeDir.
+// Write or copy resolved CV artifact to outcomeDir, preserving existing files instead of overwriting.
 if (cvResolvedPath && existsSync(cvResolvedPath)) {
   const destName = isPdf ? 'submitted_cv.pdf' : 'submitted_cv.md';
-  copyFileSync(cvResolvedPath, join(outcomeDir, destName));
+  const cvDestPath = join(outcomeDir, destName);
+  if (!existsSync(cvDestPath)) {
+    copyFileSync(cvResolvedPath, cvDestPath);
+  }
 } else {
   // Case D: Fallback to the master root cv.md.
-  const masterCv = join(repoRoot, 'cv.md');
-  if (existsSync(masterCv)) {
-    copyFileSync(masterCv, join(outcomeDir, 'submitted_cv.md'));
-  } else {
-    writeFileSync(join(outcomeDir, 'submitted_cv.md'), `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
+  const masterCv = resolve(repoRoot, 'cv.md');
+  const cvDestPath = join(outcomeDir, 'submitted_cv.md');
+  if (!existsSync(cvDestPath)) {
+    if (existsSync(masterCv)) {
+      copyFileSync(masterCv, cvDestPath);
+    } else {
+      writeFileSync(cvDestPath, `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
+    }
   }
 }
 
-// 2. Snapshot submitted cover letter if provided
+// 2. Snapshot submitted cover letter if provided, preserving existing files instead of overwriting.
 if (flags.cover && existsSync(flags.cover)) {
-  copyFileSync(flags.cover, join(outcomeDir, 'submitted_cover_letter.md'));
+  const coverDestPath = join(outcomeDir, 'submitted_cover_letter.md');
+  if (!existsSync(coverDestPath)) {
+    copyFileSync(flags.cover, coverDestPath);
+  }
 }
 
-// 3. Archive job posting or write explicit stub
+// 3. Archive job posting or write explicit stub, preserving existing files instead of overwriting.
 let postingArchived = false;
+let resolvedPostingPath = null;
 const targetUrl = flags.url || (matchedRow.notes && matchedRow.notes.match(/https?:\/\/[^\s|)]+/)?.[0]);
 
-if (targetUrl) {
+// Case 1: Check if there's already an archived posting link in the notes column
+const notesLink = matchedRow.notes && matchedRow.notes.match(/local:(jds\/[^\s|)]+)/)?.[1];
+if (notesLink) {
+  const fullPath = resolve(repoRoot, notesLink);
+  if (existsSync(fullPath)) {
+    resolvedPostingPath = fullPath;
+    postingArchived = true;
+  }
+}
+
+// Case 2: Run archive-posting.mjs to generate a new archive if not resolved or not found
+if (!resolvedPostingPath && targetUrl) {
   try {
     execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`], {
       cwd: CAREER_OPS,
@@ -310,13 +324,24 @@ if (targetUrl) {
       stdio: 'ignore',
       timeout: 45000,
     });
-    postingArchived = true;
+    const expectedFilename = `${today()}_${slugify(matchedRow.company)}_${slugify(matchedRow.role)}.pdf`;
+    const expectedFullPath = resolve(repoRoot, 'jds', expectedFilename);
+    if (existsSync(expectedFullPath)) {
+      resolvedPostingPath = expectedFullPath;
+      postingArchived = true;
+    }
   } catch {
     postingArchived = false;
   }
 }
 
-if (!postingArchived) {
+// Copy posting snapshot to the outcomes directory, preserving the original if it exists
+if (postingArchived && resolvedPostingPath) {
+  const postingDest = join(outcomeDir, 'posting.pdf');
+  if (!existsSync(postingDest)) {
+    copyFileSync(resolvedPostingPath, postingDest);
+  }
+} else {
   const stubContent = `# Job Posting Snapshot — Unavailable
 
 - **Date**: ${today()}
@@ -326,7 +351,10 @@ if (!postingArchived) {
 - **URL**: ${targetUrl || 'None provided'}
 - **Reason**: Live posting URL could not be reached or archived.
 `;
-  writeFileSync(join(outcomeDir, 'posting_missing.md'), stubContent);
+  const stubDest = join(outcomeDir, 'posting_missing.md');
+  if (!existsSync(stubDest)) {
+    writeFileSync(stubDest, stubContent);
+  }
 }
 
 // 4. Append entry to outcome.md
@@ -372,7 +400,7 @@ try {
   const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CAREER_OPS, env: process.env, encoding: 'utf-8' });
   setStatusResult = JSON.parse(statusOutput);
 } catch (err) {
-  console.error(`⚠️ Tracker update via set-status.mjs warning: ${err.message}`);
+  failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
 }
 
 const result = {
