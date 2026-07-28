@@ -39,7 +39,7 @@ Each check contributes a fixed weight; every deduction attaches a `critical`, `w
 |--------|-------|----------------|
 | 15 | Real, selectable text present (>= 300 chars) | An image-only / rasterized CV has no text layer for the ATS to read. |
 | 20 | Standard section headings (Experience, Education, Skills required; Summary/Projects/Certifications bonus) | ATS parsers key off recognizable headings to segment the CV. |
-| 15 | Contact email (and phone) reachable in the body | ATS routinely drop semantic `<header>`/`<footer>` regions; contact info must sit in the main body. (A plain `<div class="header">` title block, as in the shipped template, is body content and is not flagged.) |
+| 15 | Contact email reachable in the body (phone presence checked, but not its placement) | ATS routinely drop semantic `<header>`/`<footer>` regions; the email must sit in the main body. (A plain `<div class="header">` title block, as in the shipped template, is body content and is not flagged.) |
 | 20 | Single-column, no layout tables / multi-column CSS | Tables and columns scramble the reading order extractors follow. |
 | 10 | No CV text baked into images | ATS cannot read text inside images. |
 | 10 | Standard, embeddable fonts | Exotic fonts can extract as garbled or missing glyphs. |
