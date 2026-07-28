@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — DNS lookup pacing');
 
 try {
-  const { createTokenBucket, createCachedLookup } = await import(
+  const { createTokenBucket, createCachedLookup, lookupsPerMinFromEnv } = await import(
     pathToFileURL(join(ROOT, 'providers/_dns-cache.mjs')).href
   );
 
@@ -217,6 +217,45 @@ try {
       pass('lookupsPerMin: 0 disables pacing — every miss goes straight to the resolver');
     } else {
       fail(`disable wrong: calls=${resolver.calls.length} timers=${setTimer.pending()}`);
+    }
+  }
+
+  // --- env parsing: unset means the default, junk means the default, 0 means off ---
+  {
+    const seen = {
+      unset: lookupsPerMinFromEnv({}),
+      empty: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: '' }),
+      set: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: '120' }),
+      off: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: '0' }),
+      junk: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: 'fast' }),
+      negative: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: '-1' }),
+    };
+
+    if (seen.unset === 400 && seen.empty === 400 && seen.set === 120
+        && seen.off === 0 && seen.junk === 400 && seen.negative === 400) {
+      pass('CAREER_OPS_DNS_LOOKUPS_PER_MIN parses, defaults to 400, and 0 disables');
+    } else {
+      fail(`env parsing wrong: ${JSON.stringify(seen)}`);
+    }
+  }
+
+  // --- pacing is on by default, with no options passed ---
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const resolver = mkResolver();
+    // Only the clock and timer are injected: rate and burst take their defaults.
+    const lookup = createCachedLookup(resolver, { now: () => clock, setTimer });
+
+    for (let i = 0; i < 25; i++) lookupOnce(lookup, `d${i}.example.com`);
+    const admitted = resolver.calls.length;
+    const queued = setTimer.pending() > 0;
+    resolver.flush();
+
+    if (admitted === 20 && queued) {
+      pass('pacing defaults to on — 25 hostnames admit the 20-token burst and queue the rest');
+    } else {
+      fail(`default pacing wrong: admitted=${admitted} queued=${queued}`);
     }
   }
 } catch (e) {

@@ -42,7 +42,11 @@
  *         p.lookup('example.com').then(()=>console.log('promises hit patch:',n>0))"
  *   - Failed resolutions are never cached, so an outage cannot be pinned in.
  *
- * Opt out entirely with `CAREER_OPS_NO_DNS_CACHE=1`.
+ * Two env knobs, both read at import time:
+ *   - `CAREER_OPS_NO_DNS_CACHE=1` opts out entirely — no memoization AND no
+ *     pacing, since both live inside this patched lookup.
+ *   - `CAREER_OPS_DNS_LOOKUPS_PER_MIN` caps resolver-bound lookups
+ *     (default 400; `0` disables pacing but keeps the cache).
  */
 
 import dns from 'node:dns';
@@ -309,6 +313,30 @@ export function createCachedLookup(realLookup, options = {}) {
   return cachedLookup;
 }
 
+/**
+ * Read the pacing ceiling from the environment.
+ *
+ * Unparseable values warn and fall back rather than throwing: this runs at
+ * import time inside every scanner, and a typo in an env var must not take
+ * the whole run down.
+ *
+ * @param {Record<string, string | undefined>} [env] - Environment to read.
+ * @returns {number} Lookups per minute; 0 disables pacing.
+ */
+export function lookupsPerMinFromEnv(env = process.env) {
+  const raw = env.CAREER_OPS_DNS_LOOKUPS_PER_MIN;
+  if (raw === undefined || raw === '') return DEFAULT_LOOKUPS_PER_MIN;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(
+      `⚠ CAREER_OPS_DNS_LOOKUPS_PER_MIN=${raw} is not a non-negative number — `
+      + `using the default ${DEFAULT_LOOKUPS_PER_MIN} lookups/min`,
+    );
+    return DEFAULT_LOOKUPS_PER_MIN;
+  }
+  return n;
+}
+
 if (process.env.CAREER_OPS_NO_DNS_CACHE !== '1') {
-  dns.lookup = createCachedLookup(dns.lookup);
+  dns.lookup = createCachedLookup(dns.lookup, { lookupsPerMin: lookupsPerMinFromEnv() });
 }
