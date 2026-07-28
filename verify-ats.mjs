@@ -68,10 +68,14 @@ const GENERIC_FAMILIES = new Set([
 ]);
 
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
-// At least 9 digits total so CV date ranges like "2019 - 2024" (8 digits) do not
-// register as a phone number and earn a phantom contact point. Real numbers such
-// as "+1 415 555 0100" (11 digits) and typical international formats still match.
-const PHONE_RE = /\+?(?:\(\d{1,4}\)|\d)[\d\s().-]{7,24}\d/;
+// A run of phone-shaped characters. The length is bounded ({7,24}), so the regex
+// itself is ReDoS-safe; the >= 9-digit rule that separates a real number from a
+// CV date range like "2019 - 2024" (8 digits) is enforced in hasPhoneNumber, not
+// in the pattern (counting digits in a regex without an ambiguous quantifier is
+// awkward, so we keep the pattern simple and count afterwards).
+const PHONE_CANDIDATE_RE = /\+?\(?\d[\d\s().-]{6,23}\d/g;
+const PHONE_MIN_DIGITS = 9;
+const PHONE_MAX_CANDIDATES = 50;   // bound the work on adversarial digit-heavy input
 
 /**
  * Collapse all runs of whitespace to single spaces and trim the ends.
@@ -88,6 +92,22 @@ function stripInline(fragment) {
 }
 
 /**
+ * Remove the regions an ATS text extractor never sees as content — `<script>`
+ * and `<style>` bodies and HTML comments — while leaving element tags in place.
+ * Used both for visible-text extraction and for link parsing, so a `mailto:`/
+ * `tel:` hidden in a comment or script cannot masquerade as reachable contact
+ * info.
+ * @param {string} html
+ * @returns {string}
+ */
+function stripNonContentRegions(html) {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+}
+
+/**
  * Extract the human-visible text of the CV: drop script/style/comments, unwrap
  * tags, decode the handful of entities that appear in these documents, collapse
  * whitespace. This is what an ATS text extractor is (roughly) left with.
@@ -96,16 +116,69 @@ function stripInline(fragment) {
  */
 function extractVisibleText(html) {
   return collapse(
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
+    stripNonContentRegions(html)
       .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
       .replace(/&nbsp;/gi, ' ')
       .replace(/&amp;/gi, '&')
       .replace(/&lt;/gi, '<')
       .replace(/&gt;/gi, '>')
   );
+}
+
+/**
+ * Whether `text` contains something that looks like a real phone number: a
+ * bounded phone-shaped run carrying at least PHONE_MIN_DIGITS digits. Only the
+ * first PHONE_MAX_CANDIDATES runs are inspected, so pathological digit-heavy
+ * input can't blow up. Short numeric spans such as the date range "2019 - 2024"
+ * (8 digits) are rejected.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function hasPhoneNumber(text) {
+  const candidates = text.match(PHONE_CANDIDATE_RE);
+  if (!candidates) return false;
+  for (const candidate of candidates.slice(0, PHONE_MAX_CANDIDATES)) {
+    if ((candidate.match(/\d/g) || []).length >= PHONE_MIN_DIGITS) return true;
+  }
+  return false;
+}
+
+/**
+ * Parse actual `<a href>` targets (both quote forms), ignoring script/style/
+ * comment regions, and report whether a reachable `mailto:`/`tel:` link exists.
+ * This is the fallback for contact info whose visible text isn't the address
+ * itself (e.g. `<a href="mailto:…">Email me</a>`), without letting raw-HTML
+ * noise satisfy the check.
+ * @param {string} html
+ * @returns {{email:boolean, phone:boolean}}
+ */
+function linkContacts(html) {
+  let email = false, phone = false;
+  for (const m of stripNonContentRegions(html).matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    const href = (m[1] ?? m[2]).trim();
+    if (/^mailto:.+@.+/i.test(href)) email = true;
+    else if (/^tel:.*\d/i.test(href)) phone = true;
+  }
+  return { email, phone };
+}
+
+/**
+ * Whether a CSS declaration blob asks for two or more columns, via either
+ * `column-count: N` (N >= 2, any number of digits) or the `columns` shorthand
+ * (a bare integer token >= 2). Values carrying a unit like `11px` are column
+ * widths, not counts, so they are deliberately not treated as multi-column.
+ * @param {string} blob
+ * @returns {boolean}
+ */
+function hasMultiColumn(blob) {
+  const count = blob.match(/column-count\s*:\s*(\d+)/i);
+  if (count && Number(count[1]) >= 2) return true;
+  for (const m of blob.matchAll(/\bcolumns\s*:\s*([^;{}]+)/gi)) {
+    for (const token of m[1].trim().split(/\s+/)) {
+      if (/^\d+$/.test(token) && Number(token) >= 2) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -231,14 +304,19 @@ function auditAts(html, opts = {}) {
     .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
     .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ');
   const bodyText = extractVisibleText(bodyOnlyHtml);
-  const hasEmail = EMAIL_RE.test(text) || /mailto:[^"'>\s]*@/i.test(html);
-  const emailInBody = EMAIL_RE.test(bodyText) || /mailto:[^"'>\s]*@/i.test(bodyOnlyHtml);
-  const hasPhone = PHONE_RE.test(text) || /tel:/i.test(html);
-  if (hasEmail) {
+  const links = linkContacts(html);
+  const bodyLinks = linkContacts(bodyOnlyHtml);
+  const hasEmail = EMAIL_RE.test(text) || links.email;
+  const emailInBody = EMAIL_RE.test(bodyText) || bodyLinks.email;
+  const hasPhone = hasPhoneNumber(text) || links.phone;
+  // The 10 email points are contingent on the address being reachable in the
+  // body: an email that survives only inside a semantic <header>/<footer> is
+  // effectively invisible to the ATS, so it earns no points and is a critical
+  // (a bare warning would be ignored by isPass and let the CV pass anyway).
+  if (emailInBody) {
     score += 10;
-    if (!emailInBody) {
-      add('warning', 'Contact email appears only inside a semantic <header>/<footer> element; ATS routinely drop those regions. Move contact details into the main document body.');
-    }
+  } else if (hasEmail) {
+    add('critical', 'Contact email appears only inside a semantic <header>/<footer> element; ATS routinely drop those regions, so the address is effectively unreachable. Move contact details into the main document body.');
   } else {
     add('critical', 'No email address found. ATS and recruiters need a parseable contact email in the body of the CV.');
   }
@@ -250,7 +328,7 @@ function auditAts(html, opts = {}) {
   // definition-list-style certifications block uses it and parses fine).
   let layout = WEIGHTS.layout;
   const tableTags = (html.match(/<table\b/gi) || []).length;
-  const multiColumn = /column-count\s*:\s*[2-9]/i.test(css) || /\bcolumns\s*:\s*[^;{}]*\b[2-9]\b/i.test(css);
+  const multiColumn = styleBlobs.some(hasMultiColumn);
   const absPos = (css.match(/position\s*:\s*absolute/gi) || []).length
     + inlineStyles.filter(s => /position\s*:\s*absolute/i.test(s)).length;
   if (tableTags > 0) {
@@ -481,6 +559,43 @@ function runSelfTest() {
   check('a bare year range is not counted as a phone', hasIssue(yearRangeOnly.issues, 'no phone number'));
   check('a real phone number is detected', !hasIssue(auditAts(buildCleanHtml()).issues, 'no phone number'));
 
+  // Email only inside a semantic <header> is unreachable ⇒ critical (a warning
+  // alone would be ignored by isPass and let the CV pass anyway).
+  const headerOnlyEmail = auditAts(
+    '<html><head><meta charset="utf-8"></head><body>' +
+    '<header><div>jane@example.com | +1 415 555 0100</div></header>' +
+    '<div class="section-title">Work Experience</div>' +
+    '<div class="section-title">Education</div><div class="section-title">Skills</div>' +
+    '<p>Built and operated reliable, high-throughput distributed systems on Kubernetes with ' +
+    'clean, well-tested Python services used daily across many engineering teams, focusing on ' +
+    'observability, cost efficiency, and resilient delivery pipelines shipped safely to ' +
+    'production several times per day for years.</p></body></html>'
+  );
+  check('email only in a semantic <header> is critical', hasCritical(headerOnlyEmail.issues) && hasIssue(headerOnlyEmail.issues, '<header>'));
+  check('email only in a semantic <header> fails the gate', !isPass(headerOnlyEmail, DEFAULT_MIN_SCORE));
+
+  // A mailto:/tel: buried in a comment or <script> must NOT satisfy detection…
+  const buriedContact = auditAts(
+    '<html><head><meta charset="utf-8"></head><body>' +
+    '<!-- <a href="mailto:ghost@example.com">x</a> --><script>var t = "tel:+15551234567";</script>' +
+    '<div class="section-title">Work Experience</div><div class="section-title">Education</div>' +
+    '<div class="section-title">Skills</div>' +
+    '<p>Built and operated reliable, high-throughput distributed systems on Kubernetes with clean, ' +
+    'well-tested Python services used daily across many engineering teams for years and years now.</p>' +
+    '</body></html>'
+  );
+  check('mailto/tel in a comment or script is not a reachable email', hasIssue(buriedContact.issues, 'no email'));
+
+  // …but a mailto: href whose visible text is not the address itself does count.
+  const mailtoHrefOnly = auditAts(buildCleanHtml({ email: '<a href="mailto:jane@example.com">Email me</a>' }));
+  check('mailto: href with non-email link text still counts', !hasIssue(mailtoHrefOnly.issues, 'no email'));
+
+  // Multi-column layout is flagged for two-digit counts and for inline styles.
+  const twoDigitCols = auditAts(buildCleanHtml({ extraBody: '<style>.grid{column-count:10;}</style>' }));
+  check('two-digit column-count is flagged', hasIssue(twoDigitCols.issues, 'multi-column'));
+  const inlineCols = auditAts(buildCleanHtml({ extraBody: '<div style="columns: 2">a b</div>' }));
+  check('inline columns shorthand is flagged', hasIssue(inlineCols.issues, 'multi-column'));
+
   // Keyword coverage is opt-in and never touches the structural score.
   const withKeywords = auditAts(buildCleanHtml(), { keywords: 'python, kubernetes, rust' });
   check('keyword coverage computed when supplied', withKeywords.keywordCoverage !== null);
@@ -534,13 +649,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     let minScore = DEFAULT_MIN_SCORE;
     let asJson = false;
 
+    // A value is "missing" if there is no next token or the next token is itself
+    // an option flag (e.g. `--keywords --json` must error, not swallow --json).
+    const missingValue = (t) => t === undefined || t.startsWith('-');
+
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg === '--keywords') {
-        if (!args[i + 1]) { console.error('ERROR: --keywords requires a comma-separated list'); process.exit(1); }
+        if (missingValue(args[i + 1])) { console.error('ERROR: --keywords requires a comma-separated list'); process.exit(1); }
         keywords = args[++i];
       } else if (arg === '--role') {
-        if (!args[i + 1]) { console.error('ERROR: --role requires a value'); process.exit(1); }
+        if (missingValue(args[i + 1])) { console.error('ERROR: --role requires a value'); process.exit(1); }
         role = args[++i];
       } else if (arg === '--min-score') {
         if (!args[i + 1]) { console.error('ERROR: --min-score requires a number'); process.exit(1); }
@@ -595,6 +714,7 @@ Keyword coverage (--keywords / --role) is advisory and never changes the score.`
     } else {
       printHuman(result, file, minScore);
     }
-    process.exit(pass ? 0 : 1);
+    // Set exitCode (don't process.exit) so buffered stdout drains before exit.
+    process.exitCode = pass ? 0 : 1;
   }
 }
