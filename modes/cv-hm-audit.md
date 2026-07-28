@@ -37,7 +37,9 @@ Resolve the role to a report. Locate the tailored CV artifact per Input 4. Run `
 
 If the tailored CV is missing, stop here with: *"No tailored CV found for {company}. Run `/career-ops pdf` first — auditing the untailored `cv.md` would give you verdicts on a CV you are not sending."*
 
-If no JD text is reachable, continue against the report's requirement summary and state the degradation in the output. Partial-but-honest beats perfect-or-nothing.
+If a report exists but no JD text is reachable, continue against the report's requirement summary and state the degradation in the output. Partial-but-honest beats perfect-or-nothing.
+
+If **neither** a JD nor a report is available, stop: the reviewer would have no role context, and a verdict on bullets with nothing to judge them against is worse than no verdict. Ask for the JD text or the posting URL.
 
 ## Step 2 — Identify the reviewer, and declare the tier
 
