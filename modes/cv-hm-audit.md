@@ -22,7 +22,12 @@ Requires a tailored CV produced by `modes/pdf.md`. If none exists for the compan
 1. **Role** — a report number or company slug. If omitted, use the most recent evaluated role (same argument pattern as `cover`).
 2. **Report** at `reports/{num}-{company}-{date}.md` — read for the `**URL:**` header, archetype, and identified gaps.
 3. **JD** at `jds/{slug}.md`, or fetched from the report's `**URL:**`.
-4. **Tailored bullets** — read `/tmp/cv-{candidate}-{company}.json` if it still exists (clean `experience[].bullets[]` iteration). If it is gone, extract the `<li>` items from the newest `output/cv-*-{company}.html`. Never parse the `.pdf`.
+4. **Tailored bullets** — resolve the artifact for *this* role, in order. Never parse the `.pdf`.
+   1. `/tmp/cv-{candidate}-{company}.json` from the same session — the cleanest source (`experience[].bullets[]`).
+   2. The HTML recorded for this report in `data/pdf-index.tsv` (`report → pdf → html`, written by `generate-pdf.mjs`). Look the row up by report number.
+   3. A path the user supplies explicitly.
+
+   Only if none of those resolve, fall back to the newest `output/cv-*-{company}.html` — and say so, because a company with two open roles produces several files whose names carry the candidate and company but not the role. Auditing the wrong CV silently is worse than asking. When reading HTML, take the `<li>` items, which the generator emits only for experience and project bullets.
 5. **Factual floor** — run `node jd-skill-gap.mjs` for the zero-LLM classification of every JD requirement into `existing` / `supportedByResume` / `gap`.
 6. **Scope of truth** — `cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`. These bound what the reviewer may recommend.
 
@@ -66,9 +71,10 @@ Dispatch a single subagent per the convention in `.claude/skills/career-ops/SKIL
 
 The brief contains:
 
-- The JD (or the report's requirement summary, if degraded).
+- The JD, and the `jd-skill-gap.mjs` output.
+
+  **If no JD text was reachable**, supply the report's requirement summary instead and state in the brief that the skill-gap classification is **unavailable**. Instruct the reviewer explicitly: *"Do not infer requirement coverage, skill gaps, or fit conclusions from the report summary alone — it is a human précis, not the JD. Judge the bullets on their own merits and say which questions you could not answer without the posting."*
 - The tailored bullets, **numbered**.
-- The `jd-skill-gap.mjs` output.
 - The persona and its tier.
 - The candidate's real scope from `cv.md` and `article-digest.md`, with this instruction verbatim: *"You may recommend cutting or reframing any bullet. You may never recommend a claim the source files do not support. If a requirement is unmet, say it is unmet — do not invent coverage for it."*
 
@@ -93,14 +99,14 @@ Plus:
 
 Present to the user **before any PDF regeneration**: the identity guess, the tier and its sources, the full table, and the overall verdict. The user makes the judgment call on which rewrites to take.
 
-Then append to `reports/{num}-{company}-{date}.md`:
+Then write this section into `reports/{num}-{company}-{date}.md`:
 
 ```markdown
 ## HM Audit
 
 **Reviewer:** {tier label} — {name/function/synthesized descriptor}
-**Sources:** {links, or "none — synthesized from JD and company research"}
-**Audited:** output/cv-{candidate}-{company}.html ({N} bullets)
+**Sources:** {links, or "none — synthesized from the available JD/report context"}
+**Audited:** {artifact path} ({N} bullets) — {YYYY-MM-DD}
 **Overall:** {scope/seniority read}
 **Would advance to screen:** {yes/no} — {single biggest reason}
 
@@ -108,7 +114,9 @@ Then append to `reports/{num}-{company}-{date}.md`:
 |---|---|---|---|---|
 ```
 
-This follows the same convention as the cover letter draft appended by `modes/oferta.md`. If the role has no report, present the audit inline and say plainly that it was not persisted because there is no report to attach it to — never create a stray file.
+**Exactly one `## HM Audit` section per report.** If one already exists, **replace it wholesale** rather than appending a second — a re-run after retailoring supersedes the previous audit, and `interview-prep` reads this as the single current audit. The `**Audited:**` line carries the artifact and date, so which CV was judged stays unambiguous.
+
+Placement follows the convention of the cover letter draft appended by `modes/oferta.md`. If the role has no report, present the audit inline and say plainly that it was not persisted because there is no report to attach it to — never create a stray file.
 
 ## Guardrails
 
