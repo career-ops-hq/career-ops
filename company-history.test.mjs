@@ -378,7 +378,7 @@ try {
 
 // Value-taking flags must not consume the next flag as their value:
 // `--company --summary` would otherwise filter to a company named "--summary".
-for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-history', '--summary'], ['--followups='], ['--company=']]) {
+for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-history', '--summary'], ['--followups='], ['--company='], ['--company', ''], ['--scan-history', ''], ['--followups', '']]) {
   const label = flagArgs.join(' ');
   try {
     execFileSync('node', [scriptPath, ...flagArgs], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });

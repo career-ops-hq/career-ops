@@ -70,6 +70,13 @@ const EXPLANATION_LINE =
   'high-volume inboxes, evergreen requisitions, re-opened searches, and your own unlogged responses ' +
   'all produce these patterns — facts, not verdicts';
 
+// Locale-independent company ordering. A bare String.localeCompare() sorts by
+// the host's default locale, so emitted ordering could differ between machines;
+// pin the collator to 'en' so the output is byte-for-byte deterministic
+// everywhere. Reused by both the JSON card ordering and the summary tiebreaker.
+const companyCollator = new Intl.Collator('en');
+const compareCompany = (a, b) => companyCollator.compare(String(a), String(b));
+
 // --- CLI args ---
 const KNOWN_FLAGS = ['--summary', '--self-test', '--company', '--silence-window', '--include-stale', '--scan-history', '--followups', '--help', '-h'];
 const VALUE_FLAGS = ['--company', '--silence-window', '--scan-history', '--followups'];
@@ -119,12 +126,14 @@ function parseArgs(argv) {
     return args[idx + 1];
   };
 
-  // A value-taking flag must actually receive a value: without this guard
-  // `--company --summary` would consume `--summary` as the company name and
-  // silently filter to a company that does not exist.
+  // A value-taking flag must actually receive a non-empty value: without this
+  // guard `--company --summary` would consume `--summary` as the company name,
+  // and `--company ""` / `--company=` would filter to a company that does not
+  // exist. Reject the missing, the next-is-a-flag, and the empty-string cases in
+  // both the space-separated (`--company ""`) and equals (`--company=`) forms.
   for (let idx = 0; idx < args.length; idx += 1) {
     const flag = args[idx];
-    if (VALUE_FLAGS.includes(flag) && (args[idx + 1] === undefined || args[idx + 1].startsWith('--'))) {
+    if (VALUE_FLAGS.includes(flag) && (args[idx + 1] === undefined || args[idx + 1] === '' || args[idx + 1].startsWith('--'))) {
       console.error(`Error: ${flag} expects a value.`);
       console.error(USAGE);
       process.exit(1);
@@ -234,9 +243,19 @@ export async function loadStatusLogSource() {
     return { loaded: false, appliedDateByNum: new Map(), medianResponseDays: null };
   }
 
+  // `loaded` reports whether this source can actually PRODUCE data, not merely
+  // whether the import resolved. The merged funnel-velocity.mjs exports neither
+  // optional helper, so when no usable helper is present the source is inert and
+  // must report absent — otherwise callers treat empty enrichment as loaded.
+  const hasAppliedHelper = typeof mod.getAppliedDateObservations === 'function';
+  const hasMedianHelper = typeof mod.computeMedianResponseDays === 'function';
+  if (!hasAppliedHelper && !hasMedianHelper) {
+    return { loaded: false, appliedDateByNum: new Map(), medianResponseDays: null };
+  }
+
   const appliedDateByNum = new Map();
   try {
-    if (typeof mod.getAppliedDateObservations === 'function') {
+    if (hasAppliedHelper) {
       const observations = mod.getAppliedDateObservations();
       if (Array.isArray(observations)) {
         for (const obs of observations) {
@@ -252,7 +271,7 @@ export async function loadStatusLogSource() {
 
   let medianResponseDays = null;
   try {
-    if (typeof mod.computeMedianResponseDays === 'function') {
+    if (hasMedianHelper) {
       const value = mod.computeMedianResponseDays();
       if (typeof value === 'number' && Number.isFinite(value)) medianResponseDays = value;
     }
@@ -330,14 +349,21 @@ export function computeResponsiveness(rows, followupCountsByAppNum, opts = {}) {
         clearInstruction: `if they actually responded, node set-status.mjs ${row.num} <state> --note "responded <date>" clears this`,
       });
     } else if (RESPONDED_STATUSES.has(normalized)) {
-      const respondedDate = parseDate(row.date) ? row.date : undefined;
-      const ageBasisDate = respondedDate ? parseDate(respondedDate) : null;
+      // row.date is the EVALUATION date, not the date the company replied. Use
+      // it only to age the fact for staleness, and expose it through the same
+      // dateBasis convention the silent branch uses — never as a claimed
+      // response/contact date.
+      const evalDate = parseDate(row.date) ? row.date : undefined;
+      const ageBasisDate = evalDate ? parseDate(evalDate) : null;
       const fact = {
         num: row.num,
         outcome: OUTCOME_LABELS[normalized] || row.status,
         stale: ageBasisDate ? daysBetween(ageBasisDate, now) > staleAfterDays : false,
       };
-      if (respondedDate) fact.respondedDate = respondedDate;
+      if (evalDate) {
+        fact.date = evalDate;
+        fact.dateBasis = 'evaluation-date';
+      }
       if (normalized === 'rejected') fact.note = 'a rejection is an answer';
       facts.push(fact);
     }
@@ -456,7 +482,7 @@ export function buildCompanyCards(sources, opts = {}) {
     cards.push({ company: companyName, key, responsiveness, postingChurn, explanations });
   }
 
-  cards.sort((a, b) => a.company.localeCompare(b.company));
+  cards.sort((a, b) => compareCompany(a.company, b.company));
   hygieneAgedApplied.sort((a, b) => b.silentDays - a.silentDays);
 
   return {
@@ -511,7 +537,7 @@ export function renderSummary(result) {
 
   const sorted = [...result.companies].sort((a, b) => {
     const rank = (LABEL_ORDER[a.responsiveness.label] ?? 9) - (LABEL_ORDER[b.responsiveness.label] ?? 9);
-    return rank !== 0 ? rank : a.company.localeCompare(b.company);
+    return rank !== 0 ? rank : compareCompany(a.company, b.company);
   });
 
   if (sorted.length === 0) {
@@ -527,7 +553,7 @@ export function renderSummary(result) {
         lines.push(`      #${f.num} silent ${f.silentDays}d since ${f.appliedDate} — ${f.followupsSent} follow-up(s), ${f.confidence}${staleTag}`);
       } else {
         const note = f.note ? ` (${f.note})` : '';
-        lines.push(`      #${f.num} ${f.outcome}${f.respondedDate ? ` on ${f.respondedDate}` : ''}${note}`);
+        lines.push(`      #${f.num} ${f.outcome}${f.date ? ` (evaluated ${f.date})` : ''}${note}`);
       }
     }
     for (const c of card.postingChurn.clusters) {
@@ -543,7 +569,7 @@ export function renderSummary(result) {
 }
 
 // --- Self-test ---
-function runSelfTest() {
+async function runSelfTest() {
   let pass = 0;
   let fail = 0;
   const check = (cond, label) => {
@@ -695,13 +721,20 @@ function runSelfTest() {
     check(result.companies[0].postingChurn.label === 'no-scan-data', 'churn axis reports no-scan-data when scan-history is absent');
   }
 
-  // --- absent funnel-velocity module -> medianResponseDays omitted/null, statusLog false, no crash ---
+  // --- funnel-velocity loader is honestly inert against the merged module ---
   {
-    // Synchronous self-test cannot await the dynamic import directly, but we
-    // can assert the same contract computeResponsiveness/buildCompanyCards
-    // expose when the loader reports statusLog absent (this is exactly what
-    // loadStatusLogSource() resolves to on this branch — verified separately
-    // by the top-level async CLI run, which never throws).
+    // The merged funnel-velocity.mjs imports fine but exports neither optional
+    // helper (getAppliedDateObservations / computeMedianResponseDays), so the
+    // loader must report the statusLog source ABSENT — no applied-date
+    // observations, null median — rather than claiming loaded just because the
+    // import resolved. Assert the ACTUAL loader result against the real module.
+    const statusLog = await loadStatusLogSource();
+    check(statusLog.loaded === false, 'loadStatusLogSource reports statusLog absent when the merged module exports no usable helper');
+    check(statusLog.appliedDateByNum instanceof Map && statusLog.appliedDateByNum.size === 0, 'loadStatusLogSource yields an empty appliedDateByNum against the merged module');
+    check(statusLog.medianResponseDays === null, 'loadStatusLogSource yields null medianResponseDays against the merged module');
+
+    // Downstream contract: computeResponsiveness surfaces a null median when the
+    // loader supplied none.
     const result = computeResponsiveness([row(80, 'NoStatusLogCo', 'Applied', '2026-05-01')], new Map(), { now: NOW, silenceWindowDays: 28 });
     check(result.medianResponseDays === null, 'medianResponseDays is null when not supplied (statusLog absent)');
   }
@@ -770,7 +803,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     parseArgs(process.argv);
 
   if (selfTestMode) {
-    runSelfTest();
+    runSelfTest().catch(err => {
+      console.error(`company-history.mjs: self-test error: ${err?.message || err}`);
+      process.exit(1);
+    });
   } else {
     const run = async () => {
       const tracker = loadTrackerRows(CAREER_OPS);

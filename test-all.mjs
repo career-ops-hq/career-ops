@@ -2482,15 +2482,10 @@ if (trackerModeDoc.includes('company-history.mjs') && trackerModeDoc.includes('s
   fail('tracker mode missing company-history.mjs reference or the silent-on-you trigger');
 }
 
-if (
-  shared.includes('company-history.mjs') &&
-  shared.includes('Reposting pattern') &&
-  shared.includes('postingChurn')
-) {
-  pass('_shared.md signals table joins the reposting signal through company-history.mjs');
-} else {
-  fail('_shared.md signals table missing the Reposting pattern row, postingChurn reference, or company-history.mjs join');
-}
+// Note: Block G's reposting signal in _shared.md/oferta.md is intentionally
+// sourced from scan-history.tsv (agent-observable), NOT routed through
+// company-history.mjs — every legitimacy Source must be observable without
+// executing a script that could silently fail. See PR #1712 review.
 
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 

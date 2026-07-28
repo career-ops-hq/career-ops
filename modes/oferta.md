@@ -254,10 +254,9 @@ Analyze the job posting for signals that indicate whether this is a real, active
 - Search: `"{company}" hiring freeze {year}` -- note any announcements
 - If layoffs found: are they in the same department as this role?
 
-**4. Reposting Detection** (from the `node company-history.mjs` evidence card):
-- Run `node company-history.mjs --company <company>`, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. Then read the `postingChurn` cluster(s) — richer than a raw scan-history grep: each cluster gives `repostCount`, `daysSpan`, and `lastSeen` for a repeated role title.
-- `reposts-detected` with a high `repostCount` over a short `daysSpan` is a concerning signal; `none-detected` is neutral; `no-scan-data` means no evidence either way — do not treat absence of data as a positive signal.
-- **Churn axis only.** The same card also returns a `responsiveness` axis (has this company answered *you* before). That axis says nothing about whether *this* posting is real — never let it feed this signal or the legitimacy tier below. See "Prior-contact FYI" after the output format for where that axis belongs instead.
+**4. Reposting Detection** (from scan-history.tsv):
+- Check if company + similar role title appeared before with a different URL
+- Note how many times and over what period
 
 **5. Role Market Context** (qualitative, no additional queries):
 - Is this a common role that typically fills in 4-6 weeks?
@@ -345,12 +344,12 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 
 ### Prior-contact FYI (non-scoring)
 
-Check the `responsiveness` axis of the same `node company-history.mjs --company <company>` card (same safe argument passing as in Reposting Detection above). Branch on `responsiveness.label` and append ONE informational line to the report. The `facts` array can hold several applications to the same company, so fill placeholders deterministically: pick ONE representative fact — the most recent application matching that placeholder's condition — and use that same fact for ALL placeholders in the line; when additional applications also match, summarize them as a count appended to the line (e.g. ", and {K} earlier applications with the same pattern") so no history is omitted or misrepresented:
+Check the `responsiveness` axis of the `node company-history.mjs --company <company>` card, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. Branch on `responsiveness.label` and append ONE informational line to the report. The `facts` array can hold several applications to the same company, so fill placeholders deterministically **per category**: for each placeholder use the most recent application matching THAT placeholder's own condition — fill a responded placeholder from the most recent responded fact, a silent placeholder from the most recent silent fact — rather than forcing one fact to serve both groups. When more than one application matches a category, append a separate count for that category (e.g. ", and {K} earlier applications with the same pattern") so no history is omitted or misrepresented:
 
-- `silent-on-you`:
+- `silent-on-you` (fill from the most recent silent fact; if more than one silent application exists, append the count of the others):
 > Note: you applied to {company} on {date}; no response in {N}d after {M} follow-ups. Not a legitimacy signal — factor into how much effort to invest.
-- `mixed` (they answered at least one of your applications and went silent on another — a flat "no response" would be inaccurate):
-> Note: mixed history with {company} — they responded on #{num} ({date}) but went silent on #{num} (applied {date}, {N}d). Not a legitimacy signal — factor into how much effort to invest.
+- `mixed` (they answered at least one of your applications and went silent on another — a flat "no response" would be inaccurate). Fill the responded placeholders from the most recent **responded** fact and the silent placeholders from the most recent **silent** fact — two different applications — and give a separate count per category when more than one matches:
+> Note: mixed history with {company} — they responded on #{responded_num} ({responded_date}) but went silent on #{silent_num} (applied {silent_date}, {N}d). Not a legitimacy signal — factor into how much effort to invest.
 
 This is information about **your own history** with the company, not about this posting. It must NOT alter the 1-5 score and must NOT alter the Assessment tier above — those are driven exclusively by the `postingChurn` axis and the other Block G signals. If the label is `responded-before` or `no-history`, say nothing (silence is fine; no note needed).
 
