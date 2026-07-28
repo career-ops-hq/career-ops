@@ -155,16 +155,19 @@ export function createTokenBucket(options = {}) {
   function pump() {
     timerPending = false;
     refill();
-    // Bounded by queue length and by the tokens available this tick — both
-    // finite, so this cannot spin.
-    while (queue.length > 0 && tokens >= 1) {
-      tokens -= 1;
-      const { fn, queuedAt } = /** @type {{ fn: Function, queuedAt: number }} */ (queue.shift());
-      delayed++;
-      waitedMs += now() - queuedAt;
-      fn();
+    try {
+      // Bounded by queue length and by the tokens available this tick — both
+      // finite, so this cannot spin.
+      while (queue.length > 0 && tokens >= 1) {
+        tokens -= 1;
+        const { fn, queuedAt } = /** @type {{ fn: Function, queuedAt: number }} */ (queue.shift());
+        delayed++;
+        waitedMs += now() - queuedAt;
+        fn();
+      }
+    } finally {
+      schedule();
     }
-    schedule();
   }
 
   return {

@@ -101,6 +101,42 @@ try {
       fail(`bad rates accepted or wrongly typed: ${bad.join(', ')}`);
     }
   }
+
+  // --- a throwing callback does not strand the queue ---
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const bucket = createTokenBucket({ ratePerMin: 60, capacity: 1, now: () => clock, setTimer });
+
+    // Drain the bucket so the next calls queue.
+    bucket.take(() => {});
+    const ran = [];
+    const thrower = () => { throw new Error('test error'); };
+    bucket.take(thrower);         // First queued: will throw
+    bucket.take(() => ran.push(1)); // Second queued
+    bucket.take(() => ran.push(2)); // Third queued
+
+    // Advance clock and fire timers. The first callback throws, but schedule()
+    // must still be called (via finally block) to arm the next timer. We wrap
+    // fireAll in try/catch so the error is contained and doesn't break the test.
+    clock += 1_000;
+    try { setTimer.fireAll(); } catch (e) { /* Expected: thrower throws. */ }
+
+    // Second callback should have run during the first pump(). Advance again
+    // for the third callback.
+    clock += 1_000;
+    try { setTimer.fireAll(); } catch (e) { /* Expected: should not throw again. */ }
+
+    // Third callback runs in this pump.
+    clock += 1_000;
+    try { setTimer.fireAll(); } catch (e) { /* should not happen */ }
+
+    if (ran.join(',') === '1,2') {
+      pass('a throwing callback does not strand the queue');
+    } else {
+      fail(`queue stranded: ran=[${ran.join(',')}]`);
+    }
+  }
 } catch (e) {
   fail(`DNS pacing tests threw: ${e.message}`);
 }
