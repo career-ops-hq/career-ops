@@ -337,6 +337,21 @@ export function lookupsPerMinFromEnv(env = process.env) {
   return n;
 }
 
+/** @type {{ pacingStats: () => { delayed: number, waitedMs: number } } | null} */
+let patched = null;
+
+/**
+ * Pacing counters for the process-wide patched lookup.
+ *
+ * Zeroes when the patch is opted out, so callers never need to branch.
+ *
+ * @returns {{ delayed: number, waitedMs: number }} Delayed lookup count and total wait.
+ */
+export function dnsPacingStats() {
+  return patched ? patched.pacingStats() : { delayed: 0, waitedMs: 0 };
+}
+
 if (process.env.CAREER_OPS_NO_DNS_CACHE !== '1') {
-  dns.lookup = createCachedLookup(dns.lookup, { lookupsPerMin: lookupsPerMinFromEnv() });
+  patched = createCachedLookup(dns.lookup, { lookupsPerMin: lookupsPerMinFromEnv() });
+  dns.lookup = patched;
 }
