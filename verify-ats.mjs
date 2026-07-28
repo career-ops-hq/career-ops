@@ -119,9 +119,11 @@ function extractVisibleText(html) {
     stripNonContentRegions(html)
       .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
       .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
       .replace(/&lt;/gi, '<')
       .replace(/&gt;/gi, '>')
+      // &amp; is decoded LAST: doing it earlier could turn "&amp;lt;" into "&lt;"
+      // and then into "<", double-unescaping text that was never an entity.
+      .replace(/&amp;/gi, '&')
   );
 }
 
