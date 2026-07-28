@@ -5,7 +5,7 @@
   "license": "MIT",
   "description": "Scan and search live roles across the a16z speedrun talent network — hundreds of a16z portfolio startups behind one zero-key public feed.",
   "repo": "https://github.com/justma16ze/career-ops-plugin-a16z-speedrun-talent",
-  "sha": "77b86df2cba9e3411c771088f1deada3cb734e17",
+  "sha": "04e2ab1360b7366c6eb5eb87ae598465fb3fc3de",
   "hooks": [
     "provider",
     "search"
