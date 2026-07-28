@@ -364,7 +364,6 @@ const USER_PATHS = [
   'plugins.local/',
   'plugins.lock',
   'opencode.json',
-  'opencode.jsonc',
   '.claude/settings.json',
   '.claude/hooks/',
 ];

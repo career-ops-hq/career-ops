@@ -288,23 +288,23 @@ try {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
-  // 13. opencode.jsonc is also scanned. The MCP_CONFIGS entry for opencode
-  //     registers both .json and .jsonc; dropping .jsonc would silently
-  //     regress OpenCode users who prefer JSONC.
+  // 13. opencode.json is scanned for the opencode CLI. This pins the
+  //     strict-JSON contract so a future change to the scanned file list
+  //     fails loudly here.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-13-'));
     try {
-      writeFileSync(join(dir, 'opencode.jsonc'),
+      writeFileSync(join(dir, 'opencode.json'),
         JSON.stringify({ mcp: { playwright: { type: 'local', command: ['npx', '-y', '@playwright/mcp'] } } }));
       const state = runDoctor(dir, ['--cli', 'opencode'], {});
-      if (!expectWarn(state, '#13 --cli opencode with .jsonc config')) {
+      if (!expectWarn(state, '#13 --cli opencode with .json config')) {
         // already failed
       } else if (state.active_cli === 'opencode'
           && state.cli_source === 'flag'
           && state.playwright_mcp?.opencode === true
           && Array.isArray(state.warnings)
           && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
-        pass('--cli opencode + opencode.jsonc → no warning (jsonc variant is scanned)');
+        pass('--cli opencode + opencode.json → no warning');
       } else {
         fail(`#13 unexpected state: ${JSON.stringify(state)}`);
       }

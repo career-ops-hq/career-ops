@@ -108,7 +108,7 @@ async function checkPlaywright() {
 // Per-CLI MCP config registry.
 const MCP_CONFIGS = [
   { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'] },
-  { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'] },
+  { cli: 'opencode', files: ['opencode.json'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package.
@@ -495,7 +495,7 @@ function onboardingState(root) {
   ];
 
   const playwrightMcp = activeCli !== 'unknown' && MCP_CONFIGS.find((c) => c.cli === activeCli)
-    ? { [activeCli]: isPlaywrightMcpConfigured(root, activeCli) }
+    ? { [activeCli]: mcpCheck?.pass === true }
     : {};
 
   let plugins = [];
