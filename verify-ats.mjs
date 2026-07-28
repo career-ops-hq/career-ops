@@ -71,9 +71,7 @@ const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
 // At least 9 digits total so CV date ranges like "2019 - 2024" (8 digits) do not
 // register as a phone number and earn a phantom contact point. Real numbers such
 // as "+1 415 555 0100" (11 digits) and typical international formats still match.
-// The separator class excludes \d (only [-.\s()], at most one between digits), so
-// the nested quantifier can't ambiguously partition a long digit run — no ReDoS.
-const PHONE_RE = /\+?\d(?:[-.\s()]?\d){8,}/;
+const PHONE_RE = /\+?(?:\(\d{1,4}\)|\d)[\d\s().-]{7,24}\d/;
 
 /**
  * Collapse all runs of whitespace to single spaces and trim the ends.
