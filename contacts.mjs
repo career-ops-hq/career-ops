@@ -40,8 +40,8 @@
  *      node contacts.mjs --self-test
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname, resolve, relative, isAbsolute } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
+import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 
@@ -384,6 +384,17 @@ function printSummary(contacts, quality) {
   console.log('');
 }
 
+// True if `p` is itself a symlink (lstat does not follow the link). A missing
+// path returns false; a dangling symlink still returns true — which is exactly
+// what the vCard write guard needs so writeFileSync can't follow it out of repo.
+function isSymlink(p) {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function writeVcf(contacts, quality) {
   // --vcf is the piped/scripted mode, so quality clashes go to stderr — the
   // same never-silently-dropped contract as the JSON and --summary modes.
@@ -404,7 +415,7 @@ function writeVcf(contacts, quality) {
   // Path-traversal guard: keep the vCard write inside the project directory so
   // a crafted output argument (e.g. "../../etc/cron.d/x") can't escape the
   // repo. Anchored to the repo root (CAREER_OPS), not process.cwd() — see the
-  // generate-pdf.mjs precedent.
+  // generate-pdf.mjs precedent. Cheap lexical gate first…
   const relOut = relative(CAREER_OPS, outPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
     console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
@@ -412,7 +423,28 @@ function writeVcf(contacts, quality) {
   }
   const vcf = buildVcf(contacts, { callerId: callerIdMode });
   const cards = (vcf.match(/BEGIN:VCARD/g) || []).length; // may be < rows: duplicates export last-wins
+  // …then the authoritative, symlink-aware containment check, applied immediately
+  // before the write so it also guards a TOCTOU swap. The lexical gate above only
+  // inspects the string: a symlinked child directory (or a symlinked target file)
+  // can resolve OUTSIDE the repo while passing it. Create the parent first, then
+  // re-verify the CANONICAL destination is inside the repo. Mirrors the
+  // reconcile-pipeline.mjs / followup-seed.mjs realpath-containment pattern.
   mkdirSync(dirname(outPath), { recursive: true });
+  // A symlink at the target path (even a dangling one) would let writeFileSync
+  // follow it and escape — refuse before resolving anything else.
+  if (isSymlink(outPath)) {
+    console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
+    process.exit(1);
+  }
+  const repoReal = realpathSync(CAREER_OPS);
+  const canonicalTarget = existsSync(outPath)
+    ? realpathSync(outPath)
+    : join(realpathSync(dirname(outPath)), basename(outPath));
+  const relReal = relative(repoReal, canonicalTarget);
+  if (relReal === '' || relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
+    console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
+    process.exit(1);
+  }
   writeFileSync(outPath, vcf);
   console.log(`Wrote ${cards} contact${cards === 1 ? '' : 's'} → ${outPath}`);
 }

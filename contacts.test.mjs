@@ -22,7 +22,7 @@ import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, 
 import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 
 let passed = 0;
@@ -396,6 +396,43 @@ try {
     ok('--vcf traversal guard leaves no file outside the project dir', !existsSync(escapePath));
   } finally {
     rmSync(escapeDir, { recursive: true, force: true });
+  }
+
+  // Symlink-escape guard: the lexical `..` check passes for a path that is
+  // LEXICALLY inside the project but whose parent is a SYMLINK resolving OUTSIDE
+  // it. Realpath-containment (run right before the write) must still refuse, and
+  // no file may leak to the symlink's real target. Uses a UNIQUE sibling temp dir
+  // as the outside target; on Windows symlinkSync may throw EPERM (no privilege /
+  // Developer Mode off) — skip gracefully in that case (test-all tolerates it).
+  const linkTargetDir = mkdtempSync(join(realpathSync(tmpdir()), 'contacts-symlink-'));
+  try {
+    let symlinkSupported = true;
+    // A symlinked child directory living lexically inside the project root, whose
+    // real target is the outside temp dir. `--vcf linked/x.vcf` is lexically
+    // contained but resolves out of the project.
+    const linkPath = join(tmpRoot, 'linked');
+    try {
+      symlinkSync(linkTargetDir, linkPath, 'junction'); // 'junction' works dir-only on Windows w/o privilege
+    } catch (e) {
+      symlinkSupported = false;
+      console.log(`  SKIP: --vcf symlink-escape guard (symlink unsupported: ${e.code || e.message})`);
+    }
+    if (symlinkSupported) {
+      const symlinkEscapePath = join(linkPath, 'contacts-symlink-escape.vcf');
+      const realOutsidePath = join(linkTargetDir, 'contacts-symlink-escape.vcf');
+      let symEscaped = false;
+      try {
+        execFileSync('node', [tmpScript, '--vcf', symlinkEscapePath], { encoding: 'utf-8', timeout: 10000 });
+        symEscaped = true;
+      } catch (e) {
+        ok('--vcf refuses a symlinked-dir path escaping the project (exit 1)', e.status === 1);
+        ok('symlink refusal names the offending path', String(e.stderr).includes('Refusing to write'));
+      }
+      if (symEscaped) ok('--vcf refuses a symlinked-dir path escaping the project (exit 1)', false);
+      ok('--vcf symlink guard leaves no file at the real outside target', !existsSync(realOutsidePath));
+    }
+  } finally {
+    rmSync(linkTargetDir, { recursive: true, force: true });
   }
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });
