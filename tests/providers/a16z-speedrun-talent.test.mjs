@@ -1,4 +1,4 @@
-// tests/providers/speedruntalent.test.mjs
+// tests/providers/a16z-speedrun-talent.test.mjs
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -10,7 +10,7 @@ try {
   const provider = mod.default;
   const { normalizeSpeedrunJob } = mod;
 
-  if (provider.id === 'a16z-speedrun-talent') pass('a16z-speedrun-talent.id is "speedruntalent"');
+  if (provider.id === 'a16z-speedrun-talent') pass('a16z-speedrun-talent.id is "a16z-speedrun-talent"');
   else fail(`a16z-speedrun-talent.id is ${JSON.stringify(provider.id)}`);
 
   // normalizeSpeedrunJob — full mapping.
@@ -36,12 +36,12 @@ try {
     fail(`normalizeSpeedrunJob remote locations = ${JSON.stringify({ a: remoteLoc?.location, b: remoteOnly?.location })}`);
   }
 
-  // company fallbacks: entry name, then "speedrun talent network".
+  // company fallbacks: entry name, then "a16z speedrun talent network".
   const coEntry = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/c1', company: '' }, 'Entry Name');
   const coDefault = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/c2' });
   const coBlank = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/c3' }, '   ');
   if (coEntry?.company === 'Entry Name' && coDefault?.company === 'a16z speedrun talent network' && coBlank?.company === 'a16z speedrun talent network') {
-    pass('normalizeSpeedrunJob falls back company → entry name → "speedrun talent network"');
+    pass('normalizeSpeedrunJob falls back company → entry name → "a16z speedrun talent network"');
   } else {
     fail(`normalizeSpeedrunJob company fallbacks = ${JSON.stringify({ a: coEntry?.company, b: coDefault?.company, c: coBlank?.company })}`);
   }
@@ -111,6 +111,20 @@ try {
   const capped = await provider.fetch({ max_pages: 2 }, capCtx);
   if (capCalls.length === 2 && capped.length === 200) pass('fetch() honors max_pages ahead of total_pages');
   else fail(`fetch() cap = ${JSON.stringify({ calls: capCalls.length, jobs: capped.length })}`);
+
+  // resolveQuery: keywords[] fallback when q: is absent.
+  const kwCalls = [];
+  const kwCtx = { fetchJson: async (url) => { kwCalls.push(url); return { jobs: [mk(0)], total_pages: 1 }; } };
+  await provider.fetch({ keywords: ['machine', '', 'learning'] }, kwCtx);
+  if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() falls back to joined keywords[] when q: is absent');
+  else fail(`keywords fallback q = ${JSON.stringify(new URL(kwCalls[0]).searchParams.get('q'))}`);
+
+  // MAX_PAGES_CAP: an oversized max_pages is clamped to 120.
+  const bigCalls = [];
+  const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 100 }, (_, i) => mk(i)), total_pages: 500 }; } };
+  await provider.fetch({ max_pages: 9999 }, bigCtx);
+  if (bigCalls.length === 120) pass('fetch() clamps max_pages to the 120-page cap');
+  else fail(`cap clamp fetched ${bigCalls.length} pages`);
 
   // fetch(): malformed payload throws with a useful message.
   let threw = false;

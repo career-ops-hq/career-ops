@@ -164,6 +164,14 @@ export default {
       // Stop at the last page: a short page, or past the reported total_pages.
       if (json.jobs.length < PER_PAGE) break;
       if (Number.isInteger(json.total_pages) && page + 1 >= json.total_pages) break;
+      // Cap warning (same pattern as jibeapply/workday): the feed had more
+      // pages than we were allowed to read — surface it, with the fix.
+      if (page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {
+        const name = typeof fallbackCompany === 'string' && fallbackCompany ? fallbackCompany : 'a16z speedrun talent network';
+        console.error(
+          `⚠️  a16z-speedrun-talent: ${name} truncated at max_pages=${maxPages} (${out.length} of ${Number.isInteger(json.total) ? json.total : 'many'} jobs) — raise max_pages on this entry or narrow with q: for more`,
+        );
+      }
     }
     return out;
   },
