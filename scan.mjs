@@ -44,6 +44,7 @@ import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 
 try {
@@ -1316,6 +1317,17 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // posting or a scan without trust_filter leaves both empty.
     trustIsFlagged(offer) ? String(offer.trustScore) : '',
     trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
+    // Normalized company key (#2093): the canonical company form shared across
+    // the tracker (normalizeCompanyName — lowercased, punctuation/whitespace
+    // folded, trailing legal-entity suffixes stripped) so "Acme Inc.",
+    // "Acme, Inc." and "ACME  Inc" all key to `acme`. Stored at write time so
+    // repost/name-matching never has to route through executing a script, and
+    // the raw display company in col 5 stays faithful to what the provider
+    // returned. Trailing col 12 — purely additive: index-based readers
+    // (fingerprint@7, postedAt@8, trust@9-10, and the web parser's first 7
+    // cols) are unaffected, and older rows that lack it are tolerated by
+    // consumers normalizing the raw name on the fly.
+    normalizeCompanyName(offer.company || ''),
   ].map(sanitizeTsvField).join('\t');
 }
 
