@@ -22,9 +22,10 @@
  * still patchy): CRLF line endings, 75-octet line folding counted in BYTES
  * that never splits a multibyte UTF-8 sequence, and a stable deterministic
  * UID (careerops-{uidPart(name)}--{uidPart(company)}, where each part is
- * {slug}-{8-hex sha1 of the raw value}, or just the bare 8-hex hash when the
- * slug is empty — e.g. a fully CJK name; the raw-value hash keeps values that
- * slug identically, like "José"/"Josè", from colliding) so re-importing UPDATES
+ * {slug}-{8-hex sha1 of the normalized value}, or just the bare 8-hex hash when
+ * the slug is empty — e.g. a fully CJK name; the normalized-value hash folds
+ * case/whitespace/NFC noise yet keeps values that slug identically, like
+ * "José"/"Josè", from colliding) so re-importing UPDATES
  * existing entries instead of duplicating them on platforms that honor UID (iOS
  * fallback: assign imports to a group, delete the group to bulk-remove).
  *
@@ -147,19 +148,30 @@ export function slug(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-// UID building block: an 8-hex sha1 of the RAW value, prefixed with the pretty
+// Fold the noise that must NOT change a UID — letter case, surrounding and
+// collapsed interior whitespace, and Unicode composition (NFC vs NFD) — WITHOUT
+// deburring accents. This is the exact representation uidPart() hashes, so pure
+// "José" / "josé " / "JOSÉ" capitalization/spacing/composition variants of one
+// name produce the SAME UID, while é vs è stay distinct (see uidPart).
+export function normalizeForHash(raw) {
+  return String(raw ?? '').normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+// UID building block: an 8-hex sha1 of the NORMALIZED value (normalizeForHash:
+// case/whitespace/NFC-folded but accent-preserving), prefixed with the pretty
 // slug when it survives. The hash — not the slug — is what makes the part
 // collision-resistant: slug() is lossy (accented chars drop out, e.g. "José"
 // and "Josè" both slug to "jos"; punctuation and spacing collapse, e.g. "Acme
-// Inc" and "Acme, Inc." both to "acme-inc"), so two distinct raw values can
-// share a slug and would otherwise collide into one UID. Hashing the raw value
-// keeps distinct inputs distinct while the readable slug prefix stays for
-// humans. slug('山田 太郎') is empty (every char is non-alphanumeric), so a
-// fully non-ASCII part is just the bare hash. The hash is deterministic, so the
-// UID stays stable across exports.
+// Inc" and "Acme, Inc." both to "acme-inc"), so two distinct values can share a
+// slug and would otherwise collide into one UID. Hashing the normalized value
+// keeps genuinely distinct inputs (é vs è) distinct while folding away only the
+// noise (case, spacing, composition) that should map to one stable UID, and the
+// readable slug prefix stays for humans. slug('山田 太郎') is empty (every char
+// is non-alphanumeric), so a fully non-ASCII part is just the bare hash. The
+// hash is deterministic, so the UID stays stable across exports.
 export function uidPart(raw) {
   const s = slug(raw);
-  const h = createHash('sha1').update(String(raw ?? ''), 'utf8').digest('hex').slice(0, 8);
+  const h = createHash('sha1').update(normalizeForHash(raw), 'utf8').digest('hex').slice(0, 8);
   return s ? `${s}-${h}` : h;
 }
 
@@ -285,6 +297,17 @@ function selfTest() {
   assert(uidPart('José') !== uidPart('Josè'), 'lossy-equal slugs still get distinct UID parts');
   assert(contactUid({ name: 'José', company: 'Acme' }) !== contactUid({ name: 'Josè', company: 'Acme' }),
     'distinct raw names that slug the same produce different contact UIDs');
+  // Stability guard (the flip side): pure case / surrounding-whitespace variants
+  // of ONE name must fold to the SAME UID part — the hash input is normalized
+  // (normalizeForHash), not raw. These variants also slug identically, so the
+  // whole uidPart matches, prefix and hash.
+  assert(uidPart('José') === uidPart('JOSÉ') && uidPart('José') === uidPart('  josé  '),
+    'case + surrounding-whitespace variants of one name get the same UID part');
+  // Composition (NFC vs NFD) is folded in the HASH input: normalizeForHash maps
+  // both forms of one name to the same string (accents preserved, é ≠ è).
+  assert(normalizeForHash('José'.normalize('NFC')) === normalizeForHash('José'.normalize('NFD')),
+    'NFC vs NFD composition folds to one normalized hash input');
+  assert(normalizeForHash('José') !== normalizeForHash('Josè'), 'normalizeForHash keeps é vs è distinct');
   const cjkCard = contactToVcard(contacts[1], { rev: '2026-07-09T00:00:00.000Z' });
   assert(/UID:careerops-[0-9a-f]{8}--globex-[0-9a-f]{8}\r\n/.test(cjkCard), 'CJK contact UID: bare hash name part, slug+hash company part');
   const card = contactToVcard(contacts[0], { rev: '2026-07-09T00:00:00.000Z' });

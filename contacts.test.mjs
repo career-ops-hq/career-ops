@@ -6,9 +6,10 @@
  * - vCard escaping (backslash-first order, semicolon, comma, newline)
  * - 75-octet byte-counted line folding (ASCII, umlaut, CJK — never splitting
  *   a multibyte UTF-8 sequence)
- * - UID determinism: each part is {slug}-{8-hex raw-value hash} (bare hash when
- *   the slug is empty/non-ASCII), collision-resistant even for lossy-equal slugs
- *   (José/Josè); caller-id FN variant, optional-field omission, dup last-wins
+ * - UID determinism: each part is {slug}-{8-hex normalized-value hash} (bare hash
+ *   when the slug is empty/non-ASCII), collision-resistant even for lossy-equal
+ *   slugs (José/Josè) yet case/whitespace/NFC-stable for one name; caller-id FN
+ *   variant, optional-field omission, dup last-wins
  * - CLI behavior (JSON/--summary/--vcf/--caller-id, empty store, path guard)
  *
  * Expected vCard strings are built in code on purpose — a committed .vcf
@@ -17,7 +18,7 @@
  * Run: node contacts.test.mjs
  */
 
-import { parseContacts, escapeVcard, foldLine, slug, uidPart, contactUid, contactToVcard, buildVcf } from './contacts.mjs';
+import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from './contacts.mjs';
 import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -136,7 +137,7 @@ const dupPair = parseContacts([
 ].join('\n'));
 eq('duplicate pair: both rows kept in JSON', dupPair.contacts.length, 2);
 eq('duplicate pair: one quality.duplicates entry', dupPair.quality.duplicates,
-  [{ uid: 'careerops-jane-doe-cac7bbb6--acme-ed099798', name: 'Jane Doe', company: 'Acme', count: 2 }]);
+  [{ uid: 'careerops-jane-doe-bc225ac5--acme-293abb6b', name: 'Jane Doe', company: 'Acme', count: 2 }]);
 
 // ============================================================================
 // 4. escapeVcard — backslash first, then ; , then newline
@@ -201,9 +202,10 @@ const jane = { name: 'Jane Doe', company: 'Acme', type: 'recruiter', title: '', 
 ok('UID = careerops-{uidPart(name)}--{uidPart(company)}', /UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}\r\n/.test(contactToVcard(jane, { rev: REV })));
 eq('same contact -> identical card under pinned REV', contactToVcard(jane, { rev: REV }), contactToVcard(jane, { rev: REV }));
 
-// Each UID part is {slug}-{8-hex sha1 of the raw value}, or the bare 8-hex hash
-// when the slug is empty (a fully non-ASCII value slugs to ''). The raw-value
-// hash — not the lossy slug — is what keeps distinct inputs distinct.
+// Each UID part is {slug}-{8-hex sha1 of the normalized value}, or the bare
+// 8-hex hash when the slug is empty (a fully non-ASCII value slugs to ''). The
+// normalized-value hash — not the lossy slug — is what keeps distinct inputs
+// distinct (while folding case/whitespace/NFC noise for one name).
 ok('uidPart = pretty ASCII slug + raw-value hash', /^jane-doe-[0-9a-f]{8}$/.test(uidPart('Jane Doe')));
 ok('uidPart CJK part is the bare 8 hex chars', /^[0-9a-f]{8}$/.test(uidPart('山田 太郎')));
 eq('uidPart is deterministic', uidPart('山田 太郎'), uidPart('山田 太郎'));
@@ -216,6 +218,17 @@ eq('distinct accented names slug identically', slug('José'), slug('Josè'));
 ok('lossy-equal slugs get distinct uidParts', uidPart('José') !== uidPart('Josè'));
 ok('distinct raw names that slug the same -> different contact UIDs',
   contactUid({ name: 'José', company: 'Acme' }) !== contactUid({ name: 'Josè', company: 'Acme' }));
+// Stability (the flip side of the collision guard): pure case / surrounding-
+// whitespace variants of ONE name fold to the SAME UID part, because the hash
+// input is normalized (normalizeForHash), not the raw value.
+ok('case variants of one name get the same UID part', uidPart('José') === uidPart('JOSÉ'));
+ok('surrounding-whitespace variants of one name get the same UID part', uidPart('José') === uidPart('  josé  '));
+ok('case/space stability holds at the full contact UID',
+  contactUid({ name: '  jane  doe ', company: 'ACME' }) === contactUid({ name: 'Jane Doe', company: 'Acme' }));
+// Composition (NFC vs NFD) is folded in the HASH input, accents preserved.
+eq('NFC vs NFD composition folds to one normalized hash input',
+  normalizeForHash('José'.normalize('NFC')), normalizeForHash('José'.normalize('NFD')));
+ok('normalizeForHash keeps é vs è distinct', normalizeForHash('José') !== normalizeForHash('Josè'));
 const taro = { name: '山田 太郎', company: 'Globex', type: 'hiring-manager', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
 eq('CJK contact UID: same input -> same UID across two calls',
   contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0],
@@ -241,7 +254,7 @@ const fullContact = {
 const expectedCard = [
   'BEGIN:VCARD',
   'VERSION:3.0',
-  'UID:careerops-jane-doe-cac7bbb6--acme-ed099798',
+  'UID:careerops-jane-doe-bc225ac5--acme-293abb6b',
   'FN:Jane Doe',
   'N:Doe;Jane;;;',
   'ORG:Acme',
@@ -362,10 +375,14 @@ try {
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
 
-  // Path-traversal guard: the escaped target must never be written. Clean up the
-  // stray file on BOTH paths (guard held -> nothing written; guard failed -> a
-  // real file leaked into tmpdir) so the test never pollutes the temp dir.
-  const escapePath = join(tmpdir(), 'contacts-escape.vcf');
+  // Path-traversal guard: the escaped target must never be written. Anchor it in
+  // a UNIQUE sibling temp dir (outside tmpRoot, i.e. outside the project) so the
+  // escape target is a fresh name this test owns — a fixed shared /tmp filename
+  // could clobber an unrelated pre-existing file and isn't hermetic. Clean up
+  // only the unique dir this test created, on BOTH paths (guard held -> nothing
+  // written; guard failed -> a real file leaked into the unique dir).
+  const escapeDir = mkdtempSync(join(realpathSync(tmpdir()), 'contacts-escape-'));
+  const escapePath = join(escapeDir, 'contacts-escape.vcf');
   try {
     let escaped = false;
     try {
@@ -378,7 +395,7 @@ try {
     if (escaped) ok('--vcf refuses a path escaping the project dir (exit 1)', false);
     ok('--vcf traversal guard leaves no file outside the project dir', !existsSync(escapePath));
   } finally {
-    rmSync(escapePath, { force: true });
+    rmSync(escapeDir, { recursive: true, force: true });
   }
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });
