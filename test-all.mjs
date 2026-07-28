@@ -189,7 +189,11 @@ const scripts = [
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
-  { name: 'validate-system-paths-coverage.mjs', expectExit: 0 },
+  // The bare coverage run is NOT here on purpose: this section executes each
+  // script from a throwaway copy of the repo, and the coverage check needs
+  // `git ls-files` on the REAL tree. Running it here validated nothing and
+  // exited 0 no matter what, which is how five unregistered files shipped.
+  // It now runs from ROOT in section 5.
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -923,6 +927,56 @@ for (const f of skillEntrypoints) {
     pass(`Entrypoint is a real symlink in git: ${f}`);
   } else {
     fail(`Entrypoint committed as a REGULAR file (mode ${staged.split(' ')[0]}) — users of this CLI get a broken skill: ${f}`);
+  }
+}
+
+// The SYSTEM_PATHS coverage guard must FAIL when it cannot inspect the tree,
+// not report success.
+//
+// For as long as that guard existed it was a no-op in CI. The script-execution
+// section above runs each script from a throwaway copy created inside the repo,
+// and `git ls-files` from an untracked directory returns zero paths — so the
+// guard printed "OK: 0 tracked files covered" and exited 0 while the real tree
+// had an unregistered top-level file. `update-system` never ships an
+// unregistered file, so every user who updates silently loses it. That class has
+// landed five times with this check green throughout.
+//
+// This asserts the opposite behaviour directly: invoked where git sees nothing,
+// the guard must exit non-zero.
+{
+  const probeDir = join(ROOT, '.tmp-coverage-guard-probe');
+  try {
+    mkdirSync(probeDir, { recursive: true });
+    copyFileSync(join(ROOT, 'validate-system-paths-coverage.mjs'), join(probeDir, 'validate-system-paths-coverage.mjs'));
+    copyFileSync(join(ROOT, 'update-system.mjs'), join(probeDir, 'update-system.mjs'));
+    const probe = spawnSync(process.execPath, [join(probeDir, 'validate-system-paths-coverage.mjs')], {
+      cwd: probeDir,
+      encoding: 'utf-8',
+    });
+    if (probe.status !== 0) {
+      pass('SYSTEM_PATHS coverage guard fails when it cannot inspect the tree (not a silent pass)');
+    } else {
+      fail('SYSTEM_PATHS coverage guard exited 0 from an untracked dir — it is a no-op in CI again');
+    }
+  } catch (err) {
+    fail(`could not probe the SYSTEM_PATHS coverage guard: ${err.message} (a failed probe is not a pass)`);
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+
+// And the check itself, run where it can actually see the tree. This is the
+// assertion that was missing: every tracked file must be claimed by SYSTEM_PATHS
+// or USER_PATHS, or `update-system` silently stops shipping it.
+{
+  const cov = spawnSync(process.execPath, [join(ROOT, 'validate-system-paths-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (cov.status === 0) {
+    pass('every tracked file is covered by SYSTEM_PATHS or USER_PATHS');
+  } else {
+    fail(`SYSTEM_PATHS coverage gap — a new file is unregistered and update-system will not ship it:\n${(cov.stderr || cov.stdout || '').trim()}`);
   }
 }
 
