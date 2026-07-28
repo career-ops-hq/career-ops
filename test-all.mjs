@@ -3947,6 +3947,45 @@ console.log('\n12a. Skill entrypoint materialization');
   }
 }
 
+// Every CLI skill entrypoint tracked in git MUST also be listed in
+// SKILL_ENTRYPOINTS, because that array is the only thing that materializes
+// these files on filesystems without symlink support. A tracked-but-unlisted
+// entrypoint checks out as a pointer text file on Windows and stays that way:
+// the user opens their CLI and the skill is the literal string
+// "../../../.agents/skills/career-ops/SKILL.md". That is bug #1051, and it hit
+// a second time because Kimi shipped after the list was written and nobody
+// compared the two. Adding a CLI touches five wiring points; this asserts the
+// sixth instead of trusting a reviewer to remember it.
+console.log('\n12a-bis. Every tracked skill entrypoint is materializable');
+
+{
+  try {
+    const tracked = execSync('git ls-files', { cwd: ROOT, encoding: 'utf-8' })
+      .split('\n')
+      .filter((p) => /^\.[^/]+\/skills\/career-ops\/SKILL\.md$/.test(p))
+      .filter((p) => !p.startsWith('.agents/')) // the canonical target, not an entrypoint
+      .sort();
+
+    // An empty list means git could not see the tree, not that there is nothing
+    // to check (#2240): a guard that cannot look must never pass.
+    if (tracked.length === 0) {
+      fail('git ls-files returned no skill entrypoints — this check could not inspect anything');
+    } else {
+      const skills = await import(pathToFileURL(join(ROOT, 'scaffolder/bin/skill-entrypoints.mjs')).href);
+      const listed = new Set(skills.SKILL_ENTRYPOINTS.map((e) => e.path));
+      const unlisted = tracked.filter((p) => !listed.has(p));
+
+      if (unlisted.length === 0) {
+        pass(`all ${tracked.length} tracked skill entrypoints are in SKILL_ENTRYPOINTS`);
+      } else {
+        fail(`skill entrypoint(s) tracked in git but missing from SKILL_ENTRYPOINTS — broken on filesystems without symlinks: ${unlisted.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    fail(`skill entrypoint coverage check crashed: ${e.message}`);
+  }
+}
+
 console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
 {
@@ -3964,14 +4003,13 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
     const skills = await import(pathToFileURL(join(ROOT, 'scaffolder/bin/skill-entrypoints.mjs')).href);
     const touched = skills.ensureSkillEntrypoints(fixtureRoot).sort();
-    const expectedTouched = [
-      '.antigravitycli/skills/career-ops/SKILL.md',
-      '.claude/skills/career-ops/SKILL.md',
-      '.cursor/skills/career-ops/SKILL.md',
-      '.grok/skills/career-ops/SKILL.md',
-      '.opencode/skills/career-ops/SKILL.md',
-      '.qwen/skills/career-ops/SKILL.md',
-    ];
+    // Derived from SKILL_ENTRYPOINTS, never hand-listed. A literal array here is
+    // a second copy of the same list, and a second copy goes stale: adding Kimi
+    // to the registry turned this assertion red for the correct behaviour, which
+    // teaches whoever hits it to edit the expectation without reading it. The
+    // assertion that matters is "bootstraps everything in the registry", and
+    // that one holds whatever the registry contains.
+    const expectedTouched = skills.SKILL_ENTRYPOINTS.map((e) => e.path).sort();
 
     if (JSON.stringify(touched) === JSON.stringify(expectedTouched)) {
       pass('ensureSkillEntrypoints bootstraps all CLI skill entrypoints');
