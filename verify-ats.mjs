@@ -20,7 +20,7 @@
  * changes the structural score (it is advisory and only computed when supplied).
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -68,12 +68,16 @@ const GENERIC_FAMILIES = new Set([
 ]);
 
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
-const PHONE_RE = /\+?\d[\d\s().-]{6,}\d/;
+// At least 9 digits total so CV date ranges like "2019 - 2024" (8 digits) do not
+// register as a phone number and earn a phantom contact point. Real numbers such
+// as "+1 415 555 0100" (11 digits) and typical international formats still match.
+const PHONE_RE = /\+?\d(?:[\d\s().-]*\d){8,}/;
 
-function readIfExists(path) {
-  return existsSync(path) ? readFileSync(path, 'utf-8') : '';
-}
-
+/**
+ * Collapse all runs of whitespace to single spaces and trim the ends.
+ * @param {string} text
+ * @returns {string}
+ */
 function collapse(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -104,14 +108,24 @@ function extractVisibleText(html) {
   );
 }
 
-/** Concatenated text of every <style> block. */
+/**
+ * Concatenated text of every `<style>` block.
+ * @param {string} html
+ * @returns {string}
+ */
 function extractStyleText(html) {
   return [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(m => m[1]).join('\n');
 }
 
-/** Every inline style="…" attribute value. */
+/**
+ * Every inline `style="…"` / `style='…'` attribute value. Both quote forms are
+ * accepted so hidden-text and keyword-stuffing detection cannot be bypassed by
+ * switching quote styles.
+ * @param {string} html
+ * @returns {string[]}
+ */
 function extractInlineStyles(html) {
-  return [...html.matchAll(/style\s*=\s*"([^"]*)"/gi)].map(m => m[1]);
+  return [...html.matchAll(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map(m => m[1] ?? m[2]);
 }
 
 /**
@@ -131,6 +145,15 @@ function extractHeadings(html) {
   return out.map(s => s.toLowerCase()).filter(Boolean);
 }
 
+/**
+ * Build the target keyword set for the advisory coverage check. `--keywords` is
+ * split on commas; `--role` is split only on commas, slashes, and the word
+ * "and", so a plain title like "Senior Backend Engineer" stays a single phrase
+ * matched verbatim against the CV text (it is NOT tokenized into words).
+ * @param {string|string[]|undefined} keywords
+ * @param {string|undefined} role
+ * @returns {string[]} De-duplicated, trimmed keyword phrases (length >= 2).
+ */
 function normalizeKeywords(keywords, role) {
   const list = [];
   if (Array.isArray(keywords)) list.push(...keywords);
@@ -139,6 +162,11 @@ function normalizeKeywords(keywords, role) {
   return [...new Set(list.map(k => k.trim()).filter(k => k.length >= 2))];
 }
 
+/**
+ * Map a 0-100 structural score to a letter grade.
+ * @param {number} score
+ * @returns {string} One of A, B, C, D, F.
+ */
 function gradeFor(score) {
   if (score >= 90) return 'A';
   if (score >= 80) return 'B';
@@ -157,6 +185,9 @@ function auditAts(html, opts = {}) {
   const text = extractVisibleText(html);
   const css = extractStyleText(html);
   const inlineStyles = extractInlineStyles(html);
+  // Every place a CSS declaration can live, so equivalent evasions are caught
+  // whether the rule sits in a <style> block or an inline style attribute.
+  const styleBlobs = [css, ...inlineStyles];
   const issues = [];
   let score = 0;
 
@@ -189,7 +220,13 @@ function auditAts(html, opts = {}) {
       `Missing standard section heading(s): ${missing.join(', ')}. ATS parsers key off recognizable headings (Experience, Education, Skills).`);
   }
 
-  // 3. Contact info reachable in the body.
+  // 3. Contact info reachable in the body. We strip only *semantic* <header>/
+  // <footer> elements: those map to the PDF page header/footer regions ATS
+  // extractors routinely discard. The generated template's contact block sits in
+  // a plain <div class="header"> in the normal document flow, which parses fine —
+  // so it is deliberately NOT stripped (doing so would false-positive every
+  // shipped CV). This warning therefore targets hand-authored / alternate HTML
+  // that puts contact details inside real <header>/<footer> tags.
   const bodyOnlyHtml = html
     .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
     .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ');
@@ -200,7 +237,7 @@ function auditAts(html, opts = {}) {
   if (hasEmail) {
     score += 10;
     if (!emailInBody) {
-      add('warning', 'Contact email appears only inside a <header>/<footer> element; ATS often drop these. Put contact details in the main document body.');
+      add('warning', 'Contact email appears only inside a semantic <header>/<footer> element; ATS routinely drop those regions. Move contact details into the main document body.');
     }
   } else {
     add('critical', 'No email address found. ATS and recruiters need a parseable contact email in the body of the CV.');
@@ -233,7 +270,7 @@ function auditAts(html, opts = {}) {
   // 5. No CV text baked into images.
   let imageScore = WEIGHTS.images;
   const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map(m => m[0]);
-  const contentImgs = imgs.filter(tag => !/class\s*=\s*"[^"]*\bcv-photo\b[^"]*"/i.test(tag));
+  const contentImgs = imgs.filter(tag => !/class\s*=\s*(?:"[^"]*\bcv-photo\b[^"]*"|'[^']*\bcv-photo\b[^']*')/i.test(tag));
   if (contentImgs.length > 0 && text.length < TEXT_LOW_WITH_IMG) {
     imageScore = 0;
     add('critical', `Found ${contentImgs.length} content image(s) with little surrounding text (${text.length} chars). Text baked into images is invisible to ATS.`);
@@ -243,12 +280,15 @@ function auditAts(html, opts = {}) {
   }
   score += Math.max(0, imageScore);
 
-  // 6. Standard, embeddable fonts.
+  // 6. Standard, embeddable fonts. Scan both <style> blocks and inline styles so
+  // an inline font-family is scored the same as one in a stylesheet.
   const families = new Set();
-  for (const m of css.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
-    for (const raw of m[1].split(',')) {
-      const fam = raw.replace(/['"]/g, '').trim().toLowerCase();
-      if (fam && !GENERIC_FAMILIES.has(fam)) families.add(fam);
+  for (const blob of styleBlobs) {
+    for (const m of blob.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
+      for (const raw of m[1].split(',')) {
+        const fam = raw.replace(/['"]/g, '').trim().toLowerCase();
+        if (fam && !GENERIC_FAMILIES.has(fam)) families.add(fam);
+      }
     }
   }
   const unsafeFonts = [...families].filter(f => !ATS_SAFE_FONTS.has(f));
@@ -266,12 +306,17 @@ function auditAts(html, opts = {}) {
     add('warning', 'No <meta charset="utf-8"> declared. Declare UTF-8 so accented characters and symbols survive ATS text extraction.');
   }
 
-  // 8. No hidden text / keyword stuffing.
-  const styleBlobs = [css, ...inlineStyles];
+  // 8. No hidden text / keyword stuffing. display:none / visibility:hidden /
+  // font-size:0 are scanned across both <style> blocks and inline styles.
   const hiddenSignals = [];
   if (styleBlobs.some(s => /display\s*:\s*none/i.test(s))) hiddenSignals.push('display:none');
   if (styleBlobs.some(s => /visibility\s*:\s*hidden/i.test(s))) hiddenSignals.push('visibility:hidden');
   if (styleBlobs.some(s => /font-size\s*:\s*0(?:px|pt|em|rem|%)?\b/i.test(s))) hiddenSignals.push('font-size:0');
+  // White text is checked on INLINE styles only, by design: a white color in a
+  // <style> block is overwhelmingly legitimate (white-on-colored badges, section
+  // headers, the header gradient), so scanning stylesheets for it would flag
+  // normal templates. Inline `style="color:#fff"` on a text span is the classic
+  // white-on-white stuffing trick and is the reliable signal.
   if (inlineStyles.some(s => /color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
     hiddenSignals.push('white-on-white text');
   }
@@ -300,6 +345,13 @@ function auditAts(html, opts = {}) {
   return { score, grade: gradeFor(score), issues, keywordCoverage };
 }
 
+/**
+ * Whether a result passes the gate: score at or above the threshold and no
+ * critical issue.
+ * @param {{score:number, issues:{severity:string}[]}} result
+ * @param {number} minScore
+ * @returns {boolean}
+ */
 function isPass(result, minScore) {
   return result.score >= minScore && !result.issues.some(i => i.severity === 'critical');
 }
@@ -316,6 +368,13 @@ export {
 
 // ── Self-test ────────────────────────────────────────────────────────
 
+/**
+ * Build a clean, ATS-friendly CV HTML fixture for the self-test, with hooks to
+ * override individual pieces (font, email, charset, sections, extra body) so a
+ * single check can be regressed in isolation.
+ * @param {{font?:string, email?:string, charset?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
+ * @returns {string} A full HTML document.
+ */
 function buildCleanHtml(overrides = {}) {
   const {
     font = "'Liberation Sans', Arial, sans-serif",
@@ -350,6 +409,11 @@ function buildCleanHtml(overrides = {}) {
 </body></html>`;
 }
 
+/**
+ * Run the built-in regression suite over inline fixtures and print a pass/fail
+ * summary. Exits with status 1 if any assertion fails.
+ * @returns {void}
+ */
 function runSelfTest() {
   let passed = 0, failed = 0;
   const check = (label, cond) => {
@@ -397,6 +461,26 @@ function runSelfTest() {
   const hidden = auditAts(buildCleanHtml({ extraBody: '<span style="color:#ffffff">python kubernetes aws rust golang</span>' }));
   check('hidden white text is flagged', hasIssue(hidden.issues, 'hidden text'));
 
+  // Single-quoted inline styles must not bypass hidden-text detection.
+  const hiddenSingleQuote = auditAts(buildCleanHtml({ extraBody: "<span style='color:#ffffff'>python rust golang aws terraform</span>" }));
+  check('single-quoted white text is flagged', hasIssue(hiddenSingleQuote.issues, 'hidden text'));
+
+  // Inline font-family is scored the same as a stylesheet font-family.
+  const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
+  check('inline non-standard font is flagged', hasIssue(inlineFont.issues, 'comic sans ms'));
+
+  // PHONE_RE must not treat a bare year range as a phone number.
+  const yearRangeOnly = auditAts(
+    '<html><head><meta charset="utf-8"></head><body>' +
+    '<div class="section-title">Work Experience</div><div class="section-title">Education</div>' +
+    '<div class="section-title">Skills</div>' +
+    '<p>Reach me at jane@example.com. Employed 2019 - 2024 building reliable, high-throughput ' +
+    'distributed systems on Kubernetes, with clean, well-tested Python services used daily across ' +
+    'the whole organization and its many engineering teams.</p></body></html>'
+  );
+  check('a bare year range is not counted as a phone', hasIssue(yearRangeOnly.issues, 'no phone number'));
+  check('a real phone number is detected', !hasIssue(auditAts(buildCleanHtml()).issues, 'no phone number'));
+
   // Keyword coverage is opt-in and never touches the structural score.
   const withKeywords = auditAts(buildCleanHtml(), { keywords: 'python, kubernetes, rust' });
   check('keyword coverage computed when supplied', withKeywords.keywordCoverage !== null);
@@ -411,6 +495,14 @@ function runSelfTest() {
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
+/**
+ * Print a human-readable ATS report (score, grade, issues, keyword coverage,
+ * pass/fail) to stdout.
+ * @param {{score:number, grade:string, issues:{severity:string,message:string}[], keywordCoverage:null|{found:number,total:number,percent:number,missing:string[]}}} result
+ * @param {string} file - Display name for the checked file.
+ * @param {number} minScore
+ * @returns {void}
+ */
 function printHuman(result, file, minScore) {
   const pass = isPass(result, minScore);
   console.log(`ATS check: ${file}`);
@@ -472,7 +564,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     }
 
-    if (!targetArg || args.includes('--help') || args.includes('-h')) {
+    const helpRequested = args.includes('--help') || args.includes('-h');
+    if (!targetArg || helpRequested) {
       console.log(`Usage: node verify-ats.mjs <generated-cv.html> [--keywords "a,b,c"] [--role "..."] [--min-score N] [--json]
 
 Scores a generated CV's HTML for ATS parseability (0-100 + letter grade) and lists
@@ -480,16 +573,19 @@ concrete, fixable issues. Deterministic, read-only. Exits 0 when score >= --min-
 (default ${DEFAULT_MIN_SCORE}) and no critical issue is present, else 1.
 
 Keyword coverage (--keywords / --role) is advisory and never changes the score.`);
-      process.exit(targetArg ? 0 : 1);
+      // An explicit --help is a success; a missing target is a usage error.
+      process.exit(helpRequested ? 0 : 1);
     }
 
     const targetPath = isAbsolute(targetArg) ? targetArg : join(process.cwd(), targetArg);
-    if (!existsSync(targetPath)) {
-      console.error(`ERROR: target file not found: ${targetArg}`);
+    let html;
+    try {
+      if (!statSync(targetPath).isFile()) throw new Error('not a regular file');
+      html = readFileSync(targetPath, 'utf-8');
+    } catch (err) {
+      console.error(`ERROR: cannot read target file: ${targetArg} (${err.code || err.message})`);
       process.exit(1);
     }
-
-    const html = readIfExists(targetPath);
     const result = auditAts(html, { keywords, role });
     const pass = isPass(result, minScore);
     const file = basename(targetPath);

@@ -652,8 +652,10 @@ try {
 // ATS-hostile CV (table layout + content image + missing headings) must exit 1
 // and surface the specific issues. --json prints the full result on both paths,
 // so we can assert on the reported issues even when the process exits non-zero.
+let atsTmp;
 try {
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-ats-'));
+  atsTmp = tmp;
   const cleanCv = join(tmp, 'clean-cv.html');
   const hostileCv = join(tmp, 'hostile-cv.html');
 
@@ -697,10 +699,10 @@ cost efficiency and clean, well-tested Python services used daily across the org
   } else {
     fail(`verify-ats did not properly flag a hostile CV (status=${hostileRes.status}, table=${flaggedTable}, sections=${flaggedSections})`);
   }
-
-  rmSync(tmp, { recursive: true, force: true });
 } catch (e) {
   fail(`verify-ats regression tests crashed: ${e.message}`);
+} finally {
+  if (atsTmp) rmSync(atsTmp, { recursive: true, force: true });
 }
 
 // ── 3. LIVENESS CLASSIFICATION ──────────────────────────────────

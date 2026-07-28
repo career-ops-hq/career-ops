@@ -23,7 +23,7 @@ node verify-ats.mjs output/cv-jane-smith-acme.html --min-score 80 --json
 Flags:
 
 - `--keywords "a,b,c"` — comma-separated target keywords; reports coverage vs the CV text.
-- `--role "..."` — a role title; tokens are added to the keyword set.
+- `--role "..."` — a role title added to the keyword set as a single phrase (split only on commas, slashes, and the word "and"), matched verbatim against the CV text; it is not tokenized into individual words.
 - `--min-score N` — pass threshold (default `70`, range 0-100).
 - `--json` — machine-readable result on stdout (printed on both pass and fail).
 - `--self-test` — run the built-in regression suite.
@@ -39,7 +39,7 @@ Each check contributes a fixed weight; every deduction attaches a `critical`, `w
 |--------|-------|----------------|
 | 15 | Real, selectable text present (>= 300 chars) | An image-only / rasterized CV has no text layer for the ATS to read. |
 | 20 | Standard section headings (Experience, Education, Skills required; Summary/Projects/Certifications bonus) | ATS parsers key off recognizable headings to segment the CV. |
-| 15 | Contact email (and phone) reachable in the body | ATS often drop `<header>`/`<footer>`; contact info must be in the body. |
+| 15 | Contact email (and phone) reachable in the body | ATS routinely drop semantic `<header>`/`<footer>` regions; contact info must sit in the main body. (A plain `<div class="header">` title block, as in the shipped template, is body content and is not flagged.) |
 | 20 | Single-column, no layout tables / multi-column CSS | Tables and columns scramble the reading order extractors follow. |
 | 10 | No CV text baked into images | ATS cannot read text inside images. |
 | 10 | Standard, embeddable fonts | Exotic fonts can extract as garbled or missing glyphs. |
@@ -60,10 +60,12 @@ When `--keywords` or `--role` is supplied, the checker reports how many target k
 2. Run `node verify-ats.mjs output/cv-{candidate}-{company}.html`.
 3. Fix any `critical`/`warning` items (usually in the template or the render payload), then re-run.
 4. Optionally pass the JD's keywords with `--keywords` to confirm coverage before rendering the PDF.
+5. Relay the result to the user: `[Render in {language.output}: the score and grade, then each issue's meaning and how to fix it, and the keyword-coverage line if present]`.
 
 ## Rules
 
 - **Read-only.** The checker reads one HTML file and writes nothing; it never touches user-layer files (respects `DATA_CONTRACT.md`).
 - **Advisory, not a gate.** Unlike `verify-cv-facts.mjs`, this is not part of the `pdf` hard-gate chain. Surface the score and issues to the user; do not block generation on it.
 - **Deterministic.** Same HTML in, same score out — no model calls, no network.
+- **Localize at the presentation boundary.** `verify-ats.mjs` emits fixed English by design (zero-LLM). When you relay its score and issues to the user, render the human-facing summary in `{language.output}` per AGENTS.md § "Output Language vs Market Modes" using the `[Render in {language.output}: …]` mechanism. Keep the checker's raw stdout English; only the surfaced summary is translated.
 - Issues describe structural risk, not facts. For fact/fabrication guarding, use `verify-cv-facts.mjs`.
