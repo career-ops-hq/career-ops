@@ -26,6 +26,14 @@ confirm.**
 - `data/intake-state.json` — fingerprints of already-ingested sources
   (written by `intake.mjs --commit`, user layer)
 
+> **Symlinks inside `documents/` are followed.** Linking a master CV that lives
+> elsewhere is the point, so the scan reads through the link rather than
+> skipping it. That also means a link pointing at a large or shared tree — a
+> whole home folder, a synced drive — puts everything under it in scope for
+> extraction. Link individual files, or folders you would be comfortable
+> handing over in full. (Link cycles are safe: each real directory is walked
+> at most once.)
+
 ## Step 1 — Scan and extract
 
 ```bash
