@@ -465,25 +465,45 @@ function backdate(path, ms) {
   utimesSync(path, when, when);
 }
 
+// The two "must not reclaim" tests describe the boundary the floor creates by
+// backdating the ownerless directory into it: older than the caller's staleMs
+// (so the unfloored code reclaims on its very first pass) but far younger than
+// OWNERLESS_GRACE_MS (so the floored code must not). Stating both sides
+// explicitly keeps the tests off the wall clock — asserting against a
+// directory created "just now" would instead depend on whether a sub-
+// millisecond age drifts past a 1 ms threshold before the loop looks again,
+// which is a race, not an assertion.
+//
+// With the age relation pinned, one pass is enough in both directions, so
+// retryMs is set above timeoutMs. That also stops the loop from creating and
+// deleting the guard directory a dozen times: Windows defers a directory's
+// real removal until the last handle closes, so a tight mkdir/rmdir cycle on
+// one path can surface EPERM instead of the timeout under test.
+const ONE_PASS = { timeoutMs: 150, retryMs: 200 };
+const INSIDE_GRACE_MS = 100;   // ownerless for 100ms: past staleMs, well inside the 1s floor
+const SMALL_STALE_MS = 10;
+
 async function testFreshOwnerlessLockIsNotStolen() {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-ownerless-'));
   const lockDir = join(dir, 'tracker.lock');
   try {
-    // Stands in for a winner that has run mkdirSync but not yet written owner.json.
+    // Stands in for a winner that has run mkdirSync but not yet written
+    // owner.json — live, real, and unlabelled inside its acquisition window.
     mkdirSync(lockDir);
+    backdate(lockDir, INSIDE_GRACE_MS);
     let acquired = null;
     let err = null;
     try {
       acquired = await acquireTrackerLock(lockDir, {
-        timeoutMs: 300, retryMs: 20, staleMs: 1, tracker: join(dir, 'applications.md'),
+        ...ONE_PASS, staleMs: SMALL_STALE_MS, tracker: join(dir, 'applications.md'),
       });
     } catch (e) {
       err = e;
     }
     if (err?.code === 'LOCK_TIMEOUT' && existsSync(lockDir)) {
-      pass('ownerless lock created microseconds ago is not stolen by a small staleMs');
+      pass('ownerless lock inside the grace period is not stolen by a small staleMs');
     } else {
-      fail(`fresh ownerless lock was stolen (staleRecovered=${acquired?.staleRecovered}, err=${err?.code})`);
+      fail(`ownerless lock inside the grace period was stolen (staleRecovered=${acquired?.staleRecovered}, err=${err?.code})`);
     }
     acquired?.release();
   } finally {
@@ -526,12 +546,13 @@ async function testLiveRecoverGuardIsNotEvicted() {
     mkdirSync(lockDir);
     writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999999, token: 'dead', tracker: 'x' }));
     mkdirSync(guardDir);
+    backdate(guardDir, INSIDE_GRACE_MS);
 
     let acquired = null;
     let err = null;
     try {
       acquired = await acquireTrackerLock(lockDir, {
-        timeoutMs: 300, retryMs: 20, staleMs: 1, tracker: join(dir, 'applications.md'),
+        ...ONE_PASS, staleMs: SMALL_STALE_MS, tracker: join(dir, 'applications.md'),
       });
     } catch (e) {
       err = e;

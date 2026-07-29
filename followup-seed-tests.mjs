@@ -369,7 +369,7 @@ function cleanup(sandbox) {
   cleanup(sb);
 }
 
-// ── Test 14: a freshly created ownerless lock is not stolen (#2306) ─────────
+// ── Test 14: an ownerless lock inside the grace period is not stolen (#2306) ─
 // The follow-ups lock is ownerless for the instant between its `mkdirSync` and
 // its `owner.json` write. Judging it on `age > staleMs` alone lets a caller
 // with a small staleMs delete a lock created microseconds earlier and walk
@@ -377,13 +377,20 @@ function cleanup(sandbox) {
 {
   const sb = makeSandbox();
   writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
-  mkdirSync(sb.lock, { recursive: true });          // ownerless, created just now
+  // Ownerless for 100ms: past the caller's staleMs (so the unfloored code
+  // reclaims it immediately) but far inside the 1s floor. Pinning both sides
+  // of the relation keeps the test off the wall clock — against a directory
+  // created "just now" this would instead depend on whether a sub-millisecond
+  // age drifts past a 1ms threshold before the retry loop looks again.
+  mkdirSync(sb.lock, { recursive: true });
+  const heldSince = new Date(Date.now() - 100);
+  utimesSync(sb.lock, heldSince, heldSince);
   const res = run(['1'], sb, {
-    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '1',
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
     CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '300',
   });
-  if (res.code === 4) pass('14. ownerless lock created microseconds ago is not stolen → exit 4');
-  else fail(`14. ownerless lock created microseconds ago is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
+  if (res.code === 4) pass('14. ownerless lock inside the grace period is not stolen → exit 4');
+  else fail(`14. ownerless lock inside the grace period is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
   if (existsSync(sb.lock)) pass('14. the untouched lock directory survives');
   else fail('14. the untouched lock directory survives — it was removed');
   cleanup(sb);
@@ -399,7 +406,7 @@ function cleanup(sandbox) {
   const when = new Date(Date.now() - 60_000);
   utimesSync(sb.lock, when, when);                  // a real orphan, not a new lock
   const res = run(['1'], sb, {
-    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '1',
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
     CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '2000',
   });
   if (res.code === 0) pass('15. ownerless lock older than the grace period is still recovered');
