@@ -15826,6 +15826,21 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
   }
 }
 
+console.log('\n59d. Home-dashboard awaiting-decision ranking (web/src/lib/core/awaiting-view.mjs)');
+{
+  // web/ lives deliberately OUTSIDE the auto-updater's world (its own
+  // release-please component; see validate-system-paths-coverage.mjs
+  // EXCLUDE_PREFIXES) — a core-only install has no web/ tree, so warn (not
+  // fail) instead of crashing the suite.
+  if (existsSync(join(ROOT, 'web', 'src', 'lib', 'core', 'awaiting-view.mjs'))) {
+    const unit = run(NODE, ['--test', 'test/awaiting-view.test.mjs']);
+    if (unit !== null) pass('awaiting-view unit tests pass');
+    else fail('awaiting-view unit tests failed (run: node --test test/awaiting-view.test.mjs)');
+  } else {
+    warn('awaiting-view tests skipped — web/ not present (core-only install)');
+  }
+}
+
 console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
 {
   const unit = run(NODE, ['--test', 'test/cover-resolver.test.mjs']);

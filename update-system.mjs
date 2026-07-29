@@ -346,6 +346,7 @@ const SYSTEM_PATHS = [
   'playwright.cv.config.mjs',
   'test/cv-templates.test.mjs',
   'test/cover-resolver.test.mjs',
+  'test/awaiting-view.test.mjs',
   'test/pipeline-lock.test.mjs',
   'test/profile-photo.test.mjs',
   'templates/cv-template.zh-minimal.html',

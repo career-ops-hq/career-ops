@@ -11,6 +11,7 @@ import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
+import { selectAwaitingDecision } from "@/lib/core/awaiting-view.mjs";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
@@ -66,11 +67,11 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
-    [applications],
-  );
+  // Awaiting decision: scored (Evaluated) but no terminal status yet, ranked
+  // strongest first. Slicing tracker order instead returned the most recently
+  // SCANNED roles rather than the highest-SCORING ones, so the panel meant to
+  // surface what is worth acting on hid the best matches entirely.
+  const awaiting = useMemo(() => selectAwaitingDecision(applications, 6), [applications]);
 
   const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
