@@ -125,9 +125,16 @@ export function parseDate(dateStr) {
 // how an apply date reconstructed after the fact gets written. Skipping those
 // silently fell back to the evaluation date — the exact wrong-age failure this
 // lookup exists to prevent. The leading \b still refuses "reapplied".
+//
+// The trailing (?![\w-]) is the mirror of that leading \b: without it a
+// malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
+// plausible-looking date and then reported as a *measured* apply date. That is
+// worse than no match at all — the evaluation-date fallback is at least labelled
+// as inferred, whereas a truncated date is indistinguishable from a real one.
+// Rejecting the bad candidate lets the scan continue to a later valid date.
 export function parseAppliedDate(notes) {
   if (!notes) return null;
-  const m = String(notes).match(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})/i);
+  const m = String(notes).match(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/i);
   return m ? m[1] : null;
 }
 
