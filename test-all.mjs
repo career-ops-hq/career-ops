@@ -5466,6 +5466,13 @@ try {
   } else {
     fail('isRealCalendarDate mis-classifies a calendar date');
   }
+  // Date.UTC() maps years 0-99 onto 1900-1999, so a literal ISO year below
+  // 0100 would be validated against the wrong year entirely.
+  if (cadence.isRealCalendarDate('0096-02-29') && !cadence.isRealCalendarDate('0097-02-29')) {
+    pass('isRealCalendarDate preserves a literal ISO year below 0100');
+  } else {
+    fail(`isRealCalendarDate mishandles a sub-0100 year: 0096-02-29=${cadence.isRealCalendarDate('0096-02-29')} 0097-02-29=${cadence.isRealCalendarDate('0097-02-29')}`);
+  }
   // And the source must degrade to the fallback, not report a fabricated date.
   {
     const r = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-31' });

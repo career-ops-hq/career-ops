@@ -166,7 +166,12 @@ export function isRealCalendarDate(iso) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ''))) return false;
   const [y, mo, d] = iso.split('-').map(Number);
   if (mo < 1 || mo > 12 || d < 1) return false;
-  const dt = new Date(Date.UTC(y, mo - 1, d));
+  // setUTCFullYear rather than Date.UTC: Date.UTC maps years 0-99 onto
+  // 1900-1999, which would reject a literal ISO year below 0100 (0096-02-29 is
+  // a real leap day). The absolute setter keeps the year as written.
+  const dt = new Date(0);
+  dt.setUTCFullYear(y, mo - 1, d);
+  dt.setUTCHours(0, 0, 0, 0);
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
