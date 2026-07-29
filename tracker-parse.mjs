@@ -83,27 +83,46 @@ export function isSeparatorRow(line) {
 const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
 
 /**
+ * The ONE definition of "this row is the tracker header", shared by
+ * `isHeaderRow` and `detectColumns`.
+ *
+ * A row qualifies only by labelling the whole schema — every field in
+ * REQUIRED_HEADER_FIELDS. One telltale cell is not enough: a company genuinely
+ * named "Company", or a note consisting of that single word, would otherwise be
+ * read as table furniture and skip row-format validation, which is the same
+ * class of false positive this module exists to stop.
+ *
+ * Extracted rather than duplicated (PR #2267 review): the two callers had
+ * drifted, and a header they disagree about is one that validation skips as
+ * furniture while column detection cannot parse — silently falling back to the
+ * fixed legacy layout.
+ *
+ * @param {string[]} cells - Lowercased, trimmed cells from `line.split('|')`.
+ * @returns {Object<string,number>|null} Field → column index, or null.
+ */
+function headerSchemaMap(cells) {
+  // NOTE: the literal `company`/`role` pre-filter is kept deliberately, to hold
+  // `detectColumns` behavior identical while removing the drift. It does mean a
+  // FULLY localized header (`| # | Fecha | Empresa | Puesto | … |`) is rejected
+  // here even though HEADER_ALIASES defines `empresa`/`puesto` for exactly that
+  // case, so such a tracker silently falls back to LEGACY_COLMAP. That is a
+  // pre-existing gap, not one this PR introduces, and widening it touches every
+  // detectColumns consumer — so it belongs in its own change.
+  if (!cells.includes('company') || !cells.includes('role')) return null;
+  const map = {};
+  cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+  return REQUIRED_HEADER_FIELDS.every(k => map[k] != null) ? map : null;
+}
+
+/**
  * Whether a table row is the tracker's header row.
- *
- * Recognized by the whole header SCHEMA, not by one telltale cell: a row has to
- * label every column in REQUIRED_HEADER_FIELDS. One exact `Company` cell is not
- * enough — a company genuinely named "Company", or a note consisting of that one
- * word, would otherwise be read as table furniture and skip row-format
- * validation, which is the same substring-ish false positive this module exists
- * to stop.
- *
- * This is deliberately the acceptance test `detectColumns` already applies, so
- * the two cannot disagree about what a header is.
  *
  * @param {string} line - One line from applications.md.
  * @returns {boolean}
  */
 export function isHeaderRow(line) {
   if (typeof line !== 'string' || !line.startsWith('|')) return false;
-  const cells = line.split('|').map(s => s.trim().toLowerCase());
-  const map = {};
-  cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-  return REQUIRED_HEADER_FIELDS.every(k => map[k] != null);
+  return headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase())) !== null;
 }
 
 /**
@@ -139,11 +158,8 @@ export function resolveScoreStatus(a, b) {
 export function detectColumns(lines) {
   for (const line of lines) {
     if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim().toLowerCase());
-    if (!cells.includes('company') || !cells.includes('role')) continue;
-    const map = {};
-    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
+    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (map) return map;
   }
   return null;
 }
