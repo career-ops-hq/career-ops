@@ -218,7 +218,7 @@ I am happy to discuss further at your convenience.
 *Run `/career-ops cover {slug}` to complete angles, confirm company research, and generate the PDF.*
 ```
 
-`_shared.md` の Professional Writing section にある language rules を draft content にすべて適用する。No em dashes、no buzzwords、active voice、concrete claims only。
+`_writing.md` の Professional Writing section にある language rules を draft content にすべて適用する。No em dashes、no buzzwords、active voice、concrete claims only。
 
 ---
 

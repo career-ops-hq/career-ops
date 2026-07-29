@@ -49,6 +49,7 @@ if (!existsSync(profilePath)) {
 // 3. Check for hardcoded metrics in prompt files
 const filesToCheck = [
   { path: join(projectRoot, 'modes', '_shared.md'), name: '_shared.md' },
+  { path: join(projectRoot, 'modes', '_writing.md'), name: '_writing.md' },
   { path: join(projectRoot, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
 ];
 

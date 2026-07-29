@@ -171,6 +171,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
@@ -188,6 +189,7 @@ const scripts = [
   { name: 'followup-cadence.test.mjs', expectExit: 0 },
   { name: 'process-quality.test.mjs', expectExit: 0 },
   { name: 'company-history.test.mjs', expectExit: 0 },
+  { name: 'contacts.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
@@ -201,6 +203,7 @@ const scripts = [
   // portals file that would trigger a live remote sweep during tests.
   { name: 'verify-portals.mjs --file .tmp-test-missing-portals.yml', expectExit: 0 },
   { name: 'update-system.mjs check', expectExit: 0 },
+  { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   { name: 'archive-posting.mjs --help', expectExit: 0 },
 ];
 
@@ -208,7 +211,10 @@ const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
-    if (exclude.includes(name)) return;
+    // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
+    // Match by basename ONLY at the repo root so nested fixture subdirs such as
+    // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+    if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
       mkdirSync(dest, { recursive: true });
@@ -914,21 +920,50 @@ for (const f of systemFiles) {
   }
 }
 
-// Per-CLI SKILL.md entrypoints must be SYMLINKS in the git index (mode 120000).
-// A regular-file blob whose content is the link path as text ships a broken,
-// empty skill to every user of that CLI — exactly what happened to .kimi/ when
-// a symlink was created under core.symlinks=false and committed as-is. Checking
-// the INDEX mode (not the filesystem) keeps this assertion true on Windows
-// checkouts too.
+// Per-CLI SKILL.md entrypoints must resolve to the canonical skill content.
+//
+// The defect this guards is a regular-file blob whose content is the LINK PATH
+// AS TEXT — exactly what happened to .kimi/ when a symlink was created under
+// core.symlinks=false and committed as-is (#1051). That ships a broken, empty
+// skill to every user of that CLI.
+//
+// Index mode was a faithful proxy for that until #2259 added
+// materializeSkillEntrypoints(), which writes the real content as a regular
+// file on filesystems without symlink support. That is a second, CORRECT
+// mode-100644 state, so mode alone can no longer tell the two apart:
+//
+//   120000                          → symlink                        (correct)
+//   100644 + canonical blob         → materialized entrypoint        (correct)
+//   100644 + any other blob         → link-path text or stale copy   (BROKEN)
+//
+// Comparing the blob to the canonical entrypoint asserts the invariant the
+// defect is actually about, and still catches #1051: a link-path blob never
+// equals the canonical blob. Reading the INDEX (not the filesystem) keeps this
+// true on Windows checkouts, where a symlink entry materializes as a text file.
+const CANONICAL_ENTRYPOINT = '.agents/skills/career-ops/SKILL.md';
+const stagedBlob = (path) => {
+  const entry = run('git', ['ls-files', '-s', path]);
+  if (entry === null || entry === '') return null;
+  const [mode, sha] = entry.split(/\s+/);
+  return { mode, sha };
+};
+
+const canonicalEntry = stagedBlob(CANONICAL_ENTRYPOINT);
+if (!canonicalEntry) {
+  fail(`Could not read git index entry for the canonical entrypoint ${CANONICAL_ENTRYPOINT}`);
+}
+
 const skillEntrypoints = systemFiles.filter((f) => f.endsWith('/skills/career-ops/SKILL.md'));
 for (const f of skillEntrypoints) {
-  const staged = run('git', ['ls-files', '-s', f]);
-  if (staged === null || staged === '') {
+  const staged = stagedBlob(f);
+  if (!staged) {
     fail(`Could not read git index entry for ${f} (lookup failed — not evidence of absence)`);
-  } else if (staged.startsWith('120000')) {
+  } else if (staged.mode === '120000') {
     pass(`Entrypoint is a real symlink in git: ${f}`);
+  } else if (canonicalEntry && staged.sha === canonicalEntry.sha) {
+    pass(`Entrypoint is a materialized regular file with canonical content: ${f}`);
   } else {
-    fail(`Entrypoint committed as a REGULAR file (mode ${staged.split(' ')[0]}) — users of this CLI get a broken skill: ${f}`);
+    fail(`Entrypoint committed as a REGULAR file (mode ${staged.mode}) whose content is not the canonical skill — users of this CLI get a broken skill: ${f}`);
   }
 }
 
@@ -1769,6 +1804,51 @@ if (shared.includes('_profile.md')) {
   fail('_shared.md does NOT reference _profile.md');
 }
 
+// --- _shared.md / _writing.md split (#1710) ---
+// The split can only relocate content, never edit or drop it. Byte-preservation
+// was verified at review time (concatenating the two files reproduced the
+// pre-split _shared.md exactly), but a frozen pre-split hash is deliberately NOT
+// kept as a permanent guard: it inverts once merged — failing on every
+// legitimate future edit to either file, and _shared.md is the most-edited
+// prompt file in the repo (a model-tier update fired it two days running). The
+// durable invariant is structural instead: each concern lives in exactly ONE
+// file, and no mode points at _shared.md for a writing section — the silent-loss
+// bug byte-preservation could never catch anyway.
+{
+  // Each concern lives in exactly ONE file: eval-core headers only in _shared.md,
+  // writing headers only in _writing.md (no loss, no duplication, no misplacement).
+  // Matched as line-anchored HEADERS (`^## …`) so a prose reference to a section
+  // name inside a table cell (e.g. Sources of Truth pointing at `## Writing Style`)
+  // isn't mistaken for the section itself.
+  const writing = readFile('modes/_writing.md');
+  const hasHeader = (src, h) => new RegExp('^' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'm').test(src);
+  const coreHeaders = ['## Sources of Truth', '## Scoring System', '## Posting Legitimacy', '## Company Type and Compensation', '## Archetype Detection', '## Global Rules'];
+  const writingHeaders = ['## Voice DNA', '## Writing Style Calibration', '## Writing Style', '## Professional Writing'];
+  const coreOk = coreHeaders.every(h => hasHeader(shared, h) && !hasHeader(writing, h));
+  const writingOk = writingHeaders.every(h => hasHeader(writing, h) && !hasHeader(shared, h));
+  if (coreOk && writingOk) {
+    pass('eval-core sections stay in _shared.md; writing sections live only in _writing.md (#1710)');
+  } else {
+    fail(`_shared/_writing section placement wrong (#1710): coreOk=${coreOk} writingOk=${writingOk}`);
+  }
+
+  // Stale-reference guard: no mode may point at `_shared.md` for a writing
+  // section — those references must target `_writing.md` now, or the writing
+  // guidance silently vanishes for that mode. This is what byte-preservation
+  // alone can't catch.
+  const writingRefRe = /_shared\.md[^.\n]{0,40}(Voice DNA|Writing Style|Professional Writing)|(Voice DNA|Writing Style|Professional Writing)[^.\n]{0,40}_shared\.md/;
+  const stale = [];
+  for (const f of readdirSync(join(ROOT, 'modes'), { recursive: true }).filter(p => typeof p === 'string' && p.endsWith('.md'))) {
+    const src = readFile(`modes/${f.split(/[\\/]/).join('/')}`);
+    if (writingRefRe.test(src)) stale.push(f);
+  }
+  if (stale.length === 0) {
+    pass('no mode references _shared.md for a writing section — all writing refs point at _writing.md (#1710)');
+  } else {
+    fail(`modes still reference _shared.md for writing sections (should be _writing.md): ${stale.join(', ')}`);
+  }
+}
+
 // --- _custom.md must be READ, not just written (#1388): Sources of Truth row +
 // honor rule in _shared.md, and an explicit pre-generation read in pdf.md ---
 const pdfModeCustom = readFile('modes/pdf.md');
@@ -2155,6 +2235,100 @@ if (
   fail('offer-prep reply-draft step missing (or lost its prep-report gate, reply-draft path, traceability rule, never-send guard, questions-not-demands framing, no-legal-claims rule, checklist, or prep-report+conversation-only source boundary) (#1663)');
 }
 
+// --- offer-prep statutory-context notes for restrictive covenants (#2028) ---
+{
+  // 1. Jurisdiction table exists, parses as YAML, and both seeds are complete
+  const rcPath = join(ROOT, 'templates', 'restrictive-covenants.yml');
+  const RC_STATUS_ENUM = ['prohibited', 'allowed_with_mandatory_compensation', 'allowed_with_limits', 'common_law_reasonableness'];
+  if (!existsSync(rcPath)) {
+    fail('templates/restrictive-covenants.yml missing (#2028)');
+  } else {
+    try {
+      const { load } = await import('js-yaml');
+      const rcRaw = readFileSync(rcPath, 'utf-8');
+      const rc = load(rcRaw);
+      const rows = Array.isArray(rc?.covenants) ? rc.covenants : [];
+      const completeRow = (r) =>
+        r &&
+        typeof r.jurisdiction === 'string' &&
+        typeof r.jurisdiction_name === 'string' &&
+        r.covenant_type === 'non_compete' &&
+        RC_STATUS_ENUM.includes(r.status) &&
+        Array.isArray(r.exceptions) && r.exceptions.length > 0 &&
+        typeof r.effective === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.effective) &&
+        typeof r.legal_basis === 'string' && r.legal_basis.length > 0 &&
+        Array.isArray(r.sources) && r.sources.length > 0 &&
+        typeof r.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.as_of);
+      const usCa = rows.find((r) => r?.jurisdiction === 'US-CA');
+      const caOn = rows.find((r) => r?.jurisdiction === 'CA-ON');
+      if (
+        completeRow(usCa) && usCa.status === 'prohibited' &&
+        usCa.legal_basis.includes('16600') && usCa.legal_basis.includes('16600.5') &&
+        completeRow(caOn) && caOn.status === 'prohibited' &&
+        caOn.legal_basis.includes('67.2') && caOn.effective === '2021-10-25' &&
+        caOn.exceptions.some((e) => /executive/i.test(e)) &&
+        caOn.exceptions.some((e) => /sale/i.test(e))
+      ) {
+        pass('restrictive-covenants.yml parses; US-CA (§16600/§16600.5) and CA-ON (ESA s.67.2, 2021-10-25) non-compete seeds complete — status enum, exceptions, string dates, legal_basis, sources, as_of (#2028)');
+      } else {
+        fail('restrictive-covenants.yml seed rows incomplete — need US-CA and CA-ON non_compete rows with prohibited status, exceptions, quoted-string effective/as_of dates, legal_basis, sources (#2028)');
+      }
+      if (
+        rcRaw.includes('CONTRIBUTION RULE') &&
+        rcRaw.includes('COVENANT-TYPE DISCIPLINE') &&
+        rcRaw.includes('NEVER conflated') &&
+        rcRaw.includes('NOT LEGAL ADVICE')
+      ) {
+        pass('restrictive-covenants.yml header documents the contribution rule, covenant-type discipline, and not-legal-advice boundary (#2028)');
+      } else {
+        fail('restrictive-covenants.yml header missing the contribution rule, covenant-type (never-conflate) discipline, and/or not-legal-advice note (#2028)');
+      }
+    } catch (e) {
+      fail(`templates/restrictive-covenants.yml does not parse as YAML: ${e.message} (#2028)`);
+    }
+  }
+
+  // 2. offer-prep carries the statutory-context subsection with both output
+  //    integrations (clause-tag note + lawyer question), the covenant-type
+  //    discipline, and the never-assert-application hard rule
+  const rcStart = offerPrepMode.indexOf('Statutory-context notes for restrictive covenants');
+  const rcEnd = offerPrepMode.indexOf('## Step 3', Math.max(rcStart, 0));
+  const rcSection = rcStart >= 0 && rcEnd > rcStart ? offerPrepMode.slice(rcStart, rcEnd) : '';
+  if (
+    rcSection.includes('templates/restrictive-covenants.yml') &&
+    rcSection.includes('statutory-context note') &&
+    rcSection.includes('Questions for your lawyer') &&
+    rcSection.includes('Covenant-type discipline (mandatory)') &&
+    rcSection.includes('never conflated') &&
+    rcSection.includes('Never assert application (HARD RULE)') &&
+    rcSection.includes('cannot self-certify') &&
+    rcSection.includes('always a lawyer question') &&
+    rcSection.includes('not legal advice') &&
+    rcSection.includes('not** online') &&
+    rcSection.includes('Render in {language.output}')
+  ) {
+    pass('offer-prep statutory-context subsection pins table lookup, tag-note + lawyer-question integration, covenant-type discipline, never-assert-application rule, not-legal-advice, no-research reaffirmation, i18n rendering (#2028)');
+  } else {
+    fail('offer-prep statutory-context subsection missing/incomplete — needs table reference, statutory-context note + lawyer-question integration, covenant-type never-conflate discipline, never-assert-application hard rule, not-legal-advice note, local-lookup-is-not-research clarification, {language.output} rendering (#2028)');
+  }
+
+  // 3. Phrasing discipline holds in the report-facing text: the blockquote
+  //    template the agent renders may state what a STATUTE says (which
+  //    legitimately includes words like "prohibited" or "void" describing
+  //    the statute), but must never assert those verdicts about the
+  //    candidate's own clause. Only '>' lines (rendered output templates)
+  //    are scanned, and only for clause-directed assertions.
+  const rcQuoteLines = rcSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const rcAssertive = rcQuoteLines.filter((l) =>
+    /(this|your|the candidate'?s?) (specific )?(clause|covenant|non-compete) (is|would be|will be) (void|illegal|unenforceable|invalid|prohibited)/i.test(l)
+  );
+  if (rcSection && rcQuoteLines.length >= 1 && rcAssertive.length === 0) {
+    pass('restrictive-covenant statutory-context template states statute facts only — no void/illegal/unenforceable assertions about the candidate\'s clause (#2028)');
+  } else {
+    fail(`restrictive-covenant phrasing discipline broken: ${rcAssertive.length ? `clause-directed verdict in blockquote: ${rcAssertive[0].trim().slice(0, 80)}` : 'expected a blockquote output template in the section'} (#2028)`);
+  }
+}
+
 const routerSkill = readFile('.agents/skills/career-ops/SKILL.md');
 if (
   /argument-hint:.*offer-prep/.test(routerSkill) &&
@@ -2497,6 +2671,55 @@ if (trackerModeDoc.includes('company-history.mjs') && trackerModeDoc.includes('s
 // sourced from scan-history.tsv (agent-observable), NOT routed through
 // company-history.mjs — every legitimacy Source must be observable without
 // executing a script that could silently fail. See PR #1712 review.
+
+// Funnel-calibration wiring (#status-ledger): the lens must be offered where
+// the data lives, and the honesty rules must survive as mode text, not just
+// script output.
+if (
+  patternsModeDoc.includes('funnel-velocity.mjs') &&
+  patternsModeDoc.includes('selection-bias') &&
+  patternsModeDoc.includes('n=20')
+) {
+  pass('patterns mode offers the funnel-calibration lens with its honesty rules');
+} else {
+  fail('patterns mode missing funnel-velocity lens, selection-bias note, or n=20 claim gate');
+}
+
+if (
+  trackerModeDoc.includes('funnel-velocity.mjs') &&
+  trackerModeDoc.includes('set-status.mjs') &&
+  trackerModeDoc.includes('--on')
+) {
+  pass('tracker mode surfaces funnel-velocity and routes status changes through set-status --on');
+} else {
+  fail('tracker mode missing funnel-velocity mention or set-status/--on routing');
+}
+
+if (followupModeDoc.includes('funnel-velocity.mjs') && followupModeDoc.includes('--on')) {
+  pass('followup mode cross-references the waiting block and --on event dating');
+} else {
+  fail('followup mode missing funnel-velocity waiting cross-reference or --on');
+}
+
+const applyModeDoc = readFile('modes/apply.md');
+if (applyModeDoc.includes('--on YYYY-MM-DD')) {
+  pass('apply Step 9 documents --on for backdated submissions');
+} else {
+  fail('apply mode missing --on backdating hint in Step 9');
+}
+
+// --- contacts phonebook wiring (contacts.mjs <-> contacto mode) ---
+const contactoModeDoc = readFile('modes/contacto.md');
+
+if (
+  contactoModeDoc.includes('data/contacts.tsv') &&
+  contactoModeDoc.includes('contacts.mjs --vcf') &&
+  /never save|never auto-save/i.test(contactoModeDoc)
+) {
+  pass('contacto offers to save identified contacts (user-confirmed, never auto) and surfaces the vCard export');
+} else {
+  fail('contacto missing the save-to-contacts.tsv step, the no-auto-save rule, or the contacts.mjs --vcf mention');
+}
 
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
@@ -6116,6 +6339,29 @@ try {
     pass('role matcher keeps distinct one-word-suffix MTS roles apart despite the "engineer" filler');
   }
 
+  // Slashed short acronyms used to vanish in tokenization ("(CI/CD)" → "ci cd"
+  // → both dropped by the length filter), so a sibling req whose ONLY
+  // distinguishing qualifier is a slashed acronym tokenized identically to the
+  // bare title — the #1881 subset guard never saw an extra token — and
+  // merge-tracker overwrote the Applied row's title/score/report (#2165).
+  if (!roleFuzzyMatch(
+    'Senior Software Engineer, Infrastructure',
+    'Senior Software Engineer, Infrastructure (CI/CD)'
+  )) {
+    pass('role matcher keeps a slash-acronym-qualified sibling req distinct (#2165)');
+  } else {
+    fail('role matcher still collapses sibling reqs whose only qualifier is a slashed acronym');
+  }
+
+  if (roleFuzzyMatch(
+    'Senior Software Engineer, Infrastructure (CI/CD)',
+    'Senior Software Engineer, Infrastructure CI/CD'
+  )) {
+    pass('role matcher still matches the same slash-acronym role across punctuation variants');
+  } else {
+    fail('role matcher stopped matching identical slash-acronym roles');
+  }
+
   // Accented Latin titles used to split at the accent instead of folding it, so
   // "Sênior" tokenized to ["s", "nior"]: "s" fell to the length filter and
   // "nior" survived as a phantom token that is in no stopword list. Every
@@ -6586,6 +6832,153 @@ try {
   fail(`merge-tracker fuzzy dedup tests crashed: ${e.message}`);
 }
 
+// merge-tracker used to clobber an Applied row when a sibling req's only
+// distinguishing qualifier was a slashed acronym: "(CI/CD)" tokenized to
+// nothing, the fuzzy tier matched, and the update path rewrote the existing
+// row's title/score/date/report. Two guards now cover it: slashed acronyms
+// survive tokenization, and non-report-number matches never rewrite the title.
+console.log('\n🧪 Testing merge-tracker sibling-req clobber guard (slash acronyms + title preservation)...');
+try {
+  const clobberTmp = mkdtempSync(join(tmpdir(), 'career-ops-clobber-'));
+  try {
+    mkdirSync(join(clobberTmp, 'data'));
+    mkdirSync(join(clobberTmp, 'reports'));
+    const additionsDir = join(clobberTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(clobberTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-05 | Globex | Senior Software Engineer, Infrastructure | N/A | Applied | ❌ | - | source=applied |\n' +
+      '| 2 | 2026-01-08 | Acme | Senior Platform Engineer, Observability | 3.9/5 | Applied | ❌ | [2](../reports/002-acme-2026-01-08.md) | existing |\n');
+    for (const n of ['002-acme-2026-01-08', '003-globex-2026-01-09', '004-acme-2026-01-09']) {
+      writeFileSync(join(clobberTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // Sibling req whose only qualifier is a slashed acronym → must be ADDED.
+    writeFileSync(join(additionsDir, '003-globex.tsv'),
+      '3\t2026-01-09\tGlobex\tSenior Software Engineer, Infrastructure (CI/CD)\tEvaluated\t4.5/5\t✅\t[3](reports/003-globex-2026-01-09.md)\tdistinct req\n');
+    // True repost with reworded title → fuzzy update keeps the EXISTING title.
+    writeFileSync(join(additionsDir, '004-acme.tsv'),
+      '4\t2026-01-09\tAcme\tSr Platform Engineer, Observability (Remote)\tEvaluated\t4.2/5\t❌\t[4](reports/004-acme-2026-01-09.md)\trepost re-eval\n');
+
+    const clobberResult = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (clobberResult === null) {
+      fail('merge-tracker.mjs crashed during sibling-req clobber guard test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+
+      if (merged.includes('Senior Software Engineer, Infrastructure |') && merged.includes('Infrastructure (CI/CD)')) {
+        pass('slash-acronym sibling req added as its own row; Applied row untouched');
+      } else {
+        fail('slash-acronym sibling req clobbered the existing Applied row (regression)');
+      }
+
+      const acmeRows = merged.split('\n').filter(l => l.includes('Observability'));
+      if (acmeRows.length === 1 && acmeRows[0].includes('Senior Platform Engineer, Observability') && acmeRows[0].includes('4.2/5')) {
+        pass('fuzzy-tier update bumps score but preserves the existing role title');
+      } else {
+        fail(`fuzzy-tier title preservation broken: ${acmeRows.length} Observability rows: ${acmeRows.join(' // ')}`);
+      }
+    }
+  } finally {
+    rmSync(clobberTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker sibling-req clobber guard tests crashed: ${e.message}`);
+}
+
+// Tier-2 (entry num + company): pins the TITLE FIELD ONLY (#2166 review).
+//
+// The title-preservation guard keys on reportNumMatched, which only tier-1
+// (report number + company) sets — so tier-2 preserves the existing title too.
+// That is intentional: tier-2 fires only AFTER tier-1 failed, i.e. the addition
+// carries a report link that did NOT match the row's while the bare num did.
+// Report-file numbering and tracker-row numbering drift independently, so a
+// tier-2 hit is "these two numbers coincide at this company" — a coincidence,
+// not an expressed intent to retitle. Since date/score/report/notes are all
+// overwritten unconditionally on the update path, the title is the only field
+// left carrying the evidence that two reqs were distinct. This test exists so a
+// future refactor cannot flip that behavior silently.
+//
+// SCOPE — read before extending this test. The fixture below is a deliberately
+// pathological isolation case, and the row it produces is internally
+// inconsistent: the preserved title describes one req while the overwritten
+// report link points at another req's evaluation. That inconsistency is
+// PRE-EXISTING tier-2 behavior, not something this change introduces — before
+// the guard, the same collision overwrote the title as well, which loses
+// strictly more information (the tracker no longer records that the original
+// req was ever applied to). This test therefore asserts ONLY that the title
+// survives; it does NOT endorse the rest of the merged row as correct. The
+// underlying question — whether an uncorroborated num+company collision should
+// update in place at all, versus adding the row or surfacing a conflict — is a
+// tier-2 redesign, deliberately out of scope for this #2165 bugfix.
+console.log('\n🧪 Testing merge-tracker tier-2 (entry num) title preservation...');
+try {
+  const { roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
+  const tier2Tmp = mkdtempSync(join(tmpdir(), 'career-ops-tier2-'));
+  try {
+    mkdirSync(join(tier2Tmp, 'data'));
+    mkdirSync(join(tier2Tmp, 'reports'));
+    const additionsDir = join(tier2Tmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(tier2Tmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 7 | 2026-02-01 | Initech | Staff Data Engineer, Batch Pipelines | 3.6/5 | Applied | ❌ | [21](../reports/021-initech-2026-02-01.md) | existing |\n');
+    for (const n of ['021-initech-2026-02-01', '022-initech-2026-02-02']) {
+      writeFileSync(join(tier2Tmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // num 7 collides with the existing row at the same company, but the report
+    // link (22) does not match the row's (21) — so tier-1 misses and tier-2 is
+    // the only tier that can match: the roles are far too different to fuzzy
+    // match, which is what isolates tier-2 here.
+    writeFileSync(join(additionsDir, '007-initech.tsv'),
+      '7\t2026-02-02\tInitech\tTechnical Program Manager, Compliance\tEvaluated\t4.4/5\t❌\t[22](reports/022-initech-2026-02-02.md)\tnum collision, distinct role\n');
+
+    // The isolation above is load-bearing: if these two titles ever DID fuzzy
+    // match, tier-3 could satisfy the assertions below and this would silently
+    // stop testing tier-2. Assert the premise rather than assuming it.
+    if (!roleFuzzyMatch('Staff Data Engineer, Batch Pipelines', 'Technical Program Manager, Compliance')) {
+      pass('tier-2 fixture roles do not fuzzy-match, so tier-2 is the only tier that can fire');
+    } else {
+      fail('tier-2 fixture roles now fuzzy-match — this test no longer isolates tier-2');
+    }
+
+    const tier2Result = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (tier2Result === null) {
+      fail('merge-tracker.mjs crashed during tier-2 title preservation test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+      const initechRows = merged.split('\n').filter(l => l.includes('Initech'));
+
+      // Characterization only — this pins that the update path RAN (one row,
+      // not two, and the score moved), which is what makes the title assertion
+      // below non-vacuous. It is not a claim that in-place update is the right
+      // outcome for an uncorroborated tier-2 collision; see SCOPE above.
+      if (initechRows.length === 1 && initechRows[0].includes('4.4/5')) {
+        pass('tier-2 collision takes the in-place update path (pre-existing behavior)');
+      } else {
+        fail(`tier-2 match/update broken: ${initechRows.length} Initech rows: ${initechRows.join(' // ')}`);
+      }
+
+      if (initechRows.length === 1
+          && initechRows[0].includes('Staff Data Engineer, Batch Pipelines')
+          && !initechRows[0].includes('Technical Program Manager')) {
+        pass('tier-2 update preserves the existing role title (only tier-1 may retitle)');
+      } else {
+        fail(`tier-2 title preservation broken: ${initechRows.join(' // ')}`);
+      }
+    }
+  } finally {
+    rmSync(tier2Tmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker tier-2 title preservation tests crashed: ${e.message}`);
+}
+
 // ── MERGE-TRACKER CROSS-CHANNEL VIA GUARD: NON-LATIN AGENCIES (#1603) ─────
 // normalizeCompany() strips [^a-z0-9], so two different non-Latin agency
 // names both collapse to '' and the #1596 cross-channel guard treated them
@@ -7037,6 +7430,191 @@ try {
   }
 } catch (e) {
   fail(`merge-tracker reserved-number fidelity test crashed: ${e.message}`);
+}
+
+// ── DEDUP BLINDNESS FROM `---` / "Empresa" IN A DATA ROW (#2265) ─────────
+// Readers recognized the markdown separator row with `line.includes('---')`,
+// which also matched any DATA row whose free text contained three hyphens — a
+// URL slug like `Senior-Engineer---Platform-Team`, an em dash typed as
+// `---` — or, via the sibling `.includes('Empresa')` guard, a Spanish-market
+// company name. Such a row never reached `existingApps`, so it was invisible to
+// duplicate detection: re-evaluating that exact role appended a second row
+// instead of updating the first in place.
+//
+// #1704 fixed the NUMBERING half of this (the separate usedNumbers pass, so the
+// hidden row's number is never reissued) and deliberately left `existingApps`
+// alone. This covers the dedup half, and pins the row-format check that shares
+// the same heuristic.
+console.log('\n🧪 Testing dedup blindness from `---` / "Empresa" in a data row...');
+try {
+  const hyphenTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-hyphen-'));
+  try {
+    const hData = join(hyphenTmp, 'data');
+    const hReports = join(hyphenTmp, 'reports');
+    const hAdditions = join(hyphenTmp, 'additions');
+    mkdirSync(hData);
+    mkdirSync(hReports);
+    mkdirSync(hAdditions);
+
+    const hTracker = join(hData, 'applications.md');
+    const hHeader =
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n';
+    // Row #2 hides behind `---` (URL slug); row #1 hides behind "Empresa"
+    // (a Spanish company name). Both must be visible to dedup.
+    const hRows =
+      '| 2 | 2026-01-05 | Acme Corp | Director, Data Platform | 4.3/5 | Evaluated | ❌ | ' +
+      '[2](../reports/002-acme-corp-2026-01-05.md) | URL slug says Senior-Engineer---Platform-Team. |\n' +
+      '| 1 | 2026-01-05 | Empresa Ejemplo | Data Lead | 3.9/5 | Evaluated | ❌ | ' +
+      '[1](../reports/001-empresa-ejemplo-2026-01-05.md) | Madrid hybrid. |\n';
+    writeFileSync(hTracker, hHeader + hRows);
+    for (const r of ['002-acme-corp-2026-01-05.md', '001-empresa-ejemplo-2026-01-05.md']) {
+      writeFileSync(join(hReports, r), '# fixture\n');
+    }
+
+    // Re-evaluation of BOTH existing roles at a higher score. Correct behavior
+    // is two in-place updates and zero new rows.
+    writeFileSync(join(hAdditions, '002-acme-corp.tsv'),
+      '2\t2026-01-06\tAcme Corp\tDirector, Data Platform\tEvaluated\t4.8/5\t❌\t' +
+      '[2](reports/002-acme-corp-2026-01-05.md)\tre-evaluated after JD update\n');
+    writeFileSync(join(hAdditions, '001-empresa-ejemplo.tsv'),
+      '1\t2026-01-06\tEmpresa Ejemplo\tData Lead\tEvaluated\t4.1/5\t❌\t' +
+      '[1](reports/001-empresa-ejemplo-2026-01-05.md)\tre-evaluated after JD update\n');
+
+    const hOut = run(NODE, ['merge-tracker.mjs'], {
+      env: { ...process.env, CAREER_OPS_TRACKER: hTracker, CAREER_OPS_ADDITIONS: hAdditions },
+    });
+
+    if (hOut === null) {
+      fail('merge-tracker crashed on the `---`/"Empresa" fixture');
+    } else {
+      if (/Existing: 2 entries/.test(hOut)) {
+        pass('rows containing `---` and "Empresa" are both visible to merge-tracker');
+      } else {
+        fail(`merge-tracker did not see both rows — expected "Existing: 2 entries", got: ${hOut.split('\n').find(l => l.includes('Existing:')) || '(none)'}`);
+      }
+
+      const hMerged = readFileSync(hTracker, 'utf-8');
+      const hDataRows = hMerged.split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l));
+
+      if (hDataRows.length === 2) {
+        pass('re-evaluating a `---`/"Empresa" row updates in place, no duplicate row appended');
+      } else {
+        fail(`expected 2 rows after two in-place updates, got ${hDataRows.length}`);
+      }
+
+      if (/4\.8\/5/.test(hMerged) && /4\.1\/5/.test(hMerged)) {
+        pass('both re-evaluated scores landed on the existing rows');
+      } else {
+        fail('re-evaluated scores did not reach the existing rows');
+      }
+
+      // The separator row must still be found, or new rows land in the wrong
+      // place (or nowhere) — the structural match has to keep working.
+      if (hMerged.includes('|---|------|')) {
+        pass('table separator row survives the merge intact');
+      } else {
+        fail('table separator row was consumed or rewritten');
+      }
+    }
+
+    // verify-pipeline's row-format check shares the heuristic: a malformed row
+    // carrying `---` used to skip the column-count check entirely.
+    const hBadRow = join(hData, 'applications-badrow.md');
+    writeFileSync(hBadRow, hHeader +
+      '| 3 | 2026-01-05 | Acme | Truncated Row --- with hyphens |\n' + hRows);
+    let badOut = '';
+    let badCode = 0;
+    try {
+      badOut = execFileSync(NODE, ['verify-pipeline.mjs'], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_TRACKER: hBadRow, CAREER_OPS_REPORTS: hReports },
+      });
+    } catch (e) {
+      badOut = String(e.stdout ?? '');
+      badCode = e.status ?? -1;
+    }
+    if (/Row with too few columns/.test(badOut) && badCode === 1) {
+      pass('verify-pipeline flags a malformed row even when it contains `---`');
+    } else {
+      fail(`verify-pipeline did not flag a short row containing \`---\` (exit ${badCode})`);
+    }
+
+    // Header detection must key on the whole header SCHEMA, not one telltale
+    // cell: a malformed row carrying an exact `Empresa`/`Company` cell (a
+    // company genuinely named that, a one-word note) must not be mistaken for
+    // the header and skip the column-count check.
+    const hHeaderish = join(hData, 'applications-headerish.md');
+    writeFileSync(hHeaderish, hHeader +
+      '| 4 | 2026-01-05 | Empresa | Short Row |\n' +
+      '| 5 | 2026-01-05 | Company | Also Short |\n' + hRows);
+    let hdrOut = '';
+    let hdrCode = 0;
+    try {
+      hdrOut = execFileSync(NODE, ['verify-pipeline.mjs'], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_TRACKER: hHeaderish, CAREER_OPS_REPORTS: hReports },
+      });
+    } catch (e) {
+      hdrOut = String(e.stdout ?? '');
+      hdrCode = e.status ?? -1;
+    }
+    const shortRowErrors = (hdrOut.match(/Row with too few columns/g) || []).length;
+    if (shortRowErrors === 2 && hdrCode === 1) {
+      pass('a malformed row with an exact Empresa/Company cell is not mistaken for the header');
+    } else {
+      fail(`expected 2 short-row errors for header-like malformed rows, got ${shortRowErrors} (exit ${hdrCode})`);
+    }
+
+    // …and the real header row must still be recognized, or every tracker
+    // reports its own header as a malformed row.
+    if (!/Row with too few columns[^\n]*# \| Date \| Company/.test(hdrOut)) {
+      pass('the genuine header row is still recognized as header furniture');
+    } else {
+      fail('the genuine header row was flagged as a malformed data row');
+    }
+
+    // A FULLY localized header must map through the alias table, not fall back
+    // to LEGACY_COLMAP (#2274). On a plain 9-column table the fallback happens
+    // to line up and hides the bug; with a Location column inserted, the Score
+    // cell is read from Location instead — an ES tracker scored "Remote".
+    const trackerParse = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+    const esHeader = '| # | Fecha | Empresa | Puesto | Location | Score | Status | PDF | Report | Notes |';
+    const esMap = trackerParse.detectColumns([esHeader]);
+    if (esMap && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
+      pass('a fully localized header maps through the alias table (#2274)');
+    } else {
+      fail(`localized header did not map: ${JSON.stringify(esMap)}`);
+    }
+
+    // The two readers must agree on every shape, or validation skips as
+    // furniture what column detection cannot parse.
+    const headerShapes = [
+      ['| # | Date | Company | Role | Score | Status | PDF | Report | Notes |', true],
+      ['| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |', true],
+      ['| # | Fecha | Empresa | Puesto | Score | Status | PDF | Report | Notes |', true],
+      [esHeader, true],
+      ['| 4 | 2026-01-05 | Company | Short Row |', false],
+      ['| 5 | 2026-01-05 | Empresa | Also Short |', false],
+      ['| 6 | 2026-01-05 | Acme Corp | Director | 4.0/5 | Evaluated | ❌ | — | note |', false],
+      ['|---|------|---------|------|-------|--------|-----|--------|-------|', false],
+    ];
+    const disagreements = headerShapes.filter(([line, expected]) => {
+      const isHeader = trackerParse.isHeaderRow(line);
+      const detects = trackerParse.detectColumns([line]) !== null;
+      return isHeader !== detects || isHeader !== expected;
+    });
+    if (disagreements.length === 0) {
+      pass('isHeaderRow and detectColumns agree on every header shape');
+    } else {
+      fail(`isHeaderRow/detectColumns disagree on: ${disagreements.map(d => d[0].slice(0, 40)).join(' | ')}`);
+    }
+  } finally {
+    rmSync(hyphenTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup blindness test crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER REQ/JOB-NUMBER DEDUP GUARD (#1524) ─────────────────────
@@ -9616,6 +10194,65 @@ try {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');
   } else {
     fail(`templates/states.yml lost canonical status id(s): ${missingStates.join(', ')} — BREAKING for the web status mapping`);
+  }
+
+  // 55.3b Every web status list must carry every canonical state. states.yml is
+  // the source of truth; the web keeps SIX hardcoded copies (title-case canonical
+  // lists + UPPERCASE tab/stage lists). `Hired` (#2050) had silently drifted out
+  // of ALL of them — a landed job was unsettable, uncounted in the funnel, and a
+  // gray "unknown" dot (#2249). Cross-check each so a future core state can't
+  // vanish from the dashboard again. The analytics funnel intentionally omits
+  // SKIP (not a funnel stage), so it's excluded there.
+  const stateLabels = [...statesSrc.matchAll(/^\s+label:\s*"?([A-Za-z]+)"?\s*$/gm)].map((m) => m[1]);
+  const webStatusLists = [
+    { file: 'web/src/lib/format.ts', re: /CANONICAL_STATES\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
+    { file: 'web/src/app/actions/registry.ts', re: /CANON_STATUS\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
+    { file: 'web/src/app/actions/registry.ts', re: /TAB_VALUES\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
+    { file: 'web/src/components/pipeline-view.tsx', re: /TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
+    { file: 'web/src/app/analytics/page.tsx', re: /STAGES[^=]*=\s*\[([\s\S]*?)\];/, upper: true, exclude: ['SKIP'] },
+    // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's find, #2282):
+    // it promises to mirror states.yml and drifted to 8 states while the live path had 9.
+    { file: 'web/src/lib/core/states.ts', re: /const FALLBACK[^=]*=\s*\[([\s\S]*?)\n\];/, upper: false, exclude: [] },
+  ];
+  if (stateLabels.length > 0) {
+    const drift = [];
+    for (const { file, re, upper, exclude } of webStatusLists) {
+      const p = join(ROOT, file);
+      if (!existsSync(p)) continue;
+      const block = readFileSync(p, 'utf-8').match(re)?.[1] ?? '';
+      const present = new Set([...block.matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1]));
+      const want = (upper ? stateLabels.map((l) => l.toUpperCase()) : stateLabels).filter((l) => !exclude.includes(l));
+      const missing = want.filter((l) => !present.has(l));
+      if (missing.length) drift.push(`${file} (${missing.join(', ')})`);
+    }
+    if (drift.length === 0) {
+      pass('every web status list covers all canonical states from states.yml (#2249)');
+    } else {
+      fail(`web status list(s) missing canonical state(s) — dashboard can't set/count them (#2249): ${drift.join(' | ')}`);
+    }
+
+    // The assistant preamble also enumerates the states in PROSE (the setStatus
+    // list + the filterPipeline tab enum). Those drift the same way — the AI
+    // couldn't offer to set/filter by Hired — so check them too (#2249).
+    const assistantPath = join(ROOT, 'web', 'src', 'app', 'api', 'assistant', 'route.ts');
+    if (existsSync(assistantPath)) {
+      const src = readFileSync(assistantPath, 'utf-8');
+      const proseChecks = [
+        { name: 'setStatus canonical-states list', text: src.match(/Canonical states:\s*([^.]*)\./)?.[1] ?? '', upper: false },
+        { name: 'filterPipeline tab enum', text: src.match(/tab ∈\s*([^;]*);/)?.[1] ?? '', upper: true },
+      ];
+      const proseDrift = [];
+      for (const { name, text, upper } of proseChecks) {
+        const want = upper ? stateLabels.map((l) => l.toUpperCase()) : stateLabels;
+        const missing = want.filter((l) => !new RegExp(`\\b${l}\\b`).test(text));
+        if (missing.length) proseDrift.push(`${name} (${missing.join(', ')})`);
+      }
+      if (proseDrift.length === 0) {
+        pass('assistant preamble prose enumerates every canonical state (#2249)');
+      } else {
+        fail(`assistant preamble missing canonical state(s) in prose (#2249): ${proseDrift.join(' | ')}`);
+      }
+    }
   }
 
   // 55.4 report format blocks (modes/oferta.md → web report parser)

@@ -672,5 +672,115 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   }
 }
 
+// ── status-log ledger append (funnel-velocity data source) ──────
+// The ledger must land NEXT TO the sandboxed tracker, never in the repo's
+// real data/ — that is the whole point of deriving its path from APPS_FILE.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+
+  // real transition → one line, today's date, from/to states, source set-status
+  const r1 = runSetStatus(['2', 'Applied', '--json'], sb);
+  const today = new Date().toISOString().slice(0, 10);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r1.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
+    pass('ledger: real transition appends one dated line next to the tracker');
+  } else {
+    fail(`ledger: expected single Evaluated→Applied line, got ${JSON.stringify(log)}\n${r1.stdout}${r1.stderr}`);
+  }
+  let parsed1 = null;
+  try { parsed1 = JSON.parse(r1.stdout); } catch {}
+  if (parsed1 && parsed1.statusLogged === true) {
+    pass('ledger: JSON output carries statusLogged: true');
+  } else {
+    fail(`ledger: statusLogged missing/false in JSON\n${r1.stdout}`);
+  }
+
+  // no-op re-run → no new line
+  runSetStatus(['2', 'Applied'], sb);
+  const logAfterNoop = readFileSync(logPath, 'utf-8');
+  if (logAfterNoop.trim().split('\n').length === 1) {
+    pass('ledger: idempotent re-run appends nothing');
+  } else {
+    fail(`ledger: no-op re-run grew the log\n${logAfterNoop}`);
+  }
+
+  // --on backdates the event
+  const r2 = runSetStatus(['2', 'Responded', '--on', '2026-07-01'], sb);
+  const logAfterOn = readFileSync(logPath, 'utf-8');
+  if (r2.code === 0 && logAfterOn.includes('2\t2026-07-01\tApplied\tResponded\tset-status\t')) {
+    pass('ledger: --on records the real event date');
+  } else {
+    fail(`ledger: --on date not recorded\n${logAfterOn}${r2.stderr}`);
+  }
+
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── --on validation (before anything touches the tracker) ───────
+{
+  const sb = makeSandbox(TRACKER_9);
+  const badFormat = runSetStatus(['2', 'Applied', '--on', '07/01/2026'], sb);
+  if (badFormat.code === 1 && readTracker(sb).includes('| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated |')) {
+    pass('--on: bad format rejected before any write');
+  } else {
+    fail(`--on: bad format not rejected (code=${badFormat.code})`);
+  }
+  const notReal = runSetStatus(['2', 'Applied', '--on', '2026-02-30'], sb);
+  if (notReal.code === 1) {
+    pass('--on: impossible calendar date rejected');
+  } else {
+    fail(`--on: 2026-02-30 accepted (code=${notReal.code})`);
+  }
+  const future = runSetStatus(['2', 'Applied', '--on', '2199-01-01'], sb);
+  if (future.code === 1) {
+    pass('--on: future date rejected');
+  } else {
+    fail(`--on: future date accepted (code=${future.code})`);
+  }
+  const missingValue = runSetStatus(['2', 'Applied', '--on', '--dry-run'], sb);
+  if (missingValue.code === 1) {
+    pass('--on: refuses to consume a following flag as its value');
+  } else {
+    fail(`--on: consumed --dry-run as a date (code=${missingValue.code})`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── dry-run never writes the ledger ──────────────────────────────
+{
+  const sb = makeSandbox(TRACKER_9);
+  runSetStatus(['2', 'Applied', '--dry-run'], sb);
+  let logExists = true;
+  try { readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8'); } catch { logExists = false; }
+  if (!logExists) {
+    pass('ledger: --dry-run appends nothing');
+  } else {
+    fail('ledger: --dry-run wrote to the log');
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── ledger append failure is a warning, not a failure ────────────
+// Occupy the log path with a DIRECTORY so appendFileSync fails (EISDIR),
+// portable across platforms. The status write itself must still succeed.
+{
+  const sb = makeSandbox(TRACKER_9);
+  mkdirSync(join(sb.dir, 'status-log.tsv'));
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  const trackerUpdated = /\| Globex \| Platform Engineer \| 4.0\/5 \| Applied \|/.test(readTracker(sb));
+  // runSetStatus discards stderr on exit-0 runs, so the warning text itself
+  // isn't assertable here — statusLogged: false in the JSON is the contract.
+  if (r.code === 0 && trackerUpdated && parsed?.statusLogged === false) {
+    pass('ledger: append failure → exit 0, tracker updated, statusLogged: false');
+  } else {
+    fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

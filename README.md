@@ -298,6 +298,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops batch          → Batch evaluate multiple offers
 /career-ops tracker        → View application status
 /career-ops apply          → Fill application forms with AI
+/career-ops outcome        → Record application outcome & archive artifacts
 /career-ops pipeline       → Process pending URLs
 /career-ops contacto       → Find hiring manager / recruiter / peer + draft a ≤300-char LinkedIn message per contact type
 /career-ops deep           → Generate a structured 6-axis research prompt (AI strategy, recent moves, culture, challenges, competitors, candidate angle)
