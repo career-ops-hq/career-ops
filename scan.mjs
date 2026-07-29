@@ -44,6 +44,7 @@ import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 
 try {
@@ -349,6 +350,77 @@ export function buildContentFilter(contentFilter) {
   };
 }
 
+// ── Country-eligibility filter (#2093) ──────────────────────────────
+// Optional, opt-in. If `country_eligibility_filter` is absent from
+// portals.yml, all jobs pass — byte-identical to pre-#2093 behavior.
+//
+// Problem it solves: `location_filter` only reads the ATS provider's
+// STRUCTURED location field (e.g. "Remote"), which many US companies use
+// identically regardless of actual country eligibility. The real
+// restriction — "US-based candidates only" vs. "US or Canada eligible" —
+// often lives only in the JD DESCRIPTION body text, which this filter reads
+// (same field `content_filter` already reads — `job.description`).
+//
+// Semantics (case-insensitive substring), mirroring location_filter's
+// "don't penalize missing data" discipline exactly:
+//   - Candidate's own `location.country` (config/profile.yml) is "United
+//     States" → always pass, unconditionally. An exclusionary "US only"
+//     phrase can never legitimately block a US-based candidate, so the
+//     filter no-ops entirely rather than special-casing every keyword check.
+//   - Empty / whitespace-only / non-string description → pass (no signal).
+//   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous,
+//     never guessed — this also means an `inclusive`-only match with no
+//     exclusionary wording present is a no-op pass, same as having no
+//     signal at all).
+//   - `exclusionary` phrase matched AND an `inclusive` phrase is also
+//     present → pass (the posting explicitly widens eligibility).
+//   - `exclusionary` phrase matched AND the candidate's own country is
+//     literally named in the JD text (e.g. a Canadian candidate scanning a
+//     posting that separately mentions "Canada" elsewhere) → pass.
+//   - `exclusionary` phrase matched, no `inclusive` phrase, and the
+//     candidate's own country isn't named → reject.
+//
+// Config shape (portals.yml):
+//   country_eligibility_filter:
+//     exclusionary: ["must be located in the united states", ...]
+//     inclusive: ["united states or canada", "north america", ...]
+//
+// Kept as a sibling block to `content_filter` rather than folded into its
+// positive/negative shape: this filter cross-references
+// `config/profile.yml`'s `location.country` and has its own three-way
+// exclusionary/inclusive/candidate-country-named semantics, which doesn't
+// fit content_filter's simpler two-list reject/require shape.
+
+export function buildCountryEligibilityFilter(countryEligibilityFilter, candidateCountry) {
+  if (!countryEligibilityFilter) return () => true;
+
+  const candidateCountryLower = typeof candidateCountry === 'string'
+    ? candidateCountry.toLowerCase().trim()
+    : '';
+
+  // A "US-based candidates only" restriction can never legitimately exclude
+  // a candidate who is themselves US-based — no-op the whole filter rather
+  // than relying on the literal-country-name check below (which would miss
+  // phrasing like "US-based candidates only" that never spells out "united
+  // states").
+  if (candidateCountryLower === 'united states') return () => true;
+
+  const exclusionary = normalizeKeywordList(countryEligibilityFilter.exclusionary);
+  const inclusive = normalizeKeywordList(countryEligibilityFilter.inclusive);
+
+  return (description) => {
+    if (typeof description !== 'string' || description.trim() === '') return true;
+    const lower = description.toLowerCase();
+
+    if (exclusionary.length === 0) return true;
+    if (!exclusionary.some(k => lower.includes(k))) return true;
+    if (inclusive.length > 0 && inclusive.some(k => lower.includes(k))) return true;
+    if (candidateCountryLower && lower.includes(candidateCountryLower)) return true;
+
+    return false;
+  };
+}
+
 // ── Visa / work-authorization filter ────────────────────────────────
 // Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
 // Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
@@ -506,6 +578,25 @@ export function addDays(dateStr, days) {
   const date = new Date(`${dateStr}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+// Reads config/profile.yml's `location.country` (already a documented
+// profile field — see config/profile.example.yml) for the country-
+// eligibility filter (#2093). Missing file, missing field, or a malformed
+// profile all resolve to '' — buildCountryEligibilityFilter treats an empty
+// candidate country the same as "not the candidate's own country's US
+// no-op" and simply skips the literal-country-name pass-through, which is
+// the same conservative "don't penalize missing data" default used
+// throughout this file.
+export function loadCandidateCountry(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return '';
+  try {
+    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const country = raw?.location?.country;
+    return typeof country === 'string' ? country.trim() : '';
+  } catch {
+    return '';
+  }
 }
 
 export function loadReApplyWindows(profilePath = PROFILE_PATH) {
@@ -1316,6 +1407,17 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // posting or a scan without trust_filter leaves both empty.
     trustIsFlagged(offer) ? String(offer.trustScore) : '',
     trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
+    // Normalized company key (#2093): the canonical company form shared across
+    // the tracker (normalizeCompanyName — lowercased, punctuation/whitespace
+    // folded, trailing legal-entity suffixes stripped) so "Acme Inc.",
+    // "Acme, Inc." and "ACME  Inc" all key to `acme`. Stored at write time so
+    // repost/name-matching never has to route through executing a script, and
+    // the raw display company in col 5 stays faithful to what the provider
+    // returned. Trailing col 12 — purely additive: index-based readers
+    // (fingerprint@7, postedAt@8, trust@9-10, and the web parser's first 7
+    // cols) are unaffected, and older rows that lack it are tolerated by
+    // consumers normalizing the raw name on the fly.
+    normalizeCompanyName(offer.company || ''),
   ].map(sanitizeTsvField).join('\t');
 }
 
@@ -1331,6 +1433,11 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
   const rows = [];
   for (const line of readFileSync(historyPath, 'utf-8').split('\n')) {
     const cols = line.split('\t');
+    // Skip the header row. Older 7-col headers fall out of the `cols.length < 8`
+    // guard below on their own, but the 12-col header names col 7 `fingerprint`
+    // (non-empty), so it would otherwise pass that guard and be read as data.
+    // Real rows always carry a URL in col 0, never the literal `url`.
+    if (cols[0] === 'url') continue;
     if (cols.length < 8 || !cols[7].trim()) continue;
     rows.push({
       url: (cols[0] || '').trim(),
@@ -1400,13 +1507,19 @@ export async function appendToPipeline(offers) {
 }
 
 export function appendToScanHistory(offers, date, status = 'added') {
-  // Ensure file + header exist. Location appended as 7th column for non-breaking
-  // backward compat — older scan-history.tsv files with 6 columns still parse fine
-  // since loadSeenUrls only reads column 0. `status` is parameterized so callers
-  // can record verify outcomes (`skipped_expired`, etc.) without the legacy
-  // `(expired)` suffix in `source`.
+  // Ensure file + header exist. The header names every column the row writer
+  // (formatScanHistoryRow) emits, in the same order: the original 7 positional
+  // cols (url…location) plus the append-only trailing cols added since —
+  // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
+  // normalized_company (11). Written ONLY on fresh-file creation; existing files
+  // (including headerless legacy files and older 7-col-header files) are never
+  // rewritten. All readers either skip line 0 unconditionally, detect the header
+  // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
+  // backward-compatible. `status` is parameterized so callers can record verify
+  // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
   if (!existsSync(SCAN_HISTORY_PATH)) {
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n', 'utf-8');
+    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
+    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
   }
 
   const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -1473,7 +1586,7 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 // 'completed' in v1; a follow-up wires failure-path writes so trend stats can
 // exclude survivorship bias. Consumers MUST parse by header name, never by
 // position — columns may be appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -1489,6 +1602,8 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredVisa ?? 0,
     // filtered_posted_date appended at the END for the same reason.
     c.filteredPostedDate ?? 0,
+    // filtered_country_eligibility (#2093) appended at the END for the same reason.
+    c.filteredCountryEligibility ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
 }
@@ -1526,10 +1641,14 @@ export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
 export function computeConsecutiveFailures(healthRecords) {
   const streaks = new Map();
   for (const r of healthRecords) {
-    if (r.status === 'slug_gone' || r.status === 'network') {
-      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-    } else if (r.status === 'reachable' || r.status === 'empty') {
+    // Healthy statuses reset the streak; every other status counts toward it.
+    // Inverted (vs. listing failure statuses) so the newer error kinds
+    // (auth/server/unknown) can't silently fall outside the streak again.
+    // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
+    if (r.status === 'reachable' || r.status === 'empty') {
       streaks.set(r.company, 0);
+    } else {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
   }
   return streaks;
@@ -1763,6 +1882,8 @@ async function main() {
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
+  const candidateCountry = loadCandidateCountry();
+  const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
   const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
 
@@ -1849,6 +1970,7 @@ async function main() {
   let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
+  let totalFilteredCountryEligibility = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
   let totalFilteredVisa = 0;
@@ -1938,6 +2060,10 @@ async function main() {
         }
         if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
+          continue;
+        }
+        if (!countryEligibilityFilter(job.description)) {
+          totalFilteredCountryEligibility++;
           continue;
         }
         if (!visaFilter(job.description)) {
@@ -2095,6 +2221,9 @@ async function main() {
   if (config.content_filter || totalFilteredContent > 0) {
     console.log(`Filtered by content:   ${totalFilteredContent} removed`);
   }
+  if (config.country_eligibility_filter || totalFilteredCountryEligibility > 0) {
+    console.log(`Filtered by country eligibility: ${totalFilteredCountryEligibility} removed`);
+  }
   if (visaEnabled) {
     console.log(`Filtered by visa:      ${totalFilteredVisa} removed`);
   }
@@ -2169,16 +2298,21 @@ async function main() {
   const nowStr = new Date().toISOString();
   const healthRecords = [];
   
+  // Record each errored target under its real classifyFetchError kind. Before
+  // this, only slug_gone/network were recorded and auth (401/403), server
+  // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
+  // every run was logged as healthy forever and never reached the 🚨 streak
+  // escalation. The TSV status vocabulary is additive: auth/server/unknown
+  // join the existing reachable|slug_gone|network|empty.
+  const errorKindByCompany = new Map(
+    errors.filter((e) => e.kind).map((e) => [e.company, e.kind])
+  );
   for (const t of targets) {
-    const isUnreachable = unreachableTargets.some(e => e.company === t.name);
-    const isNetwork = networkTargets.some(e => e.company === t.name);
     const isEmpty = emptyTargets.includes(t.name);
-    
-    let status = 'reachable';
-    if (isUnreachable) status = 'slug_gone';
-    else if (isNetwork) status = 'network';
-    else if (isEmpty) status = 'empty';
-    
+
+    let status = errorKindByCompany.get(t.name) || 'reachable';
+    if (status === 'reachable' && isEmpty) status = 'empty';
+
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
 
@@ -2189,16 +2323,18 @@ async function main() {
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
   
-  for (const e of [...unreachableTargets, ...networkTargets]) {
+  // All error kinds can reach the 🚨 persistent list (auth/server/unknown
+  // included — a WAF that 403s the scanner every run is coverage decay too).
+  // Below threshold, only slug_gone/network keep their dedicated warnings;
+  // auth/server/unknown stay in the one-off `Errors (N):` print below.
+  for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind)]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
       if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
-    } else {
-      if (e.kind === 'slug_gone') {
-        if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
-      } else {
-        newlyDeadNetwork.push(e);
-      }
+    } else if (e.kind === 'slug_gone') {
+      if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
+    } else if (e.kind === 'network') {
+      newlyDeadNetwork.push(e);
     }
   }
 
@@ -2258,6 +2394,7 @@ async function main() {
       filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
     });
   }
 

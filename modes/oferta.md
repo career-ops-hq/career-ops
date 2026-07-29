@@ -450,7 +450,7 @@ I am happy to discuss further at your convenience.
 *Run `/career-ops cover {slug}` to complete angles, confirm company research, and generate the PDF.*
 ```
 
-Apply all language rules from `_shared.md` Professional Writing section to the draft content. No em dashes, no buzzwords, active voice, concrete claims only.
+Apply all language rules from `_writing.md` Professional Writing section to the draft content. No em dashes, no buzzwords, active voice, concrete claims only.
 
 ---
 

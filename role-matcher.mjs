@@ -128,6 +128,14 @@ export function roleTokens(role) {
     // itself. "engineer" is already a BASELINE_TOKENS entry, so it pads the
     // token count without ever being the sole reason two titles match.
     .replace(MTS_PREFIX, ' engineer ')
+    // Collapse slashed short acronyms into one token BEFORE punctuation is
+    // stripped: "(CI/CD)" would otherwise become "ci cd" and both halves get
+    // dropped by the length filter, making the qualifier invisible to the
+    // matcher. A sibling req whose only qualifier is such an acronym (e.g.
+    // "Senior SWE, Infrastructure (CI/CD)" vs "Senior SWE, Infrastructure")
+    // tokenized identically to the bare title and got merged over it (#2165).
+    // "cicd" / "tcpip" / "uiux" survive as content tokens.
+    .replace(/\b([a-z0-9]{1,3})\/([a-z0-9]{1,3})\b/g, '$1$2')
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));

@@ -81,7 +81,10 @@ function buildDateline(letter) {
 function buildAchievementsBlock(achievements) {
   if (!achievements || !achievements.length) return "";
   const items = achievements.map(ach => {
-    const lead = escapeHtml(ach.lead || "");
+    // Trim a caller-supplied trailing comma (cover.md's own bullet-format
+    // example shows the lead ending in a comma) so it never doubles up with
+    // the comma this function always appends.
+    const lead = escapeHtml((ach.lead || "").replace(/,\s*$/, ""));
     const impact = escapeHtml(ach.impact || "");
     return `    <li><b>${lead},</b> ${impact}</li>`;
   }).join("\n");
