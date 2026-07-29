@@ -186,6 +186,18 @@ claude   # or codex / opencode / qwen / agy / grok
 
 </details>
 
+### Global install
+
+```bash
+npm i -g @santifer/career-ops
+```
+
+This installs the `career-ops` binary globally so you can run it directly instead of via `npx`. Unlike `npx @santifer/career-ops init` (which bootstraps a project directory), the global install gives you a persistent `career-ops` command available anywhere in your terminal.
+
+**Which one should you use?**
+- `npx @santifer/career-ops init` — best for first use; creates a dedicated project folder.
+- `npm i -g @santifer/career-ops` — best once you have a project folder and want to run career-ops commands directly.
+
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
 See [docs/SETUP.md](docs/SETUP.md) for the full setup guide, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models, [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions. Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
