@@ -100,6 +100,10 @@ const DEFAULT_LOOKUPS_PER_MIN = 400;
 // (scan-ats-full.mjs) is admitted at once and pacing only bites afterwards.
 // Small runs against a handful of hostnames are therefore never slowed.
 const DEFAULT_BURST = 20;
+// setTimeout clamps anything larger to 1ms (and warns), which would turn a
+// long refill wait into a 1ms spin that never gains a token. Cap instead and
+// re-arm: a rate that slow simply wakes, finds no token, and waits again.
+const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * A token bucket: `capacity` calls may run at once, refilling at `ratePerMin`.
@@ -153,7 +157,8 @@ export function createTokenBucket(options = {}) {
     if (timerPending || queue.length === 0) return;
     timerPending = true;
     // At least 1ms: a fractional token left over must not schedule a 0ms spin.
-    setTimer(pump, Math.max(1, Math.ceil((1 - tokens) / tokensPerMs)));
+    // At most MAX_TIMER_MS: past that setTimeout clamps to 1ms and spins.
+    setTimer(pump, Math.min(MAX_TIMER_MS, Math.max(1, Math.ceil((1 - tokens) / tokensPerMs))));
   }
 
   function pump() {
@@ -325,7 +330,10 @@ export function createCachedLookup(realLookup, options = {}) {
  */
 export function lookupsPerMinFromEnv(env = process.env) {
   const raw = env.CAREER_OPS_DNS_LOOKUPS_PER_MIN;
-  if (raw === undefined || raw === '') return DEFAULT_LOOKUPS_PER_MIN;
+  // Trim before the blank check: Number(' ') is 0, and 0 is the documented
+  // "pacing off" value, so a whitespace-only setting would silently disable
+  // the limiter rather than fall back like any other unusable value.
+  if (raw === undefined || String(raw).trim() === '') return DEFAULT_LOOKUPS_PER_MIN;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) {
     console.error(

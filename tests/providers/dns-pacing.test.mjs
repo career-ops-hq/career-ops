@@ -102,6 +102,31 @@ try {
     }
   }
 
+  // --- a refill delay never exceeds Node's maximum timeout ---
+  // setTimeout clamps anything above 2^31-1 ms to 1ms, so an unbounded delay
+  // does not wait — it fires pump() immediately, gains no token, and re-arms,
+  // spinning at 1ms forever. A rate low enough to overflow must still schedule
+  // a real wait.
+  {
+    const MAX_TIMER_MS = 2_147_483_647;
+    let clock = 0;
+    const delays = [];
+    const setTimer = (fn, ms) => { delays.push(ms); };
+    const bucket = createTokenBucket({
+      ratePerMin: 1e-5, capacity: 1, now: () => clock, setTimer,
+    });
+
+    bucket.take(() => {});   // spends the only token, runs inline, schedules nothing
+    bucket.take(() => {});   // queues, so this one arms the refill timer
+
+    const armed = delays.length === 1 && delays[0] <= MAX_TIMER_MS && delays[0] >= 1;
+    if (armed) {
+      pass('a tiny rate still schedules within the maximum timeout instead of clamping to 1ms');
+    } else {
+      fail(`refill delay out of range: ${JSON.stringify(delays)} (max ${MAX_TIMER_MS})`);
+    }
+  }
+
   // --- a throwing callback does not strand the queue ---
   {
     let clock = 0;
@@ -274,6 +299,25 @@ try {
       pass('CAREER_OPS_DNS_LOOKUPS_PER_MIN parses, defaults to 400, and 0 disables');
     } else {
       fail(`env parsing wrong: ${JSON.stringify(seen)}`);
+    }
+  }
+
+  // --- whitespace must not read as 0 ---
+  // `Number(' ')` is 0, and 0 is the documented "pacing off" value, so a
+  // whitespace-only setting would silently disable the rate limiter instead of
+  // being rejected like any other junk. Silent-off is the one failure this knob
+  // must never have.
+  {
+    const seen = {
+      space: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: ' ' }),
+      tab: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: '\t' }),
+      padded: lookupsPerMinFromEnv({ CAREER_OPS_DNS_LOOKUPS_PER_MIN: ' 120 ' }),
+    };
+
+    if (seen.space === 400 && seen.tab === 400 && seen.padded === 120) {
+      pass('whitespace falls back to the default instead of silently disabling pacing');
+    } else {
+      fail(`whitespace handling wrong: ${JSON.stringify(seen)}`);
     }
   }
 
