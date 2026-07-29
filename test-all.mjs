@@ -7109,6 +7109,42 @@ try {
     } else {
       fail('the genuine header row was flagged as a malformed data row');
     }
+
+    // A FULLY localized header must map through the alias table, not fall back
+    // to LEGACY_COLMAP (#2274). On a plain 9-column table the fallback happens
+    // to line up and hides the bug; with a Location column inserted, the Score
+    // cell is read from Location instead — an ES tracker scored "Remote".
+    const trackerParse = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+    const esHeader = '| # | Fecha | Empresa | Puesto | Location | Score | Status | PDF | Report | Notes |';
+    const esMap = trackerParse.detectColumns([esHeader]);
+    if (esMap && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
+      pass('a fully localized header maps through the alias table (#2274)');
+    } else {
+      fail(`localized header did not map: ${JSON.stringify(esMap)}`);
+    }
+
+    // The two readers must agree on every shape, or validation skips as
+    // furniture what column detection cannot parse.
+    const headerShapes = [
+      ['| # | Date | Company | Role | Score | Status | PDF | Report | Notes |', true],
+      ['| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |', true],
+      ['| # | Fecha | Empresa | Puesto | Score | Status | PDF | Report | Notes |', true],
+      [esHeader, true],
+      ['| 4 | 2026-01-05 | Company | Short Row |', false],
+      ['| 5 | 2026-01-05 | Empresa | Also Short |', false],
+      ['| 6 | 2026-01-05 | Acme Corp | Director | 4.0/5 | Evaluated | ❌ | — | note |', false],
+      ['|---|------|---------|------|-------|--------|-----|--------|-------|', false],
+    ];
+    const disagreements = headerShapes.filter(([line, expected]) => {
+      const isHeader = trackerParse.isHeaderRow(line);
+      const detects = trackerParse.detectColumns([line]) !== null;
+      return isHeader !== detects || isHeader !== expected;
+    });
+    if (disagreements.length === 0) {
+      pass('isHeaderRow and detectColumns agree on every header shape');
+    } else {
+      fail(`isHeaderRow/detectColumns disagree on: ${disagreements.map(d => d[0].slice(0, 40)).join(' | ')}`);
+    }
   } finally {
     rmSync(hyphenTmp, { recursive: true, force: true });
   }

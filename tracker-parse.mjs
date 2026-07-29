@@ -101,14 +101,17 @@ const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
  * @returns {Object<string,number>|null} Field → column index, or null.
  */
 function headerSchemaMap(cells) {
-  // NOTE: the literal `company`/`role` pre-filter is kept deliberately, to hold
-  // `detectColumns` behavior identical while removing the drift. It does mean a
-  // FULLY localized header (`| # | Fecha | Empresa | Puesto | … |`) is rejected
-  // here even though HEADER_ALIASES defines `empresa`/`puesto` for exactly that
-  // case, so such a tracker silently falls back to LEGACY_COLMAP. That is a
-  // pre-existing gap, not one this PR introduces, and widening it touches every
-  // detectColumns consumer — so it belongs in its own change.
-  if (!cells.includes('company') || !cells.includes('role')) return null;
+  // The alias table is the whole contract — no literal `company`/`role`
+  // pre-filter. There used to be one, which meant a FULLY localized header
+  // (`| # | Fecha | Empresa | Puesto | … |`) never reached the aliases that
+  // exist for exactly that case, and the tracker silently fell back to
+  // LEGACY_COLMAP. On a plain 9-column table the fallback lines up and nothing
+  // looks wrong; insert the Location column from #946's own use case and the
+  // Score cell is read from Location instead (#2274).
+  //
+  // Requiring the full schema is what makes the pre-filter unnecessary: a data
+  // row would have to carry five different header labels in five different
+  // cells to qualify, which no real row does.
   const map = {};
   cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
   return REQUIRED_HEADER_FIELDS.every(k => map[k] != null) ? map : null;
