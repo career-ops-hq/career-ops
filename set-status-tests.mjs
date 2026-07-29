@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -618,8 +618,14 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   mkdirSync(lockDir, { recursive: true });
   writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999999, token: 'dead', tracker: 'x' }));
   // Orphaned guard left behind by a killed process (no owner.json → judged by age).
+  // Backdate it rather than sleeping: the guard has to read as genuinely
+  // abandoned, not merely as older than a small staleMs. Age alone is floored
+  // at OWNERLESS_GRACE_MS (#2306) so that a guard a live caller is holding is
+  // never evicted, and sleeping past that floor would make this test both
+  // slower and vaguer about which condition it is exercising.
   mkdirSync(`${lockDir}.recover`, { recursive: true });
-  await new Promise(r => setTimeout(r, 150));
+  const abandonedAt = new Date(Date.now() - 60_000);
+  utimesSync(`${lockDir}.recover`, abandonedAt, abandonedAt);
   try {
     const lock = await acquireTrackerLock(lockDir, { timeoutMs: 3000, retryMs: 25, staleMs: 50, tracker: 'x' });
     if (lock.staleRecovered) {

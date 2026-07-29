@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -366,6 +366,44 @@ function cleanup(sandbox) {
   else fail(`13. --backfill --date → exit 1 — got ${res.code}\n${res.stdout}${res.stderr}`);
   if (res.stderr.includes('--date cannot be combined with --backfill')) pass('13. usage error explains the rejection');
   else fail(`13. usage error explains the rejection — got\n${res.stderr}`);
+  cleanup(sb);
+}
+
+// ── Test 14: a freshly created ownerless lock is not stolen (#2306) ─────────
+// The follow-ups lock is ownerless for the instant between its `mkdirSync` and
+// its `owner.json` write. Judging it on `age > staleMs` alone lets a caller
+// with a small staleMs delete a lock created microseconds earlier and walk
+// straight into the read-check-append critical section beside its owner.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  mkdirSync(sb.lock, { recursive: true });          // ownerless, created just now
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '1',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '300',
+  });
+  if (res.code === 4) pass('14. ownerless lock created microseconds ago is not stolen → exit 4');
+  else fail(`14. ownerless lock created microseconds ago is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
+  if (existsSync(sb.lock)) pass('14. the untouched lock directory survives');
+  else fail('14. the untouched lock directory survives — it was removed');
+  cleanup(sb);
+}
+
+// ── Test 15: an ownerless lock older than the grace period still recovers ───
+// Guards the fix against the vacuous implementation: a floor that never lets
+// an ownerless lock age out would deadlock every writer behind a real orphan.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  mkdirSync(sb.lock, { recursive: true });
+  const when = new Date(Date.now() - 60_000);
+  utimesSync(sb.lock, when, when);                  // a real orphan, not a new lock
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '1',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '2000',
+  });
+  if (res.code === 0) pass('15. ownerless lock older than the grace period is still recovered');
+  else fail(`15. ownerless lock older than the grace period is still recovered — got ${res.code}\n${res.stdout}${res.stderr}`);
   cleanup(sb);
 }
 
