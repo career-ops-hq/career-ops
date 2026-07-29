@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
 
 </div>
 
@@ -135,6 +135,18 @@ claude   # abre tu CLI de IA — te guiará en el primer arranque
 ```
 
 </details>
+
+### Instalación global
+
+```bash
+npm i -g @santifer/career-ops
+```
+
+Esto instala el binario `career-ops` de forma global para que puedas ejecutarlo directamente en lugar de usar `npx`. A diferencia de `npx @santifer/career-ops init` (que prepara un directorio de proyecto), la instalación global te da un comando `career-ops` persistente disponible en cualquier terminal.
+
+**¿Cuál deberías usar?**
+- `npx @santifer/career-ops init` — mejor para el primer uso; crea una carpeta de proyecto dedicada.
+- `npm i -g @santifer/career-ops` — mejor una vez que tienes una carpeta de proyecto y quieres ejecutar comandos de career-ops directamente.
 
 > **El sistema está diseñado para que Claude lo personalice.** Modes, arquetipos, scoring, scripts de negociación -- solo pídelo. Claude lee los mismos archivos que usa, así que sabe exactamente qué editar.
 
