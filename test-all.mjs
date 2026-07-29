@@ -7075,6 +7075,40 @@ try {
     } else {
       fail(`verify-pipeline did not flag a short row containing \`---\` (exit ${badCode})`);
     }
+
+    // Header detection must key on the whole header SCHEMA, not one telltale
+    // cell: a malformed row carrying an exact `Empresa`/`Company` cell (a
+    // company genuinely named that, a one-word note) must not be mistaken for
+    // the header and skip the column-count check.
+    const hHeaderish = join(hData, 'applications-headerish.md');
+    writeFileSync(hHeaderish, hHeader +
+      '| 4 | 2026-01-05 | Empresa | Short Row |\n' +
+      '| 5 | 2026-01-05 | Company | Also Short |\n' + hRows);
+    let hdrOut = '';
+    let hdrCode = 0;
+    try {
+      hdrOut = execFileSync(NODE, ['verify-pipeline.mjs'], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_TRACKER: hHeaderish, CAREER_OPS_REPORTS: hReports },
+      });
+    } catch (e) {
+      hdrOut = String(e.stdout ?? '');
+      hdrCode = e.status ?? -1;
+    }
+    const shortRowErrors = (hdrOut.match(/Row with too few columns/g) || []).length;
+    if (shortRowErrors === 2 && hdrCode === 1) {
+      pass('a malformed row with an exact Empresa/Company cell is not mistaken for the header');
+    } else {
+      fail(`expected 2 short-row errors for header-like malformed rows, got ${shortRowErrors} (exit ${hdrCode})`);
+    }
+
+    // …and the real header row must still be recognized, or every tracker
+    // reports its own header as a malformed row.
+    if (!/Row with too few columns[^\n]*# \| Date \| Company/.test(hdrOut)) {
+      pass('the genuine header row is still recognized as header furniture');
+    } else {
+      fail('the genuine header row was flagged as a malformed data row');
+    }
   } finally {
     rmSync(hyphenTmp, { recursive: true, force: true });
   }

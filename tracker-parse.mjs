@@ -79,11 +79,21 @@ export function isSeparatorRow(line) {
   return typeof line === 'string' && SEPARATOR_ROW_RE.test(line);
 }
 
+/** The columns a row must label before it counts as the tracker header. */
+const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
+
 /**
- * Whether a table row is the header row, detected by a whole cell reading
- * "company" (or its Spanish alias) rather than by substring. A data row can
- * legitimately contain the word inside a longer company name or note; only an
- * exact cell match identifies the header.
+ * Whether a table row is the tracker's header row.
+ *
+ * Recognized by the whole header SCHEMA, not by one telltale cell: a row has to
+ * label every column in REQUIRED_HEADER_FIELDS. One exact `Company` cell is not
+ * enough — a company genuinely named "Company", or a note consisting of that one
+ * word, would otherwise be read as table furniture and skip row-format
+ * validation, which is the same substring-ish false positive this module exists
+ * to stop.
+ *
+ * This is deliberately the acceptance test `detectColumns` already applies, so
+ * the two cannot disagree about what a header is.
  *
  * @param {string} line - One line from applications.md.
  * @returns {boolean}
@@ -91,7 +101,9 @@ export function isSeparatorRow(line) {
 export function isHeaderRow(line) {
   if (typeof line !== 'string' || !line.startsWith('|')) return false;
   const cells = line.split('|').map(s => s.trim().toLowerCase());
-  return cells.includes('company') || cells.includes('empresa');
+  const map = {};
+  cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+  return REQUIRED_HEADER_FIELDS.every(k => map[k] != null);
 }
 
 /**
