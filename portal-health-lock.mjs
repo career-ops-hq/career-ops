@@ -32,6 +32,19 @@ const DEFAULT_STALE_MS = 30_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
 
+// Two directories are ownerless by construction, not by accident: a lock
+// between its mkdir and its owner.json write, and the recover guard, which
+// never carries owner.json at all. Judging those on `age > staleMs` alone lets
+// a caller with an aggressive staleMs delete a directory created microseconds
+// ago — either stealing a winner's lock inside its acquisition window, or
+// evicting a live guard and putting two callers inside the decide-then-delete
+// window the guard exists to serialize.
+//
+// This is a lower bound on patience, never a cap: a larger caller staleMs
+// still wins, and a genuinely abandoned directory still ages out, so a crash
+// while holding the guard cannot disable recovery for good.
+export const OWNERLESS_GRACE_MS = 1_000;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class LockTimeoutError extends Error {
@@ -78,7 +91,7 @@ function lockCanRecover(lockDir, staleMs) {
   const owner = readLockOwner(lockDir);
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
   } catch {
     return true; // vanished — nothing to recover, retry acquisition
   }

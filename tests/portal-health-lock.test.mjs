@@ -10,7 +10,7 @@
 // operation outlived the stale window would delete whichever lock directory
 // happened to be present, including another process's legitimate one.
 import { pass, fail } from './helpers.mjs';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { acquirePortalHealthLock, LockTimeoutError } from '../portal-health-lock.mjs';
@@ -108,6 +108,51 @@ try {
       pass("release() leaves another holder's reclaimed lock intact");
     } else {
       fail("release() deleted a lock owned by a different holder");
+    }
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+
+  // 5. A lock directory is ownerless for a moment by construction: between its
+  //    mkdir and its owner.json write. The recover guard is ownerless for its
+  //    whole life. Judging those on age alone lets a caller with an aggressive
+  //    staleMs delete a directory created microseconds ago — stealing a
+  //    winner's lock inside its acquisition window, or evicting a live guard
+  //    and putting two callers inside the window the guard exists to serialize.
+  {
+    const p = join(root, 'data', 'ownerless.tsv');
+    const lockDir = `${p}.lock`;
+    mkdirSync(lockDir, { recursive: true });   // ownerless, just created
+    let stolen = false;
+    try {
+      const l = await acquirePortalHealthLock(p, { timeoutMs: 400, retryMs: 20, staleMs: 1 });
+      stolen = true;
+      l.release();
+    } catch (e) {
+      if (!(e instanceof LockTimeoutError)) fail(`ownerless-floor: expected LockTimeoutError, got ${e?.constructor?.name}`);
+    }
+    if (stolen) {
+      fail('ownerless-floor: reclaimed a just-created ownerless lock despite an aggressive staleMs');
+    } else {
+      pass('a just-created ownerless lock is not reclaimable, however aggressive the caller staleMs');
+    }
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+
+  // 6. The floor is a lower bound on patience, never a cap: a genuinely
+  //    abandoned ownerless directory must still age out, or a crash while
+  //    holding the guard would disable recovery permanently.
+  {
+    const p = join(root, 'data', 'aged.tsv');
+    const lockDir = `${p}.lock`;
+    mkdirSync(lockDir, { recursive: true });
+    const old = (Date.now() - 60 * 60_000) / 1000;   // an hour old
+    utimesSync(lockDir, old, old);
+    try {
+      const l = await acquirePortalHealthLock(p, { timeoutMs: 800, retryMs: 20, staleMs: 1 });
+      pass('a genuinely aged ownerless lock still ages out and is reclaimable');
+      l.release();
+    } catch (e) {
+      fail(`aged ownerless lock should be reclaimable, got ${e?.constructor?.name}: ${e?.message}`);
     }
     rmSync(lockDir, { recursive: true, force: true });
   }
