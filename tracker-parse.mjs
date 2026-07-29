@@ -64,6 +64,37 @@ export function looksLikeScoreCell(v) {
 }
 
 /**
+ * A markdown table separator row: `|---|------|...|`, optionally with alignment
+ * colons.
+ *
+ * Readers used to recognize this row with `line.includes('---')`, which also
+ * matched any DATA row whose free text happened to contain three hyphens — a
+ * URL slug such as `Senior-Engineer---Platform-Team`, or an em dash typed
+ * as `---`. Matching the row's structure instead cannot false-positive that way.
+ */
+export const SEPARATOR_ROW_RE = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+/** @param {string} line @returns {boolean} whether the line is the `|---|` separator row. */
+export function isSeparatorRow(line) {
+  return typeof line === 'string' && SEPARATOR_ROW_RE.test(line);
+}
+
+/**
+ * Whether a table row is the header row, detected by a whole cell reading
+ * "company" (or its Spanish alias) rather than by substring. A data row can
+ * legitimately contain the word inside a longer company name or note; only an
+ * exact cell match identifies the header.
+ *
+ * @param {string} line - One line from applications.md.
+ * @returns {boolean}
+ */
+export function isHeaderRow(line) {
+  if (typeof line !== 'string' || !line.startsWith('|')) return false;
+  const cells = line.split('|').map(s => s.trim().toLowerCase());
+  return cells.includes('company') || cells.includes('empresa');
+}
+
+/**
  * Given the two adjacent cells that carry score and status in EITHER order,
  * identify which is which by content — the score cell is recognizable by
  * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
