@@ -200,6 +200,44 @@ try {
     }
   }
 
+  // --- a negative-cached refusal is free too ---
+  // Guards the seam between negative caching (#2229 resolver refusals) and
+  // pacing: both landed separately, so nothing covered them together. A
+  // refusal held in the negative cache is answered from memory and never
+  // reaches the resolver, so it must not wait on a token either — otherwise a
+  // drained bucket would stall the very retry storm the negative cache exists
+  // to absorb.
+  {
+    let clock = 0;
+    const setTimer = mkTimer();
+    const refusal = Object.assign(new Error('refused'), { code: 'EREFUSED' });
+    const resolver = mkResolver([refusal]);
+    const lookup = createCachedLookup(resolver, {
+      lookupsPerMin: 60, burst: 1, now: () => clock, setTimer,
+    });
+
+    // The leader spends the only token and is refused; the refusal is cached.
+    const first = lookupOnce(lookup, 'refused.example.com');
+    resolver.flush();
+    const [firstErr] = await first;
+
+    // Bucket is now empty. Deliver via callback rather than await: if the hit
+    // wrongly queued for a token it would never settle, and this must fail
+    // rather than hang.
+    let settled = false;
+    let secondErr = null;
+    lookup('refused.example.com', {}, (e) => { settled = true; secondErr = e; });
+    await new Promise((r) => setImmediate(r));
+
+    const free = settled && resolver.calls.length === 0 && setTimer.pending() === 0;
+    if (free && firstErr?.code === 'EREFUSED' && secondErr?.code === 'EREFUSED') {
+      pass('a negative-cached refusal is served without spending a pacing token');
+    } else {
+      fail(`negative-cache hit not free: settled=${settled} calls=${resolver.calls.length} `
+        + `pending=${setTimer.pending()} first=${firstErr?.code} second=${secondErr?.code}`);
+    }
+  }
+
   // --- pacing can be switched off entirely ---
   {
     let clock = 0;
