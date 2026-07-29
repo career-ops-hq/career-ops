@@ -622,11 +622,43 @@ process_offer() {
     # 019 — Deepgram JD unextractable in headless mode). Only the downstream
     # reconcile-pipeline.mjs safety net (which leaves an entry in Pending when
     # its report file is missing) prevented the offer from being lost.
-    local worker_failed_match
-    worker_failed_match=$(sed -nE 's/.*"status"[[:space:]]*:[[:space:]]*"failed".*/failed/p' "$log_file" 2>/dev/null | head -1 || true)
+    # Extract only the LAST ```json fenced block in the log -- that's the
+    # worker's one authoritative final result (batch-prompt.md Step 6), not
+    # arbitrary text anywhere else in stdout/stderr -- and parse it as real
+    # JSON so an unrelated line merely containing the substring
+    # `"status": "failed"` can never falsely flip a successful run.
+    local worker_result_json
+    worker_result_json=$(awk '
+      /^```json[[:space:]]*$/ { in_block=1; block=""; next }
+      in_block && /^```[[:space:]]*$/ { in_block=0; last=block; next }
+      in_block { block = block $0 "\n" }
+      END { printf "%s", last }
+    ' "$log_file" 2>/dev/null || true)
+
+    local worker_failed_match="" worker_error_match=""
+    if [[ -n "$worker_result_json" ]]; then
+      local parsed
+      parsed=$(printf '%s' "$worker_result_json" | node -e '
+        let data = "";
+        process.stdin.on("data", d => data += d);
+        process.stdin.on("end", () => {
+          try {
+            const obj = JSON.parse(data);
+            const status = typeof obj.status === "string" ? obj.status : "";
+            const error = typeof obj.error === "string" ? obj.error : "";
+            process.stdout.write(status + "\t" + error);
+          } catch {
+            process.stdout.write("");
+          }
+        });
+      ' 2>/dev/null || true)
+      if [[ "$parsed" == failed$'\t'* ]]; then
+        worker_failed_match="failed"
+        worker_error_match="${parsed#failed$'\t'}"
+      fi
+    fi
+
     if [[ -n "$worker_failed_match" ]]; then
-      local worker_error_match
-      worker_error_match=$(sed -nE 's/.*"error"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
       [[ -z "$worker_error_match" ]] && worker_error_match="worker reported status:failed (exit code 0)"
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
