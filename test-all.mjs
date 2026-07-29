@@ -914,21 +914,50 @@ for (const f of systemFiles) {
   }
 }
 
-// Per-CLI SKILL.md entrypoints must be SYMLINKS in the git index (mode 120000).
-// A regular-file blob whose content is the link path as text ships a broken,
-// empty skill to every user of that CLI — exactly what happened to .kimi/ when
-// a symlink was created under core.symlinks=false and committed as-is. Checking
-// the INDEX mode (not the filesystem) keeps this assertion true on Windows
-// checkouts too.
+// Per-CLI SKILL.md entrypoints must resolve to the canonical skill content.
+//
+// The defect this guards is a regular-file blob whose content is the LINK PATH
+// AS TEXT — exactly what happened to .kimi/ when a symlink was created under
+// core.symlinks=false and committed as-is (#1051). That ships a broken, empty
+// skill to every user of that CLI.
+//
+// Index mode was a faithful proxy for that until #2259 added
+// materializeSkillEntrypoints(), which writes the real content as a regular
+// file on filesystems without symlink support. That is a second, CORRECT
+// mode-100644 state, so mode alone can no longer tell the two apart:
+//
+//   120000                          → symlink                        (correct)
+//   100644 + canonical blob         → materialized entrypoint        (correct)
+//   100644 + any other blob         → link-path text or stale copy   (BROKEN)
+//
+// Comparing the blob to the canonical entrypoint asserts the invariant the
+// defect is actually about, and still catches #1051: a link-path blob never
+// equals the canonical blob. Reading the INDEX (not the filesystem) keeps this
+// true on Windows checkouts, where a symlink entry materializes as a text file.
+const CANONICAL_ENTRYPOINT = '.agents/skills/career-ops/SKILL.md';
+const stagedBlob = (path) => {
+  const entry = run('git', ['ls-files', '-s', path]);
+  if (entry === null || entry === '') return null;
+  const [mode, sha] = entry.split(/\s+/);
+  return { mode, sha };
+};
+
+const canonicalEntry = stagedBlob(CANONICAL_ENTRYPOINT);
+if (!canonicalEntry) {
+  fail(`Could not read git index entry for the canonical entrypoint ${CANONICAL_ENTRYPOINT}`);
+}
+
 const skillEntrypoints = systemFiles.filter((f) => f.endsWith('/skills/career-ops/SKILL.md'));
 for (const f of skillEntrypoints) {
-  const staged = run('git', ['ls-files', '-s', f]);
-  if (staged === null || staged === '') {
+  const staged = stagedBlob(f);
+  if (!staged) {
     fail(`Could not read git index entry for ${f} (lookup failed — not evidence of absence)`);
-  } else if (staged.startsWith('120000')) {
+  } else if (staged.mode === '120000') {
     pass(`Entrypoint is a real symlink in git: ${f}`);
+  } else if (canonicalEntry && staged.sha === canonicalEntry.sha) {
+    pass(`Entrypoint is a materialized regular file with canonical content: ${f}`);
   } else {
-    fail(`Entrypoint committed as a REGULAR file (mode ${staged.split(' ')[0]}) — users of this CLI get a broken skill: ${f}`);
+    fail(`Entrypoint committed as a REGULAR file (mode ${staged.mode}) whose content is not the canonical skill — users of this CLI get a broken skill: ${f}`);
   }
 }
 
