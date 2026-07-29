@@ -28,6 +28,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { canonicalize, extractSkills } from './skill-extract.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -227,12 +228,34 @@ function splitSkillsSection(cvText) {
 function classifySkillGaps(jdSkills, cvText) {
   const { namedSkillsText, proseText } = splitSkillsSection(cvText);
 
+  // Canonical skill sets present in each CV region. Folding BOTH the JD token
+  // and the CV text through skill-extract.mjs's canonicalize() is what closes
+  // the alias gap this file was reported for (#1896): a CV that writes "k8s"
+  // and a JD that says "Kubernetes" resolve to the same canonical name instead
+  // of being reported as a false gap. This is the shared tokenizer upskill.mjs
+  // already promised — three parallel copies used to disagree.
+  const namedCanon = extractSkills(namedSkillsText);
+  const proseCanon = extractSkills(proseText);
+
   const existing = [];
   const supportedByResume = [];
   const gap = [];
 
   for (const skill of jdSkills) {
-    if (skillMentionedInText(skill, namedSkillsText)) {
+    const canon = canonicalize(skill);
+    // "Known" = skill-extract recognizes this token (canonicalize rewrote it,
+    // or SKILL_PATTERN matches it). For known skills the canonical-set lookup
+    // is authoritative and alias-safe. Unknown/free tokens canonicalize to
+    // themselves and fall through to the word-boundary heuristic below, which
+    // is byte-for-byte the prior behavior — jd-skill-gap keeps its own
+    // heuristics for free tokens (#1896 answer 2).
+    const known = canon !== skill || extractSkills(skill).size > 0;
+
+    if (known && namedCanon.has(canon)) {
+      existing.push(skill);
+    } else if (known && proseCanon.has(canon)) {
+      supportedByResume.push(skill);
+    } else if (skillMentionedInText(skill, namedSkillsText)) {
       existing.push(skill);
     } else if (skillMentionedInText(skill, proseText)) {
       supportedByResume.push(skill);
@@ -401,6 +424,39 @@ Benefits and Perks (US Only)
   eq('real skill still extracted alongside a disposition opener', dispositionSkills.includes('TypeScript'), true);
   eq('does not extract "Deep" as a skill', dispositionSkills.includes('Deep'), false);
   eq('does not extract "Interest" as a skill', dispositionSkills.includes('Interest'), false);
+
+  // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
+  // must not read as a gap. Before the shared skill-extract canonicalization,
+  // classify compared the two literally — "k8s" in the CV vs "Kubernetes" in
+  // the JD — and reported Kubernetes as a false gap. canonicalize() now folds
+  // both to "Kubernetes" so it resolves to the region the CV actually uses it.
+  const aliasCv = `
+# Skills
+Python, k8s, Postgres
+
+# Experience
+Built data pipelines with golang microservices.
+`;
+  const aliasResult = classifySkillGaps(['Kubernetes', 'PostgreSQL', 'Go', 'Rust'], aliasCv);
+  eq('CV "k8s" satisfies JD "Kubernetes" (named section, not a false gap)', aliasResult.existing.includes('Kubernetes'), true);
+  eq('CV "Postgres" satisfies JD "PostgreSQL" (named section)', aliasResult.existing.includes('PostgreSQL'), true);
+  eq('CV prose "golang" satisfies JD "Go" (supportedByResume)', aliasResult.supportedByResume.includes('Go'), true);
+  eq('genuinely-absent Rust is still a real gap', aliasResult.gap.includes('Rust'), true);
+
+  // Regression (#1896, answer 2): unknown/free tokens keep the prior
+  // word-boundary behavior — canonicalize passes them through unchanged, so a
+  // JD token the shared module does not know still matches (or not) exactly as
+  // before, byte-for-byte.
+  const freeTokenCv = `
+# Skills
+Python, Fabrikam-SDK
+
+# Experience
+Maintained the internal Fabrikam-SDK build.
+`;
+  const freeResult = classifySkillGaps(['Fabrikam-SDK', 'Contoso-Cloud'], freeTokenCv);
+  eq('unknown token present in CV still matches (word-boundary fallback preserved)', freeResult.existing.includes('Fabrikam-SDK'), true);
+  eq('unknown token absent from CV is still a real gap', freeResult.gap.includes('Contoso-Cloud'), true);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

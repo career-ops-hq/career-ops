@@ -11,8 +11,10 @@ Opt-in mode for candidates who already maintain a hand-tuned `.tex` CV. **Does n
 
 | Family | Detection | Editable prose |
 |--------|-----------|----------------|
-| `resumeSubheading` | `\resumeSubheading` + `\resumeItem` | `\resumeItem{...}` bullets; `\textbf{Category}{: items}` skill values |
+| `resumeSubheading` | `\resumeSubheading` + `\resumeItem`/`\resumeItemWithoutTitle`/`\resumeSubItem` | `\resumeItem{...}` and `\resumeItemWithoutTitle{}{...}` bullets; `\textbf{Category}{: items}` and `\resumeSubItem{Category}{items}` skill values |
 | `tabularx-itemize` | `tabularx` + `itemize`, no resume macros | `\item` body text in the document body |
+
+Extraction only reads the document body (preamble macro definitions are skipped) and ignores commented-out macro calls — old bullets kept as `%` comments never become editable slots.
 
 Any other layout → stop with the script error and suggest `/career-ops latex` (cv.md → career-ops template).
 

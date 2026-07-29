@@ -112,7 +112,35 @@ function normalizeTextForATS(html) {
   }
 }
 
+/**
+ * Strip diacritics so a heading is recognized regardless of how it was typed.
+ *
+ * Rendered Polish headings are not always spelled with their diacritics —
+ * "Wykształcenie" and "Wyksztalcenie" both occur in already-generated CVs.
+ * NFD splits most Polish letters into a base plus a combining mark we drop;
+ * ł (U+0142) has no canonical decomposition, so it needs its own pass.
+ *
+ * Only used for alias lookup — display titles keep their diacritics.
+ */
+function foldDiacritics(text) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/g, 'l');
+}
+
+/**
+ * Heading spelling -> canonical section key.
+ *
+ * Polish (modes/pl) is here because without these aliases the rendered Polish
+ * titles match nothing derived from the English cv.md: validateCvSectionOrder()
+ * finds fewer than two comparable sections and silently returns, leaving the
+ * section-order guard disabled on every CV rendered in that mode.
+ *
+ * Keys are folded on construction so authored diacritics match stripped input.
+ */
 const SECTION_ALIASES = new Map([
+  // English — cv.md is the source of truth and is written in English.
   ['summary', 'summary'],
   ['professional summary', 'summary'],
   ['competencies', 'competencies'],
@@ -128,7 +156,30 @@ const SECTION_ALIASES = new Map([
   ['certifications', 'certifications'],
   ['skills', 'skills'],
   ['technical skills', 'skills'],
-]);
+  // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
+  // variants that turn up in practice (both "Kompetencje kluczowe" and
+  // "Kluczowe kompetencje" are used for the same section).
+  ['podsumowanie', 'summary'],
+  ['podsumowanie zawodowe', 'summary'],
+  ['profil zawodowy', 'summary'],
+  ['kompetencje', 'competencies'],
+  ['kompetencje kluczowe', 'competencies'],
+  ['kluczowe kompetencje', 'competencies'],
+  ['doświadczenie', 'experience'],
+  ['doświadczenie zawodowe', 'experience'],
+  ['przebieg kariery', 'experience'],
+  ['projekty', 'projects'],
+  ['kluczowe projekty', 'projects'],
+  ['wybrane projekty', 'projects'],
+  ['wykształcenie', 'education'],
+  ['edukacja', 'education'],
+  ['wykształcenie i certyfikaty', 'education'],
+  ['certyfikaty', 'certifications'],
+  ['certyfikaty i szkolenia', 'certifications'],
+  ['szkolenia i certyfikaty', 'certifications'],
+  ['umiejętności', 'skills'],
+  ['umiejętności techniczne', 'skills'],
+].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
   return text
@@ -142,7 +193,7 @@ function normalizeSectionTitle(text) {
 }
 
 function sectionKey(text) {
-  const normalized = normalizeSectionTitle(text);
+  const normalized = foldDiacritics(normalizeSectionTitle(text));
   return SECTION_ALIASES.get(normalized) ?? normalized;
 }
 
@@ -625,4 +676,4 @@ if (isMain) {
   });
 }
 
-export { normalizeTextForATS };
+export { normalizeTextForATS, sectionKey };

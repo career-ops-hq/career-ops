@@ -64,6 +64,71 @@ export function looksLikeScoreCell(v) {
 }
 
 /**
+ * A markdown table separator row: `|---|------|...|`, optionally with alignment
+ * colons.
+ *
+ * Readers used to recognize this row with `line.includes('---')`, which also
+ * matched any DATA row whose free text happened to contain three hyphens — a
+ * URL slug such as `Senior-Engineer---Platform-Team`, or an em dash typed
+ * as `---`. Matching the row's structure instead cannot false-positive that way.
+ */
+export const SEPARATOR_ROW_RE = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+/** @param {string} line @returns {boolean} whether the line is the `|---|` separator row. */
+export function isSeparatorRow(line) {
+  return typeof line === 'string' && SEPARATOR_ROW_RE.test(line);
+}
+
+/** The columns a row must label before it counts as the tracker header. */
+const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
+
+/**
+ * The ONE definition of "this row is the tracker header", shared by
+ * `isHeaderRow` and `detectColumns`.
+ *
+ * A row qualifies only by labelling the whole schema — every field in
+ * REQUIRED_HEADER_FIELDS. One telltale cell is not enough: a company genuinely
+ * named "Company", or a note consisting of that single word, would otherwise be
+ * read as table furniture and skip row-format validation, which is the same
+ * class of false positive this module exists to stop.
+ *
+ * Extracted rather than duplicated (PR #2267 review): the two callers had
+ * drifted, and a header they disagree about is one that validation skips as
+ * furniture while column detection cannot parse — silently falling back to the
+ * fixed legacy layout.
+ *
+ * @param {string[]} cells - Lowercased, trimmed cells from `line.split('|')`.
+ * @returns {Object<string,number>|null} Field → column index, or null.
+ */
+function headerSchemaMap(cells) {
+  // The alias table is the whole contract — no literal `company`/`role`
+  // pre-filter. There used to be one, which meant a FULLY localized header
+  // (`| # | Fecha | Empresa | Puesto | … |`) never reached the aliases that
+  // exist for exactly that case, and the tracker silently fell back to
+  // LEGACY_COLMAP. On a plain 9-column table the fallback lines up and nothing
+  // looks wrong; insert the Location column from #946's own use case and the
+  // Score cell is read from Location instead (#2274).
+  //
+  // Requiring the full schema is what makes the pre-filter unnecessary: a data
+  // row would have to carry five different header labels in five different
+  // cells to qualify, which no real row does.
+  const map = {};
+  cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+  return REQUIRED_HEADER_FIELDS.every(k => map[k] != null) ? map : null;
+}
+
+/**
+ * Whether a table row is the tracker's header row.
+ *
+ * @param {string} line - One line from applications.md.
+ * @returns {boolean}
+ */
+export function isHeaderRow(line) {
+  if (typeof line !== 'string' || !line.startsWith('|')) return false;
+  return headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase())) !== null;
+}
+
+/**
  * Given the two adjacent cells that carry score and status in EITHER order,
  * identify which is which by content — the score cell is recognizable by
  * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
@@ -96,11 +161,8 @@ export function resolveScoreStatus(a, b) {
 export function detectColumns(lines) {
   for (const line of lines) {
     if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim().toLowerCase());
-    if (!cells.includes('company') || !cells.includes('role')) continue;
-    const map = {};
-    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
+    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (map) return map;
   }
   return null;
 }

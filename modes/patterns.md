@@ -100,6 +100,26 @@ via X — it converts"*, a weak one is an observation, not an accusation.
 
 If compensation observations exist (report `advertised_comp` keys or `data/salary-observations.tsv` lines), run `node salary-gap.mjs --summary` as an additional lens: advertised→actual haircut per (company, role) and per currency, plus desired-attainment. Zero tokens — never recompute these numbers manually. Respect its data-quality section the same way as `sufficientSample`: low sample sizes are observations, not recommendations.
 
+### Company History lens (optional)
+
+Run `node company-history.mjs --summary` as an additional lens. Zero tokens.
+
+**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs <num> <state> --note "responded <date>"` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
+
+Then present the cards, sorted silent-first (the script already orders them this way).
+
+**Causal humility (mandatory, same posture as `vendorAnalysis`):** these cards are facts about *your own files* — a company reflecting `silent-on-you` means "no response recorded in your tracker/follow-ups," not "the company never responded." Innocent explanations are common: high-volume inboxes, evergreen requisitions, re-opened searches, or a response the candidate received but never logged. Present the facts (silent Nd since date, M follow-ups sent) and let the user judge — never phrase a card as a verdict about the company.
+
+### Funnel Calibration lens (optional)
+
+If the tracker has Applied-or-beyond rows, run `node funnel-velocity.mjs --summary` as an additional lens: the candidate's funnel rates vs candidate-side market benchmark ranges, in-flight applications past the typical first-response window, and (once `data/status-log.tsv` has accrued transitions) median days per stage hop. Zero tokens — never recompute these numbers manually. Presentation rules (these are hard MUSTs, not style suggestions):
+
+- **Above-range rates**: encouragement is wanted — this lens exists to counter silence-anxiety — but MUST keep the script's selection-bias note (targeted applications are expected to beat mass-platform averages). Confirmed filter quality, not market ease.
+- **Below-range rates**: calibration plus exactly one concrete action (follow-up compliance via followup mode, or score-threshold review via patterns Step 2). Never verdicts about the candidate.
+- **Every benchmark mention** carries its year and "directional" — the shipped baselines are recruiter-industry aggregates, not peer-reviewed statistics.
+- **No comparative multiplier claims below n=20 applied.** The script already suppresses them; do not reconstruct them manually from the raw numbers.
+- **Velocity medians**: always repeat the censored count the script prints ("n still waiting, excluded") — a median over answered applications only is survivorship-biased without it.
+
 ## Step 1b — Session-Content Targeting Signal (optional)
 
 Outcome data (Step 1) tells you *whether* you're winning. Interview sessions tell you *what role you're actually selling* in the room — a higher-resolution, lower-noise signal of role-fit than win/loss, which is confounded by comp, timing, headcount, and a dozen reasons unrelated to fit.

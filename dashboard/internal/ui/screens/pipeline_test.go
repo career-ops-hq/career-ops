@@ -636,3 +636,56 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 		t.Fatalf("expected cursor to be within [0, %d], got %d", len(reloaded.filtered)-1, reloaded.cursor)
 	}
 }
+
+// Regression: the viewer status path starts the discard reason picker (or the
+// hired celebration) on the pipeline model and then immediately reloads data.
+// WithReloadedData must carry that in-progress flow state over — wiping it
+// meant picking Discarded/SKIP from the report viewer never showed the reason
+// picker and never persisted the status change.
+func TestWithReloadedDataPreservesDiscardAndHiredFlow(t *testing.T) {
+	apps := []model.CareerApplication{
+		{
+			Company:      "Acme",
+			Role:         "Backend Engineer",
+			Status:       "Evaluated",
+			Score:        4.2,
+			ReportPath:   "reports/001-acme.md",
+			ReportNumber: "1",
+		},
+	}
+
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
+	pm.applyFilterAndSort()
+
+	pm, _ = pm.StartDiscardReasonFlow(apps[0], "SKIP")
+	pm.discardCursor = 2
+	pm.discardCustomInput = true
+	pm.discardCustomText = "typed"
+	pm.hiredApp = apps[0]
+	pm.hiredStep = 1
+
+	reloaded := pm.WithReloadedData(apps, model.PipelineMetrics{Total: len(apps)})
+
+	if !reloaded.discardPicker {
+		t.Fatal("discardPicker = false, want true (reason picker must survive reload)")
+	}
+	if reloaded.discardPendingStatus != "SKIP" {
+		t.Fatalf("discardPendingStatus = %q, want SKIP", reloaded.discardPendingStatus)
+	}
+	if reloaded.discardPendingApp.Company != "Acme" {
+		t.Fatalf("discardPendingApp lost: %+v", reloaded.discardPendingApp)
+	}
+	if len(reloaded.discardOptions) == 0 {
+		t.Fatal("discardOptions were wiped by reload")
+	}
+	if reloaded.discardCursor != 2 || !reloaded.discardCustomInput || reloaded.discardCustomText != "typed" {
+		t.Fatalf("discard cursor/custom-input lost: cursor=%d customInput=%v customText=%q",
+			reloaded.discardCursor, reloaded.discardCustomInput, reloaded.discardCustomText)
+	}
+	if reloaded.discardPredictedCount != pm.discardPredictedCount {
+		t.Fatalf("discardPredictedCount = %d, want %d", reloaded.discardPredictedCount, pm.discardPredictedCount)
+	}
+	if reloaded.hiredStep != 1 || reloaded.hiredApp.Company != "Acme" {
+		t.Fatalf("hired flow lost: step=%d app=%+v", reloaded.hiredStep, reloaded.hiredApp)
+	}
+}

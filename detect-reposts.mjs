@@ -26,6 +26,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
@@ -54,7 +55,11 @@ function daysBetween(d1, d2) {
 }
 
 // --- Parse scan-history.tsv ---
-// Format: url, first_seen, portal, title, company, status, location
+// Format: url, first_seen, portal, title, company, status, location, ...,
+//         normalized_company (trailing col 12, additive — see scan.mjs).
+// The normalized_company column is preferred as the clustering key when
+// present; rows written before it existed (fewer columns) simply lack it and
+// carry `normCompany: ''`, so a consumer normalizes the raw company on the fly.
 export function parseScanHistory(content) {
   const lines = content.split('\n').filter(line => line.trim());
   if (lines.length === 0) return [];
@@ -78,9 +83,26 @@ export function parseScanHistory(content) {
       company: company.trim(),
       status: (status || 'added').trim(),
       location: (location || '').trim(),
+      // Trailing normalized-company key (col 12, 0-indexed 11). '' for older
+      // rows that predate the column — companyKey() falls back to normalizing
+      // the raw name so old and new rows still cluster on the same key.
+      normCompany: (cols[11] || '').trim(),
     });
   }
   return rows;
+}
+
+// Canonical clustering key for a row. Prefers the stored normalized-company
+// column (written by scan.mjs via normalizeCompanyName) so "Acme Inc." and
+// "Acme" cluster without re-deriving anything; falls back to normalizing the
+// raw company on the fly for pre-column rows and for row objects built directly
+// (e.g. tests). A final fallback to the raw lowercased name preserves the
+// pre-normalization behavior for names that fold to empty (e.g. all-CJK or
+// all-Cyrillic company names), so those never over-cluster under one '' key.
+export function companyKey(row) {
+  const stored = typeof row.normCompany === 'string' ? row.normCompany.trim() : '';
+  const raw = typeof row.company === 'string' ? row.company.trim() : '';
+  return stored || normalizeCompanyName(raw) || raw.toLowerCase();
 }
 
 function loadScanHistory(path = SCAN_HISTORY_PATH) {
@@ -118,10 +140,12 @@ export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS) {
     }));
   if (valid.length < 2) return [];
 
-  // Group by company (case-insensitive).
+  // Group by normalized company key (prefers the stored normalized-company
+  // column, falls back to normalizing the raw name — see companyKey). This is
+  // what makes "Acme Inc." and "Acme" a single repost cluster instead of two.
   const byCompany = new Map();
   for (const row of valid) {
-    const key = row.company.toLowerCase();
+    const key = companyKey(row);
     if (!byCompany.has(key)) byCompany.set(key, []);
     byCompany.get(key).push(row);
   }

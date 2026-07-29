@@ -1,6 +1,6 @@
 # Mode: contacto -- Outreach messages
 
-> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_shared.md` → Voice DNA.
+> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_writing.md` → Voice DNA.
 
 This mode has two variants that share the same persona engine (recruiter → hard
 requirements; hiring manager → impact/vision):
@@ -60,6 +60,15 @@ short message; otherwise run the LinkedIn power move below.
    - ES (if Spanish company)
 
 6. **Alternative targets** with justification for why they are good second choices
+
+7. **Offer to save the contact** -- once the candidate picks a target, ask whether
+   to save that person to `data/contacts.tsv` (one line:
+   `{name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}`,
+   `-` for tracker# if there is no application yet). Append a new line, or update
+   the person's existing line in place if they are already there — match by
+   name+company, the same key the vCard UID uses. NEVER save without the
+   candidate confirming first. Saved contacts export to the phone with
+   `node contacts.mjs --vcf` (vCard).
 
 **Contact channel preference:** Read `contact_preferences.preferred_channel` from
 `config/profile.yml`. If it is absent or set to `"either"`, write the CTA

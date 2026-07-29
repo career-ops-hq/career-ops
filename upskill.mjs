@@ -45,109 +45,11 @@ export const SCHEMA_VERSION = 1;
 // gaps matter most. Matches the apply threshold in Ethical Use (CLAUDE.md).
 const LOW_FIT_SCORE = 4.0;
 
-// Skill tokenizer. Superset of the tech regex in analyze-patterns.mjs
-// (deliberately duplicated — see #1520 discussion: extracting a shared module
-// from a tested core script is a follow-up once both call sites are stable).
-const SKILL_TOKENS = [
-  // Languages
-  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Golang', 'Rust', 'PHP',
-  'Kotlin', 'Swift', 'Scala', 'Elixir', 'C\\+\\+', 'C#', '\\.NET', 'SQL',
-  // Frontend / frameworks
-  'React Native', 'React', 'Angular', 'Vue\\.?js', 'Svelte', 'Next\\.?js',
-  'Django', 'Flask', 'FastAPI', 'Rails', 'Laravel', 'Symfony', 'Spring',
-  'Node\\.?js', 'NodeJS',
-  // Data stores
-  'MongoDB', 'MySQL', 'PostgreSQL', 'Postgres', 'Redis', 'Elasticsearch',
-  'Snowflake', 'BigQuery', 'Databricks', 'DynamoDB', 'Cassandra',
-  // APIs / messaging
-  'GraphQL', 'gRPC', 'Kafka', 'RabbitMQ',
-  // Cloud / infra
-  'AWS', 'GCP', 'Azure', 'Docker', 'Kubernetes', 'k8s', 'Terraform',
-  'Ansible', 'Helm', 'Jenkins', 'GitHub Actions', 'GitLab CI', 'CI/CD',
-  'Prometheus', 'Grafana', 'Datadog', 'Supabase', 'Inngest',
-  // Data / ML / AI
-  'PyTorch', 'TensorFlow', 'scikit-learn', 'Pandas', 'NumPy', 'Spark',
-  'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
-  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering', 'Fine-?tuning',
-  'Computer Vision', 'NLP',
-  // Analytics / enterprise
-  'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
-];
-
-// \b fails at symbol edges (\bC\+\+\b needs a word char AFTER the +, \b\.NET
-// needs one BEFORE the dot), so C++/C#/.NET would never match standalone.
-// (?<!\w)/(?!\w) are equivalent to \b for word-char edges and correct for
-// symbol edges.
-const SKILL_PATTERN = new RegExp(
-  '(?<!\\w)(?:' + SKILL_TOKENS.join('|') + ')(?!\\w)',
-  'gi'
-);
-
-// "Go" is an everyday English word, so it can't join the case-insensitive
-// token list ("go the extra mile" would register a skill). Match it in a
-// separate CASE-SENSITIVE pass: only the exact standalone token "Go" counts
-// as the language; prose "go"/"GO" never do. "Golang" still resolves to "Go"
-// via the main pattern + CANONICAL. A trailing hyphen also disqualifies:
-// capitalized business phrases like "Go-to-market" and "Go-live" are not the
-// language (punctuation like "Go," "Go/Rust" "(Go)" still counts).
-const GO_SKILL_PATTERN = /(?<!\w)Go(?![\w-])/;
-
-// lowercase → canonical display casing, derived from SKILL_TOKENS by stripping
-// regex syntax ('Vue\\.?js' → 'Vue.js'). Keeps case-insensitive matches like
-// "graphql" resolving to the same key ("GraphQL") as the CV-known-skills set.
-const DISPLAY = Object.fromEntries(
-  SKILL_TOKENS.map(t => {
-    const display = t.replace(/\\/g, '').replace(/\?/g, '');
-    return [display.toLowerCase(), display];
-  })
-);
-
-// Exact-alias canonicalization ONLY (lowercased match → display name).
-// Deliberately no umbrella aliases: "cloud" must never count as knowing
-// AWS/GCP/Azure — a generous map silently suppresses real gaps, and the
-// "cv skill never appears as gap" acceptance test rewards exactly that
-// failure mode. Every entry here maps spellings of the SAME skill.
-const CANONICAL = {
-  'k8s': 'Kubernetes',
-  'golang': 'Go',
-  'postgres': 'PostgreSQL',
-  'nodejs': 'Node.js', 'node.js': 'Node.js', 'nodejs.': 'Node.js',
-  'vuejs': 'Vue.js', 'vue.js': 'Vue.js',
-  'nextjs': 'Next.js', 'next.js': 'Next.js',
-  'llm': 'LLMs', 'llms': 'LLMs',
-  'finetuning': 'Fine-tuning', 'fine-tuning': 'Fine-tuning',
-  'power bi': 'Power BI',
-  'github actions': 'GitHub Actions',
-  'gitlab ci': 'GitLab CI',
-  'ci/cd': 'CI/CD',
-  'hugging face': 'Hugging Face',
-  'react native': 'React Native',
-  'prompt engineering': 'Prompt Engineering',
-  'computer vision': 'Computer Vision',
-  'scikit-learn': 'scikit-learn',
-  'c++': 'C++', 'c#': 'C#', '.net': '.NET',
-  'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
-  'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
-};
-
-function canonicalize(token) {
-  const key = token.toLowerCase();
-  // Alias map first (k8s → Kubernetes), then display casing from the token
-  // list (graphql → GraphQL, pytorch → PyTorch) — never title-case, which
-  // manufactures keys like "Graphql" that miss the known-skills set.
-  return CANONICAL[key] || DISPLAY[key] || token;
-}
-
-/** Extract the set of canonical skill names present in a free-text blob. */
-export function extractSkills(text) {
-  if (!text) return new Set();
-  const found = new Set();
-  for (const m of text.matchAll(SKILL_PATTERN)) {
-    found.add(canonicalize(m[0]));
-  }
-  if (GO_SKILL_PATTERN.test(text)) found.add('Go');
-  return found;
-}
+// Skill vocabulary + canonical extractor moved to skill-extract.mjs (#1896) so
+// upskill, jd-skill-gap, and analyze-patterns share ONE source of truth. Re-
+// exported here so existing importers of extractSkills keep working unchanged.
+import { extractSkills } from './skill-extract.mjs';
+export { extractSkills };
 
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
@@ -387,38 +289,9 @@ function printSummary(result) {
 function runSelfTest() {
   const failures = [];
 
-  // extractSkills: canonicalization
-  const s1 = extractSkills('Needs k8s, golang and Postgres experience; NodeJS a plus');
-  for (const expected of ['Kubernetes', 'Go', 'PostgreSQL', 'Node.js']) {
-    if (!s1.has(expected)) failures.push(`extractSkills missing canonical ${expected} (got ${[...s1].join(',')})`);
-  }
-
-  // Symbol-terminated skills: \b-style boundaries would drop all three
-  const s1b = extractSkills('Requires C++ and C# on .NET, plus SQL.');
-  for (const expected of ['C++', 'C#', '.NET', 'SQL']) {
-    if (!s1b.has(expected)) failures.push(`extractSkills missing symbol skill ${expected} (got ${[...s1b].join(',')})`);
-  }
-
-  // Standalone "Go" is matched case-SENSITIVELY: a capitalized token in a
-  // skills list counts, but prose "go"/"GO" must never register as a skill
-  // (the global pattern is case-insensitive, so Go lives outside it).
-  const s1d = extractSkills('Skills: Go, Rust, TypeScript');
-  if (!s1d.has('Go')) failures.push(`extractSkills missing standalone Go (got ${[...s1d].join(',')})`);
-  const s1e = extractSkills('willing to go the extra mile; ready to GO live');
-  if (s1e.has('Go')) failures.push('prose "go"/"GO" wrongly matched as Go skill');
-  // Capitalized hyphenated business phrases must not register as the language
-  const s1f = extractSkills('Own the Go-to-market strategy and Go-live support');
-  if (s1f.has('Go')) failures.push('hyphenated "Go-to-market"/"Go-live" wrongly matched as Go skill');
-  // ...but ordinary punctuation after the token still counts
-  const s1g = extractSkills('Backend in Go/Rust (Go preferred). We ship Go.');
-  if (!s1g.has('Go')) failures.push('punctuation-adjacent standalone Go missed');
-
-  // Lowercase mentions of mixed-case skills must resolve to canonical casing,
-  // or knownSkills.has() misses them (Graphql !== GraphQL)
-  const s1c = extractSkills('familiar with graphql, pytorch and postgresql');
-  for (const expected of ['GraphQL', 'PyTorch', 'PostgreSQL']) {
-    if (!s1c.has(expected)) failures.push(`extractSkills lowercase mention not canonical ${expected} (got ${[...s1c].join(',')})`);
-  }
+  // The extractSkills canonicalization/boundary fixtures now live with the
+  // module in tests/skill-extract.test.mjs (#1896). upskill's self-test keeps
+  // the aggregation/suppression/targeted checks that are upskill's own logic.
 
   // Over-suppression guard: cv "Java" must NOT swallow a "JavaScript" gap,
   // and cv "AWS" must not swallow GCP/Azure. This is the failure mode the

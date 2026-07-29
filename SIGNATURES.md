@@ -94,3 +94,7 @@ public commit with a stated reason.
 - @asing44 | Adam Warsing | 2026-07-24 | "To approaching a turbulent space with real dignity, cheers!" | id:109570966 | src:https://github.com/santifer/career-ops/discussions/2168 | n:46
 - @cdelafosse4-ops | 2026-07-27 | id:290349063 | src:https://github.com/santifer/career-ops/discussions/2208 | n:47
 - @Saksham-Khosla | 2026-07-27 | id:294287864 | src:https://github.com/santifer/career-ops/discussions/2218 | n:48
+- @sdisaacson | Scott Isaacson | 2026-07-27 | "Whose side is your agent on?" | id:1022379 | src:https://github.com/santifer/career-ops/discussions/2219 | n:49
+- @aawbeck | Aaron Beck | 2026-07-27 | "Great tool, ty!" | id:255968200 | src:https://github.com/santifer/career-ops/discussions/2222 | n:50
+- @NotPraneeth | Sai Praneeth | 2026-07-29 | "The search mustn't stop" | id:92677364 | src:https://github.com/santifer/career-ops/discussions/2275 | n:51
+- @changeable-alcohol | X | 2026-07-29 | id:108211470 | src:https://github.com/santifer/career-ops/discussions/2287 | n:52

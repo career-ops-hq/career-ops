@@ -74,6 +74,15 @@ location:
   city: "San Francisco"
   timezone: "PST"
   visa_status: "No sponsorship needed"
+  # Countries/regions where you ALREADY hold work authorization (no sponsorship
+  # needed there). Drives the Work-Authorization signal in job evaluation
+  # (modes/oferta.md → Block A "Work-authorization check"). Optional — omit or
+  # leave [] if not applicable; the free-text visa_status above still applies.
+  authorized_in: ["United States"]
+  # true if you need visa sponsorship for roles OUTSIDE authorized_in. When a JD
+  # explicitly states it will not sponsor, that is a hard blocker (see
+  # modes/_profile.md "Your Location Policy"). Omit → treated as false.
+  needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 

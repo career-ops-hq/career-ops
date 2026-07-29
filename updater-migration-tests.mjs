@@ -84,6 +84,7 @@ const requiredSystemPaths = [
   '.qwen/',
   '.antigravitycli/skills/',
   '.grok/skills/',
+  '.cursor/skills/',
   'tracker-columns-tests.mjs',
   'updater-migration-tests.mjs',
   'README.ar.md',
@@ -101,6 +102,7 @@ const requiredSystemPaths = [
 
 const requiredBootstrapPaths = [
   '.agents/',
+  '.cursor/skills/',
   '.opencode/skills/',
   '.antigravitycli/skills/',
   '.grok/skills/',
@@ -166,7 +168,7 @@ const twoPassManifestChecks = [
   },
   {
     name: 'revertPaths uses git checkout HEAD (not just --) to reset index+worktree (#915)',
-    pattern: /git\('checkout',\s*'HEAD',\s*'--'/,
+    pattern: /\b(?:git|runGit)\('checkout',\s*'HEAD',\s*'--'/,
   },
   {
     name: 'apply commit is scoped to update paths, not bare commit (#915)',
@@ -220,7 +222,7 @@ const twoPassManifestChecks = [
     // paths HEAD lacks, so files the update introduced under a directory
     // pathspec survived the rollback as staged additions (#2015).
     name: 'revertPaths clears additions HEAD lacks under a directory pathspec (#2015)',
-    pattern: /removeAdditionsNotInHead\(p, protectedPaths\)/,
+    pattern: /removeAdditionsNotInHead\(p, protectedPaths, ctx\)/,
   },
   {
     name: 'removeAdditionsNotInHead only targets additions, never modifications (#2015)',
