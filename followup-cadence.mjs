@@ -132,10 +132,42 @@ export function parseDate(dateStr) {
 // worse than no match at all — the evaluation-date fallback is at least labelled
 // as inferred, whereas a truncated date is indistinguishable from a real one.
 // Rejecting the bad candidate lets the scan continue to a later valid date.
-export function parseAppliedDate(notes) {
+//
+// The token shape is necessary but not sufficient: "2026-06-31" and
+// "2026-02-30" match it and are not real days.
+//
+// Whether that should be rejected here depends on the caller, so it is opt-in:
+//   - followup-seed.mjs WANTS the raw candidate. It validates the date itself
+//     and throws INVALID_DATE so a typo gets corrected rather than silently
+//     absorbed — pinning a follow-up off a wrong date is worse than refusing.
+//     Filtering here unconditionally would make that impossible date invisible
+//     to it and turn a loud, fixable error into a silent wrong answer.
+//   - the cadence report wants it skipped, because parseDate() rolls an
+//     impossible date over (2026-06-31 becomes 2026-07-01), so it would become
+//     a real but WRONG date labelled `notes` — i.e. measured, not inferred.
+//     Falling back to the evaluation date is honest by comparison, and one bad
+//     row must not fail a whole report.
+//
+// @param {string} notes
+// @param {{requireValidCalendarDate?: boolean}} [options]
+export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
-  const m = String(notes).match(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/i);
-  return m ? m[1] : null;
+  const validateCalendar = options.requireValidCalendarDate === true;
+  for (const m of String(notes).matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+    if (!validateCalendar || isRealCalendarDate(m[1])) return m[1];
+  }
+  return null;
+}
+
+// True only when YYYY-MM-DD names a day that exists. Round-tripping through a
+// UTC Date and comparing the parts back catches out-of-range months/days as
+// well as month-length and leap-year violations, which a range check misses.
+export function isRealCalendarDate(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ''))) return false;
+  const [y, mo, d] = iso.split('-').map(Number);
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
 // Which date the cadence is measured from, and where it came from. A caller
@@ -143,7 +175,11 @@ export function parseAppliedDate(notes) {
 // so an inferred age reads exactly like a measured one — and acting on that
 // silently-wrong number is what pushes a live application into "cold".
 export function resolveAppliedDate(app) {
-  const fromNotes = parseAppliedDate(app?.notes);
+  // requireValidCalendarDate: an impossible date in the notes must degrade to
+  // the labelled fallback rather than be reported as a measured date. One bad
+  // row must not fail the whole report, so this skips rather than throws —
+  // unlike followup-seed.mjs, which refuses to pin a follow-up off a bad date.
+  const fromNotes = parseAppliedDate(app?.notes, { requireValidCalendarDate: true });
   return fromNotes
     ? { appliedDate: fromNotes, appDateSource: 'notes' }
     : { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };

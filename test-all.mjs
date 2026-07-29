@@ -5417,6 +5417,64 @@ try {
   } else {
     fail(`parseAppliedDate should skip the malformed date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real'))}`);
   }
+  // A date can match the token shape and still not exist. These must not be
+  // returned as MEASURED application dates: parseDate() rolls them over
+  // (2026-06-31 -> 2026-07-01), so an impossible date silently becomes a real
+  // but wrong one and shifts the cadence by days. The honest
+  // evaluation-date fallback is strictly better than a fabricated date.
+  const impossibleDates = [
+    ['Applied 2026-06-31', 'a 31st in a 30-day month'],
+    ['Applied 2026-02-30', 'a 30th in February'],
+    ['Applied 2026-02-29', 'a 29th of February in a non-leap year'],
+    ['Applied 2026-13-01', 'a 13th month'],
+    ['Applied 2026-00-10', 'a zero month'],
+    ['Applied 2026-06-00', 'a zero day'],
+  ];
+  const VALIDATE = { requireValidCalendarDate: true };
+  for (const [notes, label] of impossibleDates) {
+    if (cadence.parseAppliedDate(notes, VALIDATE) === null) {
+      pass(`parseAppliedDate rejects ${label} when calendar validation is requested (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes, VALIDATE))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Validation is OPT-IN. followup-seed.mjs depends on receiving the raw
+  // candidate so it can throw INVALID_DATE and make the user fix the typo;
+  // filtering unconditionally would turn that loud, fixable error into a
+  // silent wrong answer.
+  if (cadence.parseAppliedDate('Applied 2026-06-31') === '2026-06-31') {
+    pass('parseAppliedDate returns the raw candidate by default so callers can reject it loudly');
+  } else {
+    fail(`parseAppliedDate default mode must not swallow an impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31'))}`);
+  }
+  // A real leap day must still be accepted — the validity check must not
+  // over-reject.
+  if (cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE) === '2024-02-29') {
+    pass('parseAppliedDate accepts a real leap day under validation');
+  } else {
+    fail(`parseAppliedDate should accept 2024-02-29, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE))}`);
+  }
+  // The continued-scan contract applies to calendar-invalid candidates too.
+  if (cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE) === '2026-06-30') {
+    pass('parseAppliedDate skips an impossible date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE))}`);
+  }
+  // isRealCalendarDate is exported so callers share one definition of validity.
+  if (cadence.isRealCalendarDate('2024-02-29') && !cadence.isRealCalendarDate('2026-02-29') && !cadence.isRealCalendarDate('nope')) {
+    pass('isRealCalendarDate distinguishes a real leap day from an impossible one');
+  } else {
+    fail('isRealCalendarDate mis-classifies a calendar date');
+  }
+  // And the source must degrade to the fallback, not report a fabricated date.
+  {
+    const r = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-31' });
+    if (r.appliedDate === '2026-06-01' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back when the notes date is not a real calendar date');
+    } else {
+      fail(`resolveAppliedDate impossible-date case got ${JSON.stringify(r)}`);
+    }
+  }
   if (cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17') === '2026-06-17') {
     pass('parseAppliedDate skips a "reapplied" match and takes the next valid one');
   } else {
