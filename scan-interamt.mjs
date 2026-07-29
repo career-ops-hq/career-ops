@@ -203,6 +203,7 @@ async function searchInteramt(page, keyword, isFirst) {
   ]).catch(() => null);
 
   if (DEBUG) {
+    mkdirSync('output', { recursive: true });
     await page.screenshot({ path: 'output/debug-interamt.png', fullPage: true });
     const { writeFileSync: wf } = await import('fs');
     wf('output/debug-interamt.html', await page.content());
@@ -299,11 +300,11 @@ async function main() {
             postedAt: pubDate ? pubDate.getTime() : undefined,
           };
 
-          if (!matchesTitle(offer.title)) { titleSkipped.push(canonical); continue; }
-          if (!matchesLocation(location)) { locationSkipped.push(canonical); continue; }
+          if (!matchesTitle(offer.title)) { seen.add(canonical.url); titleSkipped.push(canonical); continue; }
+          if (!matchesLocation(location)) { seen.add(canonical.url); locationSkipped.push(canonical); continue; }
           // Same-day offers pass: lastScanDate is the day of the last run, and an
           // offer published later that same day should not be treated as stale.
-          if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
+          if (lastScanDate && pubDate && pubDate < lastScanDate) { seen.add(canonical.url); dateSkipped.push(canonical); continue; }
           if (seen.has(canonical.url)) { dupeSkipped.push(canonical); continue; }
           seen.add(canonical.url);
           newOffers.push(canonical);
@@ -319,7 +320,7 @@ async function main() {
   }
 
   if (!DRY_RUN) {
-    if (newOffers.length > 0) appendToPipeline(newOffers);
+    if (newOffers.length > 0) await appendToPipeline(newOffers);
     if (newOffers.length > 0) appendToScanHistory(newOffers, date, 'added');
     if (titleSkipped.length > 0) appendToScanHistory(titleSkipped, date, 'skipped_title');
     if (locationSkipped.length > 0) appendToScanHistory(locationSkipped, date, 'skipped_location');
