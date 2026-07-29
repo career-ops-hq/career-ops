@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — DNS cache');
 
 try {
-  const { createCachedLookup } = await import(
+  const { createCachedLookup, isResolverFailure } = await import(
     pathToFileURL(join(ROOT, 'providers/_dns-cache.mjs')).href
   );
 
@@ -145,6 +145,59 @@ try {
       fail(`option variants collapsed into ${resolver.calls.length} key(s), expected 3`);
     }
     resolver.flush();
+  }
+
+  // --- resolver-level failures are told apart from NXDOMAIN ---
+  {
+    const refused = Object.assign(new Error('queryA EREFUSED'), { code: 'EREFUSED' });
+    const nxdomain = Object.assign(new Error('getaddrinfo ENOTFOUND x'), { code: 'ENOTFOUND' });
+    // Node's fetch() wraps the real error: TypeError('fetch failed') with .cause.
+    const wrapped = Object.assign(new TypeError('fetch failed'), { cause: refused });
+
+    const results = [
+      isResolverFailure(refused),
+      isResolverFailure(wrapped),
+      isResolverFailure(nxdomain),
+      isResolverFailure(new Error('plain')),
+      isResolverFailure(null),
+    ];
+
+    if (JSON.stringify(results) === JSON.stringify([true, true, false, false, false])) {
+      pass('isResolverFailure detects refusals through a cause chain, ignores NXDOMAIN');
+    } else {
+      fail(`isResolverFailure wrong: got ${JSON.stringify(results)}`);
+    }
+  }
+
+  // --- a resolver refusal is cached briefly, then retried ---
+  {
+    const refused = Object.assign(new Error('queryA EREFUSED'), { code: 'EREFUSED' });
+    const resolver = mkResolver([refused]);
+    let clock = 1_000;
+    const lookup = createCachedLookup(resolver, { negativeTtlMs: 30_000, now: () => clock });
+
+    const first = lookupOnce(lookup, 'refused.example.com');
+    resolver.flush();
+    const [firstErr] = await first;
+
+    // Check the resolver was skipped BEFORE awaiting: a miss would queue on the
+    // stub and never settle, hanging the suite instead of failing it.
+    const secondCall = lookupOnce(lookup, 'refused.example.com');
+    const skippedResolver = resolver.calls.length === 0;
+    if (!skippedResolver) resolver.flush();          // don't strand the promise
+    const second = await secondCall;
+    const servedFromCache = skippedResolver && second[0] && second[0].code === 'EREFUSED';
+
+    clock += 30_001;                       // past the negative window
+    lookupOnce(lookup, 'refused.example.com');
+    const retried = resolver.calls.length === 1;
+    resolver.flush();
+
+    if (firstErr && firstErr.code === 'EREFUSED' && servedFromCache && retried) {
+      pass('a resolver refusal is served from the negative cache, then retried past its TTL');
+    } else {
+      fail(`negative cache wrong: served=${servedFromCache} retried=${retried}`);
+    }
   }
 
   // --- the module-level patch is opt-out-able ---

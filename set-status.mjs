@@ -38,9 +38,17 @@
  * When the new status is Applied, the JSON output carries
  * `"followupSeedCandidate": true` — the hook point for seeding
  * data/follow-ups.md with the default cadence (#1430, not implemented here).
+ *
+ * Every real status change also appends one line to the transition ledger
+ * (status-log.tsv, sibling of the tracker file):
+ *   {tracker#}\t{date}\t{from}\t{to}\tset-status\t
+ * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
+ * happened earlier ("they replied Tuesday"). The append is observation-only:
+ * if it fails, a warning goes to stderr and the exit code is unchanged — the
+ * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
@@ -59,12 +67,14 @@ const EXIT_NOT_FOUND = 2;
 const EXIT_AMBIGUOUS = 3;
 const EXIT_LOCK_TIMEOUT = 4;
 
-const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
+const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
 
   <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
+  --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
+                     pass it when the transition happened earlier than it's recorded)
   --force            Allow a numeric selector when the row's report link carries a different ID
   --dry-run          Resolve and validate, but write nothing
   --json             Machine-readable output on stdout (errors included)`;
@@ -73,18 +83,19 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, force: false, dryRun: false, json: false };
+const flags = { note: null, role: null, on: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on' };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
-  if (a === '--note' || a === '--role') {
+  if (a in VALUE_FLAGS) {
     // Never consume a following flag as the value: "--note --dry-run" would
     // silently disable dry-run and turn a preview into a real write.
     const value = rawArgs[i + 1];
     if (value === undefined || value.startsWith('--')) {
       failUsage(`Missing value for ${a}`);
     }
-    flags[a === '--note' ? 'note' : 'role'] = value;
+    flags[VALUE_FLAGS[a]] = value;
     i++;
   }
   else if (a === '--force') { flags.force = true; }
@@ -96,6 +107,16 @@ for (let i = 0; i < rawArgs.length; i++) {
 
 if (positional.length !== 2) {
   failUsage(positional.length === 0 ? null : `Expected 2 arguments (selector, state), got ${positional.length}`);
+}
+
+// --on must be a real, non-future calendar date — validated before anything
+// touches the tracker, same as state validation below.
+if (flags.on !== null) {
+  const m = /^\d{4}-\d{2}-\d{2}$/.test(flags.on);
+  const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
+  const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
+  if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
+  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
 const [selector, stateInput] = positional;
@@ -366,6 +387,25 @@ if (changed && !flags.dryRun) {
     failWith(EXIT_USAGE, 'write-failure', `Cannot write tracker at ${APPS_FILE}: ${err.message}`);
   }
 }
+
+// ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
+// Observation trail only: the tracker stays the source of truth for STATE,
+// the ledger records WHEN transitions happened. A failed append is a warning,
+// never a failure — the status write above already succeeded. Sibling of the
+// tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
+// the ledger next to the tracker it describes. Inside the lock window, so
+// concurrent writers can't interleave lines.
+let statusLogged = false;
+if (statusChanged && !flags.dryRun) {
+  const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  try {
+    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\tset-status\t\n`);
+    statusLogged = true;
+  } catch (err) {
+    console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
+  }
+}
 lock?.release();
 
 // ── report ───────────────────────────────────────────────────────
@@ -383,6 +423,7 @@ const result = {
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
 

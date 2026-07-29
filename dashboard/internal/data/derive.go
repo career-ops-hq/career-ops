@@ -18,7 +18,11 @@ var (
 	// Pay amounts in user-written Notes. Currencies are listed in currencyTokens
 	// below — the regex is assembled from that slice in three positions
 	// (prefix, optional range-prefix, suffix) so adding a new currency is a
-	// one-line append. payCeiling is currency-naive; PayMax sorts numerically.
+	// one-line append. The B suffix is matched too (not for pay itself, but so
+	// a billion-scale valuation like "$7.6B" is captured as one token and can
+	// be excluded by reFundingContext below — otherwise the "B" would be left
+	// dangling after the match and the trailing "valuation" check would never
+	// see it). payCeiling is currency-naive; PayMax sorts numerically.
 	reMoneySpan = buildMoneySpanRegex(currencyTokens)
 	// ISO dates embedded in notes ("Rejected 2026-06-04", "viewed 2026-06-04")
 	reISODate = regexp.MustCompile(`\b20\d{2}-\d{2}-\d{2}\b`)
@@ -31,10 +35,14 @@ var (
 	// "remote in Germany", which describe eligibility, not the job's location.
 	reCityIntl = regexp.MustCompile(`(?i)\b(Porto|Lisbon|London|Berlin|Munich|Hamburg|Frankfurt|Cologne|D(?:ü|u)sseldorf|Stuttgart|Z(?:ü|u)rich|Geneva|Lausanne|Basel|Dublin|Cork|Amsterdam|Rotterdam|Eindhoven|Utrecht|Paris|Lyon|Madrid|Barcelona|Valencia|Stockholm|Gothenburg|Malm(?:ö|o)|Copenhagen|Oslo|Helsinki|Milan|Rome|Turin|Vienna|Brussels|Ghent|Antwerp|Luxembourg|Warsaw|Krak(?:ó|o)w|Wroc(?:ł|l)aw|Tallinn|Riga|Vilnius|Prague|Brno|Budapest|Bucharest|Sofia|Athens|Bengaluru|Bangalore|Singapore|Sydney|Toronto|Vancouver|Tel Aviv|S(?:ã|a)o Paulo)\b`)
 	// Individual amounts inside an already-matched span: "140", "210K", "209,983"
-	reMoneyPart = regexp.MustCompile(`(\d[\d,]*(?:\.\d+)?)\s*([KkMm]?)`)
+	reMoneyPart = regexp.MustCompile(`(\d[\d,]*(?:\.\d+)?)\s*([KkMmBb]?)`)
 	// Estimate markers: "(est)", "(est;", "market est)" or "market" as its own
 	// word — but not "(EST/CST" timezones, "interest)" or "marketing".
 	reEstHint = regexp.MustCompile(`\(est[),;. ]|\best\)|\bmarket\b`)
+	// Funding/valuation context immediately after a money match: "$600M
+	// valuation", "$124M total raised", "$70M Series C" describe the company,
+	// not pay, and must not be picked up as the Pay column's figure.
+	reFundingContext = regexp.MustCompile(`(?i)^\s*(valuation|(total\s+)?raised|series\s|round\b)`)
 )
 
 // currencyTokens is the single source of truth for currencies the dashboard
@@ -70,10 +78,10 @@ func buildMoneySpanRegex(currencies []string) *regexp.Regexp {
 		}
 	}
 	pattern := fmt.Sprintf(
-		`~?(?:(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMm]?`+
-			`(?:\s*[-–]\s*(?:%s)?\d[\d,]*(?:\.\d+)?[KkMm]?)?`+
-			`|\d[\d,]*(?:\.\d+)?[KkMm]?`+
-			`(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?`+
+		`~?(?:(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
+			`(?:\s*[-–]\s*(?:%s)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
+			`|\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
+			`(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
 			`\s+(?:%s))`,
 		strings.Join(prefixParts, "|"),
 		strings.Join(rangePrefixParts, "|"),
@@ -108,6 +116,8 @@ func payCeiling(span string) float64 {
 			v *= 1_000
 		case "m":
 			v *= 1_000_000
+		case "b":
+			v *= 1_000_000_000
 		}
 		if v > top {
 			top = v
@@ -155,8 +165,16 @@ func deriveNoteFields(app *model.CareerApplication) {
 	}
 
 	// Pay: prefer the first $-range; fall back to the first lone $-amount
-	// (e.g. "$170K min floor") only when no range exists.
-	matches := reMoneySpan.FindAllString(app.Notes, -1)
+	// (e.g. "$170K min floor") only when no range exists. Skip money spans
+	// that are actually funding/valuation figures ("$600M valuation", "$70M
+	// Series C") — they describe the company, not compensation.
+	var matches []string
+	for _, idx := range reMoneySpan.FindAllStringIndex(app.Notes, -1) {
+		if reFundingContext.MatchString(app.Notes[idx[1]:]) {
+			continue
+		}
+		matches = append(matches, app.Notes[idx[0]:idx[1]])
+	}
 	for _, mm := range matches {
 		if strings.ContainsAny(mm, "-–") {
 			app.PayRange = mm

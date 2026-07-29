@@ -21,7 +21,7 @@ import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, detectColumns, resolveScoreStatus, normalizeVia } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 import { resolveTrackerPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
@@ -520,25 +520,31 @@ const existingApps = [];
 let maxNum = 0;
 
 for (const line of appLines) {
-  if (line.startsWith('|') && !line.includes('---') && !line.includes('Empresa')) {
-    const app = parseAppLine(line);
-    if (app) {
-      existingApps.push(app);
-      if (app.num > maxNum) maxNum = app.num;
-    }
+  // Skip only on the NaN check inside parseAppLine, which already rejects the
+  // header and separator rows because neither has a numeric `#` cell. The old
+  // `.includes('---') / .includes('Empresa')` heuristic was redundant for those
+  // two rows and wrong for data rows: any row whose free text contained three
+  // hyphens (a URL slug such as `Senior-Engineer---Platform-Team`, an em
+  // dash typed as `---`) or the word "Empresa" (a Spanish-market company name)
+  // never reached existingApps, so duplicate detection could not see it and a
+  // re-evaluation of that role appended a second row instead of updating it in
+  // place. #1704 fixed the numbering half of this with the usedNumbers pass
+  // below; this is the dedup half (#2265).
+  if (!line.startsWith('|')) continue;
+  const app = parseAppLine(line);
+  if (app) {
+    existingApps.push(app);
+    if (app.num > maxNum) maxNum = app.num;
   }
 }
 
-// Full set of numbers already on the tracker (#1704). This is a separate,
-// deliberately narrower pass than the existingApps loop above: it reads only
-// the numeric # cell and skips a row via the same NaN check verify-pipeline.mjs
-// uses, instead of the `.includes('---') / .includes('Empresa')` heuristic —
-// so a company or role field that happens to CONTAIN "Empresa" or "---" (e.g.
-// a Spanish-market company name, or an em-dash-style separator in a title)
-// can't hide that row's number the way it can hide the row from existingApps
-// (which stays as-is; it drives duplicate detection, not numbering). Used
-// below so a new entry's number is checked against every number actually on
-// the tracker, not just the largest one the existingApps loop happened to see.
+// Full set of numbers already on the tracker (#1704). Deliberately broader than
+// the existingApps loop above: it reserves the number from any row with a
+// numeric # cell, including a row too malformed for parseAppLine to return.
+// Such a row can't participate in duplicate detection, but its number is still
+// taken and must never be handed out again. Used below so a new entry's number
+// is checked against every number actually on the tracker, not just the largest
+// one the existingApps loop saw.
 const usedNumbers = new Set();
 const MAX_COL_IDX = Math.max(...Object.values(COLMAP));
 for (const line of appLines) {
@@ -614,6 +620,12 @@ for (const file of tsvFiles) {
   // 2. Company + role fuzzy match
   const reportNum = extractReportNum(addition.report);
   let duplicate = null;
+  // True only for a tier-1 match (report number + company): the one tier where
+  // the addition is provably the same evaluation as the existing row, so its
+  // role title may replace the row's. Tier-2 (entry num) and tier-3 (fuzzy
+  // role) matches keep the existing title — a fuzzy false positive that also
+  // rewrites the title destroys the evidence that two reqs were distinct.
+  let reportNumMatched = false;
 
   if (reportNum) {
     // Report-number match must also confirm company (#912). Report-file
@@ -626,6 +638,7 @@ for (const file of tsvFiles) {
       const existingReportNum = extractReportNum(app.report);
       return existingReportNum === reportNum && normalizeCompany(app.company) === normCompany;
     });
+    if (duplicate) reportNumMatched = true;
   }
 
   if (!duplicate) {
@@ -680,7 +693,8 @@ for (const file of tsvFiles) {
       if (lineIdx >= 0) {
         const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
         const updatedLine = buildRow({
-          num: duplicate.num, date: addition.date, company: addition.company, role: addition.role,
+          num: duplicate.num, date: addition.date, company: addition.company,
+          role: reportNumMatched ? addition.role : duplicate.role,
           via: addition.via || duplicate.via || '—',
           location: addition.location || duplicate.location || '—',
           score: addition.score, status: duplicate.status, pdf,
@@ -730,10 +744,12 @@ for (const file of tsvFiles) {
 
 // Insert new lines after the header (line index of first data row)
 if (newLines.length > 0) {
-  // Find header separator (|---|...) and insert after it
+  // Find header separator (|---|...) and insert after it. Match the row's
+  // structure rather than a bare `---` substring, so a data row carrying three
+  // hyphens in its free text can never be mistaken for the separator.
   let insertIdx = -1;
   for (let i = 0; i < appLines.length; i++) {
-    if (appLines[i].includes('---') && appLines[i].startsWith('|')) {
+    if (SEPARATOR_ROW_RE.test(appLines[i])) {
       insertIdx = i + 1;
       break;
     }

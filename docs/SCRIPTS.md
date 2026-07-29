@@ -1,6 +1,8 @@
 # Scripts Reference
 
-All scripts live in the project root as `.mjs` modules and are exposed via `npm run <name>`.
+All scripts live in the project root as `.mjs` modules. Most are exposed via
+`npm run <name>`; agent-invoked utilities (bottom section) run via
+`node <script>` directly.
 
 ## Quick Reference
 
@@ -31,6 +33,18 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run invite-match` | `invite-match.mjs` | Fuzzy-match a pasted interview-invite email against `data/applications.md` |
 | `npm run paste-reply` | `paste-reply.mjs` | Manual/no-Gmail input into the `reply-watch.mjs` classification pipeline |
 | `npm run openai:tailor` | `openai-tailor.mjs` | Tailor a CV via any OpenAI-compatible endpoint (headless companion to `openai-eval.mjs`) |
+| `npm run or` | `openrouter-runner.mjs` | Run scan/evaluate/pipeline/apply on OpenRouter free models — no Claude CLI required |
+| `npm run reconcile` | `reconcile-pipeline.mjs` | Remove batch-evaluated offers from pipeline.md "Pendientes" |
+| `npm run cover-letter` | `generate-cover-letter.mjs` | Render a cover-letter JSON payload to PDF |
+| `npm run verify:portals` | `verify-portals.mjs` | Probe ATS endpoints to confirm portals.yml slugs resolve (network) |
+| `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
+| `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
+| `npm run ollama:eval` | `ollama-eval.mjs` | Evaluate a JD with a local Ollama model |
+| `npm run openai:eval` | `openai-eval.mjs` | Evaluate a JD via any OpenAI-compatible endpoint |
+| `npm run star` | `match-star.mjs` | Match a behavioural question to your best STAR story (zero-LLM) |
+| `npm run archive` | `archive-posting.mjs` | Save a live job posting as PDF before it disappears |
+| `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
+| `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
 
 ---
 
@@ -278,6 +292,56 @@ Log line format (TSV, one per line, `#`-prefixed lines are comments; for `report
 
 ---
 
+## company-history
+
+Read-only per-company evidence-card aggregator. Joins `data/applications.md` (tracker), `data/follow-ups.md`, and `data/scan-history.tsv` per company (and a `funnel-velocity.mjs` status-log source, loaded defensively via dynamic `import()` — probed for optional applied-date/median helpers and degrading to `false` when they are absent). Companies are joined on a normalized key (`normalizeCompany`); rows whose company normalizes to an empty key (e.g. non-Latin names that strip to nothing) are never merged into another company's card — they are excluded and counted in `dataQuality.unjoinable` instead.
+
+Each card covers two independent fact axes, never combined into a single verdict:
+
+- **`responsiveness`** — has this company ever responded to you, or gone silent on an Applied row past the silence window? A rejection counts as a response (it's an answer, not silence). Labels: `responded-before`, `silent-on-you`, `mixed`, `no-history`. Rows younger than the silence window are **pending** — right-censored, never labeled silent. Facts older than 365 days are **stale** and excluded from label computation unless `--include-stale` is passed. Follow-ups sent never change the label — they only annotate a silent fact's `confidence` (`confirmed-by-followups` vs `unconfirmed`).
+- **`postingChurn`** — does this company repost the same role repeatedly (evergreen requisition / re-opened search), sourced from `detect-reposts.mjs` clusters over `data/scan-history.tsv`. Labels: `reposts-detected`, `none-detected`, `no-scan-data`.
+
+The script deliberately reports **facts, not verdicts** — output is always descriptive and past-tense ("silent 34d since 2026-05-01"), never "ghosted" or "risk". Every silent fact carries a dated `clearInstruction` (the exact `set-status.mjs` command to run if the company actually did respond and it just wasn't logged), and every card with a silent fact is accompanied by an innocent-explanations line: high-volume inboxes, evergreen requisitions, re-opened searches, and the candidate's own unlogged responses all produce the same raw signals as genuine silence. Before trusting the output against real data, run a dry read (`node company-history.mjs --summary`) and sanity-check a few cards where you already know the real story.
+
+```bash
+node company-history.mjs                        # full JSON evidence cards to stdout
+node company-history.mjs --summary               # human-readable cards (hygiene nudge, then silent-first, window caveat printed once)
+node company-history.mjs --company "Acme"         # single-card lookup (unknown company returns the minimal no-history/no-scan-data shape)
+node company-history.mjs --silence-window 21      # override the default silence window in days
+node company-history.mjs --include-stale          # include facts older than 365d in label computation
+node company-history.mjs --self-test
+```
+
+Default silence window: `templates/benchmarks.yml` `days_first_response.range_days[1] * 2` when that file exists, else `28` days.
+
+**Exit codes:** `0` success, including empty/no-data runs (a missing tracker, follow-ups, or scan-history source degrades gracefully rather than failing), `1` unrecognized CLI flag or an unexpected runtime error.
+
+---
+
+## contacts
+
+Your job-search phonebook, exportable to your phone. Reads `data/contacts.tsv` (one contact per line — the schema is the vCard fields, nothing more) and emits vCard 3.0 (`VERSION:3.0` for iOS/Android import compatibility) with CRLF line endings, byte-safe 75-octet line folding, and a stable deterministic UID `careerops-{uidPart(name)}--{uidPart(company)}` (double-dash boundary between the two parts). Each `uidPart` is the lowercase slug of the raw value (non-alphanumeric runs collapsed to single dashes, ends trimmed) suffixed with an 8-hex sha1 of the *raw* value — e.g. `jane-doe-cac7bbb6`; when the slug is empty — a fully non-ASCII value such as a CJK name — the part is the bare 8-hex hash. Hashing the raw value (not the lossy slug) keeps distinct inputs that slug identically — e.g. `José` and `Josè` both slug to `jos` (the accented char drops out), and `Acme Inc` and `Acme, Inc.` both to `acme-inc` — from colliding into one UID. Re-importing updates existing entries instead of duplicating them on platforms that honor vCard UID (iOS fallback: assign imports to a group, delete the group to bulk-remove). `--caller-id` renders the display name as `Jane Doe (Acme recruiter)` so the lock screen tells you which recruiter is calling — useful when a phone number is known (often it isn't). Malformed rows are reported in a `quality` block, never dropped silently.
+
+```bash
+node contacts.mjs                    # JSON (contacts + quality + total)
+node contacts.mjs --summary          # human-readable table
+node contacts.mjs --vcf [path]       # write vCard file (default output/contacts.vcf)
+node contacts.mjs --vcf --caller-id  # FN as "Jane Doe (Acme recruiter)"
+node contacts.mjs --self-test
+```
+
+Contact line format (TSV, one per line, `#`-prefixed lines are comments):
+
+```text
+{name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
+```
+
+`type`: recruiter | hiring-manager | peer | interviewer | other — optional; when present it must be one of the enum, else it is flagged in `quality`. Only name + company are required (>= 4 cells); all channels are optional; `-` for the tracker number when the contact precedes an application. Lines are updated in place when a contact's details change — unlike the append-only salary log. If two lines resolve to the same generated UID (`careerops-{uidPart(name)}--{uidPart(company)}` — normally rows with the same name + company), the LAST one wins the `--vcf` export (JSON keeps all rows and reports the clash in `quality.duplicates`). Import: send the `.vcf` to your phone (AirDrop/email/messaging) and open it — iOS Contacts offers "Add All Contacts", Android imports via Contacts → Fix & manage → Import.
+
+**Exit codes:** `0` always (an empty/missing store prints an explanatory message and writes no file), `1` self-test failure or a `--vcf` path escaping the project directory.
+
+---
+
 ## update:check
 
 Checks whether a newer version of career-ops is available upstream. Outputs JSON to stdout:
@@ -333,6 +397,8 @@ Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the post
 npm run liveness -- https://example.com/job/123
 npm run liveness -- https://a.com/job/1 https://b.com/job/2
 npm run liveness -- --file urls.txt
+npm run liveness -- --no-fallback https://a.com/job/1   # stay fully headless (no headed retry on anti-bot walls)
+npm run liveness -- --throttle=5000 --file urls.txt      # jittered wait between checks (rate-based WAFs)
 ```
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
@@ -385,6 +451,8 @@ Postings without a usable publish date are skipped — a reverse scan is only us
 
 `data/scan-history.tsv` carries a **SimHash fingerprint** of the JD text in its 8th column (`jd_fingerprint`), and the original posting date in its 9th column (`postedAt`). The fingerprint column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
 
+The 12th column (`normalized_company`) stores the **canonical company key** — the raw company (col 5) run through the shared `normalizeCompanyName` (lowercased, punctuation/whitespace folded, trailing legal-entity suffixes stripped), so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all resolve to `acme`. It is written at scan time so repost/name matching (`detect-reposts.mjs`) keys on a stable value instead of re-deriving it or routing a legitimacy signal through script execution. The column is **additive and trailing**: rows written before it existed simply omit it, and consumers normalize the raw company on the fly for those rows (backward-compatible). All columns beyond col 7 are append-only — index-based readers (including the web parser, which reads only cols 0-6) are unaffected.
+
 How it works:
 
 - When the ATS provider's list API returns a description field (e.g. Lever's `descriptionPlain`), the scanner computes a **64-bit SimHash** of the normalized text and stores it as the 8th column.
@@ -404,7 +472,14 @@ node scan-ats-full.mjs --dry-run               # preview without writing
 node scan-ats-full.mjs --liveness              # Playwright-verify matches first
 node scan-ats-full.mjs --include-blacklisted   # audit blacklist matches instead of skipping
 node scan-ats-full.mjs --md-out notes/scans    # also write a dated markdown digest
+npm run scan:seeds                             # probe VC portfolio seed companies (--seeds yc,a16z)
+npm run scan:yc                                # Y Combinator portfolio only (--seeds yc)
 ```
+
+`--seeds <list>` fetches comma-separated VC portfolio sources (e.g. `yc,a16z`)
+and probes those companies via the ATS providers instead of (or in addition
+to) the directory walk. Other flags: `--verbose`, `--json`, `--include-undated`,
+`--shuffle`.
 
 **Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
 
@@ -478,6 +553,168 @@ From: <sender>
 If no `Subject:`/`From:` header lines are found, the whole file is treated as the body. After appending, run `node reply-watch.mjs` to classify the new candidate and review suggested tracker updates.
 
 **Exit codes:** `0` candidate appended, `1` missing `--file` argument, input file not found, or no subject/body text found.
+
+---
+
+## or (OpenRouter runner)
+
+Runs the pipeline on OpenRouter free models with automatic fallback — no
+Claude Code CLI required.
+
+```bash
+npm run or:scan                 # scan configured companies for new listings
+npm run or:eval -- <url>        # evaluate a job by URL (no URL: paste interactively)
+npm run or:pipeline             # process pending URLs
+npm run or:apply                # application assistance
+```
+
+---
+
+## reconcile
+
+Syncs the `data/pipeline.md` "Pendientes" section with `batch/batch-state.tsv`.
+`batch-runner.sh` records evaluated offers in the state file but never writes
+back to `pipeline.md`, so batch-processed offers would otherwise be
+re-surfaced by every later scan or pipeline run.
+
+```bash
+npm run reconcile
+```
+
+---
+
+## cover-letter
+
+Renders a cover-letter JSON payload to PDF: fills
+`templates/cover-letter-template.html` with the payload, then renders via the
+same Playwright pipeline as CVs.
+
+```bash
+npm run cover-letter -- payload.json
+node generate-cover-letter.mjs --payload payload.json --out output/slug-cover.pdf
+```
+
+---
+
+## verify:portals
+
+Online ATS-slug validator — complements the offline `validate:portals`. A
+wrong slug in `careers_url` 404s silently on every future scan, so this
+probes the public Greenhouse / Ashby / Lever endpoints to confirm each slug
+actually resolves.
+
+```bash
+npm run verify:portals
+```
+
+---
+
+## reposts
+
+Repost detector. Reads `data/scan-history.tsv`, fuzzy-matches role titles per
+company, and flags any company+role listed 2+ times with different URLs
+within a 90-day window — a strong ghost-job / re-listing signal.
+
+```bash
+npm run reposts                 # JSON
+node detect-reposts.mjs --summary
+```
+
+---
+
+## gemini:eval / ollama:eval / openai:eval
+
+Standalone evaluators — run the same evaluation logic
+(`modes/oferta.md` + `modes/_shared.md` + `cv.md`) without an interactive AI
+CLI:
+
+- `gemini:eval` — Google Gemini free tier (`GEMINI_API_KEY` in `.env`)
+- `ollama:eval` — fully local and private via Ollama
+- `openai:eval` — any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq,
+  DeepSeek, LM Studio, llama.cpp, vLLM, ...)
+
+```bash
+npm run gemini:eval -- "We are looking for a Senior AI Engineer..."
+node gemini-eval.mjs --file ./jds/my-job.txt
+npm run ollama:eval -- "JD text"
+npm run openai:eval -- "JD text"
+```
+
+---
+
+## star
+
+Zero-LLM, zero-browser behavioural question matcher. Parses
+`interview-prep/story-bank.md`, scores each STAR story against the question
+text (optionally plus a JD file), and returns the top matches formatted to
+ATS paste length (250-500 words).
+
+```bash
+npm run star -- "Tell me about a time you disagreed with a decision"
+```
+
+---
+
+## archive
+
+Saves a live job posting as PDF via Playwright before it disappears —
+postings vanish once filled, and the original requirements matter for
+interview prep and salary negotiation evidence.
+
+```bash
+npm run archive -- https://example.com/job/123
+```
+
+---
+
+## prepare:application
+
+ATS auto-fill helper for Greenhouse, Ashby, and Lever. Detects the ATS from
+the apply URL, reads candidate data from `config/profile.yml`, and prints a
+prefill summary to stdout. **Never POSTs anything** — you review the output,
+open the apply URL, and submit yourself. See
+[APPLY_AUTOFILL.md](APPLY_AUTOFILL.md).
+
+```bash
+npm run prepare:application -- --url https://boards.greenhouse.io/acme/jobs/123
+```
+
+---
+
+## build:dashboard
+
+Cross-platform build wrapper for the Go TUI dashboard: picks the
+platform-correct output name (`career-dashboard.exe` on Windows, else
+`career-dashboard`), since a bare `go build -o` writes an extension-less
+binary on Windows. Requires Go 1.24+.
+
+```bash
+npm run build:dashboard
+npm run serve:dashboard    # or run the TUI directly without building
+```
+
+---
+
+## Agent-invoked utilities
+
+These have no `npm run` binding — modes and agents call them with
+`node <script>` directly. Each script's header comment documents its flags.
+
+| Invocation | Purpose |
+|------------|---------|
+| `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
+| `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
+| `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
+| `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
+| `node process-quality.mjs [--summary]` | Aggregate `[process-friction]` tags from `data/active-interviews.md` per company |
+| `node reserve-report-num.mjs [--count N]` | Atomically reserve report numbers for parallel workers (fixes the #749 race) |
+| `node agent-inbox.mjs add "..."` | Append a request to the queue the agent drains at the next session start |
+| `node generate-latex.mjs <input.tex> [output.pdf]` | Validate and compile a generated `.tex` CV via tectonic or pdflatex |
+| `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
+| `node plugin-install.mjs` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA) |
+| `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
+| `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
 
 ---
 

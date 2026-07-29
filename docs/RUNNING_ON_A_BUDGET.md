@@ -65,6 +65,80 @@ To configure OpenCode with a custom provider:
    $env:OPENAI_API_BASE="https://openrouter.ai/api/v1"
    $env:OPENAI_API_KEY="your_openrouter_api_key_here"
    ```
+### Kimi K2.5 via OpenCode (Verified)
+
+> **Kimi the model, not Kimi the CLI.** This recipe runs the Kimi K2.5 *model* through the **OpenCode** CLI. That is a different thing from using the standalone **Kimi CLI** as your host (see [Supported CLIs](SUPPORTED_CLIS.md)). The names collide; the setups don't. Follow the steps below inside OpenCode.
+
+The following configuration was verified with Career-Ops using OpenCode and Moonshot AI's OpenAI-compatible API.
+
+#### opencode.json
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "moonshot": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Moonshot Kimi",
+      "options": {
+        "baseURL": "https://api.moonshot.ai/v1",
+        "apiKey": "{env:MOONSHOT_API_KEY}"
+      },
+      "models": {
+        "kimi-k2.5": {
+          "name": "Kimi K2.5"
+        }
+      }
+    }
+  },
+  "model": "moonshot/kimi-k2.5"
+}
+```
+
+#### Environment variable
+
+Linux/macOS
+
+```bash
+export MOONSHOT_API_KEY="your_api_key"
+```
+
+Windows PowerShell
+
+```powershell
+$env:MOONSHOT_API_KEY="your_api_key"
+```
+
+Windows CMD
+
+```cmd
+set MOONSHOT_API_KEY=your_api_key
+```
+
+#### Verification
+
+This configuration was verified locally by running a complete Career-Ops evaluation.
+
+Observed during verification:
+
+- Evaluation completed successfully.
+- Markdown evaluation report was generated successfully.
+- Applications tracker was updated successfully.
+- No malformed structured output was observed during this verification run.
+- PDF generation was skipped because Playwright MCP was not configured in the local environment.
+
+#### Notes
+
+- The measured runtime reflects the complete Career-Ops pipeline (job retrieval, prompt loading, report generation, and tracker updates), not raw model inference latency.
+- Kimi K2.5 worked correctly with the Moonshot OpenAI-compatible endpoint during verification.
+
+#### Comparison
+
+| Option | Cost | Notes |
+|---------|------|------|
+| OpenRouter `:free` | Free tier | Easy setup. Subject to model availability and rate limits. |
+| Kimi K2.5 | Moonshot API | Verified working with OpenCode using the Moonshot OpenAI-compatible endpoint. |
+| Ollama | Local | No API cost, but requires suitable local hardware and larger recommended models for reliable evaluations. |
 
 ### Qwen CLI
 Qwen CLI natively supports Qwen models but can be configured to point to any custom OpenAI-compatible API base URL:
@@ -95,6 +169,8 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Qwen-2.5-Coder (32B / 72B)** | OpenRouter / DeepInfra | ~$0.07 - ~$0.30 | Strong coding and structured reasoning, highly cost-effective. |
 | **GLM-4-Air / GLM-4** | Zhipu AI / OpenRouter | Very Cheap | Reliable multi-turn reasoning and JSON/Markdown generation. |
 | **Gemini 2.5 Flash** | Google AI Studio | Free Tier (15 RPM) | Available via the standalone script `node gemini-eval.mjs`. Excellent for zero-cost low-volume runs, but subject to rate limits. |
+| **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
+
 
 > **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
