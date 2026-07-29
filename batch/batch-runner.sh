@@ -614,6 +614,28 @@ process_offer() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   if [[ $exit_code -eq 0 ]]; then
+    # A worker can exit 0 (no crash) but still self-report failure inside its
+    # own JSON summary — e.g. it correctly declines to fabricate an evaluation
+    # when the JD couldn't be extracted (Data Contract: never fabricate).
+    # Without this check such offers were silently marked "completed" with no
+    # report file on disk and score "-" (found 2026-07-29, offer id 6 / report
+    # 019 — Deepgram JD unextractable in headless mode). Only the downstream
+    # reconcile-pipeline.mjs safety net (which leaves an entry in Pending when
+    # its report file is missing) prevented the offer from being lost.
+    local worker_failed_match
+    worker_failed_match=$(sed -nE 's/.*"status"[[:space:]]*:[[:space:]]*"failed".*/failed/p' "$log_file" 2>/dev/null | head -1 || true)
+    if [[ -n "$worker_failed_match" ]]; then
+      local worker_error_match
+      worker_error_match=$(sed -nE 's/.*"error"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
+      [[ -z "$worker_error_match" ]] && worker_error_match="worker reported status:failed (exit code 0)"
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries"
+      echo "    ❌ Failed (worker-reported, attempt $retries): $worker_error_match"
+      return 0
+    fi
+
     # Try to extract score from worker output
     local score="-"
     local score_match
