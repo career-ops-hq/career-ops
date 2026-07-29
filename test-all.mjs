@@ -5343,6 +5343,54 @@ try {
     fail('parseDate validation wrong');
   }
 
+  // extractContacts — recorded outreach is usually a NAME (LinkedIn produces no
+  // email), so an email-only parser reports contacts: [] for rows that do have a
+  // human attached. "no contact" then reads identically to "contact with no
+  // email on file", which inverts the meaning of the field.
+  {
+    const nameOnly = cadence.extractContacts('reached out to recruiter Julia Masera (LinkedIn)');
+    if (nameOnly.length === 1 && nameOnly[0].name === 'Julia Masera' && nameOnly[0].email === null) {
+      pass('extractContacts finds a name-only contact with no email on file');
+    } else {
+      fail(`extractContacts name-only got ${JSON.stringify(nameOnly)}`);
+    }
+    if (nameOnly[0] && nameOnly[0].channel === 'linkedin') {
+      pass('extractContacts carries the channel through when the notes name one');
+    } else {
+      fail(`extractContacts should report channel 'linkedin', got ${JSON.stringify(nameOnly[0])}`);
+    }
+
+    const emailed = cadence.extractContacts('Emailed Jane Doe at jane.doe@acme.com');
+    if (emailed.length === 1 && emailed[0].email === 'jane.doe@acme.com' && emailed[0].channel === 'email') {
+      pass('extractContacts still resolves an email contact (regression)');
+    } else {
+      fail(`extractContacts email-case got ${JSON.stringify(emailed)}`);
+    }
+
+    if (cadence.extractContacts('On-archetype fit; no submission yet').length === 0) {
+      pass('extractContacts reports no contact when the notes carry none');
+    } else {
+      fail('extractContacts should find nothing in notes with no outreach');
+    }
+
+    // A bare capitalized word pair must not be mistaken for a contact — only a
+    // named outreach verb qualifies, or the field fills with company names.
+    if (cadence.extractContacts('Strong fit for Acme Corp; Series B').length === 0) {
+      pass('extractContacts does not treat a capitalized company name as a contact');
+    } else {
+      fail(`extractContacts false-positived on a company name: ${JSON.stringify(cadence.extractContacts('Strong fit for Acme Corp; Series B'))}`);
+    }
+
+    // The summary printer reads contacts[0].email directly; a name-only contact
+    // must not surface as a literal "null" in that column.
+    const label = cadence.contactLabel(cadence.extractContacts('messaged recruiter Asha Beirne')[0]);
+    if (label === 'Asha Beirne') {
+      pass('contactLabel shows the name when the contact has no email');
+    } else {
+      fail(`contactLabel should fall back to the name, got ${JSON.stringify(label)}`);
+    }
+  }
+
   // parseAppliedDate — extracts the real submission date from notes (the
   // tracker `date` column is the evaluation date), case-insensitive.
   if (cadence.parseAppliedDate('Applied 2026-06-09 via Personio; raised part-time') === '2026-06-09') {

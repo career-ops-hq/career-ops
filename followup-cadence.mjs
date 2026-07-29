@@ -219,9 +219,21 @@ function parseOverrides() {
 }
 
 // --- Extract contacts from notes ---
-function extractContacts(notes) {
+// Outreach recorded in notes is usually a NAME, not an email — LinkedIn, the
+// most common channel, never produces one. An email-only parser therefore
+// reports `contacts: []` for rows that do have a human attached, and "no
+// contact" becomes indistinguishable from "contact with no email on file".
+// That inverts the meaning of the field: an empty list reads as "outreach is
+// untried here" when outreach has in fact been tried and has not converted.
+//
+// Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
+// remains non-null for email contacts) so existing consumers keep working;
+// `channel` is additive.
+export function extractContacts(notes) {
   if (!notes) return [];
   const contacts = [];
+  const seen = new Set();
+
   const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
   const emails = notes.match(emailRegex) || [];
   for (const email of emails) {
@@ -230,9 +242,38 @@ function extractContacts(notes) {
     const beforeEmail = notes.substring(0, notes.indexOf(email));
     const nameMatch = beforeEmail.match(/(?:Emailed|emailed|contact[:\s]+|to\s+)([A-Z][a-z]+ ?[A-Z]?[a-z]*)\s*(?:at|@|$)/i);
     if (nameMatch) name = nameMatch[1].trim();
-    contacts.push({ email, name });
+    contacts.push({ name, email, channel: 'email' });
+    if (name) seen.add(name.toLowerCase());
   }
+
+  // Name-shaped contacts. Gated on an explicit outreach verb or role word so a
+  // capitalized company name ("Acme Corp") can never be mistaken for a person.
+  const nameRegex = /\b(?:recruiter|hiring manager|messaged|contacted|reached out to|spoke with|outreach)\b[\s(]*([A-Z][a-z]+(?:\s+[A-Z][a-z'’-]+)+)/g;
+  for (const m of notes.matchAll(nameRegex)) {
+    const name = m[1].trim();
+    if (seen.has(name.toLowerCase())) continue; // already captured with its email
+    seen.add(name.toLowerCase());
+    contacts.push({ name, email: null, channel: detectChannel(notes) });
+  }
+
   return contacts;
+}
+
+// The channel the notes name, when they name one. Null rather than a guess:
+// an unspecified channel is not evidence of any particular one.
+function detectChannel(notes) {
+  if (/\blinkedin\b/i.test(notes)) return 'linkedin';
+  if (/\bemail(ed)?\b/i.test(notes)) return 'email';
+  if (/\bphone|\bcalled\b/i.test(notes)) return 'phone';
+  return null;
+}
+
+// Display label for a contact: the email when there is one, otherwise the name.
+// The summary table reads this instead of `.email` directly, so a name-only
+// contact shows the person rather than a literal "null".
+export function contactLabel(contact) {
+  if (!contact) return '-';
+  return contact.email || contact.name || '-';
 }
 
 // --- Resolve report path ---
@@ -428,7 +469,7 @@ function printSummary(result) {
   for (const e of entries) {
     const urgLabel = urgencyIcon[e.urgency] || e.urgency;
     const nextStr = e.nextFollowupDate || '-';
-    const contactStr = e.contacts.length > 0 ? e.contacts[0].email : '-';
+    const contactStr = e.contacts.length > 0 ? contactLabel(e.contacts[0]) : '-';
     console.log(
       '  ' +
       String(e.num).padEnd(5) +
