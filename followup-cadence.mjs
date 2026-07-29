@@ -262,7 +262,25 @@ export function extractContacts(notes) {
 
     // Same address recorded twice is one contact; fill in a name/channel the
     // earlier mention lacked rather than emitting a duplicate.
-    const existing = (emailKey && byEmail.get(emailKey)) || (nameKey && byName.get(nameKey)) || null;
+    const byEmailHit = emailKey ? byEmail.get(emailKey) : null;
+    const byNameHit = nameKey ? byName.get(nameKey) : null;
+
+    // A name-only and an email-only record can be created separately, then a
+    // later statement names BOTH and proves they are the same person. Fold the
+    // two records into one and drop the redundant entry, or the result reports
+    // two contacts where the note itself says there is one.
+    if (byEmailHit && byNameHit && byEmailHit !== byNameHit) {
+      byEmailHit.name = byEmailHit.name || byNameHit.name;
+      byEmailHit.email = byEmailHit.email || byNameHit.email;
+      byEmailHit.channel = byEmailHit.channel || byNameHit.channel;
+      const idx = contacts.indexOf(byNameHit);
+      if (idx !== -1) contacts.splice(idx, 1);
+      // Repoint every key that pointed at the discarded record.
+      for (const [k, v] of byEmail) if (v === byNameHit) byEmail.set(k, byEmailHit);
+      for (const [k, v] of byName) if (v === byNameHit) byName.set(k, byEmailHit);
+    }
+
+    const existing = byEmailHit || byNameHit || null;
     if (existing) {
       if (!existing.name && name) existing.name = name;
       if (!existing.email && email) existing.email = email;

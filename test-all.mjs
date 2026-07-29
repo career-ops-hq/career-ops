@@ -5438,6 +5438,19 @@ try {
       }
     }
 
+    // LATE BRIDGE: a name-only and an email-only record can be recorded
+    // separately, then a later statement names BOTH and proves they are one
+    // person. Leaving two records behind reports two contacts where the note
+    // itself says there is one.
+    {
+      const bridged = cadence.extractContacts('recruiter Ann Lee; emailed ann.lee@acme.com; contacted Ann Lee at ann.lee@acme.com');
+      if (bridged.length === 1 && bridged[0].name === 'Ann Lee' && bridged[0].email === 'ann.lee@acme.com') {
+        pass('extractContacts coalesces name-only and email-only records once a later statement bridges them');
+      } else {
+        fail(`extractContacts late-bridge got ${JSON.stringify(bridged)}`);
+      }
+    }
+
     // A hyphenated or apostrophed name is still a name. Dropping it reports
     // "no contact" for a row that names a person, which is the exact silence
     // this parser exists to remove.
