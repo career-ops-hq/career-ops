@@ -229,42 +229,90 @@ function parseOverrides() {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
+const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+
+// Name-shaped contacts are gated on an explicit outreach verb or role word, so
+// a capitalized company name ("Acme Corp") can never be mistaken for a person.
+// Both name parts allow an internal hyphen or apostrophe ("Mary-Jane
+// O'Brien") — dropping such a name would report "no contact" for a row that
+// plainly names a person, the very silence this parser exists to remove.
+const OUTREACH_NAME_RE = /\b(?:recruiter|hiring manager|messaged|contacted|emailed|called|reached out to|spoke with|outreach)\b[\s(]*([A-Z][a-z]*(?:[-'’][A-Z]?[a-z]+)*(?:\s+[A-Z][a-z]*(?:[-'’][A-Z]?[a-z]+)*)+)/g;
+
+// One note can record several separate outreach events ("Messaged X on
+// LinkedIn; called Y"). Resolving a contact against the WHOLE note attributes
+// the first channel word it finds to every contact, so the second person is
+// silently credited to the wrong channel. Split into statements and resolve
+// each independently.
+//
+// The sentence split only fires on a period followed by whitespace and a
+// capital, so it cannot break an address like `jane.doe@acme.com`.
+function splitStatements(notes) {
+  return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
+}
+
 export function extractContacts(notes) {
   if (!notes) return [];
+  const byEmail = new Map();  // normalized email -> contact
+  const byName = new Map();   // normalized name  -> contact
   const contacts = [];
-  const seen = new Set();
 
-  const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
-  const emails = notes.match(emailRegex) || [];
-  for (const email of emails) {
-    // Try to extract name before email: "Emailed Name at" or "contact: Name"
-    let name = null;
-    const beforeEmail = notes.substring(0, notes.indexOf(email));
-    const nameMatch = beforeEmail.match(/(?:Emailed|emailed|contact[:\s]+|to\s+)([A-Z][a-z]+ ?[A-Z]?[a-z]*)\s*(?:at|@|$)/i);
-    if (nameMatch) name = nameMatch[1].trim();
-    contacts.push({ name, email, channel: 'email' });
-    if (name) seen.add(name.toLowerCase());
-  }
+  const add = ({ name, email, channel }) => {
+    const emailKey = email ? email.toLowerCase() : null;
+    const nameKey = name ? name.toLowerCase() : null;
 
-  // Name-shaped contacts. Gated on an explicit outreach verb or role word so a
-  // capitalized company name ("Acme Corp") can never be mistaken for a person.
-  const nameRegex = /\b(?:recruiter|hiring manager|messaged|contacted|reached out to|spoke with|outreach)\b[\s(]*([A-Z][a-z]+(?:\s+[A-Z][a-z'’-]+)+)/g;
-  for (const m of notes.matchAll(nameRegex)) {
-    const name = m[1].trim();
-    if (seen.has(name.toLowerCase())) continue; // already captured with its email
-    seen.add(name.toLowerCase());
-    contacts.push({ name, email: null, channel: detectChannel(notes) });
+    // Same address recorded twice is one contact; fill in a name/channel the
+    // earlier mention lacked rather than emitting a duplicate.
+    const existing = (emailKey && byEmail.get(emailKey)) || (nameKey && byName.get(nameKey)) || null;
+    if (existing) {
+      if (!existing.name && name) existing.name = name;
+      if (!existing.email && email) existing.email = email;
+      if (!existing.channel && channel) existing.channel = channel;
+      if (existing.email) byEmail.set(existing.email.toLowerCase(), existing);
+      if (existing.name) byName.set(existing.name.toLowerCase(), existing);
+      return;
+    }
+
+    const contact = { name: name ?? null, email: email ?? null, channel: channel ?? null };
+    contacts.push(contact);
+    if (emailKey) byEmail.set(emailKey, contact);
+    if (nameKey) byName.set(nameKey, contact);
+  };
+
+  for (const span of splitStatements(notes)) {
+    const emails = span.match(EMAIL_RE) || [];
+    const names = [...span.matchAll(OUTREACH_NAME_RE)].map(m => m[1].trim());
+    if (!emails.length && !names.length) continue;
+    const channel = detectChannel(span, emails.length > 0);
+
+    // One person and one address in the same statement is one contact, not an
+    // email-only entry plus a separate name-only duplicate.
+    if (names.length === 1 && emails.length === 1) {
+      add({ name: names[0], email: emails[0], channel });
+      continue;
+    }
+
+    for (const email of emails) {
+      // Fall back to the older "Emailed Name at <addr>" shape for a name that
+      // sits next to the address without a listed outreach verb.
+      let name = null;
+      const beforeEmail = span.substring(0, span.indexOf(email));
+      const nameMatch = beforeEmail.match(/(?:emailed|contact[:\s]+|to\s+)([A-Z][a-z]+ ?[A-Z]?[a-z]*)\s*(?:at|@|$)/i);
+      if (nameMatch) name = nameMatch[1].trim();
+      add({ name, email, channel });
+    }
+    for (const name of names) add({ name, email: null, channel });
   }
 
   return contacts;
 }
 
-// The channel the notes name, when they name one. Null rather than a guess:
-// an unspecified channel is not evidence of any particular one.
-function detectChannel(notes) {
-  if (/\blinkedin\b/i.test(notes)) return 'linkedin';
-  if (/\bemail(ed)?\b/i.test(notes)) return 'email';
-  if (/\bphone|\bcalled\b/i.test(notes)) return 'phone';
+// The channel a single statement names, when it names one. Null rather than a
+// guess: an unspecified channel is not evidence of any particular one. An
+// address in the statement implies email only when no channel word says otherwise.
+function detectChannel(span, hasEmail = false) {
+  if (/\blinkedin\b/i.test(span)) return 'linkedin';
+  if (/\bphone\b|\bcalled\b/i.test(span)) return 'phone';
+  if (/\bemail(ed)?\b/i.test(span) || hasEmail) return 'email';
   return null;
 }
 

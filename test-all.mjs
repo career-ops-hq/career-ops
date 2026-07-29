@@ -5381,6 +5381,85 @@ try {
       fail(`extractContacts false-positived on a company name: ${JSON.stringify(cadence.extractContacts('Strong fit for Acme Corp; Series B'))}`);
     }
 
+    // MULTIPLICITY: two contacts in one note, reached on DIFFERENT channels.
+    // A whole-note channel scan tags both with whichever channel word appears
+    // first, so the second contact is silently attributed to the wrong channel.
+    {
+      const two = cadence.extractContacts('Messaged recruiter Asha Beirne on LinkedIn; called hiring manager Bob Smith');
+      const asha = two.find(c => c.name === 'Asha Beirne');
+      const bob = two.find(c => c.name === 'Bob Smith');
+      if (two.length === 2 && asha && bob) {
+        pass('extractContacts finds both contacts when one note names two people');
+      } else {
+        fail(`extractContacts two-contact case got ${JSON.stringify(two)}`);
+      }
+      if (asha?.channel === 'linkedin' && bob?.channel === 'phone') {
+        pass('extractContacts derives each contact channel from its own statement, not the whole note');
+      } else {
+        fail(`per-contact channel wrong: asha=${JSON.stringify(asha?.channel)} bob=${JSON.stringify(bob?.channel)}`);
+      }
+    }
+
+    // MERGE: one outreach statement naming a person AND their email is ONE
+    // contact, not an email-only contact plus a separate name-only duplicate.
+    {
+      const merged = cadence.extractContacts('contacted Jane Doe at jane.doe@acme.com');
+      if (merged.length === 1 && merged[0].name === 'Jane Doe' && merged[0].email === 'jane.doe@acme.com') {
+        pass('extractContacts merges a name and email from the same outreach statement');
+      } else {
+        fail(`extractContacts merge-case got ${JSON.stringify(merged)}`);
+      }
+    }
+
+    // DEDUP: the same address repeated in a note is one contact, not two.
+    {
+      const repeated = cadence.extractContacts('emailed jane.doe@acme.com; followed up jane.doe@acme.com');
+      if (repeated.length === 1) {
+        pass('extractContacts deduplicates a repeated email address');
+      } else {
+        fail(`extractContacts repeated-email got ${JSON.stringify(repeated)}`);
+      }
+      // Address case must not defeat the dedup.
+      const cased = cadence.extractContacts('emailed Jane.Doe@Acme.com; then jane.doe@acme.com again');
+      if (cased.length === 1) {
+        pass('extractContacts deduplicates emails case-insensitively');
+      } else {
+        fail(`extractContacts case-variant email got ${JSON.stringify(cased)}`);
+      }
+    }
+
+    // The same person named twice across statements stays one contact.
+    {
+      const dup = cadence.extractContacts('messaged recruiter Ryan Hill; recruiter Ryan Hill replied');
+      if (dup.length === 1 && dup[0].name === 'Ryan Hill') {
+        pass('extractContacts does not double-count a person named in two statements');
+      } else {
+        fail(`extractContacts repeated-name got ${JSON.stringify(dup)}`);
+      }
+    }
+
+    // A hyphenated or apostrophed name is still a name. Dropping it reports
+    // "no contact" for a row that names a person, which is the exact silence
+    // this parser exists to remove.
+    {
+      const punct = cadence.extractContacts('reached out to recruiter Mary-Jane O’Brien (LinkedIn)');
+      if (punct.length === 1 && punct[0].name === 'Mary-Jane O’Brien') {
+        pass('extractContacts handles hyphenated and apostrophed names');
+      } else {
+        fail(`extractContacts punctuated-name got ${JSON.stringify(punct)}`);
+      }
+    }
+
+    // An email with no name attached still yields a contact (name null).
+    {
+      const bare = cadence.extractContacts('sent CV to careers@acme.com');
+      if (bare.length === 1 && bare[0].email === 'careers@acme.com' && bare[0].name === null) {
+        pass('extractContacts keeps a bare email contact with no name');
+      } else {
+        fail(`extractContacts bare-email got ${JSON.stringify(bare)}`);
+      }
+    }
+
     // The summary printer reads contacts[0].email directly; a name-only contact
     // must not surface as a literal "null" in that column.
     const label = cadence.contactLabel(cadence.extractContacts('messaged recruiter Asha Beirne')[0]);
