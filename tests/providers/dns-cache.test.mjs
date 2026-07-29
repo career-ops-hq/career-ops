@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — DNS cache');
 
 try {
-  const { createCachedLookup } = await import(
+  const { createCachedLookup, isResolverFailure } = await import(
     pathToFileURL(join(ROOT, 'providers/_dns-cache.mjs')).href
   );
 
@@ -145,6 +145,28 @@ try {
       fail(`option variants collapsed into ${resolver.calls.length} key(s), expected 3`);
     }
     resolver.flush();
+  }
+
+  // --- resolver-level failures are told apart from NXDOMAIN ---
+  {
+    const refused = Object.assign(new Error('queryA EREFUSED'), { code: 'EREFUSED' });
+    const nxdomain = Object.assign(new Error('getaddrinfo ENOTFOUND x'), { code: 'ENOTFOUND' });
+    // Node's fetch() wraps the real error: TypeError('fetch failed') with .cause.
+    const wrapped = Object.assign(new TypeError('fetch failed'), { cause: refused });
+
+    const results = [
+      isResolverFailure(refused),
+      isResolverFailure(wrapped),
+      isResolverFailure(nxdomain),
+      isResolverFailure(new Error('plain')),
+      isResolverFailure(null),
+    ];
+
+    if (JSON.stringify(results) === JSON.stringify([true, true, false, false, false])) {
+      pass('isResolverFailure detects refusals through a cause chain, ignores NXDOMAIN');
+    } else {
+      fail(`isResolverFailure wrong: got ${JSON.stringify(results)}`);
+    }
   }
 
   // --- the module-level patch is opt-out-able ---

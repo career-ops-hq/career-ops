@@ -47,6 +47,40 @@
 
 import dns from 'node:dns';
 
+/**
+ * DNS failures that mean *the resolver itself refused or failed*, as opposed
+ * to answering "no such host". Only these are safe to negative-cache and to
+ * treat as a resolver-health signal.
+ *
+ * ENOTFOUND is deliberately absent: it is NXDOMAIN, a legitimate per-host
+ * answer that must stay uncached so a tenant appearing later is picked up.
+ * ETIMEOUT is also absent: a query timeout is ambiguous between a slow
+ * resolver and a refusing one, and #2229 scoped this to refusals.
+ */
+export const RESOLVER_FAILURE_CODES = new Set([
+  'ENOTIMP',    // dns.NOTIMP   — what a rate-limiting Pi-hole replies with
+  'EREFUSED',   // dns.REFUSED  — resolver refused the query outright
+  'ESERVFAIL',  // dns.SERVFAIL — resolver failed to produce an answer
+  'EAI_AGAIN',  // getaddrinfo temporary failure
+]);
+
+/**
+ * Is this error (or anything it wraps) a resolver-level failure?
+ *
+ * Walks the `cause` chain because Node's `fetch()` reports every transport
+ * error as `TypeError: fetch failed` and hangs the real error off `.cause`.
+ * The walk is depth-bounded so a self-referential cause can't spin.
+ *
+ * @param {unknown} err - Error to inspect.
+ * @returns {boolean} True when a resolver refusal/failure code is present.
+ */
+export function isResolverFailure(err) {
+  for (let e = err, depth = 0; e && typeof e === 'object' && depth < 5; e = e.cause, depth++) {
+    if (RESOLVER_FAILURE_CODES.has(/** @type {any} */ (e).code)) return true;
+  }
+  return false;
+}
+
 const DEFAULT_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_ENTRIES = 512;
 
