@@ -10,6 +10,7 @@ const STAGES: { key: string; label: string }[] = [
   { key: "RESPONDED", label: "Responded" },
   { key: "INTERVIEW", label: "Interview" },
   { key: "OFFER", label: "Offer" },
+  { key: "HIRED", label: "Hired" },
   { key: "REJECTED", label: "Rejected" },
   { key: "DISCARDED", label: "Discarded" },
 ];

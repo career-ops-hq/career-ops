@@ -73,6 +73,40 @@
 #     - "Brazil"
 #     - "Australia"
 
+# -- Country-eligibility filter (optional, opt-in, #2093) --
+# location_filter only reads the ATS provider's STRUCTURED location field
+# (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
+# regardless of which countries are actually eligible — the real
+# restriction ("US-based candidates only" vs. "US or Canada eligible")
+# often lives only in the job description BODY TEXT. This filter reads that
+# text (same field content_filter reads) and cross-references it against
+# your own country from `location.country` above.
+#
+# Semantics (case-insensitive substring), same "don't penalize missing
+# data" discipline as location_filter:
+#   - Your location.country is "United States" → filter no-ops entirely
+#     (a "US only" restriction can never exclude a US-based candidate)
+#   - No description text available → pass
+#   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous)
+#   - `exclusionary` phrase matched but an `inclusive` phrase is also
+#     present, or your own country is separately named in the text → pass
+#   - `exclusionary` phrase matched, no `inclusive` phrase, your country
+#     not named → rejected, counted in scan-runs.tsv's
+#     filtered_country_eligibility column
+#
+# If this entire block is absent, behavior is unchanged (no country
+# filtering — same as before this feature existed).
+
+# country_eligibility_filter:
+#   exclusionary:
+#     - "must be located in the united states"
+#     - "us-based candidates only"
+#     - "authorized to work in the us without sponsorship"
+#   inclusive:
+#     - "united states or canada"
+#     - "north america"
+#     - "canada eligible"
+
 # -- Salary filter (optional) --
 # Filter scanned jobs by annual compensation range. Applied AFTER location
 # filter, BEFORE dedup. Only applies when structured salary data exists.

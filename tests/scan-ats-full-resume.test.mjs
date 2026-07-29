@@ -1,5 +1,6 @@
 // tests/scan-ats-full-resume.test.mjs — parallelEach resume-index tracking,
 // withTimeout watchdog, and (Task 3) checkpoint compatibility rules.
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -173,4 +174,51 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   // Reordering is drift too — resume offsets are order-dependent.
   if (datasetFingerprint(a) !== datasetFingerprint(['globex', 'acme', 'initech'])) pass('datasetFingerprint detects reordering');
   else fail('datasetFingerprint missed reordering');
+}
+
+// ── icims SOURCES wiring (Task 8) ───────────────────────────────────
+{
+  const { SOURCES } = mod;
+  if (!SOURCES) {
+    fail('SOURCES not exported from scan-ats-full.mjs');
+  } else if (!SOURCES.icims) {
+    fail('SOURCES.icims missing');
+  } else {
+    const good = SOURCES.icims.toEntry('acmefreight');
+    if (good && good.careers_url === 'https://careers-acmefreight.icims.com/jobs/search?ss=1&in_iframe=1' && good.name === 'acmefreight') {
+      pass('icims toEntry builds canonical portal URL');
+    } else {
+      fail(`icims toEntry: ${JSON.stringify(good)}`);
+    }
+    if (SOURCES.icims.toEntry('evil/..%2f') === null) pass('icims toEntry rejects non-slug input');
+    else fail('icims toEntry accepted a hostile slug');
+    if (SOURCES.icims.provider?.id === 'icims') pass('icims source wired to icims provider');
+    else fail('icims source provider mismatch');
+  }
+}
+
+// ── cappedBoards reaches the --json payload ─────────────────────────
+// The --json object exists so a caller can tell a *degraded* sweep apart from
+// an empty one. A page-capped board is exactly that: coverage is partial, so a
+// consumer reading postingsKept alone would mistake it for a fully-walked
+// board that simply had nothing fresh. The counter is a local in main(), so
+// this asserts on the source of the payload literal rather than a run.
+{
+  const src = readFileSync(join(ROOT, 'scan-ats-full.mjs'), 'utf-8');
+  const start = src.indexOf('if (opts.json) {');
+  const end = src.indexOf('offers: offers.map(', start);
+
+  if (start === -1 || end === -1 || end <= start) {
+    fail('could not locate the --json payload literal in scan-ats-full.mjs');
+  } else {
+    const payload = src.slice(start, end);
+    // Control arm: if the slice ever stops covering the payload, this sibling
+    // counter goes missing too and the real assertion below can't pass vacuously.
+    if (/\bunreachableBoards\b/.test(payload)) {
+      if (/\bcappedBoards\b/.test(payload)) pass('--json payload reports cappedBoards');
+      else fail('--json payload omits cappedBoards — capped coverage is invisible to consumers');
+    } else {
+      fail('--json payload slice missed unreachableBoards — the control arm broke, assertion would be vacuous');
+    }
+  }
 }

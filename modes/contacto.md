@@ -1,6 +1,6 @@
 # Mode: contacto -- Outreach messages
 
-> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_shared.md` → Voice DNA.
+> Apply `voice-dna.md` (if present) to every generated message — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_writing.md` → Voice DNA.
 
 This mode has two variants that share the same persona engine (recruiter → hard
 requirements; hiring manager → impact/vision):
