@@ -83,6 +83,10 @@ export function isResolverFailure(err) {
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_ENTRIES = 512;
+// Short by design: long enough to break the retry storm that a refusing
+// resolver otherwise feeds (see #2229), short enough that a resolver coming
+// back is picked up almost immediately.
+const DEFAULT_NEGATIVE_TTL_MS = 30_000;
 
 /**
  * Build a caching wrapper around a callback-style `dns.lookup`.
@@ -99,6 +103,7 @@ const DEFAULT_MAX_ENTRIES = 512;
  */
 export function createCachedLookup(realLookup, options = {}) {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+  const negativeTtlMs = options.negativeTtlMs ?? DEFAULT_NEGATIVE_TTL_MS;
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const now = options.now ?? Date.now;
 
@@ -139,13 +144,18 @@ export function createCachedLookup(realLookup, options = {}) {
       const callbacks = inflight.get(key) ?? [];
       inflight.delete(key);
 
-      // Never cache failures — a transient resolver blip must not be pinned
-      // in for the whole TTL window.
-      if (!err) {
+      // Successes cache for the full TTL. Resolver-level refusals cache for a
+      // much shorter one: not caching them at all is what turns a rate-limited
+      // resolver into a self-sustaining flood, because every worker retries a
+      // refusal that costs the resolver another query to reject (#2229).
+      // Everything else — NXDOMAIN above all — stays uncached as before, so a
+      // transient blip is never pinned in for the whole TTL window.
+      const ttl = err ? (isResolverFailure(err) ? negativeTtlMs : 0) : ttlMs;
+      if (ttl > 0) {
         // Oldest-first eviction; insertion order is good enough for a cap
         // this size, and avoids tracking per-entry access times.
         if (cache.size >= maxEntries) cache.delete(cache.keys().next().value);
-        cache.set(key, { expires: now() + ttlMs, args: [null, ...rest] });
+        cache.set(key, { expires: now() + ttl, args: err ? [err] : [null, ...rest] });
       }
 
       for (const cb of callbacks) cb(err, ...rest);

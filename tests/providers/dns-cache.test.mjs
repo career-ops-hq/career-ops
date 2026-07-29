@@ -169,6 +169,37 @@ try {
     }
   }
 
+  // --- a resolver refusal is cached briefly, then retried ---
+  {
+    const refused = Object.assign(new Error('queryA EREFUSED'), { code: 'EREFUSED' });
+    const resolver = mkResolver([refused]);
+    let clock = 1_000;
+    const lookup = createCachedLookup(resolver, { negativeTtlMs: 30_000, now: () => clock });
+
+    const first = lookupOnce(lookup, 'refused.example.com');
+    resolver.flush();
+    const [firstErr] = await first;
+
+    // Check the resolver was skipped BEFORE awaiting: a miss would queue on the
+    // stub and never settle, hanging the suite instead of failing it.
+    const secondCall = lookupOnce(lookup, 'refused.example.com');
+    const skippedResolver = resolver.calls.length === 0;
+    if (!skippedResolver) resolver.flush();          // don't strand the promise
+    const second = await secondCall;
+    const servedFromCache = skippedResolver && second[0] && second[0].code === 'EREFUSED';
+
+    clock += 30_001;                       // past the negative window
+    lookupOnce(lookup, 'refused.example.com');
+    const retried = resolver.calls.length === 1;
+    resolver.flush();
+
+    if (firstErr && firstErr.code === 'EREFUSED' && servedFromCache && retried) {
+      pass('a resolver refusal is served from the negative cache, then retried past its TTL');
+    } else {
+      fail(`negative cache wrong: served=${servedFromCache} retried=${retried}`);
+    }
+  }
+
   // --- the module-level patch is opt-out-able ---
   {
     const probe = [
