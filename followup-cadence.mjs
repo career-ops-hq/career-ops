@@ -120,10 +120,26 @@ export function parseDate(dateStr) {
 // "APPLIED ..."). Prefer that so cadence reflects when the application actually
 // went out, not when the role was evaluated. Returns the first such date, or
 // null when the notes don't carry one (caller falls back to the date column).
+//
+// The optional `~` accepts an estimated date ("Applied ~2026-06-09"), which is
+// how an apply date reconstructed after the fact gets written. Skipping those
+// silently fell back to the evaluation date — the exact wrong-age failure this
+// lookup exists to prevent. The leading \b still refuses "reapplied".
 export function parseAppliedDate(notes) {
   if (!notes) return null;
-  const m = String(notes).match(/\bapplied\s+(\d{4}-\d{2}-\d{2})/i);
+  const m = String(notes).match(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})/i);
   return m ? m[1] : null;
+}
+
+// Which date the cadence is measured from, and where it came from. A caller
+// cannot otherwise tell a real application date from the evaluation-date proxy,
+// so an inferred age reads exactly like a measured one — and acting on that
+// silently-wrong number is what pushes a live application into "cold".
+export function resolveAppliedDate(app) {
+  const fromNotes = parseAppliedDate(app?.notes);
+  return fromNotes
+    ? { appliedDate: fromNotes, appDateSource: 'notes' }
+    : { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
 }
 
 export function daysBetween(d1, d2) {
@@ -312,7 +328,9 @@ function analyze() {
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
 
     // Prefer the "Applied YYYY-MM-DD" date from notes; fall back to the column.
-    const appliedDate = parseAppliedDate(app.notes) || app.date;
+    // appDateSource travels with the entry so a consumer can tell a measured
+    // age from one inferred off the evaluation date.
+    const { appliedDate, appDateSource } = resolveAppliedDate(app);
     const appDate = parseDate(appliedDate);
     if (!appDate) continue;
 
@@ -352,6 +370,7 @@ function analyze() {
       num: app.num,
       date: app.date,
       appliedDate,
+      appDateSource,
       company: app.company,
       // Intermediary channel (#1596): agency name when the application went
       // through an intermediary, null for a direct application (the tracker's

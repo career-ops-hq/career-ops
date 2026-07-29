@@ -5372,6 +5372,45 @@ try {
   } else {
     fail('parseAppliedDate should not match the date inside "reapplied"');
   }
+  // An estimated apply date is written "Applied ~YYYY-MM-DD". Without tolerating
+  // the tilde the note is skipped and the cadence silently falls back to the
+  // evaluation date — the same wrong-age failure the notes lookup exists to fix.
+  if (cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)') === '2026-06-09') {
+    pass('parseAppliedDate tolerates an estimated "Applied ~YYYY-MM-DD" date');
+  } else {
+    fail(`parseAppliedDate should tolerate "~", got ${JSON.stringify(cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)'))}`);
+  }
+  if (cadence.parseAppliedDate('reapplied ~2026-06-09 after rejection') === null) {
+    pass('parseAppliedDate still refuses "reapplied" when a tilde is present');
+  } else {
+    fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
+  }
+
+  // resolveAppliedDate — reports WHICH date the cadence is measured from, so a
+  // consumer can tell a real application date from the evaluation-date proxy.
+  // Without it a fallback age is indistinguishable from a measured one.
+  {
+    const measured = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-09 via Personio' });
+    if (measured.appliedDate === '2026-06-09' && measured.appDateSource === 'notes') {
+      pass('resolveAppliedDate reports source "notes" when the apply date is recorded');
+    } else {
+      fail(`resolveAppliedDate notes-case got ${JSON.stringify(measured)}`);
+    }
+
+    const inferred = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'On-archetype fit; no submission yet' });
+    if (inferred.appliedDate === '2026-06-01' && inferred.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate flags the evaluation-date proxy as a fallback, not a measured date');
+    } else {
+      fail(`resolveAppliedDate fallback-case got ${JSON.stringify(inferred)}`);
+    }
+
+    const estimated = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied ~2026-06-09' });
+    if (estimated.appliedDate === '2026-06-09' && estimated.appDateSource === 'notes') {
+      pass('resolveAppliedDate treats an estimated "~" apply date as a recorded date, not a fallback');
+    } else {
+      fail(`resolveAppliedDate estimated-case got ${JSON.stringify(estimated)}`);
+    }
+  }
 
   // Status normalization (strips bold + trailing date, lowercases, maps aliases)
   if (cadence.normalizeStatus('**Applied** 2026-05-01') === 'applied') {
