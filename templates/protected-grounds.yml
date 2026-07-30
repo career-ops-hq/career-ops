@@ -234,8 +234,8 @@ protected_grounds:
           - "Haben Sie gesundheitliche Einschränkungen? / Do you have any health limitations?"
           - "Wie oft waren Sie im letzten Jahr krankgeschrieben? / How often were you on sick leave last year?"
         legitimate_contexts:
-          - "Health/disability questions are permissible only where the absence of a specific disability is a 'wesentliche und entscheidende berufliche Anforderung' (LAG Hessen 6/7 Sa 1373/09; OVG Nordrhein-Westfalen 6 B 1241/11) — e.g. police, fire services"
-          - "§165 SGB IX obliges public employers to invite severely disabled applicants who meet the basic requirements; this is a procedural right, not an exception to the prohibition"
+          - "Do not ask for a diagnosis or disability status; describe the essential duties and ask whether the candidate can perform them, with or without reasonable accommodation. A narrowly justified, job-specific requirement may support an exception under §8 AGG"
+          - "§165 SGB IX requires public employers to invite severely disabled applicants unless they are obviously professionally unsuitable; this is a procedural right, not an exception to the prohibition"
       - topic: "Alter (age)"
         example_question_patterns:
           - "Wie alt sind Sie? / How old are you?"
