@@ -57,6 +57,23 @@ try {
   else fail(`rheinmetall.fetch() returned ${rhmJobs.length} jobs after ${rhmCalls} calls`);
   if (rhmSeen[0]?.endsWith('?page=1') && rhmSeen[1]?.endsWith('?page=2')) pass('rheinmetall.fetch() pages via ?page=N (1-based)');
   else fail(`rheinmetall.fetch() paged wrong: ${JSON.stringify(rhmSeen)}`);
+
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseVacancies now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const badPage = '<html>' + card('9001', 'Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;', 'Rheinmetall AG | Kassel') + '</html>';
+    let badRows, badThrew = null;
+    try { badRows = parseVacancies(badPage, 'https://www.rheinmetall.com'); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`rheinmetall.parseVacancies() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (badRows.length === 1 && badRows[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('rheinmetall.parseVacancies() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
+    else fail(`rheinmetall.parseVacancies() out-of-range entity wrong: ${JSON.stringify(badRows)}`);
+  }
 } catch (e) {
   fail(`rheinmetall provider tests crashed: ${e.message}`);
 }

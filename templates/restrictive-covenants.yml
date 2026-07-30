@@ -1,0 +1,118 @@
+# Career-Ops — Restrictive-Covenant Statutory Context (jurisdiction table) (#2028)
+#
+# Consumed prompt-level by modes/offer-prep.md ("Statutory-context notes for
+# restrictive covenants"). This file is a DATA REFERENCE, not instruction
+# logic: extending it to a new jurisdiction or covenant type never requires
+# touching the rule text in modes/offer-prep.md. No script reads it — the
+# agent does, as a LOCAL file lookup (which is not online research and does
+# not touch offer-prep's no-research guard).
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a citable legal source (statute text, official government page, or a
+#      reputable law-firm bulletin summarizing it), AND
+#   2. an explicit effective date for the rule described, AND
+#   3. an `as_of` date recording when the row was last verified.
+# Unverified or "I heard that..." rows will be rejected in review. Seed
+# narrow and verified; extend via community PRs — same discipline as the
+# jurisdiction tables introduced for #2013/#2018/#2019/#2025.
+#
+# COVENANT-TYPE DISCIPLINE (mandatory): rows are keyed per covenant_type and
+# covenant types are NEVER conflated. A non-compete rule says nothing about
+# non-solicitation — Ontario's ESA s.67.2 ban, for example, does NOT cover
+# non-solicitation clauses, and a note implying otherwise would misinform the
+# candidate in the more dangerous direction. If a jurisdiction regulates
+# non-solicits, that is a SEPARATE row with covenant_type: non_solicit and
+# its own sources. v1 seeds cover covenant_type: non_compete only.
+#
+# NOT LEGAL ADVICE: these rows describe what published statutes say — their
+# existence, scope, effective dates, and statutory exceptions. They are never
+# a basis for asserting that any specific contract clause is void,
+# unenforceable, or illegal: exceptions (executive status, sale-of-business
+# context, choice-of-law wrinkles) are exactly the things a contract document
+# cannot self-certify. Application to a specific clause is always a lawyer
+# question.
+#
+# status enum (the real-world spectrum, not a ban/no-ban binary):
+#   prohibited                            — statute voids/bans the covenant in
+#                                           the employment context (subject to
+#                                           listed exceptions)
+#   allowed_with_mandatory_compensation   — enforceable only if the employer
+#                                           pays for the restricted period
+#                                           (e.g. Germany's Karenzentschädigung)
+#   allowed_with_limits                   — statutory caps on duration, scope,
+#                                           income thresholds, etc.
+#   common_law_reasonableness             — no statute; courts apply a
+#                                           reasonableness test case by case
+#                                           (e.g. UK)
+#
+# Schema per entry (list under `covenants`):
+#   jurisdiction: string       — code, e.g. US-CA, CA-ON, DE, UK
+#   jurisdiction_name: string  — human-readable name for report output
+#   covenant_type: enum        — non_compete | non_solicit | non_dealing
+#   status: enum               — see above
+#   exceptions: list           — statutory exceptions, verbatim-close summaries
+#   effective: YYYY-MM-DD      — date the current rule came into force
+#                                (quoted string — keep dates as strings)
+#   legal_basis: string        — statute/regulation citation + key case law
+#   sources: list              — citable texts/bulletins backing the row
+#   as_of: YYYY-MM-DD          — date this row was last verified against sources
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (suggestions only — do NOT add without the
+# source + effective-date + as_of discipline above):
+#   - US-MN : Minnesota banned employment non-competes for agreements entered
+#             into on or after 2023-07-01 (Minn. Stat. §181.988)
+#   - US-ND / US-OK : long-standing statutory bans (N.D.C.C. §9-08-06;
+#             Okla. Stat. tit. 15 §219A) — verify current text before adding
+#   - DE    : allowed_with_mandatory_compensation — §74 HGB requires
+#             Karenzentschädigung (≥50% of last compensation) for the
+#             restricted period, max 2 years
+#   - UK    : common_law_reasonableness — no statute; restraint-of-trade
+#             doctrine, enforceable only if no wider than necessary to protect
+#             a legitimate business interest
+#   - US-WA / US-CO / US-IL : allowed_with_limits — income thresholds and
+#             notice requirements vary; key at the state level with sources
+
+covenants:
+  - jurisdiction: US-CA
+    jurisdiction_name: "California, USA"
+    covenant_type: non_compete
+    status: prohibited
+    exceptions:
+      - "Statutory sale-of-business context (B&P Code §16601 family — seller of a business's goodwill or ownership interest may agree not to compete in the sold business's area)"
+    effective: "2024-01-01"   # §16600.5 (SB 699) and §16600.1 (AB 1076) in force; §16600 itself is long-standing
+    legal_basis: >-
+      California Business & Professions Code §16600 — voids non-compete
+      clauses in the employment context "no matter how narrowly tailored"
+      (codifying Edwards v. Arthur Andersen, 2008); §16600.5 (SB 699,
+      effective 2024-01-01) — unenforceable regardless of where and when the
+      contract was signed; §16600.1 (AB 1076) — inclusion of such a clause is
+      itself unlawful, and employers were placed under an individualized
+      notice duty to affected employees.
+    sources:
+      - "Quinn Emanuel client alert — California non-compete legislation (SB 699 / AB 1076)"
+      - "Holland & Knight alert — New California laws further restrict non-competes"
+      - "Jackson Lewis — California non-compete notice requirement analysis"
+      - "CalChamber alert — AB 1076 / SB 699 employer obligations"
+    as_of: "2026-07-18"
+
+  - jurisdiction: CA-ON
+    jurisdiction_name: "Ontario, Canada"
+    covenant_type: non_compete
+    status: prohibited
+    exceptions:
+      - "Executive exception — applies only to a defined C-suite list: CEO, President, CAO, COO, CFO, CIO, CLO, CHRO, Chief Corporate Development Officer, or any other chief executive position"
+      - "Sale-of-business exception — the seller becomes the purchaser's employee immediately after the sale; 'sale' includes a lease"
+    effective: "2021-10-25"
+    legal_basis: >-
+      Ontario Employment Standards Act, 2000, s.67.2 (added by the Working
+      for Workers Act, 2021 / Bill 27) — prohibits employers from entering
+      into employment contracts or other agreements with an employee that
+      include a non-compete agreement; non-compete agreements in contracts
+      entered into on or after 2021-10-25 are void. NOTE: the ban does not
+      cover non-solicitation clauses — covenant types are never conflated.
+    sources:
+      - "Bill 27, Working for Workers Act, 2021 — official text (ola.org)"
+      - "Littler insight — Ontario's ban on non-compete agreements"
+      - "Torys LLP bulletin — Working for Workers Act non-compete prohibition"
+      - "Bennett Jones bulletin — Ontario ESA non-compete amendments"
+    as_of: "2026-07-18"

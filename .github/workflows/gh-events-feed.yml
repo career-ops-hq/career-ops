@@ -15,7 +15,7 @@ jobs:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         env:
           WEBHOOK: ${{ secrets.DISCORD_CONTRIB_WEBHOOK }}
         with:

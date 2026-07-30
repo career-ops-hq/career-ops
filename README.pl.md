@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — Wieloagentowy system poszukiwania pracy" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops — Wieloagentowy system poszukiwania pracy" width="800"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="career-ops Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ ocenionych ofert · 100+ spersonalizowanych CV · 1 wymarzona rola zdobyta</strong></p>
@@ -61,17 +61,17 @@
 
 ## Co to jest
 
-Career-Ops ([career-ops.org](https://career-ops.org), znany też jako **careerops**) zamienia dowolne AI CLI w pełne centrum dowodzenia poszukiwaniem pracy. Zamiast ręcznego śledzenia aplikacji w arkuszu kalkulacyjnym, dostajesz pipeline zasilany AI, który:
+career-ops ([career-ops.org](https://career-ops.org), znany też jako **careerops**) zamienia dowolne AI CLI w pełne centrum dowodzenia poszukiwaniem pracy. Zamiast ręcznego śledzenia aplikacji w arkuszu kalkulacyjnym, dostajesz pipeline zasilany AI, który:
 
-- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–F (10 ważonych wymiarów)
+- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–F (pięć wymiarów składających się na wynik 1.0–5.0)
 - **Generuje spersonalizowane PDF** — CV zoptymalizowane pod ATS, dostosowane do każdej oferty
 - **Skanuje portale** automatycznie (Greenhouse, Ashby, Lever, strony firm)
 - **Przetwarza wsadowo** — ocena 10+ ofert równolegle przez sub-agentów
 - **Śledzi wszystko** w jednym źródle prawdy z weryfikacją spójności danych
 
-> **Ważne: to NIE jest narzędzie do masowego wysyłania aplikacji.** Career-ops to filtr — pomaga znaleźć te kilka ofert wartych twojego czasu spośród setek. System stanowczo odradza aplikowanie na oferty z oceną poniżej 4.0/5. Twój czas jest cenny, podobnie jak czas rekrutera. Zawsze sprawdzaj przed wysłaniem.
+> **Ważne: to NIE jest narzędzie do masowego wysyłania aplikacji.** career-ops to filtr — pomaga znaleźć te kilka ofert wartych twojego czasu spośród setek. System stanowczo odradza aplikowanie na oferty z oceną poniżej 4.0/5. Twój czas jest cenny, podobnie jak czas rekrutera. Zawsze sprawdzaj przed wysłaniem.
 
-Career-ops działa agentowo: Claude Code nawiguje po stronach kariery z Playwright, ocenia dopasowanie rozumując nad twoim CV kontra opis stanowiska (nie przez dopasowanie słów kluczowych) i dostosowuje CV do każdego ogłoszenia.
+career-ops działa agentowo: Claude Code nawiguje po stronach kariery z Playwright, ocenia dopasowanie rozumując nad twoim CV kontra opis stanowiska (nie przez dopasowanie słów kluczowych) i dostosowuje CV do każdego ogłoszenia.
 
 > **Uwaga: pierwsze oceny nie będą idealne.** System jeszcze cię nie zna. Dostarcz mu kontekstu — swoje CV, historię kariery, przykłady osiągnięć, preferencje, mocne strony, czego chcesz unikać. Im więcej mu dasz, tym lepiej działa. Traktuj to jak wdrożenie nowego rekrutera: w pierwszym tygodniu musi się nauczyć, kim jesteś — potem staje się nieoceniony.
 
@@ -130,7 +130,7 @@ Pełny przewodnik po konfiguracji: [docs/SETUP.md](docs/SETUP.md).
 
 ## Użycie
 
-Career-ops to jedna komenda slash z wieloma trybami:
+career-ops to jedna komenda slash z wieloma trybami:
 
 ```text
 /career-ops                    → Pokaż wszystkie dostępne komendy
@@ -173,7 +173,7 @@ Wklejasz URL oferty lub jej opis
 
 ## 🇵🇱 Polskie portale z ofertami pracy
 
-Career-ops obsługuje główne polskie portale IT. Dwa z nich — JustJoin.it i NoFluffJobs — mają publiczne API i mogą być zintegrowane jako źródła Level 0 (zero tokenów, brak WebSearch, świeże dane w czasie skanowania). Pozostałe portale wymagają weryfikacji ręcznej lub przez Playwright.
+career-ops obsługuje główne polskie portale IT. Dwa z nich — JustJoin.it i NoFluffJobs — mają publiczne API i mogą być zintegrowane jako źródła Level 0 (zero tokenów, brak WebSearch, świeże dane w czasie skanowania). Pozostałe portale wymagają weryfikacji ręcznej lub przez Playwright.
 
 | Portal              | URL                                          | API        | Uwagi                                                                 |
 | ------------------- | -------------------------------------------- | ---------- | --------------------------------------------------------------------- |
@@ -187,7 +187,7 @@ Career-ops obsługuje główne polskie portale IT. Dwa z nich — JustJoin.it i 
 
 ### Polskie realia rynku pracy w ocenach
 
-Career-ops uwzględnia specyfikę polskiego rynku pracy przy ocenianiu ofert:
+career-ops uwzględnia specyfikę polskiego rynku pracy przy ocenianiu ofert:
 
 - **Forma zatrudnienia**: UoP (Umowa o pracę) vs B2B (Faktura VAT) vs UZ (Umowa zlecenie) — różnice w kwocie netto, bezpieczeństwie, urlopie i ZUS mają wpływ na ocenę stabilności
 - **Wynagrodzenie**: brutto (przed podatkiem i ZUS) kontra netto (na rękę). Różnica bywa znaczna — system uwzględnia ją przy porównywaniu ofert
