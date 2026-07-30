@@ -61,8 +61,25 @@ if (!HAS_WEB) {
   });
 
   test('pickLeadSection: honors an explicit Verdict block if one is ever emitted', () => {
-    const sections = [...realReport(), s('Verdict')];
+    const sections = realReport().filter((x) => x.heading !== 'Recommendation');
+    sections.push(s('Verdict'));
     assert.equal(pickLeadSection(sections).heading, 'Verdict');
+  });
+
+  // The preference order is Recommendation, then Verdict, then Risk Summary.
+  // Every other ordering test uses a report carrying exactly one candidate, so
+  // a wrong order is invisible to them: only a report holding two candidates at
+  // once can tell the stated order from the implemented one.
+  test('pickLeadSection: prefers Recommendation over Verdict when a report has both', () => {
+    const sections = [...realReport(), s('Verdict')];
+    assert.equal(pickLeadSection(sections).heading, 'Recommendation');
+  });
+
+  test('pickLeadSection: prefers Verdict over Risk Summary when a report has both', () => {
+    const sections = realReport().filter((x) => x.heading !== 'Recommendation');
+    sections.push(s('Verdict'));
+    assert.equal(pickLeadSection(sections).heading, 'Verdict');
+    assert.ok(sections.some((x) => x.heading === 'Risk Summary'), 'fixture must contain Risk Summary for this to mean anything');
   });
 
   test('pickLeadSection: returns null rather than guessing when no decision block exists', () => {
@@ -76,9 +93,32 @@ if (!HAS_WEB) {
     assert.doesNotThrow(() => pickLeadSection([{}]));
   });
 
-  test('pickLeadSection: matching is case- and decoration-insensitive', () => {
+  test('pickLeadSection: matching is case-insensitive and ignores surrounding space', () => {
     assert.equal(pickLeadSection([s('RECOMMENDATION')]).heading, 'RECOMMENDATION');
     assert.equal(pickLeadSection([s('  Recommendation  ')]).heading, '  Recommendation  ');
+  });
+
+  // splitSections() keeps the author-letter ON the heading ("A) Role Summary")
+  // and reports the letter separately; cleanHeading() strips it for display.
+  // A matcher reading the raw heading therefore misses any lettered variant.
+  // No report in the current corpus writes one, so this is hardening against a
+  // shape the parser already accepts rather than a fix for a live report.
+  test('pickLeadSection: finds a lead behind an author-letter prefix', () => {
+    assert.equal(pickLeadSection([s('H) Recommendation', 'H')]).heading, 'H) Recommendation');
+    assert.equal(pickLeadSection([s('F. Verdict', 'F')]).heading, 'F. Verdict');
+    assert.equal(pickLeadSection([s('Block G: Risk Summary', 'G')]).heading, 'Block G: Risk Summary');
+  });
+
+  test('pickLeadSection: letter-prefix stripping does not break the preference order', () => {
+    const sections = [s('G) Risk Summary', 'G'), s('H) Recommendation', 'H')];
+    assert.equal(pickLeadSection(sections).heading, 'H) Recommendation');
+  });
+
+  // Guard against over-eager prefix stripping: a heading that merely starts
+  // with a letter-like word must not be mistaken for a decorated lead.
+  test('pickLeadSection: does not treat an ordinary heading as a decorated lead', () => {
+    assert.equal(pickLeadSection([s('Additional Recommendation Notes')]), null);
+    assert.equal(pickLeadSection([s('A Recommendation Was Requested')]), null);
   });
 
   test('pickLeadSection: does not mutate the input array', () => {
