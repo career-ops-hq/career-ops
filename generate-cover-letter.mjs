@@ -58,7 +58,8 @@ function buildContactLine(candidate) {
   }
   if (candidate.phone) parts.push(escapeHtml(candidate.phone));
   if (candidate.linkedin) {
-    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">LinkedIn</a>`);
+    const display = candidate.linkedin.replace(/^https?:\/\//, "");
+    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">${escapeHtml(display)}</a>`);
   }
   if (candidate.github) {
     const display = candidate.github.replace(/^https?:\/\//, "");
