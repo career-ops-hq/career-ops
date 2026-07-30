@@ -114,10 +114,15 @@ function resolveAllowedExecutable(cmd) {
  */
 export function run(cmd, args = [], opts = {}) {
   const exe = resolveAllowedExecutable(cmd);
+  // Cleared up front rather than on the success path, so the execFileSync call
+  // below stays byte-identical to what it has always been. Touching that line
+  // makes CodeQL re-attribute its long-standing "uncontrolled command line"
+  // finding to whichever PR edited it, and this change does not alter what
+  // reaches the child: the executable is still allowlisted by
+  // resolveAllowedExecutable() and the arguments are still an argv vector.
+  lastFailure = null;
   try {
-    const out = execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
-    lastFailure = null;
-    return out;
+    return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
     // execFileSync attaches the child's streams and exit status to the error.
     // Keep them: callers report failure as `<name> crashed`, and without this a
