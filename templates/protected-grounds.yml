@@ -234,15 +234,15 @@ protected_grounds:
           - "Haben Sie gesundheitliche Einschränkungen? / Do you have any health limitations?"
           - "Wie oft waren Sie im letzten Jahr krankgeschrieben? / How often were you on sick leave last year?"
         legitimate_contexts:
-          - "Health/disability questions are permissible only where the absence of a specific disability is a 'wesentliche und entscheidende berufliche Anforderung' (LAG Hessen 6/7 Sa 1373/09; OVG Nordrhein-Westfalen 6 B 1241/11) — e.g. police, fire services"
-          - "§165 SGB IX obliges public employers to invite severely disabled applicants who meet the basic requirements; this is a procedural right, not an exception to the prohibition"
+          - "Do not ask for a diagnosis or disability status; describe the essential duties and ask whether the candidate can perform them, with or without reasonable accommodation. A narrowly justified, job-specific requirement may support an exception under §8 AGG"
+          - "§165 SGB IX requires public employers to invite severely disabled applicants unless they are obviously professionally unsuitable; this is a procedural right, not an exception to the prohibition"
       - topic: "Alter (age)"
         example_question_patterns:
           - "Wie alt sind Sie? / How old are you?"
           - "Wann sind Sie geboren? / When were you born?"
           - "Welchen Jahrgang haben Sie? / What year were you born?"
         legitimate_contexts:
-          - "§10 AGG permits objective, proportionate age-based differentiations justified by a legitimate aim (e.g. minimum age for specific physically demanding roles, maximum age for recruit training where service-length rules apply)"
+          - "§10 AGG permits age-based differentiation only where it is objectively and appropriately justified by a legitimate aim and the means are necessary (e.g. a statutory minimum age or a maximum age tied to specific training or necessary service before retirement)"
           - "Confirming the candidate meets a statutory minimum working age is permissible"
       - topic: "Sexuelle Identität (sexual identity)"
         example_question_patterns:
@@ -264,8 +264,11 @@ protected_grounds:
       exception), §9 (religious-organisation exception), §10 (permissible age
       differentiation), §5 (positive action), §22 (burden of proof — shifts to
       employer when the applicant shows an indication / Indiz of
-      discrimination). Nationality is not an explicit standalone §1 ground but is protected
-      against as indirect discrimination (mittelbare Diskriminierung) under ethnic origin.
+      discrimination). Nationality is not an explicit standalone §1 ground. Depending on the facts,
+      nationality-based treatment may constitute direct discrimination because
+      nationality is being used as a proxy for ethnic origin, or indirect
+      discrimination where a neutral criterion disproportionately disadvantages an
+      ethnic group and is not objectively justified (§3 Abs. 1-2 AGG).
       The 'right to lie' (Recht zur Lüge) on inadmissible questions is established by BAG
       case law (Bundesarbeitsgericht, e.g. 7 AZR 621/01 and subsequent decisions): a contract
       formed after a false answer to an inadmissible question cannot be challenged on that basis.
