@@ -79,3 +79,22 @@ public commit with a stated reason.
 - @beerock | Brock Busby | 2026-07-16 | "Humans first." | id:9371066 | src:https://github.com/santifer/career-ops/discussions/1964 | n:31
 - @NaveenkumarreddyD | 2026-07-16 | id:106174399 | src:https://github.com/santifer/career-ops/discussions/1966 | n:32
 - @Scott-Emberson | Scott Emberson | 2026-07-17 | id:8268155 | src:https://github.com/santifer/career-ops/discussions/1983 | n:33
+- @shineboxshine | 2026-07-18 | "May the automation go both ways!" | id:11636943 | src:https://github.com/santifer/career-ops/discussions/2012 | n:34
+- @funstuie-bit | 2026-07-18 | id:264561520 | src:https://github.com/santifer/career-ops/discussions/2023 | n:35
+- @Thomasevano | tvn | 2026-07-18 | id:22095896 | src:https://github.com/santifer/career-ops/discussions/2035 | n:36
+- @ljz-3291 | 2026-07-19 | id:184739942 | src:https://github.com/santifer/career-ops/discussions/2048 | n:37
+- @freitagdavid | David Freitag | 2026-07-20 | "This has been allowing me to not spam blast every single recruiter and instead carefully curate the best fit jobs for me. Especially using upskill to improve my knowledge for certain positions." | id:26885415 | src:https://github.com/santifer/career-ops/discussions/2071 | n:38
+- @Deep2003 | Deep Patel | 2026-07-21 | "Hiring has become a quantity game on either side of the aisle; it should really be a quality-based match." | id:33074675 | src:https://github.com/santifer/career-ops/discussions/2075 | n:39
+- @shilpaduruvasan-ai | 2026-07-21 | id:235786418 | src:https://github.com/santifer/career-ops/discussions/2076 | n:40
+- @youlia-denisov | Juls | 2026-07-21 | "This is a new cool toy for job searching, it upgraded my job search in a very delightful manner. Thank you!" | id:170363981 | src:https://github.com/santifer/career-ops/discussions/2090 | n:41
+- @rubicon | Dax Davis | 2026-07-22 | "Thirty years building demand-gen engines for other people. First time I've pointed one at my own job search." | id:98216 | src:https://github.com/santifer/career-ops/discussions/2106 | n:42
+- @minammar | 2026-07-22 | id:60332772 | src:https://github.com/santifer/career-ops/discussions/2114 | n:43
+- @arberbakalli | Arbër Bakalli | 2026-07-23 | "How hiring should have been" | id:15056487 | src:https://github.com/santifer/career-ops/discussions/2131 | n:44
+- @harsh-kotak | Harsh Kotak | 2026-07-23 | "career-ops helped me search with a plan." | id:9409440 | src:https://github.com/santifer/career-ops/discussions/2133 | n:45
+- @asing44 | Adam Warsing | 2026-07-24 | "To approaching a turbulent space with real dignity, cheers!" | id:109570966 | src:https://github.com/santifer/career-ops/discussions/2168 | n:46
+- @cdelafosse4-ops | 2026-07-27 | id:290349063 | src:https://github.com/santifer/career-ops/discussions/2208 | n:47
+- @Saksham-Khosla | 2026-07-27 | id:294287864 | src:https://github.com/santifer/career-ops/discussions/2218 | n:48
+- @sdisaacson | Scott Isaacson | 2026-07-27 | "Whose side is your agent on?" | id:1022379 | src:https://github.com/santifer/career-ops/discussions/2219 | n:49
+- @aawbeck | Aaron Beck | 2026-07-27 | "Great tool, ty!" | id:255968200 | src:https://github.com/santifer/career-ops/discussions/2222 | n:50
+- @NotPraneeth | Sai Praneeth | 2026-07-29 | "The search mustn't stop" | id:92677364 | src:https://github.com/santifer/career-ops/discussions/2275 | n:51
+- @changeable-alcohol | X | 2026-07-29 | id:108211470 | src:https://github.com/santifer/career-ops/discussions/2287 | n:52

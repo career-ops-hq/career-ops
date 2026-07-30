@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops マルチエージェント求職システム" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops マルチエージェント求職システム" width="800"></a>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>掲載メディア</sub></p>
@@ -33,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops デモ" width="800">
+  <img src="docs/demo.gif" alt="career-ops デモ" width="800">
 </p>
 
 <p align="center"><strong>740件以上の求人を評価 · 100件以上のパーソナライズCVを生成 · 理想のポジションを獲得</strong></p>
@@ -65,9 +65,9 @@
 
 ## これは何？
 
-Career-Opsは、あらゆるAIコーディングCLIを本格的な求職コマンドセンターに変えます。スプレッドシートで応募を手動管理する代わりに、AIによる以下のパイプラインが手に入ります:
+career-opsは、あらゆるAIコーディングCLIを本格的な求職コマンドセンターに変えます。スプレッドシートで応募を手動管理する代わりに、AIによる以下のパイプラインが手に入ります:
 
-- **オファーを評価** -- 構造化されたA-Fスコアリングシステム（10項目の重み付け評価軸）
+- **オファーを評価** -- 構造化されたA-F評価（5つの項目が1.0〜5.0のスコアに反映される）
 - **テーラーメイドPDFを生成** -- 各求人票に合わせてATS最適化されたCV
 - **求人ポータルを自動スキャン** （Greenhouse、Ashby、Lever、企業ページ）
 - **バッチ処理** -- サブエージェントで10件以上のオファーを並列評価

@@ -23,11 +23,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 import yaml from 'js-yaml';
+import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
+import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const tracker = new TokenAccumulator();
+let activeModel = null;
 
 // ---------------------------------------------------------------------------
 // .env loader
@@ -202,6 +206,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
   const pinnedModel = process.env.CAREER_OPS_MODEL;
   if (pinnedModel) {
+    activeModel = pinnedModel;
     process.stdout.write(`[model] ${pinnedModel} (pinned) ... `);
     const body = JSON.stringify({
       model: pinnedModel,
@@ -234,7 +239,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
       console.log('OK');
-      return content;
+      const usage = normalizeOpenAIUsage(data.usage);
+      return { content, usage };
     } catch (e) {
       if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${MODEL_TIMEOUT_MS / 1000}s`);
       throw e;
@@ -257,6 +263,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
   for (let attempt = 0; attempt < active.length; attempt++) {
     const model = active[(modelIndex % active.length + attempt) % active.length];
+    activeModel = model;
     process.stdout.write(`[model] ${model} ... `);
 
     try {
@@ -300,9 +307,11 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
 
+      const usage = normalizeOpenAIUsage(data.usage);
+
       modelIndex = (modelIndex + attempt + 1) % active.length;
       console.log('OK');
-      return content;
+      return { content, usage };
 
     } catch (e) {
       lastError = e;
@@ -347,7 +356,8 @@ function loadContext() {
   };
 }
 
-function buildSystemPrompt(modeContent, ctx) {
+export function buildSystemPrompt(modeContent, ctx) {
+  const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
   return [
     ctx.shared,
     ctx.profileMode,
@@ -358,6 +368,9 @@ function buildSystemPrompt(modeContent, ctx) {
     '---',
     'CV (Markdown):',
     ctx.cv,
+    '---',
+    'OUTPUT LANGUAGE:',
+    languageInstruction,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -545,6 +558,9 @@ function extractCompanySlug(text, url) {
 
 // -- SCAN --
 async function cmdScan() {
+  tracker.recordZeroToken('scan');
+  tracker.recordZeroToken('evaluation');
+  tracker.recordZeroToken('pdf payload');
   console.log('Scanning Greenhouse portals...\n');
 
   let portals;
@@ -585,6 +601,8 @@ async function cmdScan() {
 
 // -- EVALUATE --
 async function cmdEvaluate(input, ctx) {
+  tracker.recordZeroToken('scan');
+  tracker.recordZeroToken('pdf payload');
   const modeContent = readFile('modes/oferta.md') ?? readFile('modes/auto-pipeline.md') ?? '';
 
   let jdText = input;
@@ -618,13 +636,15 @@ async function cmdEvaluate(input, ctx) {
   console.log('\nEvaluating...');
   const systemPrompt = buildSystemPrompt(modeContent, ctx);
 
-  let result;
+  let resultObj;
   try {
-    result = await callOpenRouter(systemPrompt, `Evaluate this job listing:\n\n${jdText}`);
+    resultObj = await callOpenRouter(systemPrompt, `Evaluate this job listing:\n\n${jdText}`);
   } catch (e) {
     console.error(`OpenRouter error: ${e.message}`);
     return null;
   }
+  tracker.record('evaluation', resultObj.usage);
+  const result = resultObj.content;
 
   let reservedNumbers;
   try {
@@ -703,6 +723,9 @@ async function cmdPipeline(ctx) {
 
 // -- APPLY --
 async function cmdApply(ref, ctx) {
+  tracker.recordZeroToken('scan');
+  tracker.recordZeroToken('evaluation');
+  tracker.recordZeroToken('pdf payload');
   const modeContent = readFile('modes/apply.md') ?? '';
 
   let reportContent;
@@ -722,12 +745,29 @@ async function cmdApply(ref, ctx) {
 
   if (!reportContent) { console.error('Could not read report content.'); return; }
 
+  // Score-gate: warn and confirm before applying to low-fit roles (AGENTS.md Ethical Use)
+  const scoreMatch = reportContent.match(/^\s*\*?\*?\s*(?:score|puntuaci[oó]n)\s*:\s*\*?\*?\s*(\d+(?:\.\d+)?)\s*\/\s*5/im);
+  const scoreValue = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
+  if (isFinite(scoreValue) && scoreValue < 4.0) {
+    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the 4.0/5 threshold.`);
+    console.log('Strongly discourage low-fit applications. Your time and the recruiter\'s time are both valuable.');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise(resolve => {
+      rl.question('Proceed anyway? (yes/no): ', resolve);
+    });
+    rl.close();
+    if (answer.trim().toLowerCase() !== 'yes') {
+      console.log('Aborted.');
+      return;
+    }
+  }
+
   console.log('Generating application form answers...');
   const systemPrompt = buildSystemPrompt(modeContent, ctx);
 
-  let result;
+  let resultObj;
   try {
-    result = await callOpenRouter(
+    resultObj = await callOpenRouter(
       systemPrompt,
       `Generate application form answers based on this evaluation report:\n\n${reportContent}`
     );
@@ -735,6 +775,8 @@ async function cmdApply(ref, ctx) {
     console.error(`OpenRouter error: ${e.message}`);
     return;
   }
+  tracker.record('apply', resultObj.usage);
+  const result = resultObj.content;
 
   console.log('\n─── APPLICATION ANSWERS ─────────────────────────────\n');
   console.log(result);
@@ -802,4 +844,9 @@ MODEL SELECTION:
   - They are tried in sequence; if one fails the next is used automatically.
   - Pin a model:  CAREER_OPS_MODEL=deepseek/deepseek-r1:free node openrouter-runner.mjs eval <url>
 `);
+}
+
+if (invokedDirectly && ['scan', 'evaluate', 'eval', 'pipeline', 'apply'].includes(command)) {
+  const modelName = process.env.CAREER_OPS_MODEL || activeModel || 'free-rotation';
+  console.log('\n' + formatBreakdown(tracker, modelName, 'openrouter'));
 }

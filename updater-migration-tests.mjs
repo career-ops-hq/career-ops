@@ -7,7 +7,7 @@
  * newly introduced system paths without touching user data.
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 
 let passed = 0;
 let failed = 0;
@@ -45,6 +45,26 @@ const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
+// Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
+// BOOTSTRAP_PATHS) must exist in the working tree. A path deleted upstream
+// but left in the manifest survives as a permanent `error: pathspec ...` in
+// every user's upgrade output (#2002). Directory entries (trailing '/') are
+// exempt: git checkout of a directory pathspec tolerates content drift
+// inside it. Add an entry to ALLOWED_MISSING_ENTRIES only with a comment
+// justifying why it may legitimately be absent.
+const ALLOWED_MISSING_ENTRIES = new Set([]);
+for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
+  for (const entry of entries) {
+    if (entry.endsWith('/')) continue;
+    if (ALLOWED_MISSING_ENTRIES.has(entry)) continue;
+    if (existsSync(entry)) {
+      pass(`${listName} entry exists on disk: ${entry}`);
+    } else {
+      fail(`${listName} entry missing from tree (stale manifest entry, #2002): ${entry}`);
+    }
+  }
+}
+
 const requiredSystemPaths = [
   'modes/email.md',
   'modes/followup.md',
@@ -64,6 +84,7 @@ const requiredSystemPaths = [
   '.qwen/',
   '.antigravitycli/skills/',
   '.grok/skills/',
+  '.cursor/skills/',
   'tracker-columns-tests.mjs',
   'updater-migration-tests.mjs',
   'README.ar.md',
@@ -81,6 +102,7 @@ const requiredSystemPaths = [
 
 const requiredBootstrapPaths = [
   '.agents/',
+  '.cursor/skills/',
   '.opencode/skills/',
   '.antigravitycli/skills/',
   '.grok/skills/',
@@ -146,7 +168,7 @@ const twoPassManifestChecks = [
   },
   {
     name: 'revertPaths uses git checkout HEAD (not just --) to reset index+worktree (#915)',
-    pattern: /git\('checkout',\s*'HEAD',\s*'--'/,
+    pattern: /\b(?:git|runGit)\('checkout',\s*'HEAD',\s*'--'/,
   },
   {
     name: 'apply commit is scoped to update paths, not bare commit (#915)',
@@ -159,6 +181,74 @@ const twoPassManifestChecks = [
   {
     name: 'apply captures uncommitted work via git stash create before branching (#915)',
     pattern: /git\('stash',\s*'create'\)/,
+  },
+  {
+    // A client whose manifest predates the target checks out only its own
+    // paths, so everything added upstream since is silently absent and apply
+    // still printed "Update complete" (#1998).
+    name: 'apply verifies the target manifest materialized before claiming success (#1998)',
+    pattern: /missingFromTargetManifest\(remoteSystemPaths\)/,
+  },
+  {
+    name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
+    pattern: /Update incomplete[\s\S]{0,600}?process\.exit\(1\)/,
+  },
+  {
+    // execFileSync inherits stderr, so an expected per-path skip printed git's
+    // raw pathspec error right before the success banner (#1998).
+    name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
+    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path\)/,
+  },
+  {
+    name: 'skipped upstream-absent paths are summarized explicitly (#1998)',
+    pattern: /Skipped \$\{skippedPaths\.length\} path\(s\) absent upstream/,
+  },
+  {
+    // existsSync on a pre-existing directory (docs/) would call it materialized
+    // even when the target added files under it — the verification must recurse
+    // into directory entries against FETCH_HEAD (#1998 CodeRabbit review).
+    name: 'manifest verification recurses into directory entries via ls-tree (#1998)',
+    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
+  },
+  {
+    // A checkout failure is only an expected skip when the path is truly absent
+    // from FETCH_HEAD; timeouts/permission errors must rethrow, not report
+    // success (#1998 CodeRabbit review).
+    name: 'a checkout failure only skips when the path is absent upstream, else rethrows (#1998)',
+    pattern: /catch \{ absentUpstream = true; \}\s*if \(!absentUpstream\) throw err;/,
+  },
+  {
+    // `git checkout HEAD -- docs/` restores tracked content but never removes
+    // paths HEAD lacks, so files the update introduced under a directory
+    // pathspec survived the rollback as staged additions (#2015).
+    name: 'revertPaths clears additions HEAD lacks under a directory pathspec (#2015)',
+    pattern: /removeAdditionsNotInHead\(p, protectedPaths, ctx\)/,
+  },
+  {
+    name: 'removeAdditionsNotInHead only targets additions, never modifications (#2015)',
+    pattern: /'--diff-filter=A'/,
+  },
+  {
+    // The cleanup must not delete a file the user already had staged before the
+    // update ran, only additions the update itself introduced (#2015 review).
+    name: 'rollback cleanup skips pre-update staged paths (protectedPaths) (#2015)',
+    pattern: /if \(protectedPaths\.has\(file\)\) continue;/,
+  },
+  {
+    name: 'revertPaths receives the pre-update snapshot at its call sites (#2015)',
+    pattern: /revertPaths\(updated, initialStatusPaths\)/,
+  },
+  {
+    // -z output is NUL-delimited/unquoted, so a path with spaces or newlines is
+    // not mangled by split('\n').trim() (#2015 review).
+    name: 'rollback cleanup parses NUL-delimited git output (#2015)',
+    pattern: /'--cached', '-z', '--name-only', '--diff-filter=A'[\s\S]*?added\.split\('\\0'\)\.filter/,
+  },
+  {
+    // The worktree file is deleted only after git rm succeeds, so a failed
+    // index removal never strands a staged addition with no file (#2015).
+    name: 'rollback deletes the worktree copy only after a successful git rm (#2015)',
+    pattern: /removed = true;[\s\S]{0,400}?if \(removed\) \{[\s\S]{0,80}?rmSync/,
   },
 ];
 

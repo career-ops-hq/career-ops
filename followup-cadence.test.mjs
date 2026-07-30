@@ -12,6 +12,8 @@ import {
   addDays,
   parseDate,
   DEFAULT_CADENCE,
+  parseFollowups,
+  analyzeFromContent,
 } from './followup-cadence.mjs';
 
 let passed = 0;
@@ -65,6 +67,102 @@ eq(
   'applied, no follow-ups uses applied_first',
   computeNextFollowupDate('applied', APP, null, 0),
   addDays(parseDate(APP), DEFAULT_CADENCE.applied_first),
+);
+
+// --- parseFollowups (exported content-param parser) ---
+
+const FOLLOWUPS_MD = `# Follow-ups
+
+| num | appNum | date | company | role | channel | contact | notes |
+|-----|--------|------|---------|------|---------|---------|-------|
+| 1 | 42 | 2026-07-01 | Acme | Backend Eng | email | jane@acme.com | first nudge |
+| 2 | 42 | 2026-07-08 | Acme | Backend Eng | email | jane@acme.com |  |
+- next #42 2026-07-15 (set 2026-07-08)
+| 3 | 55 | 2026-07-05 | Globex | SRE | linkedin |  |
+`;
+
+eq(
+  'parseFollowups parses table rows, skipping header/separator',
+  parseFollowups(FOLLOWUPS_MD).map(e => e.num),
+  [1, 2, 3],
+);
+
+eq(
+  'parseFollowups skips pin-directive lines (not treated as sent follow-ups)',
+  parseFollowups(FOLLOWUPS_MD).some(e => e.date === '2026-07-15'),
+  false,
+);
+
+eq(
+  'parseFollowups full shape for a normal row',
+  parseFollowups(FOLLOWUPS_MD)[0],
+  {
+    num: 1,
+    appNum: 42,
+    date: '2026-07-01',
+    company: 'Acme',
+    role: 'Backend Eng',
+    channel: 'email',
+    contact: 'jane@acme.com',
+    notes: 'first nudge',
+  },
+);
+
+eq(
+  'parseFollowups tolerates missing trailing cells (empty notes)',
+  parseFollowups(FOLLOWUPS_MD).find(e => e.num === 2).notes,
+  '',
+);
+
+eq(
+  'parseFollowups tolerates a row missing the contact cell entirely',
+  parseFollowups(FOLLOWUPS_MD).find(e => e.num === 3).contact,
+  '',
+);
+
+eq(
+  'parseFollowups returns empty array for empty content',
+  parseFollowups(''),
+  [],
+);
+
+// analyzeFromContent (#2123): the content-based core exported so stats.mjs
+// can reuse the exact same cadence math for its own cold-classification
+// wiring, instead of re-deriving applied_max_followups/cadence rules there.
+const trackerMd = [
+  '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+  '|---|------|---------|------|-------|--------|-----|--------|-------|',
+  '| 1 | 2026-05-01 | Acme | Eng | 4.5/5 | Applied | ✅ | ❌ | note |',
+  '| 2 | 2026-05-01 | Beta | Eng | 4.0/5 | Applied | ✅ | ❌ | note |',
+].join('\n');
+const followupsMd = [
+  '| # | App | Date | Company | Role | Channel | Contact | Notes |',
+  '|---|-----|------|---------|------|---------|---------|-------|',
+  '| 1 | 1 | 2026-05-10 | Acme | Eng | email | jane | f1 |',
+  '| 2 | 1 | 2026-05-20 | Acme | Eng | email | jane | f2 |',
+].join('\n');
+
+const withFollowups = analyzeFromContent(trackerMd, followupsMd);
+eq(
+  'analyzeFromContent classifies app #1 cold after applied_max_followups follow-ups, app #2 stays actionable',
+  withFollowups.entries.filter((e) => e.urgency === 'cold').map((e) => e.num),
+  [1],
+);
+
+// Missing/empty follow-ups content must degrade gracefully — no follow-up
+// log means followupCount stays 0 for every row, so nothing can reach the
+// 'cold' threshold. No error, no guessing.
+const noFollowups = analyzeFromContent(trackerMd, '');
+eq(
+  'analyzeFromContent with no follow-ups content classifies nothing as cold',
+  noFollowups.entries.some((e) => e.urgency === 'cold'),
+  false,
+);
+const missingFollowupsArg = analyzeFromContent(trackerMd);
+eq(
+  'analyzeFromContent defaults followupsContent to empty string when omitted',
+  missingFollowupsArg.entries.some((e) => e.urgency === 'cold'),
+  false,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

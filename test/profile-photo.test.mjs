@@ -53,6 +53,24 @@ test('project-relative image is validated and inlined', () => {
   assert.match(html, /src="data:image\/png;base64,/);
 });
 
+test('single-letter Windows drive paths reach local file handling', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'photo-windows-path-'));
+  const input = join(dir, 'input.json');
+  const output = join(dir, 'output.html');
+  writeFileSync(input, JSON.stringify(payload('Z:\\does-not-exist\\candidate\\headshot.png')));
+  const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stderr, /Unsupported profile photo URL scheme/);
+  assert.match(result.stderr, /not found or unreadable/);
+});
+
+test('square photo styles enforce equal dimensions in both templates', () => {
+  for (const name of ['cv-template.html', 'resume-template.html']) {
+    const html = readFileSync(join(ROOT, 'templates', name), 'utf8');
+    assert.match(html, /\.cv-photo--square\s*\{[^}]*aspect-ratio:\s*1;[^}]*height:\s*80px;/s);
+  }
+});
+
 test('valid data URL remains supported', () => {
   const dataUrl = `data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}`;
   const { html } = render(payload(dataUrl));

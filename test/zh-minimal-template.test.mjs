@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listTemplates, resolveTemplate, validateTemplate } from '../cv-templates.mjs';
+import { chromium } from 'playwright';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
@@ -56,4 +57,45 @@ test('Chinese Minimal renders a complete mixed-language payload', () => {
   assert.match(rendered, /测试候选人/);
   assert.match(rendered, /AI Agent 工作流/);
   assert.doesNotMatch(rendered, /\{\{[A-Z_]+\}\}/);
+});
+
+test('Chinese Minimal keeps long mixed-language contacts inside the A4 page', {
+  skip: !existsSync(chromium.executablePath()) && 'Chromium is not installed',
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-layout-'));
+  const input = join(dir, 'cv.json');
+  const output = join(dir, 'cv.html');
+  writeFileSync(input, JSON.stringify({
+    lang: 'zh-CN', page_format: 'a4',
+    candidate: {
+      name: '测试候选人',
+      email: 'candidate-with-an-intentionally-long-address-for-print-regression@example-company.cn',
+      location: '中国｜杭州',
+      portfolio: 'https://example.com/一个很长的中英文混合项目地址/remote-agent-production-delivery',
+    },
+    summary: '全栈工程师，负责 AI Agent 工作流与生产部署。',
+    competencies: ['AI Agent 工作流'],
+    experience: [{ company: '示例科技有限公司', role: '工程师', dates: '2025 至今', bullets: ['交付生产系统。'] }],
+    projects: [], education: [], certifications: [], skills: [],
+  }));
+  execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT });
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
+    await page.emulateMedia({ media: 'print' });
+    await page.goto(pathToFileURL(output).href);
+    const layout = await page.evaluate(() => {
+      const printable = document.querySelector('.page');
+      const right = printable.getBoundingClientRect().right;
+      const overflow = [...printable.querySelectorAll('*')]
+        .filter((element) => element.getBoundingClientRect().right > right + 0.5)
+        .map((element) => element.className || element.tagName);
+      return { documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, overflow };
+    });
+    assert.equal(layout.documentOverflow, false);
+    assert.deepEqual(layout.overflow, []);
+  } finally {
+    await browser.close();
+  }
 });

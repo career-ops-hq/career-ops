@@ -154,7 +154,7 @@
 
   .cv-photo--rounded { border-radius: 8px; }
   .cv-photo--circle { border-radius: 50%; aspect-ratio: 1; height: 80px; }
-  .cv-photo--square { border-radius: 0; }
+  .cv-photo--square { border-radius: 0; aspect-ratio: 1; height: 80px; }
 
   /* === SECTIONS === */
   .section {
@@ -437,7 +437,11 @@
 
   /* === Simplified Chinese typography === */
   html[lang="zh-CN"] body,
-  html[lang="zh"] body {
+  html[lang="zh"] body,
+  html[lang="zh-CN"] .contact-row,
+  html[lang="zh"] .contact-row,
+  html[lang="zh-CN"] .competency-tag,
+  html[lang="zh"] .competency-tag {
     font-family: 'DM Sans', 'PingFang SC', 'Hiragino Sans GB',
       'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC',
       'Source Han Sans SC', sans-serif;
@@ -450,14 +454,10 @@
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
-  html[lang="zh-CN"] .competency-tag,
-  html[lang="zh-CN"] .skill-category,
   html[lang="zh"] .header h1,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
-  html[lang="zh"] .project-title,
-  html[lang="zh"] .competency-tag,
-  html[lang="zh"] .skill-category {
+  html[lang="zh"] .project-title {
     font-family: 'Space Grotesk', 'PingFang SC', 'Hiragino Sans GB',
       'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC',
       'Source Han Sans SC', sans-serif;

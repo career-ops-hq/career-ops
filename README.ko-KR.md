@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops 멀티 에이전트 취업 시스템" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops 멀티 에이전트 취업 시스템" width="800"></a>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>소개된 매체</sub></p>
@@ -33,7 +33,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops 데모" width="800">
+  <img src="docs/demo.gif" alt="career-ops 데모" width="800">
 </p>
 
 <p align="center"><strong>740개 이상의 채용 공고 평가 · 100개 이상의 맞춤형 이력서 생성 · 꿈의 직장 1곳 합격</strong></p>
@@ -65,17 +65,17 @@
 
 ## 이게 뭔가요
 
-Career-Ops는 AI 코딩 CLI를 취업 활동 전체를 관리하는 커맨드 센터로 바꿔줍니다. 스프레드시트에서 수동으로 지원 현황을 관리하는 대신, AI 파이프라인이 알아서 처리합니다:
+career-ops는 AI 코딩 CLI를 취업 활동 전체를 관리하는 커맨드 센터로 바꿔줍니다. 스프레드시트에서 수동으로 지원 현황을 관리하는 대신, AI 파이프라인이 알아서 처리합니다:
 
-- **공고 평가** -- 구조화된 A-F 스코어링 (10개 가중 평가 항목)
+- **공고 평가** -- 구조화된 A-F 평가 (다섯 개 항목이 1.0-5.0점으로 산출됨)
 - **맞춤형 PDF 생성** -- JD별로 최적화된 ATS 이력서
 - **포털 자동 스캔** -- Greenhouse, Ashby, Lever, 기업 채용 페이지
 - **일괄 처리** -- 서브 에이전트로 10개 이상의 공고를 병렬 평가
 - **통합 추적** -- 무결성 검사가 포함된 단일 데이터 소스
 
-> **중요: 이 도구는 무차별 지원 도구가 아닙니다.** Career-ops는 필터입니다 -- 수백 개의 공고 중 당신의 시간을 투자할 가치가 있는 소수의 공고를 찾아줍니다. 4.0/5 미만의 공고에는 지원하지 않는 것을 강력히 권장합니다. 당신의 시간도, 채용 담당자의 시간도 소중합니다. 제출 전에 항상 직접 검토하세요.
+> **중요: 이 도구는 무차별 지원 도구가 아닙니다.** career-ops는 필터입니다 -- 수백 개의 공고 중 당신의 시간을 투자할 가치가 있는 소수의 공고를 찾아줍니다. 4.0/5 미만의 공고에는 지원하지 않는 것을 강력히 권장합니다. 당신의 시간도, 채용 담당자의 시간도 소중합니다. 제출 전에 항상 직접 검토하세요.
 
-Career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwright로 채용 페이지를 탐색하고, 키워드 매칭이 아닌 이력서와 JD를 비교 분석하여 적합도를 판단하고, 공고별로 이력서를 맞춤 생성합니다.
+career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwright로 채용 페이지를 탐색하고, 키워드 매칭이 아닌 이력서와 JD를 비교 분석하여 적합도를 판단하고, 공고별로 이력서를 맞춤 생성합니다.
 
 > **참고: 처음 몇 번의 평가는 정확하지 않을 수 있습니다.** 시스템이 아직 당신을 모르기 때문입니다. 이력서, 커리어 스토리, 주요 성과, 선호도, 잘하는 것, 피하고 싶은 것 등 맥락을 알려주세요. 정보를 줄수록 더 정확해집니다. 새로운 리크루터를 온보딩한다고 생각하세요: 첫 주는 당신을 파악하는 시간이고, 그 이후부터 진가를 발휘합니다.
 
@@ -135,7 +135,7 @@ claude   # open your AI CLI — it onboards you on first launch
 
 ## 사용법
 
-Career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
+career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
 
 ```
 /career-ops                → 사용 가능한 모든 명령어 표시

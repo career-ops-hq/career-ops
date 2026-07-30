@@ -15,6 +15,12 @@ import { tmpdir } from 'os';
 import yaml from 'js-yaml';
 
 /**
+ * Minimum age before directory age alone may condemn an ownerless lock or
+ * recover guard. See `lockCanRecover` for why the age check needs a floor.
+ */
+export const OWNERLESS_GRACE_MS = 1_000;
+
+/**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
  *
  * `split('|')` yields a leading empty element (before the opening `|`) and,
@@ -203,6 +209,11 @@ function readLockOwner(lockDir) {
   }
 }
 
+function sameLockDirectory(left, right) {
+  return left.dev === right.dev && left.ino === right.ino
+    && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
+}
+
 /**
  * Decide whether an existing lock can be safely recovered.
  *
@@ -212,8 +223,20 @@ function readLockOwner(lockDir) {
  * directory itself is older than the stale threshold, the waiting process may
  * remove the lock and retry acquisition.
  *
+ * That age fallback needs a floor. Two directories are ownerless by
+ * construction, not by accident: a lock between its `mkdirSync` and its
+ * `owner.json` write, and the recover guard, which never carries `owner.json`
+ * at all. Judging those on `age > staleMs` alone lets a caller with an
+ * aggressive staleMs delete a directory created microseconds ago — either
+ * stealing a winner's lock inside its acquisition window, or evicting a live
+ * guard and putting two callers inside the decide-then-delete window the guard
+ * exists to serialize. OWNERLESS_GRACE_MS is a lower bound on that patience,
+ * never a cap: a larger caller staleMs still wins, and a genuinely abandoned
+ * directory still ages out, so a crash while holding the guard cannot disable
+ * recovery for good.
+ *
  * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery.
+ * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
  * @returns {boolean} True when the caller may remove and recreate the lock.
  */
 function lockCanRecover(lockDir, staleMs) {
@@ -221,7 +244,7 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
 
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
   } catch {
     return true;
   }
@@ -241,8 +264,9 @@ function lockCanRecover(lockDir, staleMs) {
  * @param {object} [options] - Lock timing options.
  * @param {number} [options.timeoutMs=60000] - Maximum time to wait for the lock.
  * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
+ * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold, floored at OWNERLESS_GRACE_MS.
  * @param {string} [options.tracker] - Tracker path recorded in owner metadata.
+ * @param {Function} [options.removeLock] - Release hook for deterministic fault tests.
  * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}
  * Lock handle with metadata and an idempotent release method.
  */
@@ -277,18 +301,68 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         throw ownerErr;
       }
 
+      let ownerVerified = false;
+      let verifiedDir = null;
       let released = false;
+      const removeLock = typeof options.removeLock === 'function'
+        ? options.removeLock
+        : path => rmSync(path, { recursive: true, force: true });
       return {
         attempts,
         waitMs: Date.now() - startedAt,
         staleRecovered,
         release() {
           if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
+          if (ownerVerified) {
+            let currentDir;
+            try {
+              currentDir = statSync(lockDir);
+            } catch (err) {
+              if (err?.code === 'ENOENT') {
+                released = true;
+                return;
+              }
+              throw err;
+            }
+            if (!sameLockDirectory(verifiedDir, currentDir)) {
+              released = true;
+              return;
+            }
+            const owner = readLockOwner(lockDir);
+            if (owner && owner.token !== token) {
+              released = true;
+              return;
+            }
+            if (!owner && existsSync(join(lockDir, 'owner.json'))) {
+              throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
+            }
+          } else {
+            let beforeRead;
+            try {
+              beforeRead = statSync(lockDir);
+            } catch (err) {
+              if (err?.code === 'ENOENT') {
+                released = true;
+                return;
+              }
+              throw err;
+            }
+            const owner = readLockOwner(lockDir);
+            if (owner?.token !== token) {
+              if (owner) released = true;
+              else throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
+              return;
+            }
+            const afterRead = statSync(lockDir);
+            if (!sameLockDirectory(beforeRead, afterRead)) {
+              released = true;
+              return;
+            }
+            ownerVerified = true;
+            verifiedDir = afterRead;
           }
+          removeLock(lockDir);
+          released = true;
         },
       };
     } catch (err) {
@@ -332,6 +406,51 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   const timeoutErr = new Error(`Timed out waiting for tracker lock at ${lockDir}`);
   timeoutErr.code = 'LOCK_TIMEOUT';
   throw timeoutErr;
+}
+
+/**
+ * Open one serialized read/replace transaction for an applications tracker.
+ * Writers receive only the canonical path plus guarded read and atomic replace
+ * operations, keeping the complete mutation inside one shared lock lifetime.
+ */
+export async function openTrackerTransaction(appsFile, options = {}) {
+  const trackerPath = canonicalizeTrackerPath(appsFile);
+  const { lockDir = trackerLockDirFor(trackerPath), ...lockOptions } = options;
+  const lock = await acquireTrackerLock(lockDir, {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: trackerPath,
+    ...lockOptions,
+  });
+  let closed = false;
+  let closeError = null;
+  const assertOpen = () => {
+    if (closed) throw new Error('Tracker transaction is already closed');
+  };
+  return {
+    path: trackerPath,
+    read() {
+      assertOpen();
+      return readFileSync(trackerPath, 'utf-8');
+    },
+    replace(content) {
+      assertOpen();
+      writeFileAtomic(trackerPath, content);
+    },
+    close() {
+      if (closed) return closeError;
+      try {
+        lock.release();
+      } catch (err) {
+        closeError = err;
+        console.error(`Warning: tracker transaction closed but lock cleanup failed at ${lockDir}: ${err.message}`);
+      } finally {
+        closed = true;
+      }
+      return closeError;
+    },
+  };
 }
 
 /**

@@ -41,7 +41,7 @@ import yaml from 'js-yaml';
 import { computeFunnel, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
-import { parseAppliedDate } from './followup-cadence.mjs';
+import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
@@ -277,7 +277,11 @@ export function computeWaiting(rows, timelines, benchmarks, todayStr) {
   const items = [];
   let unknownDates = 0;
   for (const row of rows) {
-    if (row.status !== 'Applied') continue;
+    // Canonicalize before comparing — the funnel counts everApplied through
+    // normalizeStatus, so non-canonical Applied rows (lowercase "applied", a
+    // status carrying a date, localized "Aplicado", markdown-bold "**Applied**")
+    // must surface here too, or the follow-up backlog is under-reported.
+    if (normalizeStatus(row.status) !== 'applied') continue;
     const timeline = timelines.get(row.num) || [];
     const ledgerApplied = timeline.filter(o => o.to === 'Applied' && o.dayMath).pop();
     const appliedDate = ledgerApplied?.date ?? parseAppliedDate(row.notes) ?? null;
@@ -573,6 +577,26 @@ function selfTest() {
   const w3 = wait.items.find(i => i.num === 3);
   check(w3.dateSource === 'unknown' && w3.appliedDate === null, 'waiting: unknown date listed, never guessed');
   check(!wait.items.some(i => i.num === 4), 'waiting: non-Applied rows excluded');
+
+  // Non-canonical Applied rows must still count as in-flight. The funnel counts
+  // everApplied through normalizeStatus, so lowercase "applied", a status
+  // carrying a date, a localized "Aplicado", and markdown-bold "**Applied**"
+  // belong in the waiting backlog too (regression: a raw row.status !== 'Applied'
+  // filter dropped all four and under-reported follow-ups).
+  const noncanonTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | CanonCo | Role | 4.0/5 | Applied | ❌ | - | Applied 2026-07-01 |',
+    '| 2 | 2026-06-01 | LowerCo | Role | 4.0/5 | applied | ❌ | - | Applied 2026-07-01 |',
+    '| 3 | 2026-06-01 | DatedCo | Role | 4.0/5 | Applied 2026-06-01 | ❌ | - | Applied 2026-07-01 |',
+    '| 4 | 2026-06-01 | LocaleCo | Role | 4.0/5 | Aplicado | ❌ | - | Applied 2026-07-01 |',
+    '| 5 | 2026-06-01 | BoldCo | Role | 4.0/5 | **Applied** | ❌ | - | Applied 2026-07-01 |',
+  ].join('\n');
+  const noncanon = analyze({ trackerContent: noncanonTracker, logContent: '', benchmarks: bm, states, todayStr: TODAY });
+  check(noncanon.waiting.inFlight === 5, `waiting: non-canonical Applied variants all count in-flight, got ${noncanon.waiting.inFlight}`);
+  // The waiting count must agree with the funnel's everApplied for the same rows —
+  // both canonicalize status the same way, so neither may silently drop a variant.
+  check(noncanon.calibration.everApplied === 5, `waiting: in-flight agrees with everApplied on non-canonical rows, got ${noncanon.calibration.everApplied}`);
 
   // -- data quality --
   const dq = analyze({ trackerContent: waitTracker, logContent: LOG_FIXTURE, benchmarks: bm, states, todayStr: TODAY }).dataQuality;

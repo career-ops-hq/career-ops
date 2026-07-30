@@ -176,6 +176,21 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  if (config.visa_filter !== undefined) {
+    if (!isObject(config.visa_filter)) {
+      add(errors, 'visa_filter', 'visa_filter must be an object');
+    } else {
+      if (config.visa_filter.enabled !== undefined && typeof config.visa_filter.enabled !== 'boolean') {
+        add(errors, 'visa_filter.enabled', 'must be a boolean when set');
+      }
+      if (config.visa_filter.require_mention !== undefined && typeof config.visa_filter.require_mention !== 'boolean') {
+        add(errors, 'visa_filter.require_mention', 'must be a boolean when set');
+      }
+      validateKeywordList(config.visa_filter.positive, 'visa_filter.positive', errors);
+      validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
+    }
+  }
+
   if (config.search_queries !== undefined && !Array.isArray(config.search_queries)) {
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }

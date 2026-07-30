@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
 
 // Avature provider — parses the public Avature career-site job list.
 // Auto-detects from a careers_url on `*.avature.net`; a branded custom domain
@@ -54,18 +55,6 @@ function resolveConfig(entry) {
   // e.g. /en_US/searchjobs/SearchJobs); otherwise default to the classic path.
   const searchPath = /\/SearchJobs\b/i.test(u.pathname) ? u.pathname.replace(/\/+$/, '') : '/careers/SearchJobs';
   return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin };
-}
-
-const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#8226': '•' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z0-9]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED[body.toLowerCase()] ?? m;
-  });
 }
 
 /** @param {string} s */

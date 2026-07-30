@@ -145,9 +145,10 @@ version: 1.0.0
     color: #1a1a1a;
   }
 
-  /* Links must never break across lines */
+  /* Keep long contact values inside the printable A4 box. */
   a {
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   /* === CORE COMPETENCIES === */
