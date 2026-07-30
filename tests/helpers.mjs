@@ -115,10 +115,60 @@ function resolveAllowedExecutable(cmd) {
 export function run(cmd, args = [], opts = {}) {
   const exe = resolveAllowedExecutable(cmd);
   try {
-    return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    const out = execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    lastFailure = null;
+    return out;
   } catch (e) {
+    // execFileSync attaches the child's streams and exit status to the error.
+    // Keep them: callers report failure as `<name> crashed`, and without this a
+    // CI-only failure arrives as a single line with no stack, no assertion text,
+    // and no exit code, which is not enough to act on.
+    lastFailure = {
+      status: e?.status ?? null,
+      signal: e?.signal ?? null,
+      stdout: e?.stdout == null ? '' : String(e.stdout),
+      stderr: e?.stderr == null ? '' : String(e.stderr),
+    };
     return null;
   }
+}
+
+/** Diagnostics from the most recent failed run(), or null if the last run succeeded. */
+let lastFailure = null;
+
+/**
+ * Diagnostics for the most recently failed run().
+ *
+ * Cleared by a successful run so a stale record is never attributed to a later
+ * command. The suite is sequential, so "most recent" is unambiguous.
+ *
+ * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ */
+export function lastRunFailure() {
+  return lastFailure;
+}
+
+/**
+ * The last failure rendered for interpolation into a failure message, or an
+ * empty string when nothing has failed, so a caller can append it
+ * unconditionally without changing its message on the success path.
+ *
+ * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
+ * @returns {string}
+ */
+export function formatRunFailure(maxChars = 2000) {
+  if (!lastFailure) return '';
+  const clip = (s) => {
+    const t = String(s ?? '').trim();
+    if (!t) return '';
+    return t.length > maxChars ? `${t.slice(0, maxChars)}\n    ... (${t.length - maxChars} more chars)` : t;
+  };
+  const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
+  const out = clip(lastFailure.stdout);
+  const err = clip(lastFailure.stderr);
+  if (out) parts.push(`\n    stdout: ${out.replace(/\n/g, '\n    ')}`);
+  if (err) parts.push(`\n    stderr: ${err.replace(/\n/g, '\n    ')}`);
+  return parts.join('');
 }
 
 /**
