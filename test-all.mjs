@@ -29,6 +29,7 @@ import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFil
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
+import yaml from 'js-yaml';
 import { pass, fail, warn, run, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
 
 /**
@@ -159,6 +160,7 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
@@ -2159,6 +2161,98 @@ if (
   fail('oferta missing work-authorization / visa-sponsorship signal in Block A');
 }
 
+// --- Block G agency licensing check (#2037) ---
+{
+  // 1. Jurisdiction table exists, parses as YAML, and the CA-ON seed is complete
+  const alPath = join(ROOT, 'templates', 'agency-licensing.yml');
+  if (!existsSync(alPath)) {
+    fail('templates/agency-licensing.yml missing (#2037)');
+  } else {
+    try {
+      const { load } = await import('js-yaml');
+      const alRaw = readFileSync(alPath, 'utf-8');
+      const al = load(alRaw);
+      const on = al?.jurisdictions?.['CA-ON'];
+      if (
+        on &&
+        on.licensing_required_for === 'both' &&
+        String(on.effective) === '2024-07-01' &&
+        typeof on.registry?.url === 'string' && on.registry.url.includes('ontario.ca') &&
+        typeof on.registry?.what_it_shows === 'string' && on.registry.what_it_shows.length > 0 &&
+        typeof on.legal_basis === 'string' && on.legal_basis.includes('O. Reg. 99/23') &&
+        typeof on.client_side_prohibition === 'string' && on.client_side_prohibition.length > 0 &&
+        typeof on.penalties === 'string' && on.penalties.length > 0 &&
+        typeof on.transitional_notes === 'string' && on.transitional_notes.length > 0 &&
+        Array.isArray(on.sources) && on.sources.length > 0 &&
+        Boolean(on.as_of)
+      ) {
+        pass('agency-licensing.yml parses and CA-ON seed carries both-scope licensing, corrected 2024-07-01 effective date, ontario.ca registry, legal basis, client-side prohibition, penalties, transitional notes, sources, as_of (#2037)');
+      } else {
+        fail('agency-licensing.yml CA-ON seed incomplete — needs licensing_required_for both, effective 2024-07-01 (O. Reg. 339/23 delayed commencement — NOT 2024-01-01), registry.url on ontario.ca with what_it_shows, legal_basis (O. Reg. 99/23), client_side_prohibition, penalties, transitional_notes, sources, as_of (#2037)');
+      }
+      if (
+        alRaw.includes('CONTRIBUTION RULE') &&
+        alRaw.includes('NEVER-ASSERT RULE') &&
+        alRaw.includes('never a third-party mirror')
+      ) {
+        pass('agency-licensing.yml header documents the contribution rule, the never-assert rule, and the official-registry-only requirement (#2037)');
+      } else {
+        fail('agency-licensing.yml header missing the contribution rule, never-assert rule, and/or official-registry-only requirement (#2037)');
+      }
+    } catch (e) {
+      fail(`templates/agency-licensing.yml does not parse as YAML: ${e.message} (#2037)`);
+    }
+  }
+
+  // 2. oferta.md carries the agency-licensing section with the agency-mediated
+  //    trigger, registry pointer, tracker-note suggestion, and jurisdiction derivation
+  const alStart = ofertaMode.indexOf('Agency Licensing Check');
+  const alEnd = ofertaMode.indexOf('### Output format:', Math.max(alStart, 0));
+  const alSection = alStart >= 0 && alEnd > alStart ? ofertaMode.slice(alStart, alEnd) : '';
+  if (
+    alSection.includes('templates/agency-licensing.yml') &&
+    alSection.includes('agency-mediated') &&
+    alSection.includes('"our client"') &&
+    alSection.includes('{registry.url}') &&
+    alSection.includes('via={Agency}') &&
+    alSection.includes('never writes the tracker itself') &&
+    alSection.includes('config/profile.yml') &&
+    alSection.includes('skip this signal silently') &&
+    alSection.includes('not legal advice')
+  ) {
+    pass('oferta Block G agency-licensing signal pins the agency-mediated trigger, registry pointer, via={Agency} tracker-note suggestion, jurisdiction derivation, silent skip, not-legal-advice note (#2037)');
+  } else {
+    fail('oferta Block G missing/incomplete agency-licensing section — needs table reference, agency-mediated trigger ("our client"), registry pointer, via={Agency} tracker-note suggestion (mode never writes the tracker), config/profile.yml jurisdiction derivation, silent skip for no-row jurisdictions, not-legal-advice note (#2037)');
+  }
+
+  // 3. Hard-rule pins: the signal never asserts unlicensed status and never
+  //    fetches/scrapes the registry (zero-fetch pillar)
+  if (
+    alSection.includes('never asserts an agency is unlicensed') &&
+    alSection.includes('never fetches or scrapes the registry')
+  ) {
+    pass('oferta agency-licensing signal pins the never-assert-unlicensed and never-fetch/scrape-registry hard rules (#2037)');
+  } else {
+    fail('oferta agency-licensing signal missing the hard rules — must state it "never asserts an agency is unlicensed" and "never fetches or scrapes the registry" (#2037)');
+  }
+
+  // 4. Phrasing discipline holds in the report-facing text: the blockquote
+  //    templates the agent renders describe the regime and hand over the
+  //    registry link — never accusations about a specific agency. Clause-
+  //    directed regex (per #2029/#2031): ban "this/the agency is unlicensed /
+  //    operating illegally" patterns while letting regime descriptions
+  //    ("Ontario has required ... licences since 2024-07-01") pass.
+  const alQuoteLines = alSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const alAccusatory = alQuoteLines.filter((l) =>
+    /(this|the|that|an?y?)\s+(agency|recruiter|operator)\s+(is|was|are|were)\s+(unlicensed|not\s+licensed|operating\s+(illegally|unlawfully)|breaking\s+the\s+law)/i.test(l)
+  );
+  if (alSection && alQuoteLines.length >= 1 && alAccusatory.length === 0) {
+    pass('agency-licensing report template states regime facts + registry pointer only — no "agency is unlicensed/operating illegally" assertions (#2037)');
+  } else {
+    fail(`agency-licensing phrasing discipline broken: ${alAccusatory.length ? `accusatory blockquote line(s): ${alAccusatory[0].trim().slice(0, 80)}` : 'expected a blockquote output template in the section'} (#2037)`);
+  }
+}
+
 // --- offer-prep mode: contract reading companion (describes, never judges) ---
 const offerPrepMode = fileExists('modes/offer-prep.md') ? readFile('modes/offer-prep.md') : '';
 if (
@@ -3931,6 +4025,291 @@ try {
   fail(`portal slug validator tests crashed: ${e.message}`);
 }
 
+// ── 10c. SLUG AUTO-FIXER (fix-slugs.mjs) ─────────────────────────
+
+console.log('\n10c. Slug auto-fixer');
+
+try {
+  const { splitCompanyBlocks, computeFixes } = await import(
+    pathToFileURL(join(ROOT, 'fix-slugs.mjs')).href
+  );
+
+  const fixture = [
+    'tracked_companies:',
+    '',
+    '  # A live company — must stay untouched',
+    '  - name: Live Co',
+    '    careers_url: https://job-boards.greenhouse.io/livewco',
+    '    api: https://boards-api.greenhouse.io/v1/boards/livewco/jobs',
+    '    notes: "Some notes here."',
+    '    enabled: true',
+    '',
+    '  - name: Migrated Co',
+    '    careers_url: https://jobs.lever.co/migratedco',
+    '    notes: "Old lever board."',
+    '    enabled: true',
+    '',
+    '  - name: Unresolved Co',
+    '    careers_url: https://job-boards.greenhouse.io/typo-slug',
+    '    enabled: true',
+    '',
+    '  - name: No Notes Co',
+    '    careers_url: https://jobs.ashbyhq.com/nonotesco',
+    '    enabled: true',
+    '',
+  ].join('\n');
+
+  const { blocks } = splitCompanyBlocks(fixture);
+  const blockNames = blocks.map((b) => b.name);
+  if (
+    blockNames.length === 4 &&
+    blockNames.includes('Live Co') &&
+    blockNames.includes('Migrated Co') &&
+    blockNames.includes('Unresolved Co') &&
+    blockNames.includes('No Notes Co')
+  ) {
+    pass('fix-slugs splits portals.yml text into per-company blocks (comments excluded)');
+  } else {
+    fail(`fix-slugs splitCompanyBlocks wrong: ${JSON.stringify(blockNames)}`);
+  }
+
+  // Mock verify-portals results: one resolvable ATS migration (lever->ashby),
+  // one resolvable migration into Greenhouse for an entry with no api/notes
+  // fields yet, one genuinely unresolved slug, and one already-live entry.
+  const mockResults = [
+    { name: 'Live Co', status: 'live', ats: 'greenhouse', slug: 'livewco' },
+    {
+      name: 'Migrated Co',
+      status: 'missing',
+      ats: 'lever',
+      slug: 'migratedco',
+      errorKind: 'slug_gone',
+      suggested: { ats: 'ashby', slug: 'top-hat' },
+    },
+    {
+      name: 'Unresolved Co',
+      status: 'missing',
+      ats: 'greenhouse',
+      slug: 'typo-slug',
+      errorKind: 'slug_gone',
+      // no `suggested` — nothing resolved
+    },
+    {
+      name: 'No Notes Co',
+      status: 'missing',
+      ats: 'ashby',
+      slug: 'nonotesco',
+      errorKind: 'slug_gone',
+      suggested: { ats: 'greenhouse', slug: 'nonotesnew' },
+    },
+  ];
+
+  const { text: fixedText, fixes } = computeFixes(fixture, mockResults, { dateStr: '2026-07-08' });
+  const fixedByName = Object.fromEntries(fixes.map((f) => [f.name, f]));
+
+  if (
+    fixes.length === 2 &&
+    fixedByName['Migrated Co']?.newAts === 'ashby' &&
+    fixedByName['Migrated Co']?.careersUrlNew === 'https://jobs.ashbyhq.com/top-hat' &&
+    fixedByName['No Notes Co']?.newAts === 'greenhouse' &&
+    fixedByName['No Notes Co']?.careersUrlNew === 'https://job-boards.greenhouse.io/nonotesnew'
+  ) {
+    pass('fix-slugs computeFixes resolves only entries with a suggested alternate');
+  } else {
+    fail(`fix-slugs computeFixes wrong fix set: ${JSON.stringify(fixedByName)}`);
+  }
+
+  const parsedFixed = yaml.load(fixedText);
+  const byNameFixed = Object.fromEntries(parsedFixed.tracked_companies.map((c) => [c.name, c]));
+  if (
+    byNameFixed['Live Co'].careers_url === 'https://job-boards.greenhouse.io/livewco' &&
+    byNameFixed['Live Co'].notes === 'Some notes here.' &&
+    byNameFixed['Migrated Co'].careers_url === 'https://jobs.ashbyhq.com/top-hat' &&
+    !('api' in byNameFixed['Migrated Co']) &&
+    byNameFixed['Migrated Co'].notes.includes('slug migrated lever->ashby 2026-07-08, verify-portals') &&
+    byNameFixed['Unresolved Co'].careers_url === 'https://job-boards.greenhouse.io/typo-slug' &&
+    byNameFixed['No Notes Co'].careers_url === 'https://job-boards.greenhouse.io/nonotesnew' &&
+    byNameFixed['No Notes Co'].api === 'https://boards-api.greenhouse.io/v1/boards/nonotesnew/jobs' &&
+    byNameFixed['No Notes Co'].notes.includes('slug migrated ashby->greenhouse 2026-07-08, verify-portals')
+  ) {
+    pass('fix-slugs writes resolved careers_url/api/notes and re-parses as valid YAML');
+  } else {
+    fail(`fix-slugs fixed-text YAML wrong: ${JSON.stringify(byNameFixed)}`);
+  }
+
+  // A resolvable-but-untouched control: an unresolved entry (no `suggested`)
+  // must come out of computeFixes byte-for-byte identical to its input block.
+  if (fixedText.includes('  - name: Unresolved Co\n    careers_url: https://job-boards.greenhouse.io/typo-slug\n    enabled: true')) {
+    pass('fix-slugs leaves an unresolved entry (no suggestion) completely untouched');
+  } else {
+    fail('fix-slugs modified an unresolved entry it should have left alone');
+  }
+
+  // Bottom-to-top processing: fixing an earlier-in-file company must not
+  // corrupt the line ranges of a later-in-file company still pending, even
+  // when the earlier fix inserts new lines (new `api:` field, new `notes:`
+  // field) that shift every line number below it.
+  const orderFixture = [
+    'tracked_companies:',
+    '',
+    '  - name: First Co',
+    '    careers_url: https://jobs.lever.co/firstco',
+    '    enabled: true',
+    '',
+    '  - name: Second Co',
+    '    careers_url: https://jobs.lever.co/secondco',
+    '    enabled: true',
+    '',
+    '  - name: Third Co',
+    '    careers_url: https://jobs.lever.co/thirdco',
+    '    enabled: true',
+    '',
+  ].join('\n');
+  const orderResults = [
+    { name: 'First Co', status: 'missing', ats: 'lever', slug: 'firstco', suggested: { ats: 'greenhouse', slug: 'first-gh' } },
+    { name: 'Second Co', status: 'missing', ats: 'lever', slug: 'secondco', suggested: { ats: 'greenhouse', slug: 'second-gh' } },
+    { name: 'Third Co', status: 'missing', ats: 'lever', slug: 'thirdco', suggested: { ats: 'ashby', slug: 'third-ashby' } },
+  ];
+  const { text: orderedText } = computeFixes(orderFixture, orderResults, { dateStr: '2026-07-09' });
+  const orderedParsed = yaml.load(orderedText);
+  const orderedByName = Object.fromEntries(orderedParsed.tracked_companies.map((c) => [c.name, c]));
+  if (
+    orderedByName['First Co'].careers_url === 'https://job-boards.greenhouse.io/first-gh' &&
+    orderedByName['First Co'].api === 'https://boards-api.greenhouse.io/v1/boards/first-gh/jobs' &&
+    orderedByName['Second Co'].careers_url === 'https://job-boards.greenhouse.io/second-gh' &&
+    orderedByName['Second Co'].api === 'https://boards-api.greenhouse.io/v1/boards/second-gh/jobs' &&
+    orderedByName['Third Co'].careers_url === 'https://jobs.ashbyhq.com/third-ashby' &&
+    !('api' in orderedByName['Third Co'])
+  ) {
+    pass('fix-slugs applies fixes bottom-to-top so earlier line-count shifts never corrupt a later block');
+  } else {
+    fail(`fix-slugs multi-company ordering wrong: ${JSON.stringify(orderedByName)}`);
+  }
+
+  // notes: edge cases — block scalar and embedded/single quotes must not
+  // corrupt the surrounding YAML.
+  const notesFixture = [
+    'tracked_companies:',
+    '',
+    '  - name: Block Co',
+    '    careers_url: https://jobs.lever.co/blockco',
+    '    notes: |',
+    '      Line one of notes.',
+    '      Line two of notes.',
+    '    enabled: true',
+    '',
+    '  - name: Quote Co',
+    '    careers_url: https://jobs.lever.co/quoteco',
+    '    notes: Some "quoted" unquoted text',
+    '    enabled: true',
+    '',
+    "  - name: Single Co",
+    '    careers_url: https://jobs.lever.co/singleco',
+    "    notes: 'It''s a single-quoted note'",
+    '    enabled: true',
+    '',
+    '  - name: Commented Co',
+    '    careers_url: https://jobs.lever.co/commentedco',
+    '    notes: "Existing note" # do not remove this line',
+    '    enabled: true',
+    '',
+  ].join('\n');
+  const notesResults = [
+    { name: 'Block Co', status: 'missing', ats: 'lever', slug: 'blockco', suggested: { ats: 'ashby', slug: 'block-ashby' } },
+    { name: 'Quote Co', status: 'missing', ats: 'lever', slug: 'quoteco', suggested: { ats: 'ashby', slug: 'quote-ashby' } },
+    { name: 'Single Co', status: 'missing', ats: 'lever', slug: 'singleco', suggested: { ats: 'ashby', slug: 'single-ashby' } },
+    { name: 'Commented Co', status: 'missing', ats: 'lever', slug: 'commentedco', suggested: { ats: 'ashby', slug: 'commented-ashby' } },
+  ];
+  const { text: notesText } = computeFixes(notesFixture, notesResults, { dateStr: '2026-07-09' });
+  const notesParsed = yaml.load(notesText);
+  const notesByName = Object.fromEntries(notesParsed.tracked_companies.map((c) => [c.name, c]));
+  if (
+    notesByName['Block Co'].notes.includes('Line one of notes.') &&
+    notesByName['Block Co'].notes.includes('Line two of notes.') &&
+    notesByName['Block Co'].notes.includes('slug migrated lever->ashby 2026-07-09, verify-portals') &&
+    notesByName['Quote Co'].notes === 'Some "quoted" unquoted text (slug migrated lever->ashby 2026-07-09, verify-portals)' &&
+    notesByName['Single Co'].notes === "It's a single-quoted note (slug migrated lever->ashby 2026-07-09, verify-portals)" &&
+    notesByName['Commented Co'].notes === 'Existing note (slug migrated lever->ashby 2026-07-09, verify-portals)'
+  ) {
+    pass('fix-slugs safely appends notes to block-scalar and quote-embedded values');
+  } else {
+    fail(`fix-slugs notes edge cases produced invalid/wrong content: ${JSON.stringify(notesByName)}`);
+  }
+
+  // A quoted notes value followed by a trailing `# comment` must keep that
+  // comment as a real YAML comment (outside the rewritten quoted scalar),
+  // not swallow it into the value — regression guard for the quote-type
+  // check running before the comment was split off.
+  if (notesText.includes('# do not remove this line')) {
+    pass('fix-slugs preserves a trailing inline comment on a quoted notes value');
+  } else {
+    fail(`fix-slugs lost the trailing comment on Commented Co's notes line: ${JSON.stringify(notesText)}`);
+  }
+
+  // Regression guard: when `api:` already exists and is rewritten in place
+  // (not newly inserted), a subsequently-inserted `notes:` field must land
+  // AFTER it, not before it — `insertAfter` has to advance to the existing
+  // api line's position, not stay pinned at careers_url.
+  const apiOrderFixture = [
+    'tracked_companies:',
+    '',
+    '  - name: Renamed GH Co',
+    '    careers_url: https://job-boards.greenhouse.io/oldslug',
+    '    api: https://boards-api.greenhouse.io/v1/boards/oldslug/jobs',
+    '    enabled: true',
+    '',
+  ].join('\n');
+  const apiOrderResults = [
+    { name: 'Renamed GH Co', status: 'missing', ats: 'greenhouse', slug: 'oldslug', suggested: { ats: 'greenhouse', slug: 'newslug' } },
+  ];
+  const { text: apiOrderText } = computeFixes(apiOrderFixture, apiOrderResults, { dateStr: '2026-07-09' });
+  const apiLineIdx = apiOrderText.split('\n').findIndex((l) => l.trim().startsWith('api:'));
+  const notesLineIdx = apiOrderText.split('\n').findIndex((l) => l.trim().startsWith('notes:'));
+  if (apiLineIdx !== -1 && notesLineIdx !== -1 && notesLineIdx > apiLineIdx) {
+    pass('fix-slugs inserts a new notes field after an existing rewritten-in-place api field');
+  } else {
+    fail(`fix-slugs inserted notes before the existing api field: ${JSON.stringify(apiOrderText)}`);
+  }
+
+  // --dry-run must never mutate the file: computeFixes is pure (it only
+  // returns text), so a caller doing dry-run simply never calls writeFileSync.
+  // Verify that guarantee holds by calling computeFixes twice on the SAME base
+  // input and deep-equality-checking the two independently-returned outputs —
+  // comparing the input string to itself would prove nothing (strings are
+  // immutable in JS; that reference can never change no matter what the
+  // function does internally).
+  const runA = computeFixes(fixture, mockResults, { dateStr: '2026-07-08' });
+  const runB = computeFixes(fixture, mockResults, { dateStr: '2026-07-08' });
+  if (runA.text === runB.text && JSON.stringify(runA.fixes) === JSON.stringify(runB.fixes)) {
+    pass('fix-slugs computeFixes does not mutate its input text (dry-run safe)');
+  } else {
+    fail('fix-slugs computeFixes produced different output across two calls on the same input');
+  }
+
+  // End-to-end CLI --dry-run must not write to disk.
+  const dryRunTmp = mkdtempSync(join(tmpdir(), 'career-ops-fix-slugs-dryrun-'));
+  const dryRunPortals = join(dryRunTmp, 'portals.yml');
+  writeFileSync(dryRunPortals, fixture);
+  const beforeDryRun = readFileSync(dryRunPortals, 'utf-8');
+  try {
+    execFileSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', dryRunPortals, '--dry-run'], {
+      cwd: ROOT,
+      timeout: 15000,
+    });
+  } catch {
+    // Network is reachable-or-not in CI; either way, no write should occur.
+  }
+  const afterDryRun = readFileSync(dryRunPortals, 'utf-8');
+  if (afterDryRun === beforeDryRun) {
+    pass('fix-slugs.mjs --dry-run (default) never writes to portals.yml');
+  } else {
+    fail('fix-slugs.mjs --dry-run wrote to portals.yml — must require --fix/--apply');
+  }
+  rmSync(dryRunTmp, { recursive: true, force: true });
+} catch (e) {
+  fail(`slug auto-fixer tests crashed: ${e.message}`);
+}
+
 // ── 11. AGENTS.md INTEGRITY ─────────────────────────────────────
 
 console.log('\n11. AGENTS.md integrity');
@@ -4578,6 +4957,7 @@ try {
   const {
     buildLocationFilter,
     locationHintFromUrl,
+    titleSignalsRemote,
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
@@ -4846,6 +5226,112 @@ try {
     pass('URL hint is boundary-matched as well (Indianapolis URL survives, India URL does not)');
   } else {
     fail('URL hint must use the same word-boundary matching as the location string');
+  }
+
+  // Case 24: a remote marker in the TITLE satisfies `allow` when the location
+  // names only a city/state. Radancy/TalentBrew tenants (Optum, Kaiser) report
+  // the hiring office as the location and state remoteness in the title, so a
+  // country/region `allow` list rejected genuinely remote US roles. Measured
+  // live on careers.unitedhealthgroup.com: 14 PM-family postings, 0 passed.
+  const remoteTitleFilter = buildLocationFilter({
+    allow: ['remote', 'united states', 'usa', 'us', 'new york'],
+    block: ['india', 'united kingdom', 'london'],
+  });
+  if (
+    remoteTitleFilter('Costa Mesa, California', undefined, 'Sr. PBM Client Implementation Project Manager - Remote') === true &&
+    remoteTitleFilter('Las Vegas, Nevada', undefined, 'Program Manager - Remote') === true &&
+    remoteTitleFilter('St Louis, Missouri', undefined, 'Clinical Program Manager (Case Management) - Remote in MO') === true &&
+    remoteTitleFilter('Phoenix, Arizona', undefined, 'Project Manager (Remote)') === true &&
+    remoteTitleFilter('Dallas, Texas', undefined, 'IT Program Manager, Remote - US') === true
+  ) {
+    pass('a remote marker in the title satisfies allow when the location is city-only');
+  } else {
+    fail('title-stated remote roles are still being rejected for a city-only location');
+  }
+
+  // Case 25: the rescue must NOT widen `block`. It runs after the block tier, so
+  // a remote title can never pull in an excluded country.
+  if (
+    remoteTitleFilter('Bengaluru, Karnataka, India', undefined, 'Program Manager - Remote') === false &&
+    remoteTitleFilter('London, United Kingdom', undefined, 'Project Manager - Remote') === false &&
+    remoteTitleFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/PM_R1', 'Program Manager - Remote') === false
+  ) {
+    pass('a remote title never rescues a blocked location (block still wins, URL hint included)');
+  } else {
+    fail('remote-title rescue must not override the block tier');
+  }
+
+  // Case 26: only a work-arrangement marker counts. "Remote Sensing" is a GIS
+  // domain compound — Esri, a tracked company, posts on-site roles with exactly
+  // that phrase, so a bare /remote/ test would silently admit them.
+  if (
+    remoteTitleFilter('Redlands, California', undefined, 'Remote Sensing Program Manager') === false &&
+    remoteTitleFilter('Austin, Texas', undefined, 'Remote Monitoring Project Manager') === false &&
+    titleSignalsRemote('Remote Sensing Analyst') === false &&
+    titleSignalsRemote('Program Manager - Remote') === true &&
+    titleSignalsRemote('Telremote Engineer') === false
+  ) {
+    pass('remote-title detection ignores domain compounds (Remote Sensing/Monitoring) and mid-word hits');
+  } else {
+    fail('remote-title detection must not fire on "Remote Sensing"-style compounds');
+  }
+
+  // Case 27a: an explicit negation must lose. "Non-Remote"/"Not Remote" satisfy
+  // REMOTE_TITLE_RE on their own — the delimiter clears the lookbehind and the
+  // trailing position clears the lookahead — so without a negation guard an
+  // explicitly on-site role would bypass a non-empty `allow` list.
+  if (
+    titleSignalsRemote('Project Manager - Non-Remote') === false &&
+    titleSignalsRemote('Project Manager - Not Remote') === false &&
+    titleSignalsRemote('Office Manager (Non-Remote)') === false &&
+    titleSignalsRemote('Program Manager - NonRemote') === false &&
+    titleSignalsRemote('Program Manager - No Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Non-Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Not Remote') === false
+  ) {
+    pass('an explicit negation ("Non-Remote"/"Not Remote") never counts as a remote marker');
+  } else {
+    fail('negated remote titles are being admitted — an on-site role can bypass allow');
+  }
+
+  // Case 27b: the negation guard must not over-reach. `[\s-]*` spans only spaces
+  // and hyphens, so a word-initial "non"/"not" in an unrelated token cannot
+  // reach across to "remote".
+  if (
+    titleSignalsRemote('Nonprofit Program Manager - Remote') === true &&
+    titleSignalsRemote('Not-for-Profit Program Manager - Remote') === true &&
+    titleSignalsRemote('Nordic Program Manager - Remote') === true &&
+    titleSignalsRemote('Notary Operations Manager - Remote') === true
+  ) {
+    pass('the negation guard does not misfire on Nonprofit/Not-for-Profit/Nordic/Notary titles');
+  } else {
+    fail('negation guard is over-rejecting legitimate remote titles');
+  }
+
+  // Case 27c: the negation separator must be at least as broad as the marker's
+  // own delimiter lookahead. An ASCII-only [\s-] let every non-ASCII dash through
+  // — en dash, em dash, non-breaking hyphen, figure dash and minus all still read
+  // as remote, trivially sidestepping the guard.
+  const negatedDashes = ['-', '–', '—', '‑', '‒', '−', '', ' ', '/'];
+  if (negatedDashes.every((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) === false)) {
+    pass('the negation guard survives Unicode dash variants (en/em/non-breaking/figure/minus)');
+  } else {
+    const leak = negatedDashes.filter((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) !== false);
+    fail(`negated titles leak through with separator(s): ${JSON.stringify(leak)}`);
+  }
+
+  // Case 27: unchanged behavior — on-site city-only roles with no remote marker
+  // stay rejected, and malformed/absent titles are inert.
+  if (
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Senior Project Manager I') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, undefined) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 42) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, '   ') === false &&
+    remoteTitleFilter('United States', undefined, 'Program Manager') === true
+  ) {
+    pass('on-site city-only roles stay rejected; non-string/blank titles are inert');
+  } else {
+    fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
   if (
@@ -5343,6 +5829,146 @@ try {
     fail('parseDate validation wrong');
   }
 
+  // extractContacts — recorded outreach is usually a NAME (LinkedIn produces no
+  // email), so an email-only parser reports contacts: [] for rows that do have a
+  // human attached. "no contact" then reads identically to "contact with no
+  // email on file", which inverts the meaning of the field.
+  {
+    const nameOnly = cadence.extractContacts('reached out to recruiter Julia Masera (LinkedIn)');
+    if (nameOnly.length === 1 && nameOnly[0].name === 'Julia Masera' && nameOnly[0].email === null) {
+      pass('extractContacts finds a name-only contact with no email on file');
+    } else {
+      fail(`extractContacts name-only got ${JSON.stringify(nameOnly)}`);
+    }
+    if (nameOnly[0] && nameOnly[0].channel === 'linkedin') {
+      pass('extractContacts carries the channel through when the notes name one');
+    } else {
+      fail(`extractContacts should report channel 'linkedin', got ${JSON.stringify(nameOnly[0])}`);
+    }
+
+    const emailed = cadence.extractContacts('Emailed Jane Doe at jane.doe@acme.com');
+    if (emailed.length === 1 && emailed[0].email === 'jane.doe@acme.com' && emailed[0].channel === 'email') {
+      pass('extractContacts still resolves an email contact (regression)');
+    } else {
+      fail(`extractContacts email-case got ${JSON.stringify(emailed)}`);
+    }
+
+    if (cadence.extractContacts('On-archetype fit; no submission yet').length === 0) {
+      pass('extractContacts reports no contact when the notes carry none');
+    } else {
+      fail('extractContacts should find nothing in notes with no outreach');
+    }
+
+    // A bare capitalized word pair must not be mistaken for a contact — only a
+    // named outreach verb qualifies, or the field fills with company names.
+    if (cadence.extractContacts('Strong fit for Acme Corp; Series B').length === 0) {
+      pass('extractContacts does not treat a capitalized company name as a contact');
+    } else {
+      fail(`extractContacts false-positived on a company name: ${JSON.stringify(cadence.extractContacts('Strong fit for Acme Corp; Series B'))}`);
+    }
+
+    // MULTIPLICITY: two contacts in one note, reached on DIFFERENT channels.
+    // A whole-note channel scan tags both with whichever channel word appears
+    // first, so the second contact is silently attributed to the wrong channel.
+    {
+      const two = cadence.extractContacts('Messaged recruiter Asha Beirne on LinkedIn; called hiring manager Bob Smith');
+      const asha = two.find(c => c.name === 'Asha Beirne');
+      const bob = two.find(c => c.name === 'Bob Smith');
+      if (two.length === 2 && asha && bob) {
+        pass('extractContacts finds both contacts when one note names two people');
+      } else {
+        fail(`extractContacts two-contact case got ${JSON.stringify(two)}`);
+      }
+      if (asha?.channel === 'linkedin' && bob?.channel === 'phone') {
+        pass('extractContacts derives each contact channel from its own statement, not the whole note');
+      } else {
+        fail(`per-contact channel wrong: asha=${JSON.stringify(asha?.channel)} bob=${JSON.stringify(bob?.channel)}`);
+      }
+    }
+
+    // MERGE: one outreach statement naming a person AND their email is ONE
+    // contact, not an email-only contact plus a separate name-only duplicate.
+    {
+      const merged = cadence.extractContacts('contacted Jane Doe at jane.doe@acme.com');
+      if (merged.length === 1 && merged[0].name === 'Jane Doe' && merged[0].email === 'jane.doe@acme.com') {
+        pass('extractContacts merges a name and email from the same outreach statement');
+      } else {
+        fail(`extractContacts merge-case got ${JSON.stringify(merged)}`);
+      }
+    }
+
+    // DEDUP: the same address repeated in a note is one contact, not two.
+    {
+      const repeated = cadence.extractContacts('emailed jane.doe@acme.com; followed up jane.doe@acme.com');
+      if (repeated.length === 1) {
+        pass('extractContacts deduplicates a repeated email address');
+      } else {
+        fail(`extractContacts repeated-email got ${JSON.stringify(repeated)}`);
+      }
+      // Address case must not defeat the dedup.
+      const cased = cadence.extractContacts('emailed Jane.Doe@Acme.com; then jane.doe@acme.com again');
+      if (cased.length === 1) {
+        pass('extractContacts deduplicates emails case-insensitively');
+      } else {
+        fail(`extractContacts case-variant email got ${JSON.stringify(cased)}`);
+      }
+    }
+
+    // The same person named twice across statements stays one contact.
+    {
+      const dup = cadence.extractContacts('messaged recruiter Ryan Hill; recruiter Ryan Hill replied');
+      if (dup.length === 1 && dup[0].name === 'Ryan Hill') {
+        pass('extractContacts does not double-count a person named in two statements');
+      } else {
+        fail(`extractContacts repeated-name got ${JSON.stringify(dup)}`);
+      }
+    }
+
+    // LATE BRIDGE: a name-only and an email-only record can be recorded
+    // separately, then a later statement names BOTH and proves they are one
+    // person. Leaving two records behind reports two contacts where the note
+    // itself says there is one.
+    {
+      const bridged = cadence.extractContacts('recruiter Ann Lee; emailed ann.lee@acme.com; contacted Ann Lee at ann.lee@acme.com');
+      if (bridged.length === 1 && bridged[0].name === 'Ann Lee' && bridged[0].email === 'ann.lee@acme.com') {
+        pass('extractContacts coalesces name-only and email-only records once a later statement bridges them');
+      } else {
+        fail(`extractContacts late-bridge got ${JSON.stringify(bridged)}`);
+      }
+    }
+
+    // A hyphenated or apostrophed name is still a name. Dropping it reports
+    // "no contact" for a row that names a person, which is the exact silence
+    // this parser exists to remove.
+    {
+      const punct = cadence.extractContacts('reached out to recruiter Mary-Jane O’Brien (LinkedIn)');
+      if (punct.length === 1 && punct[0].name === 'Mary-Jane O’Brien') {
+        pass('extractContacts handles hyphenated and apostrophed names');
+      } else {
+        fail(`extractContacts punctuated-name got ${JSON.stringify(punct)}`);
+      }
+    }
+
+    // An email with no name attached still yields a contact (name null).
+    {
+      const bare = cadence.extractContacts('sent CV to careers@acme.com');
+      if (bare.length === 1 && bare[0].email === 'careers@acme.com' && bare[0].name === null) {
+        pass('extractContacts keeps a bare email contact with no name');
+      } else {
+        fail(`extractContacts bare-email got ${JSON.stringify(bare)}`);
+      }
+    }
+
+    // The summary printer reads contacts[0].email directly; a name-only contact
+    // must not surface as a literal "null" in that column.
+    const label = cadence.contactLabel(cadence.extractContacts('messaged recruiter Asha Beirne')[0]);
+    if (label === 'Asha Beirne') {
+      pass('contactLabel shows the name when the contact has no email');
+    } else {
+      fail(`contactLabel should fall back to the name, got ${JSON.stringify(label)}`);
+    }
+  }
+
   // parseAppliedDate — extracts the real submission date from notes (the
   // tracker `date` column is the evaluation date), case-insensitive.
   if (cadence.parseAppliedDate('Applied 2026-06-09 via Personio; raised part-time') === '2026-06-09') {
@@ -5371,6 +5997,256 @@ try {
     pass('parseAppliedDate does not match inside "reapplied"');
   } else {
     fail('parseAppliedDate should not match the date inside "reapplied"');
+  }
+  // An estimated apply date is written "Applied ~YYYY-MM-DD". Without tolerating
+  // the tilde the note is skipped and the cadence silently falls back to the
+  // evaluation date — the same wrong-age failure the notes lookup exists to fix.
+  if (cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)') === '2026-06-09') {
+    pass('parseAppliedDate tolerates an estimated "Applied ~YYYY-MM-DD" date');
+  } else {
+    fail(`parseAppliedDate should tolerate "~", got ${JSON.stringify(cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)'))}`);
+  }
+  if (cadence.parseAppliedDate('reapplied ~2026-06-09 after rejection') === null) {
+    pass('parseAppliedDate still refuses "reapplied" when a tilde is present');
+  } else {
+    fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
+  }
+  // A malformed value must be rejected, not silently truncated to a plausible
+  // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
+  // measured application date and quietly shift the whole cadence — worse than
+  // the honest evaluation-date fallback, because nothing marks it as a guess.
+  const trailingJunk = [
+    ['Applied 2026-06-091', 'a trailing digit'],
+    ['Applied ~2026-06-091', 'a trailing digit after a tilde'],
+    ['Applied 2026-06-09-foo', 'a hyphenated suffix'],
+    ['Applied 2026-06-09foo', 'an unseparated word suffix'],
+    ['Applied 2026-06-09_v2', 'an underscore suffix'],
+    ['Applied 2026-06-09-2026-06-10', 'an ambiguous date range'],
+  ];
+  for (const [notes, label] of trailingJunk) {
+    if (cadence.parseAppliedDate(notes) === null) {
+      pass(`parseAppliedDate rejects ${label} instead of truncating (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // A leading digit is the mirror-image malformation and must fail the same way.
+  if (cadence.parseAppliedDate('Applied 12026-06-09') === null) {
+    pass('parseAppliedDate rejects a leading extra digit');
+  } else {
+    fail(`parseAppliedDate should reject "Applied 12026-06-09", got ${JSON.stringify(cadence.parseAppliedDate('Applied 12026-06-09'))}`);
+  }
+  // Rejecting a malformed candidate must not swallow a valid one later in the
+  // note — the scan has to continue past the bad match, not stop at it.
+  if (cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real') === '2026-06-17') {
+    pass('parseAppliedDate skips a malformed date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the malformed date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real'))}`);
+  }
+  // A date can match the token shape and still not exist. These must not be
+  // returned as MEASURED application dates: parseDate() rolls them over
+  // (2026-06-31 -> 2026-07-01), so an impossible date silently becomes a real
+  // but wrong one and shifts the cadence by days. The honest
+  // evaluation-date fallback is strictly better than a fabricated date.
+  const impossibleDates = [
+    ['Applied 2026-06-31', 'a 31st in a 30-day month'],
+    ['Applied 2026-02-30', 'a 30th in February'],
+    ['Applied 2026-02-29', 'a 29th of February in a non-leap year'],
+    ['Applied 2026-13-01', 'a 13th month'],
+    ['Applied 2026-00-10', 'a zero month'],
+    ['Applied 2026-06-00', 'a zero day'],
+  ];
+  const VALIDATE = { requireValidCalendarDate: true };
+  for (const [notes, label] of impossibleDates) {
+    if (cadence.parseAppliedDate(notes, VALIDATE) === null) {
+      pass(`parseAppliedDate rejects ${label} when calendar validation is requested (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes, VALIDATE))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Validation is OPT-IN. followup-seed.mjs depends on receiving the raw
+  // candidate so it can throw INVALID_DATE and make the user fix the typo;
+  // filtering unconditionally would turn that loud, fixable error into a
+  // silent wrong answer.
+  if (cadence.parseAppliedDate('Applied 2026-06-31') === '2026-06-31') {
+    pass('parseAppliedDate returns the raw candidate by default so callers can reject it loudly');
+  } else {
+    fail(`parseAppliedDate default mode must not swallow an impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31'))}`);
+  }
+  // A real leap day must still be accepted — the validity check must not
+  // over-reject.
+  if (cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE) === '2024-02-29') {
+    pass('parseAppliedDate accepts a real leap day under validation');
+  } else {
+    fail(`parseAppliedDate should accept 2024-02-29, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE))}`);
+  }
+  // The continued-scan contract applies to calendar-invalid candidates too.
+  if (cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE) === '2026-06-30') {
+    pass('parseAppliedDate skips an impossible date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE))}`);
+  }
+  // isRealCalendarDate is exported so callers share one definition of validity.
+  if (cadence.isRealCalendarDate('2024-02-29') && !cadence.isRealCalendarDate('2026-02-29') && !cadence.isRealCalendarDate('nope')) {
+    pass('isRealCalendarDate distinguishes a real leap day from an impossible one');
+  } else {
+    fail('isRealCalendarDate mis-classifies a calendar date');
+  }
+  // Date.UTC() maps years 0-99 onto 1900-1999, so a literal ISO year below
+  // 0100 would be validated against the wrong year entirely.
+  if (cadence.isRealCalendarDate('0096-02-29') && !cadence.isRealCalendarDate('0097-02-29')) {
+    pass('isRealCalendarDate preserves a literal ISO year below 0100');
+  } else {
+    fail(`isRealCalendarDate mishandles a sub-0100 year: 0096-02-29=${cadence.isRealCalendarDate('0096-02-29')} 0097-02-29=${cadence.isRealCalendarDate('0097-02-29')}`);
+  }
+  // And the source must degrade to the fallback, not report a fabricated date.
+  {
+    const r = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-31' });
+    if (r.appliedDate === '2026-06-01' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back when the notes date is not a real calendar date');
+    } else {
+      fail(`resolveAppliedDate impossible-date case got ${JSON.stringify(r)}`);
+    }
+  }
+  if (cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17') === '2026-06-17') {
+    pass('parseAppliedDate skips a "reapplied" match and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip "reapplied" and continue, got ${JSON.stringify(cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17'))}`);
+  }
+  // Two valid dates: the first still wins (already covered for a status date;
+  // this pins it for two literal "applied" mentions).
+  if (cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req') === '2026-06-09') {
+    pass('parseAppliedDate keeps the first of two "applied" dates');
+  } else {
+    fail(`parseAppliedDate should keep the first applied date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req'))}`);
+  }
+  // Reverse ordering: a later malformed candidate must not disturb the earlier
+  // valid match the scan already found.
+  if (cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)') === '2026-06-09') {
+    pass('parseAppliedDate keeps a valid first date despite a later malformed one');
+  } else {
+    fail(`parseAppliedDate should keep the valid first date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)'))}`);
+  }
+  // Boundary characters that legitimately terminate a date must keep matching —
+  // a boundary guard that also rejects these would break real tracker notes.
+  const validTerminators = [
+    ['Applied 2026-06-09', 'end of string'],
+    ['Applied 2026-06-09.', 'a period'],
+    ['Applied 2026-06-09; noted', 'a semicolon'],
+    ['Applied 2026-06-09)', 'a closing paren'],
+    ['Applied 2026-06-09\nvia Personio', 'a newline'],
+  ];
+  for (const [notes, label] of validTerminators) {
+    if (cadence.parseAppliedDate(notes) === '2026-06-09') {
+      pass(`parseAppliedDate still matches a date terminated by ${label}`);
+    } else {
+      fail(`parseAppliedDate should match with ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Nullish notes must not throw (the tracker's Notes cell can be absent).
+  if (cadence.parseAppliedDate(null) === null && cadence.parseAppliedDate(undefined) === null) {
+    pass('parseAppliedDate returns null for nullish notes');
+  } else {
+    fail('parseAppliedDate should return null for null/undefined notes');
+  }
+
+  // resolveAppliedDate — reports WHICH date the cadence is measured from, so a
+  // consumer can tell a real application date from the evaluation-date proxy.
+  // Without it a fallback age is indistinguishable from a measured one.
+  {
+    const measured = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-09 via Personio' });
+    if (measured.appliedDate === '2026-06-09' && measured.appDateSource === 'notes') {
+      pass('resolveAppliedDate reports source "notes" when the apply date is recorded');
+    } else {
+      fail(`resolveAppliedDate notes-case got ${JSON.stringify(measured)}`);
+    }
+
+    const inferred = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'On-archetype fit; no submission yet' });
+    if (inferred.appliedDate === '2026-06-01' && inferred.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate flags the evaluation-date proxy as a fallback, not a measured date');
+    } else {
+      fail(`resolveAppliedDate fallback-case got ${JSON.stringify(inferred)}`);
+    }
+
+    const estimated = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied ~2026-06-09' });
+    if (estimated.appliedDate === '2026-06-09' && estimated.appDateSource === 'notes') {
+      pass('resolveAppliedDate treats an estimated "~" apply date as a recorded date, not a fallback');
+    } else {
+      fail(`resolveAppliedDate estimated-case got ${JSON.stringify(estimated)}`);
+    }
+
+    // A malformed note must degrade to the honest fallback, not to a truncated
+    // date wearing the "notes" provenance label.
+    const malformed = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-091 (typo)' });
+    if (malformed.appliedDate === '2026-06-01' && malformed.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back rather than trusting a truncated apply date');
+    } else {
+      fail(`resolveAppliedDate malformed-case got ${JSON.stringify(malformed)}`);
+    }
+  }
+
+  // analyze() output contract: every emitted entry must carry appDateSource, and
+  // the value must match how the date was actually obtained. The unit tests above
+  // only cover the helper — this pins the field on the JSON consumers read, which
+  // is where a silently-inferred age would actually do damage.
+  {
+    // realpath: on macOS the tmpdir is a symlink, and followup-cadence.mjs's
+    // CLI guard compares import.meta.url (realpath-resolved) against argv[1].
+    // A symlinked path silently suppresses main() and yields empty stdout.
+    const e2eTmp = realpathSync(mkdtempSync(join(tmpdir(), 'co-cadence-e2e-')));
+    try {
+      copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
+      copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
+      copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
+      symlinkSync(join(ROOT, 'node_modules'), join(e2eTmp, 'node_modules'), 'dir');
+      mkdirSync(join(e2eTmp, 'data'), { recursive: true });
+      writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
+        '# Applications Tracker',
+        '',
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+        '|---|------|---------|------|-------|--------|-----|--------|-------|',
+        '| 901 | 2026-06-01 | ExactCo | Head of AI | 4.5/5 | Applied | ✅ | [901](reports/901-exactco-2026-06-01.md) | Applied 2026-06-09 via Personio |',
+        '| 902 | 2026-06-02 | EstimateCo | Head of AI | 4.4/5 | Applied | ✅ | [902](reports/902-estimateco-2026-06-02.md) | Applied ~2026-06-10 (date estimated) |',
+        '| 903 | 2026-06-03 | FallbackCo | Head of AI | 4.3/5 | Applied | ✅ | [903](reports/903-fallbackco-2026-06-03.md) | On-archetype fit; no apply date recorded |',
+        '| 904 | 2026-06-04 | TypoCo | Head of AI | 4.2/5 | Applied | ✅ | [904](reports/904-typoco-2026-06-04.md) | Applied 2026-06-091 typo in the tracker |',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const e2eOut = execFileSync(NODE, [join(e2eTmp, 'followup-cadence.mjs')], {
+        cwd: e2eTmp,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: '' },
+      });
+      const e2e = JSON.parse(e2eOut.trim());
+      const byNum = new Map((e2e.entries || []).map(entry => [entry.num, entry]));
+
+      const e2eCases = [
+        [901, '2026-06-09', 'notes', 'an exact "Applied YYYY-MM-DD" note'],
+        [902, '2026-06-10', 'notes', 'an estimated "Applied ~YYYY-MM-DD" note'],
+        [903, '2026-06-03', 'evaluation-date-fallback', 'notes with no apply date'],
+        [904, '2026-06-04', 'evaluation-date-fallback', 'a malformed apply date in the notes'],
+      ];
+      for (const [num, expectedDate, expectedSource, label] of e2eCases) {
+        const entry = byNum.get(num);
+        if (entry && entry.appliedDate === expectedDate && entry.appDateSource === expectedSource) {
+          pass(`analyze() emits appDateSource "${expectedSource}" for ${label}`);
+        } else {
+          fail(`analyze() entry #${num} (${label}) got ${JSON.stringify(entry && { appliedDate: entry.appliedDate, appDateSource: entry.appDateSource })}`);
+        }
+      }
+
+      const missingSource = (e2e.entries || []).filter(entry => !['notes', 'evaluation-date-fallback'].includes(entry.appDateSource));
+      if ((e2e.entries || []).length === 4 && missingSource.length === 0) {
+        pass('analyze() stamps every emitted entry with a known appDateSource');
+      } else {
+        fail(`analyze() emitted ${(e2e.entries || []).length} entries, ${missingSource.length} without a known appDateSource`);
+      }
+    } catch (e2eErr) {
+      fail(`analyze() appDateSource end-to-end check crashed: ${e2eErr.message}`);
+    } finally {
+      rmSync(e2eTmp, { recursive: true, force: true });
+    }
   }
 
   // Status normalization (strips bold + trailing date, lowercases, maps aliases)
@@ -10931,6 +11807,606 @@ try {
   }
 } catch (e) {
   fail(`transcript-input debrief check: ${e.message}`);
+}
+
+// ── CONTRADICTED-FACTS CORRECTION (#2125) ────────────────────────
+// interview/debrief was append-only against the role-specific prep file —
+// no path existed for correcting an existing fact the interview directly
+// contradicts (as opposed to appending a new gap/story/retraction). This
+// section pins that the mode now documents an in-place correction step,
+// the strikethrough-plus-correction example format, and inference-tag
+// resolution, without touching the pre-existing append-only steps.
+
+console.log('\n64. Contradicted-facts correction step (#2125)');
+
+try {
+  const debriefMode = readFile('modes/interview/debrief.md');
+
+  if (debriefMode.includes('Check for Contradicted Facts')) {
+    pass('interview/debrief has a dedicated contradicted-facts step');
+  } else {
+    fail('interview/debrief missing a dedicated contradicted-facts step');
+  }
+
+  // Scoped regex: both bullets must appear, in order, within the same
+  // decision-list paragraph — not just "appends" and "correct in place"
+  // occurring anywhere independently in the file.
+  if (
+    /"This is new information"\s*→\s*appends\.[\s\S]{0,200}"This directly contradicts something the prep file already asserts as fact"\s*→\s*correct in place\./.test(
+      debriefMode
+    )
+  ) {
+    pass('interview/debrief distinguishes new-information-appends from contradiction-corrects-in-place');
+  } else {
+    fail('interview/debrief missing the append-vs-correct distinction');
+  }
+
+  // Scoped regex: the strikethrough, the bolded correction, and the
+  // confirmation-date parenthetical must all appear together on the same
+  // example line — not merely present somewhere in the file independently.
+  if (
+    /~~Metro Hall, on-site~~\s+\*\*Metro Hall — hybrid\*\*\s*\(confirmed on the \{date\} call\)/.test(
+      debriefMode
+    )
+  ) {
+    pass('interview/debrief includes a concrete strikethrough-plus-correction example with the confirmation detail');
+  } else {
+    fail('interview/debrief missing the strikethrough-plus-correction example format with its confirmation detail');
+  }
+
+  // Scoped regex: the resolve-inference-tags instruction, the literal tag,
+  // and the actual resolution behavior must appear tied together in the
+  // same instruction — not as three unrelated substrings anywhere in the file.
+  if (
+    /\*\*Resolve inference tags on contradiction or confirmation\.\*\*[\s\S]{0,200}`\[inferred from JD\]`[\s\S]{0,400}resolve the tag/.test(
+      debriefMode
+    )
+  ) {
+    pass('interview/debrief instructs resolving inference tags once confirmed or corrected');
+  } else {
+    fail('interview/debrief missing the inference-tag resolution instruction tied to its own guidance');
+  }
+} catch (e) {
+  fail(`contradicted-facts correction check: ${e.message}`);
+}
+
+// ── CALL-PLATFORM DETECTION (#2126) ─────────────────────────────
+// Pins the new **Platform:** field in interview-prep.md's Step 2 (Process
+// Overview) and Step 3 (Round-by-Round Breakdown) — distinct from the
+// existing round-type **Format:** field, cross-referencing invite-match.mjs's
+// extractPlatform without duplicating its detection logic in prose, and
+// falling back to "not stated in the invite, confirm before the call"
+// rather than guessing when the invite text doesn't say.
+
+console.log('\n65. Call-platform detection wired into interview-prep (#2126)');
+
+try {
+  const prepModeDoc = readFile('modes/interview-prep.md');
+
+  // Scope assertions to the actual sections they're supposed to be in,
+  // rather than whole-document .includes() checks that could pass even if
+  // Platform only exists in the wrong section (#2128 review finding).
+  const processOverview = prepModeDoc.match(
+    /## Step 2 — Process Overview[\s\S]*?## Step 2\.5 — Audience Map/
+  )?.[0] ?? '';
+  const roundBreakdown = prepModeDoc.match(
+    /## Step 3 — Round-by-Round Breakdown[\s\S]*?(?=\n## |$)/
+  )?.[0] ?? '';
+  const processOverviewFlat = processOverview.replace(/\s+/g, ' ');
+
+  if (processOverview.includes('- **Format:**') && processOverview.includes('- **Platform:**')) {
+    pass('interview-prep Process Overview has both Format (round type) and Platform (call medium) as distinct fields');
+  } else {
+    fail('interview-prep Process Overview missing the distinct Platform field alongside Format');
+  }
+
+  if (processOverviewFlat.includes("extractPlatform") && processOverviewFlat.includes('invite-match.mjs')) {
+    pass('interview-prep Platform field cross-references invite-match.mjs\'s extractPlatform instead of restating the detection logic');
+  } else {
+    fail('interview-prep Platform field missing the cross-reference to invite-match.mjs\'s extractPlatform');
+  }
+
+  if (processOverviewFlat.includes('not stated in the invite, confirm before the call')) {
+    pass('interview-prep Platform field falls back to "not stated in the invite, confirm before the call" instead of guessing');
+  } else {
+    fail('interview-prep Platform field missing the "not stated in the invite, confirm before the call" fallback');
+  }
+
+  if (/### Round \{N\}:[\s\S]*?- \*\*Platform:\*\*/.test(roundBreakdown)) {
+    pass('interview-prep Round-by-Round Breakdown (Step 3) also carries a per-round Platform field');
+  } else {
+    fail('interview-prep Round-by-Round Breakdown missing a per-round Platform field');
+  }
+
+  // The fallback instruction must independently exist in the Round {N}
+  // template itself, not just in Step 2 — otherwise a future edit that
+  // drops it from Step 3 only would go unnoticed (#2128 review finding).
+  // Scoped to the Round {N} template specifically (not just anywhere in
+  // Step 3's surrounding prose) so a future edit that drops the fallback
+  // from the round template but leaves it elsewhere in Step 3 would still
+  // be caught (#2128 review finding, round 2).
+  const roundTemplate = roundBreakdown.match(
+    /### Round \{N\}:[\s\S]*?(?=\n### |\n## |$)/
+  )?.[0] ?? '';
+  const roundTemplateFlat = roundTemplate.replace(/\s+/g, ' ');
+  if (roundTemplateFlat.includes('not stated in the invite, confirm before the call')) {
+    pass('interview-prep Round-by-Round Breakdown (Step 3) also carries the "not stated in the invite, confirm before the call" fallback');
+  } else {
+    fail('interview-prep Round-by-Round Breakdown missing the "not stated in the invite, confirm before the call" fallback');
+  }
+} catch (e) {
+  fail(`call-platform detection wiring check: ${e.message}`);
+}
+
+// ── 64. PLAN-SOURCED-QUESTION RESEARCH CHECK (#2096) ────────────
+// interview-prep.md's Step 1 sourced-question research and interview/practice.md's
+// reactive mid-session reuse of it were already wired together; interview/plan.md
+// was the one mode of the three with no equivalent step before Block 4's
+// behavioral-story mapping. Pins the research-check section, the reuse-existing-file
+// rule, the tagging discipline cross-reference, and the sparse-intel honesty rule.
+
+console.log('\n66. interview/plan research check before Block 4 (#2096)');
+
+try {
+  const planMode = readFile('modes/interview/plan.md');
+  const planFlat = planMode.replace(/\s+/g, ' ');
+
+  if (planFlat.includes('Research check — before drafting Block 4')) {
+    pass('interview/plan has the "Research check — before drafting Block 4" section (#2096)');
+  } else {
+    fail('interview/plan missing the "Research check — before drafting Block 4" section');
+  }
+
+  if (
+    planFlat.includes('interview-prep/{company-slug}-{role-slug}.md') &&
+    planFlat.includes('never re-search work that\'s already been done and cited')
+  ) {
+    pass('interview/plan reuses an existing interview-prep file instead of re-searching');
+  } else {
+    fail('interview/plan missing the reuse-existing-research-file rule');
+  }
+
+  if (
+    planFlat.includes('`interview-prep.md`\'s "Step 1 — Research" WebSearch queries') &&
+    planFlat.includes('[inferred from JD]')
+  ) {
+    pass('interview/plan cross-references interview-prep.md Step 1 queries and the [inferred from JD] tag convention (no duplicated query table)');
+  } else {
+    fail('interview/plan missing the interview-prep.md Step 1 cross-reference or the [inferred from JD] tag convention');
+  }
+
+  if (planFlat.includes('If the search genuinely yields nothing') && planFlat.includes('partial-but-honest')) {
+    pass('interview/plan states the honest-if-nothing-found fallback (partial-but-honest, not perfect-or-nothing)');
+  } else {
+    fail('interview/plan missing the honest sparse-intel fallback');
+  }
+
+  if (planFlat.includes('When company-intel is thin mid-session')) {
+    pass('interview/plan cross-references practice.md\'s reactive research path instead of duplicating it');
+  } else {
+    fail('interview/plan missing the cross-reference to practice.md\'s reactive research path');
+  }
+
+  if (planFlat.includes('Check for real reported questions before Block 4') && planFlat.includes('Never generate fake company intel')) {
+    pass('interview/plan Rules section reinforces the research check alongside the existing "never fake intel" rule');
+  } else {
+    fail('interview/plan Rules section missing the research-check rule or its tie-in to "never fake intel"');
+  }
+} catch (e) {
+  fail(`interview/plan research-check wiring check (#2096): ${e.message}`);
+}
+
+console.log('\n67. Protected-grounds question detection (#2030)');
+
+// --- interview-redflag protected-grounds signal (#2030) ---
+{
+  // 1. Jurisdiction table exists, parses as YAML (UTF-8 — the JP row carries
+  //    Japanese terms that must survive the parse), and both seeds are complete
+  const pgPath = join(ROOT, 'templates', 'protected-grounds.yml');
+  if (!existsSync(pgPath)) {
+    fail('templates/protected-grounds.yml missing (#2030)');
+  } else {
+    try {
+      const { load } = await import('js-yaml');
+      const pgRaw = readFileSync(pgPath, 'utf-8');
+      const pg = load(pgRaw);
+      const rows = Array.isArray(pg?.protected_grounds) ? pg.protected_grounds : [];
+      const completeRow = (r) =>
+        r &&
+        typeof r.jurisdiction === 'string' &&
+        typeof r.jurisdiction_name === 'string' &&
+        Array.isArray(r.grounds) && r.grounds.length > 0 &&
+        r.grounds.every((g) => g && typeof g.topic === 'string' && g.topic.length > 0) &&
+        typeof r.legal_basis === 'string' && r.legal_basis.length > 0 &&
+        Array.isArray(r.sources) && r.sources.length > 0 &&
+        typeof r.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.as_of);
+      const caOn = rows.find((r) => r?.jurisdiction === 'CA-ON');
+      const jp = rows.find((r) => r?.jurisdiction === 'JP');
+      const caOnTopics = (caOn?.grounds || []).map((g) => g?.topic || '');
+      const jpTopics = (jp?.grounds || []).map((g) => g?.topic || '');
+      if (
+        completeRow(caOn) && caOn.grounds.length === 16 &&
+        caOnTopics.some((t) => /gender identity/i.test(t)) &&
+        caOnTopics.some((t) => /gender expression/i.test(t)) &&
+        caOn.legal_basis.includes('5(1)') && caOn.legal_basis.includes('24(1)') &&
+        caOn.grounds.some((g) => Array.isArray(g.legitimate_contexts) && g.legitimate_contexts.length > 0) &&
+        completeRow(jp) && jp.grounds.length === 14 &&
+        // literal Japanese terms must survive YAML parsing as UTF-8
+        jpTopics.some((t) => t.includes('本籍')) &&
+        jpTopics.some((t) => t.includes('尊敬する人物')) &&
+        jp.legal_basis.includes('5-5') && jp.legal_basis.includes('141')
+      ) {
+        pass('protected-grounds.yml parses; CA-ON seed complete (16 OHRC s.5(1) grounds incl. gender identity/expression, s.24(1) contexts) and JP seed complete (14-item MHLW list, Japanese terms 本籍/尊敬する人物 survive UTF-8 parse, art. 5-5 + 告示141 basis) — grounds, legal_basis, sources, quoted as_of (#2030)');
+      } else {
+        fail('protected-grounds.yml seed rows incomplete — need CA-ON with exactly 16 grounds (incl. gender identity + gender expression, s.5(1)/s.24(1) basis, per-ground legitimate_contexts) and JP with exactly 14 grounds carrying Japanese terms (本籍, 尊敬する人物) + English glosses, art. 5-5 + guideline 141 basis; both with sources and quoted as_of dates (#2030)');
+      }
+      if (
+        pgRaw.includes('CONTRIBUTION RULE') &&
+        pgRaw.includes('NOT LEGAL ADVICE') &&
+        pgRaw.includes('EEOC') &&
+        pgRaw.includes('Equality Act') &&
+        pgRaw.includes('AGG')
+      ) {
+        pass('protected-grounds.yml header documents the contribution rule + not-legal-advice register and lists candidate rows (EEOC, UK Equality Act, DE AGG) as comments only (#2030)');
+      } else {
+        fail('protected-grounds.yml header missing the contribution rule, not-legal-advice note, and/or the commented candidate rows (EEOC / Equality Act / AGG) (#2030)');
+      }
+    } catch (e) {
+      fail(`templates/protected-grounds.yml does not parse as YAML: ${e.message} (#2030)`);
+    }
+  }
+
+  // 2. interview-redflag Step 2c: jurisdiction derivation, reuse of the
+  //    existing evidence-tier/scoring/verdict machinery (no new verdict
+  //    system), legitimate_contexts honesty, no-intent-inference rule
+  const redflagMode = readFile('modes/interview-redflag.md');
+  const pgStart = redflagMode.indexOf('## Step 2c');
+  const pgEnd = redflagMode.indexOf('## Step 3', Math.max(pgStart, 0));
+  const pgSection = pgStart >= 0 && pgEnd > pgStart ? redflagMode.slice(pgStart, pgEnd) : '';
+  if (
+    pgSection.includes('templates/protected-grounds.yml') &&
+    pgSection.includes('config/profile.yml') &&
+    pgSection.includes('skip this step entirely') &&
+    pgSection.includes('does not create a new verdict system') &&
+    pgSection.includes('exactly like the four existing signals') &&
+    pgSection.includes('+1 for one session, +2 for 2+ sessions') &&
+    pgSection.includes('blacklist-suggestion') &&
+    pgSection.includes('legitimate_contexts') &&
+    pgSection.includes('names that context instead of flagging cleanly') &&
+    pgSection.includes('no sentiment or intent inference') &&
+    pgSection.includes('not legal advice') &&
+    pgSection.includes('Render in {language.output}') &&
+    redflagMode.includes('| Protected-grounds questions (Step 2c) |') &&
+    redflagMode.includes('5 signal types × 2')
+  ) {
+    pass('interview-redflag Step 2c pins jurisdiction derivation from config/profile.yml, skip-when-no-row, reuse of existing evidence tiers + scoring (+1/+2) + verdict tiers + #1856 blacklist bridge, legitimate_contexts honesty, no-intent-inference, not-legal-advice, i18n rendering, and the aggregated signal-table row (#2030)');
+  } else {
+    fail('interview-redflag Step 2c missing/incomplete — needs table + profile.yml jurisdiction derivation, skip-when-no-row rule, existing-machinery reuse (no new verdict system; +1/+2 aggregation; blacklist-suggestion bridge), legitimate_contexts honesty, no sentiment/intent inference, not-legal-advice note, {language.output} rendering, signals-table row, updated 5-signal max (#2030)');
+  }
+
+  // 3. Phrasing discipline holds in the report-facing text: the rendered
+  //    templates may DESCRIBE statutes and list banned formulations as
+  //    banned, but must never direct a legality verdict at the interviewer
+  //    or the question itself. Scan only rendered-output surfaces — the
+  //    Step 2c blockquote template plus the Step 5 protected-grounds output
+  //    block — with a clause-directed regex that skips statute descriptions.
+  const pgQuoteLines = pgSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const out5Start = redflagMode.indexOf('### Protected-grounds questions');
+  const out5End = out5Start >= 0 ? redflagMode.indexOf('```', out5Start) : -1;
+  const out5Lines = out5Start >= 0 && out5End > out5Start ? redflagMode.slice(out5Start, out5End).split('\n') : [];
+  const pgFacing = [...pgQuoteLines, ...out5Lines];
+  // Clause-directed only: requires an asserting subject+copula frame, so the
+  // template's own banned-examples list ('never "...discrimination occurred"')
+  // and statute descriptions ("prohibits...", "protected under...") never
+  // false-positive — the #2029 approach.
+  const pgAssertive = pgFacing.filter((l) =>
+    /(the interviewer|this question) (was|is|has been) (illegal|unlawful|discriminatory|discriminating|breaking the law)/i.test(l)
+  );
+  if (pgSection && pgQuoteLines.length >= 1 && out5Lines.length >= 1 && pgAssertive.length === 0) {
+    pass('protected-grounds report-facing templates state topic + legal context only — no clause-directed "was illegal"/"discrimination occurred" verdicts in blockquote or output block (#2030)');
+  } else {
+    fail(`protected-grounds phrasing discipline broken: ${pgAssertive.length ? `verdict-directed phrasing in rendered template: ${pgAssertive[0].trim().slice(0, 80)}` : 'expected a blockquote template in Step 2c and a "### Protected-grounds questions" output block in Step 5'} (#2030)`);
+  }
+}
+
+// ── 68. Immigration-status requirement overreach (#2033) ────────
+
+console.log('\n68. Immigration-status requirement overreach (#2033)');
+
+// --- immigration-status requirement overreach (#2033): table + oferta Block G + apply Step 5d ---
+{
+  // 1. Table exists, parses as YAML, both seeds complete — INCLUDING a
+  //    non-empty lawful_screening_contrast on EVERY row (the field that
+  //    encodes the authorization-vs-status line; a row without it is invalid)
+  //    — and the header carries the contribution rule.
+  const isPath = join(ROOT, 'templates', 'immigration-status-requirements.yml');
+  if (!existsSync(isPath)) {
+    fail('templates/immigration-status-requirements.yml missing (#2033)');
+  } else {
+    try {
+      const { load } = await import('js-yaml');
+      const isRaw = readFileSync(isPath, 'utf-8');
+      const isTable = load(isRaw);
+      const rows = Array.isArray(isTable?.entries) ? isTable.entries : [];
+      const completeRow = (r) =>
+        r &&
+        typeof r.jurisdiction === 'string' &&
+        typeof r.jurisdiction_name === 'string' &&
+        Array.isArray(r.prohibited_requirement_patterns) && r.prohibited_requirement_patterns.length > 0 &&
+        r.prohibited_requirement_patterns.every((p) => p && typeof p.pattern === 'string' && typeof p.guidance === 'string') &&
+        typeof r.lawful_screening_contrast === 'string' && r.lawful_screening_contrast.trim().length > 0 &&
+        typeof r.exceptions === 'string' && r.exceptions.length > 0 &&
+        typeof r.legal_basis === 'string' && r.legal_basis.length > 0 &&
+        typeof r.enforcement_notes === 'string' && r.enforcement_notes.length > 0 &&
+        Array.isArray(r.sources) && r.sources.length > 0 &&
+        typeof r.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.as_of);
+      const us = rows.find((r) => r?.jurisdiction === 'US');
+      const caOn = rows.find((r) => r?.jurisdiction === 'CA-ON');
+      if (
+        rows.every(completeRow) &&
+        completeRow(us) && us.legal_basis.includes('1324b') &&
+        us.lawful_screening_contrast.includes('Are you authorized to work in the United States?') &&
+        us.lawful_screening_contrast.includes('Will you now or in the future require sponsorship') &&
+        us.exceptions.includes('government contract') && /ITAR/.test(us.exceptions) &&
+        us.enforcement_notes.includes('19 IER settlements') && us.enforcement_notes.includes('Facebook') &&
+        completeRow(caOn) && caOn.legal_basis.includes('s.5(1)') && caOn.legal_basis.includes('Haseeb') &&
+        caOn.lawful_screening_contrast.includes('Are you legally authorized to work in Canada?') &&
+        caOn.exceptions.includes('s.16') &&
+        caOn.prohibited_requirement_patterns.some((p) => /permanently/i.test(p.pattern))
+      ) {
+        // header checks kept separate for a useful failure message
+        if (
+          isRaw.includes('CONTRIBUTION RULE') &&
+          isRaw.includes('no entry without a citable legal source') &&
+          isRaw.includes('lawful_screening_contrast') &&
+          isRaw.includes('right-to-work') &&
+          isRaw.includes('free-movement')
+        ) {
+          pass('immigration-status-requirements.yml parses with both verified seeds (US §1324b + CA-ON Haseeb), non-empty lawful_screening_contrast on every row, and the header contribution rule + candidate rows as comments (#2033)');
+        } else {
+          fail('immigration-status-requirements.yml header missing the contribution rule (source + as_of + mandatory lawful_screening_contrast) or the commented candidate rows (UK right-to-work / EU free-movement) (#2033)');
+        }
+      } else {
+        fail('immigration-status-requirements.yml seed rows incomplete — need US (§1324b basis, both IER-approved questions in lawful_screening_contrast, government-contract + ITAR notes in exceptions, IER settlements + Facebook in enforcement_notes) and CA-ON (s.5(1) + Haseeb basis, authorization contrast, s.16 exceptions, permanence proxy pattern); every row needs a non-empty lawful_screening_contrast and quoted as_of (#2033)');
+      }
+    } catch (e) {
+      fail(`templates/immigration-status-requirements.yml does not parse as YAML: ${e.message} (#2033)`);
+    }
+  }
+
+  // 2. Mode section structure: oferta signal (jurisdiction derivation,
+  //    exceptions honesty, ITAR note) + apply step (status-vs-authorization
+  //    rule, never-auto-answer guarantees).
+  const ofertaNow = readFile('modes/oferta.md');
+  const applyNow = readFile('modes/apply.md');
+  const sigStart = ofertaNow.indexOf('**11. Immigration-Status Requirement Overreach**');
+  const sigEnd = ofertaNow.indexOf('### Output format:', Math.max(sigStart, 0));
+  const sigSection = sigStart >= 0 && sigEnd > sigStart ? ofertaNow.slice(sigStart, sigEnd) : '';
+  if (
+    sigSection.includes('templates/immigration-status-requirements.yml') &&
+    sigSection.includes('config/profile.yml') &&
+    sigSection.includes('this signal is not evaluated; say nothing') &&
+    sigSection.includes('names the claimed hook instead of flagging cleanly') &&
+    sigSection.includes('15 CFR 772.1 / 22 CFR 120.15') &&
+    sigSection.includes('unlawful unless required by law, regulation, executive order, or government contract for this position') &&
+    sigSection.includes('⚠️ **Immigration-status requirement signal:**') &&
+    sigSection.includes('not legal advice') &&
+    sigSection.includes('Render in {language.output}')
+  ) {
+    pass('oferta Block G immigration-status signal pins jurisdiction derivation, skip-when-no-row, exceptions honesty (named hook instead of clean flag), the ITAR/EAR US-person note, statute-fact phrasing, and the not-legal-advice close (#2033)');
+  } else {
+    fail('oferta Block G immigration-status signal missing/incomplete — needs table + profile.yml jurisdiction derivation, skip-when-no-row, exceptions honesty, ITAR/EAR note, statute-fact phrasing, {language.output} rendering, not-legal-advice note (#2033)');
+  }
+
+  const stepStart = applyNow.indexOf('## Step 5d — Immigration-status screening check');
+  const stepEnd = applyNow.indexOf('**Applying to several roles', Math.max(stepStart, 0));
+  const stepSection = stepStart >= 0 && stepEnd > stepStart ? applyNow.slice(stepStart, stepEnd) : '';
+  if (
+    stepSection.includes('templates/immigration-status-requirements.yml') &&
+    stepSection.includes('immigration STATUS rather than work AUTHORIZATION') &&
+    stepSection.includes('⚠️ **Immigration-status screening warning:**') &&
+    stepSection.includes('Never auto-answer the question, never auto-skip it, never block') &&
+    stepSection.includes('Haseeb') &&
+    stepSection.includes('Acme Corp') &&
+    stepSection.includes('not legal advice')
+  ) {
+    pass('apply Step 5d warns before a status-screening question is answered — status-vs-authorization rule, Haseeb proxy worked example (fictional Acme Corp), never-auto-answer/skip/block, not-legal-advice (#2033)');
+  } else {
+    fail('apply mode missing Step 5d immigration-status screening check or its status-vs-authorization rule / Haseeb proxy example / never-auto-answer guarantees (#2033)');
+  }
+
+  // 3. Phrasing discipline, scoped to rendered-output surfaces (the report
+  //    blockquote templates) with a clause-directed regex — statute
+  //    descriptions ("unlawful unless required by law...") pass; assertions
+  //    directed at the employer do not (the #2029/#2031 approach).
+  const facingLines = (sigSection + '\n' + stepSection)
+    .split('\n')
+    .filter((l) => l.trimStart().startsWith('>'));
+  const assertive = facingLines.filter((l) =>
+    /(this employer|the employer) (is|was|has been) (discriminating|breaking the law|violating|committing)/i.test(l)
+  );
+  if (sigSection && stepSection && facingLines.length >= 2 && assertive.length === 0) {
+    pass('immigration-status rendered templates state posting/form facts + statute context only — no clause-directed "the employer is discriminating/breaking the law" assertions (#2033)');
+  } else {
+    fail(`immigration-status phrasing discipline broken: ${assertive.length ? `employer-directed assertion in rendered template: ${assertive[0].trim().slice(0, 80)}` : 'expected blockquote templates in both the oferta signal and apply Step 5d'} (#2033)`);
+  }
+
+  // 4. NEGATIVE pin (unique to this member): the mode text must explicitly
+  //    state that lawful authorization/sponsorship screening questions are
+  //    NOT flagged. If either literal disappears, the signal has lost the
+  //    authorization-vs-status line — the whole member hinges on it.
+  if (
+    sigSection.includes('are NOT flagged by this signal, ever') &&
+    stepSection.includes('generate NO warning from this step — ever') &&
+    stepSection.includes('Will you now or in the future require sponsorship for employment visa status?')
+  ) {
+    pass('negative pin holds: both mode surfaces explicitly state that authorization/sponsorship screening questions are never flagged (#2033)');
+  } else {
+    fail('negative pin broken: mode text no longer explicitly states that lawful authorization/sponsorship questions are NOT flagged ("are NOT flagged by this signal, ever" / "generate NO warning from this step — ever") (#2033)');
+  }
+}
+
+// ── 69. Jurisdiction-prohibited content signal (#2018) ─────────
+
+console.log('\n69. Jurisdiction-prohibited content signal (#2018)');
+
+// --- jurisdiction-prohibited content signal (#2018): table + oferta Block G + apply Step 5c ---
+{
+  try {
+    const { load } = await import('js-yaml');
+    const tableSrc = readFile('templates/jurisdiction-prohibited-content.yml');
+    const table = load(tableSrc);
+    const entries = Array.isArray(table?.entries) ? table.entries : [];
+    const byKey = Object.fromEntries(entries.map((e) => [e.jurisdiction, e]));
+    const entryOk = (e) =>
+      e && typeof e.prohibited === 'string' && typeof e.matching === 'string' &&
+      typeof e.legal_basis === 'string' && typeof e.effective === 'string' &&
+      Array.isArray(e.sources) && e.sources.length > 0;
+    const caOn = byKey['CA-ON'];
+    const usCa = byKey['US-CA'];
+    if (
+      entryOk(caOn) && caOn.prohibited.includes('Canadian experience') && caOn.effective === '2026-01-01' &&
+      entryOk(usCa) && usCa.prohibited.toLowerCase().includes('salary history') && usCa.effective === '2018-01-01' &&
+      tableSrc.includes('no entry without a citable legal source')
+    ) {
+      pass('jurisdiction-prohibited-content.yml parses with both verified seed entries, sources, and the contribution rule (#2018)');
+    } else {
+      fail('jurisdiction-prohibited-content.yml missing/incomplete seed entries (CA-ON, US-CA) or contribution rule (#2018)');
+    }
+  } catch (e) {
+    fail(`templates/jurisdiction-prohibited-content.yml failed to load/parse as YAML: ${e.message} (#2018)`);
+  }
+
+  if (
+    ofertaMode.includes('**12. Jurisdiction-Prohibited Content**') &&
+    ofertaMode.includes('templates/jurisdiction-prohibited-content.yml') &&
+    ofertaMode.includes('⚠️ **Jurisdiction-prohibited content signal:**') &&
+    ofertaMode.includes('not legal advice') &&
+    ofertaMode.includes('never naive keyword matching')
+  ) {
+    pass('oferta Block G signal 10 reads the jurisdiction table with agent-judged matching and a not-legal-advice note (#2018)');
+  } else {
+    fail('oferta Block G missing the jurisdiction-prohibited content signal, table reference, or not-legal-advice note (#2018)');
+  }
+
+  if (
+    applyMode.includes('## Step 5c — Jurisdiction-prohibited content check') &&
+    applyMode.includes('templates/jurisdiction-prohibited-content.yml') &&
+    applyMode.includes('⚠️ **Prohibited-content warning:**') &&
+    applyMode.includes('not obligated to answer') &&
+    applyMode.includes('Never auto-answer the field, never auto-skip it, never block')
+  ) {
+    pass('apply Step 5c warns before the candidate answers a prohibited form field — warn-only, candidate decides (#2018)');
+  } else {
+    fail('apply mode missing Step 5c prohibited-content warning or its never-auto-answer/skip/block guarantees (#2018)');
+  }
+
+  // Phrasing discipline (#2018): the new mode text states verifiable facts about
+  // the posting/form only. Outside the explicit "never assert ..." guidance
+  // sentence, the new sections must not contain employer-lawbreaking language.
+  const signal9 = ofertaMode.slice(
+    ofertaMode.indexOf('**12. Jurisdiction-Prohibited Content**'),
+    ofertaMode.indexOf('### Output format:')
+  );
+  const step5c = applyMode.slice(
+    applyMode.indexOf('## Step 5c — Jurisdiction-prohibited content check'),
+    applyMode.indexOf('**Applying to several roles')
+  );
+  const allowedGuidance = /assert that the employer is breaking the law or committing a violation/g;
+  const residue = (signal9 + '\n' + step5c).replace(allowedGuidance, '');
+  if (
+    signal9.length > 0 && step5c.length > 0 &&
+    !/illegal|violat|breaking the law|lawbreak/i.test(residue)
+  ) {
+    pass('jurisdiction-prohibited sections keep phrasing discipline — no employer-lawbreaking assertions outside the guidance sentence (#2018)');
+  } else {
+    fail('jurisdiction-prohibited sections contain employer-lawbreaking language outside the "never assert" guidance (#2018)');
+  }
+}
+
+// check-table-freshness.mjs's own --self-test (invoked above via the
+// CLI-check table) covers discovery shapes, finding semantics, date-math
+// boundaries, and malformed-date handling on its own fixtures. This section
+// pins the wiring: the script ships, updates, is documented — and stays
+// strictly read-only (it reports stale jurisdiction rows; it must never be
+// able to "fix" them, or any other file, itself).
+
+console.log('\n70. Table-freshness validator wiring + read-only boundary (#2036)');
+
+try {
+  const freshnessSrc = readFile('check-table-freshness.mjs');
+
+  const updaterSrc = readFile('update-system.mjs');
+  const freshSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  if (freshSysBlock.includes("'check-table-freshness.mjs'")) {
+    pass('check-table-freshness.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  } else {
+    fail('check-table-freshness.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts && pkg.scripts.freshness === 'node check-table-freshness.mjs') {
+    pass('package.json exposes npm run freshness');
+  } else {
+    fail('package.json missing the freshness script entry');
+  }
+
+  const scriptsDoc = readFile('docs/SCRIPTS.md');
+  if (scriptsDoc.includes('## check-table-freshness') && scriptsDoc.includes('--max-age-months')) {
+    pass('docs/SCRIPTS.md documents check-table-freshness (section + threshold flag)');
+  } else {
+    fail('docs/SCRIPTS.md missing the check-table-freshness section');
+  }
+  if (/`review-due` alone never fails the run/.test(scriptsDoc)) {
+    pass('docs/SCRIPTS.md documents the CI-friendly exit-code semantics (expired=1, review-due alone=0)');
+  } else {
+    fail('docs/SCRIPTS.md missing the exit-code semantics for check-table-freshness');
+  }
+
+  const agentsDoc = readFile('AGENTS.md');
+  if (agentsDoc.includes('`check-table-freshness.mjs`')) {
+    pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+  }
+
+  // Read-only import boundary: the ONLY fs capabilities the script may hold
+  // are readFileSync / readdirSync / existsSync. No write-capable named
+  // imports, no fs/promises, no require(), no dynamic import of fs — so a
+  // future edit that adds a write path fails CI instead of shipping quietly.
+  const FS_READ_WHITELIST = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  const fsImports = [...freshnessSrc.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/g)];
+  const fsNames = fsImports.flatMap(m => m[1].split(',').map(s => s.trim()).filter(Boolean));
+  const nonWhitelisted = fsNames.filter(n => !FS_READ_WHITELIST.has(n));
+  if (fsImports.length > 0 && nonWhitelisted.length === 0) {
+    pass('check-table-freshness.mjs fs imports are read-only (readFileSync/readdirSync/existsSync only)');
+  } else {
+    fail(`check-table-freshness.mjs fs import boundary violated: ${nonWhitelisted.join(', ') || 'no fs import matched'}`);
+  }
+  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(freshnessSrc)) {
+    pass('check-table-freshness.mjs does not import fs/promises');
+  } else {
+    fail('check-table-freshness.mjs imports fs/promises — write-capable API surface');
+  }
+  if (!/\brequire\s*\(/.test(freshnessSrc)) {
+    pass('check-table-freshness.mjs has no require() escape hatch');
+  } else {
+    fail('check-table-freshness.mjs uses require() — bypasses the import whitelist');
+  }
+  if (!/import\s*\(\s*['"](?:node:)?fs/.test(freshnessSrc)) {
+    pass('check-table-freshness.mjs has no dynamic fs import');
+  } else {
+    fail('check-table-freshness.mjs dynamically imports fs — bypasses the import whitelist');
+  }
+  const writeTokens = ['writeFileSync', 'appendFileSync', 'mkdirSync', 'rmSync', 'unlinkSync', 'renameSync', 'createWriteStream', 'copyFileSync'];
+  const foundWrite = writeTokens.filter(t => freshnessSrc.includes(t));
+  if (foundWrite.length === 0) {
+    pass('check-table-freshness.mjs contains no write-capable fs tokens');
+  } else {
+    fail(`check-table-freshness.mjs mentions write-capable fs APIs: ${foundWrite.join(', ')}`);
+  }
+} catch (e) {
+  fail(`table-freshness wiring check: ${e.message}`);
 }
 
 await runDiscovered();

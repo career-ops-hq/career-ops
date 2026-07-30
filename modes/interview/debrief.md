@@ -22,7 +22,7 @@ After a real interview, capture what was asked, assess what landed and what didn
 6. **Story bank** at `interview-prep/story-bank.md` — add new stories if surfaced
 7. **CV** at `cv.md` + `article-digest.md` (if present) — to ground suggested answers in real experience
 8. **Retracted claims** at `interview-prep/retracted-claims.md` (if present) — hard gate; never use a retracted claim in a suggested answer even if the candidate said it in the interview
-9. **Role-specific prep file** — append debrief notes
+9. **Role-specific prep file** — append debrief notes; correct in place any existing fact the interview directly contradicts (see Step 1b)
 
 ---
 
@@ -54,6 +54,27 @@ If memory is incomplete, ask targeted prompts:
 Set the explicit source marker: **`input_source: recall`**.
 
 Whichever path produced the question/answer data, Steps 2 onward operate on it identically — honest assessment, gap-closing, and question-bank/story-bank updates don't distinguish between an `input_source: transcript` and an `input_source: recall` debrief. The marker itself is still carried through unchanged so Step 9 can read it.
+
+---
+
+## Step 1b — Check for Contradicted Facts
+
+While capturing what was said, also check it against the role-specific prep file's existing factual claims — this runs alongside Step 1, not after it.
+
+**The distinction that matters:** most of what an interview surfaces is *new information* — a new gap, a new story, a new detail that wasn't in the prep file before. That's append-only, and Steps 4/5/8 below handle it exactly as they always have. But sometimes what the interview surfaces isn't new — it's a **direct contradiction of a specific fact the prep file already asserts** (location, comp range, team size, reporting structure, tech/system stack, etc.). That's not a gap to close or a story to add; it's an existing claim that is now known to be wrong.
+
+- **"This is new information" → appends.** Use the existing Step 4 / Step 5 / Step 8 flows unchanged.
+- **"This directly contradicts something the prep file already asserts as fact" → correct in place.** Edit the original line in the role-specific prep file itself, rather than leaving the wrong claim untouched and only noting the discrepancy in a new section below it.
+
+When correcting in place, use a strikethrough-plus-correction format so the history of what was believed vs. confirmed stays visible in the diff:
+
+```markdown
+~~Metro Hall, on-site~~ **Metro Hall — hybrid** (confirmed on the {date} call)
+```
+
+**Resolve inference tags on contradiction or confirmation.** If the original line carried an inference marker — `[inferred from JD]`, or prose noting the source was an expired/inaccessible posting — and the interview either confirms or corrects it, resolve the tag rather than leaving a now-settled fact permanently marked as uncertain: replace the marker with the confirmed fact and its real source (the interview/call itself), using the same strikethrough-plus-correction shape when the value changed, or a plain edit to drop the marker and cite the new source when the value was merely confirmed as-is.
+
+This step never touches `interview-prep/retracted-claims.md` or the story bank — those stay reserved for the candidate's own claims, not for facts about the role. It also never rewrites Step 4's "Gaps to Close" additions; a contradicted fact is corrected at its original location, not logged as a gap.
 
 ---
 
@@ -217,3 +238,4 @@ Rules for the transcript:
 - **Extract vocabulary gaps explicitly.** If the candidate used an imprecise term where a precise one exists, add it to `interview-prep/interview-prep-guide.md` under the vocabulary section (if the candidate maintains one).
 - **One gap = one fix.** Don't overwhelm with a full study plan for every gap. Prioritize the 1–2 most likely to be tested in the next round.
 - **Celebrate what worked.** Debrief isn't only about gaps. Name what was strong — it reinforces the right behaviour and builds confidence for the next round.
+- **Contradicted facts get corrected in place, not appended around.** If the interview directly contradicts a specific fact the prep file already states (location, comp, team size, stack, reporting line), edit that line — strikethrough the old value, bold the confirmed one, note when/how it was confirmed (see Step 1b). Don't leave a wrong claim standing untouched with a caveat bolted on below it.

@@ -16,7 +16,10 @@
 //     before deleting anything.
 //   - staleness is judged by owner-PID liveness first, falling back to
 //     directory age only when the metadata is missing or unreadable. An old
-//     lock whose owner is still running is NOT stale.
+//     lock whose owner is still running is NOT stale, and an ownerless
+//     directory gets a fixed grace period (OWNERLESS_GRACE_MS) before age
+//     alone can condemn it, so a directory created microseconds ago is never
+//     reclaimable no matter how aggressive the caller's staleMs.
 //   - stale reclamation is serialized behind a second atomic guard directory
 //     ("<path>.lock.recover"). Without it, reclamation is itself a TOCTOU
 //     race: two callers that both judge the same lock stale can have the
@@ -32,6 +35,7 @@ import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
 const DEFAULT_STALE_MS = 30_000;
+export const OWNERLESS_GRACE_MS = 1_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
 
@@ -77,11 +81,22 @@ function processIsAlive(pid) {
 
 // Conservative: a lock whose recorded owner is still running is never stale,
 // however old it is. Age is the fallback only when there's no readable owner.
+//
+// That fallback needs a floor. Two directories are ownerless by construction,
+// not by accident: a lock between its mkdir and its owner.json write, and the
+// recover guard, which never carries owner.json at all. Judging those on
+// `age > staleMs` alone lets a caller with an aggressive staleMs delete a
+// directory created microseconds ago — either stealing a winner's lock inside
+// its acquisition window, or evicting a live guard and putting two callers
+// inside the decide-then-delete window the guard exists to serialize.
+// OWNERLESS_GRACE_MS is a lower bound on that patience, never a cap: a larger
+// caller staleMs still wins, and a genuinely abandoned directory still ages
+// out, so a crash while holding the guard cannot disable recovery for good.
 function lockCanRecover(lockDir, staleMs) {
   const owner = readLockOwner(lockDir);
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
   } catch {
     return true; // vanished — nothing to recover, retry acquisition
   }
@@ -95,7 +110,7 @@ function lockCanRecover(lockDir, staleMs) {
  * @param {object} [options]
  * @param {number} [options.timeoutMs=8000] - Max time to wait for the lock.
  * @param {number} [options.retryMs=80] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=30000] - Age threshold for a lock with no readable owner.
+ * @param {number} [options.staleMs=30000] - Age threshold for a lock with no readable owner, floored at OWNERLESS_GRACE_MS.
  */
 export async function acquirePipelineLock(pipelinePath, options = {}) {
   // Env overrides let a caller several frames up the stack (a test driving
