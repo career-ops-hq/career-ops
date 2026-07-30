@@ -1006,7 +1006,6 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   // row links is unambiguous and must keep working. Without this, the fix could
   // be over-broad (refusing every backfilled row) and the tests would not notice.
   boxed(sandbox => {
-    const r = runSetStatus(['--row', '5', 'Rejected', '--json'], sandbox);
     const r2 = runSetStatus(['1', 'Rejected', '--json'], sandbox);
     let parsed = null;
     try { parsed = JSON.parse(r2.stdout); } catch {}

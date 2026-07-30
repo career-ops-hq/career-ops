@@ -98,7 +98,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
-  --force            Allow a numeric selector when the row's report link carries a different ID
+  --force            Allow a numeric selector despite a report-link mismatch, or despite a
+                     report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
   --json             Machine-readable output on stdout (errors included)
 
