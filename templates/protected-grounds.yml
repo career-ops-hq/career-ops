@@ -251,7 +251,6 @@ protected_grounds:
       - topic: "Staatsangehörigkeit (nationality / citizenship)"
         example_question_patterns:
           - "Welche Staatsangehörigkeit haben Sie? / What is your nationality?"
-          - "Sind Sie deutscher Staatsbürger? / Are you a German citizen?"
         legitimate_contexts:
           - "Asking about a valid work authorisation (Arbeitserlaubnis / Aufenthaltstitel) is permissible and distinct from nationality (ADS guidance)"
           - "Questions about nationality may constitute indirect ethnic-origin discrimination (ADS 'Was Arbeitgeber fragen (dürfen)' study, citing ArbG Hamburg precedent)"
