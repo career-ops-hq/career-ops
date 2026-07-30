@@ -14,7 +14,7 @@ Un set di competenze riutilizzabili per la preparazione ai colloqui di lavoro.
 
 | Competenza | File | Quando utilizzarlo |
 |---|---|---|
-| Ricerca Aziendale | `../interview-prep.md` | Fai ricerche su una specifica azienda e ruolo prima del colloquio |
+| Ricerca Aziendale | `../../interview-prep.md` | Fai ricerche su una specifica azienda e ruolo prima del colloquio |
 
 ## Convenzioni sui File
 
