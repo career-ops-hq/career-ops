@@ -14,7 +14,7 @@ Data una descrizione del lavoro (JD) e la data/ora del colloquio, costruisci un 
 6. **Profilo** in `config/profile.yml` + `modes/_profile.md` — per leggere la narrativa, gli archetipi e gli obiettivi
 7. **Banca delle storie** in `interview-prep/story-bank.md` — storie STAR+R esistenti
 8. **Banca delle domande** in `interview-prep/question-bank.md` — lacune esistenti (se il file esiste)
-9. **Compenso dichiarato in precedenza** — se il tracker# è noto, esegui `node salary-gap.mjs --desired-for <tracker#>` (zero token). Qualsiasi precedente osservazione in `desired` è una cifra per la quale il candidato si è già impegnato in un round precedente con un intervistatore specifico — inseriscilo nel riferimento rapido del Passo 4, affinché il candidato sia coerente invece di rinegoziare accidentalmente.
+9. **Compenso dichiarato in precedenza** — se il tracker# è noto, esegui `node salary-gap.mjs --stated-for <tracker#>` (zero token). Qualsiasi precedente osservazione in `stated` è una cifra per la quale il candidato si è già impegnato in un round precedente con un intervistatore specifico — inseriscilo nel riferimento rapido del Passo 4, affinché il candidato sia coerente invece di rinegoziare accidentalmente.
 
 ---
 
@@ -139,7 +139,7 @@ Alla fine del piano, realizza un riferimento rapido di una pagina che il candida
 2. [la domanda in assoluto più probabile, assieme alla prima frase della tua risposta]
 3. [il legame tra la tua storia ed il loro dominio/settore lavorativo]
 
-**Compenso — precedentemente discusso:** [solo se `--desired-for` restituisce osservazioni antecedenti] "Hai dichiarato {amount} {currency} con {interviewer} il {date} al round {round}. Rimani coerente su questo a meno che non sia cambiato qualcosa di materiale." Ometti completamente questo blocco se non vi sono osservazioni `desired` in precedenza per questo numero di tracker — non inventare una cifra qualora non sia mai stata discussa.
+**Compenso — precedentemente discusso:** [solo se `--stated-for` restituisce osservazioni antecedenti] "Hai dichiarato {amount} {currency} con {interviewer} il {date} al round {round}. Rimani coerente su questo a meno che non sia cambiato qualcosa di materiale." Ometti completamente questo blocco se non vi sono osservazioni `stated` in precedenza per questo numero di tracker — non inventare una cifra qualora non sia mai stata discussa.
 
 **Le tue domande da fare:**
 1. [domanda 1]
