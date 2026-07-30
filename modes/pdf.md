@@ -16,7 +16,12 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
    - `supportedByResume` — not a named skill yet, but cv.md's prose already demonstrates it; legitimate candidates for the Skills section in the user's own words (Step 13's competency grid draws from here first)
    - `gap` — cv.md has no trace of it at all. **Tell the user explicitly which skills are gaps before generating the CV.** Never paper over a gap by inventing a claim, and never silently drop it from the conversation — the user decides whether to proceed, address it in the cover letter/interview, or skip the role
 
-   If the output prints a `🚨 LOW CONFIDENCE` block, the check did not run: zero skills were classified, so the three empty buckets mean "nothing was checked", not "no gaps found". **Do not treat this as a pass.** Surface the warning text and its reason to the user verbatim, state that the automated gap check could not read this JD, and read the JD yourself to identify the required skills before drafting. A `no-requirements-section` reason means the JD's headers were not recognized; `no-recognized-skills` means the requirements were found but the vocabulary covers none of them (common for non-engineering roles).
+   If the output prints a `🚨 LOW CONFIDENCE` block, zero skills were classified, so the three empty buckets mean "nothing was classified", not "no gaps found". **Do not treat this as a pass in either case.** Read the JD yourself to identify the required skills before drafting, and tell the user the automated check produced no result. The reason code says which of the two shapes it is:
+   - `no-requirements-section` — no requirements section was recognized, so no text was scanned at all
+   - `no-skill-candidates` — a requirements section was scanned, but no skill candidates came out of it. This does not mean the skills are absent from the vocabulary; the extractor only picks up capitalized tokens, so a lowercase bullet yields nothing
+   - `empty-jd` — the file has no content
+
+   > ⚠️ **Skill-gap check inconclusive:** [Render in {language.output}: state that the automated skill-gap check returned no classified skills for this JD and so cannot be read as "no gaps"; name which of the two shapes occurred from the reason code (requirements section never found, versus found but no candidates extracted); say that you will read the JD directly to identify required skills before drafting. Keep the CLI's own English diagnostic out of the user-facing message.]
 5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
 6. Detect company location → paper format:
    - US/Canada → `letter`

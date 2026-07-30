@@ -189,6 +189,14 @@ function extractJdSkills(jdText) {
  * Returns null when the run is conclusive (at least one skill was classified).
  * Otherwise returns a reason code and a message for the user.
  *
+ * The second reason deliberately says "no skill candidates were extracted"
+ * rather than blaming the vocabulary. Extraction can come back empty for
+ * reasons that have nothing to do with dictionary coverage: SKILL_TOKEN_RE only
+ * captures uppercase-leading tokens, so a lowercase bullet like
+ * "- python and kubernetes experience" yields nothing even though
+ * skill-extract.mjs knows both names. STOPWORDS can also empty a bullet. All the
+ * caller can honestly be told is that nothing was classified.
+ *
  * There is deliberately no minimum-length test here. That would need a
  * character cutoff, and this repo has no JD corpus to calibrate one against:
  * `jds/` is user-layer and gitignored, and the only JD-shaped files in the tree
@@ -221,9 +229,9 @@ function diagnoseExtraction(jdText, jdSkills) {
   }
 
   return {
-    reason: 'no-recognized-skills',
+    reason: 'no-skill-candidates',
     message:
-      'A requirements section was found, but none of its terms are in the skill vocabulary. ' +
+      'A requirements section was found and scanned, but no skill candidates were extracted from it. ' +
       'This is not the same as "no gaps": nothing was classified. Read the JD yourself before drafting.',
   };
 }
@@ -558,21 +566,52 @@ Maintained the internal Fabrikam-SDK build.
     'no-requirements-section'
   );
 
-  // The other zero shape: the requirements section IS found, but the vocabulary
-  // recognizes nothing inside it. Different cause, so a different reason code —
-  // this one points at dictionary coverage rather than at header matching.
-  const unrecognizedJd = `
+  // The other zero shape: the requirements section IS found and scanned, but no
+  // skill candidates come out of it. Different cause, so a different reason code
+  // — this one points at extraction, not at header matching.
+  const parserEmptyJd = `
 # Enablement Content Manager
 
 ## Requirements
 - adult learning principles and instructional design
 - blended and scenario-based learning
 `;
-  eq('unrecognized-vocabulary JD extracts zero skills', extractJdSkills(unrecognizedJd).length, 0);
+  eq('parser-empty JD extracts zero skills', extractJdSkills(parserEmptyJd).length, 0);
   eq(
-    'zero skills inside a real requirements section is reported as no-recognized-skills',
-    diagnoseExtraction(unrecognizedJd, extractJdSkills(unrecognizedJd)).reason,
-    'no-recognized-skills'
+    'zero skills inside a scanned requirements section is reported as no-skill-candidates',
+    diagnoseExtraction(parserEmptyJd, extractJdSkills(parserEmptyJd)).reason,
+    'no-skill-candidates'
+  );
+
+  // The reason code must not be read as "the vocabulary is missing these".
+  // SKILL_TOKEN_RE only captures uppercase-leading tokens, so a lowercase bullet
+  // extracts nothing even when skill-extract.mjs knows every name in it. Same
+  // reason code, and the message must stay true here too.
+  const lowercaseKnownJd = `
+# Role
+
+## Requirements
+- python and kubernetes experience
+`;
+  eq(
+    'a lowercase bullet of KNOWN skills still extracts zero candidates',
+    extractJdSkills(lowercaseKnownJd).length,
+    0
+  );
+  eq(
+    'the vocabulary does know those names, so the empty result is not a coverage gap',
+    [...extractSkills('python and kubernetes')].sort().join(','),
+    'Kubernetes,Python'
+  );
+  eq(
+    'a parser-empty result is reported as no-skill-candidates, not as a vocabulary gap',
+    diagnoseExtraction(lowercaseKnownJd, extractJdSkills(lowercaseKnownJd)).reason,
+    'no-skill-candidates'
+  );
+  eq(
+    'the no-skill-candidates message does not claim the vocabulary is missing the terms',
+    /vocabulary/i.test(diagnoseExtraction(lowercaseKnownJd, []).message),
+    false
   );
 
   // An empty file is its own cause and should not be blamed on header matching.
