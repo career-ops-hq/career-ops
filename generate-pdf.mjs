@@ -4,7 +4,7 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
  *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
@@ -24,6 +24,12 @@
  * role) rather than accidentally scrambled by an agent. Without this flag,
  * any divergence from cv.md's section order still fails generation.
  *
+ * --allow-nonchronological downgrades the work-experience ordering guard from
+ * a thrown error to a console warning. By default a CV whose experience entries
+ * are not newest-first fails generation: promoting "the most relevant role" to
+ * the top is a functional-resume technique that buries the candidate's most
+ * recent senior title and reads as concealment to ATS parsers and recruiters.
+ *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
  * The actual page count is checked after Chromium writes the PDF; overflow
  * warns with trimming guidance by default. --strict-pages turns that warning
@@ -41,6 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
+import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
@@ -1255,7 +1262,7 @@ async function generatePDF() {
   // Parse arguments
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
-  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
+  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false, allowNonChronological = false;
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
@@ -1270,6 +1277,8 @@ async function generatePDF() {
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
       allowReorder = true;
+    } else if (arg === '--allow-nonchronological') {
+      allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
     } else if (arg === '--skip-fact-check') {
@@ -1317,7 +1326,7 @@ async function generatePDF() {
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
     console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
@@ -1378,6 +1387,7 @@ async function generatePDF() {
   html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateCvExperienceOrder(html, { allowNonChronological });
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
