@@ -4897,6 +4897,38 @@ try {
     fail('remote-title detection must not fire on "Remote Sensing"-style compounds');
   }
 
+  // Case 27a: an explicit negation must lose. "Non-Remote"/"Not Remote" satisfy
+  // REMOTE_TITLE_RE on their own — the delimiter clears the lookbehind and the
+  // trailing position clears the lookahead — so without a negation guard an
+  // explicitly on-site role would bypass a non-empty `allow` list.
+  if (
+    titleSignalsRemote('Project Manager - Non-Remote') === false &&
+    titleSignalsRemote('Project Manager - Not Remote') === false &&
+    titleSignalsRemote('Office Manager (Non-Remote)') === false &&
+    titleSignalsRemote('Program Manager - NonRemote') === false &&
+    titleSignalsRemote('Program Manager - No Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Non-Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Not Remote') === false
+  ) {
+    pass('an explicit negation ("Non-Remote"/"Not Remote") never counts as a remote marker');
+  } else {
+    fail('negated remote titles are being admitted — an on-site role can bypass allow');
+  }
+
+  // Case 27b: the negation guard must not over-reach. `[\s-]*` spans only spaces
+  // and hyphens, so a word-initial "non"/"not" in an unrelated token cannot
+  // reach across to "remote".
+  if (
+    titleSignalsRemote('Nonprofit Program Manager - Remote') === true &&
+    titleSignalsRemote('Not-for-Profit Program Manager - Remote') === true &&
+    titleSignalsRemote('Nordic Program Manager - Remote') === true &&
+    titleSignalsRemote('Notary Operations Manager - Remote') === true
+  ) {
+    pass('the negation guard does not misfire on Nonprofit/Not-for-Profit/Nordic/Notary titles');
+  } else {
+    fail('negation guard is over-rejecting legitimate remote titles');
+  }
+
   // Case 27: unchanged behavior — on-site city-only roles with no remote marker
   // stay rejected, and malformed/absent titles are inert.
   if (

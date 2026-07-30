@@ -243,10 +243,24 @@ export function locationHintFromUrl(url) {
 // "remote sensing" / "remote monitoring" compounds.
 export const REMOTE_TITLE_RE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
 
+// …and a negation before the word has to lose, which the marker regex alone
+// cannot see: in "Non-Remote" / "Not Remote" the delimiter clears the lookbehind
+// and the trailing position clears the lookahead, so an explicitly on-site role
+// would bypass a non-empty `allow` list — the exact opposite of the intent.
+// `[\s-]*` only spans spaces/hyphens, so word-initial "non"/"not" in an
+// unrelated token cannot reach across ("Nonprofit Program Manager - Remote" and
+// "Not-for-Profit … - Remote" both stay remote).
+// A negation anywhere in the title disqualifies it. Over-rejecting here is the
+// safe direction: this tier only ever *rescues* a posting, so a false negative
+// restores the previous behavior while a false positive admits an on-site role.
+export const REMOTE_NEGATED_RE = /\b(?:non|not|no)[\s-]*remote/;
+
 /** @param {unknown} title @returns {boolean} whether the title marks the role remote. */
 export function titleSignalsRemote(title) {
   if (typeof title !== 'string' || title.trim() === '') return false;
-  return REMOTE_TITLE_RE.test(title.toLowerCase());
+  const lower = title.toLowerCase();
+  if (REMOTE_NEGATED_RE.test(lower)) return false;
+  return REMOTE_TITLE_RE.test(lower);
 }
 
 // `url` and `title` are optional. Callers that omit them get the original
