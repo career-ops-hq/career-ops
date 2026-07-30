@@ -114,6 +114,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     "phone": "+1 415 555 0100",
     "email": "jane@example.com",
     "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
+    "github": { "url": "https://github.com/janesmith", "display": "github.com/janesmith" },
     "portfolio": { "url": "https://janesmith.dev", "display": "janesmith.dev" },
     "location": "San Francisco, CA",
     "photo": "",
@@ -165,6 +166,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
 | `candidate.linkedin` | `{url, display}` | Optional — omit to drop the item and its separator. |
+| `candidate.github` | `{url, display}` | Optional — omit to drop the item and its separator. |
 | `candidate.portfolio` | `{url, display}` | Optional — omit to drop the item and its separator. |
 | `candidate.location` | string | From `profile.yml`. |
 | `candidate.photo` | string | Opt-in profile photo (#264): a local path or `data:` URL. Empty/absent emits **no `<img>`**, rendering pixel-for-pixel identical to the photoless layout (US/UK/many-market ATS penalize photos; opt in for DACH/European markets). |
@@ -295,7 +297,7 @@ Want a cover letter for this role too?
 - Or run `/career-ops cover {slug}` later
 ```
 
-Apply `voice-dna.md` (if present) to the cover letter — full guardrail, conversational voice included (Tier 1 + Tier 2). The CV PDF itself stays Tier 1 only (formal ATS register). See `_shared.md` → Voice DNA.
+Apply `voice-dna.md` (if present) to the cover letter — full guardrail, conversational voice included (Tier 1 + Tier 2). The CV PDF itself stays Tier 1 only (formal ATS register). See `_writing.md` → Voice DNA.
 
 If the user says yes, run the full cover letter flow from `modes/cover.md` in slug mode:
 1. Load the existing `## Cover Letter Draft` from the evaluation report as a starting point

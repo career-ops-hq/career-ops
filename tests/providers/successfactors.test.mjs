@@ -234,6 +234,27 @@ try {
   } else {
     fail(`parseCsbJobs did not honor cfg.base: ${JSON.stringify(csbBrandJobs[0]?.url)}`);
   }
+
+  // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
+  // RangeError out of the whole parse. The local decodeEntities copy guarded
+  // only with Number.isFinite (no `<= 0x10FFFF` / surrogate check), so ONE
+  // adversarial/malformed entity (&#99999999;, &#xFFFFFFFF;) crashed the entire
+  // provider parse and scan.mjs's per-company catch dropped EVERY posting for
+  // that run. parseTiles now routes through the shared guarded decoder, which
+  // degrades an out-of-range or lone-surrogate entity to literal text while
+  // still decoding valid ones (&amp;).
+  {
+    const badFrag2 = `<ul>
+      <li class="job-tile job-id-9001" data-url="/job/City-Bad-Entity/9001/">
+        <a class="jobTitle-link fontcolorx" href="/x">Overflow &#99999999; &amp; Hex &#xFFFFFFFF; Surrogate &#xD800;</a>
+      </li>
+    </ul>`;
+    let badTiles, badThrew = null;
+    try { badTiles = parseTiles(badFrag2, 'https://jobs.example.com'); } catch (e) { badThrew = e; }
+    if (badThrew) fail(`successfactors.parseTiles() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
+    else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
+    else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }

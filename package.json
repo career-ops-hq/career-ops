@@ -1,8 +1,11 @@
 {
   "name": "career-ops",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "doctor": "node doctor.mjs",
     "or": "node openrouter-runner.mjs",
@@ -30,6 +33,7 @@
     "scan:full": "node scan-ats-full.mjs",
     "scan:seeds": "node scan-ats-full.mjs --seeds yc,a16z",
     "scan:yc": "node scan-ats-full.mjs --seeds yc",
+    "scan:interamt": "node scan-interamt.mjs",
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
@@ -38,6 +42,7 @@
     "upskill": "node upskill.mjs",
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",
+    "freshness": "node check-table-freshness.mjs",
     "invite-match": "node invite-match.mjs",
     "paste-reply": "node paste-reply.mjs",
     "gemini:eval": "node gemini-eval.mjs",
@@ -81,6 +86,6 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
-    "playwright": "1.61.1"
+    "playwright": "1.62.0"
   }
 }

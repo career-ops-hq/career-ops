@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
 
 // SAP SuccessFactors provider — Recruiting Marketing (RMK, ex-jobs2web) career
 // sites (Career Site Builder's branded job boards). These are the portals big
@@ -104,21 +105,6 @@ export function resolveConfig(entry) {
     jobsApi: `${base}/services/recruiting/v1/jobs`,
     searchPage: `${base}/search/`,
   };
-}
-
-// Minimal HTML entity decoder — titles carry named (&amp;) and numeric
-// (&#252; / &#xfc;) entities. We only need the handful that show up in job
-// titles; anything else is left as-is.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
-  });
 }
 
 /** @param {string} s */

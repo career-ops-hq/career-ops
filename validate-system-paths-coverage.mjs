@@ -121,6 +121,28 @@ try {
   process.exit(1);
 }
 
+// An empty file list is NOT "nothing to check" — it means this run could not
+// inspect anything, and reporting success would make the guard a no-op.
+//
+// That is exactly what happened for as long as this check has existed. test-all
+// runs the scripts from a throwaway copy created *inside* the repo, and
+// `git ls-files` from an untracked subdirectory returns zero paths. So CI printed
+// "OK: 0 tracked files covered" and exited 0 while the real tree had an
+// unregistered top-level file. A file missing from SYSTEM_PATHS is not cosmetic:
+// `update-system` never ships it, so every user who updates silently loses it.
+// This bug class has landed five times (#649, #704, .editorconfig, and twice
+// since) and the guard meant to stop it was green throughout.
+//
+// A check that cannot look must fail, not pass.
+if (tracked.length === 0) {
+  console.error('FAIL: git ls-files returned no paths — this run could not inspect anything.');
+  console.error('');
+  console.error('Run this from the repository root. An empty listing usually means the');
+  console.error('script was invoked from an untracked directory (a temp copy, a fixture');
+  console.error('dir), where git reports nothing and the coverage check is meaningless.');
+  process.exit(1);
+}
+
 const orphans = tracked.filter((f) => !covered(f));
 
 if (orphans.length > 0) {

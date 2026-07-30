@@ -5,6 +5,11 @@
  *
  * The CLI remains useful for CVs, while the exported verifyFacts function is
  * shared by PDF generators so every generated document gets the same gate.
+ *
+ * Usage:
+ *   node verify-cv-facts.mjs <generated-cv.html|md|tex>
+ *   node verify-cv-facts.mjs <generated-cv> --source cv.md --source article-digest.md
+ *   node verify-cv-facts.mjs --self-test
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -20,6 +25,35 @@ const TOOL_PROSE_WORDS = new Set([
   'team', 'the', 'to', 'using', 'with',
 ]);
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
+const METRIC_NOUNS = [
+  'users', 'customers', 'clients', 'employees', 'engineers', 'teams', 'companies',
+  'partners', 'organizations', 'organisations', 'brands', 'countries',
+  'hours', 'days', 'weeks', 'months', 'years', 'minutes', 'seconds',
+  'requests', 'tokens', 'documents', 'workflows', 'pipelines', 'agents',
+  'interviews', 'applications', 'offers', 'reports', 'cvs', 'resumes',
+  'enrollments', 'enrolments', 'completions', 'courses', 'certifications',
+  'certificates', 'sessions', 'responses', 'surveys', 'cohorts',
+  'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
+  'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
+  'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
+];
+const COUNT_CLAIM_RE = new RegExp(
+  String.raw`\b(\d[\d,.]*)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,2}(${METRIC_NOUNS.join('|')})\b`,
+  'gi'
+);
+const NOUN_SYNONYMS = new Map([
+  ['repos', 'repositories'],
+  ['enrolments', 'enrollments'],
+  ['organisations', 'organizations'],
+  ['cvs', 'resumes'],
+  ['certificates', 'certifications'],
+  ['articles', 'guides'],
+]);
+const SIMPLE_CLAIM_PATTERNS = [
+  /\b\d+(?:\.\d+)?\s?%/g,
+  /(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?[kKmMbB])?/g,
+  /\b\d+(?:\.\d+)?\s?x\b/gi,
+];
 
 /** Read a UTF-8 file when it exists, otherwise return an empty string. */
 function readIfExists(path) {
@@ -92,17 +126,29 @@ export function factClaims(text) {
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text) {
   const clean = stripMarkup(text);
-  const patterns = [
-    /\b\d+(?:\.\d+)?\s?%/g,
-    /(?<![\d$€£])[$€£]\s?\d[\d,.]*(?:\s?[kKmMbB])?/g,
-    /\b\d+(?:\.\d+)?\s?x\b/gi,
-    /\b\d[\d,.]*\+?\s?(?:users|customers|clients|employees|engineers|teams|companies|hours|days|weeks|months|years|minutes|seconds|requests|tokens|documents|workflows|pipelines|agents|interviews|applications|offers|reports|cvs|resumes)\b/gi,
-  ];
   const claims = new Set();
-  for (const pattern of patterns) {
+  for (const pattern of SIMPLE_CLAIM_PATTERNS) {
     for (const match of clean.matchAll(pattern)) claims.add(normalizeClaim(match[0]));
   }
+  COUNT_CLAIM_RE.lastIndex = 0;
+  for (const match of clean.matchAll(COUNT_CLAIM_RE)) {
+    const noun = match[2].toLowerCase();
+    claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
+  }
   return claims;
+}
+
+/** Compare generated metric claims against source text without reading files. */
+export function auditClaims(targetText, sourceText, config = {}) {
+  const allowed = new Set([
+    ...metricClaims(sourceText),
+    ...(config.allow_metrics || []).map(normalizeClaim),
+  ]);
+  const invented = [...metricClaims(targetText)].filter(claim => !allowed.has(claim));
+  const forbidden = (config.forbidden_phrases || [])
+    .filter(Boolean)
+    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+  return { invented, forbidden };
 }
 
 /** Load and validate the optional fact-gate configuration file. */
@@ -211,6 +257,7 @@ function parseCliArgs(args) {
 /** Return the command-line usage text. */
 function usage() {
   return `Usage: node verify-cv-facts.mjs <generated-document> [--source path] [--config path] [--json]
+       node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
 non-metric facts (employers, titles, and tools) absent from source files.
@@ -218,8 +265,52 @@ Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }
 
+/** Exercise the metric extraction regressions that the shared gate depends on. */
+function runSelfTest() {
+  let passed = 0;
+  let failed = 0;
+  const equal = (label, actual, expected) => {
+    if (JSON.stringify(actual) === JSON.stringify(expected)) {
+      passed++;
+      return;
+    }
+    failed++;
+    console.error(`FAIL: ${label}`);
+    console.error(`  expected: ${JSON.stringify(expected)}`);
+    console.error(`  actual:   ${JSON.stringify(actual)}`);
+  };
+  const source = [
+    'Reached 16,181 active users and 289,760 enrollments across 80 courses.',
+    'Cut infrastructure cost 60%. Managed a $550K budget.',
+    'Certified partners earned 2x more. Authored 80+ open-access technical guides.',
+  ].join(' ');
+
+  equal('truthful modifier restatement', auditClaims('Reached 16,181 users', source).invented, []);
+  equal('inflated modifier count', auditClaims('Reached 94,772 active users', source).invented, ['94 772 users']);
+  equal('new training noun', auditClaims('Drove 900,000 enrollments', source).invented, ['900 000 enrollments']);
+  equal('truthful currency', auditClaims('Managed a $550K budget', source).invented, []);
+  equal('inflated currency', auditClaims('Managed a $900K budget', source).invented, ['$900k']);
+  equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
+  equal('noun synonym', auditClaims('Authored 80 articles', source).invented, []);
+  equal('ordinary year is ignored', auditClaims('Joined the team in 2013', source).invented, []);
+  equal(
+    'allow_metrics override',
+    auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,
+    []
+  );
+  equal(
+    'forbidden phrase',
+    auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
+    ['proven track record']
+  );
+
+  console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
+  return failed ? 1 : 0;
+}
+
 /** Run the fact validator CLI and return its process exit code. */
 export function runCli(args = process.argv.slice(2)) {
+  if (args.length === 1 && args[0] === '--self-test') return runSelfTest();
   let parsed;
   try {
     parsed = parseCliArgs(args);
