@@ -84,3 +84,20 @@ const OK_CHILD = 'console.log("OK");';
   if (text.includes('MARKER-ERR') && text.includes('3')) pass('formatRunFailure() carries the exit status and stderr');
   else fail(`formatRunFailure() must surface status and stderr, got ${JSON.stringify(text)}`);
 }
+
+// resolveAllowedExecutable() throws for a non-allowlisted command, and it runs
+// before the reset. A throw therefore leaves the previous run's diagnostics in
+// place, so the next formatRunFailure() attributes an unrelated child's stderr
+// to whatever failed most recently. That is worse than no diagnostic.
+{
+  run(NODE, ['-e', CHILD], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let threw = false;
+  try { run('definitely-not-on-the-allowlist', []); } catch { threw = true; }
+  if (threw) pass('run() still throws for a non-allowlisted executable');
+  else fail('run() must reject a non-allowlisted executable');
+}
+
+{
+  if (lastRunFailure() === null) pass('a rejected executable clears the previous failure record');
+  else fail(`a rejected executable must not leave a stale record, got ${JSON.stringify(lastRunFailure())}`);
+}

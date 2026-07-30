@@ -113,14 +113,19 @@ function resolveAllowedExecutable(cmd) {
  * @returns {string|null} Trimmed stdout, or null when the command fails.
  */
 export function run(cmd, args = [], opts = {}) {
-  const exe = resolveAllowedExecutable(cmd);
-  // Cleared up front rather than on the success path, so the execFileSync call
-  // below stays byte-identical to what it has always been. Touching that line
-  // makes CodeQL re-attribute its long-standing "uncontrolled command line"
-  // finding to whichever PR edited it, and this change does not alter what
-  // reaches the child: the executable is still allowlisted by
-  // resolveAllowedExecutable() and the arguments are still an argv vector.
+  // Cleared as the very first statement. resolveAllowedExecutable() throws for a
+  // command outside the allowlist, so a reset placed after it is skipped on that
+  // path and the previous run's diagnostics survive, which would let a later
+  // formatRunFailure() attribute an unrelated child's stderr to whatever failed
+  // most recently. A stale diagnostic is worse than none.
+  //
+  // Clearing here rather than on the success path also keeps the execFileSync
+  // call below byte-identical: editing that line makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // it. Nothing about what reaches the child changes either way, since the
+  // executable is still allowlisted and the arguments are still an argv vector.
   lastFailure = null;
+  const exe = resolveAllowedExecutable(cmd);
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
