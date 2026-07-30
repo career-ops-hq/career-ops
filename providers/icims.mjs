@@ -1,0 +1,176 @@
+// @ts-check
+/** @typedef {import('./_types.js').Provider} Provider */
+
+// iCIMS provider — scrapes the public hosted-portal search pages.
+// Auto-detects from careers_url on any `*.icims.com` https host
+// (canonical form: `https://careers-<tenant>.icims.com/jobs/search?ss=1`).
+//
+// iCIMS list pages carry title/location/URL but NO posted date; dates live
+// only on the job detail page's JSON-LD (schema.org JobPosting `datePosted`).
+// The provider therefore returns undated jobs plus an `enrichDate(job, ctx)`
+// hook — scan-ats-full.mjs calls it only for jobs that already passed the
+// cheap title/location filters, so a 10k-tenant sweep pays detail-page
+// requests for real candidates only, never for noise.
+
+import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { decodeEntities } from './_html-entities.mjs';
+
+// ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
+// are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
+const ICIMS_MAX_PAGES = 30;
+// Same per-tenant courtesy delay as workday.mjs — only multi-page tenants pay it.
+const INTER_PAGE_DELAY_MS = 150;
+
+// iCIMS serves 200 directly to a browser-like UA (verified live); the default
+// career-ops UA risks WAF interstitials, same as workday/glints.
+const HEADERS = {
+  'user-agent': BROWSER_LIKE_USER_AGENT,
+  'accept-language': 'en-US,en;q=0.9',
+};
+
+function sleep(ms, ctx) {
+  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveOrigin(entry) {
+  // entry.api takes precedence over careers_url (mirrors greenhouse/ashby).
+  for (const raw of [entry.api, entry.careers_url]) {
+    if (typeof raw !== 'string' || !raw) continue;
+    let parsed;
+    try { parsed = new URL(raw); } catch { continue; }
+    if (parsed.protocol !== 'https:') continue;
+    if (!parsed.hostname.endsWith('.icims.com')) continue;
+    return parsed.origin;
+  }
+  return null;
+}
+
+// in_iframe=1 selects the lighter portal-only markup; pr is the 0-based page.
+const searchUrl = (origin, page) => `${origin}/jobs/search?ss=1&pr=${page}&in_iframe=1`;
+
+/**
+ * Parse one iCIMS search-results page. Exported for unit tests.
+ *
+ * Postings are `<li class="iCIMS_JobCardItem">` cards: posting URL in an
+ * `iCIMS_Anchor` href (`/jobs/{id}/{title-slug}/job`, query stripped), title
+ * in the anchor's `<h3>`, location in the span following the card's
+ * `field-label` "Location" label. Cards whose href resolves off-origin are
+ * dropped (defense in depth —
+ * a portal page should never link a posting on another host).
+ *
+ * @param {string} html
+ * @param {string} origin   e.g. "https://careers-acme.icims.com"
+ * @param {string} companyName
+ * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ */
+export function parseIcimsSearchPage(html, origin, companyName) {
+  const jobs = [];
+  const cards = String(html).split('iCIMS_JobCardItem').slice(1);
+  for (const card of cards) {
+    const href = card.match(/href="([^"]*\/jobs\/\d+\/[^"/]+\/job[^"]*)"/);
+    if (!href) continue;
+    let parsed;
+    // Resolve against the portal origin so a documented *relative* posting href
+    // (/jobs/{id}/{slug}/job) isn't silently dropped — some tenants emit those,
+    // and dropping them all would make fetch() return zero jobs with no error.
+    // The origin check below still rejects any link that resolves off-host.
+    try { parsed = new URL(decodeEntities(href[1]), origin); } catch { continue; }
+    if (parsed.origin !== origin) continue;
+    // Match the tags with attributes allowed: tenants theme their portals, and a
+    // themed <h3 class="..."> under a bare-tag-only regex would drop the card
+    // silently — zero jobs, no error, indistinguishable from an empty board.
+    const title = card.match(/<h3\b[^>]*>\s*([\s\S]*?)<\/h3>/);
+    if (!title || !title[1].trim()) continue;
+    // `field-label` is one token in a themed class list, not reliably the last
+    // one, so anchoring on the literal `field-label">` read an empty location
+    // off any tenant that appended a class. An empty location then fails
+    // location_filter and the posting is dropped with nothing to explain it.
+    // The lookarounds keep `field-label` a whole token, so a longer hyphenated
+    // class like `field-label-inline` still doesn't count as a match.
+    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\s*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
+    jobs.push({
+      title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
+      url: `${parsed.origin}${parsed.pathname}`,
+      company: companyName,
+      location: location ? decodeEntities(location[1].replace(/\s+/g, ' ').trim()) : '',
+      // no postedAt — iCIMS list pages have no date; see enrichDate.
+    });
+  }
+  return jobs;
+}
+
+/** @type {Provider} */
+export default {
+  id: 'icims',
+
+  detect(entry) {
+    const origin = resolveOrigin(entry);
+    return origin ? { url: searchUrl(origin, 0) } : null;
+  },
+
+  async fetch(entry, ctx) {
+    const origin = resolveOrigin(entry);
+    if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
+    const all = [];
+    let prevFirstUrl = null;
+    // Distinguishes "walked the whole board" from "stopped at the page cap".
+    // Exhausting the cap silently would drop every later posting and look
+    // identical to a complete board — the same failure mode the Workday
+    // truncation tag exists to prevent.
+    let reachedEnd = false;
+    for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
+      if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+      const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
+      const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
+      if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
+      // Some tenants serve the last real page again for an out-of-range pr
+      // instead of an empty one — a repeated first URL means we're looping.
+      if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
+      prevFirstUrl = pageJobs[0].url;
+      all.push(...pageJobs);
+    }
+    if (!reachedEnd) all.icimsTruncated = true;
+    return all;
+  },
+
+  /**
+   * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
+   * `datePosted`) — the list pages carry no date at all. Any failure leaves
+   * the job undated; the caller's undated policy then applies as usual.
+   */
+  async enrichDate(job, ctx) {
+    const sep = job.url.includes('?') ? '&' : '?';
+    const html = await ctx.fetchText(`${job.url}${sep}in_iframe=1`, { headers: HEADERS, redirect: 'error' });
+    const nodes = [];
+    // `type` is not reliably the first attribute: a tenant running CSP emits a
+    // nonce on every inline script. Requiring it first found no date at all,
+    // leaving every posting on that board undated — the undated policy then
+    // drops them and a working board looks identical to an empty one.
+    for (const [, raw] of String(html).matchAll(/<script\b[^>]*(?<![\w-])type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+      let data;
+      try { data = JSON.parse(raw); } catch { continue; }
+      // Flatten the JSON-LD shapes iCIMS / schema.org emit: a bare JobPosting
+      // object, an array of nodes, or a graph document ({"@graph":[...]}).
+      if (Array.isArray(data)) nodes.push(...data);
+      else if (Array.isArray(data?.['@graph'])) nodes.push(...data['@graph']);
+      else nodes.push(data);
+    }
+    const ts = Date.parse(pickDatePosted(nodes) || '');
+    if (!Number.isNaN(ts)) job.postedAt = ts;
+  },
+};
+
+// From flattened JSON-LD nodes, return the datePosted of the first JobPosting
+// node; if none carries a @type, fall back to the first node that has a
+// datePosted at all (preserves the original lenient single-object behavior).
+function pickDatePosted(nodes) {
+  let fallback = null;
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || !node.datePosted) continue;
+    const type = node['@type'];
+    if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node.datePosted;
+    if (fallback == null) fallback = node.datePosted;
+  }
+  return fallback;
+}

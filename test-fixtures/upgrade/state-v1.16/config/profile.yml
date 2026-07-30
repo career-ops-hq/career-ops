@@ -1,0 +1,15 @@
+name: Jordan Reyes
+email: jordan.reyes@example.test
+location: Manchester, UK
+timezone: Europe/London
+target_roles:
+  - Senior Platform Engineer
+  - Staff DevOps Engineer
+salary_target:
+  min: 85000
+  max: 105000
+  currency: GBP
+spend_tier: standard
+narrative: >
+  Platform engineer who treats developer experience as a product.
+  Looking for remote-first teams with real CI/CD investment.

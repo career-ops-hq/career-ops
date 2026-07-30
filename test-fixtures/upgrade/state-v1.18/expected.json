@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "tracker_rows": 6,
+  "status_counts": { "Applied": 2, "Interview": 1, "SKIP": 1, "Evaluated": 1, "Rejected": 1 },
+  "report_files": 2,
+  "has_via_column": true,
+  "salary_observations": 2
+}

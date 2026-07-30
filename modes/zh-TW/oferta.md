@@ -189,6 +189,38 @@
 
 ---
 
+## Risk Summary (Block G 之後)
+
+在 Block G 之後、Block H 之前，以 `## Risk Summary` 區塊收尾報告本文 —— 每個風險訊號一列，順序固定 —— 讓候選人真正關心的問題（「這家公司值得加入嗎？」）在一個畫面內得到解答，而不必自己去拼湊 Block A、Block G 與外部檔案。
+
+**只做彙整，不產生新判斷。** 每一列都引用來源訊號已經得出的結論。摘要絕不重新評分、重新加權或推翻原判斷 —— 如果某一列看起來有問題，應當修正來源訊號，而不是改這裡。
+
+每列三種狀態：`✅ {明確結論}` / `⚠️ {發現的問題}` / `— not evaluated`。**`— not evaluated` 是一等狀態：** 某個訊號無法執行時必須明確寫出該列，而不是省略，這樣全 ✅ 的摘要才可信。**特例：** 面試紅旗一列的未評估情況渲染為 `— no interview sessions yet`（同一「未評估」概念針對該列的更具體表述 —— 交叉參照檢查確實執行了，只是沒有找到紅旗檔案），並非第四種狀態。
+
+列標籤、`| Signal | Status |` 表頭與狀態詞皆為固定字面量，請勿翻譯：Machine Summary 的 `risk_summary` 欄位依賴它們。
+
+| 訊號 | 來源 | 該列渲染方式 |
+|------|------|------------|
+| Posting legitimacy | Block G 的評級 | `✅ High Confidence`；Proceed with Caution / Suspicious 渲染為 `⚠️ {tier} — {一句話原因}` |
+| Employment classification | Block G 內的僱用性質訊號 | 檢查已執行且無異常時 `✅ clear`；標記觸發時 `⚠️ contractor-style language: "{引用原文}"`；無法執行時 `— not evaluated` |
+| Culture screen | Block A 的文化篩查欄位 | `✅ pass`，或 `⚠️ caution — {證據}` / `⚠️ fail — {證據}`；未做篩查時 `— not evaluated` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（來自 `interview-redflag` 模式） | **交叉參照，不是複製：** 檔案存在時寫出其目前警告等級並附相對連結 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相對於 `reports/`）；否則 `— no interview sessions yet` |
+| AI claims vs. infrastructure | Block G 中的 AI／基礎設施一致性檢查（若存在） | 本報告包含該檢查時鏡射其結論（`✅ consistent` / `⚠️ {發現}`）；否則 `— not evaluated`。該檢查一旦存在此列自動啟用，無順序相依 |
+
+區塊格式：
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Employment classification | ⚠️ contractor-style language: "{quoted phrase}" |
+| Culture screen | ⚠️ caution — {evidence} |
+| Interview red flags | — no interview sessions yet |
+| AI claims vs. infrastructure | — not evaluated |
+```
+
 ## 評估後處理流程 (Post-evaluation)
 
 **在產生 Block A–G 的評估結果之後，必須無條件執行以下兩個步驟：**
@@ -235,6 +267,9 @@
 
 ## G) 職缺真實性評估
 (此處填入維度 G 的詳細訊號分析)
+
+## Risk Summary
+(每個風險訊號一列，順序固定 —— 見上文 Risk Summary 一節)
 
 ## H) 開放式問題擬答草稿
 (僅在綜合評分 >= 4.5 且應徵表單有問答框時產生)

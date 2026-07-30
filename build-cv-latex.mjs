@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
 import { resolveTemplate } from './cv-templates.mjs';
+import { stripEmptySections } from './cv-sections-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -116,13 +117,9 @@ async function main() {
 
   let template = await readFile(TEMPLATE_PATH_RESOLVED, 'utf-8');
 
-  // Projects is the one CV section that's genuinely optional (education,
-  // experience, and skills are effectively always present) — drop the whole
-  // Personal Projects \section when there are no entries, instead of leaving
-  // a bare section header with nothing under it.
-  if (!Array.isArray(payload.projects) || payload.projects.length === 0) {
-    template = template.replace(/%%%%%%%%%%%%%%%%%%%%%%%%%%%%  PROJECTS  %%%%%%%%%%%%%%%%%%%%%%%%%%%%[\s\S]*?(?=%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills)/, '');
-  }
+  // Drop the optional sections (projects, education) that have no entries, so
+  // an absent one leaves no bare header behind. See cv-sections-core.mjs.
+  template = stripEmptySections(template, payload, 'tex');
 
   const emailUrl = sanitizeUrl(payload.email?.url || '');
   const emailDisplay = payload.email?.display || emailUrl;

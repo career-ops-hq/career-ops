@@ -1,7 +1,31 @@
+// Portals write closure banners with typographic punctuation and accents:
+// WTTJ renders "Cette offre n’est plus disponible." with U+2019, not ASCII "'".
+// A pattern spelled with a plain apostrophe silently never matches, so a clearly
+// expired posting fell through to `no_apply_control` → uncertain → never filtered.
+// Normalize once at the entry point and spell every pattern below in the
+// normalized alphabet: ASCII quotes, no diacritics, collapsed whitespace.
+function normalizeForMatch(text = '') {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/[‘’ʼ′´`]/g, "'")
+    .replace(/[“”″]/g, '"')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
 const HARD_EXPIRED_PATTERNS = [
   /job (is )?no longer available/i,
   /job.*no longer open/i,
-  /position has been filled/i,
+  // Generalized "filled" signal. The old /position has been filled/ missed the
+  // phrasing SPA ATSs (Phenom, e.g. careers.icf.com) inject on a filled req —
+  // "the job you are trying to apply for has been filled" — so those pages
+  // returned HTTP 200 with a generic Apply control and were classified active.
+  // A job noun within 60 chars, then "has been filled" — but NOT when the thing
+  // filled is an application/form (the lookbehind) or "filled out" (the
+  // lookahead). Both guards avoid the worse error: reading a LIVE posting whose
+  // copy says "once the application form has been filled…" as expired.
+  /\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?(?<!\b(?:application|form)\s)has been filled\b(?!\s+out)/i,
   /this job has expired/i,
   /job posting has expired/i,
   /no longer accepting applications/i,
@@ -13,7 +37,15 @@ const HARD_EXPIRED_PATTERNS = [
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
-  /offre (expirée|n'est plus disponible)/i,
+  // French closure banners. Spelled accent-free on purpose: normalizeForMatch
+  // strips diacritics, so "expiree" here matches "expirée" on the page.
+  /offre (expiree|n'est plus disponible)/i,
+  /(cette )?offre n'est plus (disponible|en ligne|active)/i,
+  /(offre|poste|annonce) (deja )?pourvu(e)?/i,
+  /offre (cloturee|desactivee|terminee)/i,
+  /ce poste n'est plus (disponible|a pourvoir|ouvert)/i,
+  /recrutement (termine|cloture)/i,
+  /candidatures (closes|cloturees)/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
@@ -57,7 +89,8 @@ const APPLY_PATTERNS = [
   // Polish posting has no recognized apply control and falls to no_apply_control.
   /\baplikuj\b/i,
   /panelu aplikowania/i,
-  /wyślij (cv|aplikacj)/i,
+  // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
+  /wyslij (cv|aplikacj)/i,
 ];
 
 const MIN_CONTENT_CHARS = 300;
@@ -80,7 +113,10 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
-export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
+  const bodyText = normalizeForMatch(rawBodyText);
+  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map(normalizeForMatch);
+
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
   }

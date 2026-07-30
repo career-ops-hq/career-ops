@@ -4,6 +4,20 @@
 <meta charset="UTF-8">
 <title>Cover Letter — {{NAME}}</title>
 <style>
+  /* Themeable tokens (#1837): overridable via config/profile.yml `style:`, which
+     the PDF pipeline injects as a later :root block. Defaults reproduce the
+     original hardcoded values, so a profile without a `style:` block is unchanged. */
+  :root {
+    --accent-color: #1A56A0;
+    --font-family: "Helvetica", Arial, sans-serif;
+    --font-size: 10pt;
+    /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
+       comes from the later @page rule injectPrintPageCss appends (which reads
+       this same variable), so this default must match it exactly. */
+    --page-margin: 0.6in;
+  }
+  @page { margin: var(--page-margin); }
+
   * {
     margin: 0;
     padding: 0;
@@ -23,8 +37,8 @@
   }
 
   body {
-    font-family: Helvetica, Arial, sans-serif;
-    font-size: 10pt;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
     line-height: 1.4;
     color: #1a1a1a;
     background: #ffffff;
@@ -47,7 +61,7 @@
   }
 
   .contact a, .credentials a, .footnotes a {
-    color: #1a56a0;
+    color: var(--accent-color);
     text-decoration: none;
   }
 

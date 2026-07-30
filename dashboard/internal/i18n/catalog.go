@@ -21,6 +21,7 @@ type Catalog struct {
 	TabEvaluated string
 	TabApplied   string
 	TabInterview string
+	TabResponded string
 	TabTop       string
 	TabSkip      string
 	TabRejected  string
@@ -231,6 +232,7 @@ var En = Catalog{
 	TabEvaluated: "EVALUATED",
 	TabApplied:   "APPLIED",
 	TabInterview: "INTERVIEW",
+	TabResponded: "RESPONDED",
 	TabTop:       "TOP ≥4",
 	TabSkip:      "SKIP",
 	TabRejected:  "REJECTED",
@@ -358,6 +360,7 @@ var Tr = Catalog{
 	TabEvaluated: "DEĞERLENDİRİLDİ",
 	TabApplied:   "BAŞVURULDU",
 	TabInterview: "MÜLAKAT",
+	TabResponded: "YANIT VERİLDİ",
 	TabTop:       "EN İYİ ≥4",
 	TabSkip:      "UYGUN DEĞİL",
 	TabRejected:  "REDDEDİLDİ",
@@ -485,6 +488,7 @@ var Es = Catalog{
 	TabEvaluated: "EVALUADAS",
 	TabApplied:   "APLICADAS",
 	TabInterview: "ENTREVISTA",
+	TabResponded: "RESPONDIDAS",
 	TabTop:       "TOP ≥4",
 	TabSkip:      "OMITIR",
 	TabRejected:  "RECHAZADAS",

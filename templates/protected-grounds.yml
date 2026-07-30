@@ -1,0 +1,197 @@
+# Career-Ops — Protected-Grounds Interview Questions (jurisdiction table) (#2030)
+#
+# Consumed prompt-level by modes/interview-redflag.md (Step 2c — protected-
+# grounds question detection). This file is a DATA REFERENCE, not instruction
+# logic: extending it to a new jurisdiction never requires touching the rule
+# text in modes/interview-redflag.md. No script reads it — the agent does, as
+# a LOCAL file lookup over local session transcripts. Nothing leaves the
+# machine.
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a citable legal source — official regulator/ministry guidance is
+#      preferred (human-rights commission, labour ministry, equality body);
+#      statute text and reputable law-firm bulletins may corroborate, AND
+#   2. an explicit legal_basis citation for the list described, AND
+#   3. an `as_of` date recording when the row was last verified.
+# Unverified or "I heard that..." rows will be rejected in review. Seed
+# narrow and verified; extend via community PRs — same discipline as the
+# jurisdiction tables introduced for #2013/#2018/#2019/#2025/#2028.
+#
+# REGISTER DISCIPLINE (mandatory): rows describe what a published legal
+# framework protects or lists as do-not-ask — some are statutes creating
+# civil liability (Ontario's Human Rights Code), some are administrative
+# guidance backed by statute with active regulator correction (Japan's MHLW
+# fair-hiring framework). Each row's legitimate_contexts and legal_basis
+# carry the correct register. A topic match in a transcript is NEVER a basis
+# for asserting that an interviewer broke the law or that discrimination
+# occurred: intent, bona fide occupational requirements, accommodation
+# context, and process stage are exactly the things a transcript cannot
+# self-certify. NOT LEGAL ADVICE — a private post-interview awareness aid.
+#
+# BILINGUAL TERMS: where the source framework is non-English (e.g. Japan),
+# topics carry BOTH the original terms and English glosses — transcripts may
+# be in either language, and this composes with the market vocabulary modes
+# (e.g. modes/ja).
+#
+# Schema per entry (list under `protected_grounds`):
+#   jurisdiction: string        — code, e.g. CA-ON, JP, US-federal, UK
+#   jurisdiction_name: string   — human-readable name for report output
+#   grounds: list               — one item per protected ground / do-not-ask topic:
+#     topic: string             — the ground/topic (original-language term +
+#                                 English gloss where the framework is non-English)
+#     group: string (optional)  — grouping label where the source framework
+#                                 groups its list (e.g. Japan's a/b/c groups)
+#     example_question_patterns: list (optional)
+#                               — concrete question shapes drawn from the
+#                                 regulator's own guidance, not invented
+#     legitimate_contexts: list (optional)
+#                               — contexts in which touching the topic can be
+#                                 lawful/permissible per the same sources
+#                                 (BFOR, accommodation, post-offer stage, ...)
+#   legal_basis: string         — statute/regulation/guideline citation
+#   sources: list               — citable regulator pages/texts backing the row
+#   as_of: YYYY-MM-DD           — date this row was last verified against
+#                                 sources (quoted string — keep dates as strings)
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (suggestions only — do NOT add without the
+# source + legal_basis + as_of discipline above):
+#   - US-federal : EEOC pre-employment inquiry guidance (race, color,
+#                  religion, sex, national origin, age, disability, genetic
+#                  information — Title VII / ADEA / ADA / GINA); key at the
+#                  federal level first, state overlays as separate rows
+#   - UK         : Equality Act 2010 — nine protected characteristics, plus
+#                  the s.60 restriction on pre-offer health questions
+#   - DE         : Allgemeines Gleichbehandlungsgesetz (AGG) §§1, 7 — and the
+#                  case-law "right to lie" in response to inadmissible
+#                  questions; verify with official BMAS/ADS guidance
+#   - EU         : equal-treatment directives (2000/43/EC, 2000/78/EC,
+#                  2006/54/EC) — transpositions differ; key rows per member
+#                  state, not one EU row
+
+protected_grounds:
+  - jurisdiction: CA-ON
+    jurisdiction_name: "Ontario, Canada"
+    grounds:
+      - topic: "race"
+      - topic: "ancestry"
+        example_question_patterns:
+          - "Where were your parents / ancestors born?"
+      - topic: "place of origin"
+        example_question_patterns:
+          - "Where were you born?"
+          - "Where are you really from?"
+      - topic: "colour"
+      - topic: "ethnic origin"
+      - topic: "citizenship"
+        example_question_patterns:
+          - "Are you a Canadian citizen? / Can you show proof of citizenship?"
+          - "What is your Social Insurance Number?"
+        legitimate_contexts:
+          - "Asking whether the candidate is legally entitled to work in Canada is permissible; probing citizenship status or immigration history beyond that is not (OHRC interviewing guidance)"
+          - "SIN and certain documentation requests become permissible after a conditional offer of employment (OHRC guidance)"
+          - "Canadian citizenship may be a lawful requirement only where a statute or regulation specifically imposes it (Code s.16)"
+      - topic: "creed (religion)"
+        example_question_patterns:
+          - "What religion do you practice? / Will you need time off for religious holidays?"
+        legitimate_contexts:
+          - "s.24(1) special-employment / bona fide occupational requirement — e.g. a denominational school hiring teachers of that creed"
+          - "Employer-initiated accommodation discussion of scheduling needs, framed as open to all candidates, per OHRC guidance"
+      - topic: "sex (including pregnancy)"
+        example_question_patterns:
+          - "Are you pregnant / planning to have children?"
+      - topic: "sexual orientation"
+      - topic: "gender identity"
+      - topic: "gender expression"
+      - topic: "age"
+        example_question_patterns:
+          - "How old are you? / What year did you graduate high school?"
+        legitimate_contexts:
+          - "Confirming the candidate meets a statutory minimum working age for the job is permissible (e.g. 18+ where law requires)"
+      - topic: "record of offences"
+        example_question_patterns:
+          - "Have you ever been arrested? / Do you have a criminal record?"
+        legitimate_contexts:
+          - "s.24(1) bona fide occupational requirement — narrow inquiries tied to the job (e.g. driving-record checks for driving roles) where lack of a clean record would be a reasonable and genuine disqualification"
+      - topic: "marital status"
+        example_question_patterns:
+          - "Are you married? / What does your spouse do?"
+      - topic: "family status"
+        example_question_patterns:
+          - "Do you have children? / What are your childcare arrangements?"
+      - topic: "disability"
+        example_question_patterns:
+          - "Do you have any disabilities or health conditions? / How many sick days did you take last year?"
+        legitimate_contexts:
+          - "Employer-initiated accommodation discussion — describing the essential duties and asking ALL candidates whether they can perform them, with or without accommodation, per OHRC guidance"
+          - "Medical inquiries tied to essential duties may follow a conditional offer, not precede it (OHRC guidance)"
+    legal_basis: >-
+      Ontario Human Rights Code, R.S.O. 1990, c. H.19, s.5(1) — equal
+      treatment in employment without discrimination on 16 protected grounds;
+      s.23(2) prohibits oral or written employment inquiries that directly or
+      indirectly classify by a prohibited ground; s.24(1) provides
+      special-employment / bona fide occupational requirement exceptions.
+    sources:
+      - "Ontario Human Rights Commission — The Ontario Human Rights Code (ohrc.on.ca)"
+      - "Ontario Human Rights Commission — Human Rights at Work: Interviewing and making hiring decisions (ohrc.on.ca)"
+      - "Blaney McMurtry LLP — commentary on permissible and prohibited interview questions under the Ontario Human Rights Code"
+    as_of: "2026-07-18"
+
+  - jurisdiction: JP
+    jurisdiction_name: "Japan"
+    grounds:
+      # Group (a) — 本人に責任のない事項 (matters the applicant bears no responsibility for)
+      - topic: "本籍・出生地 (registered domicile / birthplace)"
+        group: "a — matters the applicant bears no responsibility for"
+        example_question_patterns:
+          - "Where is your family register (honseki)? / Where were you born?"
+      - topic: "家族構成・家族の職業・収入・資産 (family composition, family members' occupations, income, assets)"
+        group: "a — matters the applicant bears no responsibility for"
+        example_question_patterns:
+          - "What does your father do? / Tell me about your family."
+        legitimate_contexts:
+          - "Family information needed for social-insurance and dependent paperwork is collected administratively AFTER hiring — it has no place in selection (MHLW fair-hiring guidance)"
+      - topic: "住宅状況 (housing situation)"
+        group: "a — matters the applicant bears no responsibility for"
+      - topic: "生活環境・家庭環境 (living environment / home environment)"
+        group: "a — matters the applicant bears no responsibility for"
+      # Group (b) — 本来自由であるべき事項 (matters of personal freedom)
+      - topic: "宗教 (religion)"
+        group: "b — matters of personal freedom"
+      - topic: "支持政党 (supported political party)"
+        group: "b — matters of personal freedom"
+      - topic: "人生観・生活信条 (life philosophy / personal credo)"
+        group: "b — matters of personal freedom"
+      - topic: "尊敬する人物 (respected persons — 'who do you look up to?')"
+        group: "b — matters of personal freedom"
+        example_question_patterns:
+          - "Who do you respect most? (尊敬する人物は誰ですか) — a routine icebreaker in North America, explicitly on the do-not-ask list in Japan"
+      - topic: "思想 (ideology / thought)"
+        group: "b — matters of personal freedom"
+      - topic: "労働組合・学生運動など社会運動に関する経歴 (union membership, student-movement or other social-movement history)"
+        group: "b — matters of personal freedom"
+      - topic: "購読新聞・雑誌・愛読書 (newspapers/magazines subscribed to, favourite books)"
+        group: "b — matters of personal freedom"
+        example_question_patterns:
+          - "What newspapers do you read? / What is your favourite book? (愛読書は何ですか)"
+      # Group (c) — 採用選考の方法 (selection methods employers must not use)
+      - topic: "身元調査 (background investigations into the applicant's origins/private life)"
+        group: "c — selection methods"
+      - topic: "本人の適性・能力に関係ない事項を含んだ応募書類 (application forms containing items irrelevant to aptitude and ability)"
+        group: "c — selection methods"
+      - topic: "合理的・客観的に必要性が認められない健康診断 (health checks without reasonable, objective necessity)"
+        group: "c — selection methods"
+        legitimate_contexts:
+          - "Health checks that are reasonably and objectively necessary for the specific job's duties are permitted (MHLW fair-hiring guidance)"
+    legal_basis: >-
+      MHLW 公正な採用選考 (fair hiring selection) framework — Employment
+      Security Act (職業安定法) art. 5-5 (limits on collecting personal
+      information in recruitment) and the Labour Minister guideline of 1999
+      (平成11年労働省告示第141号). Administrative guidance backed by statute,
+      with active Prefectural Labour Bureau investigation and correction of
+      reported violations — the correct register is "this topic is on MHLW's
+      fair-hiring do-not-ask list", not a criminal-law claim.
+    sources:
+      - "MHLW fair-hiring special site — kouseisaiyou.mhlw.go.jp (公正な採用選考特設サイト)"
+      - "MHLW — 公正な採用選考の基本 (basics of fair hiring selection, mhlw.go.jp)"
+      - "Tokyo Labour Bureau — 公正な採用選考 page (jsite.mhlw.go.jp/tokyo-roudoukyoku)"
+    as_of: "2026-07-18"

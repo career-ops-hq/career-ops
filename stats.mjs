@@ -23,7 +23,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { normalizeStatus } from './followup-cadence.mjs';
+import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = join(ROOT, 'data', 'applications.md');
@@ -33,16 +33,18 @@ const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
 const PORTALS_FILE = join(ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
 
-const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
 // In-flight applications. Deliberately NARROWER than the dashboard's
 // ActiveApps (which also counts Evaluated): an evaluated-but-never-sent row is
-// a candidate, not an application in flight.
+// a candidate, not an application in flight. Hired is a terminal success, not
+// in flight, so it is intentionally excluded here (but see PURSUED/funnel).
 const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer']);
 
 // Rows that count toward avgScoreApplied — jobs the user actually pursued.
-// Plain avgScore mixes in SKIP/Discarded and understates real fit.
-const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Rejected']);
+// Plain avgScore mixes in SKIP/Discarded and understates real fit. Hired is
+// the fullest pursuit of all, so it belongs here.
+const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const pct = (part, total) => (total > 0 ? round1((part / total) * 100) : 0);
@@ -111,13 +113,38 @@ export function trackerStatusByNum(content) {
   return byNum;
 }
 
+/**
+ * Tracker numbers that followup-cadence.mjs's own cadence math already
+ * classifies 'cold' (Applied, zero response after applied_max_followups
+ * follow-ups). Reuses `analyzeFromContent` — the same function
+ * followup-cadence.mjs's CLI runs — instead of re-deriving the
+ * applied_max_followups/cadence rule here (#2123). A row can only be
+ * classified cold when its status is 'applied', so every number returned
+ * here is already a subset of ACTIVE_STATUSES.
+ *
+ * Missing follow-ups content (`null`/absent file, the common case) degrades
+ * gracefully: analyzeFromContent treats it as zero logged follow-ups for
+ * every row, so nothing can cross the follow-up-count threshold and this
+ * returns an empty set — never an error, never a guess.
+ *
+ * @param {string} trackerContent - Raw applications.md text.
+ * @param {string|null} followupsContent - Raw follow-ups.md text, or null when absent.
+ */
+export function computeColdAppNums(trackerContent, followupsContent) {
+  const result = analyzeFromContent(trackerContent, followupsContent || '');
+  if (result.error) return new Set();
+  return new Set(result.entries.filter((e) => e.urgency === 'cold').map((e) => e.num));
+}
+
 // ── Cumulative funnel ───────────────────────────────────────────────
 
 /**
  * Cumulative funnel: everX = "reached stage X or beyond, ever". The math
  * mirrors the dashboard's ComputeProgressMetrics (career.go): Rejected counts
- * into everApplied (a rejection proves a submission), and each later stage
- * sums itself plus everything beyond it. Rates are relative to everApplied.
+ * into everApplied (a rejection proves a submission), Hired counts into every
+ * stage through everOffer (a landed job proves the offer and everything before
+ * it), and each later stage sums itself plus everything beyond it. Rates are
+ * relative to everApplied.
  *
  * Keys are deliberately NOT bare status names — `tracker.byStatus.Applied` is
  * "currently in Applied" while `everApplied` is "ever applied"; the same word
@@ -133,10 +160,10 @@ export function trackerStatusByNum(content) {
  */
 export function computeFunnel(byStatus) {
   const n = (k) => byStatus[k] || 0;
-  const everApplied = n('Applied') + n('Responded') + n('Interview') + n('Offer') + n('Rejected');
-  const everResponded = n('Responded') + n('Interview') + n('Offer');
-  const everInterview = n('Interview') + n('Offer');
-  const everOffer = n('Offer');
+  const everApplied = n('Applied') + n('Responded') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
+  const everResponded = n('Responded') + n('Interview') + n('Offer') + n('Hired');
+  const everInterview = n('Interview') + n('Offer') + n('Hired');
+  const everOffer = n('Offer') + n('Hired');
   return {
     everApplied,
     everResponded,
@@ -262,10 +289,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     }
     const streaks = new Map();
     for (const r of healthRecords) {
-      if (r.status === 'slug_gone' || r.status === 'network') {
-        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-      } else if (r.status === 'reachable' || r.status === 'empty') {
+      // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
+      // every other status (slug_gone/network/auth/server/unknown) counts.
+      if (r.status === 'reachable' || r.status === 'empty') {
         streaks.set(r.company, 0);
+      } else {
+        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
     }
     const threshold = cfg.portal_health_threshold || 3;
@@ -391,8 +420,33 @@ export function computeAllStats({
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
-  const tracker = apps ? computeTrackerStats(apps) : null;
+  const trackerBase = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
+
+  // Cold-classification wiring (#2123): activeApps is purely status-based and
+  // stays untouched for backward compatibility. activeAppsLive subtracts rows
+  // followup-cadence.mjs's own cadence math independently classifies 'cold'
+  // (Applied, zero response after applied_max_followups follow-ups) — the more
+  // honest "still worth expecting a reply from" figure. No follow-up data
+  // (`fups` null) means no cold rows can be identified, so activeAppsLive
+  // simply equals activeApps.
+  let tracker = trackerBase;
+  if (trackerBase) {
+    const coldNums = computeColdAppNums(apps, fups);
+    let activeAppsCold = 0;
+    if (coldNums.size > 0) {
+      const byNum = trackerStatusByNum(apps);
+      for (const [num, status] of byNum) {
+        if (ACTIVE_STATUSES.has(status) && coldNums.has(num)) activeAppsCold++;
+      }
+    }
+    tracker = {
+      ...trackerBase,
+      activeAppsLive: trackerBase.activeApps - activeAppsCold,
+      activeAppsCold,
+    };
+  }
+
   return {
     metadata: {
       generatedAt: new Date().toISOString().slice(0, 10),
@@ -425,7 +479,11 @@ function printSummary(stats) {
     const fit = t.avgScore != null
       ? ` | avg fit ${t.avgScore}/5${t.avgScoreApplied != null ? ` (pursued roles ${t.avgScoreApplied}/5)` : ''} | top ${t.topScore}`
       : '';
-    console.log(`Tracker:    ${t.total} total | ${t.activeApps} active${fit}`);
+    // Only break out live/cold when there's a cold row to report — with no
+    // follow-up data (or genuinely zero cold rows) the plain count is exactly
+    // as accurate and the parenthetical would be noise.
+    const liveInfo = t.activeAppsCold > 0 ? ` (${t.activeAppsLive} live, ${t.activeAppsCold} cold)` : '';
+    console.log(`Tracker:    ${t.total} total | ${t.activeApps} active${liveInfo}${fit}`);
     const statusLine = Object.entries(t.byStatus).filter(([, c]) => c > 0).map(([s, c]) => `${s} ${c}`).join(' · ');
     if (statusLine) console.log(`Status:     ${statusLine}`);
   } else {

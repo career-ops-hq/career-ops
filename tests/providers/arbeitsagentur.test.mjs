@@ -127,13 +127,25 @@ try {
     fail(`parseArbeitsagenturConfig remote defaults = ${JSON.stringify({ m: rdef.remoteMatch, p: rdef.remoteMaxPages })}`);
   }
 
-  // fetch() — remoteMatch:'filter' uses server-side homeoffice filter, paginates, and tags remote roles
+  // fetch() — remoteMatch:'filter' uses server-side homeoffice filter, paginates, and tags
+  // only the candidates the detail endpoint confirms as homeofficetyp VOLLSTAENDIG.
+  // `homeoffice=nv_true` also returns NACH_VEREINBARUNG (office-anchored hybrid) roles,
+  // which must keep their real city so the commute location_filter still drops them.
   let usedHomeoffice = false;
   const pagesSeen = new Set();
+  const detailsSeen = [];
+  // R1 München = genuinely remote; R2 Stuttgart = hybrid "nach Absprache"; R3 Köln = lookup fails.
+  const HOMEOFFICETYP = { R1: 'VOLLSTAENDIG', R2: 'NACH_VEREINBARUNG' };
   const filterFetched = await aa.fetch(
     { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 2 } },
     {
       fetchJson: async (url) => {
+        if (url.includes('/jobdetails/')) {
+          const refnr = Buffer.from(url.split('/jobdetails/')[1], 'base64').toString();
+          detailsSeen.push(refnr);
+          if (!(refnr in HOMEOFFICETYP)) throw new Error('HTTP 404'); // unverifiable → must stay untagged
+          return { homeofficetyp: HOMEOFFICETYP[refnr] };
+        }
         const sp = new URL(url).searchParams;
         if (sp.has('wo')) {
           return { stellenangebote: [{ refnr: 'L', titel: 'ML Engineer', arbeitgeber: 'Co', arbeitsort: { ort: 'Berlin' } }] };
@@ -150,10 +162,74 @@ try {
     },
   );
   const munich = filterFetched.find(j => j.url.endsWith('R1'));
-  if (usedHomeoffice && pagesSeen.has('1') && pagesSeen.has('2') && munich && /Deutschlandweit \(Homeoffice\)/.test(munich.location)) {
-    pass('aa.fetch() remoteMatch:filter sends homeoffice=nv_true, paginates, and tags far-city remote roles');
+  const stuttgart = filterFetched.find(j => j.url.endsWith('R2'));
+  const koeln = filterFetched.find(j => j.url.endsWith('R3'));
+  const TAG = /Deutschlandweit \(Homeoffice\)/;
+  if (usedHomeoffice && pagesSeen.has('1') && pagesSeen.has('2') && munich && TAG.test(munich.location)) {
+    pass('aa.fetch() remoteMatch:filter sends homeoffice=nv_true, paginates, and tags confirmed VOLLSTAENDIG roles');
   } else {
     fail(`aa.fetch() filter mode = ${JSON.stringify({ usedHomeoffice, pages: [...pagesSeen], munichLoc: munich?.location })}`);
+  }
+  if (stuttgart && !TAG.test(stuttgart.location) && stuttgart.location === 'Stuttgart') {
+    pass('aa.fetch() does not tag NACH_VEREINBARUNG (hybrid) roles as nationwide remote');
+  } else {
+    fail(`aa.fetch() NACH_VEREINBARUNG role = ${JSON.stringify({ loc: stuttgart?.location })}`);
+  }
+  if (koeln && !TAG.test(koeln.location) && koeln.location === 'Köln') {
+    pass('aa.fetch() leaves a posting untagged when the homeofficetyp lookup fails');
+  } else {
+    fail(`aa.fetch() unverifiable role = ${JSON.stringify({ loc: koeln?.location })}`);
+  }
+  if (detailsSeen.length === 3 && ['R1', 'R2', 'R3'].every(r => detailsSeen.includes(r))) {
+    pass('aa.fetch() verifies homeofficetyp once per remote candidate');
+  } else {
+    fail(`aa.fetch() detail lookups = ${JSON.stringify(detailsSeen)}`);
+  }
+
+  // fetch() — the detail lookups must stay batched (VERIFY_BATCH = 5). With more
+  // candidates than one batch, peak in-flight requests must never exceed the cap,
+  // and a duplicate refnr across pagination pages must not cost a second lookup.
+  // Both would pass silently under an unbounded Promise.all / an un-deduped list.
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const detailCalls = [];
+  const wideRefs = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
+  const batchFetched = await aa.fetch(
+    { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 7 } },
+    {
+      fetchJson: async (url) => {
+        if (url.includes('/jobdetails/')) {
+          const refnr = Buffer.from(url.split('/jobdetails/')[1], 'base64').toString();
+          detailCalls.push(refnr);
+          inFlight++;
+          peakInFlight = Math.max(peakInFlight, inFlight);
+          await new Promise(r => setTimeout(r, 5)); // hold the slot so overlap is observable
+          inFlight--;
+          return { homeofficetyp: 'VOLLSTAENDIG' };
+        }
+        const sp = new URL(url).searchParams;
+        if (sp.has('wo')) return { stellenangebote: [] };
+        // Page 1 is full (== size) so pagination continues; W1 repeats on page 2.
+        return Number(sp.get('page')) === 1
+          ? { stellenangebote: wideRefs.map(r => ({ refnr: r, titel: 'ML Engineer', arbeitgeber: 'Co', arbeitsort: { ort: 'München' } })) }
+          : { stellenangebote: [{ refnr: 'W1', titel: 'ML Engineer', arbeitgeber: 'Co', arbeitsort: { ort: 'München' } }] };
+      },
+    },
+  );
+  if (peakInFlight > 0 && peakInFlight <= 5) {
+    pass(`aa.fetch() caps concurrent homeofficetyp lookups at VERIFY_BATCH (peak ${peakInFlight})`);
+  } else {
+    fail(`aa.fetch() peak in-flight detail requests = ${peakInFlight} (expected 1..5)`);
+  }
+  if (detailCalls.length === wideRefs.length && new Set(detailCalls).size === wideRefs.length) {
+    pass('aa.fetch() verifies each duplicated refnr only once');
+  } else {
+    fail(`aa.fetch() detail calls = ${detailCalls.length} (${JSON.stringify(detailCalls)}), expected ${wideRefs.length} unique`);
+  }
+  if (batchFetched.length === wideRefs.length && batchFetched.every(j => /Deutschlandweit \(Homeoffice\)/.test(j.location))) {
+    pass('aa.fetch() tags every confirmed VOLLSTAENDIG candidate across batches');
+  } else {
+    fail(`aa.fetch() batched tagging = ${JSON.stringify(batchFetched.map(j => j.location))}`);
   }
 
   // fetch() — no keywords throws; total outage throws (not silent)

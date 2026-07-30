@@ -71,6 +71,27 @@ On contradiction, add exactly one flag line at the top of Block B in the report,
 
 The flag is an additive line only — Block B's existing content stays unchanged below it, and no flag line appears when there is no contradiction.
 
+### Work-authorization check
+
+After the Role Summary table, compare the candidate's work authorization against what the JD says about sponsorship and work eligibility. Read the candidate's work rights from `config/profile.yml` → `location.authorized_in` (list of countries/regions where they already hold authorization) and `location.needs_sponsorship`, falling back to the free-text `location.visa_status` when those structured keys are absent. Classify into exactly one tier:
+
+- ✅ **Sponsors** — the JD explicitly offers visa sponsorship or relocation, and the role is in a country **not** in `authorized_in`.
+- ➖ **Not needed** — the role is in a country listed in `authorized_in` (or is genuinely location-agnostic remote the candidate can work from an authorized country), **or** `needs_sponsorship` is false.
+- ⚠️ **Unstated** — the role is outside `authorized_in` and the JD says nothing about sponsorship. Silence is absence of signal, not a refusal — this tier is **NEUTRAL**.
+- ⛔ **No sponsorship** — the JD explicitly states it will **not** sponsor (e.g. "no visa sponsorship", "must have existing work authorization", "we are unable to sponsor"), **and** the role is outside `authorized_in`.
+
+Rules (mirror the Geo-mismatch discipline):
+- Quote the JD **verbatim** — never paraphrase the sponsorship language.
+- A generic "must be authorized to work in {country}" where {country} **is** in `authorized_in` is ➖ Not needed, not ⛔.
+- If the profile has no `authorized_in`/`needs_sponsorship` keys and only the free-text `visa_status`, infer conservatively and default to ⚠️ Unstated rather than guessing a blocker.
+- **Scoring (aligns with `modes/_profile.md` "Your Location Policy"):** ✅ / ➖ / ⚠️ are score-neutral — do **not** apply a location or relocation penalty. Only ⛔ **No sponsorship** for a role the candidate cannot take from an authorized country is a genuine hard blocker: score location low and record it as a `hard_stop`.
+
+On a ⛔ determination, add exactly one flag line at the top of Block B in the report, quoting the evidence **verbatim**:
+
+`⛔ **No sponsorship:** JD states "{verbatim JD line}" and role is outside your authorized_in`
+
+The flag is additive only; ✅ / ➖ / ⚠️ emit no flag line.
+
 ## Block B — Match with CV
 
 Read `cv.md`. Create a table with each JD requirement mapped to exact lines in the CV.
@@ -294,6 +315,74 @@ If this mismatch is present, append a short, non-alarmist note to the report:
 
 This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately.
 
+**9. Third-Party Platform Location Tag vs. Employer's Own Posting Mismatch** (conditional — only when both sources are available):
+
+Possible causes include the job board auto-guessing or mis-scraping the location field, or a recruiter selecting the wrong region tag when cross-posting the same requisition to multiple markets. This can result in a candidate applying based on the platform-displayed location (thinking it's local), when the role is actually in a different country entirely — and not finding out until much later in the process.
+
+This signal only triggers when **both** a third-party platform's displayed location (e.g. LinkedIn, Indeed) **and** the employer's own job page's stated location are available to compare, **and** both sources can be confirmed to refer to the same requisition/job ID (e.g. a matching req number or job ID visible on both sides) — not merely the same title or company, which can still represent two genuinely different requisitions. Evidence may come from what the user pasted/screenshotted, or — only when running the browser-backed `auto-pipeline` (not `openai-eval.mjs`, which passes JD text only into Block G and has no Playwright/browser access) — from `auto-pipeline`'s Playwright snapshot if it captures both. If only one source is available, or the two sources cannot be confirmed to share a requisition/job ID, skip this signal entirely.
+
+When both are available, compare the two stated locations. Flag only if they name **different countries** — not just different cities within the same country, which is a much weaker/more ambiguous signal (e.g. genuine multi-office companies with several valid postings).
+
+If triggered, append a short, non-alarmist note to the report:
+
+> ⚠️ **Location tag mismatch signal:** This posting shows "{platform location}" on {platform name}, but the employer's own job page for the same posting states "{employer-page location}." Confirm the actual work location directly with the employer before assuming the platform-displayed location is accurate — this is sometimes a cross-posting/tagging error, not necessarily deceptive.
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately.
+
+**Scope note:** This signal is prompt-instruction-only for now — the agent manually compares the two sources when both are present in what the user provided. It does not modify `check-liveness.mjs` or `liveness-core.mjs` to automatically fetch and compare both pages; that is out of scope for this pass and left as a future decision.
+
+**10. Agency Licensing Check** (from JD text + `templates/agency-licensing.yml`; jurisdiction from `config/profile.yml` → `location` — same derivation as the employment-classification signal):
+
+The first Block G signal keyed to **who posted** rather than what the posting says. Several jurisdictions require temporary help agencies and third-party recruiters to hold a licence to operate at all — and publish an official public registry where anyone can check an operator's status in one lookup. Unlicensed operators in a licensing jurisdiction are disproportionately the same ones running ghost postings, fee scams, and misclassification games, so telling the candidate that an authoritative one-click answer exists, and where, is high-value and zero-cost.
+
+**Trigger — BOTH conditions required:**
+1. The posting is **agency-mediated**: detected from the JD's own text (phrases like "our client", "on behalf of our client", a staffing/recruiting brand posting for an unnamed end employer — e.g. a fictional "Acme Staffing Group" advertising a role at an undisclosed manufacturer), or the user states in conversation that the role came through an agency or recruiter.
+2. The candidate's jurisdiction has a row in `templates/agency-licensing.yml` (a data reference, not instruction logic — adding a jurisdiction row there never requires touching this rule text; every row carries the licensing scope, effective date, official registry URL, legal basis, transitional notes, sources, and an `as_of` verification date). **No row for the jurisdiction → skip this signal silently** — absence of a row means "no verified regime data," not "no regime."
+
+If both conditions hold, append a short, non-alarmist note to the report:
+
+> ℹ️ **Agency licensing note:** [Render in {language.output}: state the regime facts from the table row and hand over the official registry link — e.g. for a fictional Acme Staffing Group posting evaluated by an Ontario candidate: "Ontario has required temporary help agencies and recruiters to hold a licence since 2024-07-01 (ESA 2000 + O. Reg. 99/23); the Ministry of Labour publishes a public status checker where you can look up any agency in one click: {registry.url}." Mention the client-side prohibition and penalties from the row as context for why licensed operators dominate the legitimate market. Note the transitional rule from the row (e.g. pre-deadline applicants may lawfully operate while their application pends), so the candidate reads the registry result correctly. Close with a note that this is information about the jurisdiction's licensing regime, not legal advice.]
+
+**Tracker composition (suggestion only):** when this evaluation lands in the tracker with a `via={Agency}` field (#1596), suggest carrying the registry pointer into the tracker note — so the one-click check survives into the follow-up workflow. This mode **never writes the tracker itself**; tracker updates go through the normal TSV/`set-status.mjs` paths with the user in the loop.
+
+**Hard rule (mandatory):** this signal **never asserts an agency is unlicensed** and **never fetches or scrapes the registry** — no WebFetch, no WebSearch, no Playwright against the registry URL; career-ops stays zero-fetch here by design. Transitional rules alone (operators with a pending pre-deadline application may lawfully operate) make "this agency is unlicensed" unknowable from outside the registry; only the official lookup, clicked by the candidate, answers it. State the regime facts and the pointer — never render this finding as an accusation that any specific agency is operating unlawfully.
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — the posting can be entirely real and licensed; this is a jurisdiction-awareness pointer, reported separately.
+
+**11. Immigration-Status Requirement Overreach** (from JD text; jurisdiction from `config/profile.yml` → `location` (country + city/province/state), same region-aware pattern as signal 6):
+
+Some postings demand a specific immigration status — "US citizens only," "must be a Canadian citizen or permanent resident," "must be permanently authorized to work" — that goes beyond what the candidate's own jurisdiction allows employers to require. Candidates who are fully authorized to work read these lines and self-select out. Check for it like this:
+
+1. Read `templates/immigration-status-requirements.yml` — a jurisdiction-keyed table of prohibited status-requirement patterns, each entry carrying a mandatory `lawful_screening_contrast`, `exceptions`, `legal_basis`, `enforcement_notes`, `sources`, and `as_of` date. It is a data reference, not instruction logic: extending it to another jurisdiction never requires touching this rule text, and every entry must carry a citable legal source, an `as_of` date, and a non-empty `lawful_screening_contrast` (see the contribution rule in the file header).
+2. Derive the candidate's jurisdiction key from `config/profile.yml` → `location` (e.g. Ontario, Canada → `CA-ON`; anywhere in the United States → `US` for the federal row). No table entry for the candidate's jurisdiction → this signal is not evaluated; say nothing.
+3. For each entry matching the candidate's jurisdiction, judge whether the JD text actually demands a specific immigration status per that entry's `prohibited_requirement_patterns` guidance. This is agent-judged, never naive keyword matching — presence-based only: the signal fires on status demands present in the posting text, never on the absence of anything.
+
+**The authorization-vs-status line (mandatory — the entire signal hinges on it):** asking about *work authorization* is lawful; demanding a *particular immigration status* is the problem. Authorization and sponsorship screening questions — "Are you authorized to work in the United States?", "Will you now or in the future require sponsorship for employment visa status?", "Are you legally authorized to work in Canada?" — are lawful screening per each entry's `lawful_screening_contrast` field and are NOT flagged by this signal, ever. If a candidate line could plausibly be read as either, read it as lawful authorization screening and do not flag. The one documented conversion to watch: a permanence qualifier ("authorized to work in Canada **permanently**") turns an authorization question into a status demand — that is the *Haseeb v. Imperial Oil* proxy pattern, and it fires.
+
+**Exceptions honesty (mandatory):** every entry lists statutory situations where a status requirement is lawful (US: a citizenship requirement imposed by law, regulation, executive order, or government contract for the specific position, per 8 U.S.C. §1324b(a)(2)(C); Ontario: the three Code s.16 categories). When the posting names a plausible statutory hook — a government contract, a security-clearance requirement, an s.16 category — the output names the claimed hook instead of flagging cleanly (e.g. "this posting restricts eligibility to citizens and cites a federal contract requirement — such requirements are lawful when a government contract imposes them for the position; the contract itself is not verifiable from the JD"). For the US row, apply the export-control note: EAR/ITAR "US person" (15 CFR 772.1 / 22 CFR 120.15) matches §1324b(a)(3)'s protected-individual list — citizens AND green-card holders, refugees, asylees — so a posting citing ITAR/EAR as the reason for a *citizens-only* restriction is generally an employer over-reading of export-control rules, and the output should say so (as a fact about the regulations, not about the employer's intent).
+
+**Phrasing discipline (mandatory):** state the verifiable fact about the posting text and the statute only — e.g. "this posting restricts eligibility to citizens; under 8 U.S.C. §1324b such restrictions are unlawful unless required by law, regulation, executive order, or government contract for this position." That is a fact about the statute and the posting text. Never assert that the employer is breaking the law or committing a violation: employer size, statutory hooks, and exemptions are not verifiable from the JD, so no such conclusion can be drawn from it.
+
+If matched, append a short, warn-only note to the report:
+
+> ⚠️ **Immigration-status requirement signal:** [Render in {language.output}: a factual statement that this posting contains "{the status demand, quoted from the JD}", a specific-immigration-status requirement; that under {jurisdiction_name}'s {legal_basis} such requirements are unlawful unless a listed exception applies (cite the entry's `legal_basis` and `exceptions` verbatim as data tokens, and the `enforcement_notes` where useful context); if the posting names a plausible statutory hook, name it here instead of flagging cleanly. Note that authorization/sponsorship questions are lawful screening and are not what this flag is about. Close with a note that this is informational only and not legal advice.]
+
+**12. Jurisdiction-Prohibited Content** (from JD text; jurisdiction from `config/profile.yml` → `location` (country + city/province/state), same region-aware pattern as signal 6):
+
+Some posting content is not just a yellow flag — it is content the candidate's own jurisdiction has explicitly prohibited employers from requiring or asking for (e.g. a "Canadian experience" requirement in Ontario postings, salary-history questions in California). Candidates either don't know their rights, or notice and have nowhere to record it. Check for it like this:
+
+1. Read `templates/jurisdiction-prohibited-content.yml` — a jurisdiction-keyed table of prohibited content with legal basis, effective date, and sources. It is a data reference, not instruction logic: extending it to another jurisdiction never requires touching this rule text, and every entry must carry a citable legal source plus effective date (see the contribution rule in the file header).
+2. Derive the candidate's jurisdiction key from `config/profile.yml` → `location` (e.g. Ontario, Canada → `CA-ON`; California, USA → `US-CA`). No table entry for the candidate's jurisdiction → this signal is not evaluated; say nothing.
+3. For each entry matching the candidate's jurisdiction, judge whether the JD text actually contains the prohibited content per that entry's `matching` guidance. This is agent-judged, never naive keyword matching — e.g. "we will never ask for your salary history" in a fraud-warning footer must NOT fire, and a salary-*expectations* question is not a salary-*history* question.
+
+**Phrasing discipline (mandatory):** state the verifiable fact about the posting text only — what the posting contains, what the jurisdiction's law prohibits, since when. Never assert that the employer is breaking the law or committing a violation: employer size, posting type, and statutory exemptions are not verifiable from the JD, so no such conclusion can be drawn from it.
+
+If matched, append a short, warn-only note to the report:
+
+> ⚠️ **Jurisdiction-prohibited content signal:** [Render in {language.output}: a factual statement that this posting contains "{the matched content, quoted from the JD}", which {jurisdiction_name}'s {legal_basis} has prohibited in {the scope stated by the entry, e.g. publicly advertised postings} since {effective date} — cite the entry's `legal_basis` and `effective` fields verbatim as data tokens. Describe the posting text only; draw no conclusion about the employer. Close with a note that this is informational only and not legal advice.]
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately. It never blocks or discourages an application on its own; the candidate decides what to do with the information.
+
 ### Output format:
 
 **Assessment:** One of three tiers:
@@ -305,6 +394,17 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 
 **Context Notes:** Any caveats (niche role, government job, evergreen position, etc.) that explain potentially concerning signals.
 
+### Prior-contact FYI (non-scoring)
+
+Check the `responsiveness` axis of the `node company-history.mjs --company <company>` card, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. Branch on `responsiveness.label` and append ONE informational line to the report. The `facts` array can hold several applications to the same company, so fill placeholders deterministically **per category**: for each placeholder use the most recent application matching THAT placeholder's own condition — fill a responded placeholder from the most recent responded fact, a silent placeholder from the most recent silent fact — rather than forcing one fact to serve both groups. When more than one application matches a category, append a separate count for that category (e.g. ", and {K} earlier applications with the same pattern") so no history is omitted or misrepresented:
+
+- `silent-on-you` (fill from the most recent silent fact; if more than one silent application exists, append the count of the others):
+> Note: you applied to {company} on {date}; no response in {N}d after {M} follow-ups. Not a legitimacy signal — factor into how much effort to invest.
+- `mixed` (they answered at least one of your applications and went silent on another — a flat "no response" would be inaccurate). Fill the responded placeholders from the most recent **responded** fact and the silent placeholders from the most recent **silent** fact — two different applications — and give a separate count per category when more than one matches:
+> Note: mixed history with {company} — they responded on #{responded_num} ({responded_date}) but went silent on #{silent_num} (applied {silent_date}, {N}d). Not a legitimacy signal — factor into how much effort to invest.
+
+This is information about **your own history** with the company, not about this posting. It must NOT alter the 1-5 score and must NOT alter the Assessment tier above — those are driven exclusively by the `postingChurn` axis and the other Block G signals. If the label is `responded-before` or `no-history`, say nothing (silence is fine; no note needed).
+
 ### Edge case handling:
 - **Government/academic postings:** Longer timelines are standard. Adjust thresholds (60-90 days is normal).
 - **Evergreen/continuous hire postings:** If the JD explicitly says "ongoing" or "rolling," note it as context -- this is not a ghost job, it is a pipeline role.
@@ -312,6 +412,40 @@ This signal does not change the High Confidence / Proceed with Caution / Suspici
 - **Startup / pre-revenue:** Early-stage companies may have vague JDs because the role is genuinely undefined. Weight description vagueness less heavily.
 - **No date available:** If posting age cannot be determined and no other signals are concerning, default to "Proceed with Caution" with a note that limited data was available. NEVER default to "Suspicious" without evidence.
 - **Recruiter-sourced (no public posting):** Freshness signals unavailable. Note that active recruiter contact is itself a positive legitimacy signal.
+
+---
+
+## Risk Summary (after Block G)
+
+Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order — so the question the candidate actually asks ("is this company safe to join?") is answered on one screen instead of by mentally joining Block A, Block G, and a sidecar file.
+
+**Aggregation only, zero new judgment.** Each row quotes or links the verdict already produced by its source signal. The summary never re-scores, re-weights, or overrides — if a row looks wrong, the fix belongs in the source signal, not here.
+
+Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state.
+
+| Signal | Source | Row rendering |
+|--------|--------|---------------|
+| Posting legitimacy | Block G assessment tier | `✅ High Confidence`, or `⚠️ {tier} — {one-line reason}` for Proceed with Caution / Suspicious |
+| Employment classification | Employment classification signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ contractor-style language: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
+| Culture screen | Culture screen field in Block A | `✅ pass`, or `⚠️ caution — {evidence}` / `⚠️ fail — {evidence}`; `— not evaluated` when no screen was run |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
+| AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
+
+Block format:
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Employment classification | ⚠️ contractor-style language: "{quoted phrase}" |
+| Culture screen | ⚠️ caution — {evidence} |
+| Interview red flags | — no interview sessions yet |
+| AI claims vs. infrastructure | — not evaluated |
+```
+
+Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose.
 
 ---
 
@@ -368,7 +502,7 @@ I am happy to discuss further at your convenience.
 *Run `/career-ops cover {slug}` to complete angles, confirm company research, and generate the PDF.*
 ```
 
-Apply all language rules from `_shared.md` Professional Writing section to the draft content. No em dashes, no buzzwords, active voice, concrete claims only.
+Apply all language rules from `_writing.md` Professional Writing section to the draft content. No em dashes, no buzzwords, active voice, concrete claims only.
 
 ---
 
@@ -396,6 +530,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Archetype:** {detected}
 **Score:** {X/5}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
+**Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
 **PDF:** {path or pending}
 
 ---
@@ -424,6 +559,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## G) Posting Legitimacy
 (full content of block G)
 
+## Risk Summary
+(one row per risk signal, fixed order — see the Risk Summary section above)
+
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)
 
@@ -433,7 +571,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (list of 15-20 keywords from the JD for ATS optimization)
 ```
 
-**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`.
+**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`. It also includes `risk_summary`: the Risk Summary block mirrored as a map (schema and enum values in `batch/batch-prompt.md`).
 
 ### 2. Record in tracker
 
