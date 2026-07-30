@@ -1,6 +1,6 @@
 # Mode: apply — Live Application Assistant
 
-> Apply `voice-dna.md` (if present) to free-text answers and cover-letter fields — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_shared.md` → Voice DNA.
+> Apply `voice-dna.md` (if present) to free-text answers and cover-letter fields — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_writing.md` → Voice DNA.
 
 Interactive mode for when the candidate is filling out an application form in Chrome. It reads what is on the screen, loads the previous context of the job, and generates personalized responses for each form question.
 
@@ -18,6 +18,9 @@ Interactive mode for when the candidate is filling out an application form in Ch
 4. LOAD        → Read full report + Section H / Application Answers (if they exist)
 5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
 5b. PRE-SCAN   → Scan page for knock-out questions (degree, experience, work authorization/visa, sponsorship, salary floors)
+5d. STATUS     → Warn if a form question screens for a specific immigration status rather than work authorization (warn-only; candidate decides)
+
+5c. PROHIBITED → Warn if a form field asks for content the candidate's jurisdiction prohibits (warn-only; candidate decides)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
@@ -70,6 +73,44 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
      `⚠️ KNOCK-OUT WARNING: The form asks "[question text]". Based on your profile/CV, answering "[profile answer]" may trigger immediate automatic rejection by the ATS. How would you like to answer this, or do you want to skip applying?`
    - Stop and wait for the candidate's confirmation before drafting any further answers.
 4. If no knock-out questions are found, or the candidate resolves the warning, proceed to Step 6.
+
+## Step 5d — Immigration-status screening check (#2033)
+
+Application forms are where status screening most often hides — usually one dropdown away from the lawful sponsorship question. While scanning the form (this can run in the same pass as Step 5b):
+
+1. Read `templates/immigration-status-requirements.yml` — a jurisdiction-keyed table of prohibited status-requirement patterns, each entry carrying a mandatory `lawful_screening_contrast`, `legal_basis`, `exceptions`, `sources`, and `as_of` date.
+2. Derive the candidate's jurisdiction key from `config/profile.yml` → `location` (e.g. Ontario, Canada → `CA-ON`; anywhere in the United States → `US` for the federal row). No entry for the candidate's jurisdiction → skip this step silently.
+3. For each form question, judge whether it screens for a specific immigration STATUS rather than work AUTHORIZATION, per the entry's `prohibited_requirement_patterns` guidance. Agent-judged, never naive keyword matching.
+
+**The authorization-vs-status line (mandatory):** plain authorization and sponsorship questions are lawful screening and generate NO warning from this step — ever. "Are you authorized to work in the United States?", "Will you now or in the future require sponsorship for employment visa status?", and "Are you legally authorized to work in Canada?" are exactly the questions regulators approve (Step 5b already handles them as knock-out areas against the candidate's profile). This step fires only on status demands: "Are you a US citizen?", "Are you a citizen or permanent resident?", and the *Haseeb* proxy pattern — e.g. a fictional Acme Corp form asking "Are you legally authorized to work in Canada **on a permanent basis**?" The permanence qualifier is what converts a lawful authorization question into a status screen (*Haseeb v. Imperial Oil*, HRTO); without it, the same question is lawful and passes silently.
+
+If a question matches, warn the candidate BEFORE generating or filling an answer for that question:
+
+> ⚠️ **Immigration-status screening warning:** [Render in {language.output}: a factual statement that the form question "{question text}" screens for a specific immigration status rather than work authorization; that under {jurisdiction_name}'s {legal_basis} status requirements are unlawful unless a listed exception applies — cite the entry's `legal_basis` and `exceptions` verbatim as data tokens; if the form or posting names a plausible statutory hook (government contract, security clearance, an s.16 category), name it here. Note that the lawful version of this question ("are you authorized to work in {country}?") is different and would not have triggered this warning, that exemptions cannot be verified from the form, and that this is informational only and not legal advice. Ask the candidate how they want to handle the question.]
+
+**Hard rules for this step:**
+
+- **Warn-only.** Never auto-answer the question, never auto-skip it, never block or discourage the application because of it — the candidate decides how to answer, and their decision is final.
+- **Phrasing discipline:** describe the form question and what the jurisdiction's law prohibits — never assert that the employer is breaking the law or committing a violation; statutory hooks and exemptions are not verifiable from the form.
+- This step adds a warning before the answer is drafted; it changes nothing about the existing prepare-don't-submit flow, the Step 6 `needs_candidate_confirmation` contract, or the Step 5b knock-out handling (which is where lawful sponsorship questions are checked against the candidate's own profile — a different job than this step's).
+
+## Step 5c — Jurisdiction-prohibited content check (#2018)
+
+Application forms are where legally prohibited questions most often live — salary-history questions in particular appear in forms far more often than in JD text. While scanning the form (this can run in the same pass as Step 5b):
+
+1. Read `templates/jurisdiction-prohibited-content.yml` — a jurisdiction-keyed table of content employers are prohibited from asking for, each entry carrying a legal basis, effective date, and sources.
+2. Derive the candidate's jurisdiction key from `config/profile.yml` → `location` (e.g. Ontario, Canada → `CA-ON`; California, USA → `US-CA`). No entry for the candidate's jurisdiction → skip this step silently.
+3. For each form field, judge whether it asks for content matching an entry per that entry's `matching` guidance. Agent-judged, never naive keyword matching: a salary-*expectations* field (handled by Step 5b as a knock-out area) is not a salary-*history* field, and fraud-warning boilerplate ("we will never ask for...") must not fire.
+
+If a field matches, warn the candidate BEFORE generating or filling an answer for that field:
+
+> ⚠️ **Prohibited-content warning:** [Render in {language.output}: a factual statement that the form field "{field label}" asks for {the matched content}, which {jurisdiction_name}'s {legal_basis} has prohibited employers from seeking since {effective date} — cite the entry's `legal_basis` and `effective` fields verbatim as data tokens; note that the candidate is generally not obligated to answer, that exemptions exist which cannot be verified from the form, and that this is informational only and not legal advice. Ask the candidate how they want to handle the field.]
+
+**Hard rules for this step:**
+
+- **Warn-only.** Never auto-answer the field, never auto-skip it, never block or discourage the application because of it — the candidate decides how to handle the field, and their decision is final.
+- **Phrasing discipline:** describe the form field and what the jurisdiction's law prohibits — never assert that the employer is breaking the law or committing a violation; exemptions and scope are not verifiable from the form.
+- This step adds a warning before the answer is drafted; it changes nothing about the existing prepare-don't-submit flow, the Step 6 `needs_candidate_confirmation` contract, or the Step 5b knock-out handling.
 
 **Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially against scanner entries marked `**Verification:** unconfirmed (batch mode)` — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
 
@@ -180,8 +221,8 @@ node application-answers.mjs --report reports/NNN-company-role-date.md --input a
 ## Step 9 — Post-apply (optional)
 
 If the candidate confirms that they submitted the application:
-1. Update status to Applied via the canonical CLI: `node set-status.mjs <report#> Applied` (never hand-edit the table)
-2. Seed the follow-up schedule: run `node followup-seed.mjs {num} --json` (where `{num}` is the tracker row number). If the candidate applied on a different day than today, pass `--date YYYY-MM-DD` with the actual submission date. It's idempotent, so re-running is safe.
+1. Update status to Applied via the canonical CLI: `node set-status.mjs <report#> Applied` (never hand-edit the table). If the candidate submitted on a different day than today, add `--on YYYY-MM-DD` with the actual submission date — the status-log ledger should record when it happened, not when it was typed in.
+2. Seed the follow-up schedule: run `node followup-seed.mjs {num} --json` (where `{num}` is the tracker row number). If the candidate applied on a different day than today, pass `--date YYYY-MM-DD` with the actual submission date. It's idempotent, so re-running is safe. (`--on` and `--date` are the same concept — the real submission date — each under its own script's flag name; pass the same value to both.)
 3. Refresh the report's `## Application Answers` section with the final field values and `**State:** submitted`
 4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach
 

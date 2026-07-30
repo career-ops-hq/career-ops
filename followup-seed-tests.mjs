@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -366,6 +366,111 @@ function cleanup(sandbox) {
   else fail(`13. --backfill --date → exit 1 — got ${res.code}\n${res.stdout}${res.stderr}`);
   if (res.stderr.includes('--date cannot be combined with --backfill')) pass('13. usage error explains the rejection');
   else fail(`13. usage error explains the rejection — got\n${res.stderr}`);
+  cleanup(sb);
+}
+
+// ── Test 14: an orphaned recover guard does not block stale-lock recovery ───
+// A process killed between creating `<lock>.recover` and cleaning it up leaves
+// the guard behind forever. Because the guard is the ticket required to run
+// stale-lock recovery at all, an abandoned one permanently disables recovery:
+// every later seed run times out at exit 4 until someone deletes the directory
+// under tmpdir by hand. tracker-utils.mjs and pipeline-lock.mjs both age the
+// guard out for exactly this reason; followup-seed.mjs was the outlier.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  const guard = `${sb.lock}.recover`;
+  mkdirSync(sb.lock, { recursive: true });   // ownerless: no owner.json
+  mkdirSync(guard, { recursive: true });     // the SIGKILLed predecessor's leftover
+  // Both an hour old. Backdating explicitly keeps the test off the wall clock:
+  // an age of 3_600_000ms clears the configured staleMs of 10 by five orders of
+  // magnitude, so the outcome cannot hinge on how long the retry loop happens
+  // to take.
+  const anHourAgo = new Date(Date.now() - 3_600_000);
+  utimesSync(sb.lock, anHourAgo, anHourAgo);
+  utimesSync(guard, anHourAgo, anHourAgo);
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '3000',
+  });
+  if (res.code === 0) pass('14. orphaned recover guard does not block stale-lock recovery');
+  else fail(`14. orphaned recover guard does not block stale-lock recovery — got ${res.code}\n${res.stdout}${res.stderr}`);
+  if (existsSync(sb.followups)) pass('14. the seed actually ran after recovery');
+  else fail('14. the seed actually ran after recovery — follow-ups.md was never written');
+  cleanup(sb);
+}
+
+// ── Test 15: a guard still inside its age window is respected ───────────────
+// Guards the fix against the vacuous implementation. Removing the guard
+// unconditionally would also pass test 14 while destroying the mutual
+// exclusion the guard exists to provide — two processes would run recovery on
+// the same lock at once. A fresh guard means a sibling is inside its recovery
+// window right now, so the lock must be left alone even though it is old
+// enough to reclaim.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  const guard = `${sb.lock}.recover`;
+  mkdirSync(sb.lock, { recursive: true });
+  const twoHoursAgo = new Date(Date.now() - 7_200_000);
+  utimesSync(sb.lock, twoHoursAgo, twoHoursAgo);   // reclaimable, if the guard were free
+  mkdirSync(guard, { recursive: true });           // deliberately left at "now"
+  // staleMs 60_000 against a 400ms timeout pins the boundary: the guard cannot
+  // reach 60s of age inside this run no matter how the retry loop is scheduled,
+  // so "fresh" stays true for the whole window rather than expiring mid-test.
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '60000',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '400',
+  });
+  if (res.code === 4) pass('15. a guard inside its age window is respected → exit 4');
+  else fail(`15. a guard inside its age window is respected → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
+  if (existsSync(guard)) pass('15. the live guard survives');
+  else fail('15. the live guard survives — it was removed');
+  cleanup(sb);
+}
+
+// ── Test 16: an ownerless lock inside the grace period is not stolen (#2306) ─
+// The follow-ups lock is ownerless for the instant between its `mkdirSync` and
+// its `owner.json` write. Judging it on `age > staleMs` alone lets a caller
+// with a small staleMs delete a lock created microseconds earlier and walk
+// straight into the read-check-append critical section beside its owner.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  // Ownerless for 100ms: past the caller's staleMs (so the unfloored code
+  // reclaims it immediately) but far inside the 1s floor. Pinning both sides
+  // of the relation keeps the test off the wall clock — against a directory
+  // created "just now" this would instead depend on whether a sub-millisecond
+  // age drifts past a 1ms threshold before the retry loop looks again.
+  mkdirSync(sb.lock, { recursive: true });
+  const heldSince = new Date(Date.now() - 100);
+  utimesSync(sb.lock, heldSince, heldSince);
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '300',
+  });
+  if (res.code === 4) pass('16. ownerless lock inside the grace period is not stolen → exit 4');
+  else fail(`16. ownerless lock inside the grace period is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
+  if (existsSync(sb.lock)) pass('16. the untouched lock directory survives');
+  else fail('16. the untouched lock directory survives — it was removed');
+  cleanup(sb);
+}
+
+// ── Test 17: an ownerless lock older than the grace period still recovers ───
+// Guards the fix against the vacuous implementation: a floor that never lets
+// an ownerless lock age out would deadlock every writer behind a real orphan.
+{
+  const sb = makeSandbox();
+  writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+  mkdirSync(sb.lock, { recursive: true });
+  const when = new Date(Date.now() - 60_000);
+  utimesSync(sb.lock, when, when);                  // a real orphan, not a new lock
+  const res = run(['1'], sb, {
+    CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
+    CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '2000',
+  });
+  if (res.code === 0) pass('17. ownerless lock older than the grace period is still recovered');
+  else fail(`17. ownerless lock older than the grace period is still recovered — got ${res.code}\n${res.stdout}${res.stderr}`);
   cleanup(sb);
 }
 

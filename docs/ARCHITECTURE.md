@@ -1,5 +1,8 @@
 # Architecture
 
+This file describes the runtime flows. Design principles and the
+system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md).
+
 ## System Overview
 
 ```
@@ -24,7 +27,7 @@
      │                    Output Pipeline                      │
      │  ┌──────────┐  ┌────────────┐  ┌───────────────────┐  │
      │  │ Report.md│  │  PDF (HTML  │  │ Tracker TSV       │  │
-     │  │ (A-F eval)│  │  → Puppeteer)│  │ (merge-tracker)  │  │
+     │  │ (A-G eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
      │  └──────────┘  └────────────┘  └───────────────────┘  │
      └────────────────────────────────────────────────────────┘
                                │
@@ -39,17 +42,19 @@
 1. **Input**: User pastes JD text or URL
 2. **Extract**: Playwright/WebFetch extracts JD from URL
 3. **Classify**: Detect archetype (1 of 6 types)
-4. **Evaluate**: 6 blocks (A-F):
+4. **Evaluate**: 7 blocks (A-G):
    - A: Role summary
    - B: CV match (gaps + mitigation)
    - C: Level strategy
    - D: Comp research (WebSearch)
    - E: CV personalization plan
    - F: Interview prep (STAR stories)
-5. **Score**: Weighted average across 10 dimensions (1-5)
+   - G: Posting legitimacy (scam / ghost-job signals)
+5. **Score**: Weighted average across 5 dimensions (1-5)
 6. **Report**: Save as `reports/{num}-{company}-{date}.md`
 7. **PDF**: Generate ATS-optimized CV (`generate-pdf.mjs`)
-8. **Track**: Write TSV to `batch/tracker-additions/`, auto-merged
+8. **Track**: New entries via TSV in `batch/tracker-additions/` merged by
+   `merge-tracker.mjs`; status updates to existing rows via `set-status.mjs`
 
 ## Batch Processing
 

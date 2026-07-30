@@ -120,10 +120,74 @@ export function parseDate(dateStr) {
 // "APPLIED ..."). Prefer that so cadence reflects when the application actually
 // went out, not when the role was evaluated. Returns the first such date, or
 // null when the notes don't carry one (caller falls back to the date column).
-export function parseAppliedDate(notes) {
+//
+// The optional `~` accepts an estimated date ("Applied ~2026-06-09"), which is
+// how an apply date reconstructed after the fact gets written. Skipping those
+// silently fell back to the evaluation date — the exact wrong-age failure this
+// lookup exists to prevent. The leading \b still refuses "reapplied".
+//
+// The trailing (?![\w-]) is the mirror of that leading \b: without it a
+// malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
+// plausible-looking date and then reported as a *measured* apply date. That is
+// worse than no match at all — the evaluation-date fallback is at least labelled
+// as inferred, whereas a truncated date is indistinguishable from a real one.
+// Rejecting the bad candidate lets the scan continue to a later valid date.
+//
+// The token shape is necessary but not sufficient: "2026-06-31" and
+// "2026-02-30" match it and are not real days.
+//
+// Whether that should be rejected here depends on the caller, so it is opt-in:
+//   - followup-seed.mjs WANTS the raw candidate. It validates the date itself
+//     and throws INVALID_DATE so a typo gets corrected rather than silently
+//     absorbed — pinning a follow-up off a wrong date is worse than refusing.
+//     Filtering here unconditionally would make that impossible date invisible
+//     to it and turn a loud, fixable error into a silent wrong answer.
+//   - the cadence report wants it skipped, because parseDate() rolls an
+//     impossible date over (2026-06-31 becomes 2026-07-01), so it would become
+//     a real but WRONG date labelled `notes` — i.e. measured, not inferred.
+//     Falling back to the evaluation date is honest by comparison, and one bad
+//     row must not fail a whole report.
+//
+// @param {string} notes
+// @param {{requireValidCalendarDate?: boolean}} [options]
+export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
-  const m = String(notes).match(/\bapplied\s+(\d{4}-\d{2}-\d{2})/i);
-  return m ? m[1] : null;
+  const validateCalendar = options.requireValidCalendarDate === true;
+  for (const m of String(notes).matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+    if (!validateCalendar || isRealCalendarDate(m[1])) return m[1];
+  }
+  return null;
+}
+
+// True only when YYYY-MM-DD names a day that exists. Round-tripping through a
+// UTC Date and comparing the parts back catches out-of-range months/days as
+// well as month-length and leap-year violations, which a range check misses.
+export function isRealCalendarDate(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ''))) return false;
+  const [y, mo, d] = iso.split('-').map(Number);
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  // setUTCFullYear rather than Date.UTC: Date.UTC maps years 0-99 onto
+  // 1900-1999, which would reject a literal ISO year below 0100 (0096-02-29 is
+  // a real leap day). The absolute setter keeps the year as written.
+  const dt = new Date(0);
+  dt.setUTCFullYear(y, mo - 1, d);
+  dt.setUTCHours(0, 0, 0, 0);
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+// Which date the cadence is measured from, and where it came from. A caller
+// cannot otherwise tell a real application date from the evaluation-date proxy,
+// so an inferred age reads exactly like a measured one — and acting on that
+// silently-wrong number is what pushes a live application into "cold".
+export function resolveAppliedDate(app) {
+  // requireValidCalendarDate: an impossible date in the notes must degrade to
+  // the labelled fallback rather than be reported as a measured date. One bad
+  // row must not fail the whole report, so this skips rather than throws —
+  // unlike followup-seed.mjs, which refuses to pin a follow-up off a bad date.
+  const fromNotes = parseAppliedDate(app?.notes, { requireValidCalendarDate: true });
+  return fromNotes
+    ? { appliedDate: fromNotes, appDateSource: 'notes' }
+    : { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
 }
 
 export function daysBetween(d1, d2) {
@@ -137,10 +201,11 @@ export function addDays(date, days) {
 }
 
 // --- Parse applications.md ---
-function parseTracker() {
-  if (!existsSync(APPS_FILE)) return [];
-  const content = readFileSync(APPS_FILE, 'utf-8');
-  const lines = content.split('\n');
+// Content-based core so any consumer (stats.mjs, tests) can classify rows
+// from in-memory strings without touching disk. The disk-backed wrapper
+// below is what the CLI path uses.
+function parseTrackerContent(content) {
+  const lines = String(content ?? '').split('\n');
   const colmap = resolveColumns(lines);
   const entries = [];
   for (const line of lines) {
@@ -151,11 +216,13 @@ function parseTracker() {
 }
 
 // --- Parse follow-ups.md ---
-function parseFollowups() {
-  if (!existsSync(FOLLOWUPS_FILE)) return [];
-  const content = readFileSync(FOLLOWUPS_FILE, 'utf-8');
+// Table rows only (lines starting with `|`); pin-directive lines (`- next #...`)
+// and the header/separator rows are excluded — the header's `num` cell isn't
+// numeric and the separator's dashes aren't either, so both fail the `isNaN`
+// check below and never enter `entries`.
+export function parseFollowups(content) {
   const entries = [];
-  for (const line of content.split('\n')) {
+  for (const line of String(content ?? '').split('\n')) {
     if (!line.startsWith('|')) continue;
     const parts = line.split('|').map(s => s.trim());
     if (parts.length < 8) continue;
@@ -206,26 +273,128 @@ export function resolveNextOverride(override, lastFollowupDate) {
   return override.date;
 }
 
-function parseOverrides() {
-  if (!existsSync(FOLLOWUPS_FILE)) return new Map();
-  return parseNextOverrides(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+// --- Extract contacts from notes ---
+// Outreach recorded in notes is usually a NAME, not an email — LinkedIn, the
+// most common channel, never produces one. An email-only parser therefore
+// reports `contacts: []` for rows that do have a human attached, and "no
+// contact" becomes indistinguishable from "contact with no email on file".
+// That inverts the meaning of the field: an empty list reads as "outreach is
+// untried here" when outreach has in fact been tried and has not converted.
+//
+// Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
+// remains non-null for email contacts) so existing consumers keep working;
+// `channel` is additive.
+const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+
+// Name-shaped contacts are gated on an explicit outreach verb or role word, so
+// a capitalized company name ("Acme Corp") can never be mistaken for a person.
+// Both name parts allow an internal hyphen or apostrophe ("Mary-Jane
+// O'Brien") — dropping such a name would report "no contact" for a row that
+// plainly names a person, the very silence this parser exists to remove.
+const OUTREACH_NAME_RE = /\b(?:recruiter|hiring manager|messaged|contacted|emailed|called|reached out to|spoke with|outreach)\b[\s(]*([A-Z][a-z]*(?:[-'’][A-Z]?[a-z]+)*(?:\s+[A-Z][a-z]*(?:[-'’][A-Z]?[a-z]+)*)+)/g;
+
+// One note can record several separate outreach events ("Messaged X on
+// LinkedIn; called Y"). Resolving a contact against the WHOLE note attributes
+// the first channel word it finds to every contact, so the second person is
+// silently credited to the wrong channel. Split into statements and resolve
+// each independently.
+//
+// The sentence split only fires on a period followed by whitespace and a
+// capital, so it cannot break an address like `jane.doe@acme.com`.
+function splitStatements(notes) {
+  return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-// --- Extract contacts from notes ---
-function extractContacts(notes) {
+export function extractContacts(notes) {
   if (!notes) return [];
+  const byEmail = new Map();  // normalized email -> contact
+  const byName = new Map();   // normalized name  -> contact
   const contacts = [];
-  const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
-  const emails = notes.match(emailRegex) || [];
-  for (const email of emails) {
-    // Try to extract name before email: "Emailed Name at" or "contact: Name"
-    let name = null;
-    const beforeEmail = notes.substring(0, notes.indexOf(email));
-    const nameMatch = beforeEmail.match(/(?:Emailed|emailed|contact[:\s]+|to\s+)([A-Z][a-z]+ ?[A-Z]?[a-z]*)\s*(?:at|@|$)/i);
-    if (nameMatch) name = nameMatch[1].trim();
-    contacts.push({ email, name });
+
+  const add = ({ name, email, channel }) => {
+    const emailKey = email ? email.toLowerCase() : null;
+    const nameKey = name ? name.toLowerCase() : null;
+
+    // Same address recorded twice is one contact; fill in a name/channel the
+    // earlier mention lacked rather than emitting a duplicate.
+    const byEmailHit = emailKey ? byEmail.get(emailKey) : null;
+    const byNameHit = nameKey ? byName.get(nameKey) : null;
+
+    // A name-only and an email-only record can be created separately, then a
+    // later statement names BOTH and proves they are the same person. Fold the
+    // two records into one and drop the redundant entry, or the result reports
+    // two contacts where the note itself says there is one.
+    if (byEmailHit && byNameHit && byEmailHit !== byNameHit) {
+      byEmailHit.name = byEmailHit.name || byNameHit.name;
+      byEmailHit.email = byEmailHit.email || byNameHit.email;
+      byEmailHit.channel = byEmailHit.channel || byNameHit.channel;
+      const idx = contacts.indexOf(byNameHit);
+      if (idx !== -1) contacts.splice(idx, 1);
+      // Repoint every key that pointed at the discarded record.
+      for (const [k, v] of byEmail) if (v === byNameHit) byEmail.set(k, byEmailHit);
+      for (const [k, v] of byName) if (v === byNameHit) byName.set(k, byEmailHit);
+    }
+
+    const existing = byEmailHit || byNameHit || null;
+    if (existing) {
+      if (!existing.name && name) existing.name = name;
+      if (!existing.email && email) existing.email = email;
+      if (!existing.channel && channel) existing.channel = channel;
+      if (existing.email) byEmail.set(existing.email.toLowerCase(), existing);
+      if (existing.name) byName.set(existing.name.toLowerCase(), existing);
+      return;
+    }
+
+    const contact = { name: name ?? null, email: email ?? null, channel: channel ?? null };
+    contacts.push(contact);
+    if (emailKey) byEmail.set(emailKey, contact);
+    if (nameKey) byName.set(nameKey, contact);
+  };
+
+  for (const span of splitStatements(notes)) {
+    const emails = span.match(EMAIL_RE) || [];
+    const names = [...span.matchAll(OUTREACH_NAME_RE)].map(m => m[1].trim());
+    if (!emails.length && !names.length) continue;
+    const channel = detectChannel(span, emails.length > 0);
+
+    // One person and one address in the same statement is one contact, not an
+    // email-only entry plus a separate name-only duplicate.
+    if (names.length === 1 && emails.length === 1) {
+      add({ name: names[0], email: emails[0], channel });
+      continue;
+    }
+
+    for (const email of emails) {
+      // Fall back to the older "Emailed Name at <addr>" shape for a name that
+      // sits next to the address without a listed outreach verb.
+      let name = null;
+      const beforeEmail = span.substring(0, span.indexOf(email));
+      const nameMatch = beforeEmail.match(/(?:emailed|contact[:\s]+|to\s+)([A-Z][a-z]+ ?[A-Z]?[a-z]*)\s*(?:at|@|$)/i);
+      if (nameMatch) name = nameMatch[1].trim();
+      add({ name, email, channel });
+    }
+    for (const name of names) add({ name, email: null, channel });
   }
+
   return contacts;
+}
+
+// The channel a single statement names, when it names one. Null rather than a
+// guess: an unspecified channel is not evidence of any particular one. An
+// address in the statement implies email only when no channel word says otherwise.
+function detectChannel(span, hasEmail = false) {
+  if (/\blinkedin\b/i.test(span)) return 'linkedin';
+  if (/\bphone\b|\bcalled\b/i.test(span)) return 'phone';
+  if (/\bemail(ed)?\b/i.test(span) || hasEmail) return 'email';
+  return null;
+}
+
+// Display label for a contact: the email when there is one, otherwise the name.
+// The summary table reads this instead of `.email` directly, so a name-only
+// contact shows the person rather than a literal "null".
+export function contactLabel(contact) {
+  if (!contact) return '-';
+  return contact.email || contact.name || '-';
 }
 
 // --- Resolve report path ---
@@ -281,14 +450,22 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 }
 
 // --- Main analysis ---
-function analyze() {
-  const apps = parseTracker();
+// Content-based core so consumers outside this CLI (stats.mjs, tests) can
+// reuse the exact same cadence/urgency math — including the 'cold'
+// classification — without duplicating it or touching disk. `followupsContent`
+// missing/empty (the common case when data/follow-ups.md doesn't exist yet)
+// degrades gracefully: every app gets followupCount 0, so 'cold' (which
+// requires followupCount >= applied_max_followups) simply never triggers —
+// no error, no guessing, matching the same "absent optional file = pass
+// through" convention used elsewhere in this project.
+export function analyzeFromContent(trackerContent, followupsContent = '') {
+  const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
     return { error: 'No applications found in tracker.' };
   }
 
-  const followups = parseFollowups();
-  const overrides = parseOverrides();
+  const followups = parseFollowups(followupsContent);
+  const overrides = parseNextOverrides(String(followupsContent ?? ''));
 
   // Group follow-ups by app number
   const followupsByApp = new Map();
@@ -305,7 +482,9 @@ function analyze() {
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
 
     // Prefer the "Applied YYYY-MM-DD" date from notes; fall back to the column.
-    const appliedDate = parseAppliedDate(app.notes) || app.date;
+    // appDateSource travels with the entry so a consumer can tell a measured
+    // age from one inferred off the evaluation date.
+    const { appliedDate, appDateSource } = resolveAppliedDate(app);
     const appDate = parseDate(appliedDate);
     if (!appDate) continue;
 
@@ -345,6 +524,7 @@ function analyze() {
       num: app.num,
       date: app.date,
       appliedDate,
+      appDateSource,
       company: app.company,
       // Intermediary channel (#1596): agency name when the application went
       // through an intermediary, null for a direct application (the tracker's
@@ -391,6 +571,13 @@ function analyze() {
   };
 }
 
+// --- Main analysis (disk-backed CLI entry point) ---
+function analyze() {
+  const trackerContent = existsSync(APPS_FILE) ? readFileSync(APPS_FILE, 'utf-8') : '';
+  const followupsContent = existsSync(FOLLOWUPS_FILE) ? readFileSync(FOLLOWUPS_FILE, 'utf-8') : '';
+  return analyzeFromContent(trackerContent, followupsContent);
+}
+
 // --- Summary mode ---
 function printSummary(result) {
   if (result.error) {
@@ -421,7 +608,7 @@ function printSummary(result) {
   for (const e of entries) {
     const urgLabel = urgencyIcon[e.urgency] || e.urgency;
     const nextStr = e.nextFollowupDate || '-';
-    const contactStr = e.contacts.length > 0 ? e.contacts[0].email : '-';
+    const contactStr = e.contacts.length > 0 ? contactLabel(e.contacts[0]) : '-';
     console.log(
       '  ' +
       String(e.num).padEnd(5) +

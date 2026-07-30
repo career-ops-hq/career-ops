@@ -15,6 +15,12 @@ import { tmpdir } from 'os';
 import yaml from 'js-yaml';
 
 /**
+ * Minimum age before directory age alone may condemn an ownerless lock or
+ * recover guard. See `lockCanRecover` for why the age check needs a floor.
+ */
+export const OWNERLESS_GRACE_MS = 1_000;
+
+/**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
  *
  * `split('|')` yields a leading empty element (before the opening `|`) and,
@@ -217,8 +223,20 @@ function sameLockDirectory(left, right) {
  * directory itself is older than the stale threshold, the waiting process may
  * remove the lock and retry acquisition.
  *
+ * That age fallback needs a floor. Two directories are ownerless by
+ * construction, not by accident: a lock between its `mkdirSync` and its
+ * `owner.json` write, and the recover guard, which never carries `owner.json`
+ * at all. Judging those on `age > staleMs` alone lets a caller with an
+ * aggressive staleMs delete a directory created microseconds ago — either
+ * stealing a winner's lock inside its acquisition window, or evicting a live
+ * guard and putting two callers inside the decide-then-delete window the guard
+ * exists to serialize. OWNERLESS_GRACE_MS is a lower bound on that patience,
+ * never a cap: a larger caller staleMs still wins, and a genuinely abandoned
+ * directory still ages out, so a crash while holding the guard cannot disable
+ * recovery for good.
+ *
  * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery.
+ * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
  * @returns {boolean} True when the caller may remove and recreate the lock.
  */
 function lockCanRecover(lockDir, staleMs) {
@@ -226,7 +244,7 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
 
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
   } catch {
     return true;
   }
@@ -246,7 +264,7 @@ function lockCanRecover(lockDir, staleMs) {
  * @param {object} [options] - Lock timing options.
  * @param {number} [options.timeoutMs=60000] - Maximum time to wait for the lock.
  * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
+ * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold, floored at OWNERLESS_GRACE_MS.
  * @param {string} [options.tracker] - Tracker path recorded in owner metadata.
  * @param {Function} [options.removeLock] - Release hook for deterministic fault tests.
  * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}

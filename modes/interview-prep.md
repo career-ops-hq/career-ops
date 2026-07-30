@@ -108,6 +108,7 @@ If the company is small or obscure and yields few results, broaden: search for t
 ## Process Overview
 - **Rounds:** {N} rounds, ~{X} days end-to-end
 - **Format:** {e.g., recruiter screen → technical phone → take-home → onsite (4 rounds) → hiring manager}
+- **Platform:** {e.g., Zoom / Microsoft Teams / Google Meet / Phone — the call medium, distinct from Format above. Extract from invite/scheduling text using the same platform-detection approach `invite-match.mjs`'s `extractPlatform` uses (meeting-platform URL first, phone-number pattern as fallback). If not detectable, write "not stated in the invite, confirm before the call" rather than guessing; this field-specific fallback overrides the generic unknown rule below}
 - **Difficulty:** {X}/5 (Glassdoor avg, N reviews)
 - **Positive experience rate:** {X}%
 - **Known quirks:** {e.g., "pair programming instead of whiteboard", "no LeetCode, all practical", "take-home is 4 hours"}
@@ -155,6 +156,7 @@ For each round discovered in research:
 ### Round {N}: {Type} — audience: `{audience}`
 - **Duration:** {X} min
 - **Conducted by:** {peer / manager / skip-level / recruiter — if known}
+- **Platform:** {Zoom / Microsoft Teams / Google Meet / Phone for this specific round — extract from that round's invite/scheduling text the same way as Step 2's Platform field above. If not stated in the invite, write "not stated in the invite, confirm before the call"}
 - **What they evaluate:** {specific skills or traits}
 - **Reported questions:**
   - {question} — [source: Glassdoor (URL/date)]
@@ -163,6 +165,8 @@ For each round discovered in research:
 ```
 
 If round structure is unknown, state that and provide the best available intel on what types of rounds to expect based on company size, stage, and role level.
+
+When a round's Platform is known, add one logistics line to "How to prepare": for a video platform (Zoom / Microsoft Teams / Google Meet), a reminder to check camera, lighting, and background in advance; for Phone, a reminder to confirm a quiet space and good signal. Skip this line when Platform is not stated.
 
 ## Step 4 — Likely Questions (per audience)
 

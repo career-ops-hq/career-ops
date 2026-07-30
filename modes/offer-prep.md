@@ -30,7 +30,11 @@ It is NOT:
   figures must never appear in an outbound query of any kind.
 - **Never state law from memory.** Jurisdiction-dependent legal questions
   become entries in the Questions-for-your-lawyer list — never answered
-  inline, never guessed.
+  inline, never guessed. The single sanctioned source of statutory facts is
+  `templates/restrictive-covenants.yml` (a verified, cited, local data
+  table — see the statutory-context subsection in Step 2); reading it is a
+  local file lookup, not online research and not memory. Anything not in
+  the table stays a lawyer question.
 - **Never headless.** This mode must not run in batch/headless mode
   (`claude -p`, batch workers, subagents). It requires an attending human.
   The repo's batch conventions explicitly do not apply here.
@@ -109,7 +113,11 @@ jurisdiction and route it to the lawyer list as a question; it may never
 assert what any law requires, permits, or prohibits. Content-level
 statements ("{state} requires X", "this is unenforceable") are banned. The
 `[commonly negotiated]` tag is a negotiation-norms meta-statement and is
-fine.
+fine. One narrow, table-backed carve-out exists: statutory facts drawn
+verbatim-close from `templates/restrictive-covenants.yml` may be relayed
+with their citation as statutory-context notes (rules in Step 2) — but
+statements about what the law means for **this** clause remain banned
+everywhere.
 
 ## Step 2 — Clause walk (describe, don't judge)
 
@@ -172,6 +180,72 @@ described as an absence, anchored to where it would belong, and tagged
     clause erases the rest); unilateral-amendment clauses; contingencies
     (background check, references, visa); offer-expiry terms.
 
+### Statutory-context notes for restrictive covenants (#2028)
+
+Whether a restrictive covenant is enforceable **at all** is one of the
+sharpest jurisdiction-dependent facts in employment law — the same clause is
+largely a dead letter in one jurisdiction and the most negotiable line in the
+document in another. This subsection adds jurisdiction-aware **statutory
+context** to the clause walk without changing the mode's posture: it states
+facts about statutes, and it never judges the candidate's clause.
+
+**Lookup:** when the Step 2 walk reaches a restrictive-covenant clause
+(taxonomy category 4), check `templates/restrictive-covenants.yml` for a row
+matching (a) the jurisdiction derived in Step 1 (candidate's location from
+`config/profile.yml`; a named work location in the contract wins if it
+contradicts) and (b) the clause's **covenant type**. The table is a data
+reference, not instruction logic — adding a jurisdiction or covenant-type row
+there never requires touching this rule text; every row carries a legal
+basis, an effective date, statutory exceptions, sources, and an `as_of`
+verification date. Reading it is a local file lookup — it is **not** online
+research, and the no-online-research hard guard is unchanged: no WebSearch,
+no WebFetch, no URL visits, ever.
+
+**Covenant-type discipline (mandatory):** non-compete and non-solicitation
+are never conflated. Ontario's ESA s.67.2 ban, for example, covers
+non-compete agreements only — a non-solicitation clause in the same contract
+gets no statutory-context note from that row. If the table has no row for
+the clause's exact covenant type in the jurisdiction, this subsection is
+skipped entirely for that clause and the standard Step 1 meta-statement
+boundary applies (topic → lawyer list, no law stated).
+
+**On a match, two things happen — both inside existing output shapes:**
+
+1. The clause's neutral tags (which always include `[ask your lawyer]` for a
+   matched covenant) gain a **statutory-context note** — a fact about the
+   statute, never a verdict about this clause. Template:
+
+   > **Statutory context:** [Render in {language.output}: state what the
+   > statute says, with citation, effective date, and its exceptions, from
+   > the table row only — e.g. for a fictional Acme Corp offer in Ontario:
+   > "Ontario's ESA s.67.2 has prohibited non-compete agreements in
+   > employment contracts entered into since 2021-10-25, with executive
+   > (defined C-suite list) and sale-of-business exceptions." If the row's
+   > `as_of` date is not recent, add: "this table row was last verified
+   > {as_of}; the law may have changed since." Close with: whether this
+   > statute applies to this specific clause depends on facts a contract
+   > cannot self-certify — that question is in the lawyer list below. This
+   > is statutory context, not legal advice.]
+
+2. The **Questions for your lawyer** list gains a targeted, clause-anchored
+   entry — e.g. for the fictional Acme Corp offer above: "Does ESA s.67.2
+   apply to this clause given my role, or does the executive exception cover
+   it?" or, for a California-governed contract: "Given B&P §16600/§16600.5,
+   what is the practical status of this clause, and does the choice-of-law
+   provision change anything?" The conclusion belongs to the lawyer; this
+   mode's job is making sure the question gets asked.
+
+**Never assert application (HARD RULE):** the statutory exceptions —
+executive status, sale-of-business context, choice-of-law wrinkles — are
+exactly the things a contract document cannot self-certify. So this mode
+never asserts that the candidate's clause is void, unenforceable, or
+illegal, and never says the statute "applies here". A statute's existence,
+scope, effective dates, and exceptions are facts and may be stated with
+citation; whether it governs **this** clause is always a lawyer question.
+No enforceability opinions, no negotiation-leverage claims, no verdicts —
+the describes-never-judges posture is unchanged. Statutory-context notes
+are context, not legal advice.
+
 ## Step 3 — Consistency check
 
 Compare contract terms against:
@@ -195,8 +269,11 @@ nothing more; it implies no view on the number.
 **Questions for your lawyer** — jurisdiction-scoped and clause-anchored: at
 least one entry per `[ask your lawyer]` tag (one tag may generate several
 sub-questions, and cross-clause questions spanning multiple sections are
-encouraged), plus one per unprovided referenced document, plus anything the
-candidate raised. Written to make a single paid hour efficient.
+encouraged), plus one per unprovided referenced document, plus one targeted
+question per statutory-context note from the restrictive-covenants
+subsection (does the statute apply to this clause, or does an exception
+cover it?), plus anything the candidate raised. Written to make a single
+paid hour efficient.
 
 **Items to raise with the employer** — from `[differs from what you were
 told]` deltas and `[commonly negotiated]` tags. Phrased exclusively as

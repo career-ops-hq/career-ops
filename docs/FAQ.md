@@ -51,3 +51,31 @@ Copy `templates/blacklist.example.md` to `data/blacklist.md`, then list one comp
 If a listed company is encountered, the scan reports that it was skipped (never silently). You can bypass the filter with `--include-blacklisted` if you want to audit matching postings.
 
 See the Company blacklist section in `docs/SCRIPTS.md` for the full behavior and supported workflow.
+
+## What's the difference between `Discarded` and `SKIP`?
+
+From `templates/states.yml`: `Discarded` is "discarded by candidate or offer closed" (you considered it and stopped), `SKIP` is "doesn't fit, don't apply" (never a candidate). They land in different dashboard groups, so they count differently in your funnel: SKIP is filtering, Discarded is dropping out.
+
+## Is there only one CV template?
+
+No. `templates/` has `cv-template.html`, `cv-template.tex` (LaTeX/Overleaf), `cv-template.zh-minimal.html`, `resume-template.html`, `cover-letter-template.html`, plus `templates/sections/`. See also "Can I use my own CV template?" above.
+
+## Why does Chrome open during some scans but not others?
+
+Chromium only launches with `--verify`. A normal scan reads public ATS APIs and needs no browser; `--verify` checks a posting is genuinely still live, which needs a real page load. If it fails, the error asks you to run `npx playwright install chromium`.
+
+## Can I run career-ops in Docker / self-hosted?
+
+Yes: there's a `Dockerfile` and `docker-compose.yml` in the repo root. Note that career-ops is local-first and human-in-the-loop, so Docker packages the environment: it does not turn career-ops into a service that runs on its own or applies to jobs for you.
+
+## Does career-ops sync across devices?
+
+No. Everything is files in your checkout, and there is no cloud component. People who want this put the directory in a synced folder.
+
+## How do I get an issue assigned to me?
+
+Comment on it and we'll assign it (this is in CONTRIBUTING.md). A PR with no prior issue is welcome for bug fixes, zero-auth scanner providers, docs and translations. Issue-first applies only to new features, new modes and architecture changes.
+
+## Can I use career-ops without a terminal?
+
+Yes: see [`docs/COWORK.md`](COWORK.md) which covers running it inside Claude Cowork, verified end to end. One step people trip on: Cowork's shell has no npm network access, so clone and `npm install` in a terminal *before* opening the folder.

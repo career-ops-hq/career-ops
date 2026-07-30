@@ -259,6 +259,26 @@ cover_letter:
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
 
+# ── Two-pass triage gate ────────────────────────────────────────────────────
+#
+# Used by `/career-ops pipeline`. Before running the full A-G evaluation on
+# every URL in a batch, a lightweight first pass (`modes/triage.md`) scores each
+# role from a compact profile brief (`modes/_brief.md`) and filters out the ones
+# that would clearly disqualify — so the expensive full evaluation only runs on
+# roles that pass. On a mixed batch this cuts total tokens by roughly half.
+#
+#   triage_threshold  — minimum triage score (out of 5) to proceed to full
+#                       evaluation. Roles at 3.0–(threshold) are MARGINAL and
+#                       shown to you; below 3.0 they are filtered silently.
+#                       Default (key absent): 3.5.
+#   triage_min_urls   — batches with fewer surviving URLs than this skip triage
+#                       and go straight to full evaluation (triage overhead
+#                       isn't worth it on a handful of roles). Default: 5.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
+
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
 # Define cooldown windows for companies where you've recently applied.
