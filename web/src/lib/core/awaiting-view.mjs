@@ -15,6 +15,22 @@ function scoreValue(score) {
   return m ? parseFloat(m[1]) : NaN;
 }
 
+const DEFAULT_LIMIT = 6;
+
+/**
+ * A usable row cap: a finite number truncated to an integer >= 0.
+ *
+ * Anything else (NaN, ±Infinity, a numeric string, null, an object) is a
+ * caller bug, and falls back to the default rather than to 0 — quietly
+ * emptying the panel is the same class of silent hiding this module exists to
+ * fix. A negative cap must NOT reach `slice`, where -1 means "all but the
+ * last" instead of "none".
+ */
+function rowCap(limit) {
+  if (!Number.isFinite(limit)) return DEFAULT_LIMIT;
+  return Math.max(0, Math.trunc(limit));
+}
+
 /**
  * Evaluated rows still awaiting a decision, strongest first, capped at `limit`.
  *
@@ -27,10 +43,12 @@ function scoreValue(score) {
  *
  * @template {{status?: string, score?: string, date?: string}} T
  * @param {T[]} applications
- * @param {number} [limit=6]
+ * @param {number} [limit=6] Truncated to an integer >= 0; a non-finite or
+ *   non-numeric value falls back to the default.
  * @returns {T[]} A new array; the input is never mutated.
  */
-export function selectAwaitingDecision(applications, limit = 6) {
+export function selectAwaitingDecision(applications, limit = DEFAULT_LIMIT) {
+  const cap = rowCap(limit);
   const rows = (Array.isArray(applications) ? applications : [])
     .filter((a) => /^evaluat/i.test(a?.status ?? ''));
 
@@ -43,5 +61,5 @@ export function selectAwaitingDecision(applications, limit = 6) {
       if (an !== bn) return bn - an;                       // score, strongest first
       return String(b?.date ?? '').localeCompare(String(a?.date ?? '')); // newest first
     })
-    .slice(0, limit);
+    .slice(0, cap);
 }

@@ -70,6 +70,37 @@ if (!HAS_WEB) {
     assert.doesNotThrow(() => selectAwaitingDecision(undefined, 6));
   });
 
+  test('selectAwaitingDecision: a negative limit returns nothing rather than all-but-the-last row', () => {
+    const rows = [row(1, '4.6/5'), row(2, '3.2/5'), row(3, '1.9/5')];
+    // Array.prototype.slice(0, -1) drops only the last element, so an
+    // un-normalized negative limit would surface almost the whole tracker.
+    assert.deepEqual(selectAwaitingDecision(rows, -1), []);
+    assert.deepEqual(selectAwaitingDecision(rows, -99), []);
+  });
+
+  test('selectAwaitingDecision: a zero limit returns an empty list', () => {
+    const rows = [row(1, '4.6/5'), row(2, '3.2/5')];
+    assert.deepEqual(selectAwaitingDecision(rows, 0), []);
+  });
+
+  test('selectAwaitingDecision: a fractional limit truncates toward zero', () => {
+    const rows = [row(1, '4.6/5'), row(2, '3.2/5'), row(3, '1.9/5')];
+    assert.deepEqual(selectAwaitingDecision(rows, 2.7).map((r) => r.num), ['1', '2']);
+    assert.deepEqual(selectAwaitingDecision(rows, -0.5), []);
+  });
+
+  test('selectAwaitingDecision: a non-finite or non-numeric limit falls back to the default', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => row(i, `${(i % 5) + 1}.0/5`));
+    // Falling back to the default (rather than to 0) keeps a caller bug from
+    // silently emptying the panel — the failure mode this module exists to fix.
+    assert.equal(selectAwaitingDecision(rows, NaN).length, 6);
+    assert.equal(selectAwaitingDecision(rows, Infinity).length, 6);
+    assert.equal(selectAwaitingDecision(rows, -Infinity).length, 6);
+    assert.equal(selectAwaitingDecision(rows, '3').length, 6);
+    assert.equal(selectAwaitingDecision(rows, null).length, 6);
+    assert.equal(selectAwaitingDecision(rows, {}).length, 6);
+  });
+
   test('selectAwaitingDecision: does not mutate the caller array', () => {
     const rows = [row(1, '1.0/5'), row(2, '4.6/5')];
     const before = rows.map((r) => r.num).join(',');
