@@ -15826,6 +15826,21 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
   }
 }
 
+console.log('\n59e. Report lead-section choice (web/src/lib/core/report-lead.mjs)');
+{
+  // web/ lives deliberately OUTSIDE the auto-updater's world (its own
+  // release-please component; see validate-system-paths-coverage.mjs
+  // EXCLUDE_PREFIXES) — a core-only install has no web/ tree, so warn (not
+  // fail) instead of crashing the suite.
+  if (existsSync(join(ROOT, 'web', 'src', 'lib', 'core', 'report-lead.mjs'))) {
+    const unit = run(NODE, ['--test', 'test/report-lead-section.test.mjs']);
+    if (unit !== null) pass('report-lead-section unit tests pass');
+    else fail('report-lead-section unit tests failed (run: node --test test/report-lead-section.test.mjs)');
+  } else {
+    warn('report-lead-section tests skipped — web/ not present (core-only install)');
+  }
+}
+
 console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
 {
   const unit = run(NODE, ['--test', 'test/cover-resolver.test.mjs']);
