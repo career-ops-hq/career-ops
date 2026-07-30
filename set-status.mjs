@@ -393,6 +393,32 @@ if (isBareNumericSelector && !flags.force) {
       { trackerNum: target.num, reportNums },
     );
   }
+
+  // The check above compares the matched row's report link against its own #.
+  // A backfilled row (#1799) has no link, so reportNums is empty, `mismatched`
+  // is empty, and the check passes with nothing compared — while a DIFFERENT
+  // row may link exactly this number as its report.
+  //
+  // That combination is not hypothetical: it is what merge-tracker.mjs's
+  // "Tracker #N already used; assigning #M" fallback produces. The backfilled
+  // row occupying #N is what pushes the evaluated row to #M, so the row a stale
+  // numeric selector lands on is precisely the report-less one this check could
+  // not see. Bare "#N" then names two applications at once and must not write.
+  if (reportNums.length === 0) {
+    const num = parseInt(selector, 10);
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    if (linkers.length > 0) {
+      const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
+      failWith(
+        EXIT_AMBIGUOUS,
+        'report-number-ambiguous',
+        `"${num}" is ambiguous: tracker row #${num} (${target.company} — ${target.role}) has no report, ` +
+          `but report #${num} is linked by:\n${listing}\n` +
+          `Say which you meant: --row ${num} (the row) or --report ${num} (the report).`,
+        { trackerNum: target.num, reportNum: num, linkedBy: linkers.map(r => ({ num: r.num, company: r.company, role: r.role })) },
+      );
+    }
+  }
 }
 
 // --role is an explicit statement of which opening the caller means, but
