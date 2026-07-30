@@ -151,7 +151,7 @@ Alla fine del piano, realizza un riferimento rapido di una pagina che il candida
 
 ## Passo 5 — Salvataggio Output
 
-Salva il piano su `interview-prep/{company-slug}-{role-slug}.md` nel caso in cui un file non esista già, oppure se esiste aggiungilo in calce inserendolo sotto la sezione `## Prep Plan`.
+Salva il piano su `interview-prep/{company-slug}-{role-slug}.md`. Se il file non esiste, crealo (includendo l'intestazione `## Prep Plan`). Se il file esiste già, inserisci il nuovo piano immediatamente sotto l'intestazione `## Prep Plan` preesistente, assicurandoti che rimanga all'interno di quella sezione e non venga accodato indiscriminatamente alla fine del documento.
 
 ---
 
