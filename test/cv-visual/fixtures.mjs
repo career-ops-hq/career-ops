@@ -20,38 +20,38 @@ function base(lang, withPhoto) {
       education: '教育经历', certifications: '专业认证', skills: '技术能力',
     } : undefined,
     summary: zh
-      ? '全栈工程师，专注 AI Agent 工作流、后端 API、质量门禁与生产部署。'
-      : 'Full-stack engineer focused on reliable AI workflows, backend APIs, quality gates, and production delivery.',
+      ? '视觉布局测试专用的示例简介，不代表任何真实候选人的经历或能力。'
+      : 'Sample summary for visual layout testing; it does not describe a real candidate.',
     competencies: zh
-      ? ['AI Agent 工作流', '后端 API 工程', '验证与质量门禁', '生产部署']
-      : ['AI Agent Workflows', 'Backend API Engineering', 'Validation & Quality Gates', 'Production Delivery'],
+      ? ['示例能力甲', '示例能力乙', '示例能力丙', '示例能力丁']
+      : ['Sample Competency A', 'Sample Competency B', 'Sample Competency C', 'Sample Competency D'],
     experience: [],
     projects: [],
-    education: [{ title: zh ? '计算机科学与技术 学士' : 'BSc Computer Science', org: zh ? '示例大学' : 'Example University', year: '2025' }],
-    certifications: [{ title: zh ? '云原生工程认证' : 'Cloud Engineering Certificate', org: 'Example Foundation', year: '2025' }],
-    skills: [{ category: zh ? '技术栈' : 'Stack', items: ['TypeScript', 'FastAPI', 'PostgreSQL', 'Docker', 'Playwright'] }],
+    education: [{ title: zh ? '示例学位' : 'Example Degree', org: zh ? '示例院校' : 'Example Institution', year: '2025' }],
+    certifications: [{ title: zh ? '示例认证' : 'Example Certificate', org: zh ? '示例机构' : 'Example Organization', year: '2025' }],
+    skills: [{ category: zh ? '示例技能' : 'Sample Skills', items: zh ? ['工具甲', '工具乙', '工具丙', '工具丁', '工具戊'] : ['Tool A', 'Tool B', 'Tool C', 'Tool D', 'Tool E'] }],
   };
 }
 
 function role(i, zh, dense) {
   const bullets = zh
     ? [
-        '交付 React、FastAPI 与 PostgreSQL 组成的生产系统，覆盖权限、订单和运营后台。',
-        '设计可审计的状态流转、自动化验证和异常恢复流程。',
-        '完成 Docker、Nginx、数据库迁移及生产交接文档。',
-        '与业务、设计和运营团队协作，将复杂需求拆分为可交付里程碑。',
-        '持续优化可维护性、页面性能与故障排查效率。',
+        '示例职责描述甲，用于验证较长中文文本在工作经历区域中的自动换行和间距。',
+        '示例职责描述乙，用于验证列表符号、行高以及连续条目之间的视觉关系。',
+        '示例职责描述丙，仅作为结构占位文本，不代表任何真实经验、技术或成果。',
+        '示例职责描述丁，用于在密集版履历中覆盖分页边界附近的布局表现。',
+        '示例职责描述戊，用于验证多条等长内容不会产生重叠或裁切。',
       ]
     : [
-        'Delivered a production React, FastAPI, and PostgreSQL system spanning permissions, orders, and operations.',
-        'Designed auditable state transitions, automated validation, and failure-recovery workflows.',
-        'Owned Docker, Nginx, database migrations, and production handover documentation.',
-        'Partnered with business, design, and operations to turn ambiguous requirements into milestones.',
-        'Improved maintainability, page performance, and incident diagnosis across releases.',
+        'Sample responsibility A verifies wrapping and spacing for a longer line in the experience section.',
+        'Sample responsibility B verifies bullet alignment, line height, and rhythm between adjacent entries.',
+        'Sample responsibility C is structural placeholder text and does not represent real experience or results.',
+        'Sample responsibility D exercises layout behavior near a page boundary in the dense fixture.',
+        'Sample responsibility E verifies that similarly sized entries are neither clipped nor overlapped.',
       ];
   return {
-    company: zh ? `示例科技集团第 ${i + 1} 事业部` : `Example Technology Group — Division ${i + 1}`,
-    role: zh ? '高级全栈开发工程师' : 'Senior Full-Stack Engineer',
+    company: zh ? `示例组织 ${i + 1}` : `Example Organization ${i + 1}`,
+    role: zh ? '示例职位' : 'Example Role',
     location: zh ? '远程' : 'Remote',
     dates: `${2025 - i}.01 – ${2026 - i}.01`,
     bullets: dense ? bullets : bullets.slice(0, 2),
@@ -60,12 +60,12 @@ function role(i, zh, dense) {
 
 function project(i, zh) {
   return {
-    name: zh ? `可信自动化与智能工作流项目 ${i + 1}` : `Reliable Automation Workflow ${i + 1}`,
-    badge: i === 0 ? (zh ? '开源' : 'Open Source') : '',
-    tech: 'Node.js · Playwright · FastAPI · Docker',
+    name: zh ? `示例项目 ${i + 1}` : `Example Project ${i + 1}`,
+    badge: '',
+    tech: zh ? '工具甲 · 工具乙 · 工具丙 · 工具丁' : 'Tool A · Tool B · Tool C · Tool D',
     description: zh
-      ? '构建具备输入校验、质量门禁、失败恢复和可追踪输出的端到端自动化流程。'
-      : 'Built an end-to-end automation path with input validation, quality gates, recovery, and traceable output.',
+      ? '示例项目描述，仅用于覆盖文本换行、项目间距和密集版页面布局。'
+      : 'Sample project description used only to exercise wrapping, spacing, and dense-page layout.',
   };
 }
 
