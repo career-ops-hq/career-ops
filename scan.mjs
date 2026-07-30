@@ -247,13 +247,21 @@ export const REMOTE_TITLE_RE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
 // cannot see: in "Non-Remote" / "Not Remote" the delimiter clears the lookbehind
 // and the trailing position clears the lookahead, so an explicitly on-site role
 // would bypass a non-empty `allow` list — the exact opposite of the intent.
-// `[\s-]*` only spans spaces/hyphens, so word-initial "non"/"not" in an
-// unrelated token cannot reach across ("Nonprofit Program Manager - Remote" and
-// "Not-for-Profit … - Remote" both stay remote).
+// The separator class must be at least as broad as the marker's own delimiter
+// lookahead, or the guard is trivially sidestepped. An ASCII-only `[\s-]*` let
+// every non-ASCII dash through — "Non–Remote" (en dash), "Non‑Remote"
+// (non-breaking hyphen), em dash, figure dash and minus all still read as
+// remote. `[^a-z]*` matches the marker's breadth: it spans any run of
+// non-letters, so no punctuation variant can slip between the negation and the
+// word.
+// It cannot over-reach, because it never crosses a letter: in "Nonprofit
+// Program Manager - Remote" the run after "non" starts with "profit", so the
+// negation cannot reach "remote". Same for "Not-for-Profit … - Remote",
+// "Nordic … - Remote", "Notary … - Remote".
 // A negation anywhere in the title disqualifies it. Over-rejecting here is the
 // safe direction: this tier only ever *rescues* a posting, so a false negative
 // restores the previous behavior while a false positive admits an on-site role.
-export const REMOTE_NEGATED_RE = /\b(?:non|not|no)[\s-]*remote/;
+export const REMOTE_NEGATED_RE = /\b(?:non|not|no)[^a-z]*remote/;
 
 /** @param {unknown} title @returns {boolean} whether the title marks the role remote. */
 export function titleSignalsRemote(title) {

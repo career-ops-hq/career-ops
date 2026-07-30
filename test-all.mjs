@@ -4929,6 +4929,18 @@ try {
     fail('negation guard is over-rejecting legitimate remote titles');
   }
 
+  // Case 27c: the negation separator must be at least as broad as the marker's
+  // own delimiter lookahead. An ASCII-only [\s-] let every non-ASCII dash through
+  // — en dash, em dash, non-breaking hyphen, figure dash and minus all still read
+  // as remote, trivially sidestepping the guard.
+  const negatedDashes = ['-', '–', '—', '‑', '‒', '−', '', ' ', '/'];
+  if (negatedDashes.every((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) === false)) {
+    pass('the negation guard survives Unicode dash variants (en/em/non-breaking/figure/minus)');
+  } else {
+    const leak = negatedDashes.filter((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) !== false);
+    fail(`negated titles leak through with separator(s): ${JSON.stringify(leak)}`);
+  }
+
   // Case 27: unchanged behavior — on-site city-only roles with no remote marker
   // stay rejected, and malformed/absent titles are inert.
   if (
