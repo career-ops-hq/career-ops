@@ -1,5 +1,6 @@
 const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
+/** Build neutral bilingual profile data for layout-only regression tests. */
 function base(lang, withPhoto) {
   const zh = lang === 'zh-CN';
   return {
@@ -33,6 +34,7 @@ function base(lang, withPhoto) {
   };
 }
 
+/** Build one neutral experience entry, expanding bullets for dense fixtures. */
 function role(i, zh, dense) {
   const bullets = zh
     ? [
@@ -58,6 +60,7 @@ function role(i, zh, dense) {
   };
 }
 
+/** Build one neutral project entry without experience or authorship claims. */
 function project(i, zh) {
   return {
     name: zh ? `示例项目 ${i + 1}` : `Example Project ${i + 1}`,
@@ -69,6 +72,7 @@ function project(i, zh) {
   };
 }
 
+/** Assemble one complete standard-template fixture. */
 function fixture(id, lang, dense, withPhoto) {
   const payload = base(lang, withPhoto);
   const zh = lang === 'zh-CN';
