@@ -254,6 +254,38 @@ try {
   const cappedJobs = await radancy.fetch({ name: 'Optum', careers_url: 'https://careers.unitedhealthgroup.com/search-jobs', max_jobs: 1 }, capCtx);
   if (cappedJobs.length === 1) pass('radancy.fetch() honors max_jobs on the fragment transport');
   else fail(`radancy.fetch() max_jobs=1 returned ${cappedJobs.length}`);
+
+  // The truncation warning must report what was RETURNED, not the pre-slice
+  // buffer. The page loop tests `jobs.length < maxJobs` before fetching, so a
+  // final page can overshoot the cap — logging the buffer length would overstate
+  // delivery in the one message whose entire job is accuracy about the shortfall.
+  const rowFor = (id) => `<li><a href="/job/c/s/1/${id}" data-job-id="${id}"><h2>T${id}</h2><span class="job-location">X</span></a></li>`;
+  let overshootPage = 0;
+  const overshootWarnings = [];
+  const realConsoleError = console.error;
+  const overshootCtx = {
+    sleep: async () => {},
+    fetchJson: async () => {
+      overshootPage++;
+      const ids = [overshootPage * 10 + 1, overshootPage * 10 + 2, overshootPage * 10 + 3];
+      return { results: `<section data-total-results="99" data-total-pages="9">${ids.map(rowFor).join('')}</section>`, hasJobs: true };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => overshootWarnings.push(String(m));
+  let overshootJobs;
+  try {
+    // 3 rows/page with max_jobs 4 → page 2 pushes the buffer to 6, returns 4.
+    overshootJobs = await radancy.fetch({ name: 'Overshoot', careers_url: 'https://x.example/search-jobs', max_jobs: 4 }, overshootCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  const warned = (overshootWarnings.join(' ').match(/truncated at (\d+) of (\d+)/) || [])[1];
+  if (overshootJobs.length === 4 && warned === '4') {
+    pass('radancy truncation warning reports the returned count, not the pre-slice buffer');
+  } else {
+    fail(`radancy truncation warning: returned ${overshootJobs?.length}, warned "${warned}" (expected 4 / "4")`);
+  }
 } catch (e) {
   fail(`radancy provider tests crashed: ${e.message}`);
 }

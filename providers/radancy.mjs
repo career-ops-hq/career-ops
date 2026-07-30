@@ -324,10 +324,17 @@ export default {
             if (push(rows) === 0) break; // server clamped the page — stop
           }
 
-          // Never truncate silently (AGENTS.md): say what was left behind.
-          if (totalResults && jobs.length < totalResults) {
+          // Never truncate silently (AGENTS.md): say what was left behind — and
+          // report the count actually RETURNED. `jobs.length` is the pre-slice
+          // buffer: the page loop only checks `jobs.length < maxJobs` before
+          // fetching, so the final page can push the buffer past the cap (100
+          // rows landing on a buffer of 1,950 with max_jobs 2,000). Logging the
+          // pre-slice length would overstate delivery in the one message whose
+          // entire job is to be accurate about what the caller did not get.
+          const returned = Math.min(jobs.length, maxJobs);
+          if (totalResults && returned < totalResults) {
             console.error(
-              `⚠️  radancy: ${entry.name} truncated at ${jobs.length} of ${totalResults} postings`
+              `⚠️  radancy: ${entry.name} truncated at ${returned} of ${totalResults} postings`
               + ` — raise max_jobs/max_pages on this entry for more`,
             );
           }
