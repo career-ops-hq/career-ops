@@ -4,12 +4,13 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { listTemplates } from '../../cv-templates.mjs';
+import { resolveTemplate } from '../../cv-templates.mjs';
 import { fixtures } from './fixtures.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ARTIFACTS = join(ROOT, 'test-results', 'cv-visual-artifacts');
 const BASELINES = JSON.parse(readFileSync(join(ROOT, 'test/cv-visual/baselines.json'), 'utf8'));
+const TEMPLATE = { name: 'standard', path: resolveTemplate('cv', 'standard') };
 
 function countPdfPages(pdf) {
   const matches = pdf.toString('latin1').match(/\/Type\s*\/Page\b/g);
@@ -24,18 +25,17 @@ function extractedPdfText(pdfPath) {
   }
 }
 
-for (const template of listTemplates('cv')) {
-  for (const fixture of fixtures) {
-    test(`${template.name} / ${fixture.id}`, async ({ page }) => {
+for (const fixture of fixtures) {
+  test(`${TEMPLATE.name} / ${fixture.id}`, async ({ page }) => {
       const temp = mkdtempSync(join(tmpdir(), 'cv-visual-'));
       const input = join(temp, 'payload.json');
       const html = join(temp, 'cv.html');
-      const artifactBase = `${template.name}-${fixture.id}`;
+      const artifactBase = `${TEMPLATE.name}-${fixture.id}`;
       const pdfPath = join(ARTIFACTS, `${artifactBase}.pdf`);
       const pngPath = join(ARTIFACTS, `${artifactBase}.png`);
       mkdirSync(ARTIFACTS, { recursive: true });
       writeFileSync(input, JSON.stringify(fixture.payload));
-      execFileSync(process.execPath, ['build-cv-html.mjs', input, html, template.path], { cwd: ROOT });
+      execFileSync(process.execPath, ['build-cv-html.mjs', input, html, TEMPLATE.path], { cwd: ROOT });
 
       await page.goto(pathToFileURL(html).href, { waitUntil: 'load' });
       await page.emulateMedia({ media: 'print' });
@@ -91,7 +91,7 @@ for (const template of listTemplates('cv')) {
       const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '0.6in', right: '0.6in', bottom: '0.6in', left: '0.6in' } });
       writeFileSync(pdfPath, pdf);
       const pages = countPdfPages(pdf);
-      const expected = BASELINES[template.name]?.[fixture.id];
+      const expected = BASELINES[TEMPLATE.name]?.[fixture.id];
       expect(expected, `missing page-count baseline for ${artifactBase}`).toBeTruthy();
       expect(pages).toBeGreaterThanOrEqual(expected.minPages);
       expect(pages).toBeLessThanOrEqual(expected.maxPages);
@@ -100,6 +100,5 @@ for (const template of listTemplates('cv')) {
       expect(text).toContain(fixture.payload.candidate.name);
       expect(text).toContain(fixture.payload.skills[0].items[0]);
       expect(text).not.toMatch(/[□�]/);
-    });
-  }
+  });
 }

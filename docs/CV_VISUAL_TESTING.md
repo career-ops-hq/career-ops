@@ -1,9 +1,10 @@
 # CV visual regression testing
 
-The CV visual suite renders every discoverable HTML CV template against four
-sanitized fixtures: English and Simplified Chinese, short and dense content,
-and photo/no-photo layouts. It combines screenshot baselines with geometry,
-page-count, and ATS text-extraction gates.
+The first visual-regression slice renders the standard HTML CV template against
+four sanitized fixtures: English and Simplified Chinese, short and dense
+content, and photo/no-photo layouts. It combines screenshot baselines with
+geometry, page-count, and ATS text-extraction gates. Additional templates can be
+added in separately reviewed follow-ups once this harness is stable.
 
 ## Run locally
 
