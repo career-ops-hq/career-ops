@@ -12,11 +12,13 @@ const ARTIFACTS = join(ROOT, 'test-results', 'cv-visual-artifacts');
 const BASELINES = JSON.parse(readFileSync(join(ROOT, 'test/cv-visual/baselines.json'), 'utf8'));
 const TEMPLATE = { name: 'standard', path: resolveTemplate('cv', 'standard') };
 
+/** Count concrete page objects in a generated PDF buffer. */
 function countPdfPages(pdf) {
   const matches = pdf.toString('latin1').match(/\/Type\s*\/Page\b/g);
   return matches ? matches.length : 0;
 }
 
+/** Extract layout-preserving text for the ATS readability assertion. */
 function extractedPdfText(pdfPath) {
   try {
     return execFileSync('pdftotext', ['-layout', pdfPath, '-'], { encoding: 'utf8' });
