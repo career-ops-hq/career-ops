@@ -121,6 +121,28 @@ if (!HAS_WEB) {
     assert.equal(pickLeadSection([s('A Recommendation Was Requested')]), null);
   });
 
+  // A prefix match promotes any heading that merely STARTS with a candidate
+  // word, so "Recommendation Was Requested" would lead the page. The earlier
+  // negative test only covered letter-prefixed decoration, which left the
+  // direct-prefix case unexercised.
+  test('pickLeadSection: a heading that only starts with a candidate word is not a lead', () => {
+    assert.equal(pickLeadSection([s('Recommendation Was Requested')]), null);
+    assert.equal(pickLeadSection([s('Risk Summary Notes')]), null);
+    assert.equal(pickLeadSection([s('Verdict Analysis and Rationale')]), null);
+  });
+
+  // Bounding the match must not reject the forms reports actually use. The
+  // renderer already strips a trailing "(lead)"/"(verdict)" for display, so a
+  // parenthetical qualifier is an expected shape, not an oddity.
+  test('pickLeadSection: accepts a trailing parenthetical qualifier', () => {
+    assert.equal(pickLeadSection([s('Recommendation (lead)')]).heading, 'Recommendation (lead)');
+    assert.equal(pickLeadSection([s('Risk Summary (detailed)')]).heading, 'Risk Summary (detailed)');
+  });
+
+  test('pickLeadSection: accepts the plural form of a candidate heading', () => {
+    assert.equal(pickLeadSection([s('Recommendations')]).heading, 'Recommendations');
+  });
+
   test('pickLeadSection: does not mutate the input array', () => {
     const sections = realReport();
     const before = sections.map((x) => x.heading).join('|');

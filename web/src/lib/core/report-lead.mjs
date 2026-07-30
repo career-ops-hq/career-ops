@@ -8,21 +8,33 @@
 // answers "should I apply?", sat collapsed in the depth-on-demand tier.
 //
 // Preference order, most decision-bearing first: Recommendation, then Verdict,
-// then Risk Summary. `Verdict` is accepted even though the core does not emit it
-// today, so a future contract change is picked up rather than silently ignored.
+// then Risk Summary.
 //
-// Only `## Risk Summary` is actually specified by modes/oferta.md ("close the
-// report body with a Risk Summary block"); `## Recommendation` is written by
-// some reports without being in the contract. So on an established tracker most
-// reports match nothing here and render with no callout at all. That is the
-// intended outcome: the bug being fixed was a confident callout labelled
-// "Verdict" over content that was not the verdict, and no callout is honest
-// where a wrong one was not.
+// Only `## Risk Summary` is specified by modes/oferta.md ("close the report body
+// with a Risk Summary block"). `## Recommendation` and `## Verdict` are both
+// written by reports without being in the contract, and a report carrying only a
+// `## Verdict` opens it with the actual call ("Do not apply. 3.3/5 sits below
+// the 3.5 line"), which is why it is a candidate rather than a hypothetical.
+//
+// Most reports carry none of the three and so render with no callout at all.
+// That is the intended outcome: the bug being fixed was a confident callout
+// labelled "Verdict" over content that was not the verdict, and no callout is
+// honest where a wrong one was not.
 //
 // Plain .mjs (not .ts) so the root test suite can import it with no build step
 // and no `@/` alias loader, mirroring tracker-table.mjs.
 
-const LEAD_PREFERENCE = [/^recommendation\b/i, /^verdict\b/i, /^risk summary\b/i];
+// Each pattern matches the whole normalized heading, not a prefix of it. A
+// prefix match promoted anything merely starting with a candidate word, so a
+// section titled "Recommendation Was Requested" would have led the page.
+//
+// The two deliberate liberties are an optional plural and an optional trailing
+// parenthetical: `## Recommendations` is the same block by another name, and the
+// renderer already strips a trailing "(lead)"/"(verdict)" for display, so a
+// qualifier in parentheses is an expected shape rather than an oddity.
+const bounded = (word) => new RegExp(`^${word}s?\\s*(?:\\([^)]*\\))?$`, 'i');
+
+const LEAD_PREFERENCE = [bounded('recommendation'), bounded('verdict'), bounded('risk summary')];
 
 // splitSections() leaves the author-letter ON the heading ("A) Role Summary")
 // and reports the letter separately, so a lettered `## H) Recommendation` must be
