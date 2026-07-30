@@ -54,6 +54,7 @@
     "star": "node match-star.mjs",
     "archive": "node archive-posting.mjs",
     "prepare:application": "node prepare-application.mjs",
+    "application:init": "node application-artifacts.mjs --init",
     "build:dashboard": "node build-dashboard.mjs",
     "serve:dashboard": "cd dashboard && go run . --path ..",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",

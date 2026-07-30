@@ -175,6 +175,7 @@ const SYSTEM_PATHS = [
   'match-star.mjs',
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
+  'application-artifacts.mjs',
   'providers/',
   'seeds/',
   'tests/',
@@ -1181,7 +1182,7 @@ async function apply() {
 
       if (commitFailed) {
         const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
-        const pathspec = allTargetPaths.map(p => `"${p}"`).join(' ');
+        const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
