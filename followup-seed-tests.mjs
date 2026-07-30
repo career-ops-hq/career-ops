@@ -383,9 +383,9 @@ function cleanup(sandbox) {
   mkdirSync(sb.lock, { recursive: true });   // ownerless: no owner.json
   mkdirSync(guard, { recursive: true });     // the SIGKILLed predecessor's leftover
   // Both an hour old. Backdating explicitly keeps the test off the wall clock:
-  // an age of 3_600_000ms clears any threshold the run could apply (staleMs 10,
-  // floored to 1_000 by OWNERLESS_GRACE_MS) by three orders of magnitude, so
-  // the outcome cannot hinge on how long the retry loop happens to take.
+  // an age of 3_600_000ms clears the configured staleMs of 10 by five orders of
+  // magnitude, so the outcome cannot hinge on how long the retry loop happens
+  // to take.
   const anHourAgo = new Date(Date.now() - 3_600_000);
   utimesSync(sb.lock, anHourAgo, anHourAgo);
   utimesSync(guard, anHourAgo, anHourAgo);
