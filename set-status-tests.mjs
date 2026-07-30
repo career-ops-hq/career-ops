@@ -788,5 +788,143 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// ── explicit --row / --report selectors (tracker-row-vs-report-id) ──
+//
+// Tracker row IDs and report IDs are independent counters sharing one number
+// space, so they diverge permanently once any row exists without a report.
+// This fixture is that state in miniature: row #7 links report #5, and an
+// unrelated row #5 also exists — so "5" alone names two different companies.
+{
+  const TRACKER_DIVERGED = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 5 | 2026-06-05 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [4](../reports/004-globex-2026-06-05.md) | — |
+| 6 | 2026-06-06 | Initech | Data Engineer | 3.9/5 | Evaluated | ❌ | — | backfilled, no report |
+| 7 | 2026-06-07 | Acme | AI Engineer | 4.4/5 | Evaluated | ✅ | [5](../reports/005-acme-2026-06-07.md) | — |
+`;
+
+  const sandboxed = fn => {
+    const sandbox = makeSandbox(TRACKER_DIVERGED);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // Negative control: without an explicit selector the ambiguity is real and
+  // the guard must still fire. If this ever passes, the tests below prove
+  // nothing — they would just be exercising an unguarded path.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['5', 'Applied'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 || /report ID|mismatch/i.test(r.stderr)) {
+      pass('selectors: bare number on a diverged tracker is still guarded');
+    } else {
+      fail(`selectors: bare number should be guarded, got code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Globex') {
+      pass('selectors: --row 5 selects tracker row #5 (Globex)');
+    } else {
+      fail(`selectors: --row 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // The discriminating case: the SAME number through the two selectors must
+  // land on two different applications.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Acme') {
+      pass('selectors: --report 5 selects the row LINKING report #5 (Acme, row #7)');
+    } else {
+      fail(`selectors: --report 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '7', 'Applied'], sandbox);
+    if (r.code === 0 && /Acme/.test(r.stdout)) {
+      pass('selectors: --row bypasses the mismatch guard without --force');
+    } else {
+      fail(`selectors: --row 7 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', '--report', '5', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row + --report is rejected, tracker untouched');
+    } else {
+      fail(`selectors: --row + --report → code=${r.code}, tracker changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', 'abc', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: non-numeric --row is rejected before any write');
+    } else {
+      fail(`selectors: --row abc → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Globex', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row plus a positional selector is rejected');
+    } else {
+      fail(`selectors: --row + positional → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '999', 'Applied'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report with no linked row exits not-found (2)');
+    } else {
+      fail(`selectors: --report 999 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // A row with no report link must not be reachable via --report at all.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '6', 'Applied', '--json'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report never matches a report-less row by its tracker #');
+    } else {
+      fail(`selectors: --report 6 should not match row #6, got code=${r.code}\n${r.stdout}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row without a value exits 1 without writing');
+    } else {
+      fail(`selectors: bare --row → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Applied', '--dry-run'], sandbox);
+    if (r.code === 0 && readTracker(sandbox) === before) {
+      pass('selectors: --row honours --dry-run (no write)');
+    } else {
+      fail(`selectors: --row + --dry-run → code=${r.code}, changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
