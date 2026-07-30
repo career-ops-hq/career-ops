@@ -15,6 +15,8 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
    - `existing` — already a named skill in cv.md's Skills section, safe to lead with
    - `supportedByResume` — not a named skill yet, but cv.md's prose already demonstrates it; legitimate candidates for the Skills section in the user's own words (Step 13's competency grid draws from here first)
    - `gap` — cv.md has no trace of it at all. **Tell the user explicitly which skills are gaps before generating the CV.** Never paper over a gap by inventing a claim, and never silently drop it from the conversation — the user decides whether to proceed, address it in the cover letter/interview, or skip the role
+
+   If the output prints a `🚨 LOW CONFIDENCE` block, the check did not run: zero skills were classified, so the three empty buckets mean "nothing was checked", not "no gaps found". **Do not treat this as a pass.** Surface the warning text and its reason to the user verbatim, state that the automated gap check could not read this JD, and read the JD yourself to identify the required skills before drafting. A `no-requirements-section` reason means the JD's headers were not recognized; `no-recognized-skills` means the requirements were found but the vocabulary covers none of them (common for non-engineering roles).
 5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
 6. Detect company location → paper format:
    - US/Canada → `letter`
