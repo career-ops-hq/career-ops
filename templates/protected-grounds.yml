@@ -234,9 +234,17 @@ protected_grounds:
           - "Haben Sie gesundheitliche Einschränkungen? / Do you have any health limitations?"
           - "Wie oft waren Sie im letzten Jahr krankgeschrieben? / How often were you on sick leave last year?"
         legitimate_contexts:
-          - "Health/disability questions are permissible only where the absence of a specific disability is a 'wesentliche und entscheidende berufliche Anforderung' (LAG Hessen 6/7 Sa 1373/09; OLG Nordrhein-Westfalen 6 B 1241/11) — e.g. police, fire services"
-          - "§82 SGB IX obliges public employers to invite severely disabled applicants who meet the basic requirements; this is a procedural right, not an exception to the prohibition"
-      - topic: "sexuelle Identität (sexual identity)"
+          - "Health/disability questions are permissible only where the absence of a specific disability is a 'wesentliche und entscheidende berufliche Anforderung' (LAG Hessen 6/7 Sa 1373/09; OVG Nordrhein-Westfalen 6 B 1241/11) — e.g. police, fire services"
+          - "§165 SGB IX obliges public employers to invite severely disabled applicants who meet the basic requirements; this is a procedural right, not an exception to the prohibition"
+      - topic: "Alter (age)"
+        example_question_patterns:
+          - "Wie alt sind Sie? / How old are you?"
+          - "Wann sind Sie geboren? / When were you born?"
+          - "Welchen Jahrgang haben Sie? / What year were you born?"
+        legitimate_contexts:
+          - "§10 AGG permits objective, proportionate age-based differentiations justified by a legitimate aim (e.g. minimum age for specific physically demanding roles, maximum age for recruit training where service-length rules apply)"
+          - "Confirming the candidate meets a statutory minimum working age is permissible"
+      - topic: "Sexuelle Identität (sexual identity)"
         example_question_patterns:
           - "Sind Sie homosexuell? / Are you gay?"
           - "Leben Sie in einer gleichgeschlechtlichen Partnerschaft? / Are you in a same-sex partnership?"
@@ -248,19 +256,20 @@ protected_grounds:
           - "Asking about a valid work authorisation (Arbeitserlaubnis / Aufenthaltstitel) is permissible and distinct from nationality (ADS guidance)"
           - "Questions about nationality may constitute indirect ethnic-origin discrimination (ADS 'Was Arbeitgeber fragen (dürfen)' study, citing ArbG Hamburg precedent)"
     legal_basis: >-
-      AGG (Allgemeines Gleichbehandlungsgesetz) §1 (purpose — enumerates seven
-      protected grounds), §7 Abs. 1 (prohibition of discrimination against
-      employees, including applicants, on those grounds), §7 Abs. 3 (violation
+      AGG (Allgemeines Gleichbehandlungsgesetz) §1 (purpose — enumerates six
+      statutory protected grounds: race/ethnic origin, sex, religion/belief,
+      disability, age, and sexual identity), §7 Abs. 1 (prohibition of discrimination
+      against employees, including applicants, on those grounds), §7 Abs. 3 (violation
       of contractual duties), §3 Abs. 1 S. 2 (pregnancy / motherhood as a form
       of sex discrimination), §8 Abs. 1 (genuine occupational requirement
       exception), §9 (religious-organisation exception), §10 (permissible age
       differentiation), §5 (positive action), §22 (burden of proof — shifts to
       employer when the applicant shows an indication / Indiz of
-      discrimination). The 'right to lie' (Recht zur Lüge) on inadmissible
-      questions is established by BAG case law (Bundesarbeitsgericht, e.g.
-      7 AZR 621/01 and subsequent decisions): a contract formed after a
-      false answer to an inadmissible question cannot be challenged on that
-      basis.
+      discrimination). Nationality is not an explicit standalone §1 ground but is protected
+      against as indirect discrimination (mittelbare Diskriminierung) under ethnic origin.
+      The 'right to lie' (Recht zur Lüge) on inadmissible questions is established by BAG
+      case law (Bundesarbeitsgericht, e.g. 7 AZR 621/01 and subsequent decisions): a contract
+      formed after a false answer to an inadmissible question cannot be challenged on that basis.
     sources:
       - "Allgemeines Gleichbehandlungsgesetz (AGG) — gesetze-im-internet.de/agg/ (official statute text)"
       - "Antidiskriminierungsstelle des Bundes (ADS) — 'Was Arbeitgeber fragen (dürfen)' — Studie zu unzulässigen Fragen in Vorstellungsgesprächen (antidiskriminierungsstelle.de)"
