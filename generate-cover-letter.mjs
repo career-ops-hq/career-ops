@@ -61,7 +61,7 @@ function buildContactLine(candidate) {
     parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">LinkedIn</a>`);
   }
   if (candidate.github) {
-    const display = candidate.github.replace(/^https?:\/\//, "");
+    const display = candidate.github.replace(/^https?:\/\//i, "");
     parts.push(`<a href="${escapeHtml(asUrl(candidate.github))}">${escapeHtml(display)}</a>`);
   }
   return parts.join(" &nbsp;|&nbsp; ");
