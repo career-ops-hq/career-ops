@@ -61,10 +61,17 @@ export function TodayDashboard({
   }, [refetch, router]);
 
   // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
-    [applications],
-  );
+  const getScore = (score: string) => {
+    const match = score.match(/[\d.]+/);
+    return match ? parseFloat(match[0]) : -1;
+  };
+
+  const awaiting = useMemo(() => {
+    return applications
+      .filter((a) => /^evaluat/i.test(a.status))
+      .sort((a, b) => getScore(b.score) - getScore(a.score))
+      .slice(0, 6);
+  }, [applications]);
 
   const newThisWeek = fresh.length;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;

@@ -84,6 +84,8 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
+    "lucide": "^1.27.0",
+    "lucide-react": "^1.27.0",
     "playwright": "1.62.0"
   }
 }
