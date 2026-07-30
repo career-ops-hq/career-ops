@@ -242,7 +242,7 @@ protected_grounds:
           - "Wann sind Sie geboren? / When were you born?"
           - "Welchen Jahrgang haben Sie? / What year were you born?"
         legitimate_contexts:
-          - "§10 AGG permits objective, proportionate age-based differentiations justified by a legitimate aim (e.g. minimum age for specific physically demanding roles, maximum age for recruit training where service-length rules apply)"
+          - "§10 AGG permits age-based differentiation only where it is objectively and appropriately justified by a legitimate aim and the means are necessary (e.g. a statutory minimum age or a maximum age tied to specific training or necessary service before retirement)"
           - "Confirming the candidate meets a statutory minimum working age is permissible"
       - topic: "Sexuelle Identität (sexual identity)"
         example_question_patterns:
