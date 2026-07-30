@@ -4578,6 +4578,7 @@ try {
   const {
     buildLocationFilter,
     locationHintFromUrl,
+    titleSignalsRemote,
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
@@ -4846,6 +4847,68 @@ try {
     pass('URL hint is boundary-matched as well (Indianapolis URL survives, India URL does not)');
   } else {
     fail('URL hint must use the same word-boundary matching as the location string');
+  }
+
+  // Case 24: a remote marker in the TITLE satisfies `allow` when the location
+  // names only a city/state. Radancy/TalentBrew tenants (Optum, Kaiser) report
+  // the hiring office as the location and state remoteness in the title, so a
+  // country/region `allow` list rejected genuinely remote US roles. Measured
+  // live on careers.unitedhealthgroup.com: 14 PM-family postings, 0 passed.
+  const remoteTitleFilter = buildLocationFilter({
+    allow: ['remote', 'united states', 'usa', 'us', 'new york'],
+    block: ['india', 'united kingdom', 'london'],
+  });
+  if (
+    remoteTitleFilter('Costa Mesa, California', undefined, 'Sr. PBM Client Implementation Project Manager - Remote') === true &&
+    remoteTitleFilter('Las Vegas, Nevada', undefined, 'Program Manager - Remote') === true &&
+    remoteTitleFilter('St Louis, Missouri', undefined, 'Clinical Program Manager (Case Management) - Remote in MO') === true &&
+    remoteTitleFilter('Phoenix, Arizona', undefined, 'Project Manager (Remote)') === true &&
+    remoteTitleFilter('Dallas, Texas', undefined, 'IT Program Manager, Remote - US') === true
+  ) {
+    pass('a remote marker in the title satisfies allow when the location is city-only');
+  } else {
+    fail('title-stated remote roles are still being rejected for a city-only location');
+  }
+
+  // Case 25: the rescue must NOT widen `block`. It runs after the block tier, so
+  // a remote title can never pull in an excluded country.
+  if (
+    remoteTitleFilter('Bengaluru, Karnataka, India', undefined, 'Program Manager - Remote') === false &&
+    remoteTitleFilter('London, United Kingdom', undefined, 'Project Manager - Remote') === false &&
+    remoteTitleFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/PM_R1', 'Program Manager - Remote') === false
+  ) {
+    pass('a remote title never rescues a blocked location (block still wins, URL hint included)');
+  } else {
+    fail('remote-title rescue must not override the block tier');
+  }
+
+  // Case 26: only a work-arrangement marker counts. "Remote Sensing" is a GIS
+  // domain compound — Esri, a tracked company, posts on-site roles with exactly
+  // that phrase, so a bare /remote/ test would silently admit them.
+  if (
+    remoteTitleFilter('Redlands, California', undefined, 'Remote Sensing Program Manager') === false &&
+    remoteTitleFilter('Austin, Texas', undefined, 'Remote Monitoring Project Manager') === false &&
+    titleSignalsRemote('Remote Sensing Analyst') === false &&
+    titleSignalsRemote('Program Manager - Remote') === true &&
+    titleSignalsRemote('Telremote Engineer') === false
+  ) {
+    pass('remote-title detection ignores domain compounds (Remote Sensing/Monitoring) and mid-word hits');
+  } else {
+    fail('remote-title detection must not fire on "Remote Sensing"-style compounds');
+  }
+
+  // Case 27: unchanged behavior — on-site city-only roles with no remote marker
+  // stay rejected, and malformed/absent titles are inert.
+  if (
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Senior Project Manager I') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, undefined) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 42) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, '   ') === false &&
+    remoteTitleFilter('United States', undefined, 'Program Manager') === true
+  ) {
+    pass('on-site city-only roles stay rejected; non-string/blank titles are inert');
+  } else {
+    fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
   if (

@@ -146,7 +146,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     the home region is an option, even though "france" is blocked)
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
-//   - `allow` non-empty → must match at least one keyword
+//   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
+//     an explicit remote marker (see titleSignalsRemote below)
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -225,15 +226,38 @@ export function locationHintFromUrl(url) {
   return segment.replace(/[-_+]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-// `url` is optional. Callers that omit it get the original location-only
-// semantics, which is what the existing unit tests exercise.
+// Some ATSs report the hiring office as the location even when the role is
+// remote, and state the remoteness in the TITLE instead: Radancy/TalentBrew
+// tenants return bare "City, State" strings, so
+//   "Program Manager - Remote"  ->  location "Las Vegas, Nevada"
+// An `allow` list written in country/region terms ("united states", "remote")
+// then rejects a genuinely remote US role. Live measurement on
+// careers.unitedhealthgroup.com: 14 PM-family postings, 0 passed `allow`,
+// 5 of them said "Remote" outright in the title.
+//
+// Only an unambiguous work-arrangement marker counts. A bare /remote/ test
+// would admit domain compounds — "Remote Sensing Program Manager" is an
+// on-site GIS role, and Esri (a tracked company) posts exactly those. So
+// "remote" must be followed by end-of-string, a non-letter (")", ",", "-"),
+// or " in …" as in "Remote in MO" — never by another word, which is what makes
+// "remote sensing" / "remote monitoring" compounds.
+export const REMOTE_TITLE_RE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
+
+/** @param {unknown} title @returns {boolean} whether the title marks the role remote. */
+export function titleSignalsRemote(title) {
+  if (typeof title !== 'string' || title.trim() === '') return false;
+  return REMOTE_TITLE_RE.test(title.toLowerCase());
+}
+
+// `url` and `title` are optional. Callers that omit them get the original
+// location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
 
-  return (location, url) => {
+  return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data).
@@ -245,7 +269,11 @@ export function buildLocationFilter(locationFilter) {
     if (alwaysAllow.length > 0 && alwaysAllow.some(matches)) return true;
     if (block.length > 0 && block.some(matches)) return false;
     if (allow.length === 0) return true;
-    return allow.some(matches);
+    if (allow.some(matches)) return true;
+    // Last resort only. Deliberately placed AFTER `block` so a remote title can
+    // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
+    // stays rejected. This widens `allow`, never `block`.
+    return titleSignalsRemote(title);
   };
 }
 
@@ -2042,7 +2070,9 @@ async function main() {
           totalFilteredTier++;
           continue;
         }
-        if (!locationFilter(job.location, job.url)) {
+        // job.title is passed so a role whose remoteness is stated in the title
+        // ("Program Manager - Remote") isn't rejected for a city-only location.
+        if (!locationFilter(job.location, job.url, job.title)) {
           totalFilteredLocation++;
           continue;
         }
