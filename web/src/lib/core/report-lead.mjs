@@ -32,9 +32,19 @@
 // parenthetical: `## Recommendations` is the same block by another name, and the
 // renderer already strips a trailing "(lead)"/"(verdict)" for display, so a
 // qualifier in parentheses is an expected shape rather than an oddity.
-const bounded = (word) => new RegExp(`^${word}s?\\s*(?:\\([^)]*\\))?$`, 'i');
+//
+// Each candidate spells its own plural rather than sharing an `s?` suffix. A
+// shared suffix quietly covered `Recommendations` and `Verdicts` while missing
+// `Risk Summaries`, so the helper advertised a rule it only kept for two of the
+// three. No report in the corpus uses a plural today; the fault was the
+// inconsistency, which is the kind of gap that reads as working.
+const bounded = (...forms) => new RegExp(`^(?:${forms.join('|')})\\s*(?:\\([^)]*\\))?$`, 'i');
 
-const LEAD_PREFERENCE = [bounded('recommendation'), bounded('verdict'), bounded('risk summary')];
+const LEAD_PREFERENCE = [
+  bounded('recommendation', 'recommendations'),
+  bounded('verdict', 'verdicts'),
+  bounded('risk summary', 'risk summaries'),
+];
 
 // splitSections() leaves the author-letter ON the heading ("A) Role Summary")
 // and reports the letter separately, so a lettered `## H) Recommendation` must be

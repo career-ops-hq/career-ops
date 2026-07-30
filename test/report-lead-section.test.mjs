@@ -139,8 +139,18 @@ if (!HAS_WEB) {
     assert.equal(pickLeadSection([s('Risk Summary (detailed)')]).heading, 'Risk Summary (detailed)');
   });
 
+  // The helper advertises plural support, so it has to hold for every candidate
+  // rather than only the ones whose plural is formed by appending an s. No
+  // report in the corpus uses a plural today; the defect is that the rule
+  // applied inconsistently, which is the kind of gap that reads as working.
   test('pickLeadSection: accepts the plural form of a candidate heading', () => {
     assert.equal(pickLeadSection([s('Recommendations')]).heading, 'Recommendations');
+    assert.equal(pickLeadSection([s('Verdicts')]).heading, 'Verdicts');
+    assert.equal(pickLeadSection([s('Risk Summaries')]).heading, 'Risk Summaries');
+  });
+
+  test('pickLeadSection: a plural still loses to a singular higher in the order', () => {
+    assert.equal(pickLeadSection([s('Risk Summaries'), s('Recommendation')]).heading, 'Recommendation');
   });
 
   test('pickLeadSection: does not mutate the input array', () => {
