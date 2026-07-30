@@ -23,8 +23,8 @@ const root = mkdtempSync(join(tmpdir(), 'career-ops-application-artifacts-'));
 try {
   const paths = applicationArtifactPaths({ reportNum: 7, company: 'Acme AI', role: 'Senior AI Engineer', version: 2, root });
   if (paths.key === '007-acme-ai-senior-ai-engineer'
-      && paths.cv.source.html.endsWith('/cv/source/original.html')
-      && paths.cv.tailored.pdf.endsWith('/cv/tailored/v002/cv.pdf')) {
+      && paths.cv.source.html === join(paths.root, 'cv', 'source', 'original.html')
+      && paths.cv.tailored.pdf === join(paths.root, 'cv', 'tailored', 'v002', 'cv.pdf')) {
     console.log('  ✅ application artifacts use a stable report/company/role bundle');
   } else {
     throw new Error(`unexpected artifact paths: ${JSON.stringify(paths)}`);
