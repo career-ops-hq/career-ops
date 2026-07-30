@@ -1924,3 +1924,12 @@ job_boards:
   #   provider: higheredjobs
   #   cat_id: 68
   #   enabled: true
+
+  # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
+  # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
+  # listings. The feed URL is hardcoded in the provider — no careers_url
+  # or api field needed.
+
+  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, all-remote)
+  #   provider: cryptocurrencyjobs
+  #   enabled: true
