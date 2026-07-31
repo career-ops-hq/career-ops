@@ -72,6 +72,15 @@ Calculate hours available from now until interview time. Divide into blocks:
 
 Before sizing the blocks, check `interview-prep/question-bank.md` (if it exists). Any question marked 🔴 from a prior round is a proven gap — it gets a dedicated block regardless of how the CV-vs-JD analysis ranks it. Real performance data outranks inferred risk.
 
+**Research check — before drafting Block 4.** Block 4 maps stories to "likely question types," but don't let that default to pattern-guessing when real, reported questions are one check away:
+
+1. **Check for existing sourced research first.** If `interview-prep/{company-slug}-{role-slug}.md` already exists (a prior `interview-prep` run), read its Step 1/Step 3 sourced questions and reuse them directly — never re-search work that's already been done and cited.
+2. **If no prior research file exists, run `interview-prep.md`'s "Step 1 — Research" WebSearch queries directly**, scoped to the audience of this specific round (recruiter/HR, hiring manager, or peer/technical panel — see Step 2 above) rather than the full company-research pass.
+3. **Same tagging discipline as `interview-prep.md`:** sourced questions cite their source; anything not found falls back to `[inferred from JD]` — don't invent a third label or a different citation format (see `interview-prep.md`'s "Tag conventions").
+4. **If the search genuinely yields nothing** (obscure company, no public interview reports), say so explicitly in the plan output and proceed with JD/profile-pattern inference — the same partial-but-honest principle `interview-prep.md` already applies to sparse intel, not perfect-or-nothing.
+
+This is the proactive counterpart to the reactive research path `modes/interview/practice.md` already runs mid-session (see its "When company-intel is thin mid-session") — same research stage, invoked here before the plan is drafted instead of when a candidate stumbles live.
+
 **Template (adjust block sizes based on total hours available):**
 
 ```
@@ -91,7 +100,7 @@ Block 3 — Secondary domain topic
   - Time: ~20% of available hours
 
 Block 4 — Behavioral stories
-  - Map existing stories to likely question types
+  - Map existing stories to likely question types — sourced ones from the Research Check above first, `[inferred from JD]` ones filling any remaining gaps
   - Practice the 2-minute verbal version of each
   - Prepare the Reflection for each — the senior-candidate differentiator
   - Time: ~15% of available hours
@@ -154,4 +163,5 @@ Save the plan to `interview-prep/{company-slug}-{role-slug}.md` if a file doesn'
 - **One topic per block.** Mixing topics in a single block reduces retention.
 - **Always include rest time.** A rested candidate outperforms a cramming one.
 - **Never generate fake company intel.** If you don't have research, say so — don't invent culture claims or technical details about the company.
+- **Check for real reported questions before Block 4.** Reuse `interview-prep/{company-slug}-{role-slug}.md` if it exists; otherwise run `interview-prep.md`'s Step 1 queries scoped to this round. Same tagging discipline as `interview-prep.md` — sourced-with-citation, or `[inferred from JD]` when nothing real turns up. This is the proactive counterpart to "Never generate fake company intel" above: check for the real thing before falling back to inference.
 - **Never invent claims for the candidate.** The anchor sentence and pre-interview talking points in the quick-reference (Step 4) must be grounded in what the candidate actually has — `cv.md`, `article-digest.md`, or the story bank. Don't draft claims that depend on experience or metrics the candidate doesn't have. If a claim appears in `interview-prep/retracted-claims.md`, never include it.

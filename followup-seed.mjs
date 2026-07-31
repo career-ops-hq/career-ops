@@ -75,6 +75,12 @@ export const FOLLOWUPS_HEADER = [
 
 const FOLLOWUPS_LOCK_PREFIX = 'career-ops-followups-';
 
+/**
+ * Minimum age before directory age alone may condemn an ownerless lock.
+ * See `lockCanRecover` for why the age check needs a floor.
+ */
+export const OWNERLESS_GRACE_MS = 1_000;
+
 /** Structured error carrying an exit-code-mapping `code`. */
 export class SeedError extends Error {
   constructor(code, message) {
@@ -253,11 +259,28 @@ function readLockOwner(lockDir) {
   }
 }
 
+/**
+ * Decide whether an existing lock can be safely recovered. Owner-PID liveness
+ * wins; directory age is only consulted when the metadata is missing.
+ *
+ * That age fallback needs a floor. A lock is ownerless by construction — not
+ * by accident — for the instant between its `mkdirSync` and its `owner.json`
+ * write. Judging it on `age > staleMs` alone lets a caller with an aggressive
+ * staleMs delete a lock created microseconds ago, stealing it from a winner
+ * still inside its acquisition window and putting two writers into the
+ * read-check-append critical section. OWNERLESS_GRACE_MS is a lower bound on
+ * that patience, never a cap: a larger caller staleMs still wins, and a
+ * genuinely abandoned lock still ages out.
+ *
+ * @param {string} lockDir - Directory that represents the active lock.
+ * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
+ * @returns {boolean} True when the caller may remove and recreate the lock.
+ */
 function lockCanRecover(lockDir, staleMs) {
   const owner = readLockOwner(lockDir);
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
   } catch {
     return true;
   }
@@ -271,7 +294,7 @@ function lockCanRecover(lockDir, staleMs) {
  *
  * @param {string} lockDir
  * @param {string} followupsPath - Recorded in owner.json for diagnostics.
- * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options]
+ * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options] - `staleMs` is floored at OWNERLESS_GRACE_MS.
  * @returns {Promise<{release: Function}>}
  */
 async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
@@ -312,6 +335,17 @@ async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
         hasRecoverGuard = true;
       } catch (guardErr) {
         if (guardErr?.code !== 'EEXIST') throw guardErr;
+        // A process killed between creating the guard and its cleanup leaves
+        // the guard behind forever, permanently disabling stale-lock recovery
+        // for every future writer. The guard normally lives for milliseconds,
+        // so an old one is judged stale by the same age rule as a
+        // metadata-free lock and removed; the next loop iteration can then
+        // take the guard and run recovery. Removing it unconditionally would
+        // instead let two writers recover the same lock at once, which is
+        // exactly what the guard exists to prevent.
+        if (lockCanRecover(recoverGuardDir, staleMs)) {
+          rmSync(recoverGuardDir, { recursive: true, force: true });
+        }
       }
 
       if (hasRecoverGuard) {

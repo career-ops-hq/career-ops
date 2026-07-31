@@ -74,6 +74,15 @@ location:
   city: "San Francisco"
   timezone: "PST"
   visa_status: "No sponsorship needed"
+  # Countries/regions where you ALREADY hold work authorization (no sponsorship
+  # needed there). Drives the Work-Authorization signal in job evaluation
+  # (modes/oferta.md → Block A "Work-authorization check"). Optional — omit or
+  # leave [] if not applicable; the free-text visa_status above still applies.
+  authorized_in: ["United States"]
+  # true if you need visa sponsorship for roles OUTSIDE authorized_in. When a JD
+  # explicitly states it will not sponsor, that is a hard blocker (see
+  # modes/_profile.md "Your Location Policy"). Omit → treated as false.
+  needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
@@ -102,6 +111,16 @@ language:
 #   premium  -- most capable model, adaptive extended thinking. Best for high-stakes offers.
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
+
+# (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
+# Each token is injected as a CSS custom property that overrides the template
+# default — omit the block (or any key) to keep the built-in look unchanged.
+# Only these four keys are recognized; anything else is ignored.
+# style:
+#   accent_color: "#2563eb"              # section headings / links
+#   font_family:  "Outfit, Inter, sans-serif"
+#   font_size:    "10pt"                 # base body text size
+#   margin:       "0.5in"                # page margin (@page)
 
 cv:
   output_format: "html" # "html" (default) or "latex"
@@ -239,6 +258,26 @@ cover_letter:
 # half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
+
+# ── Two-pass triage gate ────────────────────────────────────────────────────
+#
+# Used by `/career-ops pipeline`. Before running the full A-G evaluation on
+# every URL in a batch, a lightweight first pass (`modes/triage.md`) scores each
+# role from a compact profile brief (`modes/_brief.md`) and filters out the ones
+# that would clearly disqualify — so the expensive full evaluation only runs on
+# roles that pass. On a mixed batch this cuts total tokens by roughly half.
+#
+#   triage_threshold  — minimum triage score (out of 5) to proceed to full
+#                       evaluation. Roles at 3.0–(threshold) are MARGINAL and
+#                       shown to you; below 3.0 they are filtered silently.
+#                       Default (key absent): 3.5.
+#   triage_min_urls   — batches with fewer surviving URLs than this skip triage
+#                       and go straight to full evaluation (triage overhead
+#                       isn't worth it on a handful of roles). Default: 5.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
 
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #

@@ -17,7 +17,7 @@
  * Run: node detect-reposts.test.mjs
  */
 
-import { detectReposts, parseScanHistory } from './detect-reposts.mjs';
+import { detectReposts, parseScanHistory, companyKey } from './detect-reposts.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -281,6 +281,42 @@ eq('company with trailing whitespace trimmed', detectReposts([
   row({ url: 'https://a.com/1', company: 'Acme ', title: 'Backend Engineer Platform' }),
   row({ url: 'https://a.com/2', company: ' Acme', date: d('2026-02-01'), dateStr: '2026-02-01' }),
 ]).length, 1);
+
+// ============================================================================
+// 4.5 companyKey + normalized-company clustering (#2093)
+// ============================================================================
+console.log('\n--- 4.5 companyKey / normalized-company (#2093) ---');
+
+// companyKey unit behavior
+eq('companyKey prefers the stored normCompany column', companyKey({ company: 'Ignored LLC', normCompany: 'acme' }), 'acme');
+eq('companyKey falls back to normalizing the raw company', companyKey({ company: 'Acme Inc.' }), 'acme');
+eq('companyKey "Acme, Inc." == "ACME Inc" (punctuation/case folded)', companyKey({ company: 'Acme, Inc.' }), companyKey({ company: 'ACME Inc' }));
+eq('companyKey "Acme Inc." == "Acme" (legal-suffix stripped)', companyKey({ company: 'Acme Inc.' }), companyKey({ company: 'Acme' }));
+eq('companyKey unicode-only name falls back to raw lowercase', companyKey({ company: 'Тинькофф' }), 'тинькофф');
+ok('companyKey keeps two distinct unicode-only names apart (no empty over-merge)', companyKey({ company: 'Тинькофф' }) !== companyKey({ company: 'Сбербанк' }));
+
+// (a) stored normalized column clusters "Acme Inc." + "Acme"
+eq('stored normCompany clusters "Acme Inc." + "Acme"', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', normCompany: 'acme', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'Acme', normCompany: 'acme', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+// (b) backward compat: rows without the column cluster via raw-normalize fallback
+eq('fallback clusters "Acme Inc." + "Acme" with no stored column', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'Acme', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+eq('fallback clusters "Acme, Inc." + "ACME Inc" (punctuation/case)', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme, Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'ACME Inc', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+// Distinct companies must NOT merge under normalization
+eq('distinct companies not merged by normalization', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://b.com/2', company: 'Beta Corp', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 0);
 
 // ============================================================================
 // 5. detectReposts — title matching
@@ -645,6 +681,29 @@ try {
   // parseScanHistory produces rows with empty company, but detectReposts filters them out
   eq('TSV with empty company: rows parsed (2)', emptyCoParsed.length, 2);
   eq('TSV with empty company: no clusters (filtered by detectReposts)', detectReposts(emptyCoParsed, 90).length, 0);
+
+  // #2093 — normalized-company column: writer stores it (trailing col 12),
+  // parser prefers it as the clustering key so "Acme Inc." and "Acme" cluster.
+  const normTsv = [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company',
+    'https://a.com/1\t2026-01-01\tgreenhouse\tBackend Engineer Platform\tAcme Inc.\tadded\tRemote\t\t\t\t\tacme',
+    'https://a.com/2\t2026-02-01\tgreenhouse\tBackend Engineer Platform\tAcme\tadded\tRemote\t\t\t\t\tacme',
+  ].join('\n');
+  const normParsed = parseScanHistory(normTsv);
+  eq('#2093: normalized_company (col 12) parsed into normCompany', normParsed[0]?.normCompany, 'acme');
+  eq('#2093: "Acme Inc." + "Acme" cluster via stored normalized column', detectReposts(normParsed, 90).length, 1);
+
+  // Backward compat: legacy 7-column rows lack the column. Clustering falls back
+  // to normalizing the raw company on the fly, so old and new rows still key the
+  // same and cluster together — nothing depends on the writer having run.
+  const legacyTsv = [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+    'https://a.com/1\t2026-01-01\tgreenhouse\tBackend Engineer Platform\tAcme Inc.\tadded\tRemote',
+    'https://a.com/2\t2026-02-01\tgreenhouse\tBackend Engineer Platform\tAcme\tadded\tRemote',
+  ].join('\n');
+  const legacyParsed = parseScanHistory(legacyTsv);
+  eq('#2093 backward-compat: legacy rows carry empty normCompany', legacyParsed[0]?.normCompany, '');
+  eq('#2093 backward-compat: legacy "Acme Inc." + "Acme" still cluster (raw fallback)', detectReposts(legacyParsed, 90).length, 1);
 
   // Headerless 5-column TSV parsing test (Older scan-history and seed file backward compat)
   const headerlessTsv = [

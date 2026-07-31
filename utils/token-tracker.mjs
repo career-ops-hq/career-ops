@@ -7,7 +7,9 @@ export const RATES = {
   'gpt-4o-mini': { input: 0.150 / 1000000, output: 0.600 / 1000000 },
   'gpt-4o': { input: 2.50 / 1000000, output: 10.00 / 1000000 },
 
-  // Gemini models
+  // Gemini models (Developer API paid tier, USD per token; free tier is $0)
+  'gemini-3.6-flash': { input: 1.50 / 1000000, output: 7.50 / 1000000, cachedInput: 0.15 / 1000000 },
+  'gemini-3.5-flash': { input: 1.50 / 1000000, output: 9.00 / 1000000, cachedInput: 0.15 / 1000000 },
   'gemini-2.5-flash': { input: 0.075 / 1000000, output: 0.300 / 1000000, cachedInput: 0.0375 / 1000000 },
   'gemini-2.5-pro': { input: 1.25 / 1000000, output: 5.00 / 1000000, cachedInput: 0.625 / 1000000 },
 
@@ -66,7 +68,7 @@ export function estimateCost(model, usage, provider) {
     if (provider === 'openai') {
       rate = RATES['gpt-4o-mini'];
     } else if (provider === 'gemini') {
-      rate = RATES['gemini-2.5-flash'];
+      rate = RATES['gemini-3.6-flash'];
     } else if (provider === 'claude' || provider === 'anthropic') {
       rate = RATES['claude-3-5-sonnet'];
     } else {

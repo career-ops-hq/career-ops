@@ -11,6 +11,8 @@
  *   node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
  *
  * Row resolution:
+ *   - --row N     → exact match on the # column, stated explicitly
+ *   - --report N  → match the row whose Report cell links report #N
  *   - numeric argument → exact match on the # column; if the tracker has a
  *     duplicate # (see #1704 — merge-tracker.mjs bug, now fixed, that could
  *     assign the same # to two rows), --role narrows it, otherwise it fails
@@ -19,6 +21,23 @@
  *   - otherwise → company match (normalized, same key as merge-tracker dedup);
  *     multiple hits are narrowed with --role (fuzzy, role-matcher.mjs), and
  *     anything still ambiguous fails with a numbered candidate list.
+ *
+ * Why --row/--report exist:
+ *   Tracker row IDs and report IDs are two independent counters sharing one
+ *   number space. reserve-report-num.mjs treats tracker row IDs as occupied
+ *   when allocating a report number, so the sequences leapfrog and never
+ *   realign; every row added WITHOUT an evaluation report (backfilled rows,
+ *   #1799) widens the gap permanently. A bare numeric selector is therefore
+ *   genuinely ambiguous — "97" may mean row #97 or report #97, which are
+ *   different applications — and the report-number-mismatch guard below fires
+ *   on every such call once the counters have diverged. A guard that fires
+ *   almost always trains callers to reach for --force, which disables it
+ *   everywhere including the cases it was written for.
+ *
+ *   --row and --report remove the ambiguity instead of suppressing the check.
+ *   Both state which number space the caller means, so the mismatch guard is
+ *   skipped as ANSWERED rather than overridden — unlike --force, which
+ *   silences it while the ambiguity is still real.
  *
  * State validation is strict against templates/states.yml (labels, ids, and
  * aliases resolve to the canonical label; anything else is rejected before the
@@ -38,53 +57,76 @@
  * When the new status is Applied, the JSON output carries
  * `"followupSeedCandidate": true` — the hook point for seeding
  * data/follow-ups.md with the default cadence (#1430, not implemented here).
+ *
+ * Every real status change also appends one line to the transition ledger
+ * (status-log.tsv, sibling of the tracker file):
+ *   {tracker#}\t{date}\t{from}\t{to}\tset-status\t
+ * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
+ * happened earlier ("they replied Tuesday"). The append is observation-only:
+ * if it fails, a warning goes to stderr and the exit code is unchanged — the
+ * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
-  rebuildRow, resolveTrackerPath, trackerLockDirFor, acquireTrackerLock,
-  writeFileAtomic, loadCanonicalStates, resolveCanonicalState, normalizeCompany, cell,
+  rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
+  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
-const EXIT_OK = 0;
-const EXIT_USAGE = 1;
-const EXIT_NOT_FOUND = 2;
-const EXIT_AMBIGUOUS = 3;
-const EXIT_LOCK_TIMEOUT = 4;
+// LOCK_TIMEOUT is not destructured here — that exit path is raised inside
+// acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
+const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS } = CLI_EXIT;
 
-const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
+const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
+       node set-status.mjs --row N <state> [...]        (explicit tracker row ID)
+       node set-status.mjs --report N <state> [...]     (explicit report ID)
 
   <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
+  --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
+  --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
-  --force            Allow a numeric selector when the row's report link carries a different ID
+  --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
+                     pass it when the transition happened earlier than it's recorded)
+  --force            Allow a numeric selector despite a report-link mismatch, or despite a
+                     report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
-  --json             Machine-readable output on stdout (errors included)`;
+  --json             Machine-readable output on stdout (errors included)
+
+  Tracker row IDs and report IDs are separate counters that diverge permanently
+  once any row exists without a report. Prefer --row/--report (or the company
+  name) over a bare number, and prefer any of them over --force.`;
 
 // ── argument parsing ─────────────────────────────────────────────
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, force: false, dryRun: false, json: false };
+const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
-  if (a === '--note' || a === '--role') {
+  if (a in VALUE_FLAGS) {
     // Never consume a following flag as the value: "--note --dry-run" would
     // silently disable dry-run and turn a preview into a real write.
     const value = rawArgs[i + 1];
     if (value === undefined || value.startsWith('--')) {
       failUsage(`Missing value for ${a}`);
     }
-    flags[a === '--note' ? 'note' : 'role'] = value;
+    // --row/--report name a row by number; a non-numeric value is a typo, and
+    // silently treating it as "no match" would hide the mistake.
+    if ((a === '--row' || a === '--report') && !/^\d+$/.test(value)) {
+      failUsage(`${a} expects a positive integer, got "${value}"`);
+    }
+    flags[VALUE_FLAGS[a]] = value;
     i++;
   }
   else if (a === '--force') { flags.force = true; }
@@ -94,31 +136,45 @@ for (let i = 0; i < rawArgs.length; i++) {
   else { positional.push(a); }
 }
 
-if (positional.length !== 2) {
+// --row and --report ARE the selector, so they replace the positional one.
+// Accepting both would leave two competing answers to "which row?"; refuse
+// rather than pick, since picking wrong writes to the wrong application.
+if (flags.row !== null && flags.report !== null) {
+  failUsage('--row and --report are mutually exclusive — they name different number spaces');
+}
+const explicitSelector = flags.row !== null || flags.report !== null;
+
+if (explicitSelector) {
+  if (positional.length !== 1) {
+    failUsage(positional.length === 0
+      ? `Expected the state after ${flags.row !== null ? '--row' : '--report'}`
+      : `With ${flags.row !== null ? '--row' : '--report'} the only positional argument is the state, got ${positional.length}`);
+  }
+} else if (positional.length !== 2) {
   failUsage(positional.length === 0 ? null : `Expected 2 arguments (selector, state), got ${positional.length}`);
 }
 
-const [selector, stateInput] = positional;
-
-/**
- * Emit a structured error and exit.
- *
- * With --json the error object goes to stdout so callers parse one stream; the
- * human-readable message always goes to stderr.
- *
- * @param {number} exitCode - Process exit code (see EXIT_* contract above).
- * @param {string} code - Stable machine-readable error code.
- * @param {string} message - Human-readable explanation.
- * @param {object} [extra] - Extra JSON fields (e.g. candidates).
- * @returns {never}
- */
-function failWith(exitCode, code, message, extra = {}) {
-  if (flags.json) {
-    console.log(JSON.stringify({ error: message, code, ...extra }));
-  }
-  console.error(`❌ ${message}`);
-  process.exit(exitCode);
+// --on must be a real, non-future calendar date — validated before anything
+// touches the tracker, same as state validation below.
+if (flags.on !== null) {
+  const m = /^\d{4}-\d{2}-\d{2}$/.test(flags.on);
+  const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
+  const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
+  if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
+  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
 }
+
+const selector = explicitSelector ? null : positional[0];
+const stateInput = explicitSelector ? positional[0] : positional[1];
+
+// A bare positional number is the ambiguous case the mismatch guard exists for.
+// --row/--report are numeric too but carry an explicit number space, so they
+// must not be treated as ambiguous.
+const isBareNumericSelector = selector !== null && /^\d+$/.test(selector);
+
+// Shared with every other canonical tracker-writer CLI (tracker-utils.mjs) so
+// the JSON-vs-human error contract can't drift between them.
+const failWith = makeCliFailWith(flags.json);
 
 /**
  * Print usage (plus an optional specific complaint) and exit 1.
@@ -171,8 +227,34 @@ if (!existsSync(APPS_FILE)) {
  * @returns {object} The single matched row. Exits the process on 0 or 2+ matches.
  */
 function resolveRow(rows) {
-  if (/^\d+$/.test(selector)) {
-    const num = parseInt(selector, 10);
+  // --report N: resolve through the Report cell, which is the number space a
+  // caller reading a report filename actually has in hand.
+  if (flags.report !== null) {
+    const num = parseInt(flags.report, 10);
+    const matches = rows.filter(r => extractTrackerReportNumbers(r.report).includes(num));
+    if (matches.length === 0) {
+      failWith(EXIT_NOT_FOUND, 'not-found',
+        `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
+        'use --row N to select by tracker #.)');
+    }
+    if (matches.length > 1 && flags.role) {
+      const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
+      if (narrowed.length === 1) return narrowed[0];
+    }
+    if (matches.length > 1) {
+      const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
+      const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
+      failWith(EXIT_AMBIGUOUS, 'ambiguous',
+        `Report #${num} is linked by ${matches.length} tracker rows — pass --role to disambiguate:\n${listing}`,
+        { candidates });
+    }
+    return matches[0];
+  }
+
+  // --row N and a bare numeric selector both match the # column; they differ
+  // only in whether the mismatch guard below treats the number as ambiguous.
+  if (flags.row !== null || isBareNumericSelector) {
+    const num = parseInt(flags.row !== null ? flags.row : selector, 10);
     let matches = rows.filter(r => r.num === num);
     if (matches.length === 0) {
       failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with #${num}`);
@@ -221,33 +303,10 @@ function resolveRow(rows) {
 
 // ── locked read-modify-write ─────────────────────────────────────
 
-// Dry-run never writes, so it must not hold the exclusive lock: a read-only
-// preview should not block (or be blocked by) merge-tracker or another
-// set-status writer. A stale read is acceptable for a preview.
-let lock = null;
-if (!flags.dryRun) {
-  try {
-    lock = await acquireTrackerLock(trackerLockDirFor(APPS_FILE), {
-      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
-      retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
-      staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
-      tracker: APPS_FILE,
-    });
-  } catch (err) {
-    // Exit 4 means "lock is busy — retry later" and must stay reserved for
-    // the actual timeout. Filesystem/configuration failures (EACCES on the
-    // lock dir, unwritable owner.json, …) are not retryable and fail as a
-    // config error instead.
-    if (err?.code === 'LOCK_TIMEOUT') {
-      failWith(EXIT_LOCK_TIMEOUT, 'lock-timeout', err.message);
-    }
-    failWith(EXIT_USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
-  }
-}
-// Safety net: failWith/failUsage/resolveRow call process.exit() directly and
-// skip the explicit release below. release() is idempotent, so both firing
-// on the happy path is fine.
-if (lock) process.once('exit', () => lock.release());
+// Shared with mark-pdf-ready.mjs (tracker-utils.mjs): dry-run never writes,
+// so it must not hold the exclusive lock — a read-only preview should not
+// block (or be blocked by) merge-tracker or another writer.
+const lock = await acquireTrackerLockForCli(APPS_FILE, { dryRun: flags.dryRun, failWith });
 
 let content;
 try {
@@ -269,11 +328,18 @@ if (rows.length === 0) {
 
 const target = resolveRow(rows);
 
-// A numeric selector is often copied from a report filename. If tracker drift
-// has made the row ID disagree with its local report link, silently updating
-// that row can affect the wrong application. Company selectors remain usable,
-// and --force records an explicit decision to proceed despite the mismatch.
-if (/^\d+$/.test(selector) && !flags.force) {
+// A BARE numeric selector is often copied from a report filename. If the row ID
+// disagrees with its local report link, silently updating that row can affect
+// the wrong application. Company selectors remain usable, and --force records an
+// explicit decision to proceed despite the mismatch.
+//
+// --row/--report are exempt by construction, not by override: the caller has
+// already said which number space they mean, so there is no ambiguity left to
+// guard. That distinction is what keeps the check meaningful — on a tracker
+// whose counters have diverged, a guard that fires on every numeric call just
+// teaches callers to pass --force, which disables it everywhere including the
+// cases it was written for.
+if (isBareNumericSelector && !flags.force) {
   const reportNums = extractTrackerReportNumbers(target.report);
   const mismatched = reportNums.filter(num => num !== target.num);
   if (mismatched.length > 0) {
@@ -281,10 +347,73 @@ if (/^\d+$/.test(selector) && !flags.force) {
       EXIT_AMBIGUOUS,
       'report-number-mismatch',
       `Tracker #${target.num} points to report ID(s) ${reportNums.map(num => `#${num}`).join(', ')}. ` +
-        'Use the company selector, repair the Report cell, or re-run with --force.',
+        `Say which you meant: --row ${target.num} (tracker row) or ` +
+        `--report ${reportNums[0]} (report ID). ` +
+        'The company selector also works; --force overrides the check instead of answering it.',
       { trackerNum: target.num, reportNums },
     );
   }
+
+  // The check above compares the matched row's report link against its own #.
+  // A backfilled row (#1799) has no link, so reportNums is empty, `mismatched`
+  // is empty, and the check passes with nothing compared — while a DIFFERENT
+  // row may link exactly this number as its report.
+  //
+  // That combination is not hypothetical: it is what merge-tracker.mjs's
+  // "Tracker #N already used; assigning #M" fallback produces. The backfilled
+  // row occupying #N is what pushes the evaluated row to #M, so the row a stale
+  // numeric selector lands on is precisely the report-less one this check could
+  // not see. Bare "#N" then names two applications at once and must not write.
+  if (reportNums.length === 0) {
+    const num = parseInt(selector, 10);
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    if (linkers.length > 0) {
+      const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
+      failWith(
+        EXIT_AMBIGUOUS,
+        'report-number-ambiguous',
+        `"${num}" is ambiguous: tracker row #${num} (${target.company} — ${target.role}) has no report, ` +
+          `but report #${num} is linked by:\n${listing}\n` +
+          `Say which you meant: --row ${num} (the row) or --report ${num} (the report).`,
+        { trackerNum: target.num, reportNum: num, linkedBy: linkers.map(r => ({ num: r.num, company: r.company, role: r.role })) },
+      );
+    }
+  }
+}
+
+// --role is an explicit statement of which opening the caller means, but
+// resolveRow only consults it to break ties between 2+ candidates. A selector
+// matching exactly one row therefore returned that row without ever checking
+// it against --role, silently rewriting a status the caller never asked for.
+// That is the wrong-row mutation in #2009: the intended requisition may not be
+// in the tracker at all (fuzzy-deduped away, or never merged), so the lone
+// survivor for that company absorbs the update instead. Fail closed and let
+// --force record an explicit decision, matching the report-mismatch guard.
+// Exact-title equality must be checked separately: roleFuzzyMatch is a DEDUP
+// predicate, and it deliberately returns false for two titles whose overlap is
+// entirely baseline vocabulary (["platform","engineer"]) so that same-titled
+// sibling reqs never auto-merge. That makes it unusable on its own here — it
+// would reject --role "Platform Engineer" against a row that IS exactly that.
+const normalizeRoleText = s => String(s ?? '')
+  .toLowerCase()
+  // Preserve symbols that distinguish real titles before collapsing generic
+  // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
+  // "c engineer" and the exact-equality path treats them as the same row.
+  .replace(/\+\+/g, ' plusplus ')
+  .replace(/#/g, ' sharp ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+const roleMatchesTarget = normalizeRoleText(target.role) === normalizeRoleText(flags.role)
+  || roleFuzzyMatch(target.role, flags.role);
+
+if (flags.role && !flags.force && !roleMatchesTarget) {
+  failWith(
+    EXIT_AMBIGUOUS,
+    'role-mismatch',
+    `Tracker #${target.num} (${target.company}) is "${target.role}", which does not match --role "${flags.role}". ` +
+      'The row you meant may not be in the tracker. Re-run with --force to update this row anyway.',
+    { trackerNum: target.num, rowRole: target.role, requestedRole: flags.role },
+  );
 }
 const oldStatus = target.status;
 const note = flags.note != null ? cell(flags.note) : null;
@@ -331,6 +460,25 @@ if (changed && !flags.dryRun) {
     failWith(EXIT_USAGE, 'write-failure', `Cannot write tracker at ${APPS_FILE}: ${err.message}`);
   }
 }
+
+// ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
+// Observation trail only: the tracker stays the source of truth for STATE,
+// the ledger records WHEN transitions happened. A failed append is a warning,
+// never a failure — the status write above already succeeded. Sibling of the
+// tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
+// the ledger next to the tracker it describes. Inside the lock window, so
+// concurrent writers can't interleave lines.
+let statusLogged = false;
+if (statusChanged && !flags.dryRun) {
+  const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  try {
+    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\tset-status\t\n`);
+    statusLogged = true;
+  } catch (err) {
+    console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
+  }
+}
 lock?.release();
 
 // ── report ───────────────────────────────────────────────────────
@@ -348,6 +496,7 @@ const result = {
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
 

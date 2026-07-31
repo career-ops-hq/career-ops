@@ -128,6 +128,7 @@ const (
 	filterEvaluated = "evaluated"
 	filterApplied   = "applied"
 	filterInterview = "interview"
+	filterResponded = "responded"
 	filterSkip      = "skip"
 	filterRejected  = "rejected"
 	filterDiscarded = "discarded"
@@ -143,8 +144,9 @@ func getPipelineTabs() []pipelineTab {
 	return []pipelineTab{
 		{filterAll, i18n.Current.TabAll},
 		{filterEvaluated, i18n.Current.TabEvaluated},
-		{filterApplied, i18n.Current.TabApplied},
 		{filterInterview, i18n.Current.TabInterview},
+		{filterResponded, i18n.Current.TabResponded},
+		{filterApplied, i18n.Current.TabApplied},
 		{filterTop, i18n.Current.TabTop},
 		{filterSkip, i18n.Current.TabSkip},
 		{filterRejected, i18n.Current.TabRejected},
@@ -192,8 +194,13 @@ type StatusPair struct {
 	Canonical string
 }
 
-func getStatusPairs() []StatusPair {
-	return []StatusPair{
+// getStatusPairs returns the status-change picker's options in their static
+// display order. When currentNormalized is non-empty and matches one of the
+// entries (compared via data.NormalizeStatus), that entry is pulled to the
+// front so the row's own current status always leads the list, with the
+// remaining options kept in their original relative order behind it.
+func getStatusPairs(currentNormalized string) []StatusPair {
+	base := []StatusPair{
 		{i18n.Current.StatusEvaluated, "Evaluated"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
@@ -204,6 +211,41 @@ func getStatusPairs() []StatusPair {
 		{i18n.Current.StatusDiscarded, "Discarded"},
 		{i18n.Current.StatusSkip, "Skip"},
 	}
+
+	if currentNormalized == "" {
+		return base
+	}
+
+	var current *StatusPair
+	rest := make([]StatusPair, 0, len(base))
+	for _, pair := range base {
+		if current == nil && data.NormalizeStatus(pair.Canonical) == currentNormalized {
+			p := pair
+			current = &p
+			continue
+		}
+		rest = append(rest, pair)
+	}
+
+	if current == nil {
+		// Unrecognized/unmapped status -- fall back to the static order.
+		return base
+	}
+
+	ordered := make([]StatusPair, 0, len(base))
+	ordered = append(ordered, *current)
+	ordered = append(ordered, rest...)
+	return ordered
+}
+
+// currentStatusPairs resolves the status-change picker options for whichever
+// application is currently selected in the main list, so the picker reflects
+// that row's own status rather than always assuming "Evaluated".
+func (m PipelineModel) currentStatusPairs() []StatusPair {
+	if app, ok := m.CurrentApp(); ok {
+		return getStatusPairs(data.NormalizeStatus(app.Status))
+	}
+	return getStatusPairs("")
 }
 
 // statusGroupOrder defines display order for grouped view.
@@ -343,6 +385,21 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.searchInput = m.searchInput
 	// Preserve user's column visibility choices across refresh.
 	reloaded.visibleCols = m.visibleCols
+	// Preserve in-progress interactive flows. The viewer status path starts
+	// the hired celebration / discard reason picker on the pipeline model and
+	// then immediately triggers a data reload; rebuilding the model here used
+	// to wipe that state, so picking Discarded/SKIP from the report viewer
+	// silently never asked for a reason and never wrote the status.
+	reloaded.hiredApp = m.hiredApp
+	reloaded.hiredStep = m.hiredStep
+	reloaded.discardPicker = m.discardPicker
+	reloaded.discardCursor = m.discardCursor
+	reloaded.discardOptions = m.discardOptions
+	reloaded.discardCustomInput = m.discardCustomInput
+	reloaded.discardCustomText = m.discardCustomText
+	reloaded.discardPendingApp = m.discardPendingApp
+	reloaded.discardPendingStatus = m.discardPendingStatus
+	reloaded.discardPredictedCount = m.discardPredictedCount
 	reloaded.applyFilterAndSort()
 	reloaded.CopyReportCache(&m)
 
@@ -729,8 +786,8 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(getStatusPairs()) {
-			m.statusCursor = len(getStatusPairs()) - 1
+		if m.statusCursor >= len(m.currentStatusPairs()) {
+			m.statusCursor = len(m.currentStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -742,7 +799,7 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	case "enter":
 		m.statusPicker = false
 		if app, ok := m.CurrentApp(); ok {
-			newStatus := getStatusPairs()[m.statusCursor].Canonical
+			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
 			if norm == "hired" {
 				m.hiredApp = app
@@ -1882,7 +1939,7 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 	var picker []string
 	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, pair := range getStatusPairs() {
+	for i, pair := range m.currentStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
@@ -2035,6 +2092,7 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
+		"hired":     m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
 		"interview": m.theme.Green,
 		"offer":     m.theme.Green,
 		"applied":   m.theme.Sky,
