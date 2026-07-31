@@ -80,7 +80,11 @@ function supportsSafeCodexExec(binPath: string): Promise<boolean> {
       execHelp.includes("--skip-git-repo-check") &&
       execHelp.includes("--output-last-message"),
     )
-    .catch(() => false);
+    .catch(() => false)
+    .then((supported) => {
+      if (!supported) codexCapabilityCache.delete(binPath);
+      return supported;
+    });
 
   // Cache the in-flight Promise so concurrent cold requests share one probe.
   codexCapabilityCache.set(binPath, probe);
@@ -149,9 +153,25 @@ export async function POST(req: Request) {
   // Codex runs in an empty temporary cwd and writes only its final assistant
   // response to a dedicated file. Its normal console transcript includes the
   // full prompt and must never be forwarded to the Web UI.
-  const childCwd = isCodex
-    ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-"))
-    : careerOpsRoot();
+  let childCwd: string;
+
+  if (isCodex) {
+    try {
+      childCwd = fs.mkdtempSync(
+        path.join(os.tmpdir(), "career-ops-codex-"),
+      );
+    } catch {
+      return Response.json(
+        {
+          code: "CODEX_TEMP_DIR_FAILED",
+          error: "AI search could not create an isolated Codex workspace.",
+        },
+        { status: 400 },
+      );
+    }
+  } else {
+    childCwd = careerOpsRoot();
+  }
 
   const codexResultFile = isCodex
     ? path.join(childCwd, "final-response.txt")
@@ -211,22 +231,49 @@ export async function POST(req: Request) {
   // controller and throw an uncaught "Controller is already closed" (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  let forceKill: ReturnType<typeof setTimeout> | undefined;
+
+  const clearTerminationTimers = () => {
+    if (killer) clearTimeout(killer);
+    if (forceKill) clearTimeout(forceKill);
+    killer = undefined;
+    forceKill = undefined;
+  };
+
+  const terminateChild = () => {
+    let termSent = false;
+
+    try {
+      termSent = child.kill("SIGTERM");
+    } catch {
+      /* process may already have exited */
+    }
+
+    if (!isCodex || !termSent || forceKill) return;
+
+    forceKill = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* process may already have exited */
+      }
+    }, 5_000);
+
+    forceKill.unref?.();
+  };
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
       let emitted = false;
       let codexStderr = "";
       killer = setTimeout(() => {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* ignore */
-        }
+        terminateChild();
       }, 480_000);
       const safeClose = () => {
         if (!closed) {
           closed = true;
-          if (killer) clearTimeout(killer);
+          clearTerminationTimers();
           try {
             controller.close();
           } catch {
@@ -299,6 +346,8 @@ export async function POST(req: Request) {
       });
 
       child.on("close", (code) => {
+        clearTerminationTimers();
+
         if (closed) {
           cleanupChildCwd();
           return;
@@ -365,12 +414,13 @@ export async function POST(req: Request) {
     },
     cancel() {
       closed = true;
-      if (killer) clearTimeout(killer);
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* ignore */
+
+      if (killer) {
+        clearTimeout(killer);
+        killer = undefined;
       }
+
+      terminateChild();
     },
   });
 
