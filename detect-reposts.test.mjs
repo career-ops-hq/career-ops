@@ -1045,8 +1045,17 @@ sameAsLegacy('equivalence: singleton companies and singleton titles', [
 // failure is reproducible rather than a one-off.
 let seed = 20260731;
 const rand = (n) => {
-  seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-  return seed % n;
+  // Math.imul, not `*`: the product overflows 2^53, so plain multiplication
+  // rounds the low bits away and the generator degenerates. Measured over 3000
+  // draws mod 6 it returned {0:909, 1:1, 2:1022, 3:12, 4:1056} and never once
+  // returned 5, so the corpus never picked the last entry of a six-item list
+  // (the "Machine Learning" domain was unreachable).
+  seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+  // Take the HIGH bits: an LCG's low bits have a very short period (these cycle
+  // 0,1,2,3 under `% 4`). Each row draws eight times and the company is the
+  // seventh draw, so it landed on the same phase every row and all 300 rows got
+  // a single company, despite the comment above promising several.
+  return (seed >>> 16) % n;
 };
 const levels = ['', 'Senior ', 'Staff ', 'Principal ', 'Associate '];
 const domains = ['Backend', 'Frontend', 'Platform', 'Security', 'Analytics', 'Machine Learning'];
