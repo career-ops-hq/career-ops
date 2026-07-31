@@ -75,9 +75,41 @@ export function finish() {
 // to the OS), so a test can never be tricked into executing an arbitrary
 // binary — and CodeQL's uncontrolled-command-line finding is closed by
 // construction rather than dismissed (alerts #36/#41/#42).
+// Scoop installs Git for Windows under the user profile, not Program Files, so
+// a Program-Files-only list misses it entirely and getBash() falls through to
+// WSL bash. That fallback launches the script but not the environment: WSL has
+// its own PATH, so the Windows `node` (and any stub binary a test injects via
+// PATH) is invisible, and batch-runner.sh dies with `node: command not found`,
+// exit 127. run() converts that to null, the caller does `|| ''`, and the
+// assertion reports an empty argv -- which reads as a routing bug in the code
+// under test rather than a missing shell. That is what all five spend_tier
+// tests were doing on a machine where Git Bash was installed the whole time
+// (#2344).
+//
+// Kept as fixed-shape literals joined onto %USERPROFILE% / %SCOOP% rather than
+// a PATH search, so this stays an allowlist of trusted literals (see
+// resolveAllowedExecutable below and CodeQL alerts #36/#41/#42).
+const SCOOP_ROOTS = [
+  process.env.SCOOP,
+  process.env.USERPROFILE ? join(process.env.USERPROFILE, 'scoop') : null,
+].filter(Boolean);
+
 const WINDOWS_BASH_CANDIDATES = [
   'C:\\Program Files\\Git\\bin\\bash.exe',
   'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+  ...SCOOP_ROOTS.flatMap((root) => [
+    join(root, 'apps', 'git', 'current', 'bin', 'bash.exe'),
+    join(root, 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+  ]),
+];
+
+// Same discovery problem, same fix: cygpath must come from the SAME Git
+// install as the bash above. Mixing them is #1409 in reverse -- cygpath emits
+// /c/... while WSL bash expects /mnt/c/..., so the path silently fails to
+// resolve inside the shell that receives it.
+const WINDOWS_CYGPATH_CANDIDATES = [
+  'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe',
+  ...SCOOP_ROOTS.map((root) => join(root, 'apps', 'git', 'current', 'usr', 'bin', 'cygpath.exe')),
 ];
 
 /**
@@ -239,7 +271,7 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = existsSync('C:\\Program Files\\Git\\usr\\bin\\cygpath.exe') ? 'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe' : 'cygpath';
+    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}
