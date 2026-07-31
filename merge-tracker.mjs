@@ -225,6 +225,44 @@ function extractReqNumber(notes) {
 }
 
 /**
+ * Combine an existing row's Notes with a re-evaluation's Notes.
+ *
+ * The update path used to overwrite Notes with
+ * `Re-eval {date} ({old}→{new}). {new notes}`, discarding the existing cell
+ * outright (#2392 gap 2). The Notes column is not decoration: it carries the
+ * `Applied YYYY-MM-DD` marker that followup-cadence.mjs prefers over the Date
+ * column (dropping it silently resets the follow-up clock to the evaluation
+ * date), the req/job number that this script's OWN sibling-req guard reads back
+ * via extractReqNumber(), contact addresses, and whatever the user wrote with
+ * `set-status --note`. None of it is recoverable: applications.md is gitignored
+ * and no .bak is written.
+ *
+ * Format: the existing notes are kept verbatim and FIRST, with the re-eval
+ * marker and any new notes appended after them. Order is deliberate, not
+ * cosmetic — parseAppliedDate() and extractReqNumber() both return their FIRST
+ * match, so leading with the established text keeps a row's apply date and req
+ * number stable across re-evaluations instead of letting each new evaluation's
+ * text take over. The cost is that Notes grows by one clause per re-evaluation.
+ *
+ * @param {string} existingNotes - Notes cell currently on the tracker row.
+ * @param {object} addition - Parsed TSV addition (uses `notes` and `date`).
+ * @param {number} oldScore - Score currently on the row.
+ * @param {number} newScore - Score from the addition.
+ * @returns {string} Combined Notes cell.
+ */
+function mergeNotes(existingNotes, addition, oldScore, newScore) {
+  // Trailing period trimmed only so the '. ' join does not produce '..'; no
+  // other character of the existing text is touched.
+  const prev = String(existingNotes ?? '').trim().replace(/\s*\.\s*$/, '');
+  const incoming = String(addition.notes ?? '').trim();
+  const marker = `Re-eval ${addition.date} (${oldScore}→${newScore})`;
+  // Re-running the same evaluation would otherwise repeat its own text; the
+  // marker still records that the re-evaluation happened.
+  const tail = incoming && !prev.includes(incoming) ? `${marker}: ${incoming}` : marker;
+  return prev ? `${prev}. ${tail}` : tail;
+}
+
+/**
  * Parse a score cell into a numeric value for score-upgrade decisions.
  *
  * The merge path compares old and new scores to decide whether to update an
@@ -765,7 +803,7 @@ for (const file of tsvFiles) {
         location: addition.location || duplicate.location || '—',
         score: addition.score, status: duplicate.status, pdf,
         report: addition.report,
-        notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
+        notes: mergeNotes(duplicate.notes, addition, oldScore, newScore),
       });
       if (replaceTrackerLine(duplicate.raw, updatedLine)) {
         // Refresh the cached row from the line just written (#2392). `raw` was
