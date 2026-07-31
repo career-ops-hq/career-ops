@@ -55,6 +55,7 @@ const DEFAULT_SECTION_TITLES = {
   projects: 'Projects',
   education: 'Education',
   certifications: 'Certifications',
+  awards: 'Awards & Honors',
   skills: 'Skills',
 };
 
@@ -275,7 +276,7 @@ function loadSectionPartials(templatePath) {
   if (!existsSync(sectionsDir)) return partials;
 
   const sectionNames = [
-    'competencies', 'experience', 'projects', 'education', 'certifications', 'skills',
+    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
   ];
   for (const name of sectionNames) {
     const partialPath = join(sectionsDir, `${name}.html`);
@@ -457,6 +458,40 @@ function buildCertifications(entries, partial) {
   }).join('\n    ');
 }
 
+// Awards mirror certifications: a title with an optional issuing body and year,
+// laid out on one baseline. Kept as its own builder rather than an alias so the
+// two can diverge (and so awards.html can be authored independently of
+// certifications.html) without one section's markup leaking into the other.
+function buildAwards(entries, partial) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+  if (!partial) {
+    return entries.filter(Boolean).map(e => {
+      const org = e.org ? `<span class="award-org">${escapeHtml(e.org)}</span>` : '<span class="award-org"></span>';
+      const year = e.year ? `<span class="award-year">${escapeHtml(e.year)}</span>` : '<span class="award-year"></span>';
+      return `<div class="award-item">
+      <span class="award-title">${escapeHtml(e.title)}</span>
+      ${org}
+      ${year}
+    </div>`;
+    }).join('\n    ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(Boolean).map(e => {
+    const blockValues = new Map([
+      // As with certifications, absent fields still emit an empty <span> so the
+      // table cells stay aligned across rows.
+      ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
+      ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      TITLE: escapeHtml(e.title || ''),
+      ORG:   escapeHtml(e.org || ''),
+      YEAR:  escapeHtml(e.year || ''),
+    }, blockValues);
+  }).join('\n    ');
+}
+
 function buildSkills(categories, partial) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   if (!partial) {
@@ -545,6 +580,8 @@ function renderReport(payload, partials) {
     EDUCATION: buildEducation(payload.education, partials.get('education')),
     SECTION_CERTIFICATIONS: escapeHtml(sectionTitles.certifications),
     CERTIFICATIONS: buildCertifications(payload.certifications, partials.get('certifications')),
+    SECTION_AWARDS: escapeHtml(sectionTitles.awards),
+    AWARDS: buildAwards(payload.awards, partials.get('awards')),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
   };
@@ -604,6 +641,7 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
       projectEntries: (payload.projects || []).length,
       educationEntries: (payload.education || []).length,
       certificationEntries: (payload.certifications || []).length,
+      awardEntries: (payload.awards || []).length,
       skillCategories: (payload.skills || []).length,
       totalBullets: countBullets(payload),
     },
@@ -721,6 +759,7 @@ async function runSelfTest() {
       description: 'Coursework: Data Structures, Algorithms, Machine Learning.',
     }],
     certifications: [{ title: 'Certified Kubernetes Administrator', org: 'CNCF', year: '2025' }],
+    awards: [{ title: 'Gold Medal, International Olympiad in Informatics', org: 'IOI', year: '2023' }],
     skills: [
       { category: 'Languages', items: 'Python, JavaScript, TypeScript' },
       { category: 'Frameworks', items: ['FastAPI', 'React', 'PyTorch'] },
@@ -810,6 +849,10 @@ async function runSelfTest() {
   }
   if (!html.includes('class="cert-item"')) {
     console.error('Self-test failed: certifications section is missing .cert-item class');
+    process.exit(1);
+  }
+  if (!html.includes('class="award-item"')) {
+    console.error('Self-test failed: awards section is missing .award-item class');
     process.exit(1);
   }
 

@@ -51,6 +51,21 @@ function buildProjects(entries) {
   return blocks.join('\n\n');
 }
 
+// Awards are one line each — no bullet list — so they reuse
+// \resumeProjectHeading (bold left column, year right) rather than
+// \resumeSubheading, which would leave an empty second row. The issuing body
+// follows the title in the same $|$ style buildProjects() uses for context.
+function buildAwards(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+  const blocks = [];
+  for (const e of entries) {
+    if (!e) continue;
+    const org = e.org ? ` \\emph{$|$ ${escapeLatex(e.org)}}` : '';
+    blocks.push(`    \\resumeProjectHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
+  }
+  return blocks.join('\n\n');
+}
+
 function buildSkills(categories) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   return categories.map(c => {
@@ -140,6 +155,7 @@ async function main() {
     EDUCATION: buildEducation(payload.education),
     EXPERIENCE: buildExperience(payload.experience),
     PROJECTS: buildProjects(payload.projects),
+    AWARDS: buildAwards(payload.awards),
     SKILLS: buildSkills(payload.skills),
   };
 
@@ -171,6 +187,7 @@ async function main() {
       educationEntries: (payload.education || []).length,
       experienceEntries: (payload.experience || []).length,
       projectEntries: (payload.projects || []).length,
+      awardEntries: (payload.awards || []).length,
       skillCategories: (payload.skills || []).length,
       totalBullets: (() => {
         const ex = Array.isArray(payload.experience) ? payload.experience.flatMap(e => Array.isArray(e?.bullets) ? e.bullets : []) : [];
@@ -217,6 +234,10 @@ async function runSelfTest() {
         'Built a REST API with automated test coverage exceeding 90%',
       ],
     }],
+    awards: [
+      { title: 'Gold Medal, International Olympiad in Informatics', org: 'IOI', year: '2023' },
+      { title: "Dean's List", org: 'Test University', year: '2022' },
+    ],
     skills: [
       { category: 'Languages', items: 'Python, JavaScript, TypeScript' },
       { category: 'Frameworks', items: 'FastAPI, React, PyTorch' },
@@ -257,6 +278,7 @@ async function runSelfTest() {
     EDUCATION: buildEducation(sample.education),
     EXPERIENCE: buildExperience(sample.experience),
     PROJECTS: buildProjects(sample.projects),
+    AWARDS: buildAwards(sample.awards),
     SKILLS: buildSkills(sample.skills),
   };
 
@@ -290,6 +312,7 @@ async function runSelfTest() {
       educationEntries: sample.education.length,
       experienceEntries: sample.experience.length,
       projectEntries: sample.projects.length,
+      awardEntries: sample.awards.length,
       skillCategories: sample.skills.length,
       totalBullets: (() => {
         const ex = Array.isArray(sample.experience) ? sample.experience.flatMap(e => Array.isArray(e?.bullets) ? e.bullets : []) : [];
