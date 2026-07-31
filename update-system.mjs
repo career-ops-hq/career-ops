@@ -205,6 +205,7 @@ const SYSTEM_PATHS = [
   'assessment-log.mjs',
   'contacts.mjs',
   'contacts.test.mjs',
+  'weekly-digest.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',

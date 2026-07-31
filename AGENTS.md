@@ -102,6 +102,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `contacts.mjs` | Job-search phonebook → vCard 3.0 exporter — stable UIDs so re-imports update instead of duplicating on platforms that honor vCard UID (JSON, `--summary`, `--vcf`, `--caller-id`) |
 | `data/contacts.tsv` | Job-search contact list — recruiters/hiring managers/peers saved from `contacto` (user layer, gitignored third-party PII) |
 | `outcome.mjs` | Record application outcome, archive artifacts, and sync tracker (`node outcome.mjs <selector> <type>`) |
+| `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}` |
 
 ### Plugins (optional)
