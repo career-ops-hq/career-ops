@@ -62,9 +62,11 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_STALE_AFTER_DAYS = 365;
 const DEFAULT_SILENCE_WINDOW_DAYS = 28;
 
-// Statuses that count as "the company answered" — a rejection IS an answer.
-const RESPONDED_STATUSES = new Set(['responded', 'interview', 'offer', 'rejected']);
-const OUTCOME_LABELS = { responded: 'Responded', interview: 'Interview', offer: 'Offer', rejected: 'Rejected' };
+// Statuses that count as "the company answered" — a rejection IS an answer, and
+// a hire is the strongest answer of all (omitting it once labelled a company
+// that hired you 'no-history', or 'silent-on-you' against other quiet rows).
+const RESPONDED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired', 'rejected']);
+const OUTCOME_LABELS = { responded: 'Responded', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
 
 const EXPLANATION_LINE =
   'high-volume inboxes, evergreen requisitions, re-opened searches, and your own unlogged responses ' +
@@ -650,6 +652,13 @@ async function runSelfTest() {
     const rejected = computeResponsiveness([row(30, 'RejCo', 'Rejected', '2026-06-01')], new Map(), { now: NOW, silenceWindowDays: 28 });
     check(rejected.facts.length === 1 && rejected.facts[0].outcome === 'Rejected', 'Rejected row produces a responded fact with outcome Rejected');
     check(rejected.facts[0].note === 'a rejection is an answer', 'Rejected fact carries the rejection-is-an-answer note');
+  }
+
+  // --- a hire is the strongest answer (must not fall through to no-history) ---
+  {
+    const hired = computeResponsiveness([row(31, 'HireCo', 'Hired', '2026-06-01')], new Map(), { now: NOW, silenceWindowDays: 28 });
+    check(hired.facts.length === 1 && hired.facts[0].outcome === 'Hired', 'Hired row produces a responded fact with outcome Hired');
+    check(hired.label === 'responded-before', 'a company that hired you labels responded-before, never no-history');
   }
 
   // --- pin-line exclusion (parseFollowups already handles this; assert via fixture) ---
