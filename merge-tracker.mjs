@@ -625,6 +625,10 @@ tsvFiles.sort((a, b) => {
 console.log(`📥 Found ${tsvFiles.length} pending additions`);
 
 const newLines = [];
+// TSVs whose evaluation could not be applied to the tracker. They are kept out
+// of merged/ so a re-run picks them up, and they make the process exit non-zero
+// instead of reporting a success that did not happen.
+const failedAdditions = [];
 
 for (const file of tsvFiles) {
   const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
@@ -740,7 +744,31 @@ for (const file of tsvFiles) {
           notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
         });
         appLines[lineIdx] = updatedLine;
+        // Refresh the cached row from the line just written (#2392). `raw` was
+        // captured when applications.md was parsed and used to be left stale
+        // after the write, so a SECOND addition matching this same row found
+        // nothing at indexOf(), fell through a branch with no else, and was
+        // archived as merged — the evaluation was gone with no warning and no
+        // recoverable copy (the tracker is gitignored and no .bak is written).
+        // The stale `score` was just as damaging: the second comparison read
+        // the pre-update score, so which of several re-evaluations survived
+        // depended on TSV filename sort order. Re-parsing the written line is
+        // the faithful refresh — the cached row then holds exactly what a fresh
+        // read of the tracker would produce. syncPdfFlags() has always kept its
+        // cache in step this way; the update path did not.
+        const refreshed = parseAppLine(updatedLine);
+        if (refreshed) Object.assign(duplicate, refreshed);
+        else duplicate.raw = updatedLine;
         updated++;
+      } else {
+        // Unreachable once `raw` is refreshed above, but never silent again: a
+        // row we cannot locate means the addition was NOT applied, so say so,
+        // keep the TSV out of merged/, and fail the run.
+        console.error(
+          `❌ ${file}: could not locate tracker row #${duplicate.num} ` +
+          `(${duplicate.company} — ${duplicate.role}) to update; this evaluation was NOT merged.`,
+        );
+        failedAdditions.push(file);
       }
     } else {
       console.log(`⏭️  Skip: ${addition.company} — ${addition.role} (existing #${duplicate.num} ${oldScore} >= new ${newScore})`);
@@ -801,15 +829,19 @@ if (newLines.length > 0) {
 if (!DRY_RUN) {
   writeFileAtomic(APPS_FILE, appLines.join('\n'));
 
-  // Move processed files to merged/
+  // Move processed files to merged/ — but only the ones actually applied.
+  // Archiving a TSV whose row never reached the tracker is what turns a bug
+  // into permanent data loss, since applications.md is gitignored and no backup
+  // is written.
   if (!existsSync(MERGED_DIR)) mkdirSync(MERGED_DIR, { recursive: true });
-  for (const file of tsvFiles) {
+  const archivable = tsvFiles.filter(f => !failedAdditions.includes(f));
+  for (const file of archivable) {
     renameSync(join(ADDITIONS_DIR, file), join(MERGED_DIR, file));
   }
-  console.log(`\n✅ Moved ${tsvFiles.length} TSVs to merged/`);
+  console.log(`\n✅ Moved ${archivable.length} TSVs to merged/`);
 }
 
-console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped`);
+console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped${failedAdditions.length ? `, ❌${failedAdditions.length} NOT merged` : ''}`);
 if (DRY_RUN) console.log('(dry-run — no changes written)');
 trackerLock.release();
 
@@ -830,4 +862,14 @@ if (VERIFY && !DRY_RUN) {
   } catch (e) {
     process.exit(1);
   }
+}
+
+// Any addition that could not be applied fails the run. The TSVs stay in the
+// additions dir, so re-running after the tracker is repaired merges them once.
+if (failedAdditions.length > 0) {
+  console.error(
+    `\n❌ ${failedAdditions.length} addition(s) were NOT merged and were left in ${ADDITIONS_DIR}: ` +
+    failedAdditions.join(', '),
+  );
+  process.exit(1);
 }
