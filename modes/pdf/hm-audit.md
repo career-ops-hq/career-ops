@@ -1,8 +1,8 @@
 # Hiring-Manager Audit of a Tailored CV
 
-An opt-in pass inside `modes/pdf.md`, run at Step 20 — between the fact gate and the PDF render — when the invocation carried `--hm-audit` or `modes/_custom.md` turns it on. Not a routable mode: `pdf` has already loaded `_shared.md`, `_profile.md`, and `_custom.md` by the time this runs, and those rules govern what the audit may recommend.
+An opt-in pass inside `modes/pdf.md`, run at Step 20 — between the fact gate and the PDF render — when the invocation carried `--hm-audit` or `modes/_custom.md` turns it on. Not a mode of its own: `pdf` has already loaded `_shared.md`, `_profile.md`, and `_custom.md` by the time this runs, and those rules govern what the audit may recommend.
 
-**Off by default, deliberately.** A subagent dispatch plus web research costs several times the tailoring it audits. Career-ops supports free tiers where that is a meaningful share of a day's budget, so the user asks for this pass rather than declining it every time.
+**Off by default, deliberately.** The pass adds a subagent dispatch plus web research on top of the tailoring, so the user asks for it rather than declining it on every PDF.
 
 ## Purpose
 
@@ -41,7 +41,9 @@ Requires a tailored CV produced by `modes/pdf.md`. Normally that CV was just bui
 
 Resolve the role to a report. Locate the tailored CV artifact per Input 4. Run `jd-skill-gap.mjs`. Load the scope-of-truth files.
 
-If the tailored CV is missing, stop here with: *"No tailored CV found for {company}. Run `/career-ops pdf` first — auditing the untailored `cv.md` would give you verdicts on a CV you are not sending."*
+If the tailored CV is missing, stop here:
+
+> [Render in {language.output}: say that no tailored CV was found for {company}; that they should run `/career-ops pdf` first; and that auditing the untailored `cv.md` instead would produce verdicts on a CV they are not sending. Keep the command literal.]
 
 If a report exists with usable role context but no JD text is reachable, continue against the report's requirement summary and state the degradation in the output. If the report has no usable role context, stop and ask for the JD text or the posting URL. Partial-but-honest beats perfect-or-nothing.
 
@@ -79,9 +81,11 @@ Dispatch a single subagent per the convention in `.agents/skills/career-ops/SKIL
 
 The brief contains:
 
-- The JD, and the `jd-skill-gap.mjs` output.
+- The JD, and the `jd-skill-gap.mjs` output. Two failure cases, and they are not the same — resolve which one applies before dispatching.
 
-  **If no JD text was reachable, or the classification came back `LOW CONFIDENCE`**, supply the report's requirement summary instead and state in the brief that the skill-gap classification is **unavailable**. Never pass the empty buckets through as a result. Instruct the reviewer explicitly: *"Do not infer requirement coverage, skill gaps, or fit conclusions from the report summary alone — it is a human précis, not the JD. Judge the bullets on their own merits and say which questions you could not answer without the posting."*
+  **If the classification came back `LOW CONFIDENCE`**, the JD itself is still reachable; only the automated pass over it failed. Supply the JD in full, state the reason code (`no-requirements-section`, `no-skill-candidates`, or `empty-jd`), and mark the skill-gap classification **unavailable** rather than passing empty buckets through as a clean result. Instruct the reviewer: *"The automated requirement check did not run on this JD, so treat its buckets as absent, not as empty. Read the posting yourself and judge coverage from it directly."*
+
+  **If no JD text was reachable at all**, supply the report's requirement summary instead and mark the classification **unavailable** for the same reason. Instruct the reviewer explicitly: *"Do not infer requirement coverage, skill gaps, or fit conclusions from the report summary alone — it is a human précis, not the JD. Judge the bullets on their own merits and say which questions you could not answer without the posting."*
 - The tailored bullets, **numbered**.
 - The persona and its tier.
 - The candidate's real scope from `cv.md` and `article-digest.md`, with this instruction verbatim: *"You may recommend cutting or reframing any bullet. You may never recommend a claim the source files do not support. If a requirement is unmet, say it is unmet — do not invent coverage for it."*
@@ -107,6 +111,8 @@ Plus:
 
 Present to the user **before any PDF regeneration**: the identity guess, the tier and its sources, the full table, and the overall verdict. The user makes the judgment call on which rewrites to take.
 
+Persist only **after** that decision is known. The audit judged the CV as it stood at Step 19; if the user then accepts rewrites, `pdf` rebuilds from Step 17 and the rendered PDF is no longer the artifact this table describes. Recording the decision keeps the section honest about which one it read — `interview-prep` consumes it later as "bullets the reviewer would have cut," and criticism the user already acted on would otherwise resurface as though it still stood.
+
 Then write this section into `reports/{num}-{company}-{date}.md`:
 
 ```markdown
@@ -115,6 +121,7 @@ Then write this section into `reports/{num}-{company}-{date}.md`:
 **Reviewer:** {tier label} — {name/function/synthesized descriptor}
 **Sources:** {links, or "none — synthesized from the available JD/report context"}
 **Audited:** {artifact path} ({N} bullets) — {YYYY-MM-DD}
+**Rewrites applied after this audit:** {none — the rendered CV is the one audited | bullets {n, n, n} — the rendered CV supersedes this table for those rows}
 **Overall:** {scope/seniority read}
 **Would advance to screen:** {yes/no} — {single biggest reason}
 
@@ -122,7 +129,7 @@ Then write this section into `reports/{num}-{company}-{date}.md`:
 |---|---|---|---|---|
 ```
 
-**Exactly one `## HM Audit` section per report.** If one already exists, **replace it wholesale** rather than appending a second — a re-run after retailoring supersedes the previous audit, and `interview-prep` reads this as the single current audit. The `**Audited:**` line carries the artifact and date, so which CV was judged stays unambiguous.
+**Exactly one `## HM Audit` section per report.** If one already exists, **replace it wholesale** rather than appending a second — a re-run after retailoring supersedes the previous audit, and `interview-prep` reads this as the single current audit. The `**Audited:**` and `**Rewrites applied after this audit:**` lines carry the artifact, the date, and what happened to the verdict afterwards, so which CV was judged — and whether the shipped one still matches it — stays unambiguous.
 
 Placement follows the convention of the cover letter draft appended by `modes/oferta.md`. If the role has no report, present the audit inline and say plainly that it was not persisted because there is no report to attach it to — never create a stray file.
 
@@ -138,5 +145,5 @@ Placement follows the convention of the cover letter draft appended by `modes/of
 - **Not a fact checker.** `verify-cv-facts.mjs` owns that and runs first, at `pdf` Step 19.
 - **Not a rewriter.** This pass recommends; the user decides; `pdf` regenerates from Step 17.
 - **Not on by default.** `pdf.md` Step 20 runs it only for `--hm-audit`, or when `modes/_custom.md` turns it on for every CV. A `pdf` run that does not ask for it never prompts.
-- **Not a routable mode.** No entry in the router table, the argument-hint, or the `AGENTS.md` mode catalog — it is reached through `pdf`, the way `heuristics/recruiter-side.md` is reached through the modes that load it.
+- **Not a routable mode.** No entry in the router table or the argument-hint, and no mode name of its own — it is reached through `pdf --hm-audit`, the way `heuristics/recruiter-side.md` is reached through the modes that load it. The `AGENTS.md` and `modes/README.md` rows point at `pdf`, so the pass is discoverable without being addressable.
 - **Not a panel.** One reviewer. A multi-persona panel (recruiter + HM + peer) is a possible follow-up, deliberately out of scope for cost reasons.
