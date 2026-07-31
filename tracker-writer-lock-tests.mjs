@@ -4,8 +4,8 @@
 
 import { spawn } from 'child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, watch,
-  writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
+  utimesSync, writeFileSync,
 } from 'fs';
 import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
@@ -58,38 +58,43 @@ const CONTENTION_WAIT_MS = 2_000;
  * and removes `${lockDir}.recover` on every contended pass, so its first
  * appearance means "this child has tried the lock and someone else holds it".
  * That instant sits after a pre-lock read and before a post-lock one, which is
- * exactly the discrimination the mutation needs. fs.watch queues events, so a
- * guard directory that exists for a millisecond is still observed.
+ * exactly the discrimination the mutation needs.
  *
- * It is a bounded wait, never a barrier. If no guard event arrives — a lock
- * implementation that stops using the guard, a writer that legitimately does
- * other work first, a platform where fs.watch cannot report directory children
- * — the mutation proceeds anyway once CONTENTION_WAIT_MS elapses and the test
- * degrades to its previous timing-dependent behaviour instead of hanging.
+ * This POLLS rather than using fs.watch. On Windows, fs.watch aborts the whole
+ * process with a libuv assertion (`!_wcsnicmp(filename, dir, dirlen)`,
+ * src\win\fs-event.c) when the watched directory is reached through an 8.3
+ * short path — which is exactly what CI runners use (C:\Users\RUNNER~1\...),
+ * so the watcher version killed this suite with exit 3221226505 on
+ * windows-latest while passing locally. The guard is created and removed on
+ * every contended retry, not once, so a poll gets many chances to observe it.
  *
- * @param {string} dir - Directory containing the lock (watched non-recursively).
+ * It is a bounded wait, never a barrier. If no guard ever appears — a lock
+ * implementation that stops using the guard, or a writer that legitimately
+ * does other work first — the mutation proceeds anyway once
+ * CONTENTION_WAIT_MS elapses and the test degrades to its previous
+ * timing-dependent behaviour instead of hanging.
+ *
+ * @param {string} dir - Directory containing the lock.
  * @param {string} lockDir - The lock directory whose recover guard signals contention.
  * @returns {{wait: (timeoutMs: number) => Promise<boolean>, close: () => void}}
  */
 function watchForContention(dir, lockDir) {
   const guardPrefix = `${basename(lockDir)}.recover`;
-  let seen = false;
-  let watcher = null;
-  try {
-    watcher = watch(dir, (_event, name) => {
-      if (name && String(name).startsWith(guardPrefix)) seen = true;
-    });
-  } catch {
-    // fs.watch is unavailable or unsupported here — the timed fallback stands in.
-  }
+  const guardPresent = () => {
+    try {
+      return readdirSync(dir).some((name) => name.startsWith(guardPrefix));
+    } catch {
+      return false; // directory vanished mid-run; the timed fallback stands in
+    }
+  };
   return {
     async wait(timeoutMs) {
       const deadline = Date.now() + timeoutMs;
-      while (!seen && Date.now() < deadline) await sleep(5);
-      watcher?.close();
+      let seen = false;
+      while (!(seen = guardPresent()) && Date.now() < deadline) await sleep(2);
       return seen;
     },
-    close() { watcher?.close(); },
+    close() {},
   };
 }
 
