@@ -821,6 +821,8 @@ Canonical tracker write path: strict `states.yml` validation, shared lock, atomi
 node set-status.mjs <report#|company> <state> [--note "..."] [--force] [--dry-run]
 node set-status.mjs --row N <state> [--note "..."]          # explicit tracker row ID
 node set-status.mjs --report N <state> [--note "..."]       # row whose Report cell links report #N
+node set-status.mjs --row 12 Applied
+node set-status.mjs --report 345 Applied
 ```
 
 A bare number is ambiguous once tracker row IDs and report IDs diverge, so an explicit selector disambiguates which number space you mean:
@@ -830,7 +832,11 @@ A bare number is ambiguous once tracker row IDs and report IDs diverge, so an ex
 
 `--row` and `--report` are mutually exclusive. Because an explicit selector answers the report-mismatch guard rather than overriding it, `--row` bypasses that guard without needing `--force` (which silences the check while the ambiguity is still real).
 
-On bad input: exit `1` on an invalid or conflicting selector (or a non-canonical state), `2` when the selector matches no tracker row.
+Exit codes:
+
+- `1` for an invalid or conflicting selector, or a non-canonical state.
+- `2` when the selector matches no tracker row.
+- `3` when a bare numeric selector triggers the report-number mismatch guard (`report-number-mismatch`).
 
 ---
 
