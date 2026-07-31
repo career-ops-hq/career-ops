@@ -866,8 +866,9 @@ async function main() {
       // it can be up to 500 boards behind where the breaker actually stopped —
       // and --resume would replay all of them against the resolver that just
       // refused.
+      let checkpointWritten = false;
       if (!opts.dryRun) {
-        writeCheckpoint({
+        checkpointWritten = writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
           counters: snapshotCounters(),
@@ -878,8 +879,9 @@ async function main() {
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
       log(`     CAREER_OPS_NO_DNS_CACHE=1 only if you know the cache is at fault.`);
       // Only claim resumability when a checkpoint actually exists: --dry-run
-      // writes none, and a failed write already said so on its own.
-      if (!opts.dryRun) log(`     Rerun with --resume once the resolver recovers — checkpointed at company ${startAt + lastResumeAt} of ${name}.`);
+      // writes none, and a failed write (ENOSPC, read-only volume) leaves at
+      // best the last periodic checkpoint — nothing at the offset named here.
+      if (checkpointWritten) log(`     Rerun with --resume once the resolver recovers — checkpointed at company ${startAt + lastResumeAt} of ${name}.`);
       break;
     }
     completedSources.add(name);
@@ -999,6 +1001,11 @@ async function main() {
       companiesAvailable: totalCompaniesAvailable,
       companiesScanned: totalCompaniesScanned,
       capHit,
+      // The most degraded outcome this payload can report: the sweep did not
+      // finish its sources, and a checkpoint is waiting for --resume. Without
+      // it a caller can't tell a stopped run from a complete one except by
+      // stat'ing the checkpoint file itself.
+      stoppedByOutage,
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,

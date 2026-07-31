@@ -130,12 +130,21 @@ function sweep(dir, dnsCode, extraArgs = []) {
       // stored, and the resume point are all the same number. A counter left at
       // the full slice shows up as companiesScanned > resumeAt — unattempted
       // boards reported as scanned, and double-counted again on resume.
-      const reported = JSON.parse(out).companiesScanned;
+      const result = JSON.parse(out);
       const stored = cp.counters?.totalCompaniesScanned;
-      if (reported === at && stored === at) {
-        pass(`interrupted run counts only what it attempted (${reported} = checkpoint ${stored} = resumeAt ${at})`);
+      if (result.companiesScanned === at && stored === at) {
+        pass(`interrupted run counts only what it attempted (${result.companiesScanned} = checkpoint ${stored} = resumeAt ${at})`);
       } else {
-        fail(`interrupted counters disagree: companiesScanned=${reported} checkpoint=${stored} resumeAt=${at}`);
+        fail(`interrupted counters disagree: companiesScanned=${result.companiesScanned} checkpoint=${stored} resumeAt=${at}`);
+      }
+
+      // A caller that reads only the JSON (the web UI does) must be able to
+      // tell a resumable stop from a finished sweep without stat'ing the
+      // checkpoint file itself.
+      if (result.stoppedByOutage === true) {
+        pass('--json reports the run as stopped by the resolver breaker');
+      } else {
+        fail(`--json hides the outage stop: stoppedByOutage=${result.stoppedByOutage}`);
       }
     }
 
@@ -175,8 +184,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
       fail(`clean sweep did not complete${formatRunFailure()}`);
     } else if (existsSync(cpPath)) {
       fail('a completed sweep left its checkpoint behind — the next run will demand --resume');
+    } else if (JSON.parse(out).stoppedByOutage !== false) {
+      fail(`a completed sweep reported stoppedByOutage=${JSON.parse(out).stoppedByOutage}`);
     } else {
-      pass('a completed sweep still deletes its checkpoint');
+      pass('a completed sweep still deletes its checkpoint and reports no outage stop');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
