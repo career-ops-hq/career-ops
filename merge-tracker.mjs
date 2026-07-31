@@ -630,6 +630,32 @@ const newLines = [];
 // instead of reporting a success that did not happen.
 const failedAdditions = [];
 
+/**
+ * Replace one tracker row line wherever it currently lives.
+ *
+ * A row added earlier in THIS run is still queued in `newLines` and has not
+ * been spliced into `appLines` yet, so an update targeting it would not be
+ * found by an appLines-only lookup (#2392 gap 3). Searching both keeps the
+ * intra-run dedup below able to update a row it just created.
+ *
+ * @param {string} oldLine - The row line as it currently stands.
+ * @param {string} updatedLine - Replacement row line.
+ * @returns {boolean} True when the line was found and replaced.
+ */
+function replaceTrackerLine(oldLine, updatedLine) {
+  const idx = appLines.indexOf(oldLine);
+  if (idx >= 0) {
+    appLines[idx] = updatedLine;
+    return true;
+  }
+  const pendingIdx = newLines.indexOf(oldLine);
+  if (pendingIdx >= 0) {
+    newLines[pendingIdx] = updatedLine;
+    return true;
+  }
+  return false;
+}
+
 for (const file of tsvFiles) {
   const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
   const addition = parseTsvContent(content, file);
@@ -731,19 +757,17 @@ for (const file of tsvFiles) {
 
     if (newScore > oldScore) {
       console.log(`🔄 Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`);
-      const lineIdx = appLines.indexOf(duplicate.raw);
-      if (lineIdx >= 0) {
-        const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
-        const updatedLine = buildRow({
-          num: duplicate.num, date: addition.date, company: addition.company,
-          role: reportNumMatched ? addition.role : duplicate.role,
-          via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
-          score: addition.score, status: duplicate.status, pdf,
-          report: addition.report,
-          notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
-        });
-        appLines[lineIdx] = updatedLine;
+      const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
+      const updatedLine = buildRow({
+        num: duplicate.num, date: addition.date, company: addition.company,
+        role: reportNumMatched ? addition.role : duplicate.role,
+        via: addition.via || duplicate.via || '—',
+        location: addition.location || duplicate.location || '—',
+        score: addition.score, status: duplicate.status, pdf,
+        report: addition.report,
+        notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
+      });
+      if (replaceTrackerLine(duplicate.raw, updatedLine)) {
         // Refresh the cached row from the line just written (#2392). `raw` was
         // captured when applications.md was parsed and used to be left stale
         // after the write, so a SECOND addition matching this same row found
@@ -803,6 +827,17 @@ for (const file of tsvFiles) {
       report: addition.report, notes: addition.notes,
     });
     newLines.push(newLine);
+    // Register the row with the dedup index right away (#2392 gap 3). All
+    // three dedup tiers search `existingApps`, which only ever held rows read
+    // from the file, so two TSVs for the same company+role in ONE run both
+    // appended and the tracker gained duplicate rows — the exact outcome
+    // CLAUDE.md's "NEVER create new entries if company+role already exists"
+    // rule forbids. The parsed row's `raw` is the queued line, and
+    // replaceTrackerLine() knows how to find it in `newLines`, so a later
+    // higher-scored addition updates it in place just like a row already on
+    // disk.
+    const parsedNew = parseAppLine(newLine);
+    if (parsedNew) existingApps.push(parsedNew);
     added++;
     console.log(`➕ Add #${entryNum}: ${addition.company} — ${addition.role} (${addition.score})`);
   }

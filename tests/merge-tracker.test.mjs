@@ -158,3 +158,43 @@ try {
 } catch (e) {
   fail(`merge-tracker repeated-update tests crashed: ${e.message}`);
 }
+
+// ── #2392 gap 3: no dedup between rows added in the same run ────────────────
+// All three dedup tiers search `existingApps`, which only ever held rows read
+// from the file. Rows appended during the run went to `newLines` and were
+// invisible, so two TSVs for one company+role in a single batch both appended.
+console.log('\nmerge-tracker.mjs — intra-run dedup (#2392)');
+try {
+  const sameRole = runMergeDetailed({
+    '010-acme.tsv': '10\t2026-02-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.2/5\t❌\t[10](reports/010-acme-2026-02-01.md)\tfirst pass\n',
+    '011-acme.tsv': '11\t2026-02-02\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.6/5\t❌\t[11](reports/011-acme-2026-02-02.md)\tsecond pass\n',
+  });
+  const sameRows = dataRows(sameRole.tracker);
+  if (sameRows.length === 1) {
+    pass('two TSVs for one company+role in one run produce a single tracker row');
+  } else {
+    fail(`intra-run duplicate rows appended: ${sameRows.length} rows: ${sameRows.join(' // ')}`);
+  }
+  // Dedup is only worth having if the better evaluation is the one kept — a
+  // dedup that drops the higher score is the same data loss by another route.
+  if (sameRows.length === 1 && /4\.6\/5/.test(sameRows[0])) {
+    pass('the higher-scored of two same-run evaluations wins the merged row');
+  } else {
+    fail(`same-run dedup kept the wrong evaluation: ${sameRows.join(' // ')}`);
+  }
+
+  // Control: dedup must not become greedy. Distinct roles at the same company
+  // arriving in one run are two real applications and must both survive.
+  const distinct = runMergeDetailed({
+    '020-acme.tsv': '20\t2026-02-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.2/5\t❌\t[20](reports/020-acme-2026-02-01.md)\tplatform\n',
+    '021-acme.tsv': '21\t2026-02-02\tAcme\tDirector of Product Marketing\tEvaluated\t4.6/5\t❌\t[21](reports/021-acme-2026-02-02.md)\tmarketing\n',
+  });
+  const distinctRows = dataRows(distinct.tracker);
+  if (distinctRows.length === 2) {
+    pass('distinct roles at one company in the same run stay separate rows');
+  } else {
+    fail(`same-run dedup collapsed two distinct roles: ${distinctRows.join(' // ')}`);
+  }
+} catch (e) {
+  fail(`merge-tracker intra-run dedup tests crashed: ${e.message}`);
+}
