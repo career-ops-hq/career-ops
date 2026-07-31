@@ -1,10 +1,12 @@
-# Mode: cv-hm-audit — Hiring-Manager Audit of a Tailored CV
+# Hiring-Manager Audit of a Tailored CV
+
+An optional pass inside `modes/pdf.md`, offered at Step 20 — between the fact gate and the PDF render. Not a routable mode: `pdf` has already loaded `_shared.md`, `_profile.md`, and `_custom.md` by the time this runs, and those rules govern what the audit may recommend.
 
 ## Purpose
 
 Put a tailored CV in front of an adversarial, research-grounded reviewer before it becomes a PDF.
 
-The fact gate at `pdf` step 18 (`verify-cv-facts.mjs`) is **mechanical**: it diffs generated output against `cv.md` and `article-digest.md` to catch invented metrics. It cannot judge whether a truthful bullet is the *right* bullet — buried lede, wrong altitude, wrong vocabulary, or answering a requirement the JD never raised. This mode answers a different question: *"Would the person who screens this actually advance it?"*
+The fact gate at `pdf` Step 19 (`verify-cv-facts.mjs`) is **mechanical**: it diffs generated output against `cv.md` and `article-digest.md` to catch invented metrics. It cannot judge whether a truthful bullet is the *right* bullet — buried lede, wrong altitude, wrong vocabulary, or answering a requirement the JD never raised. This pass answers a different question: *"Would the person who screens this actually advance it?"*
 
 Two properties are load-bearing, and neither works without the other:
 
@@ -13,7 +15,7 @@ Two properties are load-bearing, and neither works without the other:
 
 ## Dependency
 
-Requires a tailored CV produced by `modes/pdf.md`. If none exists for the company, stop and point the user at `pdf`.
+Requires a tailored CV produced by `modes/pdf.md`. Normally that CV was just built by the surrounding flow; when this pass is run against an earlier application, resolve the artifact per Input 4. If none exists for the company, stop and point the user at `pdf`.
 
 **Never audit `cv.md` itself.** That is the untailored master; auditing it produces confidently wrong verdicts about a CV the user never intends to send.
 
@@ -23,8 +25,8 @@ Requires a tailored CV produced by `modes/pdf.md`. If none exists for the compan
 2. **Report** at `reports/{num}-{company}-{date}.md` — read for the `**URL:**` header, archetype, and identified gaps.
 3. **JD** at `jds/{slug}.md`, or fetched from the report's `**URL:**`.
 4. **Tailored bullets** — resolve the artifact for *this* role, in order. Never parse the `.pdf`.
-   1. `/tmp/cv-{candidate}-{company}.json` from the same session — the cleanest source (`experience[].bullets[]`).
-   2. The HTML recorded for this report in `data/pdf-index.tsv` (`report → pdf → html`, written by `generate-pdf.mjs`). Look the row up by report number.
+   1. `/tmp/cv-{candidate}-{company}.json` from the same session — the cleanest source (`experience[].bullets[]`). This is the usual case, since the audit runs in the same `pdf` flow that wrote it.
+   2. The `html` column recorded for this report in `data/pdf-index.tsv` (`report \t pdf \t html \t format \t date`, written by `generate-pdf.mjs`). Look the row up by report number. This resolves both layouts: a bundle's `cv/tailored/vNNN/cv.html` and a flat `output/cv-{candidate}-{company}.html`.
    3. A path the user supplies explicitly.
 
    Only if none of those resolve, fall back to the newest `output/cv-*-{company}.html` — and say so, because a company with two open roles produces several files whose names carry the candidate and company but not the role. Auditing the wrong CV silently is worse than asking. When reading HTML, take the `<li>` items, which the generator emits only for experience and project bullets.
@@ -69,7 +71,7 @@ Cap at Tier B and flag recency doubt when the profile looks stale (the person ma
 
 ## Step 3 — Brief and dispatch one subagent
 
-Dispatch a single subagent per the convention in `.claude/skills/career-ops/SKILL.md`. **Never nest subagents.**
+Dispatch a single subagent per the convention in `.agents/skills/career-ops/SKILL.md`. **Never nest subagents.**
 
 The brief contains:
 
@@ -80,7 +82,7 @@ The brief contains:
 - The persona and its tier.
 - The candidate's real scope from `cv.md` and `article-digest.md`, with this instruction verbatim: *"You may recommend cutting or reframing any bullet. You may never recommend a claim the source files do not support. If a requirement is unmet, say it is unmet — do not invent coverage for it."*
 
-If the CLI exposes no Agent primitive, run the persona inline **and say so in the output**. The value of this mode is that it is not self-auditing; degrading silently would misrepresent the result.
+If the CLI exposes no Agent primitive, run the persona inline **and say so in the output**. The value of this pass is that it is not self-auditing; degrading silently would misrepresent the result.
 
 ## Step 4 — Collect the verdict
 
@@ -129,7 +131,8 @@ Placement follows the convention of the cover letter draft appended by `modes/of
 
 ## Scope / Non-Goals
 
-- **Not a fact checker.** `verify-cv-facts.mjs` owns that and runs first, at `pdf` step 18.
-- **Not a rewriter.** This mode recommends; the user decides; `pdf` regenerates.
-- **Not mandatory.** `pdf.md` points at it. Users who want it on every CV can say so in their own `modes/_custom.md`.
+- **Not a fact checker.** `verify-cv-facts.mjs` owns that and runs first, at `pdf` Step 19.
+- **Not a rewriter.** This pass recommends; the user decides; `pdf` regenerates from Step 17.
+- **Not mandatory.** `pdf.md` offers it at Step 20. Users who want it on every CV can say so in their own `modes/_custom.md`.
+- **Not a routable mode.** No entry in the router table, the argument-hint, or the `AGENTS.md` mode catalog — it is reached through `pdf`, the way `heuristics/recruiter-side.md` is reached through the modes that load it.
 - **Not a panel.** One reviewer. A multi-persona panel (recruiter + HM + peer) is a possible follow-up, deliberately out of scope for cost reasons.

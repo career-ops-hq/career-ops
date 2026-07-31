@@ -66,6 +66,7 @@ const SYSTEM_PATHS = [
   'modes/_brief.template.md',
   'modes/oferta.md',
   'modes/pdf.md',
+  'modes/pdf/',
   'modes/cover.md',
   'modes/email.md',
   'modes/add.md',

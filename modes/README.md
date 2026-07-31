@@ -24,7 +24,6 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `pdf.md` | `pdf` | ATS-optimized PDF generation |
 | `latex.md` | `latex` | LaTeX/Overleaf CV export |
 | `cover.md` | `cover` | Cover letter generator |
-| `cv-hm-audit.md` | `cv-hm-audit` | Hiring-manager audit of a tailored CV |
 | `email.md` | `email` | Application email drafts (draft-only) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
@@ -62,6 +61,7 @@ and never touched by `update-system.mjs` (see
 |---|---|
 | `interview/` | Reusable interview skills: prep planner, practice interviewer, post-interview debrief (see [interview/README.md](interview/README.md)) |
 | `heuristics/` | Shared candidate-facing writing heuristics loaded by other modes — `recruiter-side.md` governs PDF summaries, bullets, cover letters, form answers, and outreach |
+| `pdf/` | Optional passes inside the `pdf` flow, not routable modes — `hm-audit.md` is the hiring-manager read of a tailored CV, offered between the fact gate and PDF render |
 | `regional/` | Market calibration modes — `eu-swe.md` calibrates applications for European SWE roles (advisory only) |
 | `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ pl/ pt/ ru/ tr/ ua/ zh/` | Language modes: native translations of the core modes with market-specific vocabulary; each has its own README |
 
