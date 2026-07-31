@@ -7461,7 +7461,17 @@ try {
       '| 32 | 2026-01-10 | Cohere | Senior Software Engineer, Agent Infrastructure | 4.0/5 | Evaluated | ❌ | [32](../reports/014-cohere-agent-infra.md) | distinct role — higher score |\n' +
       // Exact company+role duplicate of #32 (same title, both Evaluated) — must
       // collapse to one, keeping the higher score.
-      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n');
+      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n' +
+      // A Hired row vs a later exact-title repost. Hired must rank as an
+      // advanced status: the accepted-job record can never lose a dedup
+      // contest to a higher-scored repost.
+      '| 34 | 2026-01-05 | HiredCo | Platform Engineer | 3.8/5 | Hired | ❌ | [34](../reports/034-hiredco.md) | the accepted job |\n' +
+      '| 35 | 2026-01-12 | HiredCo | Platform Engineer | 4.2/5 | Evaluated | ❌ | [35](../reports/035-hiredco-repost.md) | repost of the accepted job |\n' +
+      // Two DIFFERENT roles sharing a stale duplicate tracker number (the
+      // known merge-bug artifact, verify-pipeline Check 12). A bare number
+      // match must not read as same-report identity.
+      '| 36 | 2026-01-06 | NumCo | Data Engineer | 3.9/5 | Applied | ❌ | [36](../reports/036-numco-data.md) | duplicate-number, applied |\n' +
+      '| 36 | 2026-01-12 | NumCo | ML Engineer | 4.5/5 | Evaluated | ❌ | [37](../reports/037-numco-ml.md) | duplicate-number, different role |\n');
 
     const dedupResult = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
     if (dedupResult === null) {
@@ -7518,6 +7528,26 @@ try {
         pass('dedup-tracker merges an exact company+role duplicate to one (keeps highest score)');
       } else {
         fail(`dedup-tracker exact-duplicate handling broken: ${cohereAgentInfra.length} Cohere Agent Infrastructure rows`);
+      }
+
+      // Regression: Hired was missing from STATUS_RANK, so it ranked 0 — the
+      // advanced-status guard never fired and a higher-scored repost deleted
+      // the accepted-job record.
+      const hiredRows = deduped.split('\n').filter(l => l.includes('HiredCo'));
+      if (hiredRows.length === 2 && hiredRows.some(l => l.includes('Hired'))) {
+        pass('dedup-tracker protects a Hired row from an exact-title repost');
+      } else {
+        fail(`dedup-tracker deleted the Hired row: ${hiredRows.length} HiredCo rows survive`);
+      }
+
+      // Regression: a bare tracker-number match short-circuited roleMatch, so
+      // two different roles sharing a stale duplicate # merged and the Applied
+      // row of a different opening was deleted.
+      const numcoRows = deduped.split('\n').filter(l => l.includes('NumCo'));
+      if (numcoRows.length === 2 && numcoRows.some(l => l.includes('Applied'))) {
+        pass('dedup-tracker keeps different roles that share a stale duplicate tracker number');
+      } else {
+        fail(`dedup-tracker merged different roles across a duplicate tracker number: ${numcoRows.length} NumCo rows survive`);
       }
     }
   } finally {

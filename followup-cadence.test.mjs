@@ -14,6 +14,7 @@ import {
   DEFAULT_CADENCE,
   parseFollowups,
   analyzeFromContent,
+  normalizeStatus,
 } from './followup-cadence.mjs';
 
 let passed = 0;
@@ -164,6 +165,13 @@ eq(
   missingFollowupsArg.entries.some((e) => e.urgency === 'cold'),
   false,
 );
+
+// Hired aliases from templates/states.yml must normalize to 'hired'. Before
+// this, 'Accepted'/'Contratado' normalized to themselves, so stats/funnel/
+// company-history consumers looking for 'hired' silently dropped those rows.
+for (const raw of ['Hired', 'Accepted', 'accept', 'Contratado', 'contratada']) {
+  eq(`normalizeStatus('${raw}') canonicalizes to hired`, normalizeStatus(raw), 'hired');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

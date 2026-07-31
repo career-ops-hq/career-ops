@@ -40,6 +40,11 @@ const STATUS_RANK = {
   'responded': 4,
   'interview': 5,
   'offer': 6,
+  // Hired outranks everything: the accepted-job record must never lose a
+  // dedup contest to a repost row (aliases from templates/states.yml).
+  'hired': 7,
+  'accepted': 7,
+  'accept': 7,
   // Spanish aliases — kept for backwards compat with existing tracker data
   'no_aplicar': 0,
   'no aplicar': 0,
@@ -52,6 +57,8 @@ const STATUS_RANK = {
   'respondido': 4,
   'entrevista': 5,
   'oferta': 6,
+  'contratado': 7,
+  'contratada': 7,
 };
 
 /**
@@ -138,19 +145,22 @@ function extractReportNum(reportStr) {
 /**
  * Determine whether two tracker rows point to the same exact report identity.
  *
- * Exact identity is stronger than fuzzy role matching. If two rows share the
- * same tracker number or bracketed report number, dedup may treat them as the
- * same record even when an advanced status is present.
+ * Exact identity is stronger than fuzzy role matching: it may cluster rows
+ * even when an advanced status is present. Matching bracketed report numbers
+ * are that evidence. A shared tracker number alone is NOT — duplicate tracker
+ * numbers are a known artifact of the old merge bug (verify-pipeline Check 12
+ * exists because they never mean the same application), so a bare number match
+ * only counts when the rows also carry the same exact role title.
  *
  * @param {object} a - First parsed applications.md row.
  * @param {object} b - Second parsed applications.md row.
  * @returns {boolean} True when both rows represent the same report identity.
  */
 function sameReportIdentity(a, b) {
-  if (a.num === b.num) return true;
   const reportA = extractReportNum(a.report);
   const reportB = extractReportNum(b.report);
-  return reportA !== null && reportA === reportB;
+  if (reportA !== null && reportA === reportB) return true;
+  return a.num === b.num && normalizeRole(a.role) === normalizeRole(b.role);
 }
 
 /**

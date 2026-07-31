@@ -91,6 +91,10 @@ const ALIASES = {
   'respondido': 'responded',
   'entrevista': 'interview',
   'oferta': 'offer',
+  // Hired aliases from templates/states.yml — without these, an "Accepted" or
+  // "Contratado" row normalizes to itself, so stats/funnel/company-history
+  // consumers looking for 'hired' silently drop the best outcome in the tracker.
+  'contratado': 'hired', 'contratada': 'hired', 'accepted': 'hired', 'accept': 'hired',
   'rechazado': 'rejected', 'rechazada': 'rejected',
   'descartado': 'discarded', 'descartada': 'discarded',
   'cerrada': 'discarded', 'cancelada': 'discarded',
