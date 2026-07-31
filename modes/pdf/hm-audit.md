@@ -1,6 +1,8 @@
 # Hiring-Manager Audit of a Tailored CV
 
-An optional pass inside `modes/pdf.md`, offered at Step 20 — between the fact gate and the PDF render. Not a routable mode: `pdf` has already loaded `_shared.md`, `_profile.md`, and `_custom.md` by the time this runs, and those rules govern what the audit may recommend.
+An opt-in pass inside `modes/pdf.md`, run at Step 20 — between the fact gate and the PDF render — when the invocation carried `--hm-audit` or `modes/_custom.md` turns it on. Not a routable mode: `pdf` has already loaded `_shared.md`, `_profile.md`, and `_custom.md` by the time this runs, and those rules govern what the audit may recommend.
+
+**Off by default, deliberately.** A subagent dispatch plus web research costs several times the tailoring it audits. Career-ops supports free tiers where that is a meaningful share of a day's budget, so the user asks for this pass rather than declining it every time.
 
 ## Purpose
 
@@ -133,6 +135,6 @@ Placement follows the convention of the cover letter draft appended by `modes/of
 
 - **Not a fact checker.** `verify-cv-facts.mjs` owns that and runs first, at `pdf` Step 19.
 - **Not a rewriter.** This pass recommends; the user decides; `pdf` regenerates from Step 17.
-- **Not mandatory.** `pdf.md` offers it at Step 20. Users who want it on every CV can say so in their own `modes/_custom.md`.
+- **Not on by default.** `pdf.md` Step 20 runs it only for `--hm-audit`, or when `modes/_custom.md` turns it on for every CV. A `pdf` run that does not ask for it never prompts.
 - **Not a routable mode.** No entry in the router table, the argument-hint, or the `AGENTS.md` mode catalog — it is reached through `pdf`, the way `heuristics/recruiter-side.md` is reached through the modes that load it.
 - **Not a panel.** One reviewer. A multi-persona panel (recruiter + HM + peer) is a possible follow-up, deliberately out of scope for cost reasons.
