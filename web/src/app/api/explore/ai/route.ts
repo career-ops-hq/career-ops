@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,42 @@ import { assembleDedupContext } from "@/lib/core/discover";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
+
+const codexCapabilityCache = new Map<string, boolean>();
+
+function supportsSafeCodexExec(binPath: string): boolean {
+  const cached = codexCapabilityCache.get(binPath);
+  if (cached !== undefined) return cached;
+
+  const help = (args: string[]) => {
+    const result = spawnSync(binPath, args, {
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    });
+
+    if (result.error) return "";
+    return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  };
+
+  const globalHelp = help(["--help"]);
+  const execHelp = help(["exec", "--help"]);
+
+  const supported =
+    globalHelp.includes("--ask-for-approval") &&
+    globalHelp.includes("--search") &&
+    execHelp.includes("--sandbox") &&
+    execHelp.includes("read-only") &&
+    execHelp.includes("--strict-config") &&
+    execHelp.includes("--ignore-user-config") &&
+    execHelp.includes("--ephemeral") &&
+    execHelp.includes("--skip-git-repo-check") &&
+    execHelp.includes("--output-last-message");
+
+  codexCapabilityCache.set(binPath, supported);
+  return supported;
+}
 
 const OUTPUT_CONTRACT = `
 
@@ -61,6 +97,17 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   const isCodex = cliId === "codex";
 
+  if (isCodex && !supportsSafeCodexExec(binPath)) {
+    return Response.json(
+      {
+        code: "CODEX_UNSUPPORTED",
+        error:
+          "Codex CLI does not support the required read-only execution flags. Update Codex and try again.",
+      },
+      { status: 400 },
+    );
+  }
+
   // The complete mode, memory and dedup context are embedded in `prompt`.
   // Codex runs in an empty temporary cwd and writes only its final assistant
   // response to a dedicated file. Its normal console transcript includes the
@@ -90,13 +137,14 @@ export async function POST(req: Request) {
       ]
     : isCodex
       ? [
-          "-c",
-          'sandbox_mode="read-only"',
-          "-c",
-          'approval_policy="never"',
-          "-c",
-          'web_search="live"',
+          "--ask-for-approval",
+          "never",
+          "--search",
           "exec",
+          "--strict-config",
+          "--ignore-user-config",
+          "--sandbox",
+          "read-only",
           "--ephemeral",
           "--skip-git-repo-check",
           "--output-last-message",
@@ -233,7 +281,31 @@ export async function POST(req: Request) {
           if (finalText) {
             emit(finalText);
           } else if (code !== 0) {
-            const diagnosticsCaptured = codexStderr.trim().length > 0;
+            const diagnosticText = codexStderr.trim();
+            const diagnosticsCaptured = diagnosticText.length > 0;
+
+            if (diagnosticsCaptured) {
+              const lowerDiagnostics = diagnosticText.toLowerCase();
+              const diagnosticMarkers = [
+                "error",
+                "fatal",
+                "failed",
+                "denied",
+                "not found",
+                "invalid",
+                "unsupported",
+              ].filter((marker) => lowerDiagnostics.includes(marker));
+
+              // Codex stderr may contain the complete user prompt. Log only
+              // bounded metadata and marker categories, never its contents.
+              console.error("[Codex AI search exited without a final response]", {
+                exitCode: code ?? "unknown",
+                stderrBytes: Buffer.byteLength(diagnosticText, "utf8"),
+                stderrLines: diagnosticText.split(/\r?\n/).length,
+                diagnosticMarkers,
+              });
+            }
+
             safeEnqueue(
               `
 [Codex exited with code ${code ?? "unknown"}${
