@@ -171,6 +171,7 @@ export function run(cmd, args = [], opts = {}) {
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
+    warnFallbackShell(exe);
     return null;
   }
 }
@@ -222,6 +223,65 @@ export function formatRunFailure(maxChars = 2000) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 let bashCache = null;
+let bashSourceCache = null;
+
+/**
+ * Which probe in getBash() produced the current bash, or null before the first
+ * getBash() call.
+ *
+ * getBash() returns the bare string 'bash' from three different branches -- the
+ * WSL probe, the PATH probe, and the give-up path -- so its return value alone
+ * cannot tell a caller which shell it is about to run. On Windows those are not
+ * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
+ * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
+ * lets a failure name the shell instead of leaving the reader to infer it
+ * (#2344).
+ *
+ * @returns {'posix'|'git-bash'|'wsl'|'path'|'unresolved'|null} Resolution source.
+ */
+export function bashSource() { return bashSourceCache; }
+
+/** Sources whose shell is ambiguous or foreign, and worth naming on failure. */
+const FALLBACK_BASH_SOURCES = new Set(['wsl', 'path', 'unresolved']);
+
+let warnedFallbackShell = false;
+
+/**
+ * Say out loud, once per process, that a failing shell command ran in a
+ * fallback shell rather than Git Bash.
+ *
+ * Unconditional by design. formatRunFailure() already surfaces the child's
+ * stderr to callers that ask for it, but the shell that produced it is still
+ * invisible, and the whole failure mode of #2344 is that nobody suspects the
+ * shell: it is missing, the script dies at `node`, run() returns null, `|| ''`
+ * turns that into an empty string, and the assertion accuses the code under
+ * test of a routing bug it does not have.
+ *
+ * Two things keep this from becoming noise in the suites that provoke command
+ * failures on purpose. It fires only when getBash() landed on a fallback -- a
+ * Git Bash resolved by literal path is unambiguous and stays silent, which is
+ * every correctly provisioned machine -- and it fires at most once per process.
+ *
+ * @param {string} exe - Executable that just failed.
+ * @returns {void}
+ */
+function warnFallbackShell(exe) {
+  if (warnedFallbackShell) return;
+  if (bashCache === null || exe !== bashCache) return;
+  if (!FALLBACK_BASH_SOURCES.has(bashSourceCache)) return;
+  warnedFallbackShell = true;
+  const where = {
+    wsl: 'WSL bash (`wsl -e bash`) -- a different OS with its own PATH',
+    path: '`bash` from PATH, provenance unknown',
+    unresolved: '`bash`, which no probe could confirm exists',
+  }[bashSourceCache];
+  console.error(`    [shell] this command ran under ${where},`);
+  console.error('            because no Git Bash was found at any known location.');
+  console.error('            The Windows `node` and any PATH-injected stub binary may be invisible there,');
+  console.error('            so scripts calling node die with `node: command not found` (exit 127) and the');
+  console.error('            assertion sees an empty result. Suspect the shell before the code under test.');
+  console.error('            Install Git for Windows, or see formatRunFailure() for the raw stderr.');
+}
 
 /**
  * Resolve the bash executable to use for shell-script checks, lazily.
@@ -236,24 +296,28 @@ let bashCache = null;
  */
 export function getBash() {
   if (bashCache !== null) return bashCache;
-  if (process.platform !== 'win32') return (bashCache = 'bash');
+  if (process.platform !== 'win32') { bashSourceCache = 'posix'; return (bashCache = 'bash'); }
   for (const cmd of WINDOWS_BASH_CANDIDATES) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      bashSourceCache = 'git-bash';
       return (bashCache = cmd);
     } catch {}
   }
   try {
     // Probe via argv vector — no shell string, nothing to interpolate.
     execFileSync('wsl', ['-e', 'bash', '-c', 'true'], { stdio: 'ignore' });
+    bashSourceCache = 'wsl';
     return (bashCache = 'bash');
   } catch {}
   for (const cmd of ['bash']) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      bashSourceCache = 'path';
       return (bashCache = cmd);
     } catch {}
   }
+  bashSourceCache = 'unresolved';
   return (bashCache = 'bash');
 }
 
