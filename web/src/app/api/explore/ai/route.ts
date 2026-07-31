@@ -210,10 +210,16 @@ export async function POST(req: Request) {
         ]
       : spec.args(prompt);
 
+  // POSIX detached children become process-group leaders. Keeping stdio
+  // piped means Node still tracks the Codex process normally.
+  const useCodexProcessGroup =
+    isCodex && process.platform !== "win32";
+
   const child = spawn(binPath, args, {
     cwd: childCwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: useCodexProcessGroup,
   });
 
   const cleanupChildCwd = () => {
@@ -233,30 +239,56 @@ export async function POST(req: Request) {
   let killer: ReturnType<typeof setTimeout> | undefined;
   let forceKill: ReturnType<typeof setTimeout> | undefined;
 
+  const isCodexProcessGroupAlive = () => {
+    if (!useCodexProcessGroup || !child.pid) return false;
+
+    try {
+      process.kill(-child.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const clearTerminationTimers = () => {
-    if (killer) clearTimeout(killer);
-    if (forceKill) clearTimeout(forceKill);
-    killer = undefined;
-    forceKill = undefined;
+    if (killer) {
+      clearTimeout(killer);
+      killer = undefined;
+    }
+
+    // If the group leader exited but a descendant ignored SIGTERM, retain the
+    // SIGKILL fallback until the remaining process group is gone.
+    if (forceKill && !isCodexProcessGroupAlive()) {
+      clearTimeout(forceKill);
+      forceKill = undefined;
+    }
+  };
+
+  const signalChild = (signal: NodeJS.Signals): boolean => {
+    if (useCodexProcessGroup && child.pid) {
+      try {
+        process.kill(-child.pid, signal);
+        return true;
+      } catch {
+        /* group may already be gone; fall back to the direct child */
+      }
+    }
+
+    try {
+      return child.kill(signal);
+    } catch {
+      return false;
+    }
   };
 
   const terminateChild = () => {
-    let termSent = false;
-
-    try {
-      termSent = child.kill("SIGTERM");
-    } catch {
-      /* process may already have exited */
-    }
+    const termSent = signalChild("SIGTERM");
 
     if (!isCodex || !termSent || forceKill) return;
 
     forceKill = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* process may already have exited */
-      }
+      signalChild("SIGKILL");
+      forceKill = undefined;
     }, 5_000);
 
     forceKill.unref?.();
