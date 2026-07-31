@@ -7527,6 +7527,75 @@ try {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
 }
 
+// ── DEDUP BLIND-VIA CHANNEL KEY: NON-LATIN AGENCIES (#2393) ──────────────
+// Unknown-employer rows (Company `?`) group by their Via channel. dedup-tracker
+// keyed that group with the file-local normalizeCompany(), which strips
+// [^a-z0-9] — so リクルート and パーソル both keyed to '' and two genuinely
+// separate agency submissions for one role landed in the same cluster, and the
+// lower-scored row was DELETED. merge-tracker already compares Via with the
+// Unicode-aware normalizeVia(); dedup must use the same key. A same-agency
+// re-blast must still collapse, otherwise the fix would just be "never merge".
+console.log('\n🧪 Testing dedup blind-via channel key with non-Latin agencies (#2393)...');
+try {
+  const viaDedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-via-'));
+  try {
+    mkdirSync(join(viaDedupTmp, 'data'));
+    const tracker = join(viaDedupTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Same role, unknown employer, two DIFFERENT non-Latin agencies —
+      // two real submissions, both must survive.
+      '| 61 | 2026-03-01 | ? | リクルート | Backend Engineer, Payments Platform | 4.0/5 | Evaluated | ❌ | [61](../reports/061-blind-a.md) | first agency |\n' +
+      '| 62 | 2026-03-02 | ? | パーソル | Backend Engineer, Payments Platform | 4.1/5 | Evaluated | ❌ | [62](../reports/062-blind-b.md) | second agency |\n' +
+      // (b) Symmetric case: a via-less blind row must not collide with a
+      // non-Latin agency just because both used to key to ''.
+      '| 63 | 2026-03-03 | ? | — | Frontend Engineer, Checkout | 3.8/5 | Evaluated | ❌ | [63](../reports/063-blind-c.md) | no agency named |\n' +
+      '| 64 | 2026-03-04 | ? | リクルート | Frontend Engineer, Checkout | 4.2/5 | Evaluated | ❌ | [64](../reports/064-blind-d.md) | agency listing |\n' +
+      // (c) Control: the SAME agency re-blasting one listing is a genuine
+      // duplicate and must still collapse to the higher-scored row.
+      '| 65 | 2026-03-05 | ? | Hays | Data Engineer, Warehouse | 3.5/5 | Evaluated | ❌ | [65](../reports/065-blind-e.md) | first sighting |\n' +
+      '| 66 | 2026-03-06 | ? | Hays | Data Engineer, Warehouse | 4.4/5 | Evaluated | ❌ | [66](../reports/066-blind-f.md) | same agency re-blast |\n');
+
+    const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
+    if (r === null) {
+      fail('dedup-tracker.mjs crashed during blind-via channel key test (#2393)');
+    } else {
+      const out = readFileSync(tracker, 'utf-8');
+
+      const paymentsRows = out.split('\n').filter(l => l.includes('Backend Engineer, Payments Platform'));
+      if (paymentsRows.length === 2
+          && paymentsRows.some(l => l.includes('リクルート'))
+          && paymentsRows.some(l => l.includes('パーソル'))) {
+        pass('dedup-tracker keeps two blind rows submitted via different non-Latin agencies (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed distinct non-Latin agency channels: ${paymentsRows.length} Payments Platform rows`);
+      }
+
+      const checkoutRows = out.split('\n').filter(l => l.includes('Frontend Engineer, Checkout'));
+      if (checkoutRows.length === 2
+          && checkoutRows.some(l => l.includes('リクルート'))
+          && checkoutRows.some(l => l.includes('| — |'))) {
+        pass('dedup-tracker keeps a via-less blind row separate from a non-Latin agency row (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed a via-less blind row into an agency channel: ${checkoutRows.length} Checkout rows`);
+      }
+
+      const warehouseRows = out.split('\n').filter(l => l.includes('Data Engineer, Warehouse'));
+      if (warehouseRows.length === 1 && warehouseRows[0].includes('4.4/5')) {
+        pass('dedup-tracker still collapses a same-agency re-blast of one blind listing (#2393)');
+      } else {
+        fail(`dedup-tracker same-agency blind dedup broken: ${warehouseRows.length} Warehouse rows`);
+      }
+    }
+  } finally {
+    rmSync(viaDedupTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
+}
+
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
 // `parts.slice(1, -1)`, which assumes the closing `|` produced a trailing empty
 // cell. A valid row written WITHOUT a trailing pipe keeps its real last cell

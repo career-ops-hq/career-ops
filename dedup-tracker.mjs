@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
@@ -302,11 +302,19 @@ console.log(`📊 ${entries.length} entries loaded`);
 // normalize to the same empty key, so they group by their Via channel instead:
 // the same agency re-blasting one listing IS a duplicate, while the same role
 // via two different agencies is two real submissions and must never merge.
+// The channel key is Unicode-aware (#1603/#2393): normalizeCompany() strips
+// everything outside [a-z0-9], so distinct non-Latin agency names (リクルート,
+// パーソル, …) all collapsed to the same empty key and one of two genuinely
+// separate submissions was DELETED. normalizeVia() is the same key that
+// merge-tracker.mjs uses for its cross-channel guard, so the two scripts
+// cannot drift on agency identity. An absent Via (empty or `—`) still keys to
+// '' and groups with other via-less blind rows, matching merge-tracker, whose
+// guard does not reject a pair whose Via cells are both blank.
 const BLIND_KEY = ' blind-via:';
 const groups = new Map();
 for (const entry of entries) {
   const key = String(entry.company).trim() === '?'
-    ? BLIND_KEY + normalizeCompany(entry.via || '')
+    ? BLIND_KEY + normalizeVia(entry.via || '')
     : normalizeCompany(entry.company);
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(entry);
