@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
@@ -58,6 +59,20 @@ export async function POST(req: Request) {
   const prompt = `${mode}${OUTPUT_CONTRACT}${memoryLine}${knownBlock}\n\n--- USER INTENT ---\n${query}\n`;
 
   const isClaude = cliId === "claude";
+  const isCodex = cliId === "codex";
+
+  // The complete mode, memory and dedup context are embedded in `prompt`.
+  // Codex runs in an empty temporary cwd and writes only its final assistant
+  // response to a dedicated file. Its normal console transcript includes the
+  // full prompt and must never be forwarded to the Web UI.
+  const childCwd = isCodex
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-"))
+    : careerOpsRoot();
+
+  const codexResultFile = isCodex
+    ? path.join(childCwd, "final-response.txt")
+    : undefined;
+
   const args = isClaude
     ? [
         "-p",
@@ -73,9 +88,37 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task", // proposer-not-writer, by construction
       ]
-    : spec.args(prompt);
+    : isCodex
+      ? [
+          "-c",
+          'sandbox_mode="read-only"',
+          "-c",
+          'approval_policy="never"',
+          "-c",
+          'web_search="live"',
+          "exec",
+          "--ephemeral",
+          "--skip-git-repo-check",
+          "--output-last-message",
+          codexResultFile!,
+          prompt,
+        ]
+      : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawn(binPath, args, {
+    cwd: childCwd,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  const cleanupChildCwd = () => {
+    if (!isCodex) return;
+    try {
+      fs.rmSync(childCwd, { recursive: true, force: true });
+    } catch {
+      /* best-effort temporary-directory cleanup */
+    }
+  };
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -87,6 +130,7 @@ export async function POST(req: Request) {
     start(controller) {
       let buf = "";
       let emitted = false;
+      let codexStderr = "";
       killer = setTimeout(() => {
         try {
           child.kill("SIGTERM");
@@ -121,6 +165,11 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
+
+        // Codex's authoritative response is read from codexResultFile after
+        // process completion. Drain but do not forward its console transcript.
+        if (isCodex) return;
+
         if (!isClaude) {
           emit(d.toString());
           return;
@@ -144,15 +193,63 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+
+        if (isCodex) {
+          // Normal Codex stderr contains session metadata and the complete
+          // prompt. Retain only a bounded private diagnostic signal and never
+          // stream it during a successful request.
+          codexStderr = (codexStderr + s).slice(-16_000);
+          return;
+        }
+
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
       });
       child.on("error", (e) => {
-        safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
+        safeEnqueue(`
+[error launching ${spec.name}: ${e.message}]`);
+        cleanupChildCwd();
         safeClose();
       });
-      child.on("close", () => {
+
+      child.on("close", (code) => {
+        if (closed) {
+          cleanupChildCwd();
+          return;
+        }
+
+        if (isCodex) {
+          let finalText = "";
+
+          try {
+            if (codexResultFile && fs.existsSync(codexResultFile)) {
+              finalText = fs.readFileSync(codexResultFile, "utf8").trim();
+            }
+          } catch {
+            /* handled below as missing final output */
+          }
+
+          if (finalText) {
+            emit(finalText);
+          } else if (code !== 0) {
+            const diagnosticsCaptured = codexStderr.trim().length > 0;
+            safeEnqueue(
+              `
+[Codex exited with code ${code ?? "unknown"}${
+                diagnosticsCaptured ? "; diagnostic output captured" : ""
+              }]
+`,
+            );
+          } else if (!emitted) {
+            safeEnqueue("_(no final output from Codex)_");
+          }
+
+          cleanupChildCwd();
+          safeClose();
+          return;
+        }
+
         if (!emitted) safeEnqueue("_(no output — is the CLI authenticated?)_");
         safeClose();
       });
