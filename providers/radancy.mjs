@@ -345,15 +345,22 @@ export default {
       }
     }
 
+    // A page-1 failure on the fallback transport (after the JSON transport also
+    // produced nothing) means the board is unreachable, not empty — THROW so
+    // scan/portal-health record a failure instead of "live but empty"
+    // (meituan/tencent idiom). Only a mid-scan failure keeps partials.
+    let succeededOnce = false;
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await wait(PAGE_DELAY_MS);
       let rows;
       try {
         const html = await ctx.fetchText(`${listUrl}?p=${page}`, { headers: { accept: 'text/html' } });
         rows = parseResults(html, origin);
-      } catch {
+      } catch (err) {
+        if (!succeededOnce) throw err;
         break; // keep jobs collected so far — a transient mid-scan failure shouldn't discard earlier pages
       }
+      succeededOnce = true;
       if (rows.length === 0) break; // past the last page
 
       let fresh = 0;

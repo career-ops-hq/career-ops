@@ -150,6 +150,10 @@ export default {
     const jobs = [];
     const seen = new Set();
     let total = null;
+    // A page-1 failure means the board is unreachable, not empty — it must
+    // THROW so scan/portal-health record a failure instead of "live but
+    // empty" (meituan/tencent idiom). Only a mid-scan failure keeps partials.
+    let succeededOnce = false;
 
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await wait(PAGE_DELAY_MS);
@@ -183,9 +187,11 @@ export default {
             locationData: {},
           }),
         });
-      } catch {
+      } catch (err) {
+        if (!succeededOnce) throw err;
         break; // keep jobs collected so far — a transient mid-scan failure shouldn't discard earlier pages
       }
+      succeededOnce = true;
       const { total: pageTotal, rows } = parseRefineSearch(json, cfg);
       if (total === null) total = pageTotal;
       if (rows.length === 0) break;

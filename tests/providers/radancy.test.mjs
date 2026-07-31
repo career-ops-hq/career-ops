@@ -75,6 +75,20 @@ try {
   if (partialJobs.length === 2 && partialCalls === 2) pass('radancy.fetch() preserves jobs from earlier pages when a later page fetch throws');
   else fail(`radancy.fetch() partial-failure handling wrong: ${partialJobs.length} jobs after ${partialCalls} calls`);
 
+  // A FIRST-page failure means the board is unreachable, not empty. It must
+  // throw so scan/portal-health record a failure instead of "live but empty".
+  let radFirstErr = null;
+  try {
+    await radancy.fetch(
+      { name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' },
+      { sleep: async () => {}, fetchText: async () => { throw new Error('tenant down'); } },
+    );
+  } catch (err) {
+    radFirstErr = err;
+  }
+  if (radFirstErr?.message === 'tenant down') pass('radancy.fetch() throws when the first page fetch fails (dead board ≠ empty board)');
+  else fail('radancy.fetch() swallowed a first-page failure into []');
+
   // fetch — stops on a page whose ids are all already-seen (server clamped
   // ?p= to the last page, or looped), NOT just on a literally empty page.
   // fresh === 0 must halt pagination without appending duplicate jobs.

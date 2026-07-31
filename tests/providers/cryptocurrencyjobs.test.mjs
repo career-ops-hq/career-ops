@@ -79,13 +79,20 @@ try {
   if (capturedOpts && capturedOpts.redirect === 'error') pass('cryptocurrencyjobs.fetch() passes redirect:"error" (SSRF hardening)');
   else fail(`cryptocurrencyjobs.fetch() should pass redirect:"error", got ${JSON.stringify(capturedOpts)}`);
 
-  // fetch() swallows transport errors and returns [] (zero-token scan must not abort)
-  const errored = await ccj.fetch(
-    { name: 'CryptocurrencyJobs', provider: 'cryptocurrencyjobs' },
-    { transport: 'http', fetchText: async () => { throw new Error('network down'); }, fetchJson: async () => ({}) },
-  );
-  if (errored.length === 0) pass('cryptocurrencyjobs.fetch() returns [] when the feed fetch fails');
-  else fail('cryptocurrencyjobs.fetch() should return [] on fetch failure');
+  // A failed feed fetch must THROW, not return []: scan.mjs catches per-target
+  // throws and records a failure, while [] reads as "live but empty" — so a
+  // dead board never trips portal-health escalation (meituan/tencent contract).
+  let threw = null;
+  try {
+    await ccj.fetch(
+      { name: 'CryptocurrencyJobs', provider: 'cryptocurrencyjobs' },
+      { transport: 'http', fetchText: async () => { throw new Error('network down'); }, fetchJson: async () => ({}) },
+    );
+  } catch (err) {
+    threw = err;
+  }
+  if (threw?.message === 'network down') pass('cryptocurrencyjobs.fetch() throws when the feed fetch fails (dead board ≠ empty board)');
+  else fail('cryptocurrencyjobs.fetch() swallowed a feed-fetch failure into []');
 } catch (e) {
   fail(`cryptocurrencyjobs provider tests crashed: ${e.message}`);
 }

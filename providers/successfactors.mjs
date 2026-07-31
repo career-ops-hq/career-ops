@@ -309,6 +309,11 @@ async function fetchCsb(entry, cfg, ctx) {
   const maxPages = resolveCsbMaxPages(entry);
   const jobs = [];
   const seen = new Set();
+  // When EVERY locale fails without a single successful request the board is
+  // unreachable, not empty — THROW so scan/portal-health record a failure
+  // instead of "live but empty" (meituan/tencent idiom).
+  let succeededOnce = false;
+  let lastErr = null;
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
@@ -322,9 +327,11 @@ async function fetchCsb(entry, cfg, ctx) {
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
         });
-      } catch {
+      } catch (err) {
+        lastErr = err;
         break; // this locale failed (e.g. 307 legacy redirect) — try the next
       }
+      succeededOnce = true;
       if (total === null) {
         total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
       }
@@ -350,6 +357,7 @@ async function fetchCsb(entry, cfg, ctx) {
       if (rawCount < CSB_PAGE_SIZE) break;
     }
   }
+  if (!succeededOnce && lastErr) throw lastErr;
   return jobs;
 }
 

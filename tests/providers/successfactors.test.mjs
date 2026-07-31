@@ -255,6 +255,26 @@ try {
     else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
   }
+  // CSB: when every locale fails without one successful jobs-API request, the
+  // board is unreachable, not empty. fetch() must throw so scan/portal-health
+  // record a failure instead of "live but empty".
+  {
+    let csbErr = null;
+    try {
+      await sf.fetch(
+        { name: 'DeadCo', careers_url: 'https://careers.deadco.example', sfVariant: 'csb' },
+        {
+          sleep: async () => {},
+          fetchText: async () => { throw new Error('discovery down'); }, // locale discovery is best-effort
+          fetchJson: async () => { throw new Error('jobs api down'); },
+        },
+      );
+    } catch (err) {
+      csbErr = err;
+    }
+    if (csbErr?.message === 'jobs api down') pass('successfactors CSB fetch() throws when every locale fails (dead board ≠ empty board)');
+    else fail(`successfactors CSB fetch() swallowed an all-locales failure${csbErr ? ` (threw ${csbErr.message})` : ' into []'}`);
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }
