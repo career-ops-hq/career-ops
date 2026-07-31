@@ -63,14 +63,20 @@ function writeGitConfig(work, mirror) {
   return cfg;
 }
 
-/** A system file whose blob differs between oldTag and target — the non-vacuity oracle. */
-function pickOracle(mirror, oldTag, targetSha) {
+/** A system file whose blob differs between oldTag and target — the non-vacuity
+ *  oracle. Restricted to files `apply` actually manages (SYSTEM_PATHS: an exact
+ *  entry, or any file under a `dir/` prefix entry); a changed USER-layer or
+ *  meta file would never be rewritten by apply, so its blob could never match
+ *  the target and the leg would go spuriously RED. */
+function pickOracle(mirror, oldTag, targetSha, systemPaths) {
   const changed = git(mirror, 'diff', '--name-only', `${oldTag}..${targetSha}`).split('\n').filter(Boolean);
   if (changed.includes('update-system.mjs')) return 'update-system.mjs';
+  const managed = (f) => systemPaths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
   const candidate = changed.find((f) => {
+    if (!managed(f)) return false;
     try { git(mirror, 'cat-file', '-e', `${targetSha}:${f}`); return true; } catch { return false; }
   });
-  if (!candidate) throw new Error(`No changed file between ${oldTag} and target — nothing to upgrade, leg would be vacuous`);
+  if (!candidate) throw new Error(`No changed system file between ${oldTag} and target — nothing to upgrade, leg would be vacuous`);
   return candidate;
 }
 
@@ -86,7 +92,17 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     const mirror = buildMirror(work, targetSha);
     if (mutateMirror) targetSha = mutateMirror(mirror, work);
     const cfg = writeGitConfig(work, mirror);
-    const oracle = pickOracle(mirror, oldTag, targetSha);
+
+    // The target's SYSTEM_PATHS — the set apply manages. Drives both the oracle
+    // selection (a changed file apply actually rewrites) and the #1998-class
+    // new-path assertion below. A refactor that renames the constant would make
+    // the regex miss; fail loud rather than dereference null.
+    const targetUpdater = git(mirror, 'show', `${targetSha}:update-system.mjs`);
+    const sysMatch = targetUpdater.match(/const\s+SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\];/);
+    if (!sysMatch) throw new Error(`Could not locate SYSTEM_PATHS in the target's update-system.mjs (constant renamed?) — refusing to run a leg with no managed-path set`);
+    const targetSystemPaths = Array.from(sysMatch[1].matchAll(/['"]([^'"]+)['"]/g), (m) => m[1]);
+
+    const oracle = pickOracle(mirror, oldTag, targetSha, targetSystemPaths);
     const oracleBlob = git(mirror, 'rev-parse', `${targetSha}:${oracle}`);
 
     const install = join(work, 'install');
@@ -97,9 +113,6 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
 
     // New-path delta for the #1998-class assertion: concrete files in the
     // target's SYSTEM_PATHS that don't exist at the old tag but do at target.
-    const targetUpdater = git(mirror, 'show', `${targetSha}:update-system.mjs`);
-    const sysMatch = targetUpdater.match(/const\s+SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\];/);
-    const targetSystemPaths = Array.from(sysMatch[1].matchAll(/['"]([^'"]+)['"]/g), (m) => m[1]);
     const newConcrete = targetSystemPaths.filter((p) => !p.endsWith('/'))
       .filter((p) => { try { git(mirror, 'cat-file', '-e', `${oldTag}:${p}`); return false; } catch { return true; } })
       .filter((p) => { try { git(mirror, 'cat-file', '-e', `${targetSha}:${p}`); return true; } catch { return false; } });
@@ -126,32 +139,47 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
       ok(existsSync(join(install, p)), `new system path present after upgrade (#1998 class): ${p}`);
     }
     // Pinned consumption checks — harness-owned parsing, never the PR's scripts.
+    // A missing/unreadable tracker or a header the era's format doesn't match is
+    // itself a leg failure, not a harness crash — report it through ok() so the
+    // gate goes cleanly RED with a diagnostic instead of throwing out of runLeg.
     const exp = loadExpectations(state);
-    const tracker = readFileSync(join(install, 'data/applications.md'), 'utf-8');
-    const rows = tracker.split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l));
-    ok(rows.length === exp.tracker_rows, `tracker rows: ${rows.length} == ${exp.tracker_rows}`);
-    // Status column position differs between eras (the Via column shifts it) —
-    // derive it from the header row instead of scanning every cell, so a Notes
-    // cell that happens to equal a status word can never false-positive.
-    const headerCells = tracker.split('\n').find((l) => /^\|\s*#\s*\|/.test(l)).split('|').map((c) => c.trim());
-    const statusCol = headerCells.indexOf('Status');
-    ok(statusCol > 0, `tracker header has a Status column`);
-    for (const [status, count] of Object.entries(exp.status_counts)) {
-      const n = rows.filter((r) => r.split('|').map((c) => c.trim())[statusCol] === status).length;
-      ok(n === count, `tracker status ${status}: ${n} == ${count}`);
+    let tracker = null;
+    try { tracker = readFileSync(join(install, 'data/applications.md'), 'utf-8'); } catch (e) { /* handled below */ void e; }
+    ok(tracker !== null, 'tracker data/applications.md is readable after upgrade');
+    if (tracker !== null) {
+      const rows = tracker.split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l));
+      ok(rows.length === exp.tracker_rows, `tracker rows: ${rows.length} == ${exp.tracker_rows}`);
+      // Status column position differs between eras (the Via column shifts it) —
+      // derive it from the header row instead of scanning every cell, so a Notes
+      // cell that happens to equal a status word can never false-positive.
+      const headerLine = tracker.split('\n').find((l) => /^\|\s*#\s*\|/.test(l));
+      ok(headerLine !== undefined, 'tracker has a parseable header row');
+      const statusCol = headerLine ? headerLine.split('|').map((c) => c.trim()).indexOf('Status') : -1;
+      ok(statusCol > 0, `tracker header has a Status column`);
+      if (statusCol > 0) {
+        for (const [status, count] of Object.entries(exp.status_counts)) {
+          const n = rows.filter((r) => r.split('|').map((c) => c.trim())[statusCol] === status).length;
+          ok(n === count, `tracker status ${status}: ${n} == ${count}`);
+        }
+      }
     }
     if (exp.salary_observations !== null) {
-      const so = readFileSync(join(install, 'data/salary-observations.tsv'), 'utf-8');
-      const n = so.split('\n').filter(Boolean).length;
-      ok(n === exp.salary_observations, `salary observations: ${n} == ${exp.salary_observations}`);
+      let so = null;
+      try { so = readFileSync(join(install, 'data/salary-observations.tsv'), 'utf-8'); } catch (e) { /* handled below */ void e; }
+      ok(so !== null, 'salary-observations.tsv is readable after upgrade');
+      if (so !== null) {
+        const n = so.split('\n').filter(Boolean).length;
+        ok(n === exp.salary_observations, `salary observations: ${n} == ${exp.salary_observations}`);
+      }
     }
     // Secondary smoke only (runs the PR's own code — never the sole oracle).
-    let doctorOk = false;
+    let doctorOk = false, doctorReason = '';
     try {
       const d = JSON.parse(execFileSync(process.execPath, ['doctor.mjs', '--json'], { cwd: install, encoding: 'utf-8', timeout: 60000 }));
       doctorOk = d.onboardingNeeded === false;
-    } catch { /* doctorOk stays false */ }
-    ok(doctorOk, 'doctor.mjs --json smoke: onboardingNeeded false');
+      if (!doctorOk) doctorReason = ` (onboardingNeeded=${JSON.stringify(d.onboardingNeeded)}, missing=${JSON.stringify(d.missing ?? [])})`;
+    } catch (e) { doctorReason = ` (${String(e.stderr || e.message || e).split('\n')[0].slice(0, 160)})`; }
+    ok(doctorOk, `doctor.mjs --json smoke: onboardingNeeded false${doctorReason}`);
     if (failures.length && output) {
       console.log(`  --- apply output tail [${label}] ---`);
       console.log(output.split('\n').slice(-15).join('\n'));
