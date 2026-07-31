@@ -53,6 +53,10 @@ function runMergeDetailed(additions, opts = {}) {
       output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
         encoding: 'utf-8',
         timeout: 30000,
+        // Capture stderr instead of letting execFileSync echo it: the
+        // separator-row fixture below deliberately triggers a loud failure,
+        // and its error text would otherwise land in the suite's own log.
+        stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir },
       });
     } catch (e) {
@@ -255,4 +259,48 @@ try {
   }
 } catch (e) {
   fail(`merge-tracker Notes-preservation tests crashed: ${e.message}`);
+}
+
+// ── #2394: a tracker with no separator row dropped everything, silently ─────
+// The insert point comes from SEPARATOR_ROW_RE. With no match, insertIdx
+// stayed -1, the splice was skipped with no else, and the run went on to write
+// the file, archive every TSV into merged/ and print "+N added". The
+// evaluations existed only in merged/ afterwards.
+console.log('\nmerge-tracker.mjs — tracker with no table separator row (#2394)');
+try {
+  const broken = runMergeDetailed({
+    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-03-01.md)\tonly evaluation\n',
+  }, { header: '# Applications Tracker\n\n' });
+
+  if (broken.exitCode !== 0) {
+    pass('merge fails loudly when the tracker table has no separator row');
+  } else {
+    fail(`merge reported success against a separator-less tracker (exit ${broken.exitCode})`);
+  }
+
+  // The consequence that actually costs data: an archived TSV whose row never
+  // reached the tracker is unrecoverable, because the tracker is gitignored.
+  if (broken.archived.length === 0 && broken.pending.includes('001-acme.tsv')) {
+    pass('the unmerged TSV stays in the additions dir instead of being archived');
+  } else {
+    fail(`TSV archived despite never reaching the tracker: archived=[${broken.archived.join(', ')}] pending=[${broken.pending.join(', ')}]`);
+  }
+
+  if (!/\+1 added/.test(broken.output) && /separator row/.test(broken.output)) {
+    pass('the failure names the missing separator row rather than reporting rows added');
+  } else {
+    fail(`merge misreported the outcome: ${broken.output.split('\n').filter(l => /added|Summary/.test(l)).join(' // ') || '(no summary line)'}`);
+  }
+
+  // Re-running after the header is repaired must merge the addition once.
+  const repaired = runMergeDetailed({
+    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-03-01.md)\tonly evaluation\n',
+  });
+  if (dataRows(repaired.tracker).length === 1 && repaired.exitCode === 0) {
+    pass('the same addition merges normally once the table header is intact');
+  } else {
+    fail(`addition did not merge against a well-formed tracker (exit ${repaired.exitCode})`);
+  }
+} catch (e) {
+  fail(`merge-tracker separator-row tests crashed: ${e.message}`);
 }

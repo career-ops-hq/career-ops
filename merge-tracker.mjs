@@ -893,9 +893,29 @@ if (newLines.length > 0) {
       break;
     }
   }
-  if (insertIdx >= 0) {
-    appLines.splice(insertIdx, 0, ...newLines);
+  if (insertIdx < 0) {
+    // #2394: no separator row means no insert point. The old code left
+    // insertIdx at -1, skipped the splice with no else, then carried on to
+    // write the file, archive every TSV into merged/ and print "+N added" —
+    // so a tracker whose table header had been damaged (or a fresh file that
+    // only ever got its `# Applications Tracker` line) swallowed a whole batch
+    // of evaluations while reporting success. Nothing survived: the tracker is
+    // gitignored and merge-tracker keeps no .bak.
+    //
+    // Abort before writing anything. Leaving the tracker and the additions dir
+    // exactly as they were makes the run a no-op that replays cleanly once the
+    // table is repaired.
+    console.error(`❌ Aborting merge: ${basename(APPS_FILE)} has no table separator row ("|---|------|...").`);
+    console.error(`   There is no insert point for ${newLines.length} new row(s), so NOTHING was written and no TSV was archived.`);
+    console.error('   Repair the tracker table header, then re-run — the pending additions in');
+    console.error(`   ${ADDITIONS_DIR} will merge then. Expected header:`);
+    console.error('     | # | Date | Company | Role | Score | Status | PDF | Report | Notes |');
+    console.error('     |---|------|---------|------|-------|--------|-----|--------|-------|');
+    for (const line of newLines) console.error(`   not merged: ${line}`);
+    trackerLock.release();
+    process.exit(1);
   }
+  appLines.splice(insertIdx, 0, ...newLines);
 }
 
 // Write back
