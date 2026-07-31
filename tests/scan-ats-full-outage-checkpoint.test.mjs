@@ -123,6 +123,20 @@ function sweep(dir, dnsCode, extraArgs = []) {
       } else {
         fail(`outage checkpoint unusable: incomplete=${incomplete} current=${JSON.stringify(cp.current)}`);
       }
+
+      // The interrupted run's own report must agree with what it checkpointed.
+      // greenhouse starts at offset 0 here, so every board below resumeAt was
+      // attempted and none above it was: the count it reports, the count it
+      // stored, and the resume point are all the same number. A counter left at
+      // the full slice shows up as companiesScanned > resumeAt — unattempted
+      // boards reported as scanned, and double-counted again on resume.
+      const reported = JSON.parse(out).companiesScanned;
+      const stored = cp.counters?.totalCompaniesScanned;
+      if (reported === at && stored === at) {
+        pass(`interrupted run counts only what it attempted (${reported} = checkpoint ${stored} = resumeAt ${at})`);
+      } else {
+        fail(`interrupted counters disagree: companiesScanned=${reported} checkpoint=${stored} resumeAt=${at}`);
+      }
     }
 
     // The point of keeping the file: --resume finishes the source, and the
@@ -135,10 +149,14 @@ function sweep(dir, dnsCode, extraArgs = []) {
         fail(`--resume after an outage stop failed${formatRunFailure()}`);
       } else {
         const { companiesScanned, resumed: wasResumed } = JSON.parse(resumed);
-        if (wasResumed && companiesScanned === COMPANIES) {
-          pass(`--resume continues the stopped source (${companiesScanned} scanned across both runs, no double count)`);
-        } else {
+        if (!wasResumed || companiesScanned !== COMPANIES) {
           fail(`resumed run miscounted: resumed=${wasResumed} companiesScanned=${companiesScanned}, expected ${COMPANIES}`);
+        } else if (existsSync(cpPath)) {
+          // The clean-sweep case below never reads a checkpoint, so it cannot
+          // catch a cleanup that only fails on the --resume path.
+          fail('a completed resumed sweep left its checkpoint behind');
+        } else {
+          pass(`--resume continues the stopped source (${companiesScanned} scanned across both runs, no double count)`);
         }
       }
     }

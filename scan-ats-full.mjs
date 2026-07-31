@@ -757,6 +757,10 @@ async function main() {
     let errors = 0;
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
+    // The board whose failure tripped the breaker. `name` is only the ATS
+    // vendor, and the resume offset is only a position — neither tells the user
+    // which board to try by hand once the resolver is back.
+    let resolverOutageCompany = null;
     // Latest progress reported by parallelEach. It computes both on every item
     // but keeps neither, and a run stopped mid-source needs them after the
     // call returns to checkpoint where it actually stopped (#2283).
@@ -787,7 +791,13 @@ async function main() {
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
         if (isResolverFailure(err)) {
-          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT) resolverOutage = true;
+          // Record only the first board past the limit: in-flight boards keep
+          // failing after the flag is set, and the last of them is not the one
+          // that tripped it.
+          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT && !resolverOutage) {
+            resolverOutage = true;
+            resolverOutageCompany = entry.name;
+          }
         } else {
           consecutiveResolverFailures = 0;
         }
@@ -843,24 +853,27 @@ async function main() {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
       stoppedByOutage = true;
+      // The counter was bumped by the FULL entries.length up front, but the
+      // breaker left entries.length - lastDone boards unattempted. Correct the
+      // live counter, not just the checkpoint payload: this run's own summary
+      // and --json would otherwise report companies nobody ever contacted as
+      // scanned. Correcting it here also gives the checkpoint the right figure
+      // for free — a resumed run re-adds its own slice, so a checkpoint holding
+      // the full slice makes the completed portion count twice.
+      totalCompaniesScanned -= entries.length - lastDone;
       // Pin the resume point here rather than leaving the last periodic write
       // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
       // it can be up to 500 boards behind where the breaker actually stopped —
       // and --resume would replay all of them against the resolver that just
-      // refused. The counter correction mirrors the periodic write's: on
-      // resume the run re-adds its own slice, so a checkpoint must record only
-      // the work actually attempted or the completed portion is counted twice.
+      // refused.
       if (!opts.dryRun) {
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
-          counters: {
-            ...snapshotCounters(),
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - lastDone),
-          },
+          counters: snapshotCounters(),
         });
       }
-      log(`\n  ⛔ stopped ${name}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
+      log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
       log(`     CAREER_OPS_NO_DNS_CACHE=1 only if you know the cache is at fault.`);
