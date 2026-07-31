@@ -1017,5 +1017,109 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   });
 }
 
+// ── shared candidate resolution (#2348) ──────────────────────────
+//
+// The three selector paths delegate their match → narrow → refuse-to-guess
+// flow to resolveCandidates(). These pin the properties that must survive any
+// future edit to that helper: every path fails CLOSED on 2+ survivors (the
+// #1704 property, previously enforced in three separate copies), and --role
+// narrowing works from every path rather than only the two that had tests.
+{
+  // Two rows link the SAME report — reachable when a re-evaluation is filed
+  // against an existing report, or a report link is copied between rows.
+  const TRACKER_DUP_REPORT = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Backend Engineer | 4.2/5 | Evaluated | ✅ | [9](../reports/009-acme-2026-06-01.md) | — |
+| 2 | 2026-06-02 | Globex | Data Engineer | 4.0/5 | Evaluated | ✅ | [9](../reports/009-globex-2026-06-02.md) | — |
+`;
+
+  const withDupReport = fn => {
+    const sandbox = makeSandbox(TRACKER_DUP_REPORT);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // Previously untested: the --report path had no 2+ coverage at all, so a
+  // regression to first-match-wins there would have gone unnoticed.
+  withDupReport(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--report', '9', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 && parsed?.code === 'ambiguous' && parsed.candidates?.length === 2
+        && readTracker(sandbox) === before) {
+      pass('#2348: --report fails closed on 2+ linking rows, with candidates');
+    } else {
+      fail(`#2348: --report dup → code=${r.code} json=${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // --role narrowing must serve the --report path too, not just the numeric
+  // and company paths that already had coverage.
+  withDupReport(sandbox => {
+    const r = runSetStatus(['--report', '9', 'Applied', '--role', 'Data Engineer', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Globex') {
+      pass('#2348: --role narrows a --report match to the intended row');
+    } else {
+      fail(`#2348: --report + --role → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  // A --role that matches NEITHER candidate must not silently pick one; the
+  // helper falls through with the original list so both stay visible.
+  withDupReport(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--report', '9', 'Applied', '--role', 'Site Reliability Engineer', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 && parsed?.candidates?.length === 2 && readTracker(sandbox) === before) {
+      pass('#2348: a --role matching neither candidate still fails closed with both listed');
+    } else {
+      fail(`#2348: --report + unmatched --role → code=${r.code} json=${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // Parity: the fail-closed contract is now enforced in ONE place, so assert
+  // it holds identically from every entry point. This is the test that would
+  // catch a future edit to resolveCandidates() that regressed one path.
+  {
+    const TRACKER_ALL_AMBIGUOUS = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 7 | 2026-06-01 | Initech | Backend Engineer | 4.2/5 | Evaluated | ✅ | [3](../reports/003-initech-2026-06-01.md) | — |
+| 7 | 2026-06-02 | Initech | Data Engineer | 4.0/5 | Evaluated | ✅ | [3](../reports/003-initech-2026-06-02.md) | — |
+`;
+    const paths = [
+      ['bare numeric', ['7', 'Applied', '--json']],
+      ['--row', ['--row', '7', 'Applied', '--json']],
+      ['--report', ['--report', '3', 'Applied', '--json']],
+      ['company', ['Initech', 'Applied', '--json']],
+    ];
+    const failures = [];
+    for (const [label, args] of paths) {
+      const sandbox = makeSandbox(TRACKER_ALL_AMBIGUOUS);
+      try {
+        const before = readTracker(sandbox);
+        const r = runSetStatus(args, sandbox);
+        let parsed = null;
+        try { parsed = JSON.parse(r.stdout); } catch {}
+        const ok = r.code === 3 && parsed?.candidates?.length === 2 && readTracker(sandbox) === before;
+        if (!ok) failures.push(`${label} (code=${r.code}, candidates=${parsed?.candidates?.length})`);
+      } finally {
+        rmSync(sandbox.dir, { recursive: true, force: true });
+      }
+    }
+    if (failures.length === 0) {
+      pass('#2348: all four selector paths fail closed on 2+ candidates, none written');
+    } else {
+      fail(`#2348: paths that did not fail closed: ${failures.join('; ')}`);
+    }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
