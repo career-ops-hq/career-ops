@@ -78,12 +78,22 @@ for (const status of [500, 502, 504]) {
     : fail(`HTTP ${status} classified ${verdict.result}/${verdict.code}, expected uncertain/server_error`);
 }
 
-// 503 keeps its more specific access-blocked classification.
-classifyLiveness({ status: 503, finalUrl: 'https://careers.example.com/job/123', bodyText: 'checking your browser', applyControls: [] }).code === 'access_blocked'
-  ? pass('HTTP 503 still classifies as access_blocked, not server_error')
-  : fail('HTTP 503 lost its access_blocked classification');
+// 503 keeps its more specific access-blocked classification: the 5xx guard
+// sits below it, so both halves of the verdict must hold, not just the code.
+const blocked = classifyLiveness({ status: 503, finalUrl: 'https://careers.example.com/job/123', bodyText: 'checking your browser', applyControls: [] });
+blocked.result === 'uncertain' && blocked.code === 'access_blocked'
+  ? pass('HTTP 503 still classifies as uncertain/access_blocked, not server_error')
+  : fail(`HTTP 503 classified ${blocked.result}/${blocked.code}, expected uncertain/access_blocked`);
 
-// A real 404/410 is still authoritative expiry.
-classifyLiveness({ status: 404, finalUrl: 'https://careers.example.com/job/123', bodyText: 'Not found', applyControls: [] }).result === 'expired'
-  ? pass('HTTP 404 still -> expired')
-  : fail('HTTP 404 regressed');
+// A real 404/410 is still authoritative expiry — both statuses, both halves.
+for (const status of [404, 410]) {
+  const gone = classifyLiveness({
+    status,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: 'Not found',
+    applyControls: [],
+  });
+  gone.result === 'expired' && gone.code === 'http_gone'
+    ? pass(`HTTP ${status} still -> expired/http_gone`)
+    : fail(`HTTP ${status} classified ${gone.result}/${gone.code}, expected expired/http_gone`);
+}
