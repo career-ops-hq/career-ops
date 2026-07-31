@@ -30,7 +30,7 @@ import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
-import { pass, fail, warn, run, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -174,6 +174,7 @@ const scripts = [
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
+  { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
@@ -265,7 +266,10 @@ try {
     } else if (allowFail) {
       warn(`${name} exited with error (expected without user data)`);
     } else {
-      fail(`${name} crashed`);
+      // Include the child's exit status and streams. Without them a CI-only
+      // failure arrives as a bare `<name> crashed`: no stack, no assertion
+      // text, no exit code, and nothing a reader can act on.
+      fail(`${name} crashed${formatRunFailure()}`);
     }
   }
 } finally {

@@ -195,3 +195,87 @@ protected_grounds:
       - "MHLW — 公正な採用選考の基本 (basics of fair hiring selection, mhlw.go.jp)"
       - "Tokyo Labour Bureau — 公正な採用選考 page (jsite.mhlw.go.jp/tokyo-roudoukyoku)"
     as_of: "2026-07-18"
+
+  - jurisdiction: DE
+    jurisdiction_name: "Germany"
+    grounds:
+      - topic: "Rasse / ethnische Herkunft (race / ethnic origin)"
+        example_question_patterns:
+          - "Woher kommen Sie wirklich? / Where are you really from?"
+          - "Sind Sie Deutscher? / Are you German?"
+          - "Was ist Ihre Muttersprache? / What is your mother tongue?"
+        legitimate_contexts:
+          - "Language-skill questions are permissible where the job genuinely requires a specific language proficiency (ArbG Hamburg, 25 Ca 282/09), the question must target proven competency, not origin"
+          - "Asking about a valid work authorisation / Aufenthaltstitel is permissible, probing ethnic origin is not (ADS 'Was Arbeitgeber fragen (dürfen)' guidance)"
+      - topic: "Geschlecht (sex, including pregnancy and motherhood)"
+        example_question_patterns:
+          - "Sind Sie schwanger? / Are you pregnant?"
+          - "Planen Sie in absehbarer Zeit Kinder? / Do you plan to have children soon?"
+          - "Wie vereinbaren Sie Beruf und Familie? / How do you balance work and family?"
+        legitimate_contexts:
+          - "Pregnancy questions are ALWAYS inadmissible per ADS guidance, even for fixed-term maternity cover or where safety regulations would restrict pregnant employees (BAG 7 AZR 621/01; LAG Köln 6 Sa 641/12)"
+          - "Questions about willingness to travel or work overtime are permissible and do not target Geschlecht (ADS 'Fair in den Job' Leitfaden)"
+      - topic: "Geschlechtsidentität (gender identity)"
+        example_question_patterns:
+          - "Sind Sie trans* / inter*? / Are you trans or intersex?"
+          - "Welches Geschlecht haben Sie? / What gender are you?"
+        legitimate_contexts:
+          - "ADS guidance instructs employers to use the candidate's correct pronoun and address — asking about gender identity directly is inadmissible  (ADS (Antidiskriminierungsstelle des Bundes) (p. 30 of the Leitfaden))"
+      - topic: "Religion oder Weltanschauung (religion or belief)"
+        example_question_patterns:
+          - "Welcher Konfession gehören Sie an? / What religion do you belong to?"
+          - "Sind Sie Muslima? / Are you Muslim?"
+          - "Feiern Sie Weihnachten? / Do you celebrate Christmas?"
+        legitimate_contexts:
+          - "§9 AGG permits religious organisations (Kirchen, religious charities) to require membership in or adherence to a particular faith where it constitutes a genuine occupational requirement"
+      - topic: "Behinderung / Schwerbehinderung (disability / severe disability)"
+        example_question_patterns:
+          - "Sind Sie schwerbehindert? / Do you have a severe disability?"
+          - "Haben Sie gesundheitliche Einschränkungen? / Do you have any health limitations?"
+          - "Wie oft waren Sie im letzten Jahr krankgeschrieben? / How often were you on sick leave last year?"
+        legitimate_contexts:
+          - "Do not ask for a diagnosis or disability status; describe the essential duties and ask whether the candidate can perform them, with or without reasonable accommodation. A narrowly justified, job-specific requirement may support an exception under §8 AGG"
+          - "§165 SGB IX requires public employers to invite severely disabled applicants unless they are obviously professionally unsuitable; this is a procedural right, not an exception to the prohibition"
+      - topic: "Alter (age)"
+        example_question_patterns:
+          - "Wie alt sind Sie? / How old are you?"
+          - "Wann sind Sie geboren? / When were you born?"
+          - "Welchen Jahrgang haben Sie? / What year were you born?"
+        legitimate_contexts:
+          - "§10 AGG permits age-based differentiation only where it is objectively and appropriately justified by a legitimate aim and the means are necessary (e.g. a statutory minimum age or a maximum age tied to specific training or necessary service before retirement)"
+          - "Confirming the candidate meets a statutory minimum working age is permissible"
+      - topic: "Sexuelle Identität (sexual identity)"
+        example_question_patterns:
+          - "Sind Sie homosexuell? / Are you gay?"
+          - "Leben Sie in einer gleichgeschlechtlichen Partnerschaft? / Are you in a same-sex partnership?"
+      - topic: "Staatsangehörigkeit (nationality / citizenship)"
+        example_question_patterns:
+          - "Welche Staatsangehörigkeit haben Sie? / What is your nationality?"
+        legitimate_contexts:
+          - "Asking about a valid work authorisation (Arbeitserlaubnis / Aufenthaltstitel) is permissible and distinct from nationality (ADS guidance)"
+          - "Questions about nationality may constitute indirect ethnic-origin discrimination (ADS 'Was Arbeitgeber fragen (dürfen)' study, citing ArbG Hamburg precedent)"
+    legal_basis: >-
+      AGG (Allgemeines Gleichbehandlungsgesetz) §1 (purpose — enumerates six
+      statutory protected grounds: race/ethnic origin, sex, religion/belief,
+      disability, age, and sexual identity), §7 Abs. 1 (prohibition of discrimination
+      against employees, including applicants, on those grounds), §7 Abs. 3 (violation
+      of contractual duties), §3 Abs. 1 S. 2 (pregnancy / motherhood as a form
+      of sex discrimination), §8 Abs. 1 (genuine occupational requirement
+      exception), §9 (religious-organisation exception), §10 (permissible age
+      differentiation), §5 (positive action), §22 (burden of proof — shifts to
+      employer when the applicant shows an indication / Indiz of
+      discrimination). Nationality is not an explicit standalone §1 ground. Depending on the facts,
+      nationality-based treatment may constitute direct discrimination because
+      nationality is being used as a proxy for ethnic origin, or indirect
+      discrimination where a neutral criterion disproportionately disadvantages an
+      ethnic group and is not objectively justified (§3 Abs. 1-2 AGG).
+      The 'right to lie' (Recht zur Lüge) on inadmissible questions is established by BAG
+      case law (Bundesarbeitsgericht, e.g. 7 AZR 621/01 and subsequent decisions): a contract
+      formed after a false answer to an inadmissible question cannot be challenged on that basis.
+    sources:
+      - "Allgemeines Gleichbehandlungsgesetz (AGG) — gesetze-im-internet.de/agg/ (official statute text)"
+      - "Antidiskriminierungsstelle des Bundes (ADS) — 'Was Arbeitgeber fragen (dürfen)' — Studie zu unzulässigen Fragen in Vorstellungsgesprächen (antidiskriminierungsstelle.de)"
+      - "Antidiskriminierungsstelle des Bundes (ADS) — 'Fair in den Job! Leitfaden für diskriminierungsfreie Einstellungsverfahren' (antidiskriminierungsstelle.de)"
+      - "Antidiskriminierungsstelle des Bundes (ADS) — Zugang zum Arbeitsleben — Bewerbungsgespräch (antidiskriminierungsstelle.de)"
+      - "Antidiskriminierungsstelle des Bundes (ADS) — Pflichten von Arbeitgebern — Fragen im Bewerbungsgespräch (antidiskriminierungsstelle.de)"
+    as_of: "2026-07-30"

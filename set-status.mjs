@@ -11,6 +11,8 @@
  *   node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--force] [--dry-run] [--json]
  *
  * Row resolution:
+ *   - --row N     → exact match on the # column, stated explicitly
+ *   - --report N  → match the row whose Report cell links report #N
  *   - numeric argument → exact match on the # column; if the tracker has a
  *     duplicate # (see #1704 — merge-tracker.mjs bug, now fixed, that could
  *     assign the same # to two rows), --role narrows it, otherwise it fails
@@ -19,6 +21,23 @@
  *   - otherwise → company match (normalized, same key as merge-tracker dedup);
  *     multiple hits are narrowed with --role (fuzzy, role-matcher.mjs), and
  *     anything still ambiguous fails with a numbered candidate list.
+ *
+ * Why --row/--report exist:
+ *   Tracker row IDs and report IDs are two independent counters sharing one
+ *   number space. reserve-report-num.mjs treats tracker row IDs as occupied
+ *   when allocating a report number, so the sequences leapfrog and never
+ *   realign; every row added WITHOUT an evaluation report (backfilled rows,
+ *   #1799) widens the gap permanently. A bare numeric selector is therefore
+ *   genuinely ambiguous — "97" may mean row #97 or report #97, which are
+ *   different applications — and the report-number-mismatch guard below fires
+ *   on every such call once the counters have diverged. A guard that fires
+ *   almost always trains callers to reach for --force, which disables it
+ *   everywhere including the cases it was written for.
+ *
+ *   --row and --report remove the ambiguity instead of suppressing the check.
+ *   Both state which number space the caller means, so the mismatch guard is
+ *   skipped as ANSWERED rather than overridden — unlike --force, which
+ *   silences it while the ambiguity is still real.
  *
  * State validation is strict against templates/states.yml (labels, ids, and
  * aliases resolve to the canonical label; anything else is rejected before the
@@ -66,23 +85,32 @@ const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS } = CLI_EXIT;
 
 const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
+       node set-status.mjs --row N <state> [...]        (explicit tracker row ID)
+       node set-status.mjs --report N <state> [...]     (explicit report ID)
 
   <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
+  --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
+  --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
-  --force            Allow a numeric selector when the row's report link carries a different ID
+  --force            Allow a numeric selector despite a report-link mismatch, or despite a
+                     report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
-  --json             Machine-readable output on stdout (errors included)`;
+  --json             Machine-readable output on stdout (errors included)
+
+  Tracker row IDs and report IDs are separate counters that diverge permanently
+  once any row exists without a report. Prefer --row/--report (or the company
+  name) over a bare number, and prefer any of them over --force.`;
 
 // ── argument parsing ─────────────────────────────────────────────
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on' };
+const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -92,6 +120,11 @@ for (let i = 0; i < rawArgs.length; i++) {
     const value = rawArgs[i + 1];
     if (value === undefined || value.startsWith('--')) {
       failUsage(`Missing value for ${a}`);
+    }
+    // --row/--report name a row by number; a non-numeric value is a typo, and
+    // silently treating it as "no match" would hide the mistake.
+    if ((a === '--row' || a === '--report') && !/^\d+$/.test(value)) {
+      failUsage(`${a} expects a positive integer, got "${value}"`);
     }
     flags[VALUE_FLAGS[a]] = value;
     i++;
@@ -103,7 +136,21 @@ for (let i = 0; i < rawArgs.length; i++) {
   else { positional.push(a); }
 }
 
-if (positional.length !== 2) {
+// --row and --report ARE the selector, so they replace the positional one.
+// Accepting both would leave two competing answers to "which row?"; refuse
+// rather than pick, since picking wrong writes to the wrong application.
+if (flags.row !== null && flags.report !== null) {
+  failUsage('--row and --report are mutually exclusive — they name different number spaces');
+}
+const explicitSelector = flags.row !== null || flags.report !== null;
+
+if (explicitSelector) {
+  if (positional.length !== 1) {
+    failUsage(positional.length === 0
+      ? `Expected the state after ${flags.row !== null ? '--row' : '--report'}`
+      : `With ${flags.row !== null ? '--row' : '--report'} the only positional argument is the state, got ${positional.length}`);
+  }
+} else if (positional.length !== 2) {
   failUsage(positional.length === 0 ? null : `Expected 2 arguments (selector, state), got ${positional.length}`);
 }
 
@@ -117,7 +164,13 @@ if (flags.on !== null) {
   if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
-const [selector, stateInput] = positional;
+const selector = explicitSelector ? null : positional[0];
+const stateInput = explicitSelector ? positional[0] : positional[1];
+
+// A bare positional number is the ambiguous case the mismatch guard exists for.
+// --row/--report are numeric too but carry an explicit number space, so they
+// must not be treated as ambiguous.
+const isBareNumericSelector = selector !== null && /^\d+$/.test(selector);
 
 // Shared with every other canonical tracker-writer CLI (tracker-utils.mjs) so
 // the JSON-vs-human error contract can't drift between them.
@@ -174,8 +227,34 @@ if (!existsSync(APPS_FILE)) {
  * @returns {object} The single matched row. Exits the process on 0 or 2+ matches.
  */
 function resolveRow(rows) {
-  if (/^\d+$/.test(selector)) {
-    const num = parseInt(selector, 10);
+  // --report N: resolve through the Report cell, which is the number space a
+  // caller reading a report filename actually has in hand.
+  if (flags.report !== null) {
+    const num = parseInt(flags.report, 10);
+    const matches = rows.filter(r => extractTrackerReportNumbers(r.report).includes(num));
+    if (matches.length === 0) {
+      failWith(EXIT_NOT_FOUND, 'not-found',
+        `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
+        'use --row N to select by tracker #.)');
+    }
+    if (matches.length > 1 && flags.role) {
+      const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
+      if (narrowed.length === 1) return narrowed[0];
+    }
+    if (matches.length > 1) {
+      const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
+      const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
+      failWith(EXIT_AMBIGUOUS, 'ambiguous',
+        `Report #${num} is linked by ${matches.length} tracker rows — pass --role to disambiguate:\n${listing}`,
+        { candidates });
+    }
+    return matches[0];
+  }
+
+  // --row N and a bare numeric selector both match the # column; they differ
+  // only in whether the mismatch guard below treats the number as ambiguous.
+  if (flags.row !== null || isBareNumericSelector) {
+    const num = parseInt(flags.row !== null ? flags.row : selector, 10);
     let matches = rows.filter(r => r.num === num);
     if (matches.length === 0) {
       failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with #${num}`);
@@ -249,11 +328,18 @@ if (rows.length === 0) {
 
 const target = resolveRow(rows);
 
-// A numeric selector is often copied from a report filename. If tracker drift
-// has made the row ID disagree with its local report link, silently updating
-// that row can affect the wrong application. Company selectors remain usable,
-// and --force records an explicit decision to proceed despite the mismatch.
-if (/^\d+$/.test(selector) && !flags.force) {
+// A BARE numeric selector is often copied from a report filename. If the row ID
+// disagrees with its local report link, silently updating that row can affect
+// the wrong application. Company selectors remain usable, and --force records an
+// explicit decision to proceed despite the mismatch.
+//
+// --row/--report are exempt by construction, not by override: the caller has
+// already said which number space they mean, so there is no ambiguity left to
+// guard. That distinction is what keeps the check meaningful — on a tracker
+// whose counters have diverged, a guard that fires on every numeric call just
+// teaches callers to pass --force, which disables it everywhere including the
+// cases it was written for.
+if (isBareNumericSelector && !flags.force) {
   const reportNums = extractTrackerReportNumbers(target.report);
   const mismatched = reportNums.filter(num => num !== target.num);
   if (mismatched.length > 0) {
@@ -261,9 +347,37 @@ if (/^\d+$/.test(selector) && !flags.force) {
       EXIT_AMBIGUOUS,
       'report-number-mismatch',
       `Tracker #${target.num} points to report ID(s) ${reportNums.map(num => `#${num}`).join(', ')}. ` +
-        'Use the company selector, repair the Report cell, or re-run with --force.',
+        `Say which you meant: --row ${target.num} (tracker row) or ` +
+        `--report ${reportNums[0]} (report ID). ` +
+        'The company selector also works; --force overrides the check instead of answering it.',
       { trackerNum: target.num, reportNums },
     );
+  }
+
+  // The check above compares the matched row's report link against its own #.
+  // A backfilled row (#1799) has no link, so reportNums is empty, `mismatched`
+  // is empty, and the check passes with nothing compared — while a DIFFERENT
+  // row may link exactly this number as its report.
+  //
+  // That combination is not hypothetical: it is what merge-tracker.mjs's
+  // "Tracker #N already used; assigning #M" fallback produces. The backfilled
+  // row occupying #N is what pushes the evaluated row to #M, so the row a stale
+  // numeric selector lands on is precisely the report-less one this check could
+  // not see. Bare "#N" then names two applications at once and must not write.
+  if (reportNums.length === 0) {
+    const num = parseInt(selector, 10);
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    if (linkers.length > 0) {
+      const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
+      failWith(
+        EXIT_AMBIGUOUS,
+        'report-number-ambiguous',
+        `"${num}" is ambiguous: tracker row #${num} (${target.company} — ${target.role}) has no report, ` +
+          `but report #${num} is linked by:\n${listing}\n` +
+          `Say which you meant: --row ${num} (the row) or --report ${num} (the report).`,
+        { trackerNum: target.num, reportNum: num, linkedBy: linkers.map(r => ({ num: r.num, company: r.company, role: r.role })) },
+      );
+    }
   }
 }
 

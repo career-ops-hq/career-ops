@@ -171,13 +171,16 @@ func (c *Catalog) ViewModeLabel(mode string) string {
 }
 
 // StatusLabel returns the localized display label for a canonical status ID
-// (interview, offer, responded, applied, evaluated, skip, rejected, discarded).
+// (interview, offer, hired, responded, applied, evaluated, skip, rejected,
+// discarded).
 func (c *Catalog) StatusLabel(norm string) string {
 	switch strings.ToLower(strings.TrimSpace(norm)) {
 	case "interview":
 		return c.StatusInterview
 	case "offer":
 		return c.StatusOffer
+	case "hired":
+		return c.StatusHired
 	case "responded":
 		return c.StatusResponded
 	case "applied":

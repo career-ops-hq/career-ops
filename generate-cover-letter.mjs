@@ -64,10 +64,11 @@ function buildContactLine(candidate) {
   }
   if (candidate.phone) parts.push(escapeHtml(candidate.phone));
   if (candidate.linkedin) {
-    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">LinkedIn</a>`);
+    const display = candidate.linkedin.replace(/^https?:\/\//i, "");
+    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">${escapeHtml(display)}</a>`);
   }
   if (candidate.github) {
-    const display = candidate.github.replace(/^https?:\/\//, "");
+    const display = candidate.github.replace(/^https?:\/\//i, "");
     parts.push(`<a href="${escapeHtml(asUrl(candidate.github))}">${escapeHtml(display)}</a>`);
   }
   return parts.join(" &nbsp;|&nbsp; ");
