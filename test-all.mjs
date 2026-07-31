@@ -6979,6 +6979,89 @@ try {
   fail(`verify-pipeline report checks crashed: ${e.message}`);
 }
 
+// ── VERIFY-PIPELINE ORPHAN REFERENCE RESOLUTION (#1425 follow-up) ────────────
+// Check 10 resolves "is this report referenced?" three ways. Two of them were
+// wrong:
+//   (a) a cell may carry SEVERAL links ("[901](…) / [902](…)" — a re-evaluation
+//       keeping both reports on record). A single .match() sees only the first,
+//       so every later link false-positives as an orphan.
+//   (b) the row's own number was credited UNCONDITIONALLY. Row and report
+//       numbers are independent counters that diverge in normal operation
+//       (#1733), so a row that links elsewhere silently "references" an
+//       unrelated report sharing its number, masking a real orphan.
+console.log('\n🧪 Testing verify-pipeline orphan reference resolution (#1425 follow-up)');
+try {
+  const orTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-orphan-'));
+  try {
+    const orReports = join(orTmp, 'reports');
+    mkdirSync(orReports, { recursive: true });
+    const orTracker = join(orTmp, 'applications.md');
+    const orEnv = { ...process.env, CAREER_OPS_TRACKER: orTracker, CAREER_OPS_REPORTS: orReports };
+    const rpt = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 3.1\n\`\`\`\n`;
+
+    // 901 + 902: one posting evaluated twice; row 900 keeps BOTH on record.
+    // 950: a genuine orphan whose number collides with row 950, which links 955.
+    // 955: the report row 950 actually points at.
+    // 970: referenced ONLY by the row-number fallback (its row carries no link).
+    writeFileSync(join(orReports, '901-acme-2026-02-01.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '902-acme-2026-02-09.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '950-globex-2026-03-02.md'), rpt('Globex', 'QA Manager'));
+    writeFileSync(join(orReports, '955-initech-2026-03-05.md'), rpt('Initech', 'Test Lead'));
+    writeFileSync(join(orReports, '970-hooli-2026-03-06.md'), rpt('Hooli', 'Release Manager'));
+
+    writeFileSync(orTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 900 | 2026-02-01 | Acme | Director of Platform | 3.1/5 | Evaluated | ❌ | ' +
+        '[901](reports/901-acme-2026-02-01.md) / [902](reports/902-acme-2026-02-09.md) | re-eval |\n' +
+      '| 950 | 2026-03-05 | Initech | Test Lead | 3.1/5 | Evaluated | ❌ | ' +
+        '[955](reports/955-initech-2026-03-05.md) | row number collides with orphan report 950 |\n' +
+      '| 970 | 2026-03-06 | Hooli | Release Manager | 3.1/5 | Evaluated | ❌ | — | legacy row, no markdown link |\n');
+
+    const orOut = run(NODE, ['verify-pipeline.mjs'], { env: orEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (orOut === null) {
+      fail('verify-pipeline crashed on the orphan-reference fixture');
+    } else {
+      // (a) second link of a dual-link cell must NOT be an orphan.
+      if (/Orphan report[^\n]*902-acme/.test(orOut)) {
+        fail('dual-link cell: second link (902) falsely flagged as orphan — .match() sees only the first');
+      } else {
+        pass('dual-link report cell resolves BOTH links, not just the first (#1425 follow-up)');
+      }
+      if (/Orphan report[^\n]*901-acme/.test(orOut)) {
+        fail('dual-link cell: first link (901) falsely flagged as orphan');
+      } else {
+        pass('dual-link report cell resolves its first link');
+      }
+      // (b) a row's own number must not mask an unrelated orphan sharing it.
+      if (/Orphan report[^\n]*#950[^\n]*950-globex/.test(orOut)) {
+        pass('row number does not mask an unrelated orphan sharing it (#1733 divergence)');
+      } else {
+        fail('orphan 950 masked by row 950, which links report 955 — row number credited unconditionally');
+      }
+      if (/Orphan report[^\n]*955-initech/.test(orOut)) {
+        fail('linked report 955 falsely flagged as orphan');
+      } else {
+        pass('report referenced by a linking row is not flagged');
+      }
+      // A link-less row is the ONE case where the row number is still the only
+      // signal. Report 970 exists on disk, so this assertion can genuinely fail
+      // if the fallback is dropped.
+      if (/Orphan report[^\n]*970-hooli/.test(orOut)) {
+        fail('link-less legacy row lost its row-number fallback — report 970 flagged');
+      } else {
+        pass('link-less row still falls back to its own number');
+      }
+    }
+  } finally {
+    rmSync(orTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline orphan reference resolution crashed: ${e.message}`);
+}
+
 // ── VERIFY-PIPELINE DUPLICATE TRACKER NUMBER (#1704) ────────────
 // A tracker # must be a unique row id. Two rows sharing a # is never
 // legitimate (unlike Check 2's company+role dedup, which can false-positive
