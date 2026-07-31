@@ -32,7 +32,9 @@ Requires a tailored CV produced by `modes/pdf.md`. Normally that CV was just bui
    3. A path the user supplies explicitly.
 
    Only if none of those resolve, fall back to the newest `output/cv-*-{company}.html` — and say so, because a company with two open roles produces several files whose names carry the candidate and company but not the role. Auditing the wrong CV silently is worse than asking. When reading HTML, take the `<li>` items, which the generator emits only for experience and project bullets.
-5. **Factual floor** — run `node jd-skill-gap.mjs` for the zero-LLM classification of every JD requirement into `existing` / `supportedByResume` / `gap`.
+5. **Factual floor** — run `node jd-skill-gap.mjs jds/{slug}.md --summary` for the zero-LLM classification of every JD requirement into `existing` / `supportedByResume` / `gap`.
+
+   If it prints a `🚨 LOW CONFIDENCE` diagnosis (`no-requirements-section`, `no-skill-candidates`, or `empty-jd`), the check did not run and an empty `gap` list is **not** "no gaps." Treat the classification as unavailable and brief the reviewer per Step 3 — never hand over empty buckets, which read as fit confirmation the check never established.
 6. **Scope of truth** — `cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`. These bound what the reviewer may recommend.
 
 ## Step 1 — Gather
@@ -79,7 +81,7 @@ The brief contains:
 
 - The JD, and the `jd-skill-gap.mjs` output.
 
-  **If no JD text was reachable**, supply the report's requirement summary instead and state in the brief that the skill-gap classification is **unavailable**. Instruct the reviewer explicitly: *"Do not infer requirement coverage, skill gaps, or fit conclusions from the report summary alone — it is a human précis, not the JD. Judge the bullets on their own merits and say which questions you could not answer without the posting."*
+  **If no JD text was reachable, or the classification came back `LOW CONFIDENCE`**, supply the report's requirement summary instead and state in the brief that the skill-gap classification is **unavailable**. Never pass the empty buckets through as a result. Instruct the reviewer explicitly: *"Do not infer requirement coverage, skill gaps, or fit conclusions from the report summary alone — it is a human précis, not the JD. Judge the bullets on their own merits and say which questions you could not answer without the posting."*
 - The tailored bullets, **numbered**.
 - The persona and its tier.
 - The candidate's real scope from `cv.md` and `article-digest.md`, with this instruction verbatim: *"You may recommend cutting or reframing any bullet. You may never recommend a claim the source files do not support. If a requirement is unmet, say it is unmet — do not invent coverage for it."*
