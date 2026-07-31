@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,40 +14,77 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
-const codexCapabilityCache = new Map<string, boolean>();
+const codexCapabilityCache = new Map<string, Promise<boolean>>();
 
-function supportsSafeCodexExec(binPath: string): boolean {
-  const cached = codexCapabilityCache.get(binPath);
-  if (cached !== undefined) return cached;
+function readCodexHelp(binPath: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
 
-  const help = (args: string[]) => {
-    const result = spawnSync(binPath, args, {
-      encoding: "utf8",
+    const finish = (output: string) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve(output);
+    };
+
+    const appendBounded = (current: string, chunk: Buffer) =>
+      (current + chunk.toString()).slice(-64_000);
+
+    const child = spawn(binPath, args, {
       env: { ...process.env, NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
     });
 
-    if (result.error) return "";
-    return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  };
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout = appendBounded(stdout, chunk);
+    });
 
-  const globalHelp = help(["--help"]);
-  const execHelp = help(["exec", "--help"]);
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = appendBounded(stderr, chunk);
+    });
 
-  const supported =
-    globalHelp.includes("--ask-for-approval") &&
-    globalHelp.includes("--search") &&
-    execHelp.includes("--sandbox") &&
-    execHelp.includes("read-only") &&
-    execHelp.includes("--strict-config") &&
-    execHelp.includes("--ignore-user-config") &&
-    execHelp.includes("--ephemeral") &&
-    execHelp.includes("--skip-git-repo-check") &&
-    execHelp.includes("--output-last-message");
+    child.on("error", () => finish(""));
+    child.on("close", () => finish(`${stdout}
+${stderr}`));
 
-  codexCapabilityCache.set(binPath, supported);
-  return supported;
+    timeout = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* best-effort capability-probe cleanup */
+      }
+      finish("");
+    }, 5_000);
+  });
+}
+
+function supportsSafeCodexExec(binPath: string): Promise<boolean> {
+  const cached = codexCapabilityCache.get(binPath);
+  if (cached) return cached;
+
+  const probe = Promise.all([
+    readCodexHelp(binPath, ["--help"]),
+    readCodexHelp(binPath, ["exec", "--help"]),
+  ])
+    .then(([globalHelp, execHelp]) =>
+      globalHelp.includes("--ask-for-approval") &&
+      globalHelp.includes("--search") &&
+      execHelp.includes("--sandbox") &&
+      execHelp.includes("read-only") &&
+      execHelp.includes("--strict-config") &&
+      execHelp.includes("--ignore-user-config") &&
+      execHelp.includes("--ephemeral") &&
+      execHelp.includes("--skip-git-repo-check") &&
+      execHelp.includes("--output-last-message"),
+    )
+    .catch(() => false);
+
+  // Cache the in-flight Promise so concurrent cold requests share one probe.
+  codexCapabilityCache.set(binPath, probe);
+  return probe;
 }
 
 const OUTPUT_CONTRACT = `
@@ -97,7 +134,7 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   const isCodex = cliId === "codex";
 
-  if (isCodex && !supportsSafeCodexExec(binPath)) {
+  if (isCodex && !(await supportsSafeCodexExec(binPath))) {
     return Response.json(
       {
         code: "CODEX_UNSUPPORTED",
