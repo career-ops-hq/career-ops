@@ -145,14 +145,32 @@ const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
 const SYNTAX_POOL_SIZE = 8;
 const execFileAsync = promisify(execFile);
 const syntaxOk = new Array(mjsFiles.length);
+const syntaxDetail = new Array(mjsFiles.length);
 let nextSyntaxIdx = 0;
+
+// A bare catch reports a child killed on timeout, or one that never spawned, as
+// "has syntax errors" — sending the reader hunting for a parse error that does
+// not exist. Keep enough of the child's own diagnosis to tell those apart.
+const describeCheckFailure = (err) => {
+  if (err?.killed || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT') {
+    return `node --check timed out after 30000ms${err.signal ? ` (signal ${err.signal})` : ''}`;
+  }
+  const stderr = String(err?.stderr ?? '').trim();
+  if (!stderr) return `no stderr (exit ${err?.code ?? 'unknown'})`;
+  const clipped = stderr.length > 2000
+    ? `${stderr.slice(0, 2000)}\n    ... (${stderr.length - 2000} more chars)`
+    : stderr;
+  return clipped.replace(/\n/g, '\n    ');
+};
+
 const syntaxWorker = async () => {
   for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
     try {
       await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
       syntaxOk[i] = true;
-    } catch {
+    } catch (err) {
       syntaxOk[i] = false;
+      syntaxDetail[i] = describeCheckFailure(err);
     }
   }
 };
@@ -163,7 +181,7 @@ mjsFiles.forEach((f, i) => {
   if (syntaxOk[i]) {
     pass(`${f} syntax OK`);
   } else {
-    fail(`${f} has syntax errors`);
+    fail(`${f} has syntax errors\n    ${syntaxDetail[i] ?? 'no diagnostic captured'}`);
   }
 });
 
