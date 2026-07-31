@@ -706,7 +706,7 @@ try {
   // matched literal IPv4 patterns and bracketless IPv6, so several Chromium-
   // routable bypasses (0.0.0.0, [::], [::1] (bracketed), [::ffff:127.0.0.1],
   // localhost.) slipped through. These cases keep that regression covered.
-  const { rejectPrivateOrInvalid } = await import(
+  const { rejectPrivateOrInvalid, setHostResolver } = await import(
     pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
   );
   const blockCases = [
@@ -755,105 +755,108 @@ try {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
   }
 
-  // SSRF redirect routing tests
-  const dnsModule = await import('dns/promises');
-  const { mock } = await import('node:test');
-
-  // Stub resolve4, resolve6, and lookup to test the DNS path
-  mock.method(dnsModule.default, 'resolve4', (hostname) => {
-    if (hostname === 'ssrf-blocked-host.local') {
-      return Promise.resolve(['127.0.0.1']);
-    }
-    return Promise.resolve([]);
-  });
-  mock.method(dnsModule.default, 'resolve6', (hostname) => {
-    return Promise.resolve([]);
-  });
-  mock.method(dnsModule.default, 'lookup', (hostname, options) => {
-    if (hostname === 'ssrf-blocked-host.local') {
-      const addr = { address: '127.0.0.1', family: 4 };
-      return Promise.resolve(options?.all ? [addr] : addr);
-    }
-    return Promise.reject(new Error('DNS lookup failure'));
+  // SSRF redirect routing tests.
+  //
+  // The resolver is injected rather than mocked on the dns module (#2386): the
+  // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
+  // reach, so the previous `mock.method(dnsModule.default, …)` stub never
+  // applied. The test passed anyway — the real resolver found nothing for
+  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // so the loopback-rejection branch under test was never executed, and each
+  // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
+  // hands back a loopback address, which is the case that matters, and keeps
+  // the whole section off the network.
+  const restoreHostResolver = setHostResolver(async (hostname) => {
+    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // Every other host in this section is a stand-in for a normal public site.
+    return ['93.184.216.34'];
   });
 
-  let routeCallback = null;
-  const mockPageInstance = {
-    _blockedByGuard: null,
-    async route(pattern, callback) {
-      routeCallback = callback;
-    },
-    async goto() {
-      if (routeCallback) {
-        let aborted = false;
-        const mockRoute = {
-          request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
-          abort: async () => {
-            aborted = true;
-          },
-          continue: async () => {}
-        };
-        await routeCallback(mockRoute);
-        if (aborted) {
-          throw new Error('net::ERR_BLOCKED_BY_CLIENT');
-        }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com/redirected'; },
-    async evaluate() { return 'body text'; }
-  };
-
-  const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
-  if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host') {
-    pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
-  } else {
-    fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
-  }
-
-  // Restore DNS mocks
-  mock.reset();
-
-  let legitimateRouteCallback = null;
-  const mockPageLegitimate = {
-    _blockedByGuard: null,
-    async route(pattern, callback) {
-      legitimateRouteCallback = callback;
-    },
-    async goto() {
-      if (legitimateRouteCallback) {
-        let continued = false;
-        const mockRoute = {
-          request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
-          abort: async () => {},
-          continue: async () => {
-            continued = true;
+  try {
+    let routeCallback = null;
+    const mockPageInstance = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        routeCallback = callback;
+      },
+      async goto() {
+        if (routeCallback) {
+          let aborted = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            abort: async () => {
+              aborted = true;
+            },
+            continue: async () => {}
+          };
+          await routeCallback(mockRoute);
+          if (aborted) {
+            throw new Error('net::ERR_BLOCKED_BY_CLIENT');
           }
-        };
-        await legitimateRouteCallback(mockRoute);
-        if (!continued) {
-          throw new Error('Blocked legitimate request');
         }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com'; },
-    async evaluate(fn) {
-      const fnStr = fn.toString();
-      if (fnStr.includes('body')) {
-        return 'legitimate page body';
-      }
-      return ['Apply'];
-    }
-  };
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com/redirected'; },
+      async evaluate() { return 'body text'; }
+    };
 
-  const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
-  if (legitimateResult.result === 'active') {
-    pass('SSRF redirect guard allows legitimate subresource requests');
-  } else {
-    fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
+    // The reason has to name the loopback address. `blocked_host` alone is also
+    // what an unresolvable host produces, so asserting on the code by itself
+    // cannot tell "guard rejected 127.0.0.1" from "host resolved to nothing" —
+    // that ambiguity is exactly what hid the broken mock (#2386).
+    if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host'
+        && /private target IP 127\.0\.0\.1/.test(redirectResult.reason ?? '')) {
+      pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
+    } else {
+      fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
+    }
+
+    let legitimateRouteCallback = null;
+    const mockPageLegitimate = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        legitimateRouteCallback = callback;
+      },
+      async goto() {
+        if (legitimateRouteCallback) {
+          let continued = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
+            abort: async () => {},
+            continue: async () => {
+              continued = true;
+            }
+          };
+          await legitimateRouteCallback(mockRoute);
+          if (!continued) {
+            throw new Error('Blocked legitimate request');
+          }
+        }
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com'; },
+      async evaluate(fn) {
+        const fnStr = fn.toString();
+        if (fnStr.includes('body')) {
+          return 'legitimate page body';
+        }
+        return ['Apply'];
+      }
+    };
+
+    const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
+    if (legitimateResult.result === 'active') {
+      pass('SSRF redirect guard allows legitimate subresource requests');
+    } else {
+      fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    }
+  } finally {
+    // Always put the real resolver back, even if an assertion above throws:
+    // a leaked stub would silently answer for every later suite in this process.
+    restoreHostResolver();
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
