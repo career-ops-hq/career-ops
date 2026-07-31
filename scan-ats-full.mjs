@@ -717,6 +717,10 @@ async function main() {
     }
   };
 
+  // Run-level, because resolverOutage below is per-source and long out of
+  // scope by the time the checkpoint's fate is decided at the end of main().
+  let stoppedByOutage = false;
+
   for (const name of opts.ats) {
     const source = SOURCES[name];
     // Stats are accumulated BEFORE the completed-source skip: on --resume a
@@ -753,6 +757,11 @@ async function main() {
     let errors = 0;
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
+    // Latest progress reported by parallelEach. It computes both on every item
+    // but keeps neither, and a run stopped mid-source needs them after the
+    // call returns to checkpoint where it actually stopped (#2283).
+    let lastDone = 0;
+    let lastResumeAt = 0;
     const truncated = [];
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
@@ -785,6 +794,8 @@ async function main() {
         if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: ${err.message}`);
       }
     }, ({ done, resumeAt }) => {
+      lastDone = done;
+      lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
@@ -831,10 +842,31 @@ async function main() {
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
+      stoppedByOutage = true;
+      // Pin the resume point here rather than leaving the last periodic write
+      // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
+      // it can be up to 500 boards behind where the breaker actually stopped —
+      // and --resume would replay all of them against the resolver that just
+      // refused. The counter correction mirrors the periodic write's: on
+      // resume the run re-adds its own slice, so a checkpoint must record only
+      // the work actually attempted or the completed portion is counted twice.
+      if (!opts.dryRun) {
+        writeCheckpoint({
+          ...checkpointBase(),
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
+          counters: {
+            ...snapshotCounters(),
+            totalCompaniesScanned: totalCompaniesScanned - (entries.length - lastDone),
+          },
+        });
+      }
       log(`\n  ⛔ stopped ${name}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
       log(`     CAREER_OPS_NO_DNS_CACHE=1 only if you know the cache is at fault.`);
+      // Only claim resumability when a checkpoint actually exists: --dry-run
+      // writes none, and a failed write already said so on its own.
+      if (!opts.dryRun) log(`     Rerun with --resume once the resolver recovers — checkpointed at company ${startAt + lastResumeAt} of ${name}.`);
       break;
     }
     completedSources.add(name);
@@ -937,8 +969,10 @@ async function main() {
     }
   }
 
-  // Sweep completed — the checkpoint's job is done.
-  if (!opts.dryRun && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
+  // Sweep completed — the checkpoint's job is done. A run the breaker stopped
+  // did NOT complete: deleting here would destroy the resume point the outage
+  // branch just wrote, which is the one case --resume exists for (#2283).
+  if (!opts.dryRun && !stoppedByOutage && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
 
   // The authoritative machine-readable result: lets a caller (e.g. the web)
   // tell a *degraded* scan (capped / stale dataset / undated dropped) apart
