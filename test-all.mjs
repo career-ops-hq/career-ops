@@ -200,6 +200,11 @@ const scripts = [
   // `git ls-files` on the REAL tree. Running it here validated nothing and
   // exited 0 no matter what, which is how five unregistered files shipped.
   // It now runs from ROOT in section 5.
+  { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
+  // Same reasoning as above: the bare run needs AGENTS.md and the real
+  // modes/ tree sitting next to it, which this throwaway single-file copy
+  // does not have. It runs from ROOT alongside the SYSTEM_PATHS coverage
+  // check below.
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -1016,6 +1021,21 @@ for (const f of skillEntrypoints) {
     pass('every tracked file is covered by SYSTEM_PATHS or USER_PATHS');
   } else {
     fail(`SYSTEM_PATHS coverage gap — a new file is unregistered and update-system will not ship it:\n${(cov.stderr || cov.stdout || '').trim()}`);
+  }
+}
+
+// Same shape, for the untrusted-external-content directive: every mode that
+// ingests raw external text must reference the canonical AGENTS.md rule, or
+// a new/edited mode can silently lose it with no signal until it's exploited.
+{
+  const untrusted = spawnSync(process.execPath, [join(ROOT, 'validate-untrusted-content-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (untrusted.status === 0) {
+    pass('canonical untrusted-external-content directive is present and referenced by every ingesting mode');
+  } else {
+    fail(`Untrusted-content directive coverage gap:\n${(untrusted.stderr || untrusted.stdout || '').trim()}`);
   }
 }
 

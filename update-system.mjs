@@ -232,6 +232,7 @@ const SYSTEM_PATHS = [
   'fix-slugs.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
+  'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
   'reply-matcher.test.mjs',
   'reply-watch.mjs',
