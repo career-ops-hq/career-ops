@@ -89,3 +89,15 @@ public commit with a stated reason.
 - @youlia-denisov | Juls | 2026-07-21 | "This is a new cool toy for job searching, it upgraded my job search in a very delightful manner. Thank you!" | id:170363981 | src:https://github.com/santifer/career-ops/discussions/2090 | n:41
 - @rubicon | Dax Davis | 2026-07-22 | "Thirty years building demand-gen engines for other people. First time I've pointed one at my own job search." | id:98216 | src:https://github.com/santifer/career-ops/discussions/2106 | n:42
 - @minammar | 2026-07-22 | id:60332772 | src:https://github.com/santifer/career-ops/discussions/2114 | n:43
+- @arberbakalli | Arbër Bakalli | 2026-07-23 | "How hiring should have been" | id:15056487 | src:https://github.com/santifer/career-ops/discussions/2131 | n:44
+- @harsh-kotak | Harsh Kotak | 2026-07-23 | "career-ops helped me search with a plan." | id:9409440 | src:https://github.com/santifer/career-ops/discussions/2133 | n:45
+- @asing44 | Adam Warsing | 2026-07-24 | "To approaching a turbulent space with real dignity, cheers!" | id:109570966 | src:https://github.com/santifer/career-ops/discussions/2168 | n:46
+- @cdelafosse4-ops | 2026-07-27 | id:290349063 | src:https://github.com/santifer/career-ops/discussions/2208 | n:47
+- @Saksham-Khosla | 2026-07-27 | id:294287864 | src:https://github.com/santifer/career-ops/discussions/2218 | n:48
+- @sdisaacson | Scott Isaacson | 2026-07-27 | "Whose side is your agent on?" | id:1022379 | src:https://github.com/santifer/career-ops/discussions/2219 | n:49
+- @aawbeck | Aaron Beck | 2026-07-27 | "Great tool, ty!" | id:255968200 | src:https://github.com/santifer/career-ops/discussions/2222 | n:50
+- @NotPraneeth | Sai Praneeth | 2026-07-29 | "The search mustn't stop" | id:92677364 | src:https://github.com/santifer/career-ops/discussions/2275 | n:51
+- @changeable-alcohol | X | 2026-07-29 | id:108211470 | src:https://github.com/santifer/career-ops/discussions/2287 | n:52
+- @marz1307 | Marvis Osazuwa | 2026-07-29 | "Building on it instead of around it." | id:62819238 | src:https://github.com/santifer/career-ops/pull/2311 | n:53
+- @kylekkkk61 | kylewu | 2026-07-30 | "I will be graduated next year, and I believe this can help me find a job." | id:102206550 | src:https://github.com/santifer/career-ops/discussions/2334 | n:54
+- @LuswetiNick | Nicholas Lusweti | 2026-07-30 | id:179443452 | src:https://github.com/santifer/career-ops/discussions/2345 | n:55

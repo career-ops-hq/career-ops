@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -143,6 +143,92 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     pass('report-mismatch: --force permits an intentional numeric update');
   } else {
     fail(`report-mismatch force: code=${forced.code}\n${forced.stdout}${forced.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1c. A single match must still be checked against --role (#2009) ─
+// resolveRow only consults --role to break ties between 2+ candidates, so a
+// company matching exactly one row was updated without ever comparing it to
+// the role the caller explicitly asked for. The intended requisition may not
+// be in the tracker at all (fuzzy-deduped away), and the lone survivor for
+// that company silently absorbed the status change.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const before = readTracker(sb);
+  const r = runSetStatus(['globex', 'SKIP', '--role', 'Data Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch'
+      && parsed.rowRole === 'Platform Engineer' && parsed.requestedRole === 'Data Engineer'
+      && readTracker(sb) === before) {
+    pass('role-mismatch: single company match fails closed without writing (#2009)');
+  } else {
+    fail(`role-mismatch: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  const forced = runSetStatus(['globex', 'SKIP', '--role', 'Data Engineer', '--force'], sb);
+  if (forced.code === 0 && /\| 2 \|[^\n]*\| SKIP \|/.test(readTracker(sb))) {
+    pass('role-mismatch: --force records an explicit decision to proceed');
+  } else {
+    fail(`role-mismatch force: code=${forced.code}\n${forced.stdout}${forced.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1d. An exact --role must NOT be rejected by the new guard (#2009) ─
+// roleFuzzyMatch is a dedup predicate: it returns false when the overlap is
+// entirely baseline vocabulary (["platform","engineer"]) so same-titled
+// sibling reqs never auto-merge. Using it alone as the guard's equality test
+// would reject --role "Platform Engineer" against a row that is exactly that.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['globex', 'Applied', '--role', 'Platform Engineer'], sb);
+  if (r.code === 0 && /\| 2 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: an exact all-baseline role title still proceeds (#2009)');
+  } else {
+    fail(`role-mismatch exact: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Case and punctuation must not matter for the equality path.
+  const r2 = runSetStatus(['globex', 'Evaluated', '--role', 'platform  engineer'], sb);
+  if (r2.code === 0 && /\| 2 \|[^\n]*\| Evaluated \|/.test(readTracker(sb))) {
+    pass('role-mismatch: role equality is case/punctuation insensitive (#2009)');
+  } else {
+    fail(`role-mismatch normalize: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1e. Symbol-bearing titles must not collapse to the same role (#2009) ─
+// The equality normalizer strips generic punctuation, so it must preserve the
+// symbols that actually distinguish a title first — otherwise "C# Engineer" and
+// "C++ Engineer" both fold to "c engineer" and the guard silently updates the
+// wrong row for exactly the kind of title it exists to protect.
+{
+  const TRACKER_SYMBOL = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Contoso | C++ Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-contoso-2026-06-01.md) | — |
+`;
+  const sb = makeSandbox(TRACKER_SYMBOL);
+  const before = readTracker(sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C# Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: "C# Engineer" does not match a "C++ Engineer" row (#2009)');
+  } else {
+    fail(`role-mismatch symbol: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // The genuine same-symbol title still matches (guard does not over-fire).
+  const r2 = runSetStatus(['contoso', 'Applied', '--role', 'c++ engineer'], sb);
+  if (r2.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: "c++ engineer" still matches a "C++ Engineer" row (#2009)');
+  } else {
+    fail(`role-mismatch symbol-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
@@ -532,8 +618,14 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   mkdirSync(lockDir, { recursive: true });
   writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999999, token: 'dead', tracker: 'x' }));
   // Orphaned guard left behind by a killed process (no owner.json → judged by age).
+  // Backdate it rather than sleeping: the guard has to read as genuinely
+  // abandoned, not merely as older than a small staleMs. Age alone is floored
+  // at OWNERLESS_GRACE_MS (#2306) so that a guard a live caller is holding is
+  // never evicted, and sleeping past that floor would make this test both
+  // slower and vaguer about which condition it is exercising.
   mkdirSync(`${lockDir}.recover`, { recursive: true });
-  await new Promise(r => setTimeout(r, 150));
+  const abandonedAt = new Date(Date.now() - 60_000);
+  utimesSync(`${lockDir}.recover`, abandonedAt, abandonedAt);
   try {
     const lock = await acquireTrackerLock(lockDir, { timeoutMs: 3000, retryMs: 25, staleMs: 50, tracker: 'x' });
     if (lock.staleRecovered) {
@@ -584,6 +676,116 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
       rmSync(dir, { recursive: true, force: true });
     }
   }
+}
+
+// ── status-log ledger append (funnel-velocity data source) ──────
+// The ledger must land NEXT TO the sandboxed tracker, never in the repo's
+// real data/ — that is the whole point of deriving its path from APPS_FILE.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+
+  // real transition → one line, today's date, from/to states, source set-status
+  const r1 = runSetStatus(['2', 'Applied', '--json'], sb);
+  const today = new Date().toISOString().slice(0, 10);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r1.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
+    pass('ledger: real transition appends one dated line next to the tracker');
+  } else {
+    fail(`ledger: expected single Evaluated→Applied line, got ${JSON.stringify(log)}\n${r1.stdout}${r1.stderr}`);
+  }
+  let parsed1 = null;
+  try { parsed1 = JSON.parse(r1.stdout); } catch {}
+  if (parsed1 && parsed1.statusLogged === true) {
+    pass('ledger: JSON output carries statusLogged: true');
+  } else {
+    fail(`ledger: statusLogged missing/false in JSON\n${r1.stdout}`);
+  }
+
+  // no-op re-run → no new line
+  runSetStatus(['2', 'Applied'], sb);
+  const logAfterNoop = readFileSync(logPath, 'utf-8');
+  if (logAfterNoop.trim().split('\n').length === 1) {
+    pass('ledger: idempotent re-run appends nothing');
+  } else {
+    fail(`ledger: no-op re-run grew the log\n${logAfterNoop}`);
+  }
+
+  // --on backdates the event
+  const r2 = runSetStatus(['2', 'Responded', '--on', '2026-07-01'], sb);
+  const logAfterOn = readFileSync(logPath, 'utf-8');
+  if (r2.code === 0 && logAfterOn.includes('2\t2026-07-01\tApplied\tResponded\tset-status\t')) {
+    pass('ledger: --on records the real event date');
+  } else {
+    fail(`ledger: --on date not recorded\n${logAfterOn}${r2.stderr}`);
+  }
+
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── --on validation (before anything touches the tracker) ───────
+{
+  const sb = makeSandbox(TRACKER_9);
+  const badFormat = runSetStatus(['2', 'Applied', '--on', '07/01/2026'], sb);
+  if (badFormat.code === 1 && readTracker(sb).includes('| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated |')) {
+    pass('--on: bad format rejected before any write');
+  } else {
+    fail(`--on: bad format not rejected (code=${badFormat.code})`);
+  }
+  const notReal = runSetStatus(['2', 'Applied', '--on', '2026-02-30'], sb);
+  if (notReal.code === 1) {
+    pass('--on: impossible calendar date rejected');
+  } else {
+    fail(`--on: 2026-02-30 accepted (code=${notReal.code})`);
+  }
+  const future = runSetStatus(['2', 'Applied', '--on', '2199-01-01'], sb);
+  if (future.code === 1) {
+    pass('--on: future date rejected');
+  } else {
+    fail(`--on: future date accepted (code=${future.code})`);
+  }
+  const missingValue = runSetStatus(['2', 'Applied', '--on', '--dry-run'], sb);
+  if (missingValue.code === 1) {
+    pass('--on: refuses to consume a following flag as its value');
+  } else {
+    fail(`--on: consumed --dry-run as a date (code=${missingValue.code})`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── dry-run never writes the ledger ──────────────────────────────
+{
+  const sb = makeSandbox(TRACKER_9);
+  runSetStatus(['2', 'Applied', '--dry-run'], sb);
+  let logExists = true;
+  try { readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8'); } catch { logExists = false; }
+  if (!logExists) {
+    pass('ledger: --dry-run appends nothing');
+  } else {
+    fail('ledger: --dry-run wrote to the log');
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── ledger append failure is a warning, not a failure ────────────
+// Occupy the log path with a DIRECTORY so appendFileSync fails (EISDIR),
+// portable across platforms. The status write itself must still succeed.
+{
+  const sb = makeSandbox(TRACKER_9);
+  mkdirSync(join(sb.dir, 'status-log.tsv'));
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  const trackerUpdated = /\| Globex \| Platform Engineer \| 4.0\/5 \| Applied \|/.test(readTracker(sb));
+  // runSetStatus discards stderr on exit-0 runs, so the warning text itself
+  // isn't assertable here — statusLogged: false in the JSON is the contract.
+  if (r.code === 0 && trackerUpdated && parsed?.statusLogged === false) {
+    pass('ledger: append failure → exit 0, tracker updated, statusLogged: false');
+  } else {
+    fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

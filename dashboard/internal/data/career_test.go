@@ -447,3 +447,95 @@ func TestNormalizeStatus(t *testing.T) {
 		})
 	}
 }
+
+// Regression: when an external writer (set-status.mjs, merge-tracker.mjs,
+// another session) changes a row's status while the dashboard is open, the
+// in-memory "old" status no longer matches the file. The update must still
+// land in the Status column — identified via the header — rather than
+// silently no-opping.
+func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|-----|------|-------|--------|-----|--------|-------|
+| 28 | 2026-07-10 | ? | DaCodes | Backend Engineer | 3.1/5 | Evaluated | ✅ | [28](../reports/028-dacodes.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Simulate an external writer changing the status on disk after parse.
+	stale := strings.Replace(applications, "| Evaluated |", "| Applied |", 1)
+	if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	// apps[0].Status is still "Evaluated" (stale) — the update must still work.
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err != nil {
+		t.Fatalf("UpdateApplicationStatus with stale status: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(out), "| Interview |") {
+		t.Errorf("status not updated, file now:\n%s", string(out))
+	}
+	if strings.Contains(string(out), "| Applied |") || strings.Contains(string(out), "| Evaluated |") {
+		t.Errorf("old status still present, file now:\n%s", string(out))
+	}
+}
+
+// A row whose canonical status column holds something unrecognizable must NOT
+// be guessed at — the update fails loudly instead of corrupting a cell.
+func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 3 | 2026-07-10 | Acme | Engineer | 3.1/5 | Evaluated | ✅ | [3](reports/003.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Corrupt the status cell into something that is not a status.
+	broken := strings.Replace(applications, "| Evaluated |", "| ??? |", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err == nil {
+		t.Fatal("expected an error when the status cell is unrecognizable, got nil")
+	}
+
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), "| ??? |") {
+		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
+	}
+}

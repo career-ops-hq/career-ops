@@ -349,6 +349,62 @@ func TestRejectedAndDiscardedTabsFilterCorrectly(t *testing.T) {
 	}
 }
 
+func TestRespondedTabFiltersCorrectly(t *testing.T) {
+	apps := []model.CareerApplication{
+		{
+			Company:    "Acme",
+			Role:       "Backend Engineer",
+			Status:     "Responded",
+			Score:      4.2,
+			ReportPath: "reports/001-acme.md",
+		},
+		{
+			Company:    "Beta",
+			Role:       "Platform Engineer",
+			Status:     "Applied",
+			Score:      3.8,
+			ReportPath: "reports/002-beta.md",
+		},
+		{
+			Company:    "Gamma",
+			Role:       "AI Engineer",
+			Status:     "Interview",
+			Score:      4.6,
+			ReportPath: "reports/003-gamma.md",
+		},
+	}
+
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		apps,
+		model.PipelineMetrics{Total: len(apps)},
+		t.TempDir(),
+		120,
+		40,
+	)
+
+	pm.activeTab = tabIndexForFilter(t, filterResponded)
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 1 || pm.filtered[0].Status != "Responded" {
+		t.Fatalf("expected responded tab to isolate responded rows, got %+v", pm.filtered)
+	}
+}
+
+// The tab row follows the funnel order used by statusGroupOrder, where a
+// responded posting sits between interview and applied.
+func TestRespondedTabSitsBetweenInterviewAndApplied(t *testing.T) {
+	interview := tabIndexForFilter(t, filterInterview)
+	responded := tabIndexForFilter(t, filterResponded)
+	applied := tabIndexForFilter(t, filterApplied)
+
+	if !(interview < responded && responded < applied) {
+		t.Fatalf(
+			"expected tab order interview < responded < applied, got %d, %d, %d",
+			interview, responded, applied,
+		)
+	}
+}
+
 // Regression: with no committed search query, Esc must NOT close the screen.
 // The help bar advertises only `q quit`, so Esc quitting silently was a bug
 // that surfaced as accidental exits when users hit Esc to "back out" of the UI.
@@ -578,5 +634,96 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 	}
 	if reloaded.cursor < 0 || reloaded.cursor >= len(reloaded.filtered) {
 		t.Fatalf("expected cursor to be within [0, %d], got %d", len(reloaded.filtered)-1, reloaded.cursor)
+	}
+}
+
+// Regression: the viewer status path starts the discard reason picker (or the
+// hired celebration) on the pipeline model and then immediately reloads data.
+// WithReloadedData must carry that in-progress flow state over — wiping it
+// meant picking Discarded/SKIP from the report viewer never showed the reason
+// picker and never persisted the status change.
+func TestWithReloadedDataPreservesDiscardAndHiredFlow(t *testing.T) {
+	apps := []model.CareerApplication{
+		{
+			Company:      "Acme",
+			Role:         "Backend Engineer",
+			Status:       "Evaluated",
+			Score:        4.2,
+			ReportPath:   "reports/001-acme.md",
+			ReportNumber: "1",
+		},
+	}
+
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
+	pm.applyFilterAndSort()
+
+	pm, _ = pm.StartDiscardReasonFlow(apps[0], "SKIP")
+	pm.discardCursor = 2
+	pm.discardCustomInput = true
+	pm.discardCustomText = "typed"
+	pm.hiredApp = apps[0]
+	pm.hiredStep = 1
+
+	reloaded := pm.WithReloadedData(apps, model.PipelineMetrics{Total: len(apps)})
+
+	if !reloaded.discardPicker {
+		t.Fatal("discardPicker = false, want true (reason picker must survive reload)")
+	}
+	if reloaded.discardPendingStatus != "SKIP" {
+		t.Fatalf("discardPendingStatus = %q, want SKIP", reloaded.discardPendingStatus)
+	}
+	if reloaded.discardPendingApp.Company != "Acme" {
+		t.Fatalf("discardPendingApp lost: %+v", reloaded.discardPendingApp)
+	}
+	if len(reloaded.discardOptions) == 0 {
+		t.Fatal("discardOptions were wiped by reload")
+	}
+	if reloaded.discardCursor != 2 || !reloaded.discardCustomInput || reloaded.discardCustomText != "typed" {
+		t.Fatalf("discard cursor/custom-input lost: cursor=%d customInput=%v customText=%q",
+			reloaded.discardCursor, reloaded.discardCustomInput, reloaded.discardCustomText)
+	}
+	if reloaded.discardPredictedCount != pm.discardPredictedCount {
+		t.Fatalf("discardPredictedCount = %d, want %d", reloaded.discardPredictedCount, pm.discardPredictedCount)
+	}
+	if reloaded.hiredStep != 1 || reloaded.hiredApp.Company != "Acme" {
+		t.Fatalf("hired flow lost: step=%d app=%+v", reloaded.hiredStep, reloaded.hiredApp)
+	}
+}
+
+func TestGetStatusPairsPinsCurrentStatusToFront(t *testing.T) {
+	base := getStatusPairs("")
+
+	ordered := getStatusPairs("applied")
+	if ordered[0].Canonical != "Applied" {
+		t.Fatalf("ordered[0].Canonical = %q, want Applied", ordered[0].Canonical)
+	}
+	if len(ordered) != len(base) {
+		t.Fatalf("len(ordered) = %d, want %d (no entries added or dropped)", len(ordered), len(base))
+	}
+
+	// The rest of the list keeps its original relative order.
+	var restGotWithoutApplied []string
+	for _, pair := range ordered[1:] {
+		restGotWithoutApplied = append(restGotWithoutApplied, pair.Canonical)
+	}
+	var restWant []string
+	for _, pair := range base {
+		if pair.Canonical != "Applied" {
+			restWant = append(restWant, pair.Canonical)
+		}
+	}
+	if strings.Join(restGotWithoutApplied, ",") != strings.Join(restWant, ",") {
+		t.Fatalf("rest of list reordered: got %v, want %v", restGotWithoutApplied, restWant)
+	}
+}
+
+func TestGetStatusPairsUnrecognizedStatusFallsBackToStaticOrder(t *testing.T) {
+	base := getStatusPairs("")
+	got := getStatusPairs("some-unmapped-status")
+
+	for i := range base {
+		if got[i].Canonical != base[i].Canonical {
+			t.Fatalf("got[%d].Canonical = %q, want %q (static order)", i, got[i].Canonical, base[i].Canonical)
+		}
 	}
 }

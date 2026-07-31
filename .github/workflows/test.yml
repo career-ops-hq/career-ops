@@ -4,10 +4,28 @@ on:
   pull_request:
     branches: [main]
 
+# A force-push supersedes the running matrix; cancel it instead of letting
+# stale legs occupy runners (3 jobs per push at this repo's PR volume).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # One OS failing must not cancel the evidence from the others —
+      # a platform-specific failure is exactly what this matrix exists to isolate.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
+      # The repo is committed with LF; Windows runners default to autocrlf,
+      # which would rewrite every text file on checkout and make regexes that
+      # rely on `.` (no \r) fail in ways the other platforms never see.
+      - name: Force LF checkout on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
