@@ -24,10 +24,11 @@
  */
 
 
-import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
+import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
+import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
 import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
@@ -134,14 +135,37 @@ console.log('\n🧪 career-ops test suite\n');
 console.log('1. Syntax checks');
 
 const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
-for (const f of mjsFiles) {
-  const result = run(NODE, ['--check', f]);
-  if (result !== null) {
+
+// `node --check` parses a file and exits; it runs no user code, touches no
+// shared state, and its result depends on nothing but that one file. Spawning
+// the 100+ root scripts one at a time was pure process-startup latency, so they
+// go through a bounded pool instead (#2387). Results are collected by index and
+// reported afterwards in the original readdir order, so the log stays
+// byte-identical to the sequential version regardless of completion order.
+const SYNTAX_POOL_SIZE = 8;
+const execFileAsync = promisify(execFile);
+const syntaxOk = new Array(mjsFiles.length);
+let nextSyntaxIdx = 0;
+const syntaxWorker = async () => {
+  for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
+    try {
+      await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
+      syntaxOk[i] = true;
+    } catch {
+      syntaxOk[i] = false;
+    }
+  }
+};
+await Promise.all(
+  Array.from({ length: Math.min(SYNTAX_POOL_SIZE, mjsFiles.length) }, syntaxWorker)
+);
+mjsFiles.forEach((f, i) => {
+  if (syntaxOk[i]) {
     pass(`${f} syntax OK`);
   } else {
     fail(`${f} has syntax errors`);
   }
-}
+});
 
 // ── 2. SCRIPT EXECUTION ─────────────────────────────────────────
 
@@ -213,11 +237,19 @@ const scripts = [
 
 const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
+  // Never copied, at any depth: dependency trees and git metadata. Nothing run
+  // from the throwaway copy reads them (module resolution walks up into the
+  // real ROOT/node_modules, which is how the root-level exclusion already
+  // worked), and a nested web/node_modules is ~400 MB on a machine that has
+  // installed the web app's deps — copying it dominated this section (#2387).
+  const EXCLUDE_AT_ANY_DEPTH = new Set(['node_modules', '.git']);
+
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
-    // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
-    // Match by basename ONLY at the repo root so nested fixture subdirs such as
-    // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+    if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
+    // Everything else is a top-level workspace dir (data/, reports/, …) and is
+    // matched by basename ONLY at the repo root, so nested fixture subdirs such
+    // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
@@ -231,8 +263,8 @@ try {
   };
 
   const excludeDirs = [
-    'node_modules',
-    '.git',
+    // node_modules and .git are not listed here — EXCLUDE_AT_ANY_DEPTH above
+    // drops them wherever they occur, root included.
     'data',
     'reports',
     '.career-ops-web',
@@ -4300,9 +4332,15 @@ try {
   writeFileSync(dryRunPortals, fixture);
   const beforeDryRun = readFileSync(dryRunPortals, 'utf-8');
   try {
+    // fix-slugs probes live Greenhouse/Ashby/Lever endpoints before it decides
+    // what to rewrite, so on a connected machine this child runs to the timeout
+    // and is killed. That is fine: the assertion below is about disk writes, not
+    // about network reachability, and a dry run must not write at any point in
+    // its life. The timeout is therefore kept short (#2387) - 15 s bought
+    // nothing but 15 s.
     execFileSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', dryRunPortals, '--dry-run'], {
       cwd: ROOT,
-      timeout: 15000,
+      timeout: 2000,
     });
   } catch {
     // Network is reachable-or-not in CI; either way, no write should occur.
