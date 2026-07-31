@@ -826,6 +826,31 @@ These have no `npm run` binding — modes and agents call them with
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
 
+## set-status
+
+Canonical tracker write path — strict `states.yml` validation, shared lock, atomic write. Modes (`apply` step 9, `followup`, `batch`) call this instead of hand-editing `applications.md`. Once the tracker-row and report counters diverge, a bare number is ambiguous, so two explicit selectors name which number space you mean:
+
+- `--row N` — select the tracker row whose `#` column is `N`.
+- `--report N` — select the row whose `Report` cell links report `#N`.
+
+`--row` and `--report` are **mutually exclusive** — passing both is a usage error. They answer the report-number-mismatch guard instead of overriding it, so they skip the guard **without `--force`** (a bare number trips the guard and pushes callers toward `--force`).
+
+When a bare number is enough vs. when to be explicit:
+
+- While the two counters are still aligned, a bare `<report#|company>` is fine.
+- Once they diverge, `97` could mean row `#97` or report `#97` (different applications) — prefer an explicit selector as soon as the mismatch guard fires.
+- `--row N` when you know the tracker row number; `--report N` when you're working from a report filename.
+
+```bash
+node set-status.mjs --row 97 Aplicado      # set tracker row #97 (skips mismatch guard, no --force)
+node set-status.mjs --report 97 Aplicado   # set the row that links report #97
+node set-status.mjs 97 Aplicado            # bare number: ambiguous once counters diverge; guard may require --row/--report or --force
+```
+
+Other flags: `--note "..."`, `--role "..."` (disambiguate duplicates), `--on YYYY-MM-DD` (effective date), `--force`, `--dry-run`, `--json`.
+
+**Exit codes:** `1` invalid or conflicting selector (missing flag value, non-numeric `--row`/`--report`, unknown flag, `--row` + `--report` together, wrong argument count, bad `--on` date, or invalid state); `2` not found (no row links that report, no tracker row with that `#`, no company match, or no tracker file).
+
 ---
 
 ## stats.mjs
