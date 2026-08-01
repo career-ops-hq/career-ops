@@ -318,6 +318,44 @@ missing data" rule as every other date/location filter here) — this bounds
 what's filterable, not what's returned. For a relative "N days old" cutoff
 instead of an absolute window, use `max_posting_age_days` in `portals.yml`.
 
+### `--since` — stop paginating stale pages (speed, not filtering)
+
+`--posted-after` filters jobs *after* they are fetched. `--since <days>` is
+different: it is a hint to the **provider**, telling it to stop paginating once
+a page is entirely older than the window.
+
+```bash
+node scan.mjs --since 7        # don't page deeper than ~7 days of history
+```
+
+Only providers that return postings newest-first can act on it — currently
+`workday.mjs`. On a large Workday tenant this is the difference between paging
+to the `max_pages` cap on every run and stopping as soon as the postings go
+stale, which on an 18,000-posting board is minutes of wall-clock and thousands
+of requests spent re-fetching rows the scanner then discards as duplicates.
+
+**It never changes which postings are eligible** — only how deep the scanner
+digs to find them. A posting inside the window is returned either way.
+
+Notes:
+
+- **Off by default.** Pagination depth is configured per-entry with `max_pages`
+  in `portals.yml`, so a default window would silently shorten every existing
+  config. (`scan-ats-full.mjs` *does* default `--since` to 3 days — it has no
+  per-entry depth setting to respect.)
+- **`--posted-after` is used as the window when `--since` is absent.** It
+  already says "nothing older than this date", which is exactly the bound the
+  early-stop needs, so the two never disagree.
+- **Undated postings are unaffected.** Providers are explicitly told not to skip
+  tenants that expose no posting date; `scan.mjs` decides what to do with those
+  downstream, where they pass.
+- A window of 30 days or more effectively never triggers the early stop —
+  Workday's age labels top out at an unbounded "30+ Days Ago" bucket, which is
+  deliberately never treated as an unambiguous age.
+
+Rule of thumb: set `--since` a little wider than your scan interval. Scanning
+weekly, `--since 10` keeps a margin for a skipped run.
+
 ### Cross-listing detection
 
 The `jd_fingerprint` column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.

@@ -1893,6 +1893,37 @@ async function main() {
     process.exit(1);
   }
 
+  // --since <days>: a lower bound on posting age, passed to providers as an
+  // EARLY-STOP HINT rather than a filter. providers/workday.mjs returns postings
+  // newest-first and can stop paginating once a page is entirely past the window
+  // — but that only fires when ctx carries sinceMs, and scan.mjs never set it, so
+  // every Workday tenant paginated to its max_pages cap on every run regardless
+  // of how stale the deep pages were. On a large tenant that is minutes of
+  // wall-clock and thousands of requests spent re-fetching postings the scanner
+  // then discards as duplicates.
+  //
+  // OFF BY DEFAULT. scan-ats-full.mjs defaults --since to 3 days; scan.mjs must
+  // not, because pagination depth here is configured per-entry via max_pages and
+  // a default window would silently shorten every existing portals.yml.
+  //
+  // --posted-after is honoured as a source when --since is absent: it already
+  // states "nothing older than this date", which is exactly the bound the
+  // early-stop needs. Reusing it keeps one concept instead of two that can
+  // disagree.
+  const sinceIdx = args.indexOf('--since');
+  const sinceRaw = sinceIdx !== -1 && args[sinceIdx + 1] && !args[sinceIdx + 1].startsWith('--')
+    ? args[sinceIdx + 1]
+    : (args.find((a) => a.startsWith('--since=')) || '').split('=')[1] || null;
+  if (sinceRaw != null && !(Number(sinceRaw) > 0)) {
+    // Gated like --posted-after: a silently-ignored window would look like a
+    // fast scan that simply found less, which is indistinguishable from success.
+    console.error(`Error: --since expects a positive number of days, got "${sinceRaw}"`);
+    process.exit(1);
+  }
+  const earlyStopSinceMs = sinceRaw != null
+    ? Date.now() - Number(sinceRaw) * 86_400_000
+    : (postedAfter ? Date.parse(`${postedAfter}T00:00:00Z`) : null);
+
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
   // Opt-in: merge enabled keyed/auth-gated provider plugins. Returns immediately
@@ -2037,7 +2068,15 @@ async function main() {
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
-    const ctx = makeHttpCtx();
+    // includeUndated is deliberately ALWAYS true, independent of the window.
+    // It does not mean "include undated postings in the results" — scan.mjs
+    // already decides that downstream, where buildPostedDateFilter passes a
+    // posting with no parseable date. It means "provider, do not pre-empt that
+    // decision": without it, workday.mjs's no-date-skip returns page 0 only for
+    // any tenant whose CXS payload omits postedOn entirely, silently dropping
+    // postings this scanner would have kept. The early-stop is an optimisation
+    // and must never change which postings are eligible.
+    const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
