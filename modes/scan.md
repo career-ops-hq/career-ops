@@ -318,40 +318,49 @@ missing data" rule as every other date/location filter here) — this bounds
 what's filterable, not what's returned. For a relative "N days old" cutoff
 instead of an absolute window, use `max_posting_age_days` in `portals.yml`.
 
-### `--since` — stop paginating stale pages (speed, not filtering)
+### `--since` — a relative posted-date bound that also stops paging early
 
-`--posted-after` filters jobs *after* they are fetched. `--since <days>` is
-different: it is a hint to the **provider**, telling it to stop paginating once
-a page is entirely older than the window.
+`--posted-after` states a lower bound on the posting date absolutely.
+`--since <days>` states the same bound relatively:
 
 ```bash
-node scan.mjs --since 7        # don't page deeper than ~7 days of history
+node scan.mjs --since 7                 # nothing older than 7 days
+node scan.mjs --posted-after 2026-07-25 # equivalent on 2026-08-01
 ```
 
-Only providers that return postings newest-first can act on it — currently
-`workday.mjs`. On a large Workday tenant this is the difference between paging
-to the `max_pages` cap on every run and stopping as soon as the postings go
-stale, which on an 18,000-posting board is minutes of wall-clock and thousands
-of requests spent re-fetching rows the scanner then discards as duplicates.
+It **filters**, exactly like `--posted-after` does — same semantics as
+`scan-ats-full.mjs`, so the flag means one thing across both scripts.
 
-**It never changes which postings are eligible** — only how deep the scanner
-digs to find them. A posting inside the window is returned either way.
+Unlike `--posted-after`, it is also passed to providers as an **early-stop
+hint**. Providers that return postings newest-first (currently `workday.mjs`)
+can stop paginating once a page is entirely past the bound instead of grinding
+to their `max_pages` cap. On a large Workday tenant that is minutes of
+wall-clock and thousands of requests saved per run.
+
+Bounds combine the way you would expect: `--posted-after`, `--since`, and the
+config-level `max_posting_age_days` all set lower bounds, they AND together, and
+**the newest one decides**. The early stop is derived from that same combined
+bound, so pagination never stops while a posting the filters would accept is
+still unfetched.
 
 Notes:
 
-- **Off by default.** Pagination depth is configured per-entry with `max_pages`
-  in `portals.yml`, so a default window would silently shorten every existing
-  config. (`scan-ats-full.mjs` *does* default `--since` to 3 days — it has no
-  per-entry depth setting to respect.)
-- **`--posted-after` is used as the window when `--since` is absent.** It
-  already says "nothing older than this date", which is exactly the bound the
-  early-stop needs, so the two never disagree.
-- **Undated postings are unaffected.** Providers are explicitly told not to skip
-  tenants that expose no posting date; `scan.mjs` decides what to do with those
-  downstream, where they pass.
-- A window of 30 days or more effectively never triggers the early stop —
+- **Off by default.** Pagination depth is otherwise configured per-entry with
+  `max_pages` in `portals.yml`, so a default window would silently shorten every
+  existing config. (`scan-ats-full.mjs` *does* default `--since` to 3 days — it
+  has no per-entry depth setting to respect.)
+- **`max_posting_age_days` alone does not enable early stopping.** It constrains
+  the bound when a CLI window is present, but on its own it leaves pagination
+  depth exactly as it is today.
+- **Undated postings are unaffected.** A posting whose provider exposes no date
+  passes every date filter here, and providers are explicitly told not to skip
+  tenants that expose no dates at all.
+- **Invalid values fail immediately** — `--since` with no number, `--since=`,
+  zero, negative, and non-finite values all exit rather than silently scanning
+  without a window.
+- A window of 30 days or more effectively never triggers the early stop:
   Workday's age labels top out at an unbounded "30+ Days Ago" bucket, which is
-  deliberately never treated as an unambiguous age.
+  deliberately never read as an unambiguous age.
 
 Rule of thumb: set `--since` a little wider than your scan interval. Scanning
 weekly, `--since 10` keeps a margin for a skipped run.
