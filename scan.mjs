@@ -2147,8 +2147,14 @@ async function main() {
     // posting with no parseable date. It means "provider, do not pre-empt that
     // decision": without it, workday.mjs's no-date-skip returns page 0 only for
     // any tenant whose CXS payload omits postedOn entirely, silently dropping
-    // postings this scanner would have kept. The early-stop is an optimisation
-    // and must never change which postings are eligible.
+    // postings this scanner would have kept.
+    //
+    // It covers the all-undated tenant, not the mixed one. workday.mjs's
+    // pageIsPastWindow reads dated postings only, so on a page mixing stale
+    // dated postings with undated ones the early-stop still fires and undated
+    // postings on later pages go unfetched. Documented in modes/scan.md; the
+    // fix belongs in workday.mjs, where closing it costs the optimisation on
+    // every tenant that mixes.
     const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
