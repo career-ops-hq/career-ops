@@ -164,6 +164,7 @@ const SYSTEM_PATHS = [
   'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
+  'url-key.mjs',
   'sync-pdf-flags.mjs',
   'tracker-links.mjs',
   'tracker.mjs',

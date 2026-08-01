@@ -460,10 +460,10 @@ Write exactly one TSV line to:
 batch/tracker-additions/{{ID}}.tsv
 ```
 
-Format, no header, 9 tab-separated columns:
+Format, no header, 9 tab-separated columns plus an optional trailing `url`:
 
 ```text
-{{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}
+{{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}\t{url}
 ```
 
 Column order is important:
