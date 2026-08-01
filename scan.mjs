@@ -316,6 +316,51 @@ export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
   };
 }
 
+// ── Posted-date lower bound (shared by the filter and the early-stop) ──
+// --posted-after states a lower bound absolutely; --since <days> states the
+// same thing relatively. They AND together with each other and with
+// max_posting_age_days, so the NEWEST bound is what actually decides
+// eligibility. Both consumers must agree on it: the downstream filter and the
+// provider early-stop hint. Kept as one function so they cannot drift.
+
+/**
+ * Collapse --posted-after and --since into a single absolute lower bound.
+ *
+ * @param {string|null} postedAfter - YYYY-MM-DD from --posted-after, or null.
+ * @param {number|null} sinceDays - Positive day count from --since, or null.
+ * @param {number} [now] - Injectable clock for tests.
+ * @returns {string|null} YYYY-MM-DD, the newer of the two, or null if neither.
+ */
+export function resolveEffectiveAfter(postedAfter, sinceDays, now = Date.now()) {
+  // Truncating --since to a date rather than an exact timestamp makes it
+  // marginally more permissive, which is the safe direction for a bound that
+  // also stops pagination.
+  const sinceIso = Number.isFinite(sinceDays) && sinceDays > 0
+    ? new Date(now - sinceDays * 86_400_000).toISOString().slice(0, 10)
+    : null;
+  return [postedAfter, sinceIso].filter(Boolean).reduce((a, b) => (a > b ? a : b), null);
+}
+
+/**
+ * The oldest posting the filters would still accept — the early-stop floor.
+ *
+ * Stopping pagination any NEWER than this would leave eligible postings
+ * unfetched, which is the one thing the optimisation must never do. Returns
+ * null when no CLI window is active: max_posting_age_days constrains the floor
+ * but must not by itself switch early stopping on for configs that never asked.
+ *
+ * @param {string|null} effectiveAfter - Output of resolveEffectiveAfter.
+ * @param {*} maxAgeDays - config.max_posting_age_days (may be absent/invalid).
+ * @param {number} [now] - Injectable clock for tests.
+ * @returns {number|null} Epoch ms floor, or null to disable early stopping.
+ */
+export function resolveEarlyStopMs(effectiveAfter, maxAgeDays, now = Date.now()) {
+  if (!effectiveAfter) return null;
+  const max = Number(maxAgeDays);
+  const ageFloor = Number.isInteger(max) && max > 0 ? now - max * 86_400_000 : -Infinity;
+  return Math.max(Date.parse(`${effectiveAfter}T00:00:00Z`), ageFloor);
+}
+
 // ── Absolute posted-date filter ─────────────────────────────────────
 // CLI-only (--posted-after / --posted-before), unlike the config-driven
 // relative max_posting_age_days above. Both bounds optional and inclusive
@@ -1893,36 +1938,39 @@ async function main() {
     process.exit(1);
   }
 
-  // --since <days>: a lower bound on posting age, passed to providers as an
-  // EARLY-STOP HINT rather than a filter. providers/workday.mjs returns postings
-  // newest-first and can stop paginating once a page is entirely past the window
-  // — but that only fires when ctx carries sinceMs, and scan.mjs never set it, so
-  // every Workday tenant paginated to its max_pages cap on every run regardless
-  // of how stale the deep pages were. On a large tenant that is minutes of
-  // wall-clock and thousands of requests spent re-fetching postings the scanner
-  // then discards as duplicates.
+  // --since <days>: a RELATIVE lower bound on the employer's posting date —
+  // the same thing --posted-after expresses absolutely, and it filters exactly
+  // like it does. Matches scan-ats-full.mjs, which has always treated --since
+  // as a filter; one flag name should not mean two different things.
   //
-  // OFF BY DEFAULT. scan-ats-full.mjs defaults --since to 3 days; scan.mjs must
-  // not, because pagination depth here is configured per-entry via max_pages and
-  // a default window would silently shorten every existing portals.yml.
+  // It additionally unlocks an optimisation. providers/workday.mjs returns
+  // postings newest-first and can stop paginating once a page is entirely past
+  // the window, but that only fires when ctx carries sinceMs — and scan.mjs
+  // built a bare makeHttpCtx(), so every Workday tenant paginated to its
+  // max_pages cap on every run however stale the deep pages were.
   //
-  // --posted-after is honoured as a source when --since is absent: it already
-  // states "nothing older than this date", which is exactly the bound the
-  // early-stop needs. Reusing it keeps one concept instead of two that can
-  // disagree.
+  // Flag presence is tracked separately from its operand. `--since` with no
+  // value, `--since=`, and `--since --posted-after X` must all fail rather than
+  // silently degrade to "no window", which would look like a fast scan that
+  // simply found less — indistinguishable from success. Number.isFinite also
+  // rejects Infinity and 1e309, which pass a bare `> 0` test and would yield an
+  // -Infinity cutoff.
+  const sinceKv = args.find((a) => a.startsWith('--since='));
   const sinceIdx = args.indexOf('--since');
-  const sinceRaw = sinceIdx !== -1 && args[sinceIdx + 1] && !args[sinceIdx + 1].startsWith('--')
-    ? args[sinceIdx + 1]
-    : (args.find((a) => a.startsWith('--since=')) || '').split('=')[1] || null;
-  if (sinceRaw != null && !(Number(sinceRaw) > 0)) {
-    // Gated like --posted-after: a silently-ignored window would look like a
-    // fast scan that simply found less, which is indistinguishable from success.
-    console.error(`Error: --since expects a positive number of days, got "${sinceRaw}"`);
-    process.exit(1);
+  let sinceDays = null;
+  if (sinceIdx !== -1 || sinceKv) {
+    const raw = sinceKv
+      ? sinceKv.slice('--since='.length)
+      : (args[sinceIdx + 1] != null && !args[sinceIdx + 1].startsWith('--') ? args[sinceIdx + 1] : null);
+    const n = raw == null || raw === '' ? NaN : Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(`Error: --since expects a positive number of days, got ${raw == null || raw === '' ? '(no value)' : `"${raw}"`}`);
+      process.exit(1);
+    }
+    sinceDays = n;
   }
-  const earlyStopSinceMs = sinceRaw != null
-    ? Date.now() - Number(sinceRaw) * 86_400_000
-    : (postedAfter ? Date.parse(`${postedAfter}T00:00:00Z`) : null);
+
+  const effectiveAfter = resolveEffectiveAfter(postedAfter, sinceDays);
 
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
@@ -1965,7 +2013,11 @@ async function main() {
 
   const locationFilter = buildLocationFilter(config.location_filter);
   const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
-  const postedDateFilter = buildPostedDateFilter(postedAfter, postedBefore);
+  const postedDateFilter = buildPostedDateFilter(effectiveAfter, postedBefore);
+
+  // Same bound the filter above uses, widened by max_posting_age_days when set.
+  // Derived by the same helper so the hint and the filter cannot disagree.
+  const earlyStopSinceMs = resolveEarlyStopMs(effectiveAfter, config.max_posting_age_days);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
@@ -2309,7 +2361,9 @@ async function main() {
   if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
-  if (postedAfter || postedBefore) {
+  // effectiveAfter, not postedAfter — --since sets a lower bound too, and a
+  // scan that filtered by date should say so regardless of which flag set it.
+  if (effectiveAfter || postedBefore) {
     console.log(`Filtered by posted date: ${totalFilteredPostedDate} removed`);
   }
   if (config.salary_filter || totalFilteredSalary > 0) {

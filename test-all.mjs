@@ -4966,6 +4966,8 @@ try {
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
+    resolveEffectiveAfter,
+    resolveEarlyStopMs,
     buildVisaFilter,
     buildCountryEligibilityFilter,
     shouldDedupScanHistoryRow,
@@ -5022,6 +5024,75 @@ try {
     pass('posted-date filter gates on an absolute after/before window; missing dates always pass');
   } else {
     fail('posted-date filter did not gate on absolute posted-date bounds correctly');
+  }
+
+  // ── --since as a lower bound, and the early-stop floor derived from it ──
+  // The invariant: the early-stop floor must never be NEWER than the oldest
+  // posting the filters still accept, or pagination stops with eligible
+  // postings unfetched.
+  const SINCE_NOW = Date.parse('2026-08-01T00:00:00Z');
+  const SINCE_DAY = 86_400_000;
+  if (
+    resolveEffectiveAfter(null, null, SINCE_NOW) === null && // neither bound → no filtering
+    resolveEffectiveAfter('2026-07-01', null, SINCE_NOW) === '2026-07-01' && // --posted-after alone
+    resolveEffectiveAfter(null, 7, SINCE_NOW) === '2026-07-25' && // --since alone, relative to now
+    // Both set: bounds AND, so the NEWER one decides. This is the case that
+    // silently dropped eligible postings when --since was hint-only — the hint
+    // stopped at Jul 25 while the filter still accepted back to Jul 1.
+    resolveEffectiveAfter('2026-07-01', 7, SINCE_NOW) === '2026-07-25' &&
+    resolveEffectiveAfter('2026-07-30', 7, SINCE_NOW) === '2026-07-30' && // absolute newer than relative
+    resolveEffectiveAfter(null, 0, SINCE_NOW) === null && // invalid day counts contribute nothing
+    resolveEffectiveAfter(null, Number.POSITIVE_INFINITY, SINCE_NOW) === null
+  ) {
+    pass('--since resolves to an absolute lower bound; the newest active bound wins');
+  } else {
+    fail('effective posted-after bound is not the newest of --posted-after and --since');
+  }
+
+  if (
+    resolveEarlyStopMs(null, null, SINCE_NOW) === null && // no CLI window → early stop disabled
+    resolveEarlyStopMs(null, 30, SINCE_NOW) === null && // config alone must not enable it
+    resolveEarlyStopMs('2026-07-25', null, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    // max_posting_age_days is the newer bound here (Jul 27 vs Jul 25), so it
+    // decides — stopping at Jul 25 would page deeper than eligibility requires,
+    // which is merely wasteful; stopping NEWER than the filter would be a bug.
+    resolveEarlyStopMs('2026-07-25', 5, SINCE_NOW) === SINCE_NOW - 5 * SINCE_DAY &&
+    // ...and when the CLI window is the newer bound, it wins.
+    resolveEarlyStopMs('2026-07-25', 60, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    resolveEarlyStopMs('2026-07-25', 0, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') && // invalid config ignored
+    resolveEarlyStopMs('2026-07-25', 'abc', SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z')
+  ) {
+    pass('early-stop floor is the newest active lower bound, and stays off without a CLI window');
+  } else {
+    fail('early-stop floor is not derived from every active lower bound');
+  }
+
+  // The contract, stated as one assertion: for a range of bound combinations,
+  // nothing the early-stop skips would have survived the filter anyway.
+  {
+    const cases = [
+      { after: null, since: 7, maxAge: null },
+      { after: '2026-07-01', since: 7, maxAge: null },
+      { after: '2026-07-01', since: null, maxAge: 30 },
+      { after: '2026-07-20', since: 3, maxAge: 10 },
+      { after: null, since: 14, maxAge: 5 },
+    ];
+    const violations = cases.filter(({ after, since, maxAge }) => {
+      const eff = resolveEffectiveAfter(after, since, SINCE_NOW);
+      const floor = resolveEarlyStopMs(eff, maxAge, SINCE_NOW);
+      if (floor === null) return false;
+      const dateOk = buildPostedDateFilter(eff, null);
+      const ageOk = buildPostingAgeFilter(maxAge, SINCE_NOW);
+      // One second older than the floor: the first posting pagination would
+      // skip. It must already be ineligible.
+      const justOutside = floor - 1000;
+      return dateOk(justOutside) && ageOk(justOutside);
+    });
+    if (violations.length === 0) {
+      pass('early stop never skips a posting the filters would have accepted');
+    } else {
+      fail(`early stop would skip eligible postings for: ${JSON.stringify(violations)}`);
+    }
   }
 
   const filter = buildLocationFilter({
