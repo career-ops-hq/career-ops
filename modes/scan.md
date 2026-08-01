@@ -334,8 +334,14 @@ It **filters**, exactly like `--posted-after` does — same semantics as
 Unlike `--posted-after`, it is also passed to providers as an **early-stop
 hint**. Providers that return postings newest-first (currently `workday.mjs`)
 can stop paginating once a page is entirely past the bound instead of grinding
-to their `max_pages` cap. On a large Workday tenant that is minutes of
-wall-clock and thousands of requests saved per run.
+to their `max_pages` cap.
+
+How much that saves depends on how far the cap sits beyond the window. One
+measured run against an ~18,000-posting Workday tenant at `max_pages: 300`:
+172s fetching 6,000 postings to the cap, versus 140s fetching 4,880 with
+`--since 3`. The saving grows with the gap — the same entry at its previous
+`max_pages: 700` would have paged nearly three times as deep for the same
+result.
 
 Bounds combine the way you would expect: `--posted-after`, `--since`, and the
 config-level `max_posting_age_days` all set lower bounds, they AND together, and

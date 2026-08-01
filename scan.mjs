@@ -335,8 +335,13 @@ export function resolveEffectiveAfter(postedAfter, sinceDays, now = Date.now()) 
   // Truncating --since to a date rather than an exact timestamp makes it
   // marginally more permissive, which is the safe direction for a bound that
   // also stops pagination.
-  const sinceIso = Number.isFinite(sinceDays) && sinceDays > 0
-    ? new Date(now - sinceDays * 86_400_000).toISOString().slice(0, 10)
+  // Guarded rather than assumed valid: this is exported and unit-tested, so it
+  // must not throw for any input. A day count large enough to push the cutoff
+  // outside the representable Date range yields an Invalid Date, and
+  // toISOString() would throw RangeError on it.
+  const cutoff = Number.isFinite(sinceDays) && sinceDays > 0 ? new Date(now - sinceDays * 86_400_000) : null;
+  const sinceIso = cutoff && !Number.isNaN(cutoff.getTime())
+    ? cutoff.toISOString().slice(0, 10)
     : null;
   return [postedAfter, sinceIso].filter(Boolean).reduce((a, b) => (a > b ? a : b), null);
 }
@@ -1955,16 +1960,32 @@ async function main() {
   // simply found less — indistinguishable from success. Number.isFinite also
   // rejects Infinity and 1e309, which pass a bare `> 0` test and would yield an
   // -Infinity cutoff.
-  const sinceKv = args.find((a) => a.startsWith('--since='));
-  const sinceIdx = args.indexOf('--since');
+  // Every occurrence is collected, not just the first match of either form:
+  // picking one and ignoring the rest means `--since=7 --since` succeeds while
+  // an occurrence with no value goes unread.
+  const sinceOccurrences = args.filter((a) => a === '--since' || a.startsWith('--since='));
+  if (sinceOccurrences.length > 1) {
+    console.error(`Error: --since given ${sinceOccurrences.length} times; pass it once`);
+    process.exit(1);
+  }
   let sinceDays = null;
-  if (sinceIdx !== -1 || sinceKv) {
-    const raw = sinceKv
-      ? sinceKv.slice('--since='.length)
-      : (args[sinceIdx + 1] != null && !args[sinceIdx + 1].startsWith('--') ? args[sinceIdx + 1] : null);
+  if (sinceOccurrences.length === 1) {
+    const occ = sinceOccurrences[0];
+    const next = args[args.indexOf('--since') + 1];
+    const raw = occ.startsWith('--since=')
+      ? occ.slice('--since='.length)
+      : (next != null && !next.startsWith('--') ? next : null);
     const n = raw == null || raw === '' ? NaN : Number(raw);
     if (!Number.isFinite(n) || n <= 0) {
       console.error(`Error: --since expects a positive number of days, got ${raw == null || raw === '' ? '(no value)' : `"${raw}"`}`);
+      process.exit(1);
+    }
+    // Finite and positive is not enough: 1e300 days lands outside the ±8.64e15ms
+    // range a Date can represent, so the derived cutoff is an Invalid Date and
+    // toISOString() throws. Reject it here rather than let it surface as an
+    // unhandled "Invalid time value" mid-scan.
+    if (Number.isNaN(new Date(Date.now() - n * 86_400_000).getTime())) {
+      console.error(`Error: --since ${raw} is too large to express as a date`);
       process.exit(1);
     }
     sinceDays = n;

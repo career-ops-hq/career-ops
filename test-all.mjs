@@ -5042,7 +5042,12 @@ try {
     resolveEffectiveAfter('2026-07-01', 7, SINCE_NOW) === '2026-07-25' &&
     resolveEffectiveAfter('2026-07-30', 7, SINCE_NOW) === '2026-07-30' && // absolute newer than relative
     resolveEffectiveAfter(null, 0, SINCE_NOW) === null && // invalid day counts contribute nothing
-    resolveEffectiveAfter(null, Number.POSITIVE_INFINITY, SINCE_NOW) === null
+    resolveEffectiveAfter(null, Number.POSITIVE_INFINITY, SINCE_NOW) === null &&
+    // Finite and positive is not sufficient: a day count this large pushes the
+    // cutoff outside the representable Date range, where toISOString() throws.
+    // The helper is exported, so it must return rather than raise.
+    resolveEffectiveAfter(null, 1e300, SINCE_NOW) === null &&
+    resolveEffectiveAfter('2026-07-01', 1e300, SINCE_NOW) === '2026-07-01'
   ) {
     pass('--since resolves to an absolute lower bound; the newest active bound wins');
   } else {
