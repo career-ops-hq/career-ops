@@ -24,9 +24,18 @@ const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const PDF_MANIFEST = process.env.CAREER_OPS_PDF_INDEX || join(CAREER_OPS, 'data', 'pdf-index.tsv');
 
 const flags = { dryRun: false, json: false };
+const unknownOptions = [];
 for (const arg of process.argv.slice(2)) {
   if (arg === '--dry-run') flags.dryRun = true;
   else if (arg === '--json') flags.json = true;
+  else unknownOptions.push(arg);
+}
+
+if (unknownOptions.length > 0) {
+  const error = `unknown option(s): ${unknownOptions.join(', ')}`;
+  if (flags.json) console.error(JSON.stringify({ error, code: 'unknown-option' }));
+  else console.error(`Error: ${error}\nUsage: node sync-pdf-flags.mjs [--dry-run] [--json]`);
+  process.exit(1);
 }
 
 if (!existsSync(APPS_FILE)) {
