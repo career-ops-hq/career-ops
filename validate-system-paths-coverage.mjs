@@ -41,6 +41,7 @@ const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS];
 
 const EXCLUDES = [
   '.coderabbit.yaml',
+  '.editorconfig',
   '.envrc',
   '.gitignore',
   '.npmignore',
@@ -83,10 +84,12 @@ if (process.argv.includes('--self-test')) {
   // Test explicitly excluded files
   assert(covered('.gitignore') === true, '.gitignore must be covered (excluded)');
   assert(covered('.coderabbit.yaml') === true, '.coderabbit.yaml must be covered (excluded)');
+  assert(covered('.editorconfig') === true, '.editorconfig must be covered (excluded, #1438/#1613)');
 
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
   assert(covered('.claude/settings.json') === true, '.claude/settings.json must be covered (USER_PATHS exact match, #1408)');
+  assert(covered('.claude/hooks/pre-push-backup.sh') === true, '.claude/hooks/ scripts must be covered (USER_PATHS dir prefix match, same class as #1408)');
 
   // Test directory prefix matches (which end in '/')
   assert(covered('providers/justjoin.mjs') === true, 'providers/justjoin.mjs must be covered (dir prefix match)');
@@ -115,6 +118,28 @@ try {
     .filter(Boolean);
 } catch (err) {
   console.error('FAIL: git ls-files failed:', err.message);
+  process.exit(1);
+}
+
+// An empty file list is NOT "nothing to check" — it means this run could not
+// inspect anything, and reporting success would make the guard a no-op.
+//
+// That is exactly what happened for as long as this check has existed. test-all
+// runs the scripts from a throwaway copy created *inside* the repo, and
+// `git ls-files` from an untracked subdirectory returns zero paths. So CI printed
+// "OK: 0 tracked files covered" and exited 0 while the real tree had an
+// unregistered top-level file. A file missing from SYSTEM_PATHS is not cosmetic:
+// `update-system` never ships it, so every user who updates silently loses it.
+// This bug class has landed five times (#649, #704, .editorconfig, and twice
+// since) and the guard meant to stop it was green throughout.
+//
+// A check that cannot look must fail, not pass.
+if (tracked.length === 0) {
+  console.error('FAIL: git ls-files returned no paths — this run could not inspect anything.');
+  console.error('');
+  console.error('Run this from the repository root. An empty listing usually means the');
+  console.error('script was invoked from an untracked directory (a temp copy, a fixture');
+  console.error('dir), where git reports nothing and the coverage check is meaningless.');
   process.exit(1);
 }
 

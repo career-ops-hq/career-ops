@@ -103,7 +103,7 @@ Notlar:
 ## Adım 6 — Başvuru Sonrası (isteğe bağlı)
 
 Aday başvuruyu gönderdiğini onaylarsa:
-1. `applications.md`'de durumu `Evaluated`'dan `Applied`'a güncelle
+1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs <report#> Applied` (`applications.md` tablosunu elle düzenleme)
 2. Blok G'yi final yanıtlarla güncelle
 3. Sonraki adımı öner: İşe alım sorumlusuna LinkedIn erişimi için `/career-ops contacto`
 

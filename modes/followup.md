@@ -6,6 +6,11 @@
 
 Track follow-up cadence for active applications. Flag overdue follow-ups, extract contacts from notes, and generate tailored follow-up email/LinkedIn drafts using report context.
 
+**Not in scope here:** a same-day follow-up after a recruiter/interviewer
+confirmed a specific call time and then didn't call. That's not an
+elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
+(`/career-ops email noshow`) instead.
+
 ## Inputs
 
 - `data/applications.md` — Application tracker
@@ -33,6 +38,8 @@ Parse the JSON output. It contains:
 If no actionable entries, tell the user:
 > "No active applications to follow up on. Apply to some roles first with `/career-ops` and come back when they're aging."
 
+**Calibration cross-reference:** `node funnel-velocity.mjs --summary` reports which in-flight applications sit beyond the typical first-response window (its `waiting` block) — those rows are natural follow-up candidates; feed them into this cadence view rather than treating the wait itself as a verdict (silence past the window is common, not a rejection). When the user reports a status change here ("they replied", "rejected"), route it through `node set-status.mjs <report#> <state>` and pass `--on YYYY-MM-DD` when they name the real event day.
+
 ## Step 2 — Display Dashboard
 
 Show a cadence dashboard sorted by urgency (urgent > overdue > waiting > cold):
@@ -57,6 +64,15 @@ For each **overdue** or **urgent** entry only:
 1. Read the linked report (`reportPath` from JSON) for company context
 2. Read `cv.md` for proof points
 3. Read `config/profile.yml` for candidate name and identity
+
+**Agency-mediated applications (#1596):** when the entry's `via` field is set (the cadence JSON emits `via: null` for direct applications), the chase target is the **agency contact** (recruiter named in the notes/contacts), not the company — the recruiter owns the client relationship and has their own incentive to respond. Reference the role by the agency's framing.
+
+**When the end employer is unknown (company `?`), this branch REPLACES the framework rules below — do not fall through to them.** There is no company name to mention and nothing company-specific to reference, so instead:
+- Sentence 1 references the role by the **agency's framing** (their listing title + the recruiter's name) **plus when you applied** — the application date stays in the opening exactly as the framework requires; only the company reference is replaced, never with a placeholder company name.
+- Sentence 2's value-add draws on cv.md/report proof points that fit the role as listed — skip the "specific to THAT company" rule.
+- Add the client-name ask: request the end employer's name as a natural part of the follow-up ("so I can prepare properly, could you share which company this role is with?") — that reveal is what unlocks cross-channel dedup in the tracker.
+
+When `via` is set but the employer IS known, use the framework below unchanged except the recipient: address the recruiter, mention the client company by name.
 
 ### Email Follow-up Framework (first follow-up, followupCount == 0)
 
@@ -109,6 +125,10 @@ Do NOT generate another follow-up. Instead suggest:
 > - Trying a different contact via `/career-ops contacto`
 > - Keeping in `Applied` status but deprioritizing"
 
+### Company history context (optional)
+
+Before drafting, check the company's card. Skip this lookup entirely when the tracker's company field is `?` (the unknown-employer marker — there is no meaningful card to fetch). Otherwise run `node company-history.mjs --company <company>`, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. If `responsiveness.label` is `silent-on-you`, set expectations rather than discouraging the follow-up: many processes are genuinely just slow, so mention this plainly and suggest capping further time investment in this company if it stays silent after this attempt. The decision to send — and how many more times — stays the user's; never skip or downgrade a follow-up because of this label. Follow-up compliance is never punished.
+
 ## Step 4 — Present Drafts
 
 For each draft, show:
@@ -145,7 +165,7 @@ After the user reviews and says they've sent a follow-up, record it:
    - `date` = today's date (YYYY-MM-DD)
    - `company` = company name
    - `role` = role title
-   - `channel` = Email / LinkedIn / Other
+   - `channel` = Email / LinkedIn / Phone / Other
    - `contact` = who it was sent to
    - `notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
 

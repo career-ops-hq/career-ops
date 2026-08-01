@@ -102,7 +102,7 @@ Note:
 ## Fase 6 -- Dopo la candidatura (opzionale)
 
 Se il candidato conferma di aver inviato il modulo:
-1. Aggiornare lo stato in `applications.md` da "Evaluated" a "Applied".
+1. Aggiornare lo stato ad "Applied" con la CLI canonica: `node set-status.mjs <report#> Applied` (non modificare la tabella di `applications.md` a mano).
 2. Aggiornare il Blocco G del report con le risposte effettivamente inviate.
 3. Suggerire il passo successivo: `/career-ops contacto` per avviare il contatto su LinkedIn con il responsabile della selezione.
 

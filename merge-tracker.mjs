@@ -14,43 +14,72 @@
  * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, statSync, realpathSync } from 'fs';
-import { join, basename, dirname, resolve, relative, isAbsolute, sep } from 'path';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { createHash, randomUUID } from 'crypto';
-import { tmpdir } from 'os';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns, resolveScoreStatus } from './tracker-parse.mjs';
+import { parsePdfIndex } from './find.mjs';
+import { LEGACY_COLMAP, detectColumns, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { resolveTrackerPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original).
-// CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
-const APPS_FILE_RAW = process.env.CAREER_OPS_TRACKER
-  ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
-const APPS_FILE = canonicalizeTrackerPath(APPS_FILE_RAW);
+// Support both layouts: data/applications.md (boilerplate) and applications.md
+// (original). CAREER_OPS_TRACKER overrides the path (used by tests and
+// non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
+// writer agrees on the same canonical path (and therefore the same lock).
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const TRACKER_DIR = dirname(APPS_FILE);
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
   : join(CAREER_OPS, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
+// CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path (used by tests).
+const BATCH_STATE_FILE = process.env.CAREER_OPS_BATCH_STATE
+  ? process.env.CAREER_OPS_BATCH_STATE
+  : join(CAREER_OPS, 'batch/batch-state.tsv');
+
+// Cross-check against batch-state.tsv (found 2026-07-30): a worker can write
+// a well-formed tracker TSV even when its own JSON result said "failed" --
+// e.g. two workers that fabricated a placeholder score (0.0/5, "Suspicious")
+// for a posting they never actually read, after being unable to extract the
+// JD. batch-runner.sh's JSON-status detection is the authority on whether an
+// offer really succeeded; a TSV whose report number maps to a "failed" row
+// there is fabricated evidence, not just cosmetically ambiguous like the
+// score/status column-swap check below -- it must never merge, however
+// well-formed the TSV itself looks in isolation.
+function loadFailedReportNumbers(path) {
+  const failed = new Set();
+  if (!existsSync(path)) return failed;
+  for (const line of readFileSync(path, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const status = cols[2];
+    const reportNum = cols[5];
+    if (status === 'failed' && reportNum && reportNum !== '-') {
+      const n = parseInt(reportNum, 10);
+      if (!isNaN(n)) failed.add(n);
+    }
+  }
+  return failed;
+}
+const FAILED_REPORT_NUMBERS = loadFailedReportNumbers(BATCH_STATE_FILE);
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
 const MIGRATE = process.argv.includes('--migrate');
+const MIGRATE_VIA = process.argv.includes('--migrate-via');
 const MERGE_HOLD_MS = Number(process.env.CAREER_OPS_MERGE_HOLD_MS) || 0;
 const MERGE_READY_IPC = process.env.CAREER_OPS_MERGE_READY_IPC === '1';
 
-const trackerLockKey = createHash('sha256').update(APPS_FILE).digest('hex').slice(0, 16);
-const TRACKER_LOCK_DIR = resolveTrackerLockDir(process.env.CAREER_OPS_TRACKER_LOCK, trackerLockKey);
+const TRACKER_LOCK_DIR = trackerLockDirFor(APPS_FILE);
 
 // The reports/ dir sits at the repo root, which is the tracker's parent in the
 // data/ layout (data/applications.md) and the tracker's own dir at root layout.
 const REPORTS_ROOT = basename(TRACKER_DIR) === 'data' ? dirname(TRACKER_DIR) : TRACKER_DIR;
+const PDF_INDEX_FILE = join(REPORTS_ROOT, 'data', 'pdf-index.tsv');
 
 /**
  * Normalize report links before writing them into the tracker file.
@@ -70,75 +99,12 @@ mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(ADDITIONS_DIR, { recursive: true });
 
 /**
- * Convert the tracker path into one stable absolute spelling before hashing it.
- *
- * Equivalent tracker paths can be written in multiple ways, such as a relative
- * path from the current shell, an absolute path, or a path that travels through
- * a symlink. The lock key must be based on one canonical spelling so all merge
- * processes that target the same tracker also target the same lock directory.
- *
- * @param {string} path - Raw tracker path from config, env, or the default.
- * @returns {string} Absolute canonical path when the file exists, else resolved path.
- */
-function canonicalizeTrackerPath(path) {
-  const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
-  }
-}
-
-/**
- * Check whether one absolute path stays inside another directory.
- *
- * This protects recursive lock cleanup from accepting paths that escape the
- * system temp directory through `..` segments or unrelated absolute roots.
- *
- * @param {string} childPath - Candidate path to validate.
- * @param {string} parentDir - Required parent directory boundary.
- * @returns {boolean} True when childPath is inside parentDir or equal to it.
- */
-function pathIsInside(childPath, parentDir) {
-  const relativePath = relative(parentDir, childPath);
-  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
-}
-
-/**
- * Validate and resolve the tracker lock directory.
- *
- * `CAREER_OPS_TRACKER_LOCK` exists for tests and unusual local layouts, but the
- * merge script later removes the lock directory recursively. To keep that safe,
- * env-provided lock paths must be absolute, live under the OS temp directory,
- * and use the career-ops lock-name prefix. Invalid values are ignored and the
- * deterministic temp-dir default is used instead.
- *
- * @param {string|undefined} envValue - Optional lock path override.
- * @param {string} lockKey - Stable tracker hash suffix.
- * @returns {string} Safe lock directory path.
- */
-function resolveTrackerLockDir(envValue, lockKey) {
-  const tmpRoot = realpathSync(tmpdir());
-  const fallback = join(tmpRoot, `career-ops-merge-tracker-${lockKey}.lock`);
-  if (!envValue || !isAbsolute(envValue)) return fallback;
-
-  const candidate = resolve(envValue);
-  const parentDir = dirname(candidate);
-  const canonicalParent = existsSync(parentDir) ? realpathSync(parentDir) : resolve(parentDir);
-  if (!pathIsInside(canonicalParent, tmpRoot)) return fallback;
-  if (!basename(candidate).startsWith('career-ops-merge-tracker-')) return fallback;
-  return candidate;
-}
-
-/**
  * Pause the async merge flow for a fixed number of milliseconds.
  *
- * This is used in two places:
- * - the lock retry loop, where waiting briefly avoids a tight CPU spin while
- *   another `merge-tracker.mjs` process owns the tracker lock;
- * - the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which deliberately
- *   holds the first merge after it reads `applications.md` so a second merge can
- *   try to enter the same critical section.
+ * Used by the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which
+ * deliberately holds the first merge after it reads `applications.md` so a
+ * second merge can try to enter the same critical section. (The lock retry
+ * loop's own sleep lives in tracker-utils.mjs with the lock.)
  *
  * @param {number} ms - Milliseconds to wait before resolving.
  * @returns {Promise<void>} Resolves after the requested delay.
@@ -147,181 +113,13 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Determine whether a process id still belongs to a live process.
- *
- * The tracker lock stores the owner PID in `owner.json`. When another process
- * finds an existing lock, this check lets it distinguish a valid live owner from
- * a crashed process that left a stale lock directory behind. `EPERM` counts as
- * alive because the process exists even if the current user cannot signal it.
- *
- * @param {number} pid - Process id recorded by the lock owner.
- * @returns {boolean} True when the process appears to still exist.
- */
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
-
-/**
- * Read lock ownership metadata from a tracker lock directory.
- *
- * The metadata contains the owner PID, a unique release token, the acquisition
- * timestamp, and the tracker path. Invalid or missing metadata is treated as
- * unreadable so the stale-lock recovery path can fall back to directory age.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @returns {object|null} Parsed owner metadata, or null when unavailable.
- */
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Decide whether an existing lock can be safely recovered.
- *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery.
- * @returns {boolean} True when the caller may remove and recreate the lock.
- */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Acquire an exclusive filesystem lock for one tracker merge.
- *
- * The critical section must cover the full read/modify/write/move sequence, not
- * just the final write. Otherwise two processes can read the same old tracker
- * snapshot, compute independent updates, and let the later writer erase rows
- * written by the earlier one. The lock is implemented with atomic directory
- * creation, owner metadata, retry/backoff, stale-owner recovery, and a release
- * token so one process cannot delete another process's newer lock.
- *
- * @param {string} lockDir - Directory path used as the lock sentinel.
- * @param {object} [options] - Lock timing options.
- * @param {number} [options.timeoutMs=60000] - Maximum time to wait for the lock.
- * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
- * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}
- * Lock handle with metadata and an idempotent release method.
- */
-async function acquireTrackerLock(lockDir, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-  const startedAt = Date.now();
-  let attempts = 0;
-  let staleRecovered = false;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempts++;
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        token,
-        started_at: new Date().toISOString(),
-        tracker: APPS_FILE,
-      }, null, 2));
-
-      let released = false;
-      return {
-        attempts,
-        waitMs: Date.now() - startedAt,
-        staleRecovered,
-        release() {
-          if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
-          }
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
-      }
-
-      if (hasRecoverGuard) {
-        try {
-          if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            staleRecovered = true;
-            continue;
-          }
-        } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
-        }
-      }
-
-      await sleep(retryMs);
-    }
-  }
-
-  throw new Error(`Timed out waiting for tracker merge lock at ${lockDir}`);
-}
-
-/**
- * Replace a tracker file atomically using a same-directory temporary file.
- *
- * Writing into the same directory keeps the final `renameSync` atomic on normal
- * filesystems and avoids exposing a partially written `applications.md` to other
- * readers. If the write or rename fails, the temporary file is cleaned up before
- * the original error is rethrown.
- *
- * @param {string} path - Final file path to replace.
- * @param {string} content - Complete file content to write.
- * @returns {void}
- */
-function writeFileAtomic(path, content) {
-  const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
-  } catch (err) {
-    rmSync(tmpPath, { force: true });
-    throw err;
-  }
-}
-
 let trackerLock;
 try {
   trackerLock = await acquireTrackerLock(TRACKER_LOCK_DIR, {
     timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
     retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
     staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: APPS_FILE,
   });
   process.once('exit', () => trackerLock?.release());
   if (trackerLock.waitMs > 0 || trackerLock.staleRecovered) {
@@ -333,7 +131,7 @@ try {
 }
 
 // Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
 /**
  * Convert raw addition status text into one canonical tracker state.
@@ -363,6 +161,7 @@ function validateStatus(status) {
     'entrevista': 'Interview',
     'oferta': 'Offer',
     'rechazado': 'Rejected', 'rechazada': 'Rejected',
+    'contratado': 'Hired', 'contratada': 'Hired', 'accepted': 'Hired', 'accept': 'Hired',
     'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
     'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',
     'geo blocker': 'SKIP',
@@ -377,20 +176,10 @@ function validateStatus(status) {
   return 'Evaluated';
 }
 
-/**
- * Normalize company names for duplicate lookup during tracker merges.
- *
- * Company names can contain spaces, punctuation, or branding variants in the
- * tracker and incoming TSV rows. Removing non-alphanumeric characters gives the
- * merge step a stable same-company key before it compares report numbers or
- * fuzzy role titles.
- *
- * @param {string} name - Company name from the tracker or addition row.
- * @returns {string} Lowercase alphanumeric company key.
- */
-function normalizeCompany(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
+// normalizeVia (Unicode-aware Via/agency key, #1596/#1603) lives in
+// tracker-parse.mjs so merge-tracker and analyze-patterns share ONE normalizer
+// and agency identity can't drift between scripts. (normalizeCompany lives in
+// tracker-utils.mjs since #1460 so every tracker writer shares one company key.)
 
 /**
  * Extract the bracketed report number from a Markdown report link.
@@ -450,6 +239,53 @@ function parseScore(s) {
   return m ? parseFloat(m[1]) : 0;
 }
 
+/**
+ * Load the optional generated-PDF manifest.
+ *
+ * data/pdf-index.tsv is gitignored and only exists after generate-pdf.mjs has
+ * written at least one PDF. Missing manifest = nothing to sync.
+ *
+ * @returns {Map<string,string>} Normalized report# → PDF path.
+ */
+function loadPdfIndex() {
+  return existsSync(PDF_INDEX_FILE)
+    ? parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8'))
+    : new Map();
+}
+
+/**
+ * Flip stale PDF cells to ✅ when the generated-PDF manifest has the row's
+ * report number.
+ *
+ * @param {Array<object>} existingApps - Parsed tracker rows.
+ * @param {string[]} appLines - Mutable tracker file lines.
+ * @param {Map<string,string>} pdfIndex - Normalized report# → PDF path.
+ * @returns {number} Number of tracker rows updated.
+ */
+function syncPdfFlags(existingApps, appLines, pdfIndex) {
+  let changed = 0;
+  if (pdfIndex.size === 0) return changed;
+
+  for (const app of existingApps) {
+    const reportNum = extractReportNum(app.report);
+    if (!reportNum || !pdfIndex.has(String(reportNum)) || app.pdf !== '❌') continue;
+
+    const lineIdx = appLines.indexOf(app.raw);
+    if (lineIdx < 0) continue;
+
+    console.log(`${DRY_RUN ? '🔄 PDF sync (dry-run)' : '🔄 PDF sync'}: #${app.num} ${app.company} — report ${reportNum} now has a generated PDF`);
+    if (!DRY_RUN) {
+      const updatedLine = buildRow({ ...app, pdf: '✅' });
+      appLines[lineIdx] = updatedLine;
+      app.pdf = '✅';
+      app.raw = updatedLine;
+    }
+    changed++;
+  }
+
+  return changed;
+}
+
 // Column layout for the applications.md table. The tracker may use the original
 // 9-column layout, or a customized one with an extra/reordered column (e.g. a
 // Location column after Role). We map columns by header NAME rather than fixed
@@ -462,23 +298,17 @@ function parseScore(s) {
 // the detected layout once the table is read (below).
 let COLMAP = LEGACY_COLMAP;
 
-// Neutralize characters that would corrupt the applications.md table. Both this
-// file and tracker-parse.mjs read rows with a raw `line.split('|')`, so a literal
-// pipe or a newline in a free-text value (company/role/location/notes) would shift
-// every later column. Replace rather than backslash-escape: `\|` would still split
-// on the inner pipe. This is additive — normal cells are unchanged; only values
-// that would already break the table get sanitized (also keeps the web reader safe).
-function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
-}
-
 // Build a tracker row string matching the detected layout (with or without the
-// optional Location column) so writes round-trip through the same schema.
+// optional Via and Location columns) so writes round-trip through the same
+// schema. Optional columns follow the documented positions: Via after Company
+// (#1596), Location after Role (#946).
 function buildRow(o) {
-  if (COLMAP.location != null) {
-    return `| ${o.num} | ${o.date} | ${cell(o.company)} | ${cell(o.role)} | ${cell(o.location) || '—'} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${cell(o.notes)} |`;
-  }
-  return `| ${o.num} | ${o.date} | ${cell(o.company)} | ${cell(o.role)} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${cell(o.notes)} |`;
+  const cells = [o.num, o.date, cell(o.company)];
+  if (COLMAP.via != null) cells.push(cell(o.via) || '—');
+  cells.push(cell(o.role));
+  if (COLMAP.location != null) cells.push(cell(o.location) || '—');
+  cells.push(o.score, o.status, o.pdf, o.report, cell(o.notes));
+  return `| ${cells.join(' | ')} |`;
 }
 
 /**
@@ -501,6 +331,7 @@ function parseAppLine(line) {
     num,
     date: parts[COLMAP.date],
     company: parts[COLMAP.company],
+    via: COLMAP.via != null ? parts[COLMAP.via] : '',
     role: parts[COLMAP.role],
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
     score: parts[COLMAP.score],
@@ -524,6 +355,35 @@ function parseAppLine(line) {
  * @param {string} filename - Source filename used in warning messages.
  * @returns {object|null} Parsed tracker addition, or null when malformed.
  */
+/**
+ * Resolve the optional trailing TSV fields (index ≥ 9) into { via, location }.
+ *
+ * Via travels as a TAGGED field (`via=Hays`) rather than another positional
+ * slot: TSV writers are LLM agents following prompt instructions, and a writer
+ * that skips an empty padding field would silently shift a positional Via into
+ * the Location slot (#1596). A single untagged extra remains the legacy
+ * positional location (stale prompts stay valid forever). Anything ambiguous —
+ * two untagged extras, duplicate via= tags — returns null so the row is
+ * rejected loudly instead of merged with scrambled columns.
+ *
+ * @param {string[]} parts - All fields of the TSV/pipe row.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {{via: string, location: string}|null}
+ */
+function parseTsvExtras(parts, filename) {
+  const extras = parts.slice(9).map(s => String(s).trim()).filter(s => s !== '');
+  const viaTags = extras.filter(s => /^via=/i.test(s));
+  const untagged = extras.filter(s => !/^via=/i.test(s));
+  if (viaTags.length > 1 || untagged.length > 1) {
+    console.warn(`⚠️  Skipping ${filename}: ambiguous extra fields [${extras.join(', ')}] — expected at most one "via=Firm" tag and one location`);
+    return null;
+  }
+  return {
+    via: viaTags.length ? viaTags[0].replace(/^via=/i, '').trim() : '',
+    location: untagged[0] || '',
+  };
+}
+
 function parseTsvContent(content, filename) {
   content = content.trim();
   if (!content) return null;
@@ -533,7 +393,9 @@ function parseTsvContent(content, filename) {
 
   // Detect pipe-delimited (markdown table row)
   if (content.startsWith('|')) {
-    parts = content.split('|').map(s => s.trim()).filter(Boolean);
+    parts = content.split('|').map(s => s.trim());
+    if (parts[0] === '') parts.shift();
+    if (parts[parts.length - 1] === '') parts.pop();
     if (parts.length < 8) {
       console.warn(`⚠️  Skipping malformed pipe-delimited ${filename}: ${parts.length} fields`);
       return null;
@@ -558,8 +420,10 @@ function parseTsvContent(content, filename) {
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
-      location: (parts[9] || '').trim(),
     };
+    const extras = parseTsvExtras(parts, filename);
+    if (!extras) return null;
+    Object.assign(addition, extras);
   } else {
     // Tab-separated
     parts = content.split('\t');
@@ -590,9 +454,10 @@ function parseTsvContent(content, filename) {
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
-      // Optional trailing field: tab-separated TSVs may append a location.
-      location: (parts[9] || '').trim(),
     };
+    const extras = parseTsvExtras(parts, filename);
+    if (!extras) return null;
+    Object.assign(addition, extras);
   }
 
   if (isNaN(addition.num) || addition.num === 0) {
@@ -639,36 +504,114 @@ if (MIGRATE) {
   process.exit(0);
 }
 
+// Opt-in migration (#1596): insert a Via column (intermediary channel) after
+// Company. Header-aware readers auto-detect both layouts, so this is optional —
+// it exists for users who want the column added to an existing tracker.
+// Idempotent: a tracker that already has a Via column is left untouched.
+// Run with: node merge-tracker.mjs --migrate-via [--dry-run]
+if (MIGRATE_VIA) {
+  const lines = appContent.split('\n');
+  const colmap = detectColumns(lines) || LEGACY_COLMAP;
+  if (colmap.via != null) {
+    console.log('✅ Via column already present — nothing to migrate.');
+    process.exit(0);
+  }
+  const companyIdx = colmap.company;
+  let changed = 0;
+  const migrated = lines.map(line => {
+    if (!line.startsWith('|')) return line;
+    const parts = line.split('|').map(s => s.trim());
+    if (parts.length <= companyIdx) return line;
+    const isHeader = parts[colmap.num] === '#';
+    const isSeparator = /^[-: ]*$/.test(parts.join(''));
+    const insert = isHeader ? 'Via' : isSeparator ? '-----' : '—';
+    const cells = [...parts.slice(1, companyIdx + 1), insert, ...parts.slice(companyIdx + 1, parts.length - 1)];
+    changed++;
+    return isSeparator
+      ? `|${cells.map(c => c || '---').join('|')}|`
+      : `| ${cells.join(' | ')} |`;
+  });
+  if (DRY_RUN) {
+    console.log(`🔎 Migration (dry-run): Via column would be inserted after Company (${changed} table line(s) rewritten)`);
+  } else {
+    writeFileAtomic(APPS_FILE, migrated.join('\n'));
+    console.log(`✅ Migration: inserted Via column after Company (${changed} table line(s) rewritten). Direct applications are marked —.`);
+  }
+  process.exit(0);
+}
+
 const appLines = appContent.split('\n');
 // Detect the tracker's column layout via header names so parsing and writing
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
 COLMAP = detectColumns(appLines) || LEGACY_COLMAP;
 if (COLMAP.location != null) console.log('🧭 Detected Location column.');
+if (COLMAP.via != null) console.log('🧭 Detected Via column.');
 const existingApps = [];
 let maxNum = 0;
 
 for (const line of appLines) {
-  if (line.startsWith('|') && !line.includes('---') && !line.includes('Empresa')) {
-    const app = parseAppLine(line);
-    if (app) {
-      existingApps.push(app);
-      if (app.num > maxNum) maxNum = app.num;
-    }
+  // Skip only on the NaN check inside parseAppLine, which already rejects the
+  // header and separator rows because neither has a numeric `#` cell. The old
+  // `.includes('---') / .includes('Empresa')` heuristic was redundant for those
+  // two rows and wrong for data rows: any row whose free text contained three
+  // hyphens (a URL slug such as `Senior-Engineer---Platform-Team`, an em
+  // dash typed as `---`) or the word "Empresa" (a Spanish-market company name)
+  // never reached existingApps, so duplicate detection could not see it and a
+  // re-evaluation of that role appended a second row instead of updating it in
+  // place. #1704 fixed the numbering half of this with the usedNumbers pass
+  // below; this is the dedup half (#2265).
+  if (!line.startsWith('|')) continue;
+  const app = parseAppLine(line);
+  if (app) {
+    existingApps.push(app);
+    if (app.num > maxNum) maxNum = app.num;
+  }
+}
+
+// Full set of numbers already on the tracker (#1704). Deliberately broader than
+// the existingApps loop above: it reserves the number from any row with a
+// numeric # cell, including a row too malformed for parseAppLine to return.
+// Such a row can't participate in duplicate detection, but its number is still
+// taken and must never be handed out again. Used below so a new entry's number
+// is checked against every number actually on the tracker, not just the largest
+// one the existingApps loop saw.
+const usedNumbers = new Set();
+const MAX_COL_IDX = Math.max(...Object.values(COLMAP));
+for (const line of appLines) {
+  if (!line.startsWith('|')) continue;
+  const parts = line.split('|').map(s => s.trim());
+  if (parts.length <= MAX_COL_IDX) continue;
+  const n = parseInt(parts[COLMAP.num]);
+  if (!isNaN(n) && n !== 0) {
+    usedNumbers.add(n);
+    if (n > maxNum) maxNum = n;
   }
 }
 
 console.log(`📊 Existing: ${existingApps.length} entries, max #${maxNum}`);
+let added = 0;
+let updated = 0;
+let skipped = 0;
+const pdfIndex = loadPdfIndex();
+const pdfSynced = syncPdfFlags(existingApps, appLines, pdfIndex);
+updated += pdfSynced;
 
 // Read tracker additions
 if (!existsSync(ADDITIONS_DIR)) {
   console.log('No tracker-additions directory found.');
+  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if (DRY_RUN) console.log('(dry-run — no changes written)');
+  trackerLock.release();
   process.exit(0);
 }
 
 const tsvFiles = readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv'));
 if (tsvFiles.length === 0) {
   console.log('✅ No pending additions to merge.');
+  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if (DRY_RUN) console.log('(dry-run — no changes written)');
+  trackerLock.release();
   process.exit(0);
 }
 
@@ -681,15 +624,22 @@ tsvFiles.sort((a, b) => {
 
 console.log(`📥 Found ${tsvFiles.length} pending additions`);
 
-let added = 0;
-let updated = 0;
-let skipped = 0;
 const newLines = [];
 
 for (const file of tsvFiles) {
   const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
   const addition = parseTsvContent(content, file);
   if (!addition) { skipped++; continue; }
+
+  // A via= tag can only be stored if the tracker has a Via column — warn
+  // instead of dropping the channel silently (#1596). Clear the value too:
+  // existing rows parse with via='' on this layout, so a set addition.via would
+  // make the cross-channel duplicate guard see a channel mismatch and add a
+  // second ? row instead of updating the same-agency re-blast.
+  if (addition.via && COLMAP.via == null) {
+    console.warn(`⚠️  ${file}: carries via=${addition.via} but the tracker has no Via column — value dropped. Add it with: node merge-tracker.mjs --migrate-via`);
+    addition.via = '';
+  }
 
   // Normalize the report link to be relative to the tracker file's directory.
   // The TSV convention carries a root-relative `reports/...` link; rewrite it
@@ -700,7 +650,20 @@ for (const file of tsvFiles) {
   // 1. Exact report number match
   // 2. Company + role fuzzy match
   const reportNum = extractReportNum(addition.report);
+
+  if (reportNum && FAILED_REPORT_NUMBERS.has(reportNum)) {
+    console.warn(`⚠️  Skipping ${file}: report #${reportNum} is marked "failed" in batch-state.tsv — refusing to merge a tracker line for an offer the batch runner itself recorded as failed (possible fabricated result)`);
+    skipped++;
+    continue;
+  }
+
   let duplicate = null;
+  // True only for a tier-1 match (report number + company): the one tier where
+  // the addition is provably the same evaluation as the existing row, so its
+  // role title may replace the row's. Tier-2 (entry num) and tier-3 (fuzzy
+  // role) matches keep the existing title — a fuzzy false positive that also
+  // rewrites the title destroys the evidence that two reqs were distinct.
+  let reportNumMatched = false;
 
   if (reportNum) {
     // Report-number match must also confirm company (#912). Report-file
@@ -713,6 +676,7 @@ for (const file of tsvFiles) {
       const existingReportNum = extractReportNum(app.report);
       return existingReportNum === reportNum && normalizeCompany(app.company) === normCompany;
     });
+    if (duplicate) reportNumMatched = true;
   }
 
   if (!duplicate) {
@@ -735,6 +699,15 @@ for (const file of tsvFiles) {
     duplicate = existingApps.find(app => {
       if (normalizeCompany(app.company) !== normCompany) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
+      // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
+      // to the same empty company key, but the same role via two DIFFERENT
+      // agencies is two real submissions — merging them silently is exactly
+      // the double-submission hazard the Via column exists to surface. Only
+      // the same channel (the agency re-blasting one listing) is a duplicate.
+      // Via comparison is Unicode-aware (#1603): normalizeCompany() would
+      // collapse distinct non-Latin agency names to the same empty key.
+      if ((String(addition.company).trim() === '?' || String(app.company).trim() === '?')
+          && normalizeVia(addition.via || '') !== normalizeVia(app.via || '')) return false;
       // Req/job-number guard (#1524): a similarly-worded title at the same
       // company can still be a genuinely distinct posting when a req/job
       // number in the Notes column proves it (employers like TD commonly run
@@ -756,10 +729,13 @@ for (const file of tsvFiles) {
       console.log(`🔄 Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`);
       const lineIdx = appLines.indexOf(duplicate.raw);
       if (lineIdx >= 0) {
+        const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
         const updatedLine = buildRow({
-          num: duplicate.num, date: addition.date, company: addition.company, role: addition.role,
+          num: duplicate.num, date: addition.date, company: addition.company,
+          role: reportNumMatched ? addition.role : duplicate.role,
+          via: addition.via || duplicate.via || '—',
           location: addition.location || duplicate.location || '—',
-          score: addition.score, status: duplicate.status, pdf: duplicate.pdf,
+          score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
           notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
         });
@@ -771,14 +747,31 @@ for (const file of tsvFiles) {
       skipped++;
     }
   } else {
-    // New entry — use the number from the TSV
-    const entryNum = addition.num > maxNum ? addition.num : ++maxNum;
-    if (addition.num > maxNum) maxNum = addition.num;
+    // New entry - preserve the TSV's reserved ID whenever it is actually
+    // free. Parallel workers can finish out of order, so a valid reservation
+    // may be lower than the current tracker maximum (#1733). Renumber only on
+    // a real collision, using the next free ID above the current maximum and
+    // warning loudly so report/tracker drift is visible (#1704).
+    let entryNum;
+    if (!usedNumbers.has(addition.num)) {
+      entryNum = addition.num;
+    } else {
+      entryNum = maxNum + 1;
+      while (usedNumbers.has(entryNum)) entryNum++;
+      console.warn(
+        `⚠️  Tracker #${addition.num} already used; assigning #${entryNum} to ` +
+        `${addition.company} — ${addition.role}. Report link remains ${addition.report}.`,
+      );
+    }
+    usedNumbers.add(entryNum);
+    if (entryNum > maxNum) maxNum = entryNum;
 
+    const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : addition.pdf;
     const newLine = buildRow({
       num: entryNum, date: addition.date, company: addition.company, role: addition.role,
+      via: addition.via || '—',
       location: addition.location || '—',
-      score: addition.score, status: addition.status, pdf: addition.pdf,
+      score: addition.score, status: addition.status, pdf,
       report: addition.report, notes: addition.notes,
     });
     newLines.push(newLine);
@@ -789,10 +782,12 @@ for (const file of tsvFiles) {
 
 // Insert new lines after the header (line index of first data row)
 if (newLines.length > 0) {
-  // Find header separator (|---|...) and insert after it
+  // Find header separator (|---|...) and insert after it. Match the row's
+  // structure rather than a bare `---` substring, so a data row carrying three
+  // hyphens in its free text can never be mistaken for the separator.
   let insertIdx = -1;
   for (let i = 0; i < appLines.length; i++) {
-    if (appLines[i].includes('---') && appLines[i].startsWith('|')) {
+    if (SEPARATOR_ROW_RE.test(appLines[i])) {
       insertIdx = i + 1;
       break;
     }
@@ -817,6 +812,15 @@ if (!DRY_RUN) {
 console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped`);
 if (DRY_RUN) console.log('(dry-run — no changes written)');
 trackerLock.release();
+
+// Sync PDF flags (idempotent; uses its own lock/transaction)
+if (!DRY_RUN) {
+  try {
+    execFileSync('node', [join(CAREER_OPS, 'sync-pdf-flags.mjs')], { stdio: 'inherit' });
+  } catch (e) {
+    console.warn(`⚠️  Failed to sync PDF flags: ${e.message}`);
+  }
+}
 
 // Optional verify
 if (VERIFY && !DRY_RUN) {

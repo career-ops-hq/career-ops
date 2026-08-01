@@ -10,21 +10,19 @@
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { rebuildRow } from './tracker-utils.mjs';
+import {
+  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+} from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
-const APPS_FILE = process.env.CAREER_OPS_TRACKER
-  ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
@@ -266,10 +264,25 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to dedup.');
   process.exit(0);
 }
-const content = readFileSync(APPS_FILE, 'utf-8');
+
+let trackerTransaction = null;
+let COLMAP;
+if (!DRY_RUN) {
+  try {
+    trackerTransaction = await openTrackerTransaction(APPS_FILE);
+  } catch (err) {
+    console.error(`Cannot acquire tracker lock: ${err.message}`);
+    process.exit(1);
+  }
+  process.once('exit', () => {
+    try { trackerTransaction.close(); } catch {}
+  });
+}
+try {
+const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 // Header-aware column map (tolerates an inserted Location column, etc.).
-const COLMAP = resolveColumns(lines);
+COLMAP = resolveColumns(lines);
 
 // Parse all entries
 const entries = [];
@@ -285,12 +298,30 @@ for (let i = 0; i < lines.length; i++) {
 
 console.log(`📊 ${entries.length} entries loaded`);
 
-// Group by company+role
+// Group by company+role. Unknown-employer rows (Company `?`, #1596) all
+// normalize to the same empty key, so they group by their Via channel instead:
+// the same agency re-blasting one listing IS a duplicate, while the same role
+// via two different agencies is two real submissions and must never merge.
+const BLIND_KEY = ' blind-via:';
 const groups = new Map();
 for (const entry of entries) {
-  const key = normalizeCompany(entry.company);
+  const key = String(entry.company).trim() === '?'
+    ? BLIND_KEY + normalizeCompany(entry.via || '')
+    : normalizeCompany(entry.company);
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(entry);
+}
+
+// Two blind rows only count as the same listing when their evaluation dates
+// sit within the re-post window (mirrors detect-reposts.mjs's 90 days).
+// Unparseable dates never cluster — deleting a real application is worse than
+// keeping a duplicate.
+const BLIND_WINDOW_DAYS = 90;
+function withinBlindWindow(a, b) {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+  return Math.abs(ta - tb) <= BLIND_WINDOW_DAYS * 86400000;
 }
 
 // Find duplicates
@@ -299,6 +330,7 @@ const linesToRemove = new Set();
 
 for (const [company, companyEntries] of groups) {
   if (companyEntries.length < 2) continue;
+  const isBlindGroup = company.startsWith(BLIND_KEY);
 
   // Within same company, find role matches
   const processed = new Set();
@@ -309,7 +341,8 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
-      if (roleMatch(companyEntries[i], companyEntries[j])) {
+      if (roleMatch(companyEntries[i], companyEntries[j])
+          && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }
@@ -343,6 +376,29 @@ for (const [company, companyEntries] of groups) {
       }
     }
 
+    // Merge notes from removed entries
+    let mergedNotes = String(keeper.notes || '').trim();
+    const originalNotes = mergedNotes;
+    for (let k = 1; k < cluster.length; k++) {
+      const dupNotes = String(cluster[k].notes || '').trim();
+      if (dupNotes && dupNotes !== 'N/A' && dupNotes !== '❌' && dupNotes !== 'pending' && dupNotes !== '-') {
+        if (!mergedNotes.includes(dupNotes)) {
+          mergedNotes = mergedNotes && mergedNotes !== 'N/A' && mergedNotes !== '-' ? `${mergedNotes}; ${dupNotes}` : dupNotes;
+        }
+      }
+    }
+
+    if (mergedNotes !== originalNotes) {
+      const lineIdx = keeper.lineIdx;
+      if (lineIdx !== undefined) {
+        const parts = lines[lineIdx].split('|').map(s => s.trim());
+        parts[COLMAP.notes] = mergedNotes;
+        lines[lineIdx] = rebuildRow(parts);
+        keeper.notes = mergedNotes;
+        console.log(`  📝 #${keeper.num}: notes merged`);
+      }
+    }
+
     // Remove duplicates
     for (let k = 1; k < cluster.length; k++) {
       const dup = cluster[k];
@@ -365,11 +421,15 @@ for (const idx of sortedRemoveIndices) {
 console.log(`\n📊 ${removed} duplicates removed`);
 
 if (!DRY_RUN && removed > 0) {
-  copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
-  console.log('✅ Written to applications.md (backup: applications.md.bak)');
+  const backupPath = `${APPS_FILE}.bak`;
+  copyFileSync(APPS_FILE, backupPath);
+  trackerTransaction.replace(lines.join('\n'));
+  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
   console.log('✅ No duplicates found');
+}
+} finally {
+  trackerTransaction?.close();
 }

@@ -1,0 +1,45 @@
+% Fictional example CV for latex-tex tests (resumeSubheading family).
+\documentclass[letterpaper,11pt]{article}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\pdfgentounicode=1
+
+\newcommand{\resumeItem}[1]{\item\small{#1}}
+\newcommand{\resumeSubheading}[4]{%
+  \item
+  \textbf{#1} \hfill #2 \\
+  \textit{#3} \hfill \textit{#4}%
+}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=0.15in]}
+\newcommand{\resumeItemListEnd}{\end{itemize}}
+
+\begin{document}
+\begin{center}
+  {\LARGE\bfseries Alex Example}\\[2pt]
+  \small alex@example.dev $|$ Example City, EX
+\end{center}
+
+\section{Summary}
+\resumeItemListStart
+  \resumeItem{Software engineer with five years building backend APIs and data pipelines.}
+\resumeItemListEnd
+
+\section{Work Experience}
+\resumeItemListStart
+  \resumeSubheading{Example Corp}{2022 -- Present}{Backend Engineer}{Remote}
+  \resumeItemListStart
+    \resumeItem{Built REST APIs in Python serving 20k daily active users.}
+    \resumeItem{Reduced batch job runtime by 35 percent with parallel workers.}
+  \resumeItemListEnd
+\resumeItemListEnd
+
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.15in]
+  \small{\item{
+    \textbf{Languages}{: Python, Go, SQL} \\
+    \textbf{Tools}{: Docker, PostgreSQL, Redis} \\
+  }}
+\end{itemize}
+
+\end{document}

@@ -171,4 +171,3 @@ func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
 		t.Fatalf("expected failure flash to carry the error, got %q", failed.flash)
 	}
 }
-

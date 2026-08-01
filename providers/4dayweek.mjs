@@ -25,6 +25,25 @@ const DEFAULT_MAX_PAGES = 3;
 const MAX_PAGES_CAP = 50;
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
+function detectFourDayEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (entry.provider === '4dayweek') return { url: FEED_BASE };
+  if (entry.provider) return null;
+
+  for (const value of [entry.api, entry.careers_url]) {
+    if (typeof value !== 'string') continue;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === 'https:' && parsed.hostname === TRUSTED_HOST) {
+        return { url: FEED_BASE };
+      }
+    } catch {
+      // Ignore malformed URLs; another provider may still claim the entry.
+    }
+  }
+  return null;
+}
+
 /** @param {string} url */
 function assertFourDayUrl(url) {
   let parsed;
@@ -109,6 +128,8 @@ export function normalize4dwJob(j, fallbackCompany) {
 /** @type {Provider} */
 export default {
   id: '4dayweek',
+
+  detect: detectFourDayEntry,
 
   async fetch(entry, ctx) {
     assertFourDayUrl(FEED_BASE);

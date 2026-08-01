@@ -2,7 +2,10 @@
 
 Generate a formal application email body that the candidate can paste into an
 email client. This mode is for direct application emails, recruiter follow-up
-emails with a CV attached, referral request emails, and cold application emails.
+emails with a CV attached, referral request emails, cold application emails,
+and process-stuck recovery emails when the application machinery itself breaks
+(a form that will not submit, a scheduling page that fails, a dead assessment
+link) and email becomes the fallback channel.
 
 It is NOT:
 - `contacto`: short LinkedIn / BOSS Zhipin / chat-style outreach.
@@ -35,6 +38,25 @@ Supported inputs:
    - If there is a most recent evaluated tracker row, offer to draft from that
      row.
    - If no usable context exists, ask for a report number, slug, or JD.
+
+4. `/career-ops email stuck {report-number-or-slug}`
+   - Load the matching `reports/{NNN}-*.md` for company and role context.
+   - Draft a process-stuck recovery email (see the dedicated section below).
+   - Also trigger this variant conversationally when the user describes a
+     broken application step, e.g. "the ATS scheduling page is broken", "I
+     can't submit the form", "the assessment link is dead", "the login loop
+     won't let me back in". Confirm the variant before drafting if ambiguous.
+
+5. `/career-ops email noshow {report-number-or-slug}`
+   - Load the matching `reports/{NNN}-*.md` for company and role context.
+   - Draft a confirmed-time no-show follow-up (see the dedicated section
+     below).
+   - Also trigger this variant conversationally when the user describes a
+     missed call after a two-way scheduling confirmation, e.g. "my call with
+     {interviewer} at {time} didn't happen", "we confirmed 2pm and nobody
+     called", "the recruiter never dialed in". Confirm the variant before
+     drafting if ambiguous — this is distinct from the cadence-driven
+     follow-ups in `modes/followup.md` (see the scope note below).
 
 ---
 
@@ -83,15 +105,32 @@ If `candidate.wechat` is absent, omit WeChat. Do not invent one.
 
 ## Step 2 — Classify Email Type
 
-Choose one of three variants from user wording or context:
+Choose one of five variants from user wording or context:
 
 | Variant | When | Tone |
 |---|---|---|
 | `hr_application` | Default. Sending CV to HR/recruiter for a posted role. | Formal, concise, screening-friendly |
 | `referral_request` | User asks for referral, internal contact, friend, alumni, or former colleague. | Warm, low-pressure, easy to forward |
 | `cold_application` | No posted role, speculative reach-out, "cold email". | Direct, value-first, no desperation |
+| `process_stuck` | The ATS or application flow broke mid-process and email is the fallback channel. | Factual, forwardable, one precise ask |
+| `confirmed_time_noshow` | A recruiter or interviewer confirmed a specific call time in a two-way exchange and did not call. | Professional, not annoyed; time-anchored, not apologetic |
 
 If unclear, default to `hr_application`.
+
+**Precedence:** any process-failure signal (a broken step, an error message, a
+dead link, failed scheduling) selects `process_stuck` over the other variants.
+A missed call after an explicit two-way time confirmation selects
+`confirmed_time_noshow` instead — it is not a process failure (nothing broke;
+someone simply did not call), so do not route it through `process_stuck`. If
+a failure or a missed-call signal is hinted at but the intent is ambiguous,
+ask for confirmation — do not fall through to `hr_application`. The
+`hr_application` default applies only when there is no failure or no-show
+indication at all.
+
+For `process_stuck` and `confirmed_time_noshow`, skip Step 3 (fit points) and
+Step 4 (attachment checklist) — the reader already has the application; these
+emails exist to unblock a process or reopen a scheduling gap, not to sell —
+and follow the dedicated sections below instead of the Step 5 structures.
 
 ---
 
@@ -169,6 +208,205 @@ Subject: {subject}
 3. 2 proof points tied to the company/domain
 4. Specific ask: short call, right contact, or permission to send CV
 5. Contact block and signature
+
+---
+
+## Process-Stuck Recovery Email (`process_stuck`)
+
+The ATS is the normal channel; this email exists because the channel broke.
+The reader is often the same recruiter who will later evaluate the candidate,
+so the draft must read as a competent incident report, not a complaint.
+
+### Intake
+
+Before drafting, ask for whatever is missing:
+
+1. **Which step broke:** form submit, interview/prescreen scheduling,
+   assessment link, account login, or other.
+2. **What the failure looks like:** error text verbatim if any, or "no error,
+   the page just reloads / spins / shows no slots".
+3. **What was already retried:** other browser, other device, other time
+   slots, cleared session, waited and retried.
+4. **Deadline pressure:** assessment window, scheduling cutoff, posting close
+   date.
+5. **Which contact addresses are visible** to the candidate: prior email
+   threads, ATS notification sender, addresses on the posting or careers page.
+
+### Draft structure
+
+1. Greeting
+2. One-line identification: role, application/req ID if known, candidate name
+3. Reproducible, timestamped failure description a recruiter can forward to
+   their ATS admin verbatim: step, exact behavior, timestamp + timezone, what
+   was already retried
+4. One precise ask — exactly one: schedule manually, confirm receipt, extend
+   the assessment window, or resend a working link
+5. One-line reaffirmation of interest in the role
+6. Signature
+
+Keep it short: 100-180 words. No blame, no apology spiral, no speculation
+about what is wrong on their side, no more detail than the admin needs.
+
+### Evidence checklist
+
+Include in the failure description:
+
+- Timestamp + timezone of the attempt(s)
+- The step and the exact failure behavior (error text verbatim if any)
+- What was already retried
+- "Screenshot available on request" — mention it, never attach unprompted
+
+### Contact triage — picking the least-wrong address
+
+Broken ATS flows rarely expose a human contact. Rank the visible options:
+
+1. **A recruiter or coordinator from any prior email thread** for this
+   application. Best option by far: existing context, a human, an incentive
+   to fix it.
+2. **The reply-to of ATS notification emails** (confirmation, invite,
+   assessment emails) — only if it is a human or team mailbox. Skip anything
+   clearly unmonitored (`no-reply@`, `notifications@`, `donotreply@`).
+3. **A general recruiting mailbox** on the posting or careers page:
+   `careers@`, `recruiting@`, `talent@`, `jobs@`, `hr@`.
+4. **LinkedIn message to the recruiter or hiring manager** as last resort —
+   hand off to `contacto` mode for the short-form version of the same
+   content.
+
+**Never send a process-support request to a special-purpose mailbox.** These
+exist for a protected or unrelated purpose, and misusing them at best gets
+the email silently dropped and at worst reads as a candidate who does not
+read instructions:
+
+- Accessibility / accommodations mailboxes
+- Benefits mailboxes
+- Ethics / whistleblower / compliance hotlines
+- Alumni mailboxes
+- Press / media mailboxes
+
+If the only visible address is a special-purpose mailbox, say so explicitly,
+do not draft for that address, and recommend the LinkedIn route (option 4)
+instead.
+
+### Guardrails
+
+All standing email-mode guardrails apply unchanged: draft only, never send,
+never click, never submit. Additionally, the stuck-email draft must:
+
+- Never threaten or escalate, and never use legal or complaint language.
+- Never speculate about the cause of the failure or criticize the company's
+  tooling — describe only what the candidate observed. Factual and
+  forwardable, nothing else.
+- Never fabricate error messages, timestamps, or retry steps. If the user
+  cannot recall a detail, omit it.
+
+### Example (generic)
+
+All values below are placeholders — fill them only with details the user
+actually provides. Never invent error text, timestamps, or retry steps.
+
+```text
+Subject: Application to {Role} ({REQ-ID}) — {broken step} issue
+
+Hi {Company} Recruiting team,
+
+I'm partway through the application process for {Role} ({REQ-ID}) and hit a
+technical issue I can't get past: {broken step} fails on every attempt.
+{Exact observed behavior — quote error text verbatim only if one exists;
+otherwise describe what happens: the page reloads, keeps spinning, shows no
+slots} (tried {date + time + timezone}, {what was retried}). A screenshot is
+available if useful.
+
+Could someone schedule the interview manually? Happy to take any slot that
+works for the team.
+
+I remain very interested in the role and don't want a technical glitch to
+stall the process.
+
+Best regards,
+{Candidate Name}
+{email}
+```
+
+---
+
+## Confirmed-Time No-Show Follow-up (`confirmed_time_noshow`)
+
+**Scope note:** this variant is unrelated to the elapsed-time cadence in
+`modes/followup.md` / `followup-cadence.mjs` (applied: 7 days, responded: 3
+days, interview: 1 day). Those track "it's been N days since the status
+changed." This variant is same-day and commitment-specific: a recruiter or
+interviewer explicitly confirmed a call time in a two-way exchange (email,
+ATS scheduler, text) and the call did not happen. There is no day-elapsed
+scoring here and no `followup-cadence.mjs` output to read — the trigger is
+the user telling you the confirmed time passed with no call.
+
+### Intake
+
+Required, always ask for whatever is missing (do not invent any of these):
+
+1. **The confirmed date/time**, as agreed in the exchange (include timezone
+   if known).
+   Before drafting, verify that this time has passed and is today in the
+   relevant timezone; otherwise clarify the scenario or use another variant.
+2. **The interviewer or recruiter's name**, exactly as given by the user —
+   do not scrape or guess it from a report.
+3. **Remaining same-day availability** the user wants to offer (a window,
+   e.g. "before 4pm today" or "any time after 2:30").
+4. Company and role, for the subject line (from the linked report if one was
+   given, otherwise ask).
+
+### Draft structure
+
+1. Greeting, addressed to the named interviewer/recruiter by name.
+2. One plain sentence stating the confirmed time and that the call did not
+   happen. State it as a fact, not an accusation — no "I was very
+   disappointed" or over-apologizing for pointing it out.
+3. One sentence offering the remaining same-day availability the user gave.
+4. One-line reaffirmation of interest — brief, not a resell of fit points
+   (Step 3 is skipped for this variant).
+5. Signature.
+
+Keep it short: under 120 words. Reference the specific confirmed time
+plainly once in the body (the subject line may also reference it); do not
+restate it more than once in the body or pad with general "just checking in"
+framing (same banned-phrase rule as `modes/followup.md`).
+
+### Guardrails
+
+- **Tone is professional, not annoyed.** No passive-aggressive phrasing
+  ("I waited...", "I understand things come up, but..."), no guilt framing,
+  no exclamation points.
+- Never fabricate the confirmed time, the interviewer's name, or the
+  availability window — all three are user-provided inputs, never inferred
+  or scraped from a report.
+- Never speculate about why the call was missed (traffic, forgot, double
+  booked). State the fact and move to the ask.
+- This is a single follow-up for a single missed commitment, not a
+  multi-touch cadence — do not suggest a second no-show follow-up; if a
+  second miss happens, treat that as its own new instance of this same
+  scenario.
+- All standing email-mode guardrails apply unchanged: draft only, never
+  send, never click, never submit.
+
+### Example (generic)
+
+All values are placeholders. Fill them only with details the user actually
+provides.
+
+```text
+Subject: {Role} — following up on our {time} call
+
+Hi {Interviewer Name},
+
+We'd confirmed a call today at {confirmed time, timezone} for the {Role}
+role, and I didn't receive it. I'm available {remaining availability window}
+if there's still time to connect today.
+
+Still very interested in the role and happy to work around your schedule.
+
+Best,
+{Candidate Name}
+```
 
 ---
 

@@ -102,7 +102,7 @@ Notas:
 ## Paso 6 -- Tras la candidatura (opcional)
 
 Si el candidato confirma que la candidatura ha sido enviada:
-1. Actualizar el estado en `applications.md` de "Evaluated" a "Applied"
+1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs <report#> Applied` (no editar la tabla de `applications.md` a mano)
 2. Actualizar el Bloque G del report con las respuestas finales
 3. Sugerir el siguiente paso: `/career-ops contacto` para LinkedIn outreach hacia el hiring manager
 

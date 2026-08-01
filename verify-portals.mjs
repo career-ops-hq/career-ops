@@ -54,7 +54,9 @@ export const ATS = {
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
   },
   lever: {
-    probeUrl: (slug) => `https://api.lever.co/v0/postings/${slug}`,
+    // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
+    // provider's resolveApiUrl; the default is the base instance.
+    probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
   },
 };
@@ -71,22 +73,42 @@ const ATS_URL_PATTERNS = [
   { ats: 'greenhouse', re: /boards\.greenhouse\.io\/([^/?#]+)/ },
   { ats: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([^/?#]+)/ },
   { ats: 'ashby', re: /jobs\.ashbyhq\.com\/([^/?#]+)/ },
-  { ats: 'lever', re: /api\.lever\.co\/v0\/postings\/([^/?#]+)/ },
-  { ats: 'lever', re: /jobs\.lever\.co\/([^/?#]+)/ },
+  // Lever entries pin an exact `host` (checked via new URL(), like
+  // providers/lever.mjs's resolveApiUrl) instead of matching the hostname as a
+  // loose substring anywhere in the URL — otherwise a crafted
+  // https://evil.com/jobs.lever.co/x careers_url would falsely resolve as Lever.
+  { ats: 'lever', host: 'api.eu.lever.co', re: /^\/v0\/postings\/([^/?#]+)/, eu: true },
+  { ats: 'lever', host: 'jobs.eu.lever.co', re: /^\/([^/?#]+)/, eu: true },
+  { ats: 'lever', host: 'api.lever.co', re: /^\/v0\/postings\/([^/?#]+)/ },
+  { ats: 'lever', host: 'jobs.lever.co', re: /^\/([^/?#]+)/ },
 ];
 
 /**
  * Identify the ATS and slug embedded in a careers_url or api URL.
  *
  * @param {string} url - A `careers_url` or `api` value from portals.yml.
- * @returns {{ats: string, slug: string}|null} Match, or null for non-ATS URLs
- *   (branded careers pages, Workday, job boards, etc.) which this tool skips.
+ * @returns {{ats: string, slug: string, eu?: boolean}|null} Match, or null for
+ *   non-ATS URLs (branded careers pages, Workday, job boards, etc.) which this
+ *   tool skips. `eu` is set for Lever's EU data-residency instance.
  */
 export function parseAtsSlug(url) {
   const text = String(url || '');
-  for (const { ats, re } of ATS_URL_PATTERNS) {
+  let hostname = null;
+  let pathname = null;
+  try {
+    ({ hostname, pathname } = new URL(text));
+  } catch {
+    // Not a parseable absolute URL — host-scoped patterns below simply won't match.
+  }
+  for (const { ats, re, eu, host } of ATS_URL_PATTERNS) {
+    if (host) {
+      if (hostname !== host) continue;
+      const m = pathname.match(re);
+      if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
+      continue;
+    }
     const m = text.match(re);
-    if (m && m[1]) return { ats, slug: m[1] };
+    if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
   }
   return null;
 }
@@ -158,7 +180,8 @@ export function classifyFetchError(err) {
  *
  * @param {string} ats - Key into ATS (greenhouse | ashby | lever).
  * @param {string} slug - Candidate slug to probe.
- * @param {{fetchJson?: Function}} [deps] - Injectable HTTP for testability.
+ * @param {{fetchJson?: Function, eu?: boolean}} [deps] - Injectable HTTP for
+ *   testability; `eu` selects Lever's EU data-residency instance.
  * @returns {Promise<{ats,slug,url,status,jobCount?,httpStatus?,errorKind?,reason?}>}
  *   status is 'live' (jobs > 0), 'empty' (200, no jobs), or 'missing'
  *   (404/error/unexpected shape).
@@ -166,7 +189,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson } = {},
+  { fetchJson = defaultFetchJson, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -178,7 +201,7 @@ export async function probeSlug(
       errorKind: 'unknown',
       reason: `unknown ATS: ${ats}`,
     };
-  const url = spec.probeUrl(slug);
+  const url = spec.probeUrl(slug, { eu });
   try {
     const json = await fetchJson(url);
     const count = spec.jobCount(json);
@@ -216,9 +239,15 @@ async function discoverAlternates(name, { fetchJson }) {
   let bestEmpty = null;
   for (const slug of deriveSlugCandidates(name)) {
     for (const ats of Object.keys(ATS)) {
-      const r = await probeSlug(ats, slug, { fetchJson });
-      if (r.status === 'live') return r;
-      if (r.status === 'empty' && !bestEmpty) bestEmpty = r;
+      // Lever no longer has a separate 'lever-eu' registry key (unified into a
+      // single 'lever' + eu flag), so both instances must be probed explicitly
+      // here or EU-only tenants become undiscoverable via --add.
+      const euVariants = ats === 'lever' ? [false, true] : [false];
+      for (const eu of euVariants) {
+        const r = await probeSlug(ats, slug, { fetchJson, eu });
+        if (r.status === 'live') return r;
+        if (r.status === 'empty' && !bestEmpty) bestEmpty = r;
+      }
     }
   }
   return bestEmpty;
@@ -345,7 +374,7 @@ export async function verifyCompanies(
     const match =
       parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
     if (match) {
-      const probe = await probeSlug(match.ats, match.slug, { fetchJson });
+      const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
       if (probe.status === 'live' || probe.status === 'empty') {
         results.push({ name, ...probe });
         continue;

@@ -14,13 +14,15 @@
  * Requires:
  *   GEMINI_API_KEY in .env (or environment variable)
  *
- * Free-tier model: gemini-2.5-flash (generous quota, no billing required)
+ * Default model: gemini-3.6-flash (GA July 2026)
  *
  * Model deprecation reference (per Google AI for Developers, May 2026):
- *   - gemini-2.0-flash       deprecated 2026-03-31  (do not use)
+ *   - gemini-2.0-flash       deprecated 2026-03-31  (do not use — generateContent 404)
  *   - gemini-2.0-flash-lite  deprecated 2026-03-31
- *   - gemini-2.5-flash       deprecated 2026-06-17  (current default)
+ *   - gemini-2.5-flash       deprecated 2026-06-17
  *   - gemini-2.5-flash-lite  deprecated 2026-07-22
+ *   - gemini-3.5-flash       prior Flash generation (still available)
+ *   - gemini-3.6-flash       current default (stable)
  * Stable Gemini models follow a 12-month lifecycle from their release date.
  * Source: https://ai.google.dev/gemini-api/docs/models
  *
@@ -28,10 +30,20 @@
  * `modelName` below and the `--model` examples accordingly.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+
+const tracker = new TokenAccumulator();
+tracker.recordZeroToken('scan');
+tracker.recordZeroToken('pdf payload');
 import { execFileSync } from 'child_process';
+import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import {
+  formatReportNumber, releaseReportNumbers, reserveReportNumbers,
+} from './reserve-report-num.mjs';
+import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env before anything else
@@ -80,12 +92,13 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   USAGE
     node gemini-eval.mjs "<JD text>"
     node gemini-eval.mjs --file ./jds/my-job.txt
-    node gemini-eval.mjs --model gemini-2.5-flash "<JD text>"
+    node gemini-eval.mjs --model gemini-3.6-flash "<JD text>"
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <name>   Gemini model to use (default: gemini-2.5-flash)
+    --model <name>   Gemini model to use (default: gemini-3.6-flash)
     --no-save        Do not save report to reports/ directory
+    --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
 
   SETUP
@@ -102,8 +115,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
+let noCompress = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -117,6 +131,8 @@ for (let i = 0; i < args.length; i++) {
     modelName = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
+  } else if (args[i] === '--no-compress') {
+    noCompress = true;
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
@@ -151,16 +167,6 @@ function readFile(path, label) {
     return `[${label} not found — skipping]`;
   }
   return readFileSync(path, 'utf-8').trim();
-}
-
-function nextReportNumber() {
-  if (!existsSync(PATHS.reports)) return '001';
-  const files = readdirSync(PATHS.reports)
-    .filter(f => /^\d{3}-/.test(f))
-    .map(f => parseInt(f.slice(0, 3)))
-    .filter(n => !isNaN(n));
-  if (files.length === 0) return '001';
-  return String(Math.max(...files) + 1).padStart(3, '0');
 }
 
 function validateEvaluationShape(text) {
@@ -231,39 +237,41 @@ const ofertaLogic    = readFile(PATHS.oferta,      'modes/oferta.md');
 const cvContent      = readFile(PATHS.cv,          'cv.md');
 const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
 const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
-// Build the system prompt (mirrors the Claude skill router logic)
+// Build the system prompt with token budget management
 // ---------------------------------------------------------------------------
+const { contextBody, budgetReport } = buildBudgetedPrompt({
+  sharedContent: sharedContext,
+  ofertaContent: ofertaLogic,
+  cvContent,
+  profileYml,
+  profileContent,
+  jdText,
+  noCompress,
+  maxTokens: 1_048_576, // gemini-2.5-flash context window
+});
+
+// Log token budget info
+if (budgetReport.compressed) {
+  console.log(`📊  Token budget: ${budgetReport.beforeTokens} → ${budgetReport.afterTokens} tokens (saved ${budgetReport.beforeTokens - budgetReport.afterTokens})`);
+  console.log(`    Trimmed sections: ${budgetReport.removed.join(', ')}`);
+  if (budgetReport.overBudget) {
+    console.log(`    ⚠️  Still ${budgetReport.afterTokens - budgetReport.budget} tokens over budget after compression`);
+  }
+} else if (budgetReport.overBudget) {
+  console.log(`⚠️  Token budget: ${budgetReport.totalTokens} tokens exceeds ${budgetReport.budget} limit by ${budgetReport.totalTokens - budgetReport.budget}`);
+} else {
+  console.log(`📊  Token budget: ${budgetReport.totalTokens} tokens (within ${budgetReport.budget} limit)`);
+}
+
 const systemPrompt = `You are career-ops, an AI-powered job search assistant.
 You evaluate job offers against the user's CV using a structured A-G scoring system.
 
 Your evaluation methodology is defined below. Follow it exactly.
 
-═══════════════════════════════════════════════════════
-SYSTEM CONTEXT (_shared.md)
-═══════════════════════════════════════════════════════
-${sharedContext}
-
-═══════════════════════════════════════════════════════
-EVALUATION MODE (oferta.md)
-═══════════════════════════════════════════════════════
-${ofertaLogic}
-
-═══════════════════════════════════════════════════════
-CANDIDATE RESUME (cv.md)
-═══════════════════════════════════════════════════════
-${cvContent}
-
-═══════════════════════════════════════════════════════
-CANDIDATE PROFILE & TARGETS (config/profile.yml)
-═══════════════════════════════════════════════════════
-${profileYml}
-
-═══════════════════════════════════════════════════════
-USER ARCHETYPES & NARRATIVE (_profile.md)
-═══════════════════════════════════════════════════════
-${profileContent}
+${contextBody}
 
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION
@@ -272,8 +280,9 @@ IMPORTANT OPERATING RULES FOR THIS CLI SESSION
    - For Block D (Comp research): provide salary estimates based on your training data, clearly noted as estimates.
    - For Block G (Legitimacy): analyze the JD text only; skip URL/page freshness checks.
    - Post-evaluation file saving is handled by the script, not by you.
-2. Generate Blocks A through G in full, in English, unless the JD is in another language.
-3. At the very end, output a machine-readable summary block in this exact format:
+2. ${languageInstruction}
+3. Generate Blocks A through G in full.
+4. At the very end, output a machine-readable summary block in this exact format:
 
 ---SCORE_SUMMARY---
 COMPANY: <company name or "Unknown">
@@ -290,8 +299,16 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 console.log(`🤖  Calling Gemini (${modelName})... this may take 30-60 seconds.\n`);
 
 const genAI = new GoogleGenerativeAI(apiKey);
+// Prompt caching (#1709) — engine 3 of the four, adapted to Gemini's shape.
+// Gemini has no `cache_control` field; its lever is the ~12K-token static prefix
+// (shared + oferta + cv) being a stable `systemInstruction` rather than the first
+// turn of `contents` — that's what its 2.5 models cache implicitly across
+// back-to-back requests. So the static context moves to `systemInstruction` and
+// generateContent() carries only the per-JD user turn. The prompt text is
+// unchanged — just where it sits in the request.
 const model = genAI.getGenerativeModel({
   model: modelName,
+  systemInstruction: systemPrompt,
   generationConfig: {
     temperature: 0.4,      // deterministic enough for structured evaluation
     maxOutputTokens: 8192, // full 7-block evaluation
@@ -300,11 +317,15 @@ const model = genAI.getGenerativeModel({
 
 let evaluationText;
 try {
-  const result = await model.generateContent([
-    { text: systemPrompt },
-    { text: `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
-  ]);
+  const result = await model.generateContent(`JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`);
   evaluationText = result.response.text();
+  const usage = {
+    prompt_tokens: result.response.usageMetadata?.promptTokenCount ?? 0,
+    completion_tokens: result.response.usageMetadata?.candidatesTokenCount ?? 0,
+    total_tokens: result.response.usageMetadata?.totalTokenCount ?? 0,
+    cached_tokens: result.response.usageMetadata?.cachedContentTokenCount ?? 0
+  };
+  tracker.record('evaluation', usage);
 } catch (err) {
   const sanitizedMsg = (err.message || '').split(apiKey).join('[REDACTED]');
   console.error('❌  Gemini API error:', sanitizedMsg);
@@ -370,17 +391,20 @@ if (summaryMatch) {
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reportSaved = false;
+  let reservedNumbers = [];
   try {
-    if (!existsSync(PATHS.reports)) {
-      mkdirSync(PATHS.reports, { recursive: true });
-    }
+    try {
+      if (!existsSync(PATHS.reports)) {
+        mkdirSync(PATHS.reports, { recursive: true });
+      }
 
-    const num         = nextReportNumber();
-    const today       = new Date().toISOString().split('T')[0];
-    const companySlug = slugifyCompany(company);
-    const filename    = `${num}-${companySlug}-${today}.md`;
-    const reportPath  = join(PATHS.reports, filename);
-    const trackerPath = join(PATHS.trackerAdditions, `${num}-${companySlug}.tsv`);
+      reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+      const num         = formatReportNumber(reservedNumbers[0]);
+      const today       = new Date().toISOString().split('T')[0];
+      const companySlug = slugifyCompany(company);
+      const filename    = `${num}-${companySlug}-${today}.md`;
+      const reportPath  = join(PATHS.reports, filename);
+      const trackerPath = join(PATHS.trackerAdditions, `${num}-${companySlug}.tsv`);
 
     const reportContent = `# Evaluation: ${company} — ${role}
 
@@ -396,40 +420,49 @@ if (saveReport) {
 ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
 `;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    const trackerFields = [
-      String(parseInt(num, 10)),
-      today,
-      tsvSafe(company),
-      tsvSafe(role),
-      'Evaluated',
-      normalizedTrackerScore(score),
-      '❌',
-      `[${num}](reports/${filename})`,
-      'Gemini evaluation',
-    ];
-    writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
-    console.log(`\n✅  Report saved: reports/${filename}`);
-    console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
-    reportSaved = true;
-  } catch (err) {
-    console.warn(`⚠️   Could not save report: ${err.message}`);
-    process.exitCode = 1;
-  }
-
-  if (reportSaved) {
-    try {
-      const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
-        cwd: ROOT,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      if (mergeOutput.trim()) console.log(mergeOutput.trim());
-      console.log('📊  Tracker merged into data/applications.md.');
+      writeFileSync(reportPath, reportContent, 'utf-8');
+      mkdirSync(PATHS.trackerAdditions, { recursive: true });
+      const trackerFields = [
+        String(parseInt(num, 10)),
+        today,
+        tsvSafe(company),
+        tsvSafe(role),
+        'Evaluated',
+        normalizedTrackerScore(score),
+        '❌',
+        `[${num}](reports/${filename})`,
+        'Gemini evaluation',
+      ];
+      writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
+      console.log(`\n✅  Report saved: reports/${filename}`);
+      console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
+      reportSaved = true;
     } catch (err) {
-      console.warn(`⚠️   Report saved, but could not merge tracker addition into data/applications.md: ${err.message}`);
+      console.warn(`⚠️   Could not save report: ${err.message}`);
       process.exitCode = 1;
+    }
+
+    if (reportSaved) {
+      try {
+        const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
+          cwd: ROOT,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        if (mergeOutput.trim()) console.log(mergeOutput.trim());
+        console.log('📊  Tracker merged into data/applications.md.');
+      } catch (err) {
+        console.warn(`⚠️   Report saved, but could not merge tracker addition into data/applications.md: ${err.message}`);
+        process.exitCode = 1;
+      }
+    }
+  } finally {
+    if (reservedNumbers.length > 0) {
+      try {
+        await releaseReportNumbers(reservedNumbers, { rootDir: ROOT, reportsDir: PATHS.reports });
+      } catch (err) {
+        console.warn(`⚠️   Could not release report reservation: ${err.message}`);
+      }
     }
   }
 }
@@ -437,3 +470,5 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
 console.log('\n' + '─'.repeat(66));
 console.log(`  Score: ${score}/5  |  Archetype: ${archetype}  |  Legitimacy: ${legitimacy}`);
 console.log('─'.repeat(66) + '\n');
+
+console.log(formatBreakdown(tracker, modelName, 'gemini'));

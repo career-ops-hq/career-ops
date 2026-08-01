@@ -8,12 +8,13 @@ Given a job description and interview date/time, build a structured, time-blocke
 
 1. **Job description** (required) — paste inline or provide URL
 2. **Interview date and time** (required) — to calculate hours available
-3. **Interviewer name and role** (if known) — shapes depth and tone of prep
+3. **Interviewer name and role** (if known) — shapes depth and tone of prep. Later rounds (panel / onsite loop) often name several interviewers at once — from the user directly, a pasted calendar invite, or a pasted scheduling email. When more than one panelist is named, see the Panel Intel note in Step 2.
 4. **Round type** (if known) — screening, technical/domain-specific, design/case study, behavioral panel
 5. **CV** at `cv.md` + `article-digest.md` (if present) — read for experience, skills, proof points
 6. **Profile** at `config/profile.yml` + `modes/_profile.md` — read for narrative, archetypes, and targets
 7. **Story bank** at `interview-prep/story-bank.md` — existing STAR+R stories
 8. **Question bank** at `interview-prep/question-bank.md` — existing gaps (if file exists)
+9. **Prior stated compensation** — if the tracker# is known, run `node salary-gap.mjs --stated-for <tracker#>` (zero tokens). Any prior `stated` observation is a number the candidate already committed to, in an earlier round, to a specific interviewer — feed it into Step 4's quick-reference so the candidate stays consistent instead of accidentally renegotiating.
 
 ---
 
@@ -61,6 +62,8 @@ Identify what this round is actually evaluating based on:
 
 Calibrate the plan to the round. Over-preparing depth for a screening wastes time and creates the wrong mindset.
 
+**Panel Intel (when panelists are named).** If two or more interviewers are named for this round — from the user directly, a pasted calendar invite, or a pasted scheduling email — build the Panel Intel table before moving to Step 3. See `modes/interview-prep.md` § "Panel Intel table" (under Step 4 → `panel-mixed`) for the full table format and the three sub-behaviors (decision-maker weighting against the JD's reporting line, career-trajectory signal reading, per-panelist tailored closing question) — apply that same logic here, then use the resulting audience tags to size Step 3's blocks per panelist instead of prepping one generic pack. A single named interviewer doesn't need the table; go straight to Step 3 calibrated to that person's round type above.
+
 ---
 
 ## Step 3 — Build the Time-Blocked Plan
@@ -68,6 +71,15 @@ Calibrate the plan to the round. Over-preparing depth for a screening wastes tim
 Calculate hours available from now until interview time. Divide into blocks:
 
 Before sizing the blocks, check `interview-prep/question-bank.md` (if it exists). Any question marked 🔴 from a prior round is a proven gap — it gets a dedicated block regardless of how the CV-vs-JD analysis ranks it. Real performance data outranks inferred risk.
+
+**Research check — before drafting Block 4.** Block 4 maps stories to "likely question types," but don't let that default to pattern-guessing when real, reported questions are one check away:
+
+1. **Check for existing sourced research first.** If `interview-prep/{company-slug}-{role-slug}.md` already exists (a prior `interview-prep` run), read its Step 1/Step 3 sourced questions and reuse them directly — never re-search work that's already been done and cited.
+2. **If no prior research file exists, run `interview-prep.md`'s "Step 1 — Research" WebSearch queries directly**, scoped to the audience of this specific round (recruiter/HR, hiring manager, or peer/technical panel — see Step 2 above) rather than the full company-research pass.
+3. **Same tagging discipline as `interview-prep.md`:** sourced questions cite their source; anything not found falls back to `[inferred from JD]` — don't invent a third label or a different citation format (see `interview-prep.md`'s "Tag conventions").
+4. **If the search genuinely yields nothing** (obscure company, no public interview reports), say so explicitly in the plan output and proceed with JD/profile-pattern inference — the same partial-but-honest principle `interview-prep.md` already applies to sparse intel, not perfect-or-nothing.
+
+This is the proactive counterpart to the reactive research path `modes/interview/practice.md` already runs mid-session (see its "When company-intel is thin mid-session") — same research stage, invoked here before the plan is drafted instead of when a candidate stumbles live.
 
 **Template (adjust block sizes based on total hours available):**
 
@@ -88,7 +100,7 @@ Block 3 — Secondary domain topic
   - Time: ~20% of available hours
 
 Block 4 — Behavioral stories
-  - Map existing stories to likely question types
+  - Map existing stories to likely question types — sourced ones from the Research Check above first, `[inferred from JD]` ones filling any remaining gaps
   - Practice the 2-minute verbal version of each
   - Prepare the Reflection for each — the senior-candidate differentiator
   - Time: ~15% of available hours
@@ -127,6 +139,8 @@ At the end of the plan, produce a one-page quick-reference the candidate can ski
 2. [most likely question and your first sentence of the answer]
 3. [the connection between your history and their domain]
 
+**Compensation — already discussed:** [only if `--stated-for` returned prior observations] "You stated {amount} {currency} to {interviewer} on {date} in {round}. Stay consistent unless something material changed." Omit this block entirely if there are no prior `stated` observations for this tracker# — don't invent a number that was never said.
+
 **Your questions to ask:**
 1. [question 1]
 2. [question 2]
@@ -149,4 +163,5 @@ Save the plan to `interview-prep/{company-slug}-{role-slug}.md` if a file doesn'
 - **One topic per block.** Mixing topics in a single block reduces retention.
 - **Always include rest time.** A rested candidate outperforms a cramming one.
 - **Never generate fake company intel.** If you don't have research, say so — don't invent culture claims or technical details about the company.
+- **Check for real reported questions before Block 4.** Reuse `interview-prep/{company-slug}-{role-slug}.md` if it exists; otherwise run `interview-prep.md`'s Step 1 queries scoped to this round. Same tagging discipline as `interview-prep.md` — sourced-with-citation, or `[inferred from JD]` when nothing real turns up. This is the proactive counterpart to "Never generate fake company intel" above: check for the real thing before falling back to inference.
 - **Never invent claims for the candidate.** The anchor sentence and pre-interview talking points in the quick-reference (Step 4) must be grounded in what the candidate actually has — `cv.md`, `article-digest.md`, or the story bank. Don't draft claims that depend on experience or metrics the candidate doesn't have. If a claim appears in `interview-prep/retracted-claims.md`, never include it.

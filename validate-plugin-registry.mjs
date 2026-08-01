@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // @ts-check
-// validate-plugin-registry.mjs — deterministic shape gate for plugins-registry.json.
+// validate-plugin-registry.mjs — deterministic shape gate for the plugin
+// registry (plugins-registry/<id>.json, one file per plugin; legacy single-file
+// plugins-registry.json still validates via the loader's fallback).
 // Run locally + by the registry-validate CI. Shape/uniqueness only (no network);
 // the CI additionally clones each changed entry at its pinned SHA and runs the
 // min-file + manifest + audit checks in a no-secret, read-only sandbox.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { loadRegistry, validateRegistryEntry } from './plugins/_registry.mjs';
+import { loadRegistry, loadRegistryFiles, validateRegistryEntry } from './plugins/_registry.mjs';
 import { HOOK_KINDS, RESERVED_ENV } from './plugins/_engine.mjs';
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -17,6 +19,13 @@ export function validateRegistry(root) {
   const reg = loadRegistry(root);
   const problems = [];
   if (reg.registryVersion !== 1) problems.push(`unsupported registryVersion ${JSON.stringify(reg.registryVersion)}`);
+  // Per-plugin-file invariants: every file parses, and the filename equals the
+  // entry's id — the filename IS the conflict-free uniqueness guarantee (two
+  // plugins can't claim one id without touching the same file).
+  for (const { file, entry } of loadRegistryFiles(root)) {
+    if (!entry || typeof entry !== 'object') { problems.push(`${file}: not a JSON object`); continue; }
+    if (entry.id && `${entry.id}.json` !== file) problems.push(`${file}: filename must equal "<id>.json" (id is "${entry.id}")`);
+  }
   const names = new Set(), ids = new Set();
   for (const e of reg.plugins) {
     for (const er of validateRegistryEntry(e, { idRe: ID_RE, hookKinds: HOOK_KINDS, reservedEnv: RESERVED_ENV })) {
@@ -48,5 +57,5 @@ if (import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]
     }
   }
   if (problems.length) { for (const p of problems) console.error(`✗ ${p}`); process.exit(1); }
-  console.log(`✓ plugins-registry.json is valid${deep ? ' (deep: all entries cloned + audited)' : ''}`); process.exit(0);
+  console.log(`✓ plugin registry is valid${deep ? ' (deep: all entries cloned + audited)' : ''}`); process.exit(0);
 }

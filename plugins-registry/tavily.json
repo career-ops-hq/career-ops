@@ -1,0 +1,20 @@
+{
+  "id": "tavily",
+  "name": "career-ops-plugin-tavily",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Tavily search/extract for job scanning, liveness checks, and company research.",
+  "repo": "https://github.com/Schlaflied/career-ops-plugin-tavily",
+  "sha": "79cc4bcab0f746ca27ee8ce5a01d53e709946eac",
+  "hooks": [
+    "search"
+  ],
+  "requiredEnv": [
+    "TAVILY_API_KEY"
+  ],
+  "allowedHosts": [
+    "api.tavily.com"
+  ],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1344",
+  "addedAt": "2026-06-29"
+}

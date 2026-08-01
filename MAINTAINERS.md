@@ -7,8 +7,9 @@ This file lists who maintains career-ops and how contributors grow into review a
 | Role | Who | Areas |
 |------|-----|-------|
 | Lead maintainer | [@santifer](https://github.com/santifer) | All areas; final say on architecture, scoring, and the data contract |
+| Reviewer | [@FReptar0](https://github.com/FReptar0) | Dashboard, tracker, CI, updater — triage, labels, first-pass reviews; his approvals unblock merges |
 
-Reviewers and additional maintainers are added as the contributor ladder below produces them. If you're reviewing this and the list is short — that's the honest current state, and the ladder is how it grows.
+Reviewers and additional maintainers are added as the contributor ladder below produces them. This list growing slowly is by design — see "Trust & access" below.
 
 ## The contributor ladder
 

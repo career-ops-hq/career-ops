@@ -1,10 +1,22 @@
 // HTTP transport helpers shared across providers.
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
+import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.3)';
 
-async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}) {
+/**
+ * Browser-like User-Agent for providers that must clear WAF/CDN bot
+ * management blocking the default career-ops UA outright (seen live:
+ * Glints' firewall, Geico's Cloudflare-gated Workday tenant). Shared so
+ * every provider working around such a block bumps one constant instead
+ * of drifting Chrome versions independently per file.
+ */
+export const BROWSER_LIKE_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -28,20 +40,22 @@ async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers =
       err.retryAfter = res.headers.get('retry-after');
       throw err;
     }
-    return res;
+    // Body consumption must stay inside the timer window: a server that sends
+    // headers and then stalls the body otherwise hangs the caller forever
+    // (this froze full-directory sweeps silently — 20 workers all stuck on
+    // stalled reads with the abort timer already cleared).
+    return await consume(res);
   } finally {
     clearTimeout(timer);
   }
 }
 
 export async function fetchJson(url, opts = {}) {
-  const res = await fetchWithTimeout(url, opts);
-  return await res.json();
+  return fetchWithTimeout(url, opts, (res) => res.json());
 }
 
 export async function fetchText(url, opts = {}) {
-  const res = await fetchWithTimeout(url, opts);
-  return await res.text();
+  return fetchWithTimeout(url, opts, (res) => res.text());
 }
 
 export function makeHttpCtx() {

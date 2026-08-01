@@ -15,7 +15,7 @@
  * Supported ATS:
  *   Greenhouse  boards.greenhouse.io / greenhouse.io
  *   Ashby       jobs.ashbyhq.com / ashbyhq.com
- *   Lever       jobs.lever.co / lever.co
+ *   Lever       jobs.(eu.)?lever.co / lever.co
  */
 
 import { readFileSync, existsSync, statSync } from 'fs';
@@ -30,6 +30,7 @@ const ALLOWED_HOSTS = new Set([
   'jobs.ashbyhq.com',
   'ashbyhq.com',
   'jobs.lever.co',
+  'jobs.eu.lever.co',
   'lever.co',
 ]);
 
@@ -99,7 +100,7 @@ function detectAts(url) {
   const path = url.pathname;
   const GH  = new Set(['boards.greenhouse.io', 'greenhouse.io']);
   const ASH = new Set(['jobs.ashbyhq.com', 'ashbyhq.com']);
-  const LEV = new Set(['jobs.lever.co', 'lever.co']);
+  const LEV = new Set(['jobs.lever.co', 'jobs.eu.lever.co', 'lever.co']);
 
   const gh = path.match(/^\/([^/]+)\/jobs\/(\d+)/);
   if (gh && GH.has(url.hostname)) {

@@ -1,0 +1,34 @@
+% Fictional example CV for latex-tex tests (tabularx + itemize family).
+\documentclass[11pt]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\begin{document}
+\begin{center}
+  {\Large\bfseries Blair Sample}\\
+  blair@example.dev $|$ Sample Town, EX
+\end{center}
+
+\section*{Profile}
+\begin{itemize}[leftmargin=*]
+  \item Product-minded engineer focused on developer tools and platform reliability.
+\end{itemize}
+
+\section*{Experience}
+\begin{tabularx}{\textwidth}{@{}X r@{}}
+  Example Labs & 2021 -- Present \\
+\end{tabularx}
+\begin{itemize}[leftmargin=*]
+  \item Operated Kubernetes clusters for internal platform teams.
+  \item Introduced SLO dashboards that cut incident triage time.
+\end{itemize}
+
+\section*{Skills}
+\begin{itemize}[leftmargin=*]
+  \item Languages: TypeScript, Python, Bash
+  \item Infrastructure: AWS, Terraform, Grafana
+\end{itemize}
+
+\end{document}

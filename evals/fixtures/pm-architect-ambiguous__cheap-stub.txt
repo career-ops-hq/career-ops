@@ -1,0 +1,15 @@
+[recorded fixture — candidate model "cheap-stub" output for golden case pm-architect-ambiguous]
+[Only the ---SCORE_SUMMARY--- block is parsed by eval-golden.mjs; the prose above
+it is illustrative and intentionally trimmed so fixtures stay small and reviewable.]
+
+Roadmap, stakeholder alignment, and PRDs stand out to the candidate model, which
+reads this as a product role — missing that the accountable deliverable is the
+integration architecture. This is the archetype the cheap model gets wrong.
+
+---SCORE_SUMMARY---
+COMPANY: Northwind Enterprise
+ROLE: AI Solutions Lead
+SCORE: 3.9
+ARCHETYPE: Technical AI PM
+LEGITIMACY: High Confidence
+---END_SUMMARY---

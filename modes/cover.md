@@ -199,7 +199,7 @@ Select 4-5 achievement bullets from `cv.md` only (`article-digest.md` may be rea
 4. Use the exact wording and metrics from cv.md — never paraphrase or invent
 5. Apply keyword mirroring from Step 4 to the vocabulary around each bullet (not the metrics)
 
-Format: `**Bold lead phrase,** one sentence of impact with metric.`
+Format: `**Bold lead phrase,** one sentence of impact with metric.` This describes the *rendered* bullet only — the `lead` value in the JSON payload (Step 9) must be a bare phrase with no trailing punctuation; `generate-cover-letter.mjs` appends the comma automatically when building the bullet.
 
 ---
 
@@ -265,9 +265,24 @@ End the draft with: "How does this read? Once you approve I'll generate the PDF.
 
 ---
 
+Resolve the cover-letter template with the shared resolver (do not hardcode `cover-letter-template.html`):
+
+- If the user named a template, run: `node cv-templates.mjs resolve cover "<name>"`
+- Otherwise run: `node cv-templates.mjs resolve cover` (returns the `cover_letter.template` default, or the base template when unset).
+
+Fill the resolved template's `{{...}}` placeholders. A non-zero exit means the named template is missing/invalid — surface it, do not silently fall back.
+
 ## Step 9 — Generate PDF
 
 Only after explicit user approval.
+
+Before rendering, run the shared fact validator against the assembled cover
+letter HTML. It checks metric-like claims plus explicitly asserted employers,
+titles, and tools against `cv.md`, `article-digest.md`, and the optional
+`config/cv-facts.json` allowlist. The validator returns a stable `pass`, `warn`,
+or `block` verdict. Advisory `warn_phrases` do not stop PDF generation; a
+`block` verdict does, so add the missing evidence or obtain a verified
+allowlist exception first.
 
 Assemble the JSON payload:
 
@@ -300,6 +315,8 @@ Assemble the JSON payload:
   "output_path": "output/{company-slug}-{role-slug}-cover.pdf"
 }
 ```
+
+Each `achievements[].lead` must be a bare phrase with no trailing comma or other punctuation — `generate-cover-letter.mjs` appends the comma when rendering (see Step 7).
 
 Write payload to `/tmp/cover-payload-{company-slug}.json`.
 

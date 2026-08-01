@@ -36,6 +36,7 @@
 ## URL에서 공고를 지능적으로 감지
 
 1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`. 모든 SPA에 대응합니다.
+   - **선택 — CLI 추출기 (`config/profile.yml`의 `scan.extractor: cli`):** 대신 `node browser-extract.mjs <url>`(`--mode jd`) 실행 — 간결한 `{ "url", "title", "text" }`, 더 적은 토큰(포털에 따라 다름). 오류나 부재 시 **조용히** `browser_navigate` + `browser_snapshot`로 폴백.
 2. **WebFetch (fallback):** 정적 페이지 또는 Playwright를 사용할 수 없을 때 사용합니다.
 3. **WebSearch (last resort):** 공고를 index하는 secondary portal에서 검색합니다.
 
