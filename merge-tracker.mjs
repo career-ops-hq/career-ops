@@ -349,6 +349,23 @@ function buildRow(o) {
   return `| ${cells.join(' | ')} |`;
 }
 
+// Header + separator for the DETECTED layout, mirroring buildRow's column
+// order. The abort path below prints these as repair guidance, so hard-coding
+// the nine-column form would hand a user with a Via or Location column a
+// header that silently drops it — repair instructions that reintroduce the
+// drift they exist to fix.
+function buildHeaderRows() {
+  const labels = ['#', 'Date', 'Company'];
+  if (COLMAP.via != null) labels.push('Via');
+  labels.push('Role');
+  if (COLMAP.location != null) labels.push('Location');
+  labels.push('Score', 'Status', 'PDF', 'Report', 'Notes');
+  return {
+    header: `| ${labels.join(' | ')} |`,
+    separator: `|${labels.map((l) => '-'.repeat(Math.max(3, l.length + 2))).join('|')}|`,
+  };
+}
+
 /**
  * Parse one Markdown applications.md table row into a tracker object.
  *
@@ -909,8 +926,9 @@ if (newLines.length > 0) {
     console.error(`   There is no insert point for ${newLines.length} new row(s), so NOTHING was written and no TSV was archived.`);
     console.error('   Repair the tracker table header, then re-run — the pending additions in');
     console.error(`   ${ADDITIONS_DIR} will merge then. Expected header:`);
-    console.error('     | # | Date | Company | Role | Score | Status | PDF | Report | Notes |');
-    console.error('     |---|------|---------|------|-------|--------|-----|--------|-------|');
+    const { header, separator } = buildHeaderRows();
+    console.error(`     ${header}`);
+    console.error(`     ${separator}`);
     for (const line of newLines) console.error(`   not merged: ${line}`);
     trackerLock.release();
     process.exit(1);

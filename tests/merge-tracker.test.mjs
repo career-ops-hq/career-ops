@@ -32,23 +32,31 @@ function runMerge(additions) {
  * and exit code, and which TSVs the run archived into merged/.
  *
  * @param {Record<string,string>} additions - TSV filename → file content.
- * @param {{rows?: string, header?: string}} [opts] - Seed rows appended to the
- *   tracker header, or a replacement header (used to build a tracker whose
- *   table separator row is missing).
- * @returns {{tracker: string, output: string, exitCode: number, archived: string[], pending: string[]}}
+ * @param {{rows?: string, header?: string, keepWorkspace?: boolean, reuse?: object}} [opts] -
+ *   Seed rows appended to the tracker header, or a replacement header (used to
+ *   build a tracker whose table separator row is missing). `keepWorkspace`
+ *   leaves the temp dir on disk and returns it, and `reuse` runs against a
+ *   workspace a previous call kept, so a test can genuinely re-run the SAME
+ *   pending TSVs after repairing the tracker rather than starting fresh.
+ * @returns {{tracker: string, output: string, exitCode: number, archived: string[], pending: string[], work?: string}}
  */
 function runMergeDetailed(additions, opts = {}) {
-  const work = mkdtempSync(join(tmpdir(), 'cops-merge-'));
+  const work = opts.reuse?.work ?? mkdtempSync(join(tmpdir(), 'cops-merge-'));
   try {
     const tracker = join(work, 'applications.md');
     const addsDir = join(work, 'adds');
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, (opts.header ?? TRACKER_HEADER) + (opts.rows ?? ''));
-    for (const [name, line] of Object.entries(additions)) {
-      writeFileSync(join(addsDir, name), line);
+    // On a reused workspace the pending TSVs are already on disk from the
+    // aborted run; rewriting them would defeat the point of replaying them.
+    if (!opts.reuse) {
+      for (const [name, line] of Object.entries(additions)) {
+        writeFileSync(join(addsDir, name), line);
+      }
     }
     let output = '';
     let exitCode = 0;
+    let killedBy = null;
     try {
       output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
         encoding: 'utf-8',
@@ -61,18 +69,31 @@ function runMergeDetailed(additions, opts = {}) {
       });
     } catch (e) {
       output = String(e.stdout ?? '') + String(e.stderr ?? '');
-      exitCode = e.status ?? -1;
+      // A normal non-zero exit carries `status`; a kill (the 30s timeout, or
+      // any other signal) carries `signal` with a null status. Collapsing both
+      // to -1 would let a HUNG merge-tracker satisfy an `exitCode !== 0`
+      // assertion, so the separator test would pass on a hang — the opposite
+      // of what it checks. Surface the signal separately and let the caller
+      // fail on it.
+      if (typeof e.status === 'number') {
+        exitCode = e.status;
+      } else {
+        killedBy = e.signal ?? 'unknown';
+        exitCode = null;
+      }
     }
     const mergedDir = join(addsDir, 'merged');
     return {
       tracker: readFileSync(tracker, 'utf-8'),
       output,
       exitCode,
+      killedBy,
       archived: existsSync(mergedDir) ? readdirSync(mergedDir) : [],
       pending: readdirSync(addsDir).filter(f => f.endsWith('.tsv')),
+      work: opts.keepWorkspace ? work : undefined,
     };
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    if (!opts.keepWorkspace) rmSync(work, { recursive: true, force: true });
   }
 }
 
@@ -268,11 +289,17 @@ try {
 // evaluations existed only in merged/ afterwards.
 console.log('\nmerge-tracker.mjs — tracker with no table separator row (#2394)');
 try {
-  const broken = runMergeDetailed({
-    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-03-01.md)\tonly evaluation\n',
-  }, { header: '# Applications Tracker\n\n' });
+  const ADDITION = '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-03-01.md)\tonly evaluation\n';
+  const broken = runMergeDetailed(
+    { '001-acme.tsv': ADDITION },
+    { header: '# Applications Tracker\n\n', keepWorkspace: true },
+  );
 
-  if (broken.exitCode !== 0) {
+  // exitCode is null when the child was killed rather than exiting, so a hung
+  // merge cannot masquerade as the loud failure this asserts.
+  if (broken.killedBy) {
+    fail(`merge-tracker was killed by ${broken.killedBy} instead of exiting`);
+  } else if (broken.exitCode !== 0) {
     pass('merge fails loudly when the tracker table has no separator row');
   } else {
     fail(`merge reported success against a separator-less tracker (exit ${broken.exitCode})`);
@@ -292,14 +319,26 @@ try {
     fail(`merge misreported the outcome: ${broken.output.split('\n').filter(l => /added|Summary/.test(l)).join(' // ') || '(no summary line)'}`);
   }
 
-  // Re-running after the header is repaired must merge the addition once.
-  const repaired = runMergeDetailed({
-    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-03-01.md)\tonly evaluation\n',
-  });
-  if (dataRows(repaired.tracker).length === 1 && repaired.exitCode === 0) {
-    pass('the same addition merges normally once the table header is intact');
-  } else {
-    fail(`addition did not merge against a well-formed tracker (exit ${repaired.exitCode})`);
+  // The abort promises the run "replays cleanly once the table is repaired", so
+  // replay it literally: same workspace, same TSV left on disk by the aborted
+  // run, only the tracker header repaired. Merging a fresh copy into a fresh
+  // workspace would prove nothing about the pending file the user still has.
+  try {
+    const repaired = runMergeDetailed({}, { reuse: broken, keepWorkspace: true });
+    if (repaired.killedBy) {
+      fail(`replay was killed by ${repaired.killedBy} instead of exiting`);
+    } else if (dataRows(repaired.tracker).length === 1 && repaired.exitCode === 0) {
+      pass('the TSV left pending by the abort merges on replay once the header is repaired');
+    } else {
+      fail(`pending addition did not merge after header repair (exit ${repaired.exitCode}, rows ${dataRows(repaired.tracker).length})`);
+    }
+    if (repaired.archived.includes('001-acme.tsv') && repaired.pending.length === 0) {
+      pass('the replayed TSV is archived once it has actually landed in the tracker');
+    } else {
+      fail(`replay left the TSV unarchived: archived=[${repaired.archived.join(', ')}] pending=[${repaired.pending.join(', ')}]`);
+    }
+  } finally {
+    rmSync(broken.work, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`merge-tracker separator-row tests crashed: ${e.message}`);
