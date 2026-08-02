@@ -6282,7 +6282,17 @@ try {
       copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
       copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
       copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
-      symlinkSync(join(ROOT, 'node_modules'), join(e2eTmp, 'node_modules'), 'dir');
+      // 'junction' on Windows, not 'dir': a directory symlink needs
+      // SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless
+      // Developer Mode is on, so this threw EPERM and failed the test on an
+      // ordinary Windows checkout. Junctions need no privilege, and the two
+      // constraints they add are already met — the target is absolute and is a
+      // directory on a local volume. The type argument is ignored off Windows.
+      symlinkSync(
+        join(ROOT, 'node_modules'),
+        join(e2eTmp, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       mkdirSync(join(e2eTmp, 'data'), { recursive: true });
       writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
         '# Applications Tracker',
