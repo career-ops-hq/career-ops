@@ -490,6 +490,12 @@ RECOVERY_DIR="$BATCH_DIR/batch-state-recovery.d"
 
 append_recovery_record() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
+  # Same rationale as update_state_unlocked: a literal tab/newline/CR in
+  # $error would split this single-line record into extra fields or rows,
+  # corrupting the record and the state row it later reconciles into.
+  error=${error//$'\r'/ }
+  error=${error//$'\n'/ }
+  error=${error//$'\t'/ }
   mkdir -p "$RECOVERY_DIR" || return 1
   local rec
   rec=$(mktemp "$RECOVERY_DIR/rec-XXXXXX") || return 1
