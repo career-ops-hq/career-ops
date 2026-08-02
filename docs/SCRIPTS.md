@@ -833,19 +833,28 @@ These have no `npm run` binding — modes and agents call them with
 Canonical tracker write path: strict `states.yml` validation, shared lock, atomic write. Modes and agents call this instead of hand-editing `applications.md`.
 
 ```bash
-node set-status.mjs <report#|company> <state> [--note "..."] [--force] [--dry-run]
+node set-status.mjs <report#|company> <state> [--note "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
 node set-status.mjs --row N <state> [--note "..."]          # explicit tracker row ID
 node set-status.mjs --report N <state> [--note "..."]       # row whose Report cell links report #N
+node set-status.mjs --role "Role Name" <state>              # filter by role fragment
 node set-status.mjs --row 12 Applied
-node set-status.mjs --report 345 Applied
+node set-status.mjs --report 345 Applied --on 2026-08-01
 ```
 
-A bare number is ambiguous once tracker row IDs and report IDs diverge, so an explicit selector disambiguates which number space you mean:
+A bare number or company name is convenient, but becomes ambiguous once tracker row IDs and report IDs diverge or when multiple applications share a company. Explicit selectors disambiguate the target row and number space:
 
-- `--row N` selects the row whose `#` cell is `N`.
-- `--report N` selects the row whose `Report` cell links report `N`.
+- `--row N`: Selects the row whose `#` cell is `N`.
+- `--report N`: Selects the row whose `Report` cell links report `N`.
+- `--role <role>`: Disambiguates by role fragment when multiple tracker rows exist for a single company.
+- `--on <date>`: Specifies an explicit transition date (YYYY-MM-DD) for status logs and notes.
+- `--json`: Formats command output as structured JSON.
 
 `--row` and `--report` are mutually exclusive. Because an explicit selector answers the report-mismatch guard rather than overriding it, `--row` bypasses that guard without needing `--force` (which silences the check while the ambiguity is still real).
+
+### Bare numbers vs. explicit selectors
+
+- **Use a bare number** when tracker row IDs and report IDs are identical or when querying interactively.
+- **Use `--row N` or `--report N`** in automated scripts, modes, or whenever row IDs and report IDs have diverged to avoid ambiguous updates.
 
 Exit codes:
 
