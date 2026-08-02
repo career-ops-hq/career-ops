@@ -20,6 +20,7 @@ const TABS = [
   "RESPONDED",
   "INTERVIEW",
   "OFFER",
+  "HIRED",
   "REJECTED",
   "DISCARDED",
   "SKIP",

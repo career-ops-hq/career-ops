@@ -828,6 +828,32 @@ These have no `npm run` binding — modes and agents call them with
 
 ---
 
+## set-status.mjs
+
+Canonical tracker write path: strict `states.yml` validation, shared lock, atomic write. Modes and agents call this instead of hand-editing `applications.md`.
+
+```bash
+node set-status.mjs <report#|company> <state> [--note "..."] [--force] [--dry-run]
+node set-status.mjs --row N <state> [--note "..."]          # explicit tracker row ID
+node set-status.mjs --report N <state> [--note "..."]       # row whose Report cell links report #N
+node set-status.mjs --row 12 Applied
+node set-status.mjs --report 345 Applied
+```
+
+A bare number is ambiguous once tracker row IDs and report IDs diverge, so an explicit selector disambiguates which number space you mean:
+
+- `--row N` selects the row whose `#` cell is `N`.
+- `--report N` selects the row whose `Report` cell links report `N`.
+
+`--row` and `--report` are mutually exclusive. Because an explicit selector answers the report-mismatch guard rather than overriding it, `--row` bypasses that guard without needing `--force` (which silences the check while the ambiguity is still real).
+
+Exit codes:
+
+- `1` for an invalid or conflicting selector, or a non-canonical state.
+- `2` when the selector matches no tracker row.
+- `3` when a bare numeric selector triggers the report-number mismatch guard (`report-number-mismatch`).
+
+---
 ## stats.mjs
 
 Aggregates lifetime pipeline stats into one JSON report. Stats include tracker, scanner, portals, follow-ups and runs. Reads from data/applications.md, data/scan-history.tsv, portals.yml, data/follow-ups.md and data/scan-runs.tsv. If a file doesn't exist yet, the section turns into null.

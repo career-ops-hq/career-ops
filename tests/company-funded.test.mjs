@@ -149,6 +149,14 @@ try {
     ['prnewswire', 'MegaCorp announces quarterly earnings and financial results'],
     ['prnewswire', 'Foundation awards $5M scholarships and grants'],
     ['techcrunch', 'How to raise seed funding in a difficult market'],
+<<<<<<< HEAD
+=======
+    // The `cuts N%` exclusion sits in a group that used to close with \b, which
+    // can never match after "%" — so layoff headlines that also mention a raise
+    // were surfaced as funding leads.
+    ['techcrunch', 'Acme raises $40M Series A, then cuts 30% of staff'],
+    ['techcrunch', 'Beta Corp raises $25M seed and cuts 15% of its workforce'],
+>>>>>>> upstream/main
   ].map(([source, title], idx) => ({
     source,
     title,

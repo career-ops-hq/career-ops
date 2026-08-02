@@ -577,7 +577,18 @@ function hasFundingLanguage(text) {
 function isExcludedFundingItem(item) {
   const text = `${item.title || ''} ${item.text || ''} ${item.categories?.join(' ') || ''}`;
   const exclusions = [
+<<<<<<< HEAD
     /\b(acquires?|acquired|acquisition|merger|spac|ipo|bankruptcy|layoffs?|cuts?\s+\d+%|earnings|quarterly results)\b/i,
+=======
+    // (?<!\w)/(?!\w), not \b: the `cuts N%` alternative ends in "%", and a
+    // trailing \b can never match after a non-word character — so that
+    // alternative was dead and layoff headlines that also mention a raise
+    // ("Acme raises $40M Series A, then cuts 30% of staff") were surfaced as
+    // funding leads. Same symbol-edge class as the fix in #2227. For every
+    // other alternative (all of which end in a word character) \b and the
+    // lookarounds are equivalent, so their behaviour is unchanged.
+    /(?<!\w)(acquires?|acquired|acquisition|merger|spac|ipo|bankruptcy|layoffs?|cuts?\s+\d+%|earnings|quarterly results)(?!\w)/i,
+>>>>>>> upstream/main
     /\b(public offering|registered direct offering|private placement|atm offering|offering of common stock)\b/i,
     /\braises?\s+\$[\d,.]+(?:\.\d+)?\s*(?:billion|million|bn|m|b|k)?\s+fund\b/i,
     /\b(venture fund|vc fund|investment fund|private equity fund|capital fund|fund ii|fund iii|fund iv|new fund)\b/i,

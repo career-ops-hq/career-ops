@@ -140,6 +140,10 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `DATA_CONTRACT.md` | This file |
 | `writing-samples/README.md` | System-owned onboarding documentation for the writing-samples directory |
 | `seed-fixture.mjs` / `test-fixtures/*` | Upgrade-test fixtures and seeder (system layer; fictional data, never user data) |
+<<<<<<< HEAD
+=======
+| `upgrade-tests.mjs` | Dynamic upgrade regression harness (PR gate: old install applies the commit under test hermetically) |
+>>>>>>> upstream/main
 
 ## The Rule
 

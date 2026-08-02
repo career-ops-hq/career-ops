@@ -24,10 +24,15 @@
  */
 
 
+<<<<<<< HEAD
 import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
+=======
+import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
+>>>>>>> upstream/main
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
+import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
 import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
@@ -134,14 +139,55 @@ console.log('\n🧪 career-ops test suite\n');
 console.log('1. Syntax checks');
 
 const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
-for (const f of mjsFiles) {
-  const result = run(NODE, ['--check', f]);
-  if (result !== null) {
+
+// `node --check` parses a file and exits; it runs no user code, touches no
+// shared state, and its result depends on nothing but that one file. Spawning
+// the 100+ root scripts one at a time was pure process-startup latency, so they
+// go through a bounded pool instead (#2387). Results are collected by index and
+// reported afterwards in the original readdir order, so the log stays
+// byte-identical to the sequential version regardless of completion order.
+const SYNTAX_POOL_SIZE = 8;
+const execFileAsync = promisify(execFile);
+const syntaxOk = new Array(mjsFiles.length);
+const syntaxDetail = new Array(mjsFiles.length);
+let nextSyntaxIdx = 0;
+
+// A bare catch reports a child killed on timeout, or one that never spawned, as
+// "has syntax errors" — sending the reader hunting for a parse error that does
+// not exist. Keep enough of the child's own diagnosis to tell those apart.
+const describeCheckFailure = (err) => {
+  if (err?.killed || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT') {
+    return `node --check timed out after 30000ms${err.signal ? ` (signal ${err.signal})` : ''}`;
+  }
+  const stderr = String(err?.stderr ?? '').trim();
+  if (!stderr) return `no stderr (exit ${err?.code ?? 'unknown'})`;
+  const clipped = stderr.length > 2000
+    ? `${stderr.slice(0, 2000)}\n    ... (${stderr.length - 2000} more chars)`
+    : stderr;
+  return clipped.replace(/\n/g, '\n    ');
+};
+
+const syntaxWorker = async () => {
+  for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
+    try {
+      await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
+      syntaxOk[i] = true;
+    } catch (err) {
+      syntaxOk[i] = false;
+      syntaxDetail[i] = describeCheckFailure(err);
+    }
+  }
+};
+await Promise.all(
+  Array.from({ length: Math.min(SYNTAX_POOL_SIZE, mjsFiles.length) }, syntaxWorker)
+);
+mjsFiles.forEach((f, i) => {
+  if (syntaxOk[i]) {
     pass(`${f} syntax OK`);
   } else {
-    fail(`${f} has syntax errors`);
+    fail(`${f} has syntax errors\n    ${syntaxDetail[i] ?? 'no diagnostic captured'}`);
   }
-}
+});
 
 // ── 2. SCRIPT EXECUTION ─────────────────────────────────────────
 
@@ -202,6 +248,14 @@ const scripts = [
   // `git ls-files` on the REAL tree. Running it here validated nothing and
   // exited 0 no matter what, which is how five unregistered files shipped.
   // It now runs from ROOT in section 5.
+<<<<<<< HEAD
+=======
+  { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
+  // Same reasoning as above: the bare run needs AGENTS.md and the real
+  // modes/ tree sitting next to it, which this throwaway single-file copy
+  // does not have. It runs from ROOT alongside the SYSTEM_PATHS coverage
+  // check below.
+>>>>>>> upstream/main
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -213,11 +267,27 @@ const scripts = [
 
 const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
+<<<<<<< HEAD
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
     // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
     // Match by basename ONLY at the repo root so nested fixture subdirs such as
     // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+=======
+  // Never copied, at any depth: dependency trees and git metadata. Nothing run
+  // from the throwaway copy reads them (module resolution walks up into the
+  // real ROOT/node_modules, which is how the root-level exclusion already
+  // worked), and a nested web/node_modules is ~400 MB on a machine that has
+  // installed the web app's deps — copying it dominated this section (#2387).
+  const EXCLUDE_AT_ANY_DEPTH = new Set(['node_modules', '.git']);
+
+  const copyDirSync = (src, dest, exclude = []) => {
+    const name = src.split(/[\\/]/).pop();
+    if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
+    // Everything else is a top-level workspace dir (data/, reports/, …) and is
+    // matched by basename ONLY at the repo root, so nested fixture subdirs such
+    // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
+>>>>>>> upstream/main
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
@@ -231,8 +301,13 @@ try {
   };
 
   const excludeDirs = [
+<<<<<<< HEAD
     'node_modules',
     '.git',
+=======
+    // node_modules and .git are not listed here — EXCLUDE_AT_ANY_DEPTH above
+    // drops them wherever they occur, root included.
+>>>>>>> upstream/main
     'data',
     'reports',
     '.career-ops-web',
@@ -706,7 +781,7 @@ try {
   // matched literal IPv4 patterns and bracketless IPv6, so several Chromium-
   // routable bypasses (0.0.0.0, [::], [::1] (bracketed), [::ffff:127.0.0.1],
   // localhost.) slipped through. These cases keep that regression covered.
-  const { rejectPrivateOrInvalid } = await import(
+  const { rejectPrivateOrInvalid, setHostResolver } = await import(
     pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
   );
   const blockCases = [
@@ -755,6 +830,7 @@ try {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
   }
 
+<<<<<<< HEAD
   // SSRF redirect routing tests
   const dnsModule = await import('dns/promises');
   const { mock } = await import('node:test');
@@ -790,70 +866,109 @@ try {
           request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
           abort: async () => {
             aborted = true;
-          },
-          continue: async () => {}
-        };
-        await routeCallback(mockRoute);
-        if (aborted) {
-          throw new Error('net::ERR_BLOCKED_BY_CLIENT');
-        }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com/redirected'; },
-    async evaluate() { return 'body text'; }
-  };
+  // SSRF redirect routing tests.
+  //
+  // The resolver is injected rather than mocked on the dns module (#2386): the
+  // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
+  // reach, so the previous `mock.method(dnsModule.default, …)` stub never
+  // applied. The test passed anyway — the real resolver found nothing for
+  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // so the loopback-rejection branch under test was never executed, and each
+  // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
+  // hands back a loopback address, which is the case that matters, and keeps
+  // the whole section off the network.
+  const restoreHostResolver = setHostResolver(async (hostname) => {
+    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // Every other host in this section is a stand-in for a normal public site.
+    return ['93.184.216.34'];
+  });
 
-  const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
-  if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host') {
-    pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
-  } else {
-    fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
-  }
-
-  // Restore DNS mocks
-  mock.reset();
-
-  let legitimateRouteCallback = null;
-  const mockPageLegitimate = {
-    _blockedByGuard: null,
-    async route(pattern, callback) {
-      legitimateRouteCallback = callback;
-    },
-    async goto() {
-      if (legitimateRouteCallback) {
-        let continued = false;
-        const mockRoute = {
-          request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
-          abort: async () => {},
-          continue: async () => {
-            continued = true;
+  try {
+    let routeCallback = null;
+    const mockPageInstance = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        routeCallback = callback;
+      },
+      async goto() {
+        if (routeCallback) {
+          let aborted = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            abort: async () => {
+              aborted = true;
+            },
+            continue: async () => {}
+          };
+          await routeCallback(mockRoute);
+          if (aborted) {
+            throw new Error('net::ERR_BLOCKED_BY_CLIENT');
           }
-        };
-        await legitimateRouteCallback(mockRoute);
-        if (!continued) {
-          throw new Error('Blocked legitimate request');
         }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com'; },
-    async evaluate(fn) {
-      const fnStr = fn.toString();
-      if (fnStr.includes('body')) {
-        return 'legitimate page body';
-      }
-      return ['Apply'];
-    }
-  };
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com/redirected'; },
+      async evaluate() { return 'body text'; }
+    };
 
-  const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
-  if (legitimateResult.result === 'active') {
-    pass('SSRF redirect guard allows legitimate subresource requests');
-  } else {
-    fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
+    // The reason has to name the loopback address. `blocked_host` alone is also
+    // what an unresolvable host produces, so asserting on the code by itself
+    // cannot tell "guard rejected 127.0.0.1" from "host resolved to nothing" —
+    // that ambiguity is exactly what hid the broken mock (#2386).
+    if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host'
+        && /private target IP 127\.0\.0\.1/.test(redirectResult.reason ?? '')) {
+      pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
+    } else {
+      fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
+    }
+
+    let legitimateRouteCallback = null;
+    const mockPageLegitimate = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        legitimateRouteCallback = callback;
+      },
+      async goto() {
+        if (legitimateRouteCallback) {
+          let continued = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
+            abort: async () => {},
+            continue: async () => {
+              continued = true;
+            }
+          };
+          await legitimateRouteCallback(mockRoute);
+          if (!continued) {
+            throw new Error('Blocked legitimate request');
+          }
+        }
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com'; },
+      async evaluate(fn) {
+        const fnStr = fn.toString();
+        if (fnStr.includes('body')) {
+          return 'legitimate page body';
+        }
+        return ['Apply'];
+      }
+    };
+
+    const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
+    if (legitimateResult.result === 'active') {
+      pass('SSRF redirect guard allows legitimate subresource requests');
+    } else {
+      fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    }
+  } finally {
+    // Always put the real resolver back, even if an assertion above throws:
+    // a leaked stub would silently answer for every later suite in this process.
+    restoreHostResolver();
+>>>>>>> upstream/main
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
@@ -1024,6 +1139,20 @@ for (const f of skillEntrypoints) {
   }
 }
 
+// Same shape, for the untrusted-external-content directive: every mode that
+// ingests raw external text must reference the canonical AGENTS.md rule, or
+// a new/edited mode can silently lose it with no signal until it's exploited.
+{
+  const untrusted = spawnSync(process.execPath, [join(ROOT, 'validate-untrusted-content-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (untrusted.status === 0) {
+    pass('canonical untrusted-external-content directive is present and referenced by every ingesting mode');
+  } else {
+    fail(`Untrusted-content directive coverage gap:\n${(untrusted.stderr || untrusted.stdout || '').trim()}`);
+  }
+}
 // The plugin manifest ships in two locations: .claude-plugin/plugin.json is
 // canonical (Claude Code + Copilot CLI both read it), and .github/plugin/
 // plugin.json exists only because the awesome-copilot marketplace validator
@@ -4297,9 +4426,16 @@ try {
   writeFileSync(dryRunPortals, fixture);
   const beforeDryRun = readFileSync(dryRunPortals, 'utf-8');
   try {
+    // fix-slugs probes live Greenhouse/Ashby/Lever endpoints before it decides
+    // what to rewrite, so on a connected machine this child runs to the timeout
+    // and is killed. That is fine: the assertion below is about disk writes, not
+    // about network reachability, and a dry run must not write at any point in
+    // its life. The timeout is therefore kept short (#2387) - 15 s bought
+    // nothing but 15 s.
     execFileSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', dryRunPortals, '--dry-run'], {
       cwd: ROOT,
-      timeout: 15000,
+      timeout: 2000,
+    });
     });
   } catch {
     // Network is reachable-or-not in CI; either way, no write should occur.
@@ -7461,7 +7597,17 @@ try {
       '| 32 | 2026-01-10 | Cohere | Senior Software Engineer, Agent Infrastructure | 4.0/5 | Evaluated | ❌ | [32](../reports/014-cohere-agent-infra.md) | distinct role — higher score |\n' +
       // Exact company+role duplicate of #32 (same title, both Evaluated) — must
       // collapse to one, keeping the higher score.
-      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n');
+      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n' +
+      // A Hired row vs a later exact-title repost. Hired must rank as an
+      // advanced status: the accepted-job record can never lose a dedup
+      // contest to a higher-scored repost.
+      '| 34 | 2026-01-05 | HiredCo | Platform Engineer | 3.8/5 | Hired | ❌ | [34](../reports/034-hiredco.md) | the accepted job |\n' +
+      '| 35 | 2026-01-12 | HiredCo | Platform Engineer | 4.2/5 | Evaluated | ❌ | [35](../reports/035-hiredco-repost.md) | repost of the accepted job |\n' +
+      // Two DIFFERENT roles sharing a stale duplicate tracker number (the
+      // known merge-bug artifact, verify-pipeline Check 12). A bare number
+      // match must not read as same-report identity.
+      '| 36 | 2026-01-06 | NumCo | Data Engineer | 3.9/5 | Applied | ❌ | [36](../reports/036-numco-data.md) | duplicate-number, applied |\n' +
+      '| 36 | 2026-01-12 | NumCo | ML Engineer | 4.5/5 | Evaluated | ❌ | [37](../reports/037-numco-ml.md) | duplicate-number, different role |\n');
 
     const dedupResult = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
     if (dedupResult === null) {
@@ -7519,12 +7665,101 @@ try {
       } else {
         fail(`dedup-tracker exact-duplicate handling broken: ${cohereAgentInfra.length} Cohere Agent Infrastructure rows`);
       }
+
+      // Regression: Hired was missing from STATUS_RANK, so it ranked 0 — the
+      // advanced-status guard never fired and a higher-scored repost deleted
+      // the accepted-job record.
+      const hiredRows = deduped.split('\n').filter(l => l.includes('HiredCo'));
+      if (hiredRows.length === 2 && hiredRows.some(l => l.includes('Hired'))) {
+        pass('dedup-tracker protects a Hired row from an exact-title repost');
+      } else {
+        fail(`dedup-tracker deleted the Hired row: ${hiredRows.length} HiredCo rows survive`);
+      }
+
+      // Regression: a bare tracker-number match short-circuited roleMatch, so
+      // two different roles sharing a stale duplicate # merged and the Applied
+      // row of a different opening was deleted.
+      const numcoRows = deduped.split('\n').filter(l => l.includes('NumCo'));
+      if (numcoRows.length === 2 && numcoRows.some(l => l.includes('Applied'))) {
+        pass('dedup-tracker keeps different roles that share a stale duplicate tracker number');
+      } else {
+        fail(`dedup-tracker merged different roles across a duplicate tracker number: ${numcoRows.length} NumCo rows survive`);
+      }
     }
   } finally {
     rmSync(dedupTmp, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
+}
+
+// ── DEDUP BLIND-VIA CHANNEL KEY: NON-LATIN AGENCIES (#2393) ──────────────
+// Unknown-employer rows (Company `?`) group by their Via channel. dedup-tracker
+// keyed that group with the file-local normalizeCompany(), which strips
+// [^a-z0-9] — so リクルート and パーソル both keyed to '' and two genuinely
+// separate agency submissions for one role landed in the same cluster, and the
+// lower-scored row was DELETED. merge-tracker already compares Via with the
+// Unicode-aware normalizeVia(); dedup must use the same key. A same-agency
+// re-blast must still collapse, otherwise the fix would just be "never merge".
+console.log('\n🧪 Testing dedup blind-via channel key with non-Latin agencies (#2393)...');
+try {
+  const viaDedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-via-'));
+  try {
+    mkdirSync(join(viaDedupTmp, 'data'));
+    const tracker = join(viaDedupTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Same role, unknown employer, two DIFFERENT non-Latin agencies —
+      // two real submissions, both must survive.
+      '| 61 | 2026-03-01 | ? | リクルート | Backend Engineer, Payments Platform | 4.0/5 | Evaluated | ❌ | [61](../reports/061-blind-a.md) | first agency |\n' +
+      '| 62 | 2026-03-02 | ? | パーソル | Backend Engineer, Payments Platform | 4.1/5 | Evaluated | ❌ | [62](../reports/062-blind-b.md) | second agency |\n' +
+      // (b) Symmetric case: a via-less blind row must not collide with a
+      // non-Latin agency just because both used to key to ''.
+      '| 63 | 2026-03-03 | ? | — | Frontend Engineer, Checkout | 3.8/5 | Evaluated | ❌ | [63](../reports/063-blind-c.md) | no agency named |\n' +
+      '| 64 | 2026-03-04 | ? | リクルート | Frontend Engineer, Checkout | 4.2/5 | Evaluated | ❌ | [64](../reports/064-blind-d.md) | agency listing |\n' +
+      // (c) Control: the SAME agency re-blasting one listing is a genuine
+      // duplicate and must still collapse to the higher-scored row.
+      '| 65 | 2026-03-05 | ? | Hays | Data Engineer, Warehouse | 3.5/5 | Evaluated | ❌ | [65](../reports/065-blind-e.md) | first sighting |\n' +
+      '| 66 | 2026-03-06 | ? | Hays | Data Engineer, Warehouse | 4.4/5 | Evaluated | ❌ | [66](../reports/066-blind-f.md) | same agency re-blast |\n');
+
+    const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
+    if (r === null) {
+      fail('dedup-tracker.mjs crashed during blind-via channel key test (#2393)');
+    } else {
+      const out = readFileSync(tracker, 'utf-8');
+
+      const paymentsRows = out.split('\n').filter(l => l.includes('Backend Engineer, Payments Platform'));
+      if (paymentsRows.length === 2
+          && paymentsRows.some(l => l.includes('リクルート'))
+          && paymentsRows.some(l => l.includes('パーソル'))) {
+        pass('dedup-tracker keeps two blind rows submitted via different non-Latin agencies (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed distinct non-Latin agency channels: ${paymentsRows.length} Payments Platform rows`);
+      }
+
+      const checkoutRows = out.split('\n').filter(l => l.includes('Frontend Engineer, Checkout'));
+      if (checkoutRows.length === 2
+          && checkoutRows.some(l => l.includes('リクルート'))
+          && checkoutRows.some(l => l.includes('| — |'))) {
+        pass('dedup-tracker keeps a via-less blind row separate from a non-Latin agency row (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed a via-less blind row into an agency channel: ${checkoutRows.length} Checkout rows`);
+      }
+
+      const warehouseRows = out.split('\n').filter(l => l.includes('Data Engineer, Warehouse'));
+      if (warehouseRows.length === 1 && warehouseRows[0].includes('4.4/5')) {
+        pass('dedup-tracker still collapses a same-agency re-blast of one blind listing (#2393)');
+      } else {
+        fail(`dedup-tracker same-agency blind dedup broken: ${warehouseRows.length} Warehouse rows`);
+      }
+    }
+  } finally {
+    rmSync(viaDedupTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
 }
 
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
@@ -11179,7 +11414,14 @@ try {
 
   // 55.3 canonical statuses (templates/states.yml → web status pills/actions)
   const statesSrc = readFileSync(join(ROOT, 'templates', 'states.yml'), 'utf-8');
-  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'interview', 'offer', 'rejected', 'discarded'];
+  // Every id in states.yml, hardcoded ON PURPOSE — deriving this list from the
+  // file it guards would make the check vacuous. It protected only 6 of the 9,
+  // so `responded`, `skip` and `hired` could be deleted from states.yml and this
+  // check still passed while claiming it "keeps every canonical status id".
+  // 55.3b below reads states.yml dynamically, so it inherits any such loss
+  // instead of catching it: with `hired` removed both checks went green while
+  // set-status.mjs would reject the terminal-success state as invalid.
+  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
   const missingStates = CANONICAL_STATE_IDS.filter((s) => !new RegExp(`^  - id: ${s}$`, 'm').test(statesSrc));
   if (missingStates.length === 0) {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');

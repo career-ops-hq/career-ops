@@ -236,6 +236,7 @@ const SYSTEM_PATHS = [
   'fix-slugs.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
+  'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
   'reply-matcher.test.mjs',
   'reply-watch.mjs',
@@ -335,6 +336,7 @@ const SYSTEM_PATHS = [
   'opencode.example.json',
   'seed-fixture.mjs',
   'test-fixtures/',
+  'upgrade-tests.mjs',
 ];
 
 const BOOTSTRAP_PATHS = [
