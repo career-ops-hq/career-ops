@@ -267,14 +267,22 @@ try {
         {
           sleep: async () => {},
           fetchText: async () => { throw new Error('discovery down'); }, // locale discovery is best-effort
-          fetchJson: async () => { csbCalls++; throw new Error('jobs api down'); },
+          // Each locale fails with a DISTINCT message so the assertion below
+          // pins WHICH failure fetch() surfaces, not merely THAT it throws.
+          fetchJson: async () => { csbCalls++; throw new Error(`jobs api down (call ${csbCalls})`); },
         },
       );
     } catch (err) {
       csbErr = err;
     }
-    if (csbErr?.message === 'jobs api down' && csbCalls >= 1) pass('successfactors CSB fetch() throws when every locale fails (dead board ≠ empty board)');
-    else fail(`successfactors CSB fetch() wrong: ${csbErr ? `threw "${csbErr.message}"` : 'swallowed an all-locales failure into []'} after ${csbCalls} jobs-API calls`);
+    // Discovery is down, so both default locales (de_DE, en_US) are tried and
+    // fail → 2+ calls; the surfaced error must be the FIRST locale's, pinning
+    // the deterministic firstErr retention.
+    if (csbErr?.message === 'jobs api down (call 1)' && csbCalls >= 2) {
+      pass('successfactors CSB fetch() throws the FIRST locale failure when every locale fails (dead board ≠ empty board, deterministic error)');
+    } else {
+      fail(`successfactors CSB fetch() wrong: ${csbErr ? `threw "${csbErr.message}"` : 'swallowed an all-locales failure into []'} after ${csbCalls} jobs-API calls`);
+    }
   }
   // Dispatcher default path (NO sfVariant): a healthy RMK tenant with zero
   // postings triggers the post-RMK CSB probe. The probe failing on every
