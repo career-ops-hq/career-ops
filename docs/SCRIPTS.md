@@ -813,6 +813,7 @@ These have no `npm run` binding — modes and agents call them with
 | Invocation | Purpose |
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
+| `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
@@ -852,6 +853,27 @@ Exit codes:
 - `1` for an invalid or conflicting selector, or a non-canonical state.
 - `2` when the selector matches no tracker row.
 - `3` when a bare numeric selector triggers the report-number mismatch guard (`report-number-mismatch`).
+
+## mark-pdf-ready.mjs
+
+The web PDF render path calls this utility after a CV PDF has been generated so
+the matching tracker row can be marked ready. It is not normally a manual
+day-to-day command. The argument is the report number from the `reports/NNN-...`
+filename or Report cell, not the tracker row's `#` value.
+
+```bash
+node mark-pdf-ready.mjs <report#>                  # mark the matching row
+node mark-pdf-ready.mjs <report#> --dry-run       # validate without writing
+node mark-pdf-ready.mjs <report#> --json          # emit machine-readable output
+```
+
+The script resolves the report-to-row link, refuses ambiguous matches, and
+leaves an already-ready row unchanged. Writes use the same shared tracker lock
+and atomic replacement as `set-status.mjs`, so concurrent tracker updates do
+not overwrite one another. Exit status `0` covers a successful mark and an
+idempotent no-op; `1` is a usage, column, or write error; `2` means the tracker
+or report row was not found; `3` means the report matched more than one row;
+and `4` means the tracker lock timed out and the operation should be retried.
 
 ---
 
