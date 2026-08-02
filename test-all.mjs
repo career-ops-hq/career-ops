@@ -10406,6 +10406,28 @@ try {
   fail(`gemini-eval systemInstruction source test crashed: ${e.message}`);
 }
 
+// ── 44f. openai-tailor — host-gated prompt-cache breakpoint (#1709, #2432) ──
+// openai-tailor.mjs runs on import (arg parse + fetch), so it can't be imported
+// to unit-test the helper — assert the host-gated shape at the source level,
+// same approach as 44c for its sibling openai-eval.mjs.
+console.log('\n44f. openai-tailor — host-gated prompt-cache breakpoint (#1709, #2432)');
+try {
+  const src = readFileSync(join(ROOT, 'openai-tailor.mjs'), 'utf-8');
+  const checks = [
+    // api.openai.com gets a plain-string system message (auto-caches; may reject the field)
+    { name: 'openai-tailor gates cache_control off for api.openai.com', re: /host === 'api\.openai\.com'\)\s*return\s*\{\s*role:\s*'system',\s*content:\s*prompt\s*\}/ },
+    // other OpenAI-compatible hosts get the ephemeral cache_control breakpoint, text preserved
+    { name: 'openai-tailor sends an ephemeral cache_control breakpoint to compatible gateways', re: /text:\s*prompt,\s*cache_control:\s*\{\s*type:\s*'ephemeral'\s*\}/ },
+    // and it's actually wired into the request, keyed on the resolved endpoint host
+    { name: 'openai-tailor builds the system message via buildSystemMessage(systemPrompt, endpointHost)', re: /buildSystemMessage\(systemPrompt,\s*endpointHost\)/ },
+  ];
+  const missing = checks.filter((c) => !c.re.test(src));
+  if (missing.length === 0) pass('openai-tailor host-gates the #1709 prompt-cache breakpoint and wires it into the request');
+  else fail(`openai-tailor prompt-cache wiring missing: ${missing.map((m) => m.name).join('; ')}`);
+} catch (e) {
+  fail(`openai-tailor prompt-cache source test crashed: ${e.message}`);
+}
+
 // ── 44e. ollama-eval — temperature must live in options ────────
 // Ollama's /api/chat reads generation params from `options` only; a top-level
 // `temperature` is silently ignored (defaulting to 0.8). Assert it sits in
