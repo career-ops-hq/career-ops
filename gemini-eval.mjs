@@ -31,9 +31,11 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import yaml from 'js-yaml';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+import { redactCandidatePII } from './utils/privacy-filter.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -115,7 +117,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+let modelName = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 let saveReport = true;
 let noCompress = false;
 
@@ -228,15 +230,16 @@ function normalizedTrackerScore(value) {
 }
 
 // ---------------------------------------------------------------------------
-// Load context files
+// Load context files & Privacy Redaction
 // ---------------------------------------------------------------------------
 console.log('\n📂  Loading context files...');
 
 const sharedContext  = readFile(PATHS.shared,      'modes/_shared.md');
 const ofertaLogic    = readFile(PATHS.oferta,      'modes/oferta.md');
-const cvContent      = readFile(PATHS.cv,          'cv.md');
-const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
-const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+const profileYmlRaw  = readFile(PATHS.profileYml,  'config/profile.yml');
+const cvContent      = redactCandidatePII(readFile(PATHS.cv, 'cv.md'), profileYmlRaw);
+const profileContent = redactCandidatePII(readFile(PATHS.profile, 'modes/_profile.md'), profileYmlRaw);
+const profileYml     = redactCandidatePII(profileYmlRaw, profileYmlRaw);
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------

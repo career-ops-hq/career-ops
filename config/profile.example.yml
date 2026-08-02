@@ -23,6 +23,11 @@ candidate:
   # Optional framing for the CV photo: rounded (default), circle, or square.
   photo_style: rounded
 
+  # Optional privacy settings. Automatically redacts candidate contact PII
+  # (name, email, phone, linkedin, github) from prompts sent to external LLMs.
+  # privacy:
+  #   redact_contact_info: true
+
 target_roles:
   # Your North Star roles — what you're optimizing for
   primary:

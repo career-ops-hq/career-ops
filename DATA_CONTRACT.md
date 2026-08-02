@@ -116,6 +116,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `GEMINI.md` | Legacy no-op context guard (prevents Antigravity duplicate imports) |
 | `AGENTS.md` | Canonical agent instructions (imported by CLI-specific wrappers) |
 | `*.mjs` | Utility scripts |
+| `utils/privacy-filter.mjs` | Privacy & PII redaction filter utility for external LLM prompts |
 | `providers/` | Job-source provider modules for the zero-token scanner |
 | `plugins/` | Bundled plugins + the plugin engine (opt-in external integrations) |
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
