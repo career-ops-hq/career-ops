@@ -471,64 +471,76 @@ update_state() {
   run_with_state_lock update_state_unlocked "$@"
 }
 
-# Durable last-resort record of a state transition that could NOT be written
-# into $STATE_FILE (state-lock exhausted its retries). A plain `>>` append is
-# used deliberately instead of the mkdir-based lock: it's a single atomic
-# write syscall for one line, so it doesn't need mutual exclusion the way a
-# full-file read-modify-write does, and it must not itself depend on the
-# lock that just failed. This is the durability half of the fix — a failed
-# write here would mean genuinely losing the transition, so callers of
-# update_state_retrying can trust that once THIS returns success, the
-# transition is recorded somewhere on disk even if not yet merged into
-# $STATE_FILE. reconcile_recovery_records() (called once at the start of the
-# next run, before any lock contention exists) merges these back in.
-RECOVERY_FILE="$BATCH_DIR/batch-state-recovery.tsv"
+# Durable last-resort records of state transitions that could NOT be written
+# into $STATE_FILE (state-lock exhausted its retries). ONE FILE PER RECORD:
+# each failed transition gets its own uniquely-named file via mktemp
+# (O_CREAT|O_EXCL — atomic creation, guaranteed-unique name), so no two
+# workers ever write to the same file and no shared-file truncate/append
+# race can exist on any platform. That matters here because recovery writes
+# are CORRELATED, not independent: they fire exactly when the state lock is
+# jammed, which makes all parallel workers fail (and try to record) at the
+# same moment — a shared recovery file is racing precisely when it is
+# needed most (PR #2417 review). This mechanism must also never depend on
+# the state lock that just failed, and it doesn't: creation is the only
+# synchronization. reconcile_recovery_records() (start of the next run,
+# single-threaded, before any worker spawns) merges each record into
+# $STATE_FILE and deletes its file only on success — there is no
+# rewrite-and-rename step, so nothing here needs cross-filesystem atomicity.
+RECOVERY_DIR="$BATCH_DIR/batch-state-recovery.d"
 
 append_recovery_record() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
-  if [[ ! -f "$RECOVERY_FILE" ]]; then
-    printf 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n' > "$RECOVERY_FILE"
-  fi
+  mkdir -p "$RECOVERY_DIR" || return 1
+  local rec
+  rec=$(mktemp "$RECOVERY_DIR/rec-XXXXXX") || return 1
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$RECOVERY_FILE"
+    "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" > "$rec"
 }
 
 # Merge any recovery records left by a prior run into $STATE_FILE. Runs
 # single-threaded at the very start of main(), before any worker is spawned,
 # so there is no lock contention here — this is the one place these records
-# are guaranteed a clean shot at the lock.
+# are guaranteed a clean shot at the lock. Each record file is deleted only
+# after its transition lands in $STATE_FILE; failures leave the file in
+# place for the run after that.
 reconcile_recovery_records() {
-  [[ -f "$RECOVERY_FILE" ]] || return 0
+  [[ -d "$RECOVERY_DIR" ]] || return 0
 
-  local pending
-  pending=$(tail -n +2 "$RECOVERY_FILE" | grep -c '[^[:space:]]' 2>/dev/null || true)
-  pending="${pending:-0}"
-  (( pending == 0 )) && { rm -f "$RECOVERY_FILE"; return 0; }
+  local -a rec_files=()
+  local f
+  for f in "$RECOVERY_DIR"/rec-*; do
+    [[ -f "$f" ]] || continue
+    rec_files+=("$f")
+  done
+  if (( ${#rec_files[@]} == 0 )); then
+    rmdir "$RECOVERY_DIR" 2>/dev/null || true
+    return 0
+  fi
 
-  echo "=== Reconciling $pending recovery record(s) from a prior interrupted run ==="
+  echo "=== Reconciling ${#rec_files[@]} recovery record(s) from a prior interrupted run ==="
   local merged=0 still_failed=0
-  local still_failed_file
-  still_failed_file=$(mktemp "${TMPDIR:-/tmp}/batch-recovery-retry.XXXXXX")
-  printf 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n' > "$still_failed_file"
-
-  while IFS=$'\t' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries; do
-    [[ "$rid" == "id" ]] && continue
-    [[ -z "$rid" ]] && continue
+  local rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries
+  for f in "${rec_files[@]}"; do
+    rid=""
+    IFS=$'\t' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries < "$f" || true
+    if [[ -z "$rid" ]]; then
+      echo "    WARN: discarding unreadable recovery record $f" >&2
+      rm -f "$f"
+      continue
+    fi
     if update_state "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries"; then
+      rm -f "$f"
       merged=$((merged + 1))
     else
       still_failed=$((still_failed + 1))
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries" >> "$still_failed_file"
     fi
-  done < "$RECOVERY_FILE"
+  done
 
   echo "    Merged: $merged | Still unrecovered: $still_failed"
   if (( still_failed > 0 )); then
-    echo "    WARN: $still_failed record(s) could not be merged even single-threaded — check $STATE_LOCK_DIR for a genuinely stuck lock." >&2
-    mv "$still_failed_file" "$RECOVERY_FILE"
+    echo "    WARN: $still_failed record(s) could not be merged even single-threaded — check $STATE_LOCK_DIR for a genuinely stuck lock. Unmerged records remain in $RECOVERY_DIR." >&2
   else
-    rm -f "$still_failed_file" "$RECOVERY_FILE"
+    rmdir "$RECOVERY_DIR" 2>/dev/null || true
   fi
 }
 
@@ -555,9 +567,9 @@ update_state_retrying() {
     fi
   done
   if append_recovery_record "$@"; then
-    echo "    ⚠️  State update failed after $max_attempts attempts — offer id=$1 status=$3 recorded to $RECOVERY_FILE for reconciliation on next run." >&2
+    echo "    ⚠️  State update failed after $max_attempts attempts — offer id=$1 status=$3 recorded to $RECOVERY_DIR for reconciliation on next run." >&2
   else
-    echo "    ❌ State update failed after $max_attempts attempts AND recovery-log append also failed — offer id=$1 status=$3 was NOT recorded anywhere. It will be retried as pending next run." >&2
+    echo "    ❌ State update failed after $max_attempts attempts AND recovery-record write also failed — offer id=$1 status=$3 was NOT recorded anywhere. It will be retried as pending next run." >&2
   fi
   return 1
 }
