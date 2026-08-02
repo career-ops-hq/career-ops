@@ -117,7 +117,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
 let noCompress = false;
 

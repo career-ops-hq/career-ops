@@ -76,8 +76,6 @@ function inRange(dateStr, from, to) {
   return isValidDateStr(dateStr) && dateStr >= from && dateStr <= to;
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Value of a value-taking flag, accepting BOTH `--flag value` and `--flag=value`.
  *
@@ -100,8 +98,6 @@ export function flagValue(args, flag) {
   if (idx === -1) return undefined;
   return args[idx + 1];
 }
-
->>>>>>> upstream/main
 // ── Session file parsing ────────────────────────────────────────────
 
 /**
@@ -415,8 +411,6 @@ async function runSelfTest() {
   const sun = computeDefaultRange(new Date('2026-07-26T23:00:00Z'));
   check(sun.from === '2026-07-20' && sun.to === '2026-07-26', 'computeDefaultRange handles Sunday itself as the range end');
 
-<<<<<<< HEAD
-=======
   // flagValue: both CLI spellings must reach the same value. The `=` form used
   // to be invisible to indexOf(), so `--from=2020-01-01` silently produced the
   // CURRENT week's digest instead of the requested one.
@@ -426,8 +420,6 @@ async function runSelfTest() {
   check(flagValue(['--from='], '--from') === '', 'flagValue reports an explicitly empty value as empty, not absent');
   check(flagValue(['--dir=/tmp/x=y'], '--dir') === '/tmp/x=y', 'flagValue keeps later "=" characters in the value');
   check(flagValue(['--to=2020-01-07', '--from=2020-01-01'], '--from') === '2020-01-01', 'flagValue matches its own flag, not a similarly-shaped neighbour');
-
->>>>>>> upstream/main
   // parseSessionFile: well-formed session with two competency tags.
   const goodSession = [
     '---',
@@ -663,16 +655,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const summaryMode = args.includes('--summary');
-<<<<<<< HEAD
-  const fromIdx = args.indexOf('--from');
-  const toIdx = args.indexOf('--to');
-  const dirIdx = args.indexOf('--dir');
-  const from = fromIdx !== -1 ? args[fromIdx + 1] : undefined;
-  const to = toIdx !== -1 ? args[toIdx + 1] : undefined;
-  const sessionsDir = dirIdx !== -1 && args[dirIdx + 1] !== undefined ? args[dirIdx + 1] : DEFAULT_SESSIONS_DIR;
-
-  if ((from && !isValidDateStr(from)) || (to && !isValidDateStr(to))) {
-=======
   const from = flagValue(args, '--from');
   const to = flagValue(args, '--to');
   const dirValue = flagValue(args, '--dir');
@@ -683,7 +665,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // let '' through as a range bound, and `dateStr >= ''` is true for every
   // session — silently widening the window instead of reporting the mistake.
   if ((from !== undefined && !isValidDateStr(from)) || (to !== undefined && !isValidDateStr(to))) {
->>>>>>> upstream/main
     console.error('  Invalid --from/--to date — expected YYYY-MM-DD');
     process.exit(1);
   }
