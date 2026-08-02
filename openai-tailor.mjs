@@ -20,6 +20,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
+import { redactCandidatePII } from './utils/privacy-filter.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -81,7 +82,7 @@ let jdPath     = '';
 let reportPath = '';
 let modelName  = process.env.OPENAI_MODEL || 'gpt-4o'; // Tailoring needs a smarter model default than eval
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-let apiKey     = process.env.OPENAI_API_KEY || '';
+let apiKey     = process.env.OPENAI_API_KEY || (baseUrl.includes('openrouter') ? process.env.OPENROUTER_API_KEY : '') || '';
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--jd' && args[i + 1]) {
@@ -100,6 +101,10 @@ for (let i = 0; i < args.length; i++) {
 if (!jdPath || !reportPath) {
   console.error('❌  Both --jd and --report are required. Run with --help for usage.');
   process.exit(1);
+}
+
+if (!apiKey) {
+  apiKey = process.env.OPENAI_API_KEY || (baseUrl.includes('openrouter') ? process.env.OPENROUTER_API_KEY : '') || '';
 }
 
 if (!existsSync(jdPath)) {
@@ -188,8 +193,9 @@ const sharedContext  = readFile(PATHS.shared, 'modes/_shared.md', false);
 // engines that read the eval-core _shared.md alone.
 const writingContext = readFile(PATHS.writing, 'modes/_writing.md', false);
 const pdfModeLogic   = readFile(PATHS.pdfMode, 'modes/pdf.md', false);
-const cvContent      = readFile(PATHS.cv, 'cv.md', true);
-const profileContent = readFile(PATHS.profile, 'config/profile.yml', true);
+const profileYmlRaw  = readFile(PATHS.profile, 'config/profile.yml', true);
+const cvContent      = redactCandidatePII(readFile(PATHS.cv, 'cv.md', true), profileYmlRaw);
+const profileContent = redactCandidatePII(readFile(PATHS.profile, 'config/profile.yml', true), profileYmlRaw);
 const templateHtml   = readFile(PATHS.template, 'templates/cv-template.html', true);
 
 // ---------------------------------------------------------------------------
