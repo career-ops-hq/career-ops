@@ -315,9 +315,11 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
   const seen = new Set();
   // When EVERY locale fails without a single successful request the board is
   // unreachable, not empty — THROW so scan/portal-health record a failure
-  // instead of "live but empty" (meituan/tencent idiom).
+  // instead of "live but empty" (meituan/tencent idiom). The FIRST failure is
+  // retained and surfaced: later locales usually fail for the same root cause,
+  // and keeping the first makes the thrown error deterministic.
   let succeededOnce = false;
-  let lastErr = null;
+  let firstErr = null;
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
@@ -332,7 +334,7 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
           body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
         });
       } catch (err) {
-        lastErr = err;
+        firstErr ??= err;
         break; // this locale failed (e.g. 307 legacy redirect) — try the next
       }
       succeededOnce = true;
@@ -361,7 +363,7 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
       if (rawCount < CSB_PAGE_SIZE) break;
     }
   }
-  if (!probe && !succeededOnce && lastErr) throw lastErr;
+  if (!probe && !succeededOnce && firstErr) throw firstErr;
   return jobs;
 }
 

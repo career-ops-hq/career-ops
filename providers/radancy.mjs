@@ -293,9 +293,13 @@ export default {
         const first = await ctx.fetchJson(buildFragmentUrl(listUrl, 1), {
           headers: { accept: 'application/json', 'x-requested-with': 'XMLHttpRequest' },
         });
-        succeededOnce = true;
         const firstHtml = typeof first?.results === 'string' ? first.results : '';
         const firstRows = firstHtml ? parseResults(firstHtml, origin) : [];
+        // Proof of life only once the response also PARSED: a valid fragment
+        // with zero rows counts, but a response that crashes parsing leaves
+        // this false so a failing HTML fallback still reports the malformed
+        // initial response instead of returning [].
+        succeededOnce = true;
         if (firstRows.length) {
           const { totalResults, totalPages } = readFragmentTotals(firstHtml);
           // Bound by the server's own page count when it gives one; the local

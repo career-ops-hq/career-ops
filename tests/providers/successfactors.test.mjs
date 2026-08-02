@@ -260,20 +260,21 @@ try {
   // record a failure instead of "live but empty".
   {
     let csbErr = null;
+    let csbCalls = 0;
     try {
       await sf.fetch(
         { name: 'DeadCo', careers_url: 'https://careers.deadco.example', sfVariant: 'csb' },
         {
           sleep: async () => {},
           fetchText: async () => { throw new Error('discovery down'); }, // locale discovery is best-effort
-          fetchJson: async () => { throw new Error('jobs api down'); },
+          fetchJson: async () => { csbCalls++; throw new Error('jobs api down'); },
         },
       );
     } catch (err) {
       csbErr = err;
     }
-    if (csbErr?.message === 'jobs api down') pass('successfactors CSB fetch() throws when every locale fails (dead board ≠ empty board)');
-    else fail(`successfactors CSB fetch() swallowed an all-locales failure${csbErr ? ` (threw ${csbErr.message})` : ' into []'}`);
+    if (csbErr?.message === 'jobs api down' && csbCalls >= 1) pass('successfactors CSB fetch() throws when every locale fails (dead board ≠ empty board)');
+    else fail(`successfactors CSB fetch() wrong: ${csbErr ? `threw "${csbErr.message}"` : 'swallowed an all-locales failure into []'} after ${csbCalls} jobs-API calls`);
   }
   // Dispatcher default path (NO sfVariant): a healthy RMK tenant with zero
   // postings triggers the post-RMK CSB probe. The probe failing on every
@@ -282,6 +283,7 @@ try {
   {
     let probeErr = null;
     let probeJobs = null;
+    let probeCalls = 0;
     try {
       probeJobs = await sf.fetch(
         { name: 'EmptyCo', careers_url: 'https://jobs.emptyco.example' },
@@ -290,16 +292,18 @@ try {
           // Serves both the RMK tile endpoint (healthy 200, zero tiles) and
           // the best-effort /search/ locale discovery.
           fetchText: async () => '<!DOCTYPE html>',
-          fetchJson: async () => { throw new Error('no CSB endpoint on this tenant'); },
+          fetchJson: async () => { probeCalls++; throw new Error('no CSB endpoint on this tenant'); },
         },
       );
     } catch (err) {
       probeErr = err;
     }
-    if (!probeErr && Array.isArray(probeJobs) && probeJobs.length === 0) {
+    // probeCalls >= 1 pins that the CSB probe actually RAN — an empty array
+    // straight off the RMK path would otherwise pass this test vacuously.
+    if (!probeErr && Array.isArray(probeJobs) && probeJobs.length === 0 && probeCalls >= 1) {
       pass('successfactors fetch() without sfVariant: empty RMK + failing CSB probe returns [] (healthy empty board ≠ dead slug)');
     } else {
-      fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)}`);
+      fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)} after ${probeCalls} jobs-API calls`);
     }
   }
 } catch (err) {
