@@ -246,19 +246,38 @@ acquire_state_lock() {
       local stale=false
       local stale_reason=""
 
+      # SAFETY INVARIANT: never treat the lock as stale while kill -0
+      # positively confirms the recorded PID is still running — a
+      # confirmed-alive owner may still write update_state_unlocked's
+      # rewrite of STATE_FILE, and reclaiming under it would let two
+      # processes rewrite $STATE_FILE.tmp concurrently (real data loss).
+      # The age-based fallback below only ever fires when the PID check
+      # could NOT confirm liveness (empty/missing PID, or kill -0 itself
+      # reported not-running) — it narrows, but does not replace, the PID
+      # check. This intentionally leaves one Windows/Git-Bash edge case
+      # unhandled: a `kill -0` FALSE POSITIVE (reports alive for a PID
+      # that Windows has actually reused for an unrelated process). That
+      # gap is accepted because the alternative — reclaiming while any
+      # chance remains the owner is genuinely alive — risks silent
+      # concurrent-write corruption, which is worse than this lock
+      # occasionally timing out (recoverable via retry) in that rare case.
+      local pid_confirmed_alive=false
       if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
-        # Lock owner PID is verifiably running — lock is active and MUST NOT be reclaimed.
-        stale=false
-      elif [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-        stale=true
-        stale_reason="PID $lock_pid not running"
-      elif [[ "$lock_epoch" =~ ^[0-9]+$ ]]; then
-        local now age
-        now=$(date +%s)
-        age=$((now - lock_epoch))
-        if (( age >= STATE_LOCK_STALE_AGE_SECONDS )); then
+        pid_confirmed_alive=true
+      fi
+
+      if [[ "$pid_confirmed_alive" == "false" ]]; then
+        if [[ -n "$lock_pid" ]]; then
           stale=true
-          stale_reason="unverifiable PID lock age ${age}s >= ${STATE_LOCK_STALE_AGE_SECONDS}s"
+          stale_reason="PID $lock_pid not running"
+        elif [[ "$lock_epoch" =~ ^[0-9]+$ ]]; then
+          local now age
+          now=$(date +%s)
+          age=$((now - lock_epoch))
+          if (( age >= STATE_LOCK_STALE_AGE_SECONDS )); then
+            stale=true
+            stale_reason="lock age ${age}s >= ${STATE_LOCK_STALE_AGE_SECONDS}s (no PID recorded to check liveness against)"
+          fi
         fi
       fi
 
@@ -449,10 +468,84 @@ update_state_unlocked() {
 }
 
 update_state() {
+  run_with_state_lock update_state_unlocked "$@"
+}
+
+# Durable last-resort record of a state transition that could NOT be written
+# into $STATE_FILE (state-lock exhausted its retries). A plain `>>` append is
+# used deliberately instead of the mkdir-based lock: it's a single atomic
+# write syscall for one line, so it doesn't need mutual exclusion the way a
+# full-file read-modify-write does, and it must not itself depend on the
+# lock that just failed. This is the durability half of the fix — a failed
+# write here would mean genuinely losing the transition, so callers of
+# update_state_retrying can trust that once THIS returns success, the
+# transition is recorded somewhere on disk even if not yet merged into
+# $STATE_FILE. reconcile_recovery_records() (called once at the start of the
+# next run, before any lock contention exists) merges these back in.
+RECOVERY_FILE="$BATCH_DIR/batch-state-recovery.tsv"
+
+append_recovery_record() {
+  local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
+  if [[ ! -f "$RECOVERY_FILE" ]]; then
+    printf 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n' > "$RECOVERY_FILE"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$RECOVERY_FILE"
+}
+
+# Merge any recovery records left by a prior run into $STATE_FILE. Runs
+# single-threaded at the very start of main(), before any worker is spawned,
+# so there is no lock contention here — this is the one place these records
+# are guaranteed a clean shot at the lock.
+reconcile_recovery_records() {
+  [[ -f "$RECOVERY_FILE" ]] || return 0
+
+  local pending
+  pending=$(tail -n +2 "$RECOVERY_FILE" | grep -c '[^[:space:]]' 2>/dev/null || true)
+  pending="${pending:-0}"
+  (( pending == 0 )) && { rm -f "$RECOVERY_FILE"; return 0; }
+
+  echo "=== Reconciling $pending recovery record(s) from a prior interrupted run ==="
+  local merged=0 still_failed=0
+  local still_failed_file
+  still_failed_file=$(mktemp "${TMPDIR:-/tmp}/batch-recovery-retry.XXXXXX")
+  printf 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n' > "$still_failed_file"
+
+  while IFS=$'\t' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries; do
+    [[ "$rid" == "id" ]] && continue
+    [[ -z "$rid" ]] && continue
+    if update_state "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries"; then
+      merged=$((merged + 1))
+    else
+      still_failed=$((still_failed + 1))
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries" >> "$still_failed_file"
+    fi
+  done < "$RECOVERY_FILE"
+
+  echo "    Merged: $merged | Still unrecovered: $still_failed"
+  if (( still_failed > 0 )); then
+    echo "    WARN: $still_failed record(s) could not be merged even single-threaded — check $STATE_LOCK_DIR for a genuinely stuck lock." >&2
+    mv "$still_failed_file" "$RECOVERY_FILE"
+  else
+    rm -f "$still_failed_file" "$RECOVERY_FILE"
+  fi
+}
+
+# Retry wrapper around update_state. Bare `update_state ...` calls under
+# `set -e` will silently kill the entire background worker subshell if a
+# single lock-timeout failure propagates — this wrapper retries a few times
+# and, if it still fails, falls back to append_recovery_record so the
+# transition is never actually lost (only delayed until the next run's
+# reconcile step), then logs a clear warning and returns non-zero so the
+# CALLER can still decide whether to skip side effects that assumed success
+# (found under --parallel 5 on Git Bash/Windows: ~47 of 50 jobs silently
+# dropped in one run from exactly this before the retry+recovery-log fix).
+update_state_retrying() {
   local attempt=0
   local max_attempts=3
   while (( attempt < max_attempts )); do
-    if run_with_state_lock update_state_unlocked "$@"; then
+    if update_state "$@"; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -461,8 +554,12 @@ update_state() {
       sleep 2
     fi
   done
-  echo "    ❌ State update failed after $max_attempts attempts — offer id=$1 status=$3 was NOT recorded in $STATE_FILE. It will be retried as pending next run." >&2
-  return 0
+  if append_recovery_record "$@"; then
+    echo "    ⚠️  State update failed after $max_attempts attempts — offer id=$1 status=$3 recorded to $RECOVERY_FILE for reconciliation on next run." >&2
+  else
+    echo "    ❌ State update failed after $max_attempts attempts AND recovery-log append also failed — offer id=$1 status=$3 was NOT recorded anywhere. It will be retried as pending next run." >&2
+  fi
+  return 1
 }
 
 is_rate_limit_log() {
@@ -481,7 +578,7 @@ mark_paused_rate_limit() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local error_msg
   error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "session/rate limit reached")
-  update_state "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
+  update_state_retrying "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
   printf '%s\t%s\t%s\n' "$id" "$report_num" "$error_msg" > "$PAUSE_FILE"
   BATCH_PAUSED=true
 }
@@ -518,11 +615,18 @@ release_report_num() {
 }
 
 reserve_report_num() {
+  run_with_state_lock reserve_report_num_unlocked "$@"
+}
+
+# Retry wrapper — same rationale as update_state_retrying above. A bare
+# `x=$(reserve_report_num ...)` under `set -e` kills the worker subshell
+# silently on a single lock-timeout; this retries and logs instead.
+reserve_report_num_retrying() {
   local attempt=0
   local max_attempts=3
   local result=""
   while (( attempt < max_attempts )); do
-    if result=$(run_with_state_lock reserve_report_num_unlocked "$@"); then
+    if result=$(reserve_report_num "$@"); then
       printf '%s\n' "$result"
       return 0
     fi
@@ -545,7 +649,7 @@ process_offer() {
   local retries
   retries=$(get_retries "$id")
   local report_num
-  if ! report_num=$(reserve_report_num "$id" "$url" "$started_at" "$retries"); then
+  if ! report_num=$(reserve_report_num_retrying "$id" "$url" "$started_at" "$retries"); then
     return 1
   fi
   local date
@@ -657,7 +761,7 @@ process_offer() {
       retries=$((retries + 1))
       local retry_completed_at
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      update_state "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries"
+      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries" || true
       echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${RATE_LIMIT_SLEEP}s before retry..."
       sleep "$RATE_LIMIT_SLEEP"
       continue
@@ -737,7 +841,7 @@ process_offer() {
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi
-      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries"
+      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries" || true
       release_report_num "$report_num"
       echo "    ❌ Failed (worker-reported, attempt $retries): $worker_error_match"
       return 0
@@ -754,7 +858,7 @@ process_offer() {
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi
-      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries"
+      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries" || true
       release_report_num "$report_num"
       echo "    ❌ Failed (no report file on disk, attempt $retries)"
       return 0
@@ -763,14 +867,14 @@ process_offer() {
     # Check min-score gate
     if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
       if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries"
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
       fi
     fi
 
-    update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
+    update_state_retrying "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries" || true
     release_report_num "$report_num"
     echo "    ✅ Completed (score: $score, report: $report_num)"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
@@ -779,7 +883,7 @@ process_offer() {
     fi
     local error_msg
     error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "Unknown error (exit code $exit_code)")
-    update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
+    update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
     release_report_num "$report_num"
     echo "    ❌ Failed (attempt $retries, exit code $exit_code)"
   fi
@@ -973,6 +1077,10 @@ main() {
   fi
 
   init_state
+
+  if [[ "$DRY_RUN" == "false" ]]; then
+    reconcile_recovery_records
+  fi
 
   # Count input offers (skip header, ignore blank lines)
   local total_input
