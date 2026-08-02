@@ -5131,6 +5131,48 @@ try {
     }
   }
 
+  // The assertions above exercise the resolver in-process. --since is rejected
+  // earlier than that, in main()'s argv parsing, so nothing above would catch a
+  // regression there — hence the real binary. Each case fails before scan.mjs
+  // loads config or opens a socket, so these stay offline and quick.
+  //
+  // stderr is matched, not just the exit code: every one of these paths exits 1,
+  // and so would an unrelated startup failure. The message is what proves the
+  // flag was read and refused.
+  {
+    const sinceCli = (...argv) => spawnSync(NODE, [join(ROOT, 'scan.mjs'), ...argv], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const NO_VALUE = '--since expects a positive number of days, got (no value)';
+    const sinceCases = [
+      { argv: ['--since'], want: NO_VALUE, why: 'flag with no operand' },
+      { argv: ['--since='], want: NO_VALUE, why: 'empty inline operand' },
+      // The next token is a flag, not a value. Consuming it would scan the full
+      // window while looking like it had honoured --since.
+      { argv: ['--since', '--posted-after', '2026-07-01'], want: NO_VALUE, why: 'operand stealing' },
+      { argv: ['--since', '0'], want: 'got "0"', why: 'zero days' },
+      { argv: ['--since', '-3'], want: 'got "-3"', why: 'negative days' },
+      // Passes a bare `> 0` test; only Number.isFinite rejects it.
+      { argv: ['--since', 'Infinity'], want: 'got "Infinity"', why: 'non-finite' },
+      // Finite and positive, but the derived cutoff is outside Date's range.
+      { argv: ['--since', '1e300'], want: 'is too large to express as a date', why: 'out-of-range cutoff' },
+      // Reading only the first occurrence would let this one through.
+      { argv: ['--since=7', '--since'], want: '--since given 2 times; pass it once', why: 'repeated flag' },
+    ];
+    const badCases = sinceCases.filter(({ argv, want }) => {
+      const r = sinceCli(...argv);
+      return r.status !== 1 || !String(r.stderr).includes(want);
+    });
+    if (badCases.length === 0) {
+      pass('scan.mjs --since rejects bad input at the CLI (exit 1, with the reason named)');
+    } else {
+      fail(`scan.mjs --since accepted or misreported: ${badCases.map((c) => c.why).join(', ')}`);
+    }
+  }
+
   const filter = buildLocationFilter({
     always_allow: ['belgium', 'brussels'],
     allow: ['europe', 'emea', 'remote'],
