@@ -263,6 +263,31 @@ try {
   if (emptyFragJobs.length === 2 && emptyText > 0) pass('radancy.fetch() falls back when the fragment parses to zero rows');
   else fail(`radancy.fetch() empty-fragment fallback = ${emptyFragJobs.length} jobs, ${emptyText} text calls`);
 
+  // A resolved fragment request is proof of life even with zero rows: when the
+  // HTML fallback then fails (e.g. 403 on ?p=1), fetch() must NOT throw
+  // "unreachable" for a tenant it just talked to — it returns what it has.
+  {
+    let zeroErr = null;
+    let zeroJobs = null;
+    try {
+      zeroJobs = await radancy.fetch(
+        { name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' },
+        {
+          sleep: async () => {},
+          fetchJson: async () => ({ results: '', hasJobs: false }),
+          fetchText: async () => { throw new Error('403 on the HTML page'); },
+        },
+      );
+    } catch (err) {
+      zeroErr = err;
+    }
+    if (!zeroErr && Array.isArray(zeroJobs) && zeroJobs.length === 0) {
+      pass('radancy.fetch() does not throw when the fragment resolved (zero rows) and the HTML fallback fails (fragment success = proof of life)');
+    } else {
+      fail(`radancy.fetch() fragment proof-of-life wrong: ${zeroErr ? `threw "${zeroErr.message}"` : JSON.stringify(zeroJobs)}`);
+    }
+  }
+
   // max_jobs bounds the fragment walk.
   const capCtx = { sleep: async () => {}, fetchJson: async () => ({ results: LEGACY_UHG, hasJobs: true }), fetchText: async () => { throw new Error('unused'); } };
   const cappedJobs = await radancy.fetch({ name: 'Optum', careers_url: 'https://careers.unitedhealthgroup.com/search-jobs', max_jobs: 1 }, capCtx);

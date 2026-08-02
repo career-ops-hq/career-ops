@@ -295,8 +295,12 @@ function resolveCsbMaxPages(entry) {
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
 // by id across locales+pages. `total` from the first page bounds pagination;
 // an empty/short page also stops the loop.
-/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
-async function fetchCsb(entry, cfg, ctx) {
+//
+// `probe: true` marks the post-RMK fallback probe: RMK already answered (the
+// board is reachable, just empty of tiles), so an all-locales CSB failure must
+// NOT read as a dead board — return [] instead of throwing.
+/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
+async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
   let locales = CSB_DEFAULT_LOCALES;
   try {
     const html = await ctx.fetchText(cfg.searchPage, { redirect: 'error', headers: { accept: 'text/html' } });
@@ -357,7 +361,7 @@ async function fetchCsb(entry, cfg, ctx) {
       if (rawCount < CSB_PAGE_SIZE) break;
     }
   }
-  if (!succeededOnce && lastErr) throw lastErr;
+  if (!probe && !succeededOnce && lastErr) throw lastErr;
   return jobs;
 }
 
@@ -419,6 +423,9 @@ export default {
     }
     const rmkJobs = await fetchRmk(entry, cfg, ctx);
     if (rmkJobs.length > 0) return rmkJobs;
-    return fetchCsb(entry, cfg, ctx);
+    // RMK answered (healthy, possibly legitimately empty) — the CSB call here
+    // is only a probe for the empty-shell signature, so it must not turn a
+    // failing/absent CSB endpoint into a dead-board throw.
+    return fetchCsb(entry, cfg, ctx, { probe: true });
   },
 };

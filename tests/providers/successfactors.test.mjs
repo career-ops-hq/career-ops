@@ -275,6 +275,33 @@ try {
     if (csbErr?.message === 'jobs api down') pass('successfactors CSB fetch() throws when every locale fails (dead board ≠ empty board)');
     else fail(`successfactors CSB fetch() swallowed an all-locales failure${csbErr ? ` (threw ${csbErr.message})` : ' into []'}`);
   }
+  // Dispatcher default path (NO sfVariant): a healthy RMK tenant with zero
+  // postings triggers the post-RMK CSB probe. The probe failing on every
+  // locale must NOT throw — RMK already answered, so the board is reachable
+  // and legitimately empty, not a dead slug.
+  {
+    let probeErr = null;
+    let probeJobs = null;
+    try {
+      probeJobs = await sf.fetch(
+        { name: 'EmptyCo', careers_url: 'https://jobs.emptyco.example' },
+        {
+          sleep: async () => {},
+          // Serves both the RMK tile endpoint (healthy 200, zero tiles) and
+          // the best-effort /search/ locale discovery.
+          fetchText: async () => '<!DOCTYPE html>',
+          fetchJson: async () => { throw new Error('no CSB endpoint on this tenant'); },
+        },
+      );
+    } catch (err) {
+      probeErr = err;
+    }
+    if (!probeErr && Array.isArray(probeJobs) && probeJobs.length === 0) {
+      pass('successfactors fetch() without sfVariant: empty RMK + failing CSB probe returns [] (healthy empty board ≠ dead slug)');
+    } else {
+      fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)}`);
+    }
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }

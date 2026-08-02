@@ -278,6 +278,10 @@ export default {
     const maxJobs = resolveMaxJobs(entry);
     const jobs = [];
     const seen = new Set();
+    // Proof of life across BOTH transports: any resolved request — including a
+    // fragment 200 that parses to zero rows — proves the tenant is reachable,
+    // so a later HTML page-1 failure must not read as "unreachable".
+    let succeededOnce = false;
 
     // ── Preferred transport: the JSON results fragment ───────────────────────
     // Tried first because on legacy-markup tenants the ?p=N HTML page carries a
@@ -289,6 +293,7 @@ export default {
         const first = await ctx.fetchJson(buildFragmentUrl(listUrl, 1), {
           headers: { accept: 'application/json', 'x-requested-with': 'XMLHttpRequest' },
         });
+        succeededOnce = true;
         const firstHtml = typeof first?.results === 'string' ? first.results : '';
         const firstRows = firstHtml ? parseResults(firstHtml, origin) : [];
         if (firstRows.length) {
@@ -345,11 +350,11 @@ export default {
       }
     }
 
-    // A page-1 failure on the fallback transport (after the JSON transport also
-    // produced nothing) means the board is unreachable, not empty — THROW so
-    // scan/portal-health record a failure instead of "live but empty"
-    // (meituan/tencent idiom). Only a mid-scan failure keeps partials.
-    let succeededOnce = false;
+    // A page-1 failure on the fallback transport — when NO request on either
+    // transport ever resolved — means the board is unreachable, not empty:
+    // THROW so scan/portal-health record a failure instead of "live but empty"
+    // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
+    // failure here, keeps partials instead.
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await wait(PAGE_DELAY_MS);
       let rows;
