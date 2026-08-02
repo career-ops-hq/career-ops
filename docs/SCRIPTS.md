@@ -836,16 +836,16 @@ Canonical tracker write path: strict `states.yml` validation, shared lock, atomi
 node set-status.mjs <report#|company> <state> [--note "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
 node set-status.mjs --row N <state> [--note "..."]          # explicit tracker row ID
 node set-status.mjs --report N <state> [--note "..."]       # row whose Report cell links report #N
-node set-status.mjs --role "Role Name" <state>              # filter by role fragment
+node set-status.mjs "Company Name" Applied --role "Role"    # narrow match by role fragment
 node set-status.mjs --row 12 Applied
 node set-status.mjs --report 345 Applied --on 2026-08-01
 ```
 
-A bare number or company name is convenient, but becomes ambiguous once tracker row IDs and report IDs diverge or when multiple applications share a company. Explicit selectors disambiguate the target row and number space:
+A bare number or company name is convenient, but becomes ambiguous when multiple tracker rows exist for a company or when tracker row IDs and report IDs diverge. Base selectors resolve the main target, while explicit selectors and filters disambiguate the target row:
 
 - `--row N`: Selects the row whose `#` cell is `N`.
 - `--report N`: Selects the row whose `Report` cell links report `N`.
-- `--role <role>`: Disambiguates by role fragment when multiple tracker rows exist for a single company.
+- `--role <role>`: Narrowing selector that refines a company, report, row, or bare-number match when multiple tracker rows exist for a single target.
 - `--on <date>`: Specifies an explicit transition date (YYYY-MM-DD) for status logs and notes.
 - `--json`: Formats command output as structured JSON.
 
@@ -854,7 +854,7 @@ A bare number or company name is convenient, but becomes ambiguous once tracker 
 ### Bare numbers vs. explicit selectors
 
 - **Use a bare number** when tracker row IDs and report IDs are identical or when querying interactively.
-- **Use `--row N` or `--report N`** in automated scripts, modes, or whenever row IDs and report IDs have diverged to avoid ambiguous updates.
+- **Use `--row N` or `--report N`** in automated scripts, modes, or whenever row IDs and report IDs have diverged to avoid triggering report-number mismatch guards or ambiguous updates. Use `--role` alongside a base selector to narrow down multiple matching roles for a company.
 
 Exit codes:
 
