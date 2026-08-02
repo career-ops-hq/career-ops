@@ -331,10 +331,11 @@ node scan.mjs --posted-after 2026-07-25 # equivalent on 2026-08-01
 It **filters**, exactly like `--posted-after` does — same semantics as
 `scan-ats-full.mjs`, so the flag means one thing across both scripts.
 
-Unlike `--posted-after`, it is also passed to providers as an **early-stop
-hint**. Providers that return postings newest-first (currently `workday.mjs`)
-can stop paginating once a page's oldest dated posting is past the bound instead
-of grinding to their `max_pages` cap.
+The bound is also passed to providers as an **early-stop hint** — whichever
+lower bound ends up in effect, so `--posted-after` unlocks this too. Providers
+that return postings newest-first (currently `workday.mjs`) can stop paginating
+once a page's oldest dated posting is past that bound instead of grinding to
+their `max_pages` cap.
 
 How much that saves depends on how far the cap sits beyond the window. One
 measured run against an ~18,000-posting Workday tenant at `max_pages: 300`:
