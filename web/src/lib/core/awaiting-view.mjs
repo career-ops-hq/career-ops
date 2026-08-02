@@ -9,11 +9,23 @@
 // Plain .mjs (not .ts) so the root test suite can import it with no build step
 // and no `@/` alias loader, mirroring tracker-table.mjs.
 
-/** First number in a score string ("4.1/5", "3.0") → numeric, or NaN. */
+/**
+ * A well-formed score string ("4.1/5") → numeric 0–5, or NaN.
+ *
+ * Matches the full string against the tracker's "X.X/5" format rather than
+ * pulling out the first digit substring — "n/a (2026)" and "-1/5" contain
+ * digits but are not scores, and "10/5" is out of range. Any of those must
+ * sort as a placeholder, not outrank a genuine score.
+ */
 function scoreValue(score) {
-  const m = String(score ?? '').match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
+  const m = String(score ?? '').trim().match(/^(\d+(?:\.\d+)?)\/5$/);
+  if (!m) return NaN;
+  const value = parseFloat(m[1]);
+  return value >= 0 && value <= 5 ? value : NaN;
 }
+
+/** Canonical "Evaluated" status (see templates/states.yml) — exact match, not a prefix. */
+const EVALUATED_STATUS = /^(evaluated|evaluada)$/i;
 
 const DEFAULT_LIMIT = 6;
 
@@ -50,7 +62,7 @@ function rowCap(limit) {
 export function selectAwaitingDecision(applications, limit = DEFAULT_LIMIT) {
   const cap = rowCap(limit);
   const rows = (Array.isArray(applications) ? applications : [])
-    .filter((a) => /^evaluat/i.test(a?.status ?? ''));
+    .filter((a) => EVALUATED_STATUS.test(String(a?.status ?? '').trim()));
 
   return [...rows]
     .sort((a, b) => {

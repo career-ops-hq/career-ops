@@ -107,4 +107,34 @@ if (!HAS_WEB) {
     selectAwaitingDecision(rows, 2);
     assert.equal(rows.map((r) => r.num).join(','), before);
   });
+
+  test('selectAwaitingDecision: a score with a stray digit elsewhere in the string does not outrank a real score', () => {
+    // scoreValue() must validate the whole string, not just find any digit in
+    // it — "n/a (2026)" has no real score, but a bare digit-substring match
+    // would read "2026" and let this row outrank every genuine 4.x/5.
+    const rows = [row(1, 'n/a (2026)'), row(2, '4.6/5')];
+    const out = selectAwaitingDecision(rows, 6);
+    assert.equal(out[0].num, '2', 'a real score must outrank a malformed one, even with a large embedded digit');
+  });
+
+  test('selectAwaitingDecision: an out-of-range or malformed score does not outrank a real score', () => {
+    const rows = [row(1, '-1/5'), row(2, '10/5'), row(3, '3.0/5')];
+    const out = selectAwaitingDecision(rows, 6);
+    assert.equal(out[0].num, '3', 'the only well-formed 0–5 score must sort first');
+    assert.equal(out.length, 3, 'malformed scores are still awaiting a decision, not dropped');
+  });
+
+  test('selectAwaitingDecision: excludes "Evaluating" and "Evaluation failed" — only the canonical "Evaluated" status counts', () => {
+    // The old /^evaluat/i prefix test also matched these two non-canonical
+    // states (see templates/states.yml), letting an in-progress or failed row
+    // consume a result slot and displace a real Evaluated row.
+    const rows = [row(1, '4.9/5', 'Evaluating'), row(2, '4.8/5', 'Evaluation failed'), row(3, '3.0/5', 'Evaluated')];
+    const out = selectAwaitingDecision(rows, 6);
+    assert.deepEqual(out.map((r) => r.num), ['3']);
+  });
+
+  test('selectAwaitingDecision: status match is case-insensitive but still exact', () => {
+    const rows = [row(1, '4.0/5', 'evaluated'), row(2, '4.0/5', 'EVALUATED')];
+    assert.equal(selectAwaitingDecision(rows, 6).length, 2);
+  });
 }
