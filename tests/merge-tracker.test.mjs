@@ -343,3 +343,122 @@ try {
 } catch (e) {
   fail(`merge-tracker separator-row tests crashed: ${e.message}`);
 }
+
+// ── Non-Latin company names must not collapse into one row ──────────────────
+// normalizeCompany() strips everything outside [a-z0-9], so every CJK /
+// Cyrillic / Arabic company name normalizes to '' and all of them compared
+// equal. With same-run rows registered in existingApps, tier-3 (empty company
+// key + fuzzy role) folded DIFFERENT companies posting the same role in one
+// batch into a single row. companiesMatch() falls back to raw equality when
+// the normalized key is empty.
+console.log('\nmerge-tracker.mjs — non-Latin company names stay distinct');
+try {
+  const twoCompanies = runMergeDetailed({
+    '030-zeta.tsv': '30\t2026-02-01\t株式会社ゼータ\tデータエンジニア\tEvaluated\t4.2/5\t❌\t[30](reports/030-zeta-2026-02-01.md)\tzeta eval\n',
+    '031-omega.tsv': '31\t2026-02-02\t合同会社オメガ\tデータエンジニア\tEvaluated\t4.6/5\t❌\t[31](reports/031-omega-2026-02-02.md)\tomega eval\n',
+  });
+  const twoCompanyRows = dataRows(twoCompanies.tracker);
+  if (twoCompanyRows.length === 2 && /株式会社ゼータ/.test(twoCompanies.tracker) && /合同会社オメガ/.test(twoCompanies.tracker)) {
+    pass('two distinct Japanese companies with the same role produce two rows');
+  } else {
+    fail(`non-Latin companies collapsed: ${twoCompanyRows.length} row(s): ${twoCompanyRows.join(' // ')}`);
+  }
+
+  // Control: dedup must still fire for the SAME non-Latin company — raw
+  // equality replaces the empty key, it does not disable duplicate detection.
+  const sameCompany = runMergeDetailed({
+    '040-zeta.tsv': '40\t2026-02-01\t株式会社ゼータ\tデータエンジニア\tEvaluated\t4.2/5\t❌\t[40](reports/040-zeta-2026-02-01.md)\tfirst pass\n',
+    '041-zeta.tsv': '41\t2026-02-02\t株式会社ゼータ\tデータエンジニア\tEvaluated\t4.6/5\t❌\t[41](reports/041-zeta-2026-02-02.md)\tsecond pass\n',
+  });
+  const sameCompanyRows = dataRows(sameCompany.tracker);
+  if (sameCompanyRows.length === 1 && /4\.6\/5/.test(sameCompanyRows[0])) {
+    pass('the same Japanese company twice still dedups to one row (higher score kept)');
+  } else {
+    fail(`same non-Latin company did not dedup: ${sameCompanyRows.join(' // ')}`);
+  }
+} catch (e) {
+  fail(`merge-tracker non-Latin company tests crashed: ${e.message}`);
+}
+
+// ── mergeNotes: a new note that is a substring of an old clause must land ───
+// The repeat check was a raw prev.includes(incoming): existing
+// "Applied 2026-01-15. Remote OK" swallowed an incoming "Remote" outright.
+// Repeats are now judged per '. '-separated clause.
+console.log('\nmerge-tracker.mjs — substring notes survive a score upgrade');
+try {
+  const REMOTE_ROW =
+    '| 1 | 2026-01-01 | Acme | Staff Data Platform Engineer | 4.0/5 | Applied | ❌ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | Applied 2026-01-15. Remote OK |\n';
+  const substringNote = runMergeDetailed({
+    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-01-01.md)\tRemote\n',
+  }, { rows: REMOTE_ROW });
+  const substringRow = dataRows(substringNote.tracker)[0] || '';
+  if (/Remote OK/.test(substringRow) && /\(4→4\.7\): Remote\s*\|/.test(substringRow)) {
+    pass('an incoming note that is a substring of an existing clause is still appended');
+  } else {
+    fail(`substring note was dropped: ${substringRow}`);
+  }
+
+  // Control: an incoming note IDENTICAL to an existing clause is a genuine
+  // repeat — the marker is recorded, the text is not duplicated.
+  const repeatNote = runMergeDetailed({
+    '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-01-01.md)\tRemote OK\n',
+  }, { rows: REMOTE_ROW });
+  const repeatRow = dataRows(repeatNote.tracker)[0] || '';
+  const remoteOkCount = (repeatRow.match(/Remote OK/g) || []).length;
+  if (remoteOkCount === 1 && /Re-eval 2026-03-01/.test(repeatRow)) {
+    pass('an incoming note identical to an existing clause is not duplicated');
+  } else {
+    fail(`clause-level repeat detection failed (${remoteOkCount} copies): ${repeatRow}`);
+  }
+} catch (e) {
+  fail(`merge-tracker substring-note tests crashed: ${e.message}`);
+}
+
+// ── Same-run num collisions: distinct roles must not fold into one row ──────
+// Two TSVs that both claimed the same reserved num for DIFFERENT roles at one
+// company are a reservation race, not a re-evaluation. Tier-2 (num + company)
+// has no role check, so with same-run rows in existingApps the second TSV
+// became an update candidate for the first — one row, first title, second
+// score. Main renumbered and kept both (#1704/#1733); same-run tier-2 now
+// requires a fuzzy role match too.
+console.log('\nmerge-tracker.mjs — same-run num collision with distinct roles');
+try {
+  const collision = runMergeDetailed({
+    '050-acme-a.tsv': '5\t2026-02-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.2/5\t❌\t[5](reports/005-acme-2026-02-01.md)\tplatform\n',
+    '051-acme-b.tsv': '5\t2026-02-02\tAcme\tDirector of Product Marketing\tEvaluated\t4.6/5\t❌\t[6](reports/006-acme-2026-02-02.md)\tmarketing\n',
+  });
+  const collisionRows = dataRows(collision.tracker);
+  if (collisionRows.length === 2
+      && /Staff Data Platform Engineer/.test(collision.tracker)
+      && /Director of Product Marketing/.test(collision.tracker)) {
+    pass('two same-run TSVs sharing one num but distinct roles stay two rows');
+  } else {
+    fail(`same-run num collision folded distinct roles: ${collisionRows.join(' // ')}`);
+  }
+  // The renumber itself is the observable contract (#1704/#1733): the first
+  // TSV keeps the contested num, the second gets the next free one. (The
+  // accompanying "already used" warning goes to stderr, which the success-path
+  // capture here does not see.)
+  const marketingRow = collisionRows.find(r => /Director of Product Marketing/.test(r)) || '';
+  if (/^\|\s*6\s*\|/.test(marketingRow) && collisionRows.some(r => /^\|\s*5\s*\|/.test(r))) {
+    pass('the losing TSV of a same-run num collision is renumbered to the next free id');
+  } else {
+    fail(`same-run num collision was not renumbered: ${collisionRows.join(' // ')}`);
+  }
+
+  // Control: the same num AND the same role in one run is still one evaluation
+  // re-emitted — it must keep deduping to a single row.
+  const sameRoleCollision = runMergeDetailed({
+    '060-acme-a.tsv': '7\t2026-02-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.2/5\t❌\t[7](reports/007-acme-2026-02-01.md)\tfirst pass\n',
+    '061-acme-b.tsv': '7\t2026-02-02\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.6/5\t❌\t[8](reports/008-acme-2026-02-02.md)\tsecond pass\n',
+  });
+  const sameRoleRows = dataRows(sameRoleCollision.tracker);
+  if (sameRoleRows.length === 1 && /4\.6\/5/.test(sameRoleRows[0])) {
+    pass('the same num with the same role in one run still dedups to one row');
+  } else {
+    fail(`same-run same-role collision mishandled: ${sameRoleRows.join(' // ')}`);
+  }
+} catch (e) {
+  fail(`merge-tracker same-run num collision tests crashed: ${e.message}`);
+}

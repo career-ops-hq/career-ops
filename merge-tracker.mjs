@@ -225,6 +225,29 @@ function extractReqNumber(notes) {
 }
 
 /**
+ * Company equality for duplicate detection.
+ *
+ * normalizeCompany() strips everything outside [a-z0-9], so a company name
+ * written entirely in a non-Latin script (CJK, Cyrillic, Arabic, …) normalizes
+ * to the empty string — and every such name would compare equal to every other
+ * one. That collapses DIFFERENT companies into one row as soon as their roles
+ * fuzzy-match (six Japanese companies posting データエンジニア → one row).
+ * When the normalized key carries no signal, fall back to raw trimmed
+ * equality so distinct non-Latin companies stay distinct; the unknown-employer
+ * `?` marker still matches itself, so the #1596 cross-channel guard keeps its
+ * existing behavior.
+ *
+ * @param {string} a - Company cell from one side of the comparison.
+ * @param {string} b - Company cell from the other side.
+ * @returns {boolean} True when the two cells name the same company.
+ */
+function companiesMatch(a, b) {
+  const key = normalizeCompany(String(a));
+  if (key !== normalizeCompany(String(b))) return false;
+  return key !== '' || String(a).trim() === String(b).trim();
+}
+
+/**
  * Combine an existing row's Notes with a re-evaluation's Notes.
  *
  * The update path used to overwrite Notes with
@@ -257,8 +280,17 @@ function mergeNotes(existingNotes, addition, oldScore, newScore) {
   const incoming = String(addition.notes ?? '').trim();
   const marker = `Re-eval ${addition.date} (${oldScore}→${newScore})`;
   // Re-running the same evaluation would otherwise repeat its own text; the
-  // marker still records that the re-evaluation happened.
-  const tail = incoming && !prev.includes(incoming) ? `${marker}: ${incoming}` : marker;
+  // marker still records that the re-evaluation happened. Repeats are detected
+  // per CLAUSE — the same '. ' separator this function joins with — not by raw
+  // substring: `prev.includes(incoming)` dropped any new note that happened to
+  // appear INSIDE an existing clause ("Remote" vanished against "Remote OK").
+  // A clause equals the incoming text either bare or in the marker-prefixed
+  // form a previous run of this function appended (`{marker}: {incoming}`).
+  const clause = (s) => s.replace(/\.+$/, '').trim();
+  const incomingClause = clause(incoming);
+  const isRepeat = incoming !== '' && prev.split(/\.\s+/).map(clause)
+    .some(c => c === incomingClause || c.endsWith(`: ${incomingClause}`));
+  const tail = incoming && !isRepeat ? `${marker}: ${incoming}` : marker;
   return prev ? `${prev}. ${tail}` : tail;
 }
 
@@ -756,10 +788,9 @@ for (const file of tsvFiles) {
     // appearing for two different companies is sequence drift, not a duplicate.
     // Without the company guard, a NewCo TSV with report [1] silently overwrites
     // the existing tracker row [1] belonging to an unrelated company.
-    const normCompany = normalizeCompany(addition.company);
     duplicate = existingApps.find(app => {
       const existingReportNum = extractReportNum(app.report);
-      return existingReportNum === reportNum && normalizeCompany(app.company) === normCompany;
+      return existingReportNum === reportNum && companiesMatch(app.company, addition.company);
     });
     if (duplicate) reportNumMatched = true;
   }
@@ -771,18 +802,25 @@ for (const file of tsvFiles) {
     // 067 while the tracker was already at #69). A bare num collision across
     // *different* companies is that drift, not a duplicate — matching on num
     // alone silently merges a brand-new role into an unrelated existing row.
-    const normCompany = normalizeCompany(addition.company);
     duplicate = existingApps.find(app =>
-      app.num === addition.num && normalizeCompany(app.company) === normCompany
+      app.num === addition.num && companiesMatch(app.company, addition.company)
+      // Same-run num collisions are reservation races, not row-id references:
+      // two TSVs that both claimed num=5 for DIFFERENT roles at one company
+      // are two distinct evaluations, and folding them keeps the first title
+      // with the second score (main renumbers and keeps both via the
+      // #1704/#1733 path). For a row queued THIS run, only accept the num
+      // match when the roles also fuzzy-match — consistent with tier-3's
+      // cross-run semantics. For rows already on disk, num remains the
+      // tracker row id and behavior is unchanged.
+      && (!app.addedThisRun || roleFuzzyMatch(addition.role, app.role))
     );
   }
 
   if (!duplicate) {
     // Company + role fuzzy match
-    const normCompany = normalizeCompany(addition.company);
     const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
-      if (normalizeCompany(app.company) !== normCompany) return false;
+      if (!companiesMatch(app.company, addition.company)) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
       // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
       // to the same empty company key, but the same role via two DIFFERENT
@@ -892,7 +930,14 @@ for (const file of tsvFiles) {
     // higher-scored addition updates it in place just like a row already on
     // disk.
     const parsedNew = parseAppLine(newLine);
-    if (parsedNew) existingApps.push(parsedNew);
+    if (parsedNew) {
+      // Mark the row as queued this run: tier-2 treats a num collision with a
+      // same-run row as a reservation race unless the roles also fuzzy-match
+      // (see the tier-2 guard above). Object.assign() in the update path never
+      // deletes the flag, so it survives in-place refreshes within the run.
+      parsedNew.addedThisRun = true;
+      existingApps.push(parsedNew);
+    }
     added++;
     console.log(`➕ Add #${entryNum}: ${addition.company} — ${addition.role} (${addition.score})`);
   }
