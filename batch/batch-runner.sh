@@ -246,7 +246,10 @@ acquire_state_lock() {
       local stale=false
       local stale_reason=""
 
-      if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+        # Lock owner PID is verifiably running — lock is active and MUST NOT be reclaimed.
+        stale=false
+      elif [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
         stale=true
         stale_reason="PID $lock_pid not running"
       elif [[ "$lock_epoch" =~ ^[0-9]+$ ]]; then
@@ -255,7 +258,7 @@ acquire_state_lock() {
         age=$((now - lock_epoch))
         if (( age >= STATE_LOCK_STALE_AGE_SECONDS )); then
           stale=true
-          stale_reason="lock age ${age}s >= ${STATE_LOCK_STALE_AGE_SECONDS}s (age-based fallback — PID liveness checks are unreliable on Git Bash/Windows)"
+          stale_reason="unverifiable PID lock age ${age}s >= ${STATE_LOCK_STALE_AGE_SECONDS}s"
         fi
       fi
 
@@ -446,21 +449,10 @@ update_state_unlocked() {
 }
 
 update_state() {
-  run_with_state_lock update_state_unlocked "$@"
-}
-
-# Retry wrapper around update_state. Bare `update_state ...` calls under
-# `set -e` will silently kill the entire background worker subshell if a
-# single lock-timeout failure propagates — this wrapper retries a few times
-# and, if it still fails, logs a clear warning and returns non-zero so the
-# CALLER can decide what to do, instead of the process vanishing with no
-# trace (found under --parallel 5 on Git Bash/Windows: ~47 of 50 jobs
-# silently dropped in one run from exactly this).
-update_state_retrying() {
   local attempt=0
   local max_attempts=3
   while (( attempt < max_attempts )); do
-    if update_state "$@"; then
+    if run_with_state_lock update_state_unlocked "$@"; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -470,7 +462,7 @@ update_state_retrying() {
     fi
   done
   echo "    ❌ State update failed after $max_attempts attempts — offer id=$1 status=$3 was NOT recorded in $STATE_FILE. It will be retried as pending next run." >&2
-  return 1
+  return 0
 }
 
 is_rate_limit_log() {
@@ -489,7 +481,7 @@ mark_paused_rate_limit() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local error_msg
   error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "session/rate limit reached")
-  update_state_retrying "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
+  update_state "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
   printf '%s\t%s\t%s\n' "$id" "$report_num" "$error_msg" > "$PAUSE_FILE"
   BATCH_PAUSED=true
 }
@@ -526,18 +518,11 @@ release_report_num() {
 }
 
 reserve_report_num() {
-  run_with_state_lock reserve_report_num_unlocked "$@"
-}
-
-# Retry wrapper — same rationale as update_state_retrying above. A bare
-# `x=$(reserve_report_num ...)` under `set -e` kills the worker subshell
-# silently on a single lock-timeout; this retries and logs instead.
-reserve_report_num_retrying() {
   local attempt=0
   local max_attempts=3
   local result=""
   while (( attempt < max_attempts )); do
-    if result=$(reserve_report_num "$@"); then
+    if result=$(run_with_state_lock reserve_report_num_unlocked "$@"); then
       printf '%s\n' "$result"
       return 0
     fi
@@ -560,7 +545,7 @@ process_offer() {
   local retries
   retries=$(get_retries "$id")
   local report_num
-  if ! report_num=$(reserve_report_num_retrying "$id" "$url" "$started_at" "$retries"); then
+  if ! report_num=$(reserve_report_num "$id" "$url" "$started_at" "$retries"); then
     return 1
   fi
   local date
@@ -672,7 +657,7 @@ process_offer() {
       retries=$((retries + 1))
       local retry_completed_at
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries" || true
+      update_state "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries"
       echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${RATE_LIMIT_SLEEP}s before retry..."
       sleep "$RATE_LIMIT_SLEEP"
       continue
@@ -752,7 +737,7 @@ process_offer() {
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi
-      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries" || true
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries"
       release_report_num "$report_num"
       echo "    ❌ Failed (worker-reported, attempt $retries): $worker_error_match"
       return 0
@@ -769,7 +754,7 @@ process_offer() {
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi
-      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries" || true
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries"
       release_report_num "$report_num"
       echo "    ❌ Failed (no report file on disk, attempt $retries)"
       return 0
@@ -778,14 +763,14 @@ process_offer() {
     # Check min-score gate
     if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
       if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        update_state "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries"
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
       fi
     fi
 
-    update_state_retrying "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries" || true
+    update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
     release_report_num "$report_num"
     echo "    ✅ Completed (score: $score, report: $report_num)"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
@@ -794,7 +779,7 @@ process_offer() {
     fi
     local error_msg
     error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "Unknown error (exit code $exit_code)")
-    update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
+    update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
     release_report_num "$report_num"
     echo "    ❌ Failed (attempt $retries, exit code $exit_code)"
   fi
