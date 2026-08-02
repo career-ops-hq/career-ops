@@ -117,10 +117,12 @@ function score(story, queryTokens, jdTokens) {
   const signal = queryTokens.filter(t => !STOPWORDS.has(t));
   let s = 0;
 
-  // Tag match: highest weight (tags are explicit "best for" labels)
-  const tagText = story.tags.join(' ');
+  // Tag match: highest weight (tags are explicit "best for" labels).
+  // Tokenized exact membership (mirrors the JD-boost path below) so short query
+  // tokens (ai, ml, go, qa…) can't spuriously collide inside longer tag words.
+  const tagTokens = new Set(story.tags.flatMap(tokenize));
   for (const token of signal) {
-    if (tagText.includes(token)) s += 3;
+    if (tagTokens.has(token)) s += 3;
   }
 
   // Title/theme match

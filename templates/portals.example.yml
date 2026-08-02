@@ -31,6 +31,24 @@
 # scan_history:
 #   recheck_after_days: 30
 
+# -- Interamt.de searches (optional, German public sector) --
+# Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
+# scanner for Interamt.de, a portal for German federal, state, and municipal
+# government job postings. Interamt has no REST API (Apache Wicket, stateful),
+# so it isn't reachable through the tracked_companies providers above;
+# scan-interamt.mjs drives a real browser session instead.
+#
+# Each `was:` entry is a search keyword submitted to Interamt's search form.
+# If this block is absent, scan-interamt.mjs falls back to a generic set of
+# German IT keywords (Informatiker, Softwareentwickler, IT-Spezialist, ...).
+# Results are still filtered by title_filter/location_filter below.
+#
+# interamt_searches:
+#   - was: "Softwareentwickler"
+#   - was: "Informatiker"
+#   - was: "Datenanalyst"
+#   - was: "Systemadministrator"
+
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
 # If this entire block is absent, all locations pass (current default behavior).
@@ -72,6 +90,40 @@
 #     - "Japan"
 #     - "Brazil"
 #     - "Australia"
+
+# -- Country-eligibility filter (optional, opt-in, #2093) --
+# location_filter only reads the ATS provider's STRUCTURED location field
+# (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
+# regardless of which countries are actually eligible — the real
+# restriction ("US-based candidates only" vs. "US or Canada eligible")
+# often lives only in the job description BODY TEXT. This filter reads that
+# text (same field content_filter reads) and cross-references it against
+# your own country from `location.country` above.
+#
+# Semantics (case-insensitive substring), same "don't penalize missing
+# data" discipline as location_filter:
+#   - Your location.country is "United States" → filter no-ops entirely
+#     (a "US only" restriction can never exclude a US-based candidate)
+#   - No description text available → pass
+#   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous)
+#   - `exclusionary` phrase matched but an `inclusive` phrase is also
+#     present, or your own country is separately named in the text → pass
+#   - `exclusionary` phrase matched, no `inclusive` phrase, your country
+#     not named → rejected, counted in scan-runs.tsv's
+#     filtered_country_eligibility column
+#
+# If this entire block is absent, behavior is unchanged (no country
+# filtering — same as before this feature existed).
+
+# country_eligibility_filter:
+#   exclusionary:
+#     - "must be located in the united states"
+#     - "us-based candidates only"
+#     - "authorized to work in the us without sponsorship"
+#   inclusive:
+#     - "united states or canada"
+#     - "north america"
+#     - "canada eligible"
 
 # -- Salary filter (optional) --
 # Filter scanned jobs by annual compensation range. Applied AFTER location
@@ -591,9 +643,9 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas,
-# ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
-# weworkremotely, workingnomads, wttj. Examples for every built-in provider are below.
+# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
+# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
+# thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -715,10 +767,20 @@ search_queries:
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
 #   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67)
+#
+# - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
+#   provider: a16z-speedrun-talent
+#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   q: machine learning   # optional server-side full-text search (synonyms expand)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
 #   provider: arbeitnow
+#   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Flowxtra                        # board-wide, every company hosted on Flowxtra
+#   provider: flowxtra
 #   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
 #   enabled: true
 #
@@ -730,6 +792,22 @@ search_queries:
 #     umkreis: 50         # optional km radius around wo (0-1000)
 #     days: 30            # optional recency window (1-1000)
 #     size: 100           # optional results per keyword (1-100)
+#   enabled: true
+#
+# - name: VDAB — AI/ML Vlaanderen        # Flanders (BE) public employment service
+#   provider: vdab
+#   vdab:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted.
+#     # keywords: ["AI Engineer", "Machine Learning"]  # explicit override
+#     days: 30            # optional recency window (1-1000)
+#     size: 100           # optional results per keyword page (1-100)
+#     fetchDetails: false # optional: true fetches detail JSON descriptions
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true
+#   # No location/radius option: VDAB's search API exposes no working geo
+#   # field we could find, so every keyword search is nationwide — use
+#   # location_filter (above) for precision, same recall-first approach
+#   # arbeitsagentur uses for its optional remote pass.
 #   enabled: true
 #
 # - name: Glints — Indonesia             # SE-Asia aggregator (SG/ID/MY/VN)
@@ -1845,4 +1923,13 @@ job_boards:
   # - name: HigherEdJobs — Higher Education
   #   provider: higheredjobs
   #   cat_id: 68
+  #   enabled: true
+
+  # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
+  # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
+  # listings. The feed URL is hardcoded in the provider — no careers_url
+  # or api field needed.
+
+  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, all-remote)
+  #   provider: cryptocurrencyjobs
   #   enabled: true

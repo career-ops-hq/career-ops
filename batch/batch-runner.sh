@@ -346,8 +346,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-4-8" ;;
-    standard|*) echo "claude-sonnet-4-6" ;;
+    premium) echo "claude-opus-5" ;;
+    standard|*) echo "claude-sonnet-5" ;;
   esac
 }
 
@@ -374,39 +374,21 @@ log_discard() {
   printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
 }
 
-# Calculate next report number.
-# Caller must hold STATE_LOCK_DIR while this runs.
-next_report_num_unlocked() {
-  local max_num=0
-  if [[ -d "$REPORTS_DIR" ]]; then
-    for f in "$REPORTS_DIR"/*.md; do
-      [[ -f "$f" ]] || continue
-      local basename
-      basename=$(basename "$f")
-      local num="${basename%%-*}"
-      num=$((10#$num)) # Remove leading zeros for arithmetic
-      if (( num > max_num )); then
-        max_num=$num
-      fi
-    done
-  fi
-  # Also check state file for assigned report numbers
-  if [[ -f "$STATE_FILE" ]]; then
-    while IFS=$'\t' read -r _ _ _ _ _ rnum _ _ _; do
-      [[ "$rnum" == "report_num" || "$rnum" == "-" || -z "$rnum" ]] && continue
-      local n=$((10#$rnum))
-      if (( n > max_num )); then
-        max_num=$n
-      fi
-    done < "$STATE_FILE"
-  fi
-  printf '%03d' $((max_num + 1))
-}
 
 # Update or insert state for an offer.
 # Caller must hold STATE_LOCK_DIR while this runs.
 update_state_unlocked() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
+
+  # batch-state.tsv is tab-separated with one row per line -- a literal tab,
+  # newline, or carriage return inside $error (e.g. from a worker's raw error
+  # text, or JSON.parse unescaping \n/\r/\t in a caller upstream) would split
+  # into extra columns or extra rows and corrupt every row after it. Collapse
+  # them to spaces centrally here so every caller is protected, not just the
+  # one that happened to trigger this.
+  error=${error//$'\r'/ }
+  error=${error//$'\n'/ }
+  error=${error//$'\t'/ }
 
   if [[ ! -f "$STATE_FILE" ]]; then
     init_state
@@ -467,12 +449,32 @@ mark_paused_rate_limit() {
 reserve_report_num_unlocked() {
   local id="$1" url="$2" started="$3" retries="$4"
 
+  # Use the shared, cross-process-atomic reservation system (O_CREAT|O_EXCL
+  # sentinel files in reserve-report-num.mjs) instead of the old bash-native
+  # max(existing report files, batch-state.tsv numbers)+1 scan. The bash-native
+  # version had zero visibility into reservations made by any OTHER process
+  # calling `node reserve-report-num.mjs` directly -- e.g. an interactively
+  # dispatched Agent evaluating one offer with a browser tool while a batch
+  # run is in flight. Both could independently compute the same "next" number
+  # and collide on disk. Found 2026-07-30: two separate collisions (report
+  # 049, report 051) in one batch run for exactly this reason -- routing every
+  # caller through the same node script means they all share one real lock.
   local report_num=""
-  if report_num=$(next_report_num_unlocked); then
+  report_num=$(node "$PROJECT_DIR/reserve-report-num.mjs" 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "$report_num" ]]; then
     update_state_unlocked "$id" "$url" "processing" "$started" "-" "$report_num" "-" "-" "$retries"
   fi
 
   printf '%s\n' "$report_num"
+}
+
+# Release a report-number reservation via the shared atomic system. Safe to
+# call even if the number was never actually reserved this way (e.g. a
+# resumed/paused offer) -- the underlying script no-ops on a missing sentinel.
+release_report_num() {
+  local report_num="$1"
+  [[ -n "$report_num" && "$report_num" != "-" ]] || return 0
+  node "$PROJECT_DIR/reserve-report-num.mjs" --release "$report_num" >/dev/null 2>&1 || true
 }
 
 reserve_report_num() {
@@ -614,24 +616,105 @@ process_offer() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   if [[ $exit_code -eq 0 ]]; then
-    # Try to extract score from worker output
-    local score="-"
-    local score_match
-   score_match=$(sed -nE 's/.*"score":[[:space:]]*([0-9.]+).*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
-    if [[ -n "$score_match" ]]; then
-      score="$score_match"
+    # A worker can exit 0 (no crash) but still self-report failure inside its
+    # own JSON summary — e.g. it correctly declines to fabricate an evaluation
+    # when the JD couldn't be extracted (Data Contract: never fabricate).
+    # Without this check such offers were silently marked "completed" with no
+    # report file on disk and score "-" (found 2026-07-29, offer id 6 / report
+    # 019 — Deepgram JD unextractable in headless mode). Only the downstream
+    # reconcile-pipeline.mjs safety net (which leaves an entry in Pending when
+    # its report file is missing) prevented the offer from being lost.
+    # Extract only the LAST ```json fenced block in the log -- that's the
+    # worker's one authoritative final result (batch-prompt.md Step 6), not
+    # arbitrary text anywhere else in stdout/stderr -- and parse it as real
+    # JSON so an unrelated line merely containing the substring
+    # `"status": "failed"` can never falsely flip a successful run.
+    local worker_result_json
+    worker_result_json=$(awk '
+      /^```json[[:space:]]*$/ { in_block=1; block=""; next }
+      in_block && /^```[[:space:]]*$/ { in_block=0; last=block; next }
+      in_block { block = block $0 "\n" }
+      END { printf "%s", last }
+    ' "$log_file" 2>/dev/null || true)
+
+    # Parse status, error, AND score from the same authoritative JSON object
+    # in one pass -- score extraction used to be a separate sed regex over
+    # the whole log (`.*"score":...`), which grabbed the first match
+    # anywhere in the log rather than the one from this final result object,
+    # producing a spurious score "-" whenever an earlier line in the log
+    # (reasoning text, an intermediate example, Block D's "Comp score: 4/5"
+    # mention, etc.) matched first. Reading it from the same parsed object
+    # as status/error fixes both by construction -- there's only one place
+    # left to look.
+    local worker_failed_match="" worker_error_match="" score="-"
+    if [[ -n "$worker_result_json" ]]; then
+      local parsed
+      parsed=$(printf '%s' "$worker_result_json" | node -e '
+        let data = "";
+        process.stdin.on("data", d => data += d);
+        process.stdin.on("end", () => {
+          try {
+            const obj = JSON.parse(data);
+            const status = typeof obj.status === "string" ? obj.status : "";
+            const error = typeof obj.error === "string" ? obj.error : "";
+            const score = typeof obj.score === "number" ? String(obj.score) : "";
+            process.stdout.write(status + "\t" + error + "\t" + score);
+          } catch {
+            process.stdout.write("");
+          }
+        });
+      ' 2>/dev/null || true)
+      if [[ -n "$parsed" ]]; then
+        IFS=$'\t' read -r parsed_status parsed_error parsed_score <<< "$parsed"
+        if [[ "$parsed_status" == "failed" ]]; then
+          worker_failed_match="failed"
+          worker_error_match="$parsed_error"
+        elif [[ -n "$parsed_score" ]]; then
+          score="$parsed_score"
+        fi
+      fi
+    fi
+
+    if [[ -n "$worker_failed_match" ]]; then
+      [[ -z "$worker_error_match" ]] && worker_error_match="worker reported status:failed (exit code 0)"
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries"
+      release_report_num "$report_num"
+      echo "    ❌ Failed (worker-reported, attempt $retries): $worker_error_match"
+      return 0
+    fi
+
+    # A worker can exit 0, self-report a non-"failed" status (or no parseable
+    # JSON at all), and STILL never actually write the report file it claims
+    # -- exit code and JSON status alone are not proof a report exists. Found
+    # 2026-07-30: offer id 6/report 049 was marked "completed" this way with
+    # no file on disk, silently freeing that number for a second, unrelated
+    # offer to claim (a real collision). Verify the file before trusting
+    # "completed" -- fail closed, not open.
+    if [[ -z "$(compgen -G "$REPORTS_DIR/${report_num}-*.md")" ]]; then
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries"
+      release_report_num "$report_num"
+      echo "    ❌ Failed (no report file on disk, attempt $retries)"
+      return 0
     fi
 
     # Check min-score gate
     if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
       if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
         update_state "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries"
+        release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
       fi
     fi
 
     update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
+    release_report_num "$report_num"
     echo "    ✅ Completed (score: $score, report: $report_num)"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
     if (( retries < MAX_RETRIES )); then
@@ -640,6 +723,7 @@ process_offer() {
     local error_msg
     error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "Unknown error (exit code $exit_code)")
     update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
+    release_report_num "$report_num"
     echo "    ❌ Failed (attempt $retries, exit code $exit_code)"
   fi
 }

@@ -407,6 +407,14 @@ career-ops/
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)** -- Portfolio website (santifer.io) जिसमें AI chatbot, LLMOps dashboard, और case studies हैं। यदि आपको job search के साथ showcase करने के लिए portfolio चाहिए, इसे fork करें और अपना बनाएं।
 
+## अक्सर पूछे जाने वाले प्रश्न (FAQ)
+
+**career-ops क्या है?**  
+career-ops एक ओपन-सोर्स, CLI-agnostic जॉब सर्च कमांड सेंटर है। यह किसी भी AI कोडिंग CLI को ऐसे पाइपलाइन में बदल देता है जो आपके CV के अनुसार नौकरी के ऑफ़र्स का मूल्यांकन करता है, ATS-अनुकूल PDF तैयार करता है, सही व्यक्ति का संपर्क ढूँढता है, और पूरी प्रक्रिया को एक ही जगह ट्रैक करता है — जबकि अंतिम निर्णय हमेशा आपका होता है। यह CareerOps Manifesto का पहला reference implementation है। अधिक जानकारी के लिए देखें: [career-ops.org](https://career-ops.org).
+
+**क्या मैं career-ops को मुफ्त में या किसी सस्ते / लोकल मॉडल के साथ चला सकता हूँ?**  
+हाँ। career-ops CLI-agnostic है और OpenRouter के मुफ्त मॉडल, Ollama, या किसी भी OpenAI-compatible endpoint के माध्यम से मुफ्त तथा लोकल मॉडलों पर चल सकता है। इसलिए आप किसी पेड सब्सक्रिप्शन पर निर्भर नहीं हैं। पूरी सेटअप प्रक्रिया के लिए [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) देखें।
+
 ## Author के बारे में
 
 मैं [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) हूँ -- Head of Applied AI, former founder (एक ऐसा business build किया और बेचा जो अभी भी मेरे नाम से चलता है)। मैंने career-ops अपनी खुद की job search manage करने के लिए बनाया। यह काम आया: मैंने इसे अपना current role land करने के लिए use किया।

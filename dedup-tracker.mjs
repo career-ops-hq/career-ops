@@ -376,6 +376,29 @@ for (const [company, companyEntries] of groups) {
       }
     }
 
+    // Merge notes from removed entries
+    let mergedNotes = String(keeper.notes || '').trim();
+    const originalNotes = mergedNotes;
+    for (let k = 1; k < cluster.length; k++) {
+      const dupNotes = String(cluster[k].notes || '').trim();
+      if (dupNotes && dupNotes !== 'N/A' && dupNotes !== '❌' && dupNotes !== 'pending' && dupNotes !== '-') {
+        if (!mergedNotes.includes(dupNotes)) {
+          mergedNotes = mergedNotes && mergedNotes !== 'N/A' && mergedNotes !== '-' ? `${mergedNotes}; ${dupNotes}` : dupNotes;
+        }
+      }
+    }
+
+    if (mergedNotes !== originalNotes) {
+      const lineIdx = keeper.lineIdx;
+      if (lineIdx !== undefined) {
+        const parts = lines[lineIdx].split('|').map(s => s.trim());
+        parts[COLMAP.notes] = mergedNotes;
+        lines[lineIdx] = rebuildRow(parts);
+        keeper.notes = mergedNotes;
+        console.log(`  📝 #${keeper.num}: notes merged`);
+      }
+    }
+
     // Remove duplicates
     for (let k = 1; k < cluster.length; k++) {
       const dup = cluster[k];

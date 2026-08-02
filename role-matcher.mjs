@@ -12,6 +12,17 @@ export const SENIORITY_TOKENS = new Set([
   'chief', 'associate', 'intern', 'entry'
 ]);
 
+// Seniority tokens that place a requisition BELOW the bare baseline title.
+// "senior"/"principal" modify an ambiguous baseline and are routinely added or
+// dropped when the same opening is re-posted, so seeing one on a single side is
+// not evidence of a different job. These words are different in kind: they mean
+// the req sits at a lower level than the unqualified title, with its own scope,
+// comp band, and req ID. "Associate X" and a bare "X" at one company are two
+// real openings, so a lone sub-baseline qualifier is a disagreement (#2009).
+export const SUB_BASELINE_SENIORITY = new Set([
+  'associate', 'junior', 'entry', 'intern',
+]);
+
 // Tokens that almost every role shares must not count as strong matching
 // signal. This set covers seniority, work mode, contract shape, locations, and
 // other words that frequently appear in titles without identifying the opening.
@@ -38,6 +49,15 @@ export const ROLE_STOPWORDS = new Set([
   'with', 'from', 'into', 'over', 'this', 'that',
 ]);
 
+// "Member of Technical Staff" (MTS) is a boilerplate level-prefix used by
+// several companies for senior IC titles, not a content signal — e.g.
+// "Member of Technical Staff, Connector Platform" vs "...Backend Platform"
+// are different openings whose suffix should decide the match, not the
+// prefix. Stripped as a literal phrase (not a blanket stopword on "member"/
+// "technical") so those words keep their normal discriminating role in
+// unrelated titles such as "Technical Program Manager" or "Team Member".
+const MTS_PREFIX = /\bmember\s+of\s+technical\s+staff\b/g;
+
 // Short specialty acronyms that are discriminating despite their length.
 // Broad two-letter buckets such as AI/ML are intentionally excluded because
 // they appear across many unrelated roles.
@@ -54,7 +74,38 @@ export const BASELINE_TOKENS = new Set([
   'analyst', 'designer', 'consultant', 'specialist',
   'platform', 'systems', 'services',
   'backend', 'frontend', 'full', 'stack', 'fullstack',
+  // 'product' alone cannot identify an opening: "Product Manager - Marketplace"
+  // and "Product Manager - AI" must stay separate applications ("ai" is dropped
+  // by the tokenizer, leaving only [product, manager] to match on).
+  'product',
 ]);
+
+/**
+ * Lowercase a title and fold accented Latin letters onto their ASCII base.
+ *
+ * Every rule below matches against ASCII vocabulary, so an accent used to act
+ * as a word separator rather than a letter: "Sênior" became ["s", "nior"],
+ * leaving a phantom "nior" token that no stopword list covers. Folding first
+ * keeps the accented spelling in the same vocabulary as the plain one.
+ *
+ * Only accents that NFD decomposes are folded. Letters with no canonical
+ * decomposition (ø, ł, ß, đ) still reach the ASCII filter unchanged, exactly
+ * as before.
+ *
+ * `\p{Mn}` (nonspacing mark), not `\p{Diacritic}`: the latter also matches
+ * standalone characters such as "·", "^" and "`", which are separators in a
+ * title. Deleting those would glue neighbouring words into one token.
+ *
+ * @param {unknown} value - Raw title, possibly not a string.
+ * @returns {string} Lowercased, accent-folded text.
+ */
+function normalizeTitle(value) {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '');
+}
 
 /**
  * Convert a role title into content tokens used for fuzzy matching.
@@ -68,19 +119,31 @@ export const BASELINE_TOKENS = new Set([
  * @returns {string[]} Ordered role-title tokens.
  */
 export function roleTokens(role) {
-  const text = typeof role === 'string' ? role : String(role ?? '');
-  return text
-    .toLowerCase()
+  return normalizeTitle(role)
+    // Replace with a generic baseline token, not empty space: a bare "Member
+    // of Technical Staff" (no suffix) or a one-word-suffix MTS title (e.g.
+    // "...Staff, Backend") would otherwise tokenize to 0 or 1 words, and
+    // roleFuzzyMatch requires 2+ overlapping tokens — so even an exact
+    // (punctuation-varying) repost of a short MTS title would fail to match
+    // itself. "engineer" is already a BASELINE_TOKENS entry, so it pads the
+    // token count without ever being the sole reason two titles match.
+    .replace(MTS_PREFIX, ' engineer ')
+    // Collapse slashed short acronyms into one token BEFORE punctuation is
+    // stripped: "(CI/CD)" would otherwise become "ci cd" and both halves get
+    // dropped by the length filter, making the qualifier invisible to the
+    // matcher. A sibling req whose only qualifier is such an acronym (e.g.
+    // "Senior SWE, Infrastructure (CI/CD)" vs "Senior SWE, Infrastructure")
+    // tokenized identically to the bare title and got merged over it (#2165).
+    // "cicd" / "tcpip" / "uiux" survive as content tokens.
+    .replace(/\b([a-z0-9]{1,3})\/([a-z0-9]{1,3})\b/g, '$1$2')
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
 function extractSeniorities(title) {
-  const text = typeof title === 'string' ? title : String(title ?? '');
   return new Set(
-    text
-      .toLowerCase()
+    normalizeTitle(title)
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
       .filter(w => SENIORITY_TOKENS.has(w))
@@ -101,6 +164,14 @@ function extractSeniorities(title) {
  * @returns {boolean} True when the titles are similar enough to deduplicate.
  */
 export function roleFuzzyMatch(a, b) {
+  // Identical titles (case/whitespace-insensitive) always match, even a bare
+  // title that tokenizes to 0 words (e.g. a company posting just "Member of
+  // Technical Staff" with no suffix) — tokenization can never be the reason
+  // an exact repost fails to dedupe.
+  const textA = String(a ?? '').trim().toLowerCase();
+  const textB = String(b ?? '').trim().toLowerCase();
+  if (textA && textA === textB) return true;
+
   const senA = extractSeniorities(a);
   const senB = extractSeniorities(b);
 
@@ -111,6 +182,14 @@ export function roleFuzzyMatch(a, b) {
   if (senA.size > 0 && senB.size > 0) {
     const hasOverlap = [...senA].some(s => senB.has(s));
     if (!hasOverlap) return false;
+  } else if (senA.size > 0 || senB.size > 0) {
+    // Exactly one side states a seniority. The tokenizer drops seniority words
+    // as stopwords, so "Associate Product Manager, Team" and "Product Manager,
+    // Team" otherwise tokenize identically and score a perfect Jaccard ratio —
+    // silently collapsing two real requisitions. A sub-baseline qualifier on
+    // the lone side is a level disagreement, not a loose rewrite (#2009).
+    const lone = senA.size > 0 ? senA : senB;
+    if ([...lone].some(s => SUB_BASELINE_SENIORITY.has(s))) return false;
   }
 
   const wordsA = [...new Set(roleTokens(a))];

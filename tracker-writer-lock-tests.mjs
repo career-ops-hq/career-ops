@@ -4,7 +4,7 @@
 
 import { spawn } from 'child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync,
 } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
@@ -20,6 +20,19 @@ let failed = 0;
 function pass(message) { console.log(`PASS ${message}`); passed++; }
 function fail(message) { console.error(`FAIL ${message}`); failed++; }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// How long the HARNESS waits for a spawned Node process to start, print, or
+// exit. This is not a value under test: it encodes only how fast the machine
+// is, and every other suite that spawns a child budgets 30s for the same work
+// (followup-seed-tests.mjs, set-status-tests.mjs, run() in tests/helpers.mjs).
+// A Windows CI runner under load routinely needs more than the 2s this file
+// used to allow, which made a correctness test fail for want of a faster host.
+//
+// Every SEMANTIC timeout stays exactly as it was: the argument to
+// launchWriter() is the child's CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS, and
+// timeoutMs / staleMs / retryMs are the lock's own parameters. Those are what
+// the tests assert on, so widening them would change what is being tested.
+const HARNESS_WAIT_MS = 30_000;
 
 function trackerTable(rows) {
   return `# Applications Tracker
@@ -112,7 +125,7 @@ async function runWhileLocked({
   });
 
   const probe = launchWriter(200);
-  const probeResult = await waitForWriter(probe, 2_000);
+  const probeResult = await waitForWriter(probe, HARNESS_WAIT_MS);
   const probeOutput = probe.output();
   if (!probeResult.timedOut && probeResult.code !== 0
       && `${probeOutput.stdout}${probeOutput.stderr}`.includes('Timed out waiting for tracker lock')
@@ -126,7 +139,7 @@ async function runWhileLocked({
 
   try {
     if (beforeMutationOutput) {
-      const deadline = Date.now() + 2_000;
+      const deadline = Date.now() + HARNESS_WAIT_MS;
       while (!run.output().stdout.includes(beforeMutationOutput) && Date.now() < deadline) {
         await sleep(10);
       }
@@ -145,7 +158,7 @@ async function runWhileLocked({
     lock.release();
   }
 
-  const result = await waitForWriter(run, 5_000);
+  const result = await waitForWriter(run, HARNESS_WAIT_MS);
   const { stdout, stderr } = run.output();
 
   const after = existsSync(tracker) ? readFileSync(tracker, 'utf-8') : '';
@@ -429,7 +442,7 @@ async function testReplyWatchConflictingRecommendations() {
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.end();
     const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
-    let result = await Promise.race([closePromise, sleep(3_000).then(() => null)]);
+    let result = await Promise.race([closePromise, sleep(HARNESS_WAIT_MS).then(() => null)]);
     if (result === null) {
       child.kill('SIGKILL');
       result = await closePromise;
@@ -448,6 +461,129 @@ async function testReplyWatchConflictingRecommendations() {
 }
 
 await testReplyWatchConflictingRecommendations();
+
+// --- Ownerless-directory grace period (#2306) -------------------------------
+//
+// A lock is ownerless for the instant between its `mkdirSync` and its
+// `owner.json` write, and the recover guard is ownerless for its whole life.
+// Judging either on `age > staleMs` alone lets a caller with a small staleMs
+// delete a directory created microseconds ago. These tests pin the floor that
+// keeps a brand-new ownerless directory off-limits, and — just as importantly —
+// pin that a genuinely old one is still reclaimed, so the floor cannot be
+// satisfied by disabling recovery outright.
+
+// Backdate a directory's mtime so the age check sees it as genuinely old.
+function backdate(path, ms) {
+  const when = new Date(Date.now() - ms);
+  utimesSync(path, when, when);
+}
+
+// The two "must not reclaim" tests describe the boundary the floor creates by
+// backdating the ownerless directory into it: older than the caller's staleMs
+// (so the unfloored code reclaims on its very first pass) but far younger than
+// OWNERLESS_GRACE_MS (so the floored code must not). Stating both sides
+// explicitly keeps the tests off the wall clock — asserting against a
+// directory created "just now" would instead depend on whether a sub-
+// millisecond age drifts past a 1 ms threshold before the loop looks again,
+// which is a race, not an assertion.
+//
+// With the age relation pinned, one pass is enough in both directions, so
+// retryMs is set above timeoutMs. That also stops the loop from creating and
+// deleting the guard directory a dozen times: Windows defers a directory's
+// real removal until the last handle closes, so a tight mkdir/rmdir cycle on
+// one path can surface EPERM instead of the timeout under test.
+const ONE_PASS = { timeoutMs: 150, retryMs: 200 };
+const INSIDE_GRACE_MS = 100;   // ownerless for 100ms: past staleMs, well inside the 1s floor
+const SMALL_STALE_MS = 10;
+
+async function testFreshOwnerlessLockIsNotStolen() {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-ownerless-'));
+  const lockDir = join(dir, 'tracker.lock');
+  try {
+    // Stands in for a winner that has run mkdirSync but not yet written
+    // owner.json — live, real, and unlabelled inside its acquisition window.
+    mkdirSync(lockDir);
+    backdate(lockDir, INSIDE_GRACE_MS);
+    let acquired = null;
+    let err = null;
+    try {
+      acquired = await acquireTrackerLock(lockDir, {
+        ...ONE_PASS, staleMs: SMALL_STALE_MS, tracker: join(dir, 'applications.md'),
+      });
+    } catch (e) {
+      err = e;
+    }
+    if (err?.code === 'LOCK_TIMEOUT' && existsSync(lockDir)) {
+      pass('ownerless lock inside the grace period is not stolen by a small staleMs');
+    } else {
+      fail(`ownerless lock inside the grace period was stolen (staleRecovered=${acquired?.staleRecovered}, err=${err?.code})`);
+    }
+    acquired?.release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function testAgedOwnerlessLockStillRecovers() {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-ownerless-aged-'));
+  const lockDir = join(dir, 'tracker.lock');
+  try {
+    // A real orphan: ownerless *and* older than any grace period.
+    mkdirSync(lockDir);
+    backdate(lockDir, 60_000);
+    const lock = await acquireTrackerLock(lockDir, {
+      timeoutMs: 1_000, retryMs: 20, staleMs: 1, tracker: join(dir, 'applications.md'),
+    });
+    if (lock.staleRecovered) {
+      pass('ownerless lock older than the grace period is still recovered');
+    } else {
+      fail('aged ownerless lock was not recovered — the grace period must not disable recovery');
+    }
+    lock.release();
+  } catch (e) {
+    fail(`aged ownerless lock was not recovered (${e.code ?? e.message})`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function testLiveRecoverGuardIsNotEvicted() {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-guard-live-'));
+  const lockDir = join(dir, 'tracker.lock');
+  const guardDir = `${lockDir}.recover`;
+  try {
+    // The lock itself is recoverable (dead owner PID), so the only thing that
+    // can hold recovery back is the guard — which another caller is holding
+    // right now. Evicting it puts two callers inside the decide-then-delete
+    // window the guard exists to serialize.
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999999, token: 'dead', tracker: 'x' }));
+    mkdirSync(guardDir);
+    backdate(guardDir, INSIDE_GRACE_MS);
+
+    let acquired = null;
+    let err = null;
+    try {
+      acquired = await acquireTrackerLock(lockDir, {
+        ...ONE_PASS, staleMs: SMALL_STALE_MS, tracker: join(dir, 'applications.md'),
+      });
+    } catch (e) {
+      err = e;
+    }
+    if (err?.code === 'LOCK_TIMEOUT' && existsSync(guardDir)) {
+      pass('recover guard held by a live caller is not evicted by a small staleMs');
+    } else {
+      fail(`live recover guard was evicted (staleRecovered=${acquired?.staleRecovered}, err=${err?.code}, guard=${existsSync(guardDir)})`);
+    }
+    acquired?.release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+await testFreshOwnerlessLockIsNotStolen();
+await testAgedOwnerlessLockStillRecovers();
+await testLiveRecoverGuardIsNotEvicted();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
