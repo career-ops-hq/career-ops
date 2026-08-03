@@ -137,4 +137,12 @@ if (!HAS_WEB) {
     const rows = [row(1, '4.0/5', 'evaluated'), row(2, '4.0/5', 'EVALUATED')];
     assert.equal(selectAwaitingDecision(rows, 6).length, 2);
   });
+
+  // EVALUATED_STATUS accepts the "Evaluada" alias (templates/states.yml), but
+  // the case-insensitivity test above only exercised "Evaluated" case variants
+  // — a regression that dropped the alias branch entirely would have passed it.
+  test('selectAwaitingDecision: includes rows using the "Evaluada" status alias', () => {
+    const rows = [row(1, '4.5/5', 'Evaluada'), row(2, '4.0/5', 'evaluada')];
+    assert.deepEqual(selectAwaitingDecision(rows, 6).map((r) => r.num), ['1', '2']);
+  });
 }
