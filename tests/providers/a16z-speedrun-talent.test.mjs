@@ -142,16 +142,16 @@ try {
 
   // PER_PAGE fallback pinned from both directions when the response omits
   // page_size/total_pages: a full 50-row page continues (fails if PER_PAGE
-  // regresses above 50), a 30-row page stops (fails if it regresses below 31).
+  // regresses above 50), a 49-row page stops (fails if it regresses below 50).
   const bareCalls = [];
   const bareCtx = {
     fetchJson: async (url) => {
       bareCalls.push(url);
-      return { jobs: Array.from({ length: bareCalls.length === 1 ? 50 : 30 }, (_, i) => mk(i)) };
+      return { jobs: Array.from({ length: bareCalls.length === 1 ? 50 : 49 }, (_, i) => mk(i)) };
     },
   };
   const bare = await provider.fetch({ max_pages: 5 }, bareCtx);
-  if (bareCalls.length === 2 && bare.length === 80) pass('fetch() stops on a short page via the PER_PAGE=50 fallback when page_size is absent');
+  if (bareCalls.length === 2 && bare.length === 99) pass('fetch() stops on a short page via the PER_PAGE=50 fallback when page_size is absent');
   else fail(`bare fallback = ${JSON.stringify({ calls: bareCalls.length, jobs: bare.length })}`);
 
   // Empty feed (e.g. a q: with no matches) returns [] after one call.
