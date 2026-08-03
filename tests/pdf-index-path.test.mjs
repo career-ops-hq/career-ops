@@ -72,16 +72,21 @@ withPdfIndexEnv('/elsewhere/custom-index.tsv', () => {
 });
 
 // THE REGRESSION (#2471). Given a tracker redirected into an isolated
-// workspace, When resolving the manifest with no override, Then the result must
-// live inside that workspace and never in the career-ops install directory —
-// otherwise an isolated run reads real user data.
+// workspace, When resolving the manifest with no override, Then it must be that
+// workspace's own manifest — never the career-ops install directory's, which is
+// how an isolated run came to read real user data.
+//
+// Asserted as exact equality rather than a prefix match: a prefix would also
+// accept a wrong filename or a nested path inside the workspace.
 withPdfIndexEnv(undefined, () => {
   const isolatedWorkspace = join('/tmp', 'career-ops-fixture');
   const resolved = resolvePdfIndexPath(join(isolatedWorkspace, 'data', 'applications.md'));
-  const installManifest = join(process.cwd(), 'data', 'pdf-index.tsv');
-  if (resolved.startsWith(isolatedWorkspace) && resolved !== installManifest) {
-    pass('a redirected tracker never resolves to the install directory\'s manifest');
+  const expected = join(isolatedWorkspace, 'data', 'pdf-index.tsv');
+  if (resolved === expected) {
+    pass('a redirected tracker resolves its own workspace manifest, not the install directory\'s');
   } else {
-    fail(`#2471 regression: isolated tracker resolved to ${resolved}`);
+    const installManifest = join(process.cwd(), 'data', 'pdf-index.tsv');
+    const leaked = resolved === installManifest ? " — that is the install directory's manifest" : '';
+    fail(`#2471 regression: expected ${expected}, got ${resolved}${leaked}`);
   }
 });
