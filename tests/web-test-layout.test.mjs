@@ -92,24 +92,46 @@ function globToRegExp(pattern) {
 /**
  * Lowest Node version an `engines` range provably admits, as [major, minor, patch].
  *
- * Deliberately narrow: one `>=` lower bound, optionally followed by upper-bound
- * constraints (`>=22 <25` is fine — an upper bound never admits an older Node).
- * Partial versions are accepted (`>=22`, `>=22.0`), absent components read as 0.
+ * Validates the WHOLE range against one deliberately narrow grammar:
+ * whitespace-separated comparators, each `>=`/`<=`/`<` followed by a 1-to-3
+ * component version, with exactly one `>=` lower bound. Every upper bound must
+ * leave that bound satisfiable, so `>=22 <25` and `>=22 <=22` are accepted
+ * while `>=22.0.0 <20.0.0` and `>=22.0.0 <22.0.0` are not.
  *
- * Everything else returns null and is reported as unverifiable rather than
- * guessed at, because guessing silently blesses a Node that cannot run the
- * suite: `^22.0.0 || >=20.0.0` admits 20, `^24 || ^20` admits 20, and
- * `<=23.0.0` sets no lower bound at all. Evaluating those properly means a
- * semver range evaluator, which is far more machinery than this one invariant
- * justifies — and `tests/` must stay dependency-free (it runs on a bare clone).
+ * Anything outside the grammar returns null and is reported as unverifiable
+ * rather than guessed at, because guessing silently blesses a Node that cannot
+ * run the suite. Refused, with the reason: `^22.0.0 || >=20.0.0` and
+ * `^24 || ^20` (unions admitting 20), `<=23.0.0` (no lower bound at all),
+ * `>=22.0.0 garbage` (trailing junk), `^22.0.0` / `22.x` (caret and x-range
+ * semantics this guard does not parse).
+ *
+ * Evaluating the full npm range grammar properly needs a semver evaluator.
+ * `semver` is not a dependency of this repo and is not installed, Node ships no
+ * built-in equivalent, and `tests/` must stay dependency-free — it ships to end
+ * users via SYSTEM_PATHS and #1440 requires the suite to run on a bare clone.
+ * So the burden is inverted: prove the floor or refuse the range.
  *
  * @param {string} range - An `engines.node` value.
  * @returns {number[]|null} [major, minor, patch], or null if not provable.
  */
 function floorOf(range) {
-  if (range.includes('||')) return null;
-  const m = range.trim().match(/^>=\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-  return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
+  const terms = range.trim().split(/\s+/).filter(Boolean);
+  const parsed = [];
+  for (const term of terms) {
+    const m = term.match(/^(>=|<=|<)(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
+    if (!m) return null;   // unknown operator, `||`, caret/x-range, or junk
+    parsed.push({ op: m[1], version: [Number(m[2]), Number(m[3] ?? 0), Number(m[4] ?? 0)] });
+  }
+  const lowerBounds = parsed.filter((t) => t.op === '>=');
+  if (lowerBounds.length !== 1) return null;
+  const floor = lowerBounds[0].version;
+  const order = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+  for (const { op, version } of parsed) {
+    // An upper bound at or below the floor makes the range unsatisfiable.
+    if (op === '<' && order(version, floor) <= 0) return null;
+    if (op === '<=' && order(version, floor) < 0) return null;
+  }
+  return floor;
 }
 
 // web/ is NOT in update-system.mjs's SYSTEM_PATHS but tests/ is, so this file
@@ -202,6 +224,35 @@ if (!existsSync(WEB_PKG)) {
       fail(`web suites the declared glob cannot reach (#2360): ${unreachable.join(', ')}`
         + ` — pattern(s) ${patterns.join(', ')} run, but these files do not match,`
         + ' so they are dead weight that looks like coverage');
+    }
+  });
+
+  // ── The floor parser itself, so a subtle range can't slip past ──
+  // Regression table for the #2468 review: every entry here once passed, or
+  // could plausibly be written by hand, and each would bless a Node that
+  // cannot run the suite.
+  scenario('that floorOf only accepts provable floors', () => {
+    const PROVABLE = ['>=22', '>=22.0', '>=22.0.0', '>=22 <25', '>=22 <=22'];
+    const REFUSED = [
+      '^22.0.0 || >=20.0.0',  // union — admits Node 20
+      '^24 || ^20',           // union — admits Node 20
+      '<=23.0.0',             // no lower bound at all
+      '>=22.0.0 <20.0.0',     // unsatisfiable
+      '>=22.0.0 <22.0.0',     // unsatisfiable
+      '>=22.0.0 garbage',     // trailing junk
+      '>=22 >=24',            // two lower bounds — ambiguous
+      '^22.0.0',              // caret semantics, not parsed here
+      '22.x',                 // x-range semantics, not parsed here
+      '',                     // absent
+    ];
+    const wrong = [
+      ...PROVABLE.filter((r) => floorOf(r) === null).map((r) => `${JSON.stringify(r)} should be provable`),
+      ...REFUSED.filter((r) => floorOf(r) !== null).map((r) => `${JSON.stringify(r)} should be refused`),
+    ];
+    if (wrong.length === 0) {
+      pass(`floorOf accepts ${PROVABLE.length} provable floors, refuses ${REFUSED.length} unprovable ranges`);
+    } else {
+      fail(`floorOf misjudged engines ranges (#2360): ${wrong.join('; ')}`);
     }
   });
 
