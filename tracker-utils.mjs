@@ -94,6 +94,45 @@ export function resolveTrackerPath(rootDir) {
 }
 
 /**
+ * Resolve the workspace root that owns a tracker, i.e. where `reports/` and
+ * `data/` sit: the tracker's parent in the `data/applications.md` layout, and
+ * the tracker's own directory in the root `applications.md` layout.
+ *
+ * Derive sibling paths from THIS rather than from a script's own location, so
+ * that pointing `CAREER_OPS_TRACKER` at another workspace moves the whole set
+ * together. A script that mixes the two (tracker from the env, manifest from
+ * its own directory) reads one workspace and writes another — which is how the
+ * merge-tracker suite came to read a developer's real `data/pdf-index.tsv`
+ * while writing an isolated temp tracker.
+ *
+ * @param {string} trackerPath - Tracker path, typically from resolveTrackerPath().
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRoot(trackerPath) {
+  const trackerDir = dirname(trackerPath);
+  return basename(trackerDir) === 'data' ? dirname(trackerDir) : trackerDir;
+}
+
+/**
+ * Resolve the PDF manifest (`data/pdf-index.tsv`) for the workspace that owns
+ * a tracker. `CAREER_OPS_PDF_INDEX` overrides it explicitly.
+ *
+ * One definition for every reader, because the manifest path was previously
+ * rebuilt from a literal in each script — and each picked its own base
+ * directory, so `merge-tracker.mjs` derived it from the tracker while
+ * `sync-pdf-flags.mjs` and `find.mjs` used their own install directory. Scripts
+ * that resolve the tracker from `CAREER_OPS_TRACKER` then read one workspace's
+ * manifest against another's tracker (#2471).
+ *
+ * @param {string} trackerPath - Tracker path, typically from resolveTrackerPath().
+ * @returns {string} Absolute path to the PDF manifest.
+ */
+export function resolvePdfIndexPath(trackerPath) {
+  return process.env.CAREER_OPS_PDF_INDEX
+    || join(resolveWorkspaceRoot(trackerPath), 'data', 'pdf-index.tsv');
+}
+
+/**
  * Convert the tracker path into one stable absolute spelling before hashing it.
  *
  * Equivalent tracker paths can be written in multiple ways, such as a relative

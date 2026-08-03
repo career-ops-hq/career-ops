@@ -17,11 +17,13 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, openTrackerTransaction } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
-const PDF_MANIFEST = process.env.CAREER_OPS_PDF_INDEX || join(CAREER_OPS, 'data', 'pdf-index.tsv');
+// Derived from the TRACKER, not from this script's location, so a redirected
+// CAREER_OPS_TRACKER moves the whole workspace together (#2471).
+const PDF_MANIFEST = resolvePdfIndexPath(APPS_FILE);
 
 const flags = { dryRun: false, json: false };
 for (const arg of process.argv.slice(2)) {
