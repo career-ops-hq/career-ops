@@ -28,28 +28,35 @@ function withPdfIndexEnv(value, body) {
   }
 }
 
+// Both sides of every path assertion are built with join(), so the separator
+// matches on Windows too (the suite runs on windows-latest). Deliberately NOT
+// resolve(): resolve() resolves against cwd and so prepends the current drive
+// on Windows, while resolveWorkspaceRoot() derives its answer with dirname(),
+// which never drive-qualifies — `C:\ws` vs `\ws` would fail there.
+const WORKSPACE = join('/ws');
+
 // Given a tracker in the data/ layout, When resolving its workspace root,
 // Then it is the tracker's grandparent (where reports/ and data/ live).
 {
-  const root = resolveWorkspaceRoot(join('/ws', 'data', 'applications.md'));
-  if (root === '/ws') pass('data/ layout: workspace root is the tracker\'s parent directory');
-  else fail(`data/ layout: expected /ws, got ${root}`);
+  const root = resolveWorkspaceRoot(join(WORKSPACE, 'data', 'applications.md'));
+  if (root === WORKSPACE) pass('data/ layout: workspace root is the tracker\'s parent directory');
+  else fail(`data/ layout: expected ${WORKSPACE}, got ${root}`);
 }
 
 // Given a tracker in the root layout, When resolving its workspace root,
 // Then it is the tracker's own directory.
 {
-  const root = resolveWorkspaceRoot(join('/ws', 'applications.md'));
-  if (root === '/ws') pass('root layout: workspace root is the tracker\'s own directory');
-  else fail(`root layout: expected /ws, got ${root}`);
+  const root = resolveWorkspaceRoot(join(WORKSPACE, 'applications.md'));
+  if (root === WORKSPACE) pass('root layout: workspace root is the tracker\'s own directory');
+  else fail(`root layout: expected ${WORKSPACE}, got ${root}`);
 }
 
 // Given no override, When resolving the manifest for a tracker,
 // Then it sits under that tracker's workspace in both layouts.
 withPdfIndexEnv(undefined, () => {
-  const fromData = resolvePdfIndexPath(join('/ws', 'data', 'applications.md'));
-  const fromRoot = resolvePdfIndexPath(join('/ws', 'applications.md'));
-  const expected = join('/ws', 'data', 'pdf-index.tsv');
+  const fromData = resolvePdfIndexPath(join(WORKSPACE, 'data', 'applications.md'));
+  const fromRoot = resolvePdfIndexPath(join(WORKSPACE, 'applications.md'));
+  const expected = join(WORKSPACE, 'data', 'pdf-index.tsv');
   if (fromData === expected && fromRoot === expected) {
     pass('manifest resolves under the tracker\'s workspace in both layouts');
   } else {
@@ -69,10 +76,10 @@ withPdfIndexEnv('/elsewhere/custom-index.tsv', () => {
 // live inside that workspace and never in the career-ops install directory —
 // otherwise an isolated run reads real user data.
 withPdfIndexEnv(undefined, () => {
-  const isolated = join('/tmp', 'career-ops-fixture', 'data', 'applications.md');
-  const resolved = resolvePdfIndexPath(isolated);
+  const isolatedWorkspace = join('/tmp', 'career-ops-fixture');
+  const resolved = resolvePdfIndexPath(join(isolatedWorkspace, 'data', 'applications.md'));
   const installManifest = join(process.cwd(), 'data', 'pdf-index.tsv');
-  if (resolved.startsWith(join('/tmp', 'career-ops-fixture')) && resolved !== installManifest) {
+  if (resolved.startsWith(isolatedWorkspace) && resolved !== installManifest) {
     pass('a redirected tracker never resolves to the install directory\'s manifest');
   } else {
     fail(`#2471 regression: isolated tracker resolved to ${resolved}`);
