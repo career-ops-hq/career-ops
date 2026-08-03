@@ -90,17 +90,25 @@ function globToRegExp(pattern) {
 }
 
 /**
- * Lowest Node version an `engines` range admits, as [major, minor, patch].
+ * Lowest Node version an `engines` range provably admits, as [major, minor, patch].
  *
- * Accepts the partial forms package.json ranges use in practice — `>=22`,
- * `>=22.0`, `^22.0.0`, `22.x` — defaulting absent components to 0. A compound
- * range like `>=20 <23` yields its first version, which is the floor.
+ * Deliberately narrow: one `>=` lower bound, optionally followed by upper-bound
+ * constraints (`>=22 <25` is fine — an upper bound never admits an older Node).
+ * Partial versions are accepted (`>=22`, `>=22.0`), absent components read as 0.
+ *
+ * Everything else returns null and is reported as unverifiable rather than
+ * guessed at, because guessing silently blesses a Node that cannot run the
+ * suite: `^22.0.0 || >=20.0.0` admits 20, `^24 || ^20` admits 20, and
+ * `<=23.0.0` sets no lower bound at all. Evaluating those properly means a
+ * semver range evaluator, which is far more machinery than this one invariant
+ * justifies — and `tests/` must stay dependency-free (it runs on a bare clone).
  *
  * @param {string} range - An `engines.node` value.
- * @returns {number[]|null} [major, minor, patch], or null if none found.
+ * @returns {number[]|null} [major, minor, patch], or null if not provable.
  */
 function floorOf(range) {
-  const m = range.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (range.includes('||')) return null;
+  const m = range.trim().match(/^>=\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
   return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
 }
 
@@ -203,8 +211,10 @@ if (!existsSync(WEB_PKG)) {
     const declaredFloor = floorOf(engines);
     const required = GLOB_FLOOR.join('.');
     if (!declaredFloor) {
-      fail(`web/package.json declares no engines.node floor (#2360, got ${JSON.stringify(engines)})`
-        + ` — its test script discovers by glob, which needs >=${required}`);
+      fail(`web/package.json declares no verifiable engines.node floor (#2360, got ${JSON.stringify(engines)})`
+        + ` — its test script discovers by glob, which needs >=${required}. State it as a single`
+        + ` \`>=<version>\` lower bound (an upper bound may follow); \`||\` alternatives are refused`
+        + ' because they can admit an older Node than the first term suggests');
       return;
     }
     const [dMajor, dMinor, dPatch] = declaredFloor;

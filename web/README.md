@@ -11,7 +11,7 @@ database, no server. If you never run it, nothing about your CLI workflow change
 
 ## Quick start
 
-Requires Node 20+.
+Requires Node 22+ (see [Tests](#tests) — `npm test`'s glob discovery needs it).
 
 ```bash
 cd web
