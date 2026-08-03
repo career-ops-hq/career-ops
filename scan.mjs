@@ -103,11 +103,20 @@ export function buildTitleFilter(titleFilter) {
   const positive = normalize(titleFilter?.positive);
   const negative = normalize(titleFilter?.negative);
 
+  // Optional seniority gate: when `seniority_required` is declared (non-empty),
+  // the title must also match at least one of its keywords. This stops IC-level
+  // titles that happen to contain a positive keyword (e.g. "Customer Success
+  // Manager", "Warehouse Operations Supervisor") from reaching the pipeline
+  // when the user only wants Director+ leadership roles.
+  const seniority = normalize(titleFilter?.seniority_required);
+  const gateSeniority = seniority.length > 0;
+
   return (title) => {
     const lower = (title || '').toLowerCase();
     const hasPositive = positive.length === 0 || positive.some(m => m(lower));
     const hasNegative = negative.some(m => m(lower));
-    return hasPositive && !hasNegative;
+    const hasSeniority = !gateSeniority || seniority.some(m => m(lower));
+    return hasPositive && !hasNegative && hasSeniority;
   };
 }
 

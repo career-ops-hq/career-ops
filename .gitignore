@@ -6,6 +6,7 @@ data/follow-ups.md
 data/pipeline.md
 data/scan-history.tsv
 data/pdf-index.tsv
+data/positioning-plan.md
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep

@@ -5792,6 +5792,46 @@ try {
   fail(`title filter acronym tests crashed: ${e.message}`);
 }
 
+// ── 11c. TITLE FILTER — seniority_required gate ─────────────────
+console.log('\n11c. Title filter — seniority_required gate');
+try {
+  const { buildTitleFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+  // When seniority_required is declared, a positive-only title match is NOT enough.
+  const gated = buildTitleFilter({ positive: ['operations'], seniority_required: ['director', 'vp'] });
+  if (gated('Director of Operations') === true) pass('seniority_required passes a Director+ title');
+  else fail('seniority_required should pass "Director of Operations"');
+  if (gated('VP of Operations') === true) pass('seniority_required passes a VP title');
+  else fail('seniority_required should pass "VP of Operations"');
+  if (gated('Operations Supervisor') === false) pass('seniority_required blocks an IC "Operations Supervisor" title');
+  else fail('seniority_required should block "Operations Supervisor"');
+  if (gated('Customer Success Manager') === false) pass('seniority_required blocks a Manager-level title');
+  else fail('seniority_required should block "Customer Success Manager"');
+
+  // Absent or empty seniority_required keeps legacy behavior (no gate).
+  const ungated = buildTitleFilter({ positive: ['operations'] });
+  if (ungated('Operations Supervisor') === true) pass('absent seniority_required keeps legacy permissive matching');
+  else fail('absent seniority_required must not gate');
+  const emptyGated = buildTitleFilter({ positive: ['operations'], seniority_required: [] });
+  if (emptyGated('Operations Supervisor') === true) pass('empty seniority_required keeps legacy permissive matching');
+  else fail('empty seniority_required must not gate');
+
+  // Negative still wins even when seniority matches.
+  const gatedNeg = buildTitleFilter({ positive: ['operations'], negative: ['junior'], seniority_required: ['director'] });
+  if (gatedNeg('Junior Director of Operations') === false) pass('negative keyword still rejects with seniority_required');
+  else fail('negative keyword should still reject with seniority_required');
+
+  // Malformed seniority_required entries must not crash.
+  const messySeniority = buildTitleFilter({ positive: ['operations'], seniority_required: ['director', null, 123, ''] });
+  if (messySeniority('Director of Operations') === true && messySeniority('Operations Supervisor') === false) {
+    pass('buildTitleFilter ignores non-string/empty seniority_required entries without crashing');
+  } else {
+    fail('buildTitleFilter should ignore non-string/empty seniority_required entries');
+  }
+} catch (e) {
+  fail(`seniority_required gate tests crashed: ${e.message}`);
+}
+
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
 
 console.log('\n12. Follow-up cadence logic');
