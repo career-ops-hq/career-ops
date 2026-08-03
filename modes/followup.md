@@ -165,7 +165,7 @@ After the user reviews and says they've sent a follow-up, record it:
    - `date` = today's date (YYYY-MM-DD)
    - `company` = company name
    - `role` = role title
-   - `channel` = Email / LinkedIn / Other
+   - `channel` = Email / LinkedIn / Phone / Other
    - `contact` = who it was sent to
    - `notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
 

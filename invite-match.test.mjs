@@ -6,7 +6,7 @@
  * Run: node invite-match.test.mjs
  */
 
-import { matchInvite, normalizeCompanyName } from './invite-match.mjs';
+import { matchInvite, normalizeCompanyName, extractPlatform } from './invite-match.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -86,6 +86,37 @@ eq(
   normalizeCompanyName('Northwind Solutions Group') === normalizeCompanyName('Northwind Technologies Holdings'),
   false
 );
+
+// extractPlatform — deterministic call-platform detection (issue #2126).
+// A meeting-platform URL always wins over a phone-number pattern that might
+// also be present in the same text (e.g. a dial-in fallback line under a
+// Zoom link) — the video link is the actual call medium in that case.
+eq('Zoom URL detected as Zoom', extractPlatform('Join: https://us05web.zoom.us/j/9998887777'), 'Zoom');
+eq('Teams (microsoft.com) URL detected as Microsoft Teams', extractPlatform('https://teams.microsoft.com/l/meetup-join/abc'), 'Microsoft Teams');
+eq('Teams (live.com) URL detected as Microsoft Teams', extractPlatform('https://teams.live.com/meet/abc'), 'Microsoft Teams');
+eq('Meet URL detected as Google Meet', extractPlatform('https://meet.google.com/xyz-abcd-efg'), 'Google Meet');
+eq('phone number with no meeting URL detected as Phone', extractPlatform('We will call you at 416-555-0199 for the screen.'), 'Phone');
+eq('meeting URL outranks a phone-number fallback line in the same text', extractPlatform('Zoom: https://zoom.us/j/1234567890\nDial-in: 416-555-0199'), 'Zoom');
+eq('no platform or phone signal returns null', extractPlatform('Please confirm your availability for the interview.'), null);
+// Lookalike hosts / email addresses must never be reported as a real
+// meeting platform — "silence stays silence" (issue #2128 review finding).
+eq('lookalike host (notzoom.us) is not detected as Zoom', extractPlatform('Please visit https://notzoom.us for details.'), null);
+eq('email address containing zoom.us is not detected as Zoom', extractPlatform('Contact support@zoom.us with questions.'), null);
+eq('lookalike domain (teams.microsoft.com.evil.example) is not detected as Microsoft Teams', extractPlatform('See https://teams.microsoft.com.evil.example for the link.'), null);
+// A platform-looking host must only be recognized at a true URL authority
+// boundary — not as a path segment or query value on an unrelated host
+// (issue #2128 review finding).
+eq('does not detect a platform-looking URL path (Zoom)', extractPlatform('See https://example.com/zoom.us for details.'), null);
+eq('does not detect a platform-looking query value (Zoom)', extractPlatform('See https://example.com?next=zoom.us for details.'), null);
+eq('does not detect a platform-looking URL path (Microsoft Teams)', extractPlatform('See https://example.com/teams.microsoft.com for details.'), null);
+eq('does not detect a platform-looking query value (Microsoft Teams)', extractPlatform('See https://example.com?next=teams.microsoft.com for details.'), null);
+eq('does not detect a platform-looking URL path (Google Meet)', extractPlatform('See https://example.com/meet.google.com for details.'), null);
+eq('does not detect a platform-looking query value (Google Meet)', extractPlatform('See https://example.com?next=meet.google.com for details.'), null);
+// An explicit port in the URL authority must not block detection (issue
+// #2128 review finding).
+eq('Zoom URL with explicit port detected as Zoom', extractPlatform('Join: https://zoom.us:443/j/123456789'), 'Zoom');
+eq('Microsoft Teams URL with explicit port detected as Microsoft Teams', extractPlatform('https://teams.microsoft.com:8443/l/meetup-join/abc'), 'Microsoft Teams');
+eq('Google Meet URL with explicit port detected as Google Meet', extractPlatform('https://meet.google.com:443/xyz-abcd-efg'), 'Google Meet');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

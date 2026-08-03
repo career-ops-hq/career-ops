@@ -36,6 +36,37 @@ const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
   : join(CAREER_OPS, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
+// CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path (used by tests).
+const BATCH_STATE_FILE = process.env.CAREER_OPS_BATCH_STATE
+  ? process.env.CAREER_OPS_BATCH_STATE
+  : join(CAREER_OPS, 'batch/batch-state.tsv');
+
+// Cross-check against batch-state.tsv (found 2026-07-30): a worker can write
+// a well-formed tracker TSV even when its own JSON result said "failed" --
+// e.g. two workers that fabricated a placeholder score (0.0/5, "Suspicious")
+// for a posting they never actually read, after being unable to extract the
+// JD. batch-runner.sh's JSON-status detection is the authority on whether an
+// offer really succeeded; a TSV whose report number maps to a "failed" row
+// there is fabricated evidence, not just cosmetically ambiguous like the
+// score/status column-swap check below -- it must never merge, however
+// well-formed the TSV itself looks in isolation.
+function loadFailedReportNumbers(path) {
+  const failed = new Set();
+  if (!existsSync(path)) return failed;
+  for (const line of readFileSync(path, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const status = cols[2];
+    const reportNum = cols[5];
+    if (status === 'failed' && reportNum && reportNum !== '-') {
+      const n = parseInt(reportNum, 10);
+      if (!isNaN(n)) failed.add(n);
+    }
+  }
+  return failed;
+}
+const FAILED_REPORT_NUMBERS = loadFailedReportNumbers(BATCH_STATE_FILE);
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
 const MIGRATE = process.argv.includes('--migrate');
@@ -619,6 +650,13 @@ for (const file of tsvFiles) {
   // 1. Exact report number match
   // 2. Company + role fuzzy match
   const reportNum = extractReportNum(addition.report);
+
+  if (reportNum && FAILED_REPORT_NUMBERS.has(reportNum)) {
+    console.warn(`⚠️  Skipping ${file}: report #${reportNum} is marked "failed" in batch-state.tsv — refusing to merge a tracker line for an offer the batch runner itself recorded as failed (possible fabricated result)`);
+    skipped++;
+    continue;
+  }
+
   let duplicate = null;
   // True only for a tier-1 match (report number + company): the one tier where
   // the addition is provably the same evaluation as the existing row, so its

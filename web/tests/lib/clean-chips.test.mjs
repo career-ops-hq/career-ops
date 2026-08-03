@@ -2,11 +2,11 @@
 // Imports directly from clean-chips.mjs (the single source of truth) so the
 // test and production code can never drift out of sync.
 //
-// Run:  node --test test-clean-chips.mjs
+// Run:  node --test tests/lib/clean-chips.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanChips } from "./src/lib/clean-chips.mjs";
+import { cleanChips } from "../../src/lib/clean-chips.mjs";
 
 /** Split a raw input string the same way filter-builder's commit() does —
  *  on unambiguous item separators only (never bare spaces). */

@@ -40,3 +40,23 @@ jobs:
       - name: Go dashboard tests
         run: go test ./...
         working-directory: dashboard
+
+  upgrade-gate:
+    name: Upgrade regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0            # harness needs release tags
+          persist-credentials: false # the harness only ever touches a local mirror
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'   # old updaters rebuild the dashboard during apply
+      - run: npm install --ignore-scripts
+      - name: Upgrade PR gate (newest old release -> this commit)
+        run: node upgrade-tests.mjs --pr-gate
+      - name: Canary (harness must be able to fail)
+        run: node upgrade-tests.mjs --canary

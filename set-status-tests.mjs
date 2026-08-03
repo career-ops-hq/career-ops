@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -618,8 +618,14 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   mkdirSync(lockDir, { recursive: true });
   writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999999, token: 'dead', tracker: 'x' }));
   // Orphaned guard left behind by a killed process (no owner.json → judged by age).
+  // Backdate it rather than sleeping: the guard has to read as genuinely
+  // abandoned, not merely as older than a small staleMs. Age alone is floored
+  // at OWNERLESS_GRACE_MS (#2306) so that a guard a live caller is holding is
+  // never evicted, and sleeping past that floor would make this test both
+  // slower and vaguer about which condition it is exercising.
   mkdirSync(`${lockDir}.recover`, { recursive: true });
-  await new Promise(r => setTimeout(r, 150));
+  const abandonedAt = new Date(Date.now() - 60_000);
+  utimesSync(`${lockDir}.recover`, abandonedAt, abandonedAt);
   try {
     const lock = await acquireTrackerLock(lockDir, { timeoutMs: 3000, retryMs: 25, staleMs: 50, tracker: 'x' });
     if (lock.staleRecovered) {
@@ -780,6 +786,235 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── explicit --row / --report selectors (tracker-row-vs-report-id) ──
+//
+// Tracker row IDs and report IDs are independent counters sharing one number
+// space, so they diverge permanently once any row exists without a report.
+// This fixture is that state in miniature: row #7 links report #5, and an
+// unrelated row #5 also exists — so "5" alone names two different companies.
+{
+  const TRACKER_DIVERGED = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 5 | 2026-06-05 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [4](../reports/004-globex-2026-06-05.md) | — |
+| 6 | 2026-06-06 | Initech | Data Engineer | 3.9/5 | Evaluated | ❌ | — | backfilled, no report |
+| 7 | 2026-06-07 | Acme | AI Engineer | 4.4/5 | Evaluated | ✅ | [5](../reports/005-acme-2026-06-07.md) | — |
+`;
+
+  const sandboxed = fn => {
+    const sandbox = makeSandbox(TRACKER_DIVERGED);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // Negative control: without an explicit selector the ambiguity is real and
+  // the guard must still fire. If this ever passes, the tests below prove
+  // nothing — they would just be exercising an unguarded path.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['5', 'Applied'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 || /report ID|mismatch/i.test(r.stderr)) {
+      pass('selectors: bare number on a diverged tracker is still guarded');
+    } else {
+      fail(`selectors: bare number should be guarded, got code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Globex') {
+      pass('selectors: --row 5 selects tracker row #5 (Globex)');
+    } else {
+      fail(`selectors: --row 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // The discriminating case: the SAME number through the two selectors must
+  // land on two different applications.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Acme') {
+      pass('selectors: --report 5 selects the row LINKING report #5 (Acme, row #7)');
+    } else {
+      fail(`selectors: --report 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '7', 'Applied'], sandbox);
+    if (r.code === 0 && /Acme/.test(r.stdout)) {
+      pass('selectors: --row bypasses the mismatch guard without --force');
+    } else {
+      fail(`selectors: --row 7 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', '--report', '5', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row + --report is rejected, tracker untouched');
+    } else {
+      fail(`selectors: --row + --report → code=${r.code}, tracker changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', 'abc', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: non-numeric --row is rejected before any write');
+    } else {
+      fail(`selectors: --row abc → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Globex', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row plus a positional selector is rejected');
+    } else {
+      fail(`selectors: --row + positional → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '999', 'Applied'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report with no linked row exits not-found (2)');
+    } else {
+      fail(`selectors: --report 999 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // A row with no report link must not be reachable via --report at all.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '6', 'Applied', '--json'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report never matches a report-less row by its tracker #');
+    } else {
+      fail(`selectors: --report 6 should not match row #6, got code=${r.code}\n${r.stdout}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row without a value exits 1 without writing');
+    } else {
+      fail(`selectors: bare --row → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Applied', '--dry-run'], sandbox);
+    if (r.code === 0 && readTracker(sandbox) === before) {
+      pass('selectors: --row honours --dry-run (no write)');
+    } else {
+      fail(`selectors: --row + --dry-run → code=${r.code}, changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+}
+
+// ── report-less row blind spot (#2346) ───────────────────────────
+//
+// merge-tracker's "Tracker #N already used; assigning #M" fallback leaves a
+// backfilled row at #N while the evaluated row lands at #M keeping its [N]
+// report link. A stale numeric selector then lands on the report-less row,
+// which the report-link guard cannot compare against anything.
+{
+  const TRACKER_2346 = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-acme-2026-06-01.md) | — |
+| 4 | 2026-06-04 | Umbrella | Coordinator | N/A | Applied | ❌ | — | backfilled, occupies #4 |
+| 5 | 2026-06-05 | Hooli | ML Engineer | 4.3/5 | Evaluated | ❌ | [4](../reports/004-hooli-2026-06-05.md) | pushed off #4 by the collision |
+`;
+
+  const boxed = fn => {
+    const sandbox = makeSandbox(TRACKER_2346);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // The bug: "4" names row #4 (Umbrella) AND report #4 (Hooli). Before the
+  // fix this silently rewrote Umbrella.
+  boxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['4', 'Rejected', '--note', 'rejected per email'], sandbox);
+    if (r.code === 3 && readTracker(sandbox) === before) {
+      pass('#2346: bare number matching a report-less row is refused, tracker untouched');
+    } else {
+      fail(`#2346: expected exit 3 + no write, got code=${r.code} changed=${readTracker(sandbox) !== before}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (parsed?.code === 'report-number-ambiguous' && parsed?.linkedBy?.[0]?.company === 'Hooli') {
+      pass('#2346: structured error names the row that links the report');
+    } else {
+      fail(`#2346: json payload = ${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // Both escapes must still reach their intended, DIFFERENT rows.
+  boxed(sandbox => {
+    const r = runSetStatus(['--report', '4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Hooli') {
+      pass('#2346: --report 4 reaches Hooli (the actually-rejected application)');
+    } else {
+      fail(`#2346: --report 4 → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['--row', '4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Umbrella') {
+      pass('#2346: --row 4 still reaches Umbrella');
+    } else {
+      fail(`#2346: --row 4 → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['4', 'Rejected', '--force'], sandbox);
+    if (r.code === 0 && /Umbrella/.test(r.stdout)) {
+      pass('#2346: --force still overrides, unchanged escape hatch');
+    } else {
+      fail(`#2346: --force → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // Negative control for the new check: a report-less row whose number NO other
+  // row links is unambiguous and must keep working. Without this, the fix could
+  // be over-broad (refusing every backfilled row) and the tests would not notice.
+  boxed(sandbox => {
+    const r2 = runSetStatus(['1', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r2.stdout); } catch {}
+    if (r2.code === 0 && parsed?.company === 'Acme') {
+      pass('#2346: unambiguous bare number is still accepted (not over-broad)');
+    } else {
+      fail(`#2346: bare "1" should still work, got code=${r2.code} company=${parsed?.company}`);
+    }
+  });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
