@@ -31,7 +31,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
-import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -104,12 +104,42 @@ async function runDiscovered(filter = null) {
     process.exit(1);
   }
   for (const f of files) {
+    const rel = f.slice(ROOT.length + 1);
+    const src = readFileSync(f, 'utf-8');
     // Discovered suites run IN-PROCESS and share this suite's counters. A
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(readFileSync(f, 'utf-8'))) {
-      fail(`${f.slice(ROOT.length + 1)} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+    if (/\bprocess\.exit\s*\(/.test(src)) {
+      fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+      continue;
+    }
+    // A node:test suite reports through node's OWN runner, which touches none
+    // of the counters above, and it runs its tests asynchronously AFTER the
+    // import resolves — so finish()'s process.exit() killed them mid-flight and
+    // discarded the result. A deliberately failing suite dropped into tests/
+    // printed "2049 passed, 0 failed / All tests passed" and exited 0
+    // (verified 2026-08-03). That silently covered all 16 node:test suites
+    // here, including every provider test: they only ever reported under a
+    // direct `node --test`.
+    //
+    // Run those in a child process and fold the real exit code into the
+    // counters. Importing them is what loses the result, so this cannot be
+    // fixed in finish(); it has to happen where the suite is invoked.
+    if (/from ['"]node:test['"]/.test(src)) {
+      const out = run(NODE, ['--test', f]);
+      if (out === null) {
+        const detail = lastRunFailure();
+        fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
+        // Surface the runner's own summary; a bare "failed" is not actionable.
+        const tail = (detail?.stderr || detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
+        for (const line of tail) console.log(`      ${line}`);
+      } else {
+        // Both reporters: TAP prints "# pass N", the default spec reporter
+        // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
+        const count = (out.match(/^(?:#|ℹ) pass (\d+)/m) ?? [])[1];
+        pass(`${rel} — node:test suite passed${count ? ` (${count} tests)` : ''}`);
+      }
       continue;
     }
     await import(pathToFileURL(f).href);

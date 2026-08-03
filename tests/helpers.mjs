@@ -56,9 +56,25 @@ export function results() { return { passed, failed, warnings }; }
  * Moved verbatim from the tail of test-all.mjs — output must stay byte-identical.
  */
 export function finish() {
+  // A discovered suite under tests/ that uses node:test reports through node's
+  // own runner, which increments none of the counters above. node:test does set
+  // process.exitCode = 1 when one of its tests fails, but process.exit(0) below
+  // overwrites that -- so a failing tests/*.test.mjs printed "All tests passed"
+  // and exited 0. Verified 2026-08-03 by dropping a deliberately failing suite
+  // into tests/: "📊 2049 passed, 0 failed" / "🟢 All tests passed" / exit 0.
+  //
+  // That silently covered every node:test suite in the directory (url-identity,
+  // digest, stats, filter-precision, pipeline-state, the provider tests...):
+  // they only ever reported when run directly with `node --test`.
+  //
+  // Read before printing so the summary line tells the truth too. The counters
+  // stay authoritative for inline assertions; this only adds a failure source
+  // that was already being computed and thrown away.
+  const runnerFailed = Boolean(process.exitCode);
   console.log('\n' + '='.repeat(50));
-  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`);
-  if (failed > 0) {
+  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
+    + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
+  if (failed > 0 || runnerFailed) {
     console.log('🔴 TESTS FAILED — do NOT push/merge until fixed\n');
     process.exit(1);
   } else if (warnings > 0) {
