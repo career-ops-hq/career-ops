@@ -7705,6 +7705,112 @@ try {
   fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
 }
 
+// ── VERIFY-PIPELINE GROUPING KEYS: NON-LATIN COMPANIES AND ROLES (#2393) ──
+// Same root cause as the blind-via key above, one layer up. verify-pipeline
+// keyed Check 2 (duplicate tracker rows), Check 9 (duplicate report files) and
+// Check 11 (Via channels) by stripping [^a-z0-9], which erases CJK outright.
+// On a Japanese pipeline every company AND every role keyed to '', so unrelated
+// rows were reported as one "possible duplicates" cluster and the real signal
+// drowned — while Check 11 saw every non-Latin agency as 'direct' and never
+// fired. Controls: genuine same-company+same-role pairs must still be flagged.
+console.log('\n🧪 Testing verify-pipeline grouping keys with non-Latin text (#2393)...');
+try {
+  const vpKeyTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-unicode-'));
+  try {
+    const vpKeyReports = join(vpKeyTmp, 'reports');
+    mkdirSync(vpKeyReports, { recursive: true });
+    const vpKeyTracker = join(vpKeyTmp, 'applications.md');
+    const vpKeyEnv = {
+      ...process.env, CAREER_OPS_TRACKER: vpKeyTracker, CAREER_OPS_REPORTS: vpKeyReports,
+    };
+    const jaReport = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 4.0\n\`\`\`\n`;
+
+    // Two different roles at one non-Latin company: not duplicate reports.
+    writeFileSync(join(vpKeyReports, '001-yamabuki-2026-01-04.md'), jaReport('株式会社ヤマブキ', 'データアナリスト'));
+    writeFileSync(join(vpKeyReports, '002-yamabuki-2026-01-05.md'), jaReport('株式会社ヤマブキ', 'バックエンドエンジニア（アプリ基盤）'));
+    // Control: the same non-Latin role twice must still be caught.
+    writeFileSync(join(vpKeyReports, '003-kogane-2026-01-06.md'), jaReport('株式会社コガネ', 'プロダクトエンジニア'));
+    writeFileSync(join(vpKeyReports, '004-kogane-2026-01-07.md'), jaReport('株式会社コガネ', 'プロダクトエンジニア'));
+
+    writeFileSync(vpKeyTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Different non-Latin companies AND different non-Latin roles.
+      '| 1 | 2026-01-04 | 株式会社アカネ | — | バックエンドエンジニア（自社サービス「配膳便」） | 4.1/5 | Evaluated | ❌ | [1](reports/001-yamabuki-2026-01-04.md) | ok |\n' +
+      '| 2 | 2026-01-05 | 株式会社コガネ | — | プロダクトエンジニア（サーバサイド/フロントエンド両面） | 4.1/5 | Evaluated | ❌ | [2](reports/002-yamabuki-2026-01-05.md) | ok |\n' +
+      // (b) One company, two genuinely different non-Latin roles.
+      '| 3 | 2026-01-06 | 株式会社ヤマブキ | — | データアナリスト | 3.2/5 | Evaluated | ❌ | [3](reports/003-kogane-2026-01-06.md) | ok |\n' +
+      '| 4 | 2026-01-07 | 株式会社ヤマブキ | — | バックエンドエンジニア（アプリ基盤） | 4.4/5 | Evaluated | ❌ | [4](reports/004-kogane-2026-01-07.md) | ok |\n' +
+      // (c) Control: identical non-Latin company+role is a real duplicate.
+      '| 5 | 2026-01-08 | 株式会社ミドリ | — | フルスタックエンジニア | 4.3/5 | Evaluated | ❌ | — | first |\n' +
+      '| 6 | 2026-01-09 | 株式会社ミドリ | — | フルスタックエンジニア | 4.3/5 | Evaluated | ❌ | — | second |\n' +
+      // (d) Check 11: one role reached through two non-Latin agencies.
+      '| 7 | 2026-01-10 | 株式会社アオゾラ | リクルート | 会計プロダクトエンジニア | 4.0/5 | Applied | ❌ | — | via A |\n' +
+      '| 8 | 2026-01-11 | 株式会社アオゾラ | パーソル | 会計プロダクトエンジニア | 4.0/5 | Applied | ❌ | — | via B |\n' +
+      // (e) Combining marks: Devanagari matras carry meaning and have no
+      // precomposed form, so NFKC cannot fold them into the base letter.
+      // Dropping \p{M} would key कंपनी and कपनी identically — the same
+      // collision as (a), one script over, and modes/hi ships a Hindi market.
+      '| 9 | 2026-01-12 | कंपनी सॉफ्टवेयर | — | बैकएंड इंजीनियर | 4.0/5 | Evaluated | ❌ | — | with matras |\n' +
+      '| 10 | 2026-01-13 | कपनी सफटवयर | — | बकएड इजीनियर | 4.0/5 | Evaluated | ❌ | — | matras stripped |\n');
+
+    const vpKeyOut = run(NODE, ['verify-pipeline.mjs'], { env: vpKeyEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (vpKeyOut === null) {
+      fail('verify-pipeline crashed on non-Latin grouping fixture (#2393)');
+    } else {
+      const dupLines = vpKeyOut.split('\n').filter(l => l.includes('Possible duplicates'));
+
+      if (!dupLines.some(l => /#1\b/.test(l) && /#2\b/.test(l))) {
+        pass('verify-pipeline keeps distinct non-Latin companies apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered unrelated non-Latin companies: ${dupLines.join(' | ')}`);
+      }
+
+      if (!dupLines.some(l => /#3\b/.test(l) && /#4\b/.test(l))) {
+        pass('verify-pipeline keeps distinct non-Latin roles at one company apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered distinct non-Latin roles: ${dupLines.join(' | ')}`);
+      }
+
+      if (dupLines.some(l => /#5\b/.test(l) && /#6\b/.test(l))) {
+        pass('verify-pipeline still flags a genuine non-Latin duplicate row pair (#2393)');
+      } else {
+        fail('verify-pipeline missed a genuine duplicate with identical non-Latin company+role');
+      }
+
+      const dupReportLines = vpKeyOut.split('\n').filter(l => l.includes('Duplicate reports for same company+role'));
+      if (!dupReportLines.some(l => l.includes('001-yamabuki') && l.includes('002-yamabuki'))) {
+        pass('verify-pipeline keeps two non-Latin roles under one company slug apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered distinct non-Latin report roles: ${dupReportLines.join(' | ')}`);
+      }
+      if (dupReportLines.some(l => l.includes('003-kogane') && l.includes('004-kogane'))) {
+        pass('verify-pipeline still flags two reports for one non-Latin company+role (#2393)');
+      } else {
+        fail('verify-pipeline missed a genuine duplicate report pair with a non-Latin role');
+      }
+
+      if (vpKeyOut.includes('Cross-channel duplicate') && vpKeyOut.includes('リクルート') && vpKeyOut.includes('パーソル')) {
+        pass('verify-pipeline flags one role reached via two non-Latin agencies (#2393)');
+      } else {
+        fail('verify-pipeline missed a cross-channel duplicate between two non-Latin agencies');
+      }
+
+      if (!dupLines.some(l => /#9\b/.test(l) && /#10\b/.test(l))) {
+        pass('verify-pipeline keeps Devanagari names differing only by combining marks apart');
+      } else {
+        fail(`verify-pipeline collapsed Devanagari names that differ by matras: ${dupLines.join(' | ')}`);
+      }
+    }
+  } finally {
+    rmSync(vpKeyTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline non-Latin grouping key tests crashed (#2393): ${e.message}`);
+}
+
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
 // `parts.slice(1, -1)`, which assumes the closing `|` produced a trailing empty
 // cell. A valid row written WITHOUT a trailing pipe keeps its real last cell

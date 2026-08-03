@@ -22,7 +22,10 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns } from './tracker-parse.mjs';
+import {
+  looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
+  normalizeTextKey, normalizeVia,
+} from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -144,8 +147,10 @@ if (badStatuses === 0) ok('All statuses are canonical');
 const companyRoleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
-  const key = e.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '::' +
-    e.role.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+  // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
+  // so every Japanese company and every Japanese role keyed to '' and unrelated
+  // rows were reported as "possible duplicates".
+  const key = normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
 }
@@ -251,7 +256,9 @@ if (staleSentinels === 0) ok('No stale reservation sentinels');
 // Warning-level, not error: duplicates can be legitimate (re-evaluation
 // after a JD change).
 const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
-const normalizeKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Shares normalizeTextKey with Check 2 so a report pair and a tracker pair
+// can never disagree about whether two roles are the same (#2393).
+const normalizeKey = normalizeTextKey;
 
 // Role comes from the report body: the Machine Summary YAML fence when
 // present (field names are exact by contract), else the title line
@@ -351,10 +358,12 @@ for (const e of entries) {
 }
 // Same company+role reached through different channels: both submissions are
 // real, so this is a warning to the human (double-submission risk), never an
-// auto-merge. Channel identity is normalized the same way merge-tracker.mjs
-// normalizes companies (strip non-alphanumerics, lowercase), so "Hays" and
-// "HAYS " read as one channel; the raw spelling is kept for the message.
-const normalizeChannel = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'direct';
+// auto-merge. Channel identity uses the shared normalizeVia() that merge-tracker
+// and dedup-tracker key agencies with (#2397), so "Hays" and "HAYS " read as one
+// channel while リクルート and パーソル stay two; the raw spelling is kept for
+// the message. Before this, both non-Latin agencies normalized to '' and fell
+// back to 'direct', hiding exactly the double-submission this check exists for.
+const normalizeChannel = (v) => normalizeVia(v ?? '') || 'direct';
 const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
