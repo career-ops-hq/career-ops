@@ -896,7 +896,7 @@ A bare number or company name is convenient, but becomes ambiguous when multiple
 
 `--row` and `--report` are mutually exclusive. Because an explicit selector answers the report-mismatch guard rather than overriding it, `--row` bypasses that guard without needing `--force` (which silences the check while the ambiguity is still real).
 
-This is worth preferring in practice, not just in principle: on a diverged tracker the guard fires on nearly every bare numeric call, and a guard that always fires trains callers to reach for `--force` by reflex — which disables it everywhere, including the cases it was written to catch. Reach for a selector (or the company name) instead.
+This is worth preferring in practice, not just in principle. Once the counters have diverged, a bare number trips the guard whenever the row it matches links a report number other than its own `#`, or links no report at all while a different row claims that number as its report — so on a tracker with a wide gap the check keeps firing, and a check that keeps firing teaches callers to pass `--force` by reflex, which disables it everywhere including the cases it was written to catch. Reach for a selector (or the company name) instead.
 
 ### Bare numbers vs. explicit selectors
 
