@@ -282,6 +282,31 @@ try {
   fail(`merge-tracker Notes-preservation tests crashed: ${e.message}`);
 }
 
+// ── #2483: placeholder Notes collapse to the marker, not gain a separator ───
+// mergeNotes() only collapsed empty/whitespace/bare-period cells. The tracker's
+// own "no data" sentinels (`—` / `-` / `N/A` — the looksLikeScoreCell set minus
+// the score-only DUP) stayed truthy after the trim, so a placeholder row came
+// out of a score upgrade as `—. Re-eval …`, a separator the row never had.
+console.log('\nmerge-tracker.mjs — placeholder Notes collapse on upgrade (#2483)');
+try {
+  for (const ph of ['—', '-', 'N/A']) {
+    const row =
+      '| 1 | 2026-01-01 | Acme | Staff Data Platform Engineer | 4.0/5 | Evaluated | ❌ | ' +
+      `[1](reports/001-acme-2026-01-01.md) | ${ph} |\n`;
+    const upgraded = runMergeDetailed({
+      '001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-01-01.md)\tre-scored after JD refresh\n',
+    }, { rows: row });
+    const notes = (dataRows(upgraded.tracker)[0] || '').split('|').map(c => c.trim())[9] ?? '';
+    if (notes === 'Re-eval 2026-03-01 (4→4.7): re-scored after JD refresh') {
+      pass(`placeholder Notes "${ph}" collapses to the marker alone`);
+    } else {
+      fail(`placeholder "${ph}" leaked into the merged Notes: "${notes}"`);
+    }
+  }
+} catch (e) {
+  fail(`merge-tracker placeholder-notes tests crashed: ${e.message}`);
+}
+
 // ── #2394: a tracker with no separator row dropped everything, silently ─────
 // The insert point comes from SEPARATOR_ROW_RE. With no match, insertIdx
 // stayed -1, the splice was skipped with no else, and the run went on to write
