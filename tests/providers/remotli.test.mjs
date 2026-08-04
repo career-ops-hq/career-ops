@@ -61,17 +61,23 @@ try {
     fail(`normalizeRemotliJob description = ${JSON.stringify(full?.description)}`);
   }
 
-  // Double-encoded markup (&lt;p&gt;) must not survive as literal "<p>" text.
-  // A single strip-then-decode leaves it behind — it hit 38 of 50 rows on a
-  // live page and would poison the cross-listing fingerprint.
-  const doubleEncoded = normalizeRemotliJob(row({
+  // Nested markup and entities inside it both resolve in a single pass.
+  //
+  // An earlier revision of this provider carried a second tag-strip after the
+  // decode, to cope with rows that arrived entity-encoded (`&lt;p&gt;…`) rather
+  // than as real HTML. That was compensating for the board serving a mix of
+  // both encodings from /api/jobs, and it cost two HIGH CodeQL alerts
+  // (js/double-escaping, js/bad-tag-filter). The API now decodes on the way out
+  // and always answers with real tags, so the standard strip-once-then-decode
+  // order — shared with agentic-jobs.mjs and avature.mjs — is sufficient.
+  const nested = normalizeRemotliJob(row({
     title: 'T', slug: 'de', status: 'active',
-    description: '&lt;p&gt;Own the numbers&lt;/p&gt;&lt;li&gt;FP&amp;amp;A&lt;/li&gt;',
+    description: '<div><p>Own the <b>numbers</b></p><li>FP&amp;A</li></div>',
   }));
-  if (doubleEncoded && !/<[a-z/]/i.test(doubleEncoded.description) && /Own the numbers/.test(doubleEncoded.description)) {
-    pass('normalizeRemotliJob strips markup that only appears after entity decoding (double-encoded rows)');
+  if (nested && !/[<>]/.test(nested.description) && /Own the numbers/.test(nested.description) && /FP&A/.test(nested.description)) {
+    pass('normalizeRemotliJob resolves nested tags and inner entities in one pass');
   } else {
-    fail(`normalizeRemotliJob double-encoded description = ${JSON.stringify(doubleEncoded?.description)}`);
+    fail(`normalizeRemotliJob nested description = ${JSON.stringify(nested?.description)}`);
   }
 
   if (full && full.salary && full.salary.min === 180000 && full.salary.max === 220000 && full.salary.currency === 'CHF') {
@@ -126,15 +132,37 @@ try {
   // RangeError above 0x10FFFF and Number.isFinite does not catch it, so an
   // unguarded decode let one malformed description abort the entire page fetch
   // and drop every job on the board.
-  let entityThrew = null;
+  // The contract is not merely "does not throw": _html-entities.mjs passes an
+  // out-of-range entity through VERBATIM (the regex matches, the range guard
+  // rejects the codepoint, the original text is returned). Assert that the
+  // surrounding prose survives intact and the entity is neither dropped nor
+  // replaced with a replacement character.
+  const OUT_OF_RANGE = 'pay &#99999999; and &#xFFFFFFF; ok';
+  let entityResult;
   try {
-    const dec = normalizeRemotliJob(row({ title: 'T', slug: 'ent', status: 'active', description: 'pay &#99999999; and &#xFFFFFFF; ok' }));
-    entityThrew = dec && !/�?\d{8}/.test(dec.description) ? false : false;
+    const dec = normalizeRemotliJob(row({ title: 'T', slug: 'ent', status: 'active', description: OUT_OF_RANGE }));
+    entityResult = dec ? dec.description : '<row dropped>';
   } catch (e) {
-    entityThrew = e;
+    entityResult = `<threw: ${e && e.message}>`;
   }
-  if (entityThrew === false) pass('normalizeRemotliJob survives out-of-range numeric/hex entities (no RangeError)');
-  else fail(`normalizeRemotliJob threw on an out-of-range entity: ${entityThrew}`);
+  if (entityResult === OUT_OF_RANGE) {
+    pass('normalizeRemotliJob passes out-of-range numeric/hex entities through verbatim (no RangeError, no data loss)');
+  } else {
+    fail(`normalizeRemotliJob mangled an out-of-range entity: ${JSON.stringify(entityResult)}`);
+  }
+
+  // In-range entities must still decode — otherwise the assertion above would
+  // also pass on a decoder that had been accidentally turned into a no-op.
+  // Input shape is real HTML with an encoded ampersand, which is what /api/jobs
+  // serves: strip removes the tags, decode then resolves the entity. (This is
+  // the strip-once-then-decode order shared with agentic-jobs.mjs / avature.mjs;
+  // it relies on the API emitting real tags rather than `&lt;p&gt;`.)
+  const decoded = normalizeRemotliJob(row({ title: 'T', slug: 'e2', status: 'active', description: '<p>R&amp;D team</p>' }));
+  if (decoded && decoded.description === 'R&D team') {
+    pass('normalizeRemotliJob strips tags then decodes entities (house order)');
+  } else {
+    fail(`normalizeRemotliJob entity decode = ${JSON.stringify(decoded && decoded.description)}`);
+  }
 
   // …and the same must hold through fetch(), where one bad row previously
   // killed every other job on the page.
@@ -199,6 +227,31 @@ try {
   if (capped.length === 1) pass('fetch() honors ctx.maxPages (health probe reads one page only)');
   else fail(`fetch() with maxPages:1 requested ${capped.length} pages`);
 
+  // entry.max_pages is the per-target override used when ctx.maxPages is absent
+  // (the DEFAULT_MAX_PAGES fallback sits behind it). Previously unexercised.
+  const entryCapped = [];
+  await remotli.fetch({ name: 'Remotli', max_pages: 2 }, {
+    fetchJson: async (url) => {
+      entryCapped.push(url);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), pagination: { page: 1, limit: 50, total: 500, totalPages: 10 } };
+    },
+  });
+  if (entryCapped.length === 2) pass('fetch() honors entry.max_pages when ctx.maxPages is absent');
+  else fail(`fetch() with entry.max_pages:2 requested ${entryCapped.length} pages`);
+
+  // ctx.maxPages must win over entry.max_pages — the health probe has to be able
+  // to force a single page regardless of how the target is configured.
+  const bothSet = [];
+  await remotli.fetch({ name: 'Remotli', max_pages: 5 }, {
+    maxPages: 1,
+    fetchJson: async (url) => {
+      bothSet.push(url);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), pagination: { page: 1, limit: 50, total: 500, totalPages: 10 } };
+    },
+  });
+  if (bothSet.length === 1) pass('fetch() lets ctx.maxPages override entry.max_pages');
+  else fail(`fetch() with ctx.maxPages:1 + entry.max_pages:5 requested ${bothSet.length} pages`);
+
   // Unexpected shape → throws rather than silently returning nothing.
   let threw = false;
   try {
@@ -208,6 +261,76 @@ try {
   }
   if (threw) pass('fetch() throws on an unexpected API response shape (no silent empty result)');
   else fail('fetch() should throw when the jobs array is absent');
+
+  // --- dead-board contract ---------------------------------------------------
+  // Half one: a first-request failure must throw, so a genuinely dead board is
+  // reported as dead rather than as an empty board.
+  let firstPageThrew = false;
+  try {
+    await remotli.fetch({ name: 'X' }, {
+      fetchJson: async () => { throw new Error('ECONNREFUSED'); },
+    });
+  } catch (e) {
+    firstPageThrew = /ECONNREFUSED/.test(e.message);
+  }
+  if (firstPageThrew) pass('fetch() throws when the FIRST request fails (dead board stays dead)');
+  else fail('fetch() swallowed a first-request failure');
+
+  // A malformed page-1 body is not proof of life either: the shape error must
+  // propagate rather than being treated as "reachable, just empty".
+  let firstPageShapeThrew = false;
+  try {
+    await remotli.fetch({ name: 'X' }, {
+      fetchJson: async (url) => {
+        if (Number(new URL(url).searchParams.get('page')) === 1) return { wrong: true };
+        return { jobs: [], pagination: { totalPages: 1 } };
+      },
+    });
+  } catch (e) {
+    firstPageShapeThrew = /unexpected API response/.test(e.message);
+  }
+  if (firstPageShapeThrew) pass('fetch() treats a malformed first page as a dead board, not as proof of life');
+  else fail('fetch() accepted a malformed first page as reachable');
+
+  // Half two: once one page has parsed, a transient mid-scan failure keeps the
+  // rows already collected instead of discarding the whole target.
+  let partial = null;
+  let partialThrew = null;
+  try {
+    partial = await remotli.fetch({ name: 'X' }, {
+      fetchJson: async (url) => {
+        const page = Number(new URL(url).searchParams.get('page'));
+        if (page >= 3) throw new Error('ETIMEDOUT on page 3');
+        return { jobs: Array.from({ length: 50 }, (_, i) => mk(page * 100 + i)), pagination: { page, limit: 50, total: 400, totalPages: 8 } };
+      },
+    });
+  } catch (e) {
+    partialThrew = e;
+  }
+  if (!partialThrew && partial && partial.length === 100) {
+    pass('fetch() keeps pages 1-2 when page 3 fails mid-scan (partial-keep, not total loss)');
+  } else {
+    fail(`fetch() mid-scan failure: threw=${partialThrew && partialThrew.message} length=${partial && partial.length}`);
+  }
+
+  // Same idiom, malformed body rather than a thrown request.
+  let partialShape = null;
+  try {
+    partialShape = await remotli.fetch({ name: 'X' }, {
+      fetchJson: async (url) => {
+        const page = Number(new URL(url).searchParams.get('page'));
+        if (page >= 2) return { garbage: true };
+        return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), pagination: { page: 1, limit: 50, total: 400, totalPages: 8 } };
+      },
+    });
+  } catch {
+    partialShape = null;
+  }
+  if (partialShape && partialShape.length === 50) {
+    pass('fetch() keeps page 1 when a later page returns a malformed body');
+  } else {
+    fail(`fetch() malformed later page returned ${partialShape && partialShape.length}`);
+  }
 
 } catch (e) {
   fail(`remotli provider tests crashed: ${e.message}`);

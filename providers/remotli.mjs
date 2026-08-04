@@ -65,15 +65,20 @@ function toEpochMs(value) {
 // range guard (#1639), where checking only Number.isFinite still lets
 // String.fromCodePoint throw a RangeError on "&#99999999;" and crash the whole
 // parse. Same one-line shape as agentic-jobs.mjs / avature.mjs.
-// Strip is applied on BOTH sides of the decode: a subset of rows arrive
-// double-encoded (`&lt;p&gt;…`, presumably re-escaped somewhere upstream of the
-// board), so decoding after a single strip turns that markup back into literal
-// "<p>" text — 38 of 50 rows on a live page. The second strip removes what
-// decoding revealed, which keeps the fingerprint free of markup noise.
+//
+// Strip once, then decode — the house order, and it is now the correct one for
+// this source. An earlier revision stripped on both sides of the decode because
+// most rows arrived entity-encoded (`&lt;p&gt;…`), so a single leading strip
+// found no tags and decoding afterwards resurrected the markup as literal "<p>"
+// text. That second pass was the root cause of two HIGH CodeQL alerts
+// (js/double-escaping, js/bad-tag-filter), and it was compensating for a defect
+// on the board's side rather than anything intrinsic to the format: /api/jobs
+// mixed entity-encoded and raw-HTML descriptions row by row. The API now decodes
+// on the way out and always answers with real HTML, so one strip is sufficient
+// and the compensating pass is gone.
 function htmlToText(html) {
   if (typeof html !== 'string' || !html) return '';
-  const decoded = decodeEntities(html.replace(/<[^>]+>/g, ' '));
-  return decoded.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 /** Fold `location` together with any extra `allLocations` into one string. */
@@ -197,28 +202,48 @@ export default {
     /** @type {any[]} */
     const out = [];
     let totalPages = 1;
+    // Proof of life. Only a well-formed response sets this: a page-1 failure —
+    // or a page-1 body that isn't `{ jobs: [...] }` — means we cannot tell a
+    // live board from a broken one, so it must throw and surface as a dead
+    // target. Once one page has parsed, the board is provably reachable and a
+    // later transient failure must not discard what we already collected.
+    let succeededOnce = false;
 
     for (let page = 1; page <= Math.min(cap, totalPages); page++) {
       const url = `${ORIGIN}${API_PATH}?page=${page}&limit=${PAGE_SIZE}`;
       assertRemotliUrl(url);
-      // redirect:'error' prevents SSRF via server-side redirects; combined with
-      // assertRemotliUrl this pins every hop to remotli.ch.
-      const data = await ctx.fetchJson(url, { redirect: 'error' });
 
-      if (!data || typeof data !== 'object' || !Array.isArray(/** @type {any} */ (data).jobs)) {
-        throw new Error(
-          `remotli: unexpected API response — expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
-        );
+      /** @type {any[]} */
+      let rows;
+      try {
+        // redirect:'error' prevents SSRF via server-side redirects; combined with
+        // assertRemotliUrl this pins every hop to remotli.ch.
+        const data = await ctx.fetchJson(url, { redirect: 'error' });
+
+        if (!data || typeof data !== 'object' || !Array.isArray(/** @type {any} */ (data).jobs)) {
+          throw new Error(
+            `remotli: unexpected API response — expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
+          );
+        }
+
+        rows = /** @type {any} */ (data).jobs;
+
+        const reported = Number(/** @type {any} */ (data).pagination?.totalPages);
+        if (Number.isInteger(reported) && reported > 0) totalPages = reported;
+      } catch (err) {
+        if (!succeededOnce) throw err;
+        break; // keep the pages already collected — a mid-scan blip isn't a dead board
       }
 
-      const rows = /** @type {any} */ (data).jobs;
+      // Set only after the shape check passed, so a malformed body never counts
+      // as proof of life.
+      succeededOnce = true;
+
       for (const row of rows) {
         const job = normalizeRemotliJob(row, entry?.name);
         if (job) out.push(job);
       }
 
-      const reported = Number(/** @type {any} */ (data).pagination?.totalPages);
-      if (Number.isInteger(reported) && reported > 0) totalPages = reported;
       // A short page means the board ended early — stop rather than trust the count.
       if (rows.length < PAGE_SIZE) break;
     }
