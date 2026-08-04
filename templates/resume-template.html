@@ -329,6 +329,45 @@
     line-height: 1.5;
   }
 
+  /* === AWARDS === */
+  /* Kept here even though Certifications is not: an award is a recent,
+     competitive signal (contest medal, dean's list) rather than the academic
+     filler the resume variant drops, and the section is hidden entirely when
+     the payload carries no entries. */
+  .award-table {
+    display: table;
+    width: 100%;
+  }
+
+  .award-item {
+    display: table-row;
+  }
+
+  .award-item > * {
+    display: table-cell;
+    vertical-align: baseline;
+    padding-bottom: 6px;
+  }
+
+  .award-title {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .award-org {
+    color: hsl(270, 70%, 45%);
+    white-space: nowrap;
+  }
+
+  .award-year {
+    font-size: 10px;
+    color: #777;
+    white-space: nowrap;
+    text-align: right;
+    width: 44px;
+  }
+
   /* === SKILLS === */
   .skills-grid {
     display: flex;
@@ -527,6 +566,12 @@
   <div class="section avoid-break">
     <div class="section-title">{{SECTION_EDUCATION}}</div>
     {{EDUCATION}}
+  </div>
+
+  <!-- AWARDS -->
+  <div class="section avoid-break">
+    <div class="section-title">{{SECTION_AWARDS}}</div>
+    <div class="award-table">{{AWARDS}}</div>
   </div>
 
   <!-- SKILLS -->

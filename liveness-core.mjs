@@ -132,6 +132,14 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   if (status === 403 || status === 503) {
     return { result: 'uncertain', code: 'access_blocked', reason: `HTTP ${status} (access blocked, likely anti-bot)` };
   }
+  // Any other 5xx is a transient origin error (502/504 gateway hiccups, 500s
+  // during deploys), not evidence the posting is gone. Without this guard the
+  // short error body ("502 Bad Gateway / nginx") falls through to the
+  // insufficient-content heuristic and reads as expired — and a false
+  // "expired" permanently dedup-filters a real job out of future scans.
+  if (status >= 500) {
+    return { result: 'uncertain', code: 'server_error', reason: `HTTP ${status} (transient server error)` };
+  }
 
   const expiredUrl = firstMatch(EXPIRED_URL_PATTERNS, finalUrl);
   if (expiredUrl) {

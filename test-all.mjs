@@ -5045,6 +5045,8 @@ try {
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
+    resolveEffectiveAfter,
+    resolveEarlyStopMs,
     buildVisaFilter,
     buildCountryEligibilityFilter,
     shouldDedupScanHistoryRow,
@@ -5101,6 +5103,153 @@ try {
     pass('posted-date filter gates on an absolute after/before window; missing dates always pass');
   } else {
     fail('posted-date filter did not gate on absolute posted-date bounds correctly');
+  }
+
+  // ── --since as a lower bound, and the early-stop floor derived from it ──
+  // The invariant: the early-stop floor must never be NEWER than the oldest
+  // posting the filters still accept, or pagination stops with eligible
+  // postings unfetched.
+  const SINCE_NOW = Date.parse('2026-08-01T00:00:00Z');
+  const SINCE_DAY = 86_400_000;
+  if (
+    resolveEffectiveAfter(null, null, SINCE_NOW) === null && // neither bound → no filtering
+    resolveEffectiveAfter('2026-07-01', null, SINCE_NOW) === '2026-07-01' && // --posted-after alone
+    resolveEffectiveAfter(null, 7, SINCE_NOW) === '2026-07-25' && // --since alone, relative to now
+    // Both set: bounds AND, so the NEWER one decides. This is the case that
+    // silently dropped eligible postings when --since was hint-only — the hint
+    // stopped at Jul 25 while the filter still accepted back to Jul 1.
+    resolveEffectiveAfter('2026-07-01', 7, SINCE_NOW) === '2026-07-25' &&
+    resolveEffectiveAfter('2026-07-30', 7, SINCE_NOW) === '2026-07-30' && // absolute newer than relative
+    resolveEffectiveAfter(null, 0, SINCE_NOW) === null && // invalid day counts contribute nothing
+    resolveEffectiveAfter(null, Number.POSITIVE_INFINITY, SINCE_NOW) === null &&
+    // Finite and positive is not sufficient: a day count this large pushes the
+    // cutoff outside the representable Date range, where toISOString() throws.
+    // The helper is exported, so it must return rather than raise.
+    resolveEffectiveAfter(null, 1e300, SINCE_NOW) === null &&
+    resolveEffectiveAfter('2026-07-01', 1e300, SINCE_NOW) === '2026-07-01'
+  ) {
+    pass('--since resolves to an absolute lower bound; the newest active bound wins');
+  } else {
+    fail('effective posted-after bound is not the newest of --posted-after and --since');
+  }
+
+  if (
+    resolveEarlyStopMs(null, null, SINCE_NOW) === null && // no CLI window → early stop disabled
+    resolveEarlyStopMs(null, 30, SINCE_NOW) === null && // config alone must not enable it
+    resolveEarlyStopMs('2026-07-25', null, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    // max_posting_age_days is the newer bound here (Jul 27 vs Jul 25), so it
+    // decides — stopping at Jul 25 would page deeper than eligibility requires,
+    // which is merely wasteful; stopping NEWER than the filter would be a bug.
+    resolveEarlyStopMs('2026-07-25', 5, SINCE_NOW) === SINCE_NOW - 5 * SINCE_DAY &&
+    // ...and when the CLI window is the newer bound, it wins.
+    resolveEarlyStopMs('2026-07-25', 60, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    resolveEarlyStopMs('2026-07-25', 0, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') && // invalid config ignored
+    resolveEarlyStopMs('2026-07-25', 'abc', SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z')
+  ) {
+    pass('early-stop floor is the newest active lower bound, and stays off without a CLI window');
+  } else {
+    fail('early-stop floor is not derived from every active lower bound');
+  }
+
+  // The contract, stated as one assertion: for a range of bound combinations,
+  // nothing the early-stop skips would have survived the filter anyway.
+  {
+    const cases = [
+      { after: null, since: 7, maxAge: null },
+      { after: '2026-07-01', since: 7, maxAge: null },
+      { after: '2026-07-01', since: null, maxAge: 30 },
+      { after: '2026-07-20', since: 3, maxAge: 10 },
+      { after: null, since: 14, maxAge: 5 },
+    ];
+    const violations = cases.filter(({ after, since, maxAge }) => {
+      const eff = resolveEffectiveAfter(after, since, SINCE_NOW);
+      const floor = resolveEarlyStopMs(eff, maxAge, SINCE_NOW);
+      if (floor === null) return false;
+      const dateOk = buildPostedDateFilter(eff, null);
+      const ageOk = buildPostingAgeFilter(maxAge, SINCE_NOW);
+      // One second older than the floor: the first posting pagination would
+      // skip. It must already be ineligible.
+      const justOutside = floor - 1000;
+      return dateOk(justOutside) && ageOk(justOutside);
+    });
+    if (violations.length === 0) {
+      pass('early stop never skips a dated posting the filters would have accepted');
+    } else {
+      fail(`early stop would skip eligible postings for: ${JSON.stringify(violations)}`);
+    }
+  }
+
+  // The contract above holds for dated postings only. Undated ones pass every
+  // date filter, so the early stop CAN narrow results — pinned here so the
+  // behaviour and modes/scan.md can't drift apart. Change this test only
+  // alongside the doc.
+  {
+    const { pageIsPastWindow } = await import(pathToFileURL(join(ROOT, 'providers', 'workday.mjs')).href);
+    const floor = SINCE_NOW - 7 * SINCE_DAY;
+    const stale = floor - 30 * SINCE_DAY; // well past the 2-day jitter margin
+    const fresh = SINCE_NOW - SINCE_DAY;
+    const undated = { postedAt: undefined };
+
+    if (
+      // No window → the hint is inert, whatever the page holds.
+      pageIsPastWindow([{ postedAt: stale }], null) === false &&
+      // Tenants like adventhealth: no dates anywhere. Protected — this is what
+      // scan.mjs's includeUndated:true keeps alive downstream.
+      pageIsPastWindow([undated, undated], floor) === false &&
+      // A fresh dated posting holds pagination open.
+      pageIsPastWindow([{ postedAt: fresh }, undated], floor) === false &&
+      // KNOWN LIMITATION: the dated postings are stale, the undated ones are
+      // eligible, and pagination stops anyway. Undated postings on later pages
+      // are lost. Fixing it lives in workday.mjs and costs the optimisation on
+      // every mixed tenant.
+      pageIsPastWindow([{ postedAt: stale }, undated], floor) === true
+    ) {
+      pass('early stop ignores undated postings — all-undated pages are safe, mixed pages are not');
+    } else {
+      fail('workday early-stop no longer matches the undated-posting behaviour documented in modes/scan.md');
+    }
+  }
+
+  // The assertions above exercise the resolver in-process. --since is rejected
+  // earlier than that, in main()'s argv parsing, so nothing above would catch a
+  // regression there — hence the real binary. Each case fails before scan.mjs
+  // loads config or opens a socket, so these stay offline and quick.
+  //
+  // stderr is matched, not just the exit code: every one of these paths exits 1,
+  // and so would an unrelated startup failure. The message is what proves the
+  // flag was read and refused.
+  {
+    const sinceCli = (...argv) => spawnSync(NODE, [join(ROOT, 'scan.mjs'), ...argv], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const NO_VALUE = '--since expects a positive number of days, got (no value)';
+    const sinceCases = [
+      { argv: ['--since'], want: NO_VALUE, why: 'flag with no operand' },
+      { argv: ['--since='], want: NO_VALUE, why: 'empty inline operand' },
+      // The next token is a flag, not a value. Consuming it would scan the full
+      // window while looking like it had honoured --since.
+      { argv: ['--since', '--posted-after', '2026-07-01'], want: NO_VALUE, why: 'operand stealing' },
+      { argv: ['--since', '0'], want: 'got "0"', why: 'zero days' },
+      { argv: ['--since', '-3'], want: 'got "-3"', why: 'negative days' },
+      // Passes a bare `> 0` test; only Number.isFinite rejects it.
+      { argv: ['--since', 'Infinity'], want: 'got "Infinity"', why: 'non-finite' },
+      // Finite and positive, but the derived cutoff is outside Date's range.
+      { argv: ['--since', '1e300'], want: 'is too large to express as a date', why: 'out-of-range cutoff' },
+      // Reading only the first occurrence would let this one through.
+      { argv: ['--since=7', '--since'], want: '--since given 2 times; pass it once', why: 'repeated flag' },
+    ];
+    const badCases = sinceCases.filter(({ argv, want }) => {
+      const r = sinceCli(...argv);
+      return r.status !== 1 || !String(r.stderr).includes(want);
+    });
+    if (badCases.length === 0) {
+      pass('scan.mjs --since rejects bad input at the CLI (exit 1, with the reason named)');
+    } else {
+      fail(`scan.mjs --since accepted or misreported: ${badCases.map((c) => c.why).join(', ')}`);
+    }
   }
 
   const filter = buildLocationFilter({
@@ -6282,7 +6431,17 @@ try {
       copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
       copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
       copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
-      symlinkSync(join(ROOT, 'node_modules'), join(e2eTmp, 'node_modules'), 'dir');
+      // 'junction' on Windows, not 'dir': a directory symlink needs
+      // SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless
+      // Developer Mode is on, so this threw EPERM and failed the test on an
+      // ordinary Windows checkout. Junctions need no privilege, and the two
+      // constraints they add are already met — the target is absolute and is a
+      // directory on a local volume. The type argument is ignored off Windows.
+      symlinkSync(
+        join(ROOT, 'node_modules'),
+        join(e2eTmp, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       mkdirSync(join(e2eTmp, 'data'), { recursive: true });
       writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
         '# Applications Tracker',
@@ -7166,6 +7325,89 @@ try {
   }
 } catch (e) {
   fail(`verify-pipeline report checks crashed: ${e.message}`);
+}
+
+// ── VERIFY-PIPELINE ORPHAN REFERENCE RESOLUTION (#1425 follow-up) ────────────
+// Check 10 resolves "is this report referenced?" three ways. Two of them were
+// wrong:
+//   (a) a cell may carry SEVERAL links ("[901](…) / [902](…)" — a re-evaluation
+//       keeping both reports on record). A single .match() sees only the first,
+//       so every later link false-positives as an orphan.
+//   (b) the row's own number was credited UNCONDITIONALLY. Row and report
+//       numbers are independent counters that diverge in normal operation
+//       (#1733), so a row that links elsewhere silently "references" an
+//       unrelated report sharing its number, masking a real orphan.
+console.log('\n🧪 Testing verify-pipeline orphan reference resolution (#1425 follow-up)');
+try {
+  const orTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-orphan-'));
+  try {
+    const orReports = join(orTmp, 'reports');
+    mkdirSync(orReports, { recursive: true });
+    const orTracker = join(orTmp, 'applications.md');
+    const orEnv = { ...process.env, CAREER_OPS_TRACKER: orTracker, CAREER_OPS_REPORTS: orReports };
+    const rpt = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 3.1\n\`\`\`\n`;
+
+    // 901 + 902: one posting evaluated twice; row 900 keeps BOTH on record.
+    // 950: a genuine orphan whose number collides with row 950, which links 955.
+    // 955: the report row 950 actually points at.
+    // 970: referenced ONLY by the row-number fallback (its row carries no link).
+    writeFileSync(join(orReports, '901-acme-2026-02-01.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '902-acme-2026-02-09.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '950-globex-2026-03-02.md'), rpt('Globex', 'QA Manager'));
+    writeFileSync(join(orReports, '955-initech-2026-03-05.md'), rpt('Initech', 'Test Lead'));
+    writeFileSync(join(orReports, '970-hooli-2026-03-06.md'), rpt('Hooli', 'Release Manager'));
+
+    writeFileSync(orTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 900 | 2026-02-01 | Acme | Director of Platform | 3.1/5 | Evaluated | ❌ | ' +
+        '[901](reports/901-acme-2026-02-01.md) / [902](reports/902-acme-2026-02-09.md) | re-eval |\n' +
+      '| 950 | 2026-03-05 | Initech | Test Lead | 3.1/5 | Evaluated | ❌ | ' +
+        '[955](reports/955-initech-2026-03-05.md) | row number collides with orphan report 950 |\n' +
+      '| 970 | 2026-03-06 | Hooli | Release Manager | 3.1/5 | Evaluated | ❌ | — | legacy row, no markdown link |\n');
+
+    const orOut = run(NODE, ['verify-pipeline.mjs'], { env: orEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (orOut === null) {
+      fail('verify-pipeline crashed on the orphan-reference fixture');
+    } else {
+      // (a) second link of a dual-link cell must NOT be an orphan.
+      if (/Orphan report[^\n]*902-acme/.test(orOut)) {
+        fail('dual-link cell: second link (902) falsely flagged as orphan — .match() sees only the first');
+      } else {
+        pass('dual-link report cell resolves BOTH links, not just the first (#1425 follow-up)');
+      }
+      if (/Orphan report[^\n]*901-acme/.test(orOut)) {
+        fail('dual-link cell: first link (901) falsely flagged as orphan');
+      } else {
+        pass('dual-link report cell resolves its first link');
+      }
+      // (b) a row's own number must not mask an unrelated orphan sharing it.
+      if (/Orphan report[^\n]*#950[^\n]*950-globex/.test(orOut)) {
+        pass('row number does not mask an unrelated orphan sharing it (#1733 divergence)');
+      } else {
+        fail('orphan 950 masked by row 950, which links report 955 — row number credited unconditionally');
+      }
+      if (/Orphan report[^\n]*955-initech/.test(orOut)) {
+        fail('linked report 955 falsely flagged as orphan');
+      } else {
+        pass('report referenced by a linking row is not flagged');
+      }
+      // A link-less row is the ONE case where the row number is still the only
+      // signal. Report 970 exists on disk, so this assertion can genuinely fail
+      // if the fallback is dropped.
+      if (/Orphan report[^\n]*970-hooli/.test(orOut)) {
+        fail('link-less legacy row lost its row-number fallback — report 970 flagged');
+      } else {
+        pass('link-less row still falls back to its own number');
+      }
+    }
+  } finally {
+    rmSync(orTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline orphan reference resolution crashed: ${e.message}`);
 }
 
 // ── VERIFY-PIPELINE DUPLICATE TRACKER NUMBER (#1704) ────────────

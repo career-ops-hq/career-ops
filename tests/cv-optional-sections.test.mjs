@@ -1,12 +1,14 @@
 // tests/cv-optional-sections.test.mjs — the optional CV sections (projects,
-// education, certifications) must vanish entirely when they have no entries,
-// rather than rendering a bare section header with nothing under it.
+// education, certifications, awards) must vanish entirely when they have no
+// entries, rather than rendering a bare section header with nothing under it.
 //
 // #1879 fixed this for projects; education is the same bug (not every
 // candidate has a degree). Certifications was fixed once directly in
 // build-cv-html.mjs, then lost when that logic was generalized into this
 // shared module (only projects/education made the cut) — the v1.22.0
-// auto-update shipped that regression. All three are delimited by marker
+// auto-update shipped that regression. Awards (#2220) is optional by
+// construction: most candidates have none, so it ships hidden-when-empty from
+// the start rather than being retrofitted. All four are delimited by marker
 // matching rather than parsed, so the boundary pattern is the whole
 // correctness story — see the header comment in cv-sections-core.mjs for the
 // failure modes exercised here.
@@ -17,8 +19,13 @@ import { stripEmptySections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
-const EMPTY = { projects: [], education: [], certifications: [] };
-const FULL = { projects: [{ name: 'P' }], education: [{ degree: 'D' }], certifications: [{ title: 'C' }] };
+const EMPTY = { projects: [], education: [], certifications: [], awards: [] };
+const FULL = {
+  projects: [{ name: 'P' }],
+  education: [{ degree: 'D' }],
+  certifications: [{ title: 'C' }],
+  awards: [{ title: 'A' }],
+};
 
 function check(label, actual, expected) {
   if (actual === expected) pass(label);
@@ -42,13 +49,15 @@ for (const { file, format, after, hasCertifications } of TEMPLATES) {
   const projectsMarker = format === 'html' ? '<!-- PROJECTS -->' : 'PROJECTS  %';
   const educationMarker = format === 'html' ? '<!-- EDUCATION -->' : 'Education  %';
   const certificationsMarker = '<!-- CERTIFICATIONS -->'; // html-only; no LaTeX Certifications section exists
+  const awardsMarker = format === 'html' ? '<!-- AWARDS -->' : 'AWARDS  %';
 
   check(`${name}: empty payload removes the projects block`, stripped.includes(projectsMarker), false);
   check(`${name}: empty payload removes the education block`, stripped.includes(educationMarker), false);
   if (hasCertifications) {
     check(`${name}: empty payload removes the certifications block`, stripped.includes(certificationsMarker), false);
   }
-  check(`${name}: the section after certifications survives`, stripped.includes(after), true);
+  check(`${name}: empty payload removes the awards block`, stripped.includes(awardsMarker), false);
+  check(`${name}: the section after awards survives`, stripped.includes(after), true);
   check(`${name}: {{EXPERIENCE}} is untouched`, stripped.includes('{{EXPERIENCE}}'), true);
 
   // Populated payload must be a no-op — the strip only ever removes.
@@ -56,17 +65,30 @@ for (const { file, format, after, hasCertifications } of TEMPLATES) {
     stripEmptySections(template, FULL, format) === template, true);
 
   // One empty, one populated: only the empty one goes.
-  const onlyEdu = stripEmptySections(template, { projects: [{ name: 'P' }], education: [], certifications: [{ title: 'C' }] }, format);
+  const onlyEdu = stripEmptySections(template, { ...FULL, education: [] }, format);
   check(`${name}: empty education alone keeps projects`, onlyEdu.includes(projectsMarker), true);
   check(`${name}: empty education alone drops education`, onlyEdu.includes(educationMarker), false);
+  check(`${name}: empty education alone keeps awards`, onlyEdu.includes(awardsMarker), true);
   if (hasCertifications) {
     check(`${name}: empty education alone keeps certifications`, onlyEdu.includes(certificationsMarker), true);
 
     // Certifications empty on its own: projects/education (both populated) survive, only certifications goes.
-    const onlyCert = stripEmptySections(template, { projects: [{ name: 'P' }], education: [{ degree: 'D' }], certifications: [] }, format);
+    const onlyCert = stripEmptySections(template, { ...FULL, certifications: [] }, format);
     check(`${name}: empty certifications alone keeps projects`, onlyCert.includes(projectsMarker), true);
     check(`${name}: empty certifications alone keeps education`, onlyCert.includes(educationMarker), true);
     check(`${name}: empty certifications alone drops certifications`, onlyCert.includes(certificationsMarker), false);
+    check(`${name}: empty certifications alone keeps awards`, onlyCert.includes(awardsMarker), true);
+  }
+
+  // Awards empty on its own: it is last among the optional sections in the HTML
+  // templates, so an end-of-block boundary slip here would swallow Skills.
+  const onlyAwards = stripEmptySections(template, { ...FULL, awards: [] }, format);
+  check(`${name}: empty awards alone keeps projects`, onlyAwards.includes(projectsMarker), true);
+  check(`${name}: empty awards alone keeps education`, onlyAwards.includes(educationMarker), true);
+  check(`${name}: empty awards alone drops awards`, onlyAwards.includes(awardsMarker), false);
+  check(`${name}: empty awards alone keeps the section after it`, onlyAwards.includes(after), true);
+  if (hasCertifications) {
+    check(`${name}: empty awards alone keeps certifications`, onlyAwards.includes(certificationsMarker), true);
   }
 }
 

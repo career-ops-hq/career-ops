@@ -82,8 +82,8 @@ try {
 
   // fetch(): 0-based pagination with source tag, stop on short page; q passthrough.
   const mk = (i) => ({ title: `Role ${i}`, url: `https://speedrun-talent-network.com/jobs/x${i}`, company: `Co ${i}`, location: 'New York, NY', remote: false, published_at: '2026-07-01T00:00:00.000Z' });
-  const page0 = { jobs: Array.from({ length: 100 }, (_, i) => mk(i)), total: 133, page: 0, page_size: 100, total_pages: 2 };
-  const page1 = { jobs: [mk(100), mk(101), { title: '', url: 'https://speedrun-talent-network.com/jobs/bad' }], total: 133, page: 1, page_size: 100, total_pages: 2 };
+  const page0 = { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 53, page: 0, page_size: 50, total_pages: 2 };
+  const page1 = { jobs: [mk(50), mk(51), { title: '', url: 'https://speedrun-talent-network.com/jobs/bad' }], total: 53, page: 1, page_size: 50, total_pages: 2 };
   const calls = [];
   const ctx = {
     fetchJson: async (url) => {
@@ -99,7 +99,7 @@ try {
     && calls.every((u) => new URL(u).searchParams.get('q') === 'engineer')
     && new URL(calls[0]).searchParams.get('page') === '0'
     && new URL(calls[1]).searchParams.get('page') === '1';
-  if (urlsOk && jobs.length === 102 && jobs[0].title === 'Role 0' && jobs[101].title === 'Role 101') {
+  if (urlsOk && jobs.length === 52 && jobs[0].title === 'Role 0' && jobs[51].title === 'Role 51') {
     pass('fetch() paginates 0-based with source=career-ops + q passthrough, stops after total_pages, drops invalid rows');
   } else {
     fail(`fetch() = ${JSON.stringify({ calls, count: jobs.length })}`);
@@ -107,10 +107,59 @@ try {
 
   // fetch(): max_pages caps ahead of total_pages.
   const capCalls = [];
-  const capCtx = { fetchJson: async (url) => { capCalls.push(url); return { jobs: Array.from({ length: 100 }, (_, i) => mk(i)), total_pages: 50 }; } };
+  const capCtx = { fetchJson: async (url) => { capCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 50 }; } };
   const capped = await provider.fetch({ max_pages: 2 }, capCtx);
-  if (capCalls.length === 2 && capped.length === 200) pass('fetch() honors max_pages ahead of total_pages');
+  if (capCalls.length === 2 && capped.length === 100) pass('fetch() honors max_pages ahead of total_pages');
   else fail(`fetch() cap = ${JSON.stringify({ calls: capCalls.length, jobs: capped.length })}`);
+
+  // Regression: the live feed serves exactly 50 jobs/page. A full 50-row page
+  // must NOT be mistaken for a short page — the old hardcoded PER_PAGE=100
+  // made 50 < 100 true, broke after page 0, and silently truncated a
+  // 16k-job board to its newest 50 rows.
+  const liveShapeCalls = [];
+  const liveShapeCtx = {
+    fetchJson: async (url) => {
+      liveShapeCalls.push(url);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 16830, page: liveShapeCalls.length - 1, page_size: 50, total_pages: 337 };
+    },
+  };
+  const liveWarnings = [];
+  const liveRealConsoleError = console.error;
+  let liveShape;
+  try {
+    console.error = (...args) => liveWarnings.push(args.join(' '));
+    liveShape = await provider.fetch({ max_pages: 2 }, liveShapeCtx);
+  } finally {
+    console.error = liveRealConsoleError;
+  }
+  const livePagesOk = liveShapeCalls.length === 2
+    && new URL(liveShapeCalls[0]).searchParams.get('page') === '0'
+    && new URL(liveShapeCalls[1]).searchParams.get('page') === '1';
+  if (livePagesOk && liveShape.length === 100) pass('fetch() keeps paginating past a full 50-row page (live feed shape)');
+  else fail(`live-shape pagination = ${JSON.stringify({ calls: liveShapeCalls, jobs: liveShape?.length })}`);
+  if (liveWarnings.some((w) => w.includes('truncated at max_pages=2'))) pass('fetch() warns when max_pages truncates the live-shape feed');
+  else fail(`live-shape truncation warning missing; captured = ${JSON.stringify(liveWarnings)}`);
+
+  // PER_PAGE fallback pinned from both directions when the response omits
+  // page_size/total_pages: a full 50-row page continues (fails if PER_PAGE
+  // regresses above 50), a 49-row page stops (fails if it regresses below 50).
+  const bareCalls = [];
+  const bareCtx = {
+    fetchJson: async (url) => {
+      bareCalls.push(url);
+      return { jobs: Array.from({ length: bareCalls.length === 1 ? 50 : 49 }, (_, i) => mk(i)) };
+    },
+  };
+  const bare = await provider.fetch({ max_pages: 5 }, bareCtx);
+  if (bareCalls.length === 2 && bare.length === 99) pass('fetch() stops on a short page via the PER_PAGE=50 fallback when page_size is absent');
+  else fail(`bare fallback = ${JSON.stringify({ calls: bareCalls.length, jobs: bare.length })}`);
+
+  // Empty feed (e.g. a q: with no matches) returns [] after one call.
+  const emptyCalls = [];
+  const emptyCtx = { fetchJson: async (url) => { emptyCalls.push(url); return { jobs: [], total: 0, page: 0, page_size: 50, total_pages: 0 }; } };
+  const empty = await provider.fetch({ max_pages: 3 }, emptyCtx);
+  if (emptyCalls.length === 1 && empty.length === 0) pass('fetch() returns [] after one call on an empty feed');
+  else fail(`empty feed = ${JSON.stringify({ calls: emptyCalls.length, jobs: empty.length })}`);
 
   // resolveQuery: keywords[] fallback when q: is absent.
   const kwCalls = [];
@@ -122,7 +171,7 @@ try {
   // MAX_PAGES_CAP: an oversized max_pages is clamped to 120, and the
   // truncation warning fires (spied via console.error, restored in finally).
   const bigCalls = [];
-  const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 100 }, (_, i) => mk(i)), total_pages: 500 }; } };
+  const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 500 }; } };
   const warnings = [];
   const realConsoleError = console.error;
   try {

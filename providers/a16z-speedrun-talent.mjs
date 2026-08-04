@@ -8,7 +8,7 @@
 // Response shape: { jobs: [ { id, title, company, url, location, remote,
 //   published_at, ... } ], total, page, page_size, total_pages, facets }
 //
-// Paginated 100/page via `?page=N` (0-indexed); the response carries
+// Paginated 50/page via `?page=N` (0-indexed); the response carries
 // `total_pages`, so iteration is bounded by min(total_pages, max_pages).
 // Default cap is modest; the board is several thousand roles, so either
 // raise `max_pages` on the entry or narrow server-side with `q:` (the feed
@@ -22,7 +22,7 @@
 
 const FEED_BASE = 'https://speedrun-talent-network.com/api/v1/jobs';
 const TRUSTED_HOST = 'speedrun-talent-network.com';
-const PER_PAGE = 100;
+const PER_PAGE = 50;
 const DEFAULT_MAX_PAGES = 3;
 const MAX_PAGES_CAP = 120;
 
