@@ -15,8 +15,8 @@ try {
 
   // --- detect() -------------------------------------------------------------
   const hit = remotli.detect({ name: 'X', careers_url: 'https://remotli.ch/' });
-  if (hit && /^https:\/\/remotli\.ch\/api\/jobs\?page=1&limit=50$/.test(hit.url)) {
-    pass('detect() claims a remotli.ch careers_url and points at the paged API');
+  if (hit && /^https:\/\/remotli\.ch\/api\/jobs\?page=1&limit=50&remote=all$/.test(hit.url)) {
+    pass('detect() claims a remotli.ch careers_url and points at the paged, full-inventory API');
   } else {
     fail(`detect() returned ${JSON.stringify(hit)}`);
   }
@@ -46,12 +46,13 @@ try {
     location: 'Zürich, Switzerland',
     allLocations: ['Zürich, Switzerland', 'Remote'],
     description: '<p>Own the <b>numbers</b>.</p><li>FP&amp;A</li>',
+    applyUrl: 'https://job-boards.greenhouse.io/acme/jobs/4012345',
     publishedAt: '2026-08-01T10:00:00.000Z',
     salaryMin: 180000, salaryMax: 220000, salaryCurrency: 'chf',
   }));
   if (full
       && full.title === 'Head of Finance'
-      && full.url === 'https://remotli.ch/jobs/head-of-finance-at-acme'
+      && full.url === 'https://job-boards.greenhouse.io/acme/jobs/4012345'
       && full.company === 'Acme AG'
       && full.location === 'Zürich, Switzerland; Remote'
       && full.postedAt === Date.parse('2026-08-01T10:00:00.000Z')) {
@@ -141,6 +142,46 @@ try {
     pass('normalizeRemotliJob falls back company → companies.name → entry name → "Remotli"');
   } else {
     fail(`normalizeRemotliJob company fallbacks = ${JSON.stringify({ a: fromJoin?.company, b: fromEntry?.company, c: fallback?.company })}`);
+  }
+
+  // --- canonical URL (Source Indexing Policy rule 2) --------------------------
+  // The employer's applyUrl is the emitted URL; the board page is the fallback.
+  const urlCases = [
+    ['applyUrl wins over the board page',
+      row({ title: 'T', slug: 'ok', applyUrl: 'https://jobs.ashbyhq.com/acme/abc-123' }),
+      'https://jobs.ashbyhq.com/acme/abc-123'],
+    ['absent applyUrl falls back to the board page',
+      row({ title: 'T', slug: 'ok' }),
+      'https://remotli.ch/jobs/ok'],
+    ['empty applyUrl falls back',
+      row({ title: 'T', slug: 'ok', applyUrl: '   ' }),
+      'https://remotli.ch/jobs/ok'],
+    ['non-https applyUrl falls back rather than being trusted',
+      row({ title: 'T', slug: 'ok', applyUrl: 'http://jobs.example.com/1' }),
+      'https://remotli.ch/jobs/ok'],
+    ['javascript: applyUrl falls back',
+      row({ title: 'T', slug: 'ok', applyUrl: 'javascript:alert(1)' }),
+      'https://remotli.ch/jobs/ok'],
+    ['malformed applyUrl falls back',
+      row({ title: 'T', slug: 'ok', applyUrl: 'not a url' }),
+      'https://remotli.ch/jobs/ok'],
+    ['non-string applyUrl falls back',
+      row({ title: 'T', slug: 'ok', applyUrl: 42 }),
+      'https://remotli.ch/jobs/ok'],
+    // The slug is only interpolated on the fallback path, so an unsafe slug no
+    // longer costs us a real posting — it just never gets used.
+    ['unsafe slug is still emitted when applyUrl is usable',
+      row({ title: 'T', slug: '../../etc/passwd', applyUrl: 'https://jobs.lever.co/acme/xyz' }),
+      'https://jobs.lever.co/acme/xyz'],
+  ];
+  const urlFailures = urlCases.filter(([, r, want]) => {
+    const got = normalizeRemotliJob(r);
+    return !got || got.url !== want;
+  });
+  if (urlFailures.length === 0) {
+    pass('normalizeRemotliJob emits applyUrl as the canonical URL, falling back to the board page (8 cases)');
+  } else {
+    fail(`canonical URL cases failed: ${urlFailures.map(([n]) => n).join('; ')}`);
   }
 
   // Slug is the only thing interpolated into the URL — keep it path-safe.
@@ -233,8 +274,8 @@ try {
   else fail(`fetch() returned ${paged.length} jobs (expected 60)`);
 
   if (requested.length === 2
-      && requested[0].url === 'https://remotli.ch/api/jobs?page=1&limit=50'
-      && requested[1].url === 'https://remotli.ch/api/jobs?page=2&limit=50') {
+      && requested[0].url === 'https://remotli.ch/api/jobs?page=1&limit=50&remote=all'
+      && requested[1].url === 'https://remotli.ch/api/jobs?page=2&limit=50&remote=all') {
     pass('fetch() builds ?page=N&limit=50 URLs and stops after the short page');
   } else {
     fail(`fetch() requested = ${JSON.stringify(requested.map(r => r.url))}`);

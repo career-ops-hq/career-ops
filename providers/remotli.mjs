@@ -4,9 +4,12 @@
 // Remotli provider — remotli.ch, a curated board of remote roles at Swiss
 // companies (paid in CHF). Public JSON API, no auth:
 //
-//   https://remotli.ch/api/jobs?page=N&limit=50
+//   https://remotli.ch/api/jobs?page=N&limit=50&remote=all
 //   → { jobs: [ { jobs: {...}, companies: {...} }, ... ],
 //       pagination: { page, limit, total, totalPages } }
+//
+// `remote=all` is required for full coverage — without it the API serves its
+// remote-first default view, which is ~43% of the board. See ALL_WORK_MODES.
 //
 // Note the doubly-nested shape: each element of the top-level `jobs` array is a
 // join row `{ jobs, companies }`, and the posting itself lives under `.jobs`.
@@ -20,15 +23,23 @@
 //
 // --- Design notes -----------------------------------------------------------
 //
-// URL / dedup key. The API exposes `applyUrl` pointing at the original ATS
-// (join.com, Greenhouse, …). We deliberately do NOT use it as the emitted URL.
-// Every other provider here is host-locked to its own domain (see the off-host
-// drop in tests/providers/arbeitnow.test.mjs), and emitting arbitrary
-// third-party hosts would both break that convention and hand the dedup key to
-// a URL whose format may not match what the direct ATS provider emits anyway.
-// We emit the canonical remotli page instead and let the #1597 SimHash
-// fingerprint catch genuine cross-listings — which works here precisely because
-// this API ships the full `description` for free.
+// URL / dedup key. Each posting carries its `applyUrl` — the original ATS page
+// (Greenhouse, Ashby, Lever, Personio, …) — as the emitted URL, per the Source
+// Indexing Policy rule 2: the shortest verifiable path to the employer. The
+// board's own page is the fallback, used only when a row has no usable
+// applyUrl.
+//
+// Following jobvite.mjs, the emitted URL is accepted from any https: origin and
+// is NOT host-pinned: it is display-only and never fetched by this provider, so
+// the host lock belongs on the API URLs we actually request (assertRemotliUrl),
+// not on the URLs we hand downstream. Non-https and malformed applyUrls fall
+// back to the board page rather than being trusted.
+//
+// Side benefit for dedup: a role cross-listed here and on the employer's direct
+// ATS provider now resolves to the same URL, so it dedups exactly rather than
+// relying on the #1597 SimHash fingerprint to notice. The fingerprint still
+// works — this API ships the full `description` for free — but it is no longer
+// the only thing standing between a cross-listing and a duplicate row.
 //
 // Employer attribution. Many reposting aggregators collapse `company` to the
 // aggregator's own name, which makes tracker rows unattributable and invites
@@ -46,6 +57,23 @@ import { decodeEntities } from './_html-entities.mjs';
 
 const ORIGIN = 'https://remotli.ch';
 const API_PATH = '/api/jobs';
+// `remote=all` disables the board's work-mode filter so we walk its COMPLETE
+// inventory — Source Indexing Policy rule 3.
+//
+// Without it the API serves its human-facing default view, which is remote-first
+// (fully_remote + remote_friendly) and shows 395 of 925 active listings — about
+// 43%. The hidden 530 are hybrid (488), workation (41) and one row carrying no
+// work-mode at all.
+//
+// Naming the four filter values explicitly would very nearly work, but not
+// quite: it returns 924, missing the policy-less row, and it would go stale the
+// next time the board adds a work mode — the same drift that has bitten that
+// board's own hardcoded copies of this list before. The board therefore added a
+// single flag that means "no work-mode filter", which is stable against both.
+//
+// Filtering is the consumer's job (rule 5), so the provider takes everything and
+// lets scan.mjs's content/location filters decide.
+const ALL_WORK_MODES = 'remote=all';
 // The server caps `limit` at 50 regardless of what is requested (?limit=200
 // still returns 50), so ask for exactly the cap and page through.
 const PAGE_SIZE = 50;
@@ -79,6 +107,34 @@ function toEpochMs(value) {
 function htmlToText(html) {
   if (typeof html !== 'string' || !html) return '';
   return decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Canonical URL for a posting — Source Indexing Policy rule 2, "the shortest
+ * verifiable path to the employer the source exposes".
+ *
+ * Prefers `applyUrl` (the employer's own ATS page). Accepts any https: origin,
+ * as jobvite.mjs does: the value is display-only and never fetched here, so the
+ * host lock stays on the API URLs this provider requests, not on the ones it
+ * emits. Falls back to the board page when applyUrl is absent, non-https or
+ * malformed — the policy says "when available", and a verifiable board page
+ * beats dropping a real posting. Returns '' when neither is usable, and the
+ * caller drops the row.
+ *
+ * @param {any} job
+ * @param {string} safeSlug Already validated as path-safe, or '' if it was not.
+ */
+function resolveUrl(job, safeSlug) {
+  const raw = typeof job.applyUrl === 'string' ? job.applyUrl.trim() : '';
+  if (raw) {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol === 'https:') return parsed.href;
+    } catch {
+      // malformed — fall through to the board page
+    }
+  }
+  return safeSlug ? `${ORIGIN}/jobs/${safeSlug}` : '';
 }
 
 /** Fold `location` together with any extra `allLocations` into one string. */
@@ -142,9 +198,15 @@ export function normalizeRemotliJob(row, fallbackCompany) {
   const status = typeof job.status === 'string' ? job.status.trim().toLowerCase() : '';
   if (status !== 'active') return null;
 
+  // Canonical URL: the employer's own application page when the row exposes a
+  // usable one, else the board page. The slug is validated only on the fallback
+  // path, because that is the only place it gets interpolated into a URL — a
+  // row with an unsafe slug but a good applyUrl is still emitted, and the unsafe
+  // slug is simply never used.
   const slug = typeof job.slug === 'string' ? job.slug.trim() : '';
-  if (!slug || /[^a-z0-9._~-]/i.test(slug)) return null; // host-locked, path-safe slugs only
-  const url = `${ORIGIN}/jobs/${slug}`;
+  const safeSlug = slug && !/[^a-z0-9._~-]/i.test(slug) ? slug : '';
+  const url = resolveUrl(job, safeSlug);
+  if (!url) return null;
 
   const companies = row.companies && typeof row.companies === 'object' ? row.companies : {};
   const company =
@@ -196,7 +258,7 @@ export default {
     }
     if (parsed.protocol !== 'https:') return null;
     if (!HOST_RE.test(parsed.hostname)) return null;
-    return { url: `${ORIGIN}${API_PATH}?page=1&limit=${PAGE_SIZE}` };
+    return { url: `${ORIGIN}${API_PATH}?page=1&limit=${PAGE_SIZE}&${ALL_WORK_MODES}` };
   },
 
   async fetch(entry, ctx) {
@@ -220,7 +282,7 @@ export default {
     let succeededOnce = false;
 
     for (let page = 1; page <= Math.min(cap, totalPages); page++) {
-      const url = `${ORIGIN}${API_PATH}?page=${page}&limit=${PAGE_SIZE}`;
+      const url = `${ORIGIN}${API_PATH}?page=${page}&limit=${PAGE_SIZE}&${ALL_WORK_MODES}`;
       assertRemotliUrl(url);
 
       /** @type {any[]} */
