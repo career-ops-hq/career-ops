@@ -459,8 +459,8 @@ function buildCertifications(entries, partial) {
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
     const blockValues = new Map([
-      // Certifications use EMPTY variants so that absent fields still emit an
-      // empty <span> for table-cell alignment — not a bare removal.
+      // An absent field resolves to the partial's _EMPTY fallback, emitting an
+      // empty <span> for table-cell alignment rather than being removed.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
     ]);
@@ -493,8 +493,8 @@ function buildAwards(entries, partial) {
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
     const blockValues = new Map([
-      // As with certifications, absent fields still emit an empty <span> so the
-      // table cells stay aligned across rows.
+      // As with certifications, an absent field resolves to the partial's
+      // _EMPTY fallback so the table cells stay aligned across rows.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
     ]);
