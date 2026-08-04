@@ -110,6 +110,8 @@ package-lock.json
 
 # Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/
+test-results/
+playwright-report/
 
 # Planning (local scratchpad)
 plan/

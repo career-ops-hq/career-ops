@@ -342,6 +342,44 @@
     width: 44px;
   }
 
+  /* === AWARDS === */
+  /* Same table model as certifications (title / issuer / year on one baseline),
+     under its own class names so a template pack can restyle awards without
+     dragging certifications along. */
+  .award-table {
+    display: table;
+    width: 100%;
+  }
+
+  .award-item {
+    display: table-row;
+  }
+
+  .award-item > * {
+    display: table-cell;
+    vertical-align: baseline;
+    padding-bottom: 6px;
+  }
+
+  .award-title {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .award-org {
+    color: hsl(270, 70%, 45%);
+    white-space: nowrap;
+  }
+
+  .award-year {
+    font-size: 10px;
+    color: #777;
+    white-space: nowrap;
+    text-align: right;
+    width: 44px;
+  }
+
   /* === SKILLS === */
   .skills-grid {
     display: flex;
@@ -575,6 +613,12 @@
   <div class="section">
     <div class="section-title">{{SECTION_CERTIFICATIONS}}</div>
     <div class="cert-table">{{CERTIFICATIONS}}</div>
+  </div>
+
+  <!-- AWARDS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_AWARDS}}</div>
+    <div class="award-table">{{AWARDS}}</div>
   </div>
 
   <!-- SKILLS -->

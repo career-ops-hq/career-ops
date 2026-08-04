@@ -49,6 +49,18 @@ const COVERED_MODES = [
   'modes/deep.md',
   'modes/contacto.md',
   'modes/reply-watch.md',
+  // #2368 set the criterion — "every mode that genuinely ingests raw external
+  // text" — and named its only intentional exclusions (`ofertas`, `discover`).
+  // These four meet the criterion and were not among the exclusions: triage
+  // WebFetches posting URLs, cover works from a pasted JD, interview-prep
+  // WebFetches the JD as its headless fallback, and expand reads third-party
+  // READMEs and portfolio pages on its way to proposing cv.md additions.
+  // cover.md and interview-prep.md do not load _shared.md at all, so for them
+  // there was no transitive pointer either.
+  'modes/triage.md',
+  'modes/cover.md',
+  'modes/interview-prep.md',
+  'modes/expand.md',
 ];
 
 /** Pure, self-testable: does this file's text carry the directive marker? */

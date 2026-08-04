@@ -109,8 +109,17 @@ async function fetchPageWithRetry(ctx, api, opts) {
   throw lastErr;
 }
 
-/** True once a page's oldest unambiguously-dated posting is past the --since window. */
-function pageIsPastWindow(pageJobs, sinceMs) {
+/**
+ * True once a page's oldest unambiguously-dated posting is past the --since window.
+ *
+ * Undated postings are invisible here. A page of nothing but undated postings
+ * never stops pagination (the `dated.length === 0` guard), but a page that
+ * mixes stale dated postings with undated ones does — and the undated ones on
+ * later pages are then never fetched, even though scan.mjs's date filters
+ * would have accepted them. Exported for test-all.mjs, which pins that
+ * behaviour so it can't drift without the docs drifting too.
+ */
+export function pageIsPastWindow(pageJobs, sinceMs) {
   if (typeof sinceMs !== 'number') return false;
   const dated = pageJobs.map((j) => j.postedAt).filter((v) => typeof v === 'number');
   if (dated.length === 0) return false;
@@ -305,11 +314,17 @@ export default {
     // (a full-directory scan can hit this on dozens of tenants).
     //
     // "raise max_pages" only applies when `entry` is a real portals.yml
-    // tracked_companies entry (scan.mjs, sinceMs === null). scan-ats-full.mjs's
-    // reverse scan (the only caller that sets ctx.sinceMs) synthesizes entries
-    // from the external dataset — there's no portal entry to edit, and no
-    // fixed cap can guarantee full coverage of an unbounded company
-    // directory anyway, so there's nothing else to suggest.
+    // tracked_companies entry — there is something to edit. scan-ats-full.mjs's
+    // reverse scan synthesizes entries from the external dataset, so there's no
+    // portal entry to point at, and no fixed cap can guarantee full coverage of
+    // an unbounded company directory anyway; nothing else to suggest there.
+    //
+    // The branch below keys on `sinceMs === null` as a proxy for that
+    // distinction. Since #2418 the proxy is no longer exact: `scan.mjs --since`
+    // also sets ctx.sinceMs, so those runs take the else branch and get the
+    // terser message even though they DO have a portals.yml entry to raise.
+    // Harmless (the cap is still surfaced, just without the suggestion) but
+    // worth knowing before trusting the proxy — see #2495.
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (sinceMs === null) {

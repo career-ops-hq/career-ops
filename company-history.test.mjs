@@ -90,8 +90,11 @@ console.log('\n--- 1. multi-source 3-company scenario ---');
     row(1, 'Responsive Corp', 'Rejected', '2026-06-01'),
     // Company B: Silent Systems — old Applied row, applied date from notes.
     row(2, 'Silent Systems', 'Applied', '2026-03-01', 'Applied 2026-03-10'),
-    // Company C: unjoinable non-Latin name -> excluded from companies, counted unjoinable.
-    row(3, '株式会社テスト', 'Applied', '2026-01-01'),
+    // Company C: genuinely keyless company (`?`, punctuation only) -> excluded
+    // from companies, counted unjoinable. A non-Latin name is NOT keyless
+    // (#2429) — it folds script-preserving and gets a real card, so it can't
+    // stand in for the unjoinable case any more.
+    row(3, '?', 'Applied', '2026-01-01'),
   ];
   const followupRows = [
     followup(1, 2, '2026-03-20', 'Silent Systems'),
@@ -120,7 +123,7 @@ console.log('\n--- 1. multi-source 3-company scenario ---');
   eq('metadata.sources reflects sourcesLoaded', result.metadata.sources, { tracker: true, followups: true, scanHistory: true, statusLog: false });
 
   // --- data quality ---
-  eq('dataQuality.unjoinable counts the non-Latin company', result.dataQuality.unjoinable, 1);
+  eq('dataQuality.unjoinable counts the keyless (punctuation-only) company', result.dataQuality.unjoinable, 1);
 
   // --- card ordering (alphabetical by company name) ---
   eq('cards ordered alphabetically: Responsive Corp first', result.companies[0].company, 'Responsive Corp');

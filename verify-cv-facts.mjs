@@ -37,8 +37,27 @@ const METRIC_NOUNS = [
   'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
 ];
+// How many words may sit between a number and the noun it counts. The same
+// regex parses the generated CV and the sources, so the window is symmetric by
+// construction — but a window still decides WHETHER a claim exists, and the CV
+// and its source rarely word a fact identically. At {0,2}, "~5 live Cloud Run
+// deployments" (three modifiers) yielded no claim while the paraphrase
+// "~5 Cloud Run deployments" (two) did, which broke the gate in both
+// directions (#2279):
+//
+//   - a truthful CV failed, because the claim existed on the CV side only;
+//   - a CHANGED number passed, because a 3-modifier phrasing on the CV side
+//     produced no claim to compare — and catching invented numbers is the
+//     entire point of this script.
+//
+// Four covers the phrasings seen in real CVs ("live Cloud Run deployments",
+// "active monthly paying customers"). Widening cannot hide an invented number:
+// it only ever extracts MORE claims, on both sides. A number is a hard barrier
+// for the chain — modifiers are alphabetic only — so a wider window still
+// cannot jump across an intervening figure to bind an unrelated noun.
+const MODIFIER_WINDOW = 4;
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,2}(${METRIC_NOUNS.join('|')})\b`,
+  String.raw`\b(\d[\d,.]*)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -60,9 +79,72 @@ function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, 'utf-8') : '';
 }
 
+// Unicode decimal-digit blocks, by the code point of their zero. Every claim
+// pattern in this file is written with ASCII `\d`, so a CV that spells its
+// numbers in any other script produced ZERO claims and the gate reported a
+// pass without having checked anything — in ar, hi, ja, zh and zh-TW, all of
+// which ship mode sets. NFKC alone is not enough: it folds full-width digits
+// (ja/zh) but leaves Arabic-Indic, Persian and Devanagari untouched.
+const DIGIT_ZEROS = [
+  0x0660, // Arabic-Indic (ar)
+  0x06f0, // Extended Arabic-Indic (fa, ur)
+  0x0966, // Devanagari (hi)
+  0x09e6, // Bengali
+  0x0a66, // Gurmukhi
+  0x0ae6, // Gujarati
+  0x0b66, // Oriya
+  0x0be6, // Tamil
+  0x0c66, // Telugu
+  0x0ce6, // Kannada
+  0x0d66, // Malayalam
+  0x0e50, // Thai
+  0x0ed0, // Lao
+  0x0f20, // Tibetan
+  0x1040, // Myanmar
+  0x17e0, // Khmer
+  0x1810, // Mongolian
+];
+
+/**
+ * Rewrite every Unicode decimal digit as its ASCII counterpart, plus the
+ * separators and percent signs that travel with them, so the claim patterns
+ * see the same numbers whatever script wrote them.
+ *
+ * Applied to the generated document AND to the sources, so it can only ever
+ * make MORE claims visible on both sides — it cannot hide one.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function foldDigits(text) {
+  // NFKC first: it maps full-width digits and ％ to ASCII outright.
+  let out = text.normalize('NFKC');
+  out = out.replace(/\p{Nd}/gu, (char) => {
+    const cp = char.codePointAt(0) ?? 0;
+    if (cp >= 0x30 && cp <= 0x39) return char;
+    for (const zero of DIGIT_ZEROS) {
+      const value = cp - zero;
+      if (value >= 0 && value <= 9) return String(value);
+    }
+    return char; // a decimal digit from a block we don't list: left as-is
+  });
+  // Arabic separators and percent sign, which NFKC does not fold either.
+  out = out
+    .replace(/\u066a/g, '%')   // ٪ Arabic percent sign
+    .replace(/\u066b/g, '.')   // ٫ Arabic decimal separator
+    .replace(/\u066c/g, ',');  // ٬ Arabic thousands separator
+  // A SPACE-grouped thousand ("16 181", common in fr/ru/sv and as NNBSP in
+  // typeset text) has to be joined here, before extraction: the claim pattern
+  // reads a number as `\d[\d,.]*`, so it would stop at the space and extract
+  // "181 users" — a claim the sources never contain, failing a truthful CV.
+  // The `(?<!\d)\d{1,3}` guard keeps it to real grouping: in "in 2026 100
+  // users" the left part is four digits, so nothing is joined.
+  return out.replace(/(?<!\d)(\d{1,3})[\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1');
+}
+
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
 export function stripMarkup(text) {
-  return text
+  return foldDigits(String(text))
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     // Only strip things that actually look like tags: `<name …>` or `</name>`.
@@ -70,6 +152,14 @@ export function stripMarkup(text) {
     // and `[^>]` matches newlines — so the old `/<[^>]+>/g` let one stray `<` swallow
     // everything up to the next `>`, deleting real evidence from the allow-list and
     // failing truthful CVs (article-digest.md lost 1,327 chars, incl. two metrics).
+    // A BLOCK boundary becomes a sentence break, not a space. Collapsing
+    // `</li><li>` to ' ' glues two bullets into one line, and the employer /
+    // title captures chain consecutive Capitalised words — so a truthful
+    // "…as a Principal Engineer" followed by a bullet starting "Built…" was
+    // read as the title "Principal Engineer Built", which no source contains.
+    // The markdown sources never had the problem (their newlines break the
+    // chain), so the two sides now normalise the same way.
+    .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
     .replace(/&nbsp;/g, ' ')
@@ -78,9 +168,25 @@ export function stripMarkup(text) {
     .trim();
 }
 
-/** Normalize a claim for case- and whitespace-insensitive comparison. */
+/**
+ * Normalize a claim for case- and whitespace-insensitive comparison.
+ *
+ * Thousands separators are removed FIRST, so the same number compares equal
+ * however it is grouped: "16,181" / "16 181" / "16181". Without that step the
+ * old rule turned "16,181" into "16 181" while an ungrouped source stayed
+ * "16181", and the two never matched — a truthful CV failed the gate because
+ * of a comma. That bites hardest in the scripts folded above, since Arabic and
+ * Devanagari numerals are usually written without a separator at all.
+ *
+ * Only a separator followed by EXACTLY three digits is removed, so a decimal
+ * comma ("1,2 million") and ordinary prose are left alone.
+ */
 export function normalizeClaim(claim) {
-  return claim.toLowerCase().replace(/[,\s]+/g, ' ').trim();
+  return String(claim)
+    .toLowerCase()
+    .replace(/(\d)[,\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
+    .replace(/[,\s]+/g, ' ')
+    .trim();
 }
 
 /** Normalize a non-metric fact and remove terminal punctuation. */
@@ -104,8 +210,30 @@ export function factClaims(text) {
   const clean = stripMarkup(text);
   const claims = [];
   const patterns = [
-    ['employer', /\b(?:worked at|joined|employer\s*:\s*|company\s*:\s*)\s*([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4})/g],
-    ['title', /\b(?:served as|worked as|title\s*:\s*|role\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+[A-Z][\w/-]*){0,4})|\b(?:worked at|joined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+as\s+(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+[A-Z][\w/-]*){0,4})/g],
+    // The TRIGGER is case-insensitive, the CAPTURE is not. Both patterns used
+    // to be plain /g, so only a lowercase trigger matched — and a CV is
+    // written in capitalised bullets, so the phrasings that actually occur
+    // were invisible:
+    //
+    //   "- Worked at Initech as a Principal Engineer"  ->  no claim, gate passed
+    //   "he worked at Initech as a Principal Engineer" ->  employer + title
+    //
+    // A fabricated employer or title therefore shipped unflagged in the
+    // spelling CVs use, which is the half of this gate that enforces
+    // AGENTS.md's "authorship claims are non-negotiable".
+    //
+    // The `i` flag is NOT applied to the whole regex on purpose: the capture
+    // leans on `[A-Z]` to tell a proper noun from ordinary prose, and making
+    // that case-insensitive would read "worked at the office as a manager" as
+    // an employer claim. Only the trigger words carry an explicit case class.
+    ['employer', /\b(?:[Ww]orked [Aa]t|[Jj]oined|[Ee]mployer\s*:\s*|[Cc]ompany\s*:\s*)\s*([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4})/g],
+    // A title may carry a lowercase connector: stopping at it truncated "Head
+    // of Data" to "head", which made it indistinguishable from "Head of
+    // Engineering" — so an inflated title compared equal to the real one and
+    // passed the gate (CodeRabbit review). The connector list is closed and
+    // each one must be followed by another Capitalised word, so the capture
+    // cannot wander into ordinary prose.
+    ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
     ['tool', /\b(?:using|built with|worked with|technologies?\s*:\s*|tech stack\s*:\s*)([^.;\n]+?)(?=\s+\bfor\b|[.;\n]|$)/gi],
   ];
   for (const [kind, pattern] of patterns) {
@@ -286,8 +414,10 @@ function runSelfTest() {
   ].join(' ');
 
   equal('truthful modifier restatement', auditClaims('Reached 16,181 users', source).invented, []);
-  equal('inflated modifier count', auditClaims('Reached 94,772 active users', source).invented, ['94 772 users']);
-  equal('new training noun', auditClaims('Drove 900,000 enrollments', source).invented, ['900 000 enrollments']);
+  // The normalized claim now carries no thousands separator, since grouping no
+  // longer decides whether two spellings of the same number match.
+  equal('inflated modifier count', auditClaims('Reached 94,772 active users', source).invented, ['94772 users']);
+  equal('new training noun', auditClaims('Drove 900,000 enrollments', source).invented, ['900000 enrollments']);
   equal('truthful currency', auditClaims('Managed a $550K budget', source).invented, []);
   equal('inflated currency', auditClaims('Managed a $900K budget', source).invented, ['$900k']);
   equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
@@ -302,6 +432,114 @@ function runSelfTest() {
     'forbidden phrase',
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
     ['proven track record']
+  );
+
+  // Non-ASCII digits: every claim pattern here is written with ASCII \d, so a
+  // CV in ar/hi/ja/zh produced ZERO claims and the gate reported a pass having
+  // checked nothing — in five markets this repo ships mode sets for.
+  const foldSource = 'Reached 16,181 active users across 80 courses. Cut cost 60%.';
+  equal('fabricated full-width metric is caught', auditClaims('Reached ９４，７７２ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Arabic-Indic metric is caught', auditClaims('Reached ٩٤٧٧٢ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Devanagari metric is caught', auditClaims('Reached ९४७७२ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Arabic percentage is caught', auditClaims('Cut cost ٩٩٪', foldSource).invented, ['99%']);
+  // …and the folding must not turn a TRUTHFUL localized CV red.
+  equal('truthful Arabic-Indic metric passes', auditClaims('Reached ١٦١٨١ users', foldSource).invented, []);
+  equal('truthful full-width metric passes', auditClaims('Reached １６，１８１ users', foldSource).invented, []);
+
+  // Thousands grouping must not decide whether a claim matches: the extraction
+  // pattern stops at a space, so "16 181 users" used to yield "181 users" — a
+  // claim no source contains.
+  equal('space-grouped thousands compare equal', auditClaims('Reached 16 181 users', foldSource).invented, []);
+  equal('ungrouped compares equal to a grouped source', auditClaims('Reached 16181 users', foldSource).invented, []);
+  equal('a fabricated space-grouped number is still caught', auditClaims('Reached 94 772 users', foldSource).invented, ['94772 users']);
+  // Multi-group values fold in full: `.replace(/…/g)` evaluates each separator
+  // against the ORIGINAL string, where every group is preceded by a space, not
+  // a digit, so the lookbehind passes at each one (CodeRabbit asked).
+  equal('a multi-group number folds completely', auditClaims('Reached 1 234 567 users', 'Reached 1234567 active users.').invented, []);
+  equal('an eight-digit multi-group number folds too', auditClaims('Reached 12 345 678 users', 'Reached 12345678 active users.').invented, []);
+  // A four-digit left part is a year, not a group: nothing is joined.
+  equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
+
+  // The employer/title triggers used to be lowercase-only (plain /g), so the
+  // phrasing a CV actually uses — a capitalised bullet — produced NO claim,
+  // and a fabricated employer shipped unflagged. This is the half of the gate
+  // that enforces "authorship claims are non-negotiable".
+  const kinds = (text) => factClaims(text).map((f) => `${f.kind}:${f.value}`);
+  equal('a capitalised CV bullet yields employer + title',
+    kinds('- Worked at Initech as a Principal Engineer'),
+    ['employer:initech', 'title:principal engineer']);
+  equal('the lowercase phrasing still works',
+    kinds('he worked at Initech as a Principal Engineer'),
+    ['employer:initech', 'title:principal engineer']);
+  equal('Joined, capitalised', kinds('Joined Globex in 2024'), ['employer:globex']);
+  equal('Employer: label, capitalised', kinds('Employer: Initech'), ['employer:initech']);
+  // A lowercase connector is part of the title: truncating at it made "Head of
+  // Data" and "Head of Engineering" the same claim, so an inflated title
+  // matched the real one and passed (CodeRabbit review).
+  equal('a connector keeps the title whole', kinds('Served as Head of Data'), ['title:head of data']);
+  equal('an inflated title is a different claim', kinds('Served as Head of Engineering'), ['title:head of engineering']);
+  equal('a longer title survives too', kinds('Served as Vice President of Sales'), ['title:vice president of sales']);
+  // The title expression is duplicated across the two alternatives, so the
+  // connector must be covered on the "Worked at X as Y" branch as well — a fix
+  // applied to one and not the other would pass every test above (CodeRabbit).
+  equal('the connector works on the worked-at branch too',
+    kinds('Worked at Initech as Head of Data'),
+    ['employer:initech', 'title:head of data']);
+  // The capture stays case-SENSITIVE: only the triggers are relaxed, so
+  // ordinary prose is never read as an employer or title claim.
+  equal('ordinary prose is not a claim', kinds('Worked at the office as a manager'), []);
+  equal('ordinary prose, lowercase', kinds('joined the team as a contractor'), []);
+
+  // A block boundary is a sentence break: gluing two list items let the title
+  // capture chain across them ("Principal Engineer Built"), a string no source
+  // contains — a truthful CV failing the gate.
+  equal('a title does not chain across a list-item boundary',
+    kinds('<ul><li>Worked at Initech as a Principal Engineer</li><li>Built pipelines</li></ul>'),
+    ['employer:initech', 'title:principal engineer']);
+  // #2279 — the modifier count must never decide whether a claim exists. The
+  // source words the fact with three modifiers, the CV with two: at the old
+  // {0,2} window the claim was extracted from the CV side only, and a true
+  // statement failed the gate.
+  const modifierSource = 'Consolidated 25+ services down to ~5 live Cloud Run deployments.';
+  equal(
+    'same number, fewer modifiers in the CV',
+    auditClaims('25+ services consolidated to ~5 Cloud Run deployments', modifierSource).invented,
+    []
+  );
+  equal(
+    'same number, more modifiers in the CV',
+    auditClaims('Consolidated to ~5 live production Cloud Run deployments', modifierSource).invented,
+    []
+  );
+  // The direction that matters: a CHANGED number hid behind the 3-modifier
+  // phrasing, because the CV side yielded no claim to compare at all.
+  equal(
+    'changed number behind three modifiers is caught',
+    auditClaims('Consolidated to ~9 live Cloud Run deployments', modifierSource).invented,
+    ['9 deployments']
+  );
+  equal(
+    'changed number with the plain phrasing is still caught',
+    auditClaims('Consolidated to ~9 Cloud Run deployments', modifierSource).invented,
+    ['9 deployments']
+  );
+  // A wider window must not let the chain jump over an intervening figure to
+  // bind a number to a noun it does not count. The source states the two facts
+  // in SEPARATE sentences on purpose: with identical text on both sides, a
+  // wrong "7 hours" extraction would appear on both and cancel itself out, so
+  // the assertion would pass while proving nothing. Both nouns are metric
+  // nouns, so each real claim is independently evidenced and the only thing
+  // that can surface as invented is a cross-number binding.
+  const numericBarrierSource = 'Ran 7 tests. Logged 40 hours.';
+  equal(
+    'a figure still blocks the chain',
+    auditClaims('Ran 7 tests over 40 hours', numericBarrierSource).invented,
+    []
+  );
+  equal(
+    'no cross-number binding invents evidence',
+    auditClaims('Shipped 3 integrations', 'Shipped 3 features across 12 integrations').invented,
+    ['3 integrations']
   );
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);

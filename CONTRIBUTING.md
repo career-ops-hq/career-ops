@@ -84,6 +84,22 @@ career-ops says yes to a lot: providers, languages, CLI support, fixes. Where we
 
 Failing one of these is a routing, not a rejection. Open the issue first and we will tell you which door fits: core, plugin, or separate project. The plugin registry gives real distribution, and an idea that is wrong for core today can still be the most useful thing you ship.
 
+## Source Indexing Policy
+
+career-ops reads job listings from public sources: ATSes, job boards, company career pages, talent networks. This policy is the single bar every source meets, whoever proposes it — including operators submitting their own board. We don't judge a source's business model; we judge its data. These rules are the [CareerOps Manifesto](MANIFESTO.md) applied to sources.
+
+1. **What gets indexed.** Any source whose listings are real, attributed to an identifiable employer, and free for candidates to read and apply to. Manifesto right 4 — *"You never pay"* — applies to sources too: a source that paywalls listings or applications for candidates doesn't get indexed, whatever else it does.
+
+2. **Canonical URL.** Each listing carries the shortest verifiable path to the employer the source exposes (the ATS or direct application URL when available). The source's own page may travel as secondary attribution.
+
+3. **Paid placement doesn't reach the candidate.** Promoted content cannot buy position in career-ops: ranking happens on each user's machine, providers traverse their source's complete inventory, and the maintainer audits sources for response bias (API totals vs site totals, page distribution). career-ops itself carries no sponsored placements of any kind. This is manifesto right 8 — *"Your agent works for you. Not for a platform, not for an employer."* — enforced at the data layer.
+
+4. **Indexing is not endorsement, and distribution is not owed.** Presence in the registry places listings in front of the installed base (as of August 2026, a single network's launch post drove 15,626 unique machines to clone the repo in a day). Real, measurable, channel-dependent — and no source is owed placement, traffic, or permanence. Sources are listed with their operator declared, and no single source may exceed 40% of the registry.
+
+5. **The aggregation layer belongs to the project.** A provider reads its own source. Cross-source aggregation, ranking, matching and the registry live in core and are never delegated to a source.
+
+To propose a source (yours or anyone's): [open a source proposal](https://github.com/santifer/career-ops/issues/new?template=source-proposal.yml) walking through these five rules. A direct PR with the provider is welcome too: the same five rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
+
 ## Guidelines
 
 - Keep modes language-agnostic when possible (Claude handles both EN and ES)

@@ -645,7 +645,7 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
-# thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -905,6 +905,11 @@ search_queries:
 # - name: EchoJobs                        # tech jobs aggregated from company ATS boards
 #   provider: echojobs
 #   max_pages: 3                          # 100 jobs/page; raise for deeper coverage
+#   enabled: true
+#
+# - name: getManfred                      # Spanish/EU tech roles, salary ranges published
+#   provider: manfred
+#   lang: EN                              # EN or ES; the API rejects the call without it
 #   enabled: true
 #
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread

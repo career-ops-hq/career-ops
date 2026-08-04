@@ -28,6 +28,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { flagValue } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
@@ -44,13 +45,13 @@ const selfTestMode = args.includes('--self-test');
 // --file convention. Primarily for test isolation: it lets tests point at a
 // controlled temp path instead of depending on whatever data/active-interviews.md
 // happens to exist (or not) in the caller's real workspace.
-const fileIdx = args.indexOf('--file');
-const ACTIVE_INTERVIEWS_PATH = fileIdx !== -1 && args[fileIdx + 1] !== undefined
-  ? args[fileIdx + 1]
+const fileFlagValue = flagValue(args, '--file');
+const ACTIVE_INTERVIEWS_PATH = fileFlagValue !== undefined
+  ? fileFlagValue
   : DEFAULT_ACTIVE_INTERVIEWS_PATH;
-const minThresholdIdx = args.indexOf('--min-threshold');
-const rawMinThreshold = minThresholdIdx !== -1 && args[minThresholdIdx + 1] !== undefined
-  ? parseInt(args[minThresholdIdx + 1], 10)
+const minThresholdValue = flagValue(args, '--min-threshold');
+const rawMinThreshold = minThresholdValue !== undefined
+  ? parseInt(minThresholdValue, 10)
   : 1;
 // Clamped here (not just inside aggregateProcessQuality) so printSummary's
 // displayed threshold always matches the threshold actually applied.

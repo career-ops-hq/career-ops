@@ -275,3 +275,36 @@ try {
 } catch (e) {
   fail(`fingerprint-core popcount equivalence tests crashed: ${e.stack || e.message}`);
 }
+
+// ── non-Latin employers are DIFFERENT employers (#2500) ──────────────────
+// companyKey used an [a-z0-9] strip, so every non-Latin name keyed to '' and
+// compared equal. findCrossListings skips same-key pairs as re-posts, so an
+// identical posting shared between two genuinely different non-Latin employers
+// was silently never reported — while the Latin equivalent was reported fine.
+{
+  const { findCrossListings, fingerprintText } = await import(pathToFileURL(join(ROOT, 'fingerprint-core.mjs')).href);
+  const jd = 'Senior backend engineer working on distributed payment platforms. You will design and operate high throughput services, own reliability, and mentor other engineers across the payments organisation. Experience with Go, Kubernetes and event driven systems is expected for this role.';
+  const f = fingerprintText(jd);
+  const today = new Date('2026-08-04T00:00:00Z');
+  const offer = (company) => ({ url: 'https://x.test/1', company, title: 'Backend Engineer', fingerprint: f });
+  const histRow = (company) => ({ url: 'https://y.test/2', company, title: 'Backend Engineer', fingerprint: f, dateStr: '2026-08-01' });
+  const found = (a, b) => findCrossListings([offer(a)], [histRow(b)], { today }).length;
+
+  const differentEmployers = [
+    ['アクメ株式会社', 'グロベックス合同会社'],
+    ['Яндекс', '北京字节跳动'],
+    ['कंपनी', 'कपनी'], // differ only in combining marks
+  ];
+  if (differentEmployers.every(([a, b]) => found(a, b) === 1)) {
+    pass('cross-listings between two different non-Latin employers are detected (#2500)');
+  } else {
+    fail('a shared posting between different non-Latin employers was skipped as a same-company re-post');
+  }
+  // The same-company skip must survive: a non-Latin employer re-posting its own
+  // listing is a re-post, not a cross-listing.
+  if (found('Acme Inc', 'Acme Inc') === 0 && found('アクメ株式会社', 'アクメ株式会社') === 0) {
+    pass('same-employer pairs are still skipped as re-posts, Latin and non-Latin alike (#2500)');
+  } else {
+    fail('same-employer pair was reported as a cross-listing');
+  }
+}

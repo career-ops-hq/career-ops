@@ -59,3 +59,41 @@ classifyLiveness({
 }).result !== 'expired'
   ? pass('"job application form has been filled" (no "out") is NOT expired')
   : fail('false positive: "application form has been filled" read as an expired req');
+
+console.log('\nliveness-core — transient 5xx must not classify as expired');
+
+// Regression: a 502 with a typical short gateway body used to fall through to
+// the insufficient-content heuristic and read as expired, which dedup-blocks
+// the posting from every future scan. Any 5xx is transient, never "gone".
+for (const status of [500, 502, 504]) {
+  const verdict = classifyLiveness({
+    status,
+    requestedUrl: 'https://careers.example.com/job/123',
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${status} Bad Gateway\nnginx`,
+    applyControls: [],
+  });
+  verdict.result === 'uncertain' && verdict.code === 'server_error'
+    ? pass(`HTTP ${status} -> uncertain/server_error (was: expired via insufficient_content)`)
+    : fail(`HTTP ${status} classified ${verdict.result}/${verdict.code}, expected uncertain/server_error`);
+}
+
+// 503 keeps its more specific access-blocked classification: the 5xx guard
+// sits below it, so both halves of the verdict must hold, not just the code.
+const blocked = classifyLiveness({ status: 503, finalUrl: 'https://careers.example.com/job/123', bodyText: 'checking your browser', applyControls: [] });
+blocked.result === 'uncertain' && blocked.code === 'access_blocked'
+  ? pass('HTTP 503 still classifies as uncertain/access_blocked, not server_error')
+  : fail(`HTTP 503 classified ${blocked.result}/${blocked.code}, expected uncertain/access_blocked`);
+
+// A real 404/410 is still authoritative expiry — both statuses, both halves.
+for (const status of [404, 410]) {
+  const gone = classifyLiveness({
+    status,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: 'Not found',
+    applyControls: [],
+  });
+  gone.result === 'expired' && gone.code === 'http_gone'
+    ? pass(`HTTP ${status} still -> expired/http_gone`)
+    : fail(`HTTP ${status} classified ${gone.result}/${gone.code}, expected expired/http_gone`);
+}

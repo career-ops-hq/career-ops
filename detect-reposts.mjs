@@ -27,6 +27,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 import { roleFuzzyMatch, roleTokens, BASELINE_TOKENS } from './role-matcher.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
@@ -36,9 +37,9 @@ const DEFAULT_WINDOW_DAYS = 90;
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-const windowIdx = args.indexOf('--window');
-const windowDays = windowIdx !== -1 && args[windowIdx + 1] !== undefined
-  ? (Number.isNaN(parseInt(args[windowIdx + 1], 10)) ? DEFAULT_WINDOW_DAYS : parseInt(args[windowIdx + 1], 10))
+const windowValue = flagValue(args, '--window');
+const windowDays = windowValue !== undefined
+  ? (Number.isNaN(parseInt(windowValue, 10)) ? DEFAULT_WINDOW_DAYS : parseInt(windowValue, 10))
   : DEFAULT_WINDOW_DAYS;
 
 // --- Date helpers ---
