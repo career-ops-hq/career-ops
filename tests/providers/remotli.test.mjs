@@ -31,7 +31,12 @@ try {
   else fail(`detect() misses = ${JSON.stringify(misses)}`);
 
   // --- normalizeRemotliJob() -------------------------------------------------
-  const row = (jobs, companies) => ({ jobs, companies: companies || {} });
+  // `status` defaults to 'active' so each test exercises the thing it names.
+  // normalizeRemotliJob rejects any row whose status is not exactly 'active',
+  // so without this default the slug/title/salary cases below would all return
+  // null for the WRONG reason and still pass — vacuous tests. Cases that are
+  // about status override it, and the missing-status case builds its row inline.
+  const row = (jobs, companies) => ({ jobs: { status: 'active', ...jobs }, companies: companies || {} });
 
   const full = normalizeRemotliJob(row({
     title: '  Head of Finance  ',
@@ -100,10 +105,33 @@ try {
   if (closed.every(c => c === null)) pass('normalizeRemotliJob drops non-active rows (built-in liveness)');
   else fail(`normalizeRemotliJob non-active = ${JSON.stringify(closed)}`);
 
-  // A missing status is treated as open (don't penalize missing data).
-  const noStatus = normalizeRemotliJob(row({ title: 'T', slug: 'ns' }));
-  if (noStatus && noStatus.url === 'https://remotli.ch/jobs/ns') pass('normalizeRemotliJob keeps rows with no status field');
-  else fail(`normalizeRemotliJob no-status = ${JSON.stringify(noStatus)}`);
+  // Unknown status fails CLOSED. An earlier revision treated a missing status as
+  // open ("don't penalize missing data"), which made the liveness guarantee
+  // conditional on the API always sending the field. Built inline rather than
+  // through row(), which now defaults status to 'active'.
+  const unknownStatus = [
+    normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns' }, companies: {} }),           // absent
+    normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns', status: null }, companies: {} }),
+    normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns', status: 1 }, companies: {} }), // non-string
+    normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns', status: '' }, companies: {} }),
+    normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns', status: '  ' }, companies: {} }),
+  ];
+  if (unknownStatus.every(s => s === null)) {
+    pass('normalizeRemotliJob rejects rows whose status is missing, null, non-string or blank (fails closed)');
+  } else {
+    fail(`normalizeRemotliJob unknown-status = ${JSON.stringify(unknownStatus)}`);
+  }
+
+  // ...but a well-formed active row still survives, so the check above is not
+  // passing merely because normalizeRemotliJob rejects everything.
+  const active = normalizeRemotliJob(row({ title: 'T', slug: 'ns' }));
+  if (active && active.url === 'https://remotli.ch/jobs/ns') pass('normalizeRemotliJob keeps rows with status "active"');
+  else fail(`normalizeRemotliJob active row = ${JSON.stringify(active)}`);
+
+  // Case and surrounding whitespace are normalised before the comparison.
+  const messyActive = normalizeRemotliJob({ jobs: { title: 'T', slug: 'ns', status: '  ACTIVE  ' }, companies: {} });
+  if (messyActive && messyActive.url === 'https://remotli.ch/jobs/ns') pass('normalizeRemotliJob trims and lowercases status before comparing');
+  else fail(`normalizeRemotliJob messy active = ${JSON.stringify(messyActive)}`);
 
   // Company fallbacks: job.company → companies.name → entry name → "Remotli".
   const fromJoin = normalizeRemotliJob(row({ title: 'T', slug: 'f1' }, { name: 'Join Co' }));

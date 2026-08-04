@@ -129,8 +129,18 @@ export function normalizeRemotliJob(row, fallbackCompany) {
   // Only currently-open roles. The board also carries closed/draft rows, and
   // emitting them would put dead links in the pipeline — the exact staleness
   // problem that made the WebSearch-based remotli query useless.
+  //
+  // Fail closed: anything that is not exactly `active` is rejected, including a
+  // missing or non-string status. An earlier revision let an absent status
+  // through, which made the "only active rows are emitted" guarantee depend on
+  // the API always sending the field. It does today — /api/jobs filters
+  // `status = 'active'` in SQL, so all 395 live rows carry it — but the provider
+  // cannot see that invariant, and the two failure modes are not symmetric: a
+  // dropped field would silently publish closed roles as dead links, whereas
+  // rejecting unknown status yields a visibly empty board that the
+  // verify-portals health probe surfaces.
   const status = typeof job.status === 'string' ? job.status.trim().toLowerCase() : '';
-  if (status && status !== 'active') return null;
+  if (status !== 'active') return null;
 
   const slug = typeof job.slug === 'string' ? job.slug.trim() : '';
   if (!slug || /[^a-z0-9._~-]/i.test(slug)) return null; // host-locked, path-safe slugs only
