@@ -118,6 +118,26 @@ function buildFootnotesBlock(footnotes) {
   return `<div class="footnotes">\n${lines}\n  </div>`;
 }
 
+/**
+ * Build the optional sign-off block: a valediction over the signing name.
+ *
+ * Accepts either a plain string (used verbatim as the valediction) or an
+ * object `{ valediction, name }`. `name` defaults to the candidate name so a
+ * payload can set only the valediction. Returns "" when unset, which keeps
+ * every pre-existing payload rendering byte-identical.
+ */
+function buildSignatureBlock(signature, candidateName) {
+  if (!signature) return "";
+  const isObject = typeof signature === "object" && signature !== null;
+  const valediction = isObject ? signature.valediction : signature;
+  const name = (isObject ? signature.name : "") || candidateName || "";
+  if (!valediction && !name) return "";
+  // Each value is escaped independently; the <br> separator is template markup
+  // emitted between them, never injected into escaped content.
+  const lines = [valediction, name].filter(Boolean).map(escapeHtml);
+  return `<p class="signature">${lines.join("<br>")}</p>`;
+}
+
 // Resolve the cover-letter template through the shared resolver so a
 // `cover_letter.template` profile default, an explicit `payload.template`, and
 // installed template packs are all honored. Any resolver failure (no profile,
@@ -152,6 +172,12 @@ export function buildHtml(payload, templatePath) {
     : "";
   const problemsBlock = letter.problems_section ? `<p>${escapeHtml(letter.problems_section)}</p>` : "";
 
+  // Optional sign-off (e.g. valediction "Sincerely," over the signing name).
+  // Omitted -> no signature, preserving behavior for payloads that don't set it.
+  // The name falls back to the candidate name so a payload can set only the
+  // valediction. The <br> is emitted around escaped values, never inside one.
+  const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
+
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
@@ -165,6 +191,7 @@ export function buildHtml(payload, templatePath) {
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,
     "{{LANGUAGE_CLOSING_BLOCK}}": languageClosingBlock,
+    "{{SIGNATURE_BLOCK}}": signatureBlock,
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
