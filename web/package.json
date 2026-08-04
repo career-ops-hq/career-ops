@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test-clean-chips.mjs"
+    "test": "node --test \"tests/**/*.test.mjs\" test-stream-parse.mjs test-act-envelope.mjs"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.78",

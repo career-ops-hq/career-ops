@@ -5,6 +5,7 @@
 // across stream chunk boundaries must BUFFER, never flush as garbage or drop.
 
 import type { DiscoveredOffer } from "./explore";
+import { pendingOpenerLen } from "./stream-parse.mjs";
 
 const OPEN = "<<offer:";
 const CLOSE = ">>";
@@ -58,20 +59,15 @@ export function makeAiStreamParser(opts?: { knownUrls?: Set<string> }) {
       for (;;) {
         const open = buf.indexOf(OPEN);
         if (open === -1) {
-          // No opener in view. Flush as narration — but hold back a short tail
-          // that could be the start of a split opener ("<<offe…").
-          const keep = OPEN.length - 1;
-          if (buf.length > keep) {
-            const tail = buf.slice(buf.length - keep);
-            if (OPEN.startsWith(tail)) {
-              const text = buf.slice(0, buf.length - keep);
-              if (text.trim()) out.push({ kind: "narration", text });
-              buf = tail;
-            } else {
-              if (buf.trim()) out.push({ kind: "narration", text: buf });
-              buf = "";
-            }
-          }
+          // No opener in view. Flush as narration — but hold back the longest
+          // trailing run that could be the start of a split opener ("<<offe…"),
+          // so an offer whose marker straddles a chunk boundary is never dropped
+          // as garbage (#2290). A fixed-length tail check missed the shorter
+          // partial openers ("<<", "<<off") preceded by other text.
+          const hold = pendingOpenerLen(buf, OPEN);
+          const text = hold ? buf.slice(0, buf.length - hold) : buf;
+          if (text.trim()) out.push({ kind: "narration", text });
+          buf = hold ? buf.slice(buf.length - hold) : "";
           break;
         }
         const before = buf.slice(0, open);

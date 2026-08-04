@@ -521,3 +521,78 @@ export function resolveCanonicalState(input, states) {
   }
   return null;
 }
+
+/**
+ * Canonical process-exit codes shared by every locked, single-purpose
+ * tracker-writer CLI (set-status.mjs, mark-pdf-ready.mjs, ...) — one source
+ * so a new script can't drift from the numbering an existing one already
+ * commits to (callers/CI may depend on these exact values).
+ */
+export const CLI_EXIT = { OK: 0, USAGE: 1, NOT_FOUND: 2, AMBIGUOUS: 3, LOCK_TIMEOUT: 4 };
+
+/**
+ * Build a failWith(exitCode, code, message, extra) bound to a --json flag,
+ * shared by every canonical tracker-writer CLI so the JSON-vs-human error
+ * contract can't drift between them.
+ *
+ * With json:true the error object goes to stdout so machine callers always
+ * parse one stream; the human-readable message always goes to stderr.
+ *
+ * @param {boolean} json - The CLI's --json flag.
+ * @returns {(exitCode: number, code: string, message: string, extra?: object) => never}
+ */
+export function makeCliFailWith(json) {
+  return function failWith(exitCode, code, message, extra = {}) {
+    if (json) {
+      console.log(JSON.stringify({ error: message, code, ...extra }));
+    }
+    console.error(`❌ ${message}`);
+    process.exit(exitCode);
+  };
+}
+
+/**
+ * Acquire the shared tracker lock for a locked read-modify-write CLI,
+ * routing any failure through the caller's failWith so every canonical
+ * writer surfaces lock errors identically (LOCK_TIMEOUT → CLI_EXIT.LOCK_TIMEOUT,
+ * anything else → CLI_EXIT.USAGE as a non-retryable config/filesystem error).
+ *
+ * Dry-run never writes, so it must not hold the exclusive lock: a read-only
+ * preview should not block (or be blocked by) another writer — returns null
+ * in that case. Registers the `process.exit` release safety net these CLIs
+ * rely on (failWith/failUsage/row-resolution all exit directly and skip an
+ * explicit release — release() is idempotent, so both firing is fine).
+ *
+ * @param {string} appsFile - Canonical tracker path (resolveTrackerPath()).
+ * @param {{dryRun: boolean, failWith: (exitCode: number, code: string, message: string, extra?: object) => never}} options
+ * @returns {Promise<{release: Function}|null>}
+ */
+export async function acquireTrackerLockForCli(appsFile, { dryRun, failWith }) {
+  if (dryRun) return null;
+  let lock;
+  try {
+    lock = await acquireTrackerLock(trackerLockDirFor(appsFile), {
+      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+      retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+      staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+      tracker: appsFile,
+    });
+  } catch (err) {
+    // Exit 4 means "lock is busy — retry later" and must stay reserved for
+    // the actual timeout. Filesystem/configuration failures (EACCES on the
+    // lock dir, unwritable owner.json, …) are not retryable and fail as a
+    // config error instead.
+    if (err?.code === 'LOCK_TIMEOUT') {
+      failWith(CLI_EXIT.LOCK_TIMEOUT, 'lock-timeout', err.message);
+    } else {
+      failWith(CLI_EXIT.USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
+    }
+    // failWith is documented (and, today, always) to exit the process — but
+    // this function is now shared, so don't let a future non-exiting failWith
+    // silently fall through to releasing/returning an undefined lock; fail
+    // loudly instead.
+    throw err;
+  }
+  process.once('exit', () => lock.release());
+  return lock;
+}

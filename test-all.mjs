@@ -24,13 +24,14 @@
  */
 
 
-import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
+import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
+import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
-import { pass, fail, warn, run, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -134,14 +135,55 @@ console.log('\n🧪 career-ops test suite\n');
 console.log('1. Syntax checks');
 
 const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
-for (const f of mjsFiles) {
-  const result = run(NODE, ['--check', f]);
-  if (result !== null) {
+
+// `node --check` parses a file and exits; it runs no user code, touches no
+// shared state, and its result depends on nothing but that one file. Spawning
+// the 100+ root scripts one at a time was pure process-startup latency, so they
+// go through a bounded pool instead (#2387). Results are collected by index and
+// reported afterwards in the original readdir order, so the log stays
+// byte-identical to the sequential version regardless of completion order.
+const SYNTAX_POOL_SIZE = 8;
+const execFileAsync = promisify(execFile);
+const syntaxOk = new Array(mjsFiles.length);
+const syntaxDetail = new Array(mjsFiles.length);
+let nextSyntaxIdx = 0;
+
+// A bare catch reports a child killed on timeout, or one that never spawned, as
+// "has syntax errors" — sending the reader hunting for a parse error that does
+// not exist. Keep enough of the child's own diagnosis to tell those apart.
+const describeCheckFailure = (err) => {
+  if (err?.killed || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT') {
+    return `node --check timed out after 30000ms${err.signal ? ` (signal ${err.signal})` : ''}`;
+  }
+  const stderr = String(err?.stderr ?? '').trim();
+  if (!stderr) return `no stderr (exit ${err?.code ?? 'unknown'})`;
+  const clipped = stderr.length > 2000
+    ? `${stderr.slice(0, 2000)}\n    ... (${stderr.length - 2000} more chars)`
+    : stderr;
+  return clipped.replace(/\n/g, '\n    ');
+};
+
+const syntaxWorker = async () => {
+  for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
+    try {
+      await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
+      syntaxOk[i] = true;
+    } catch (err) {
+      syntaxOk[i] = false;
+      syntaxDetail[i] = describeCheckFailure(err);
+    }
+  }
+};
+await Promise.all(
+  Array.from({ length: Math.min(SYNTAX_POOL_SIZE, mjsFiles.length) }, syntaxWorker)
+);
+mjsFiles.forEach((f, i) => {
+  if (syntaxOk[i]) {
     pass(`${f} syntax OK`);
   } else {
-    fail(`${f} has syntax errors`);
+    fail(`${f} has syntax errors\n    ${syntaxDetail[i] ?? 'no diagnostic captured'}`);
   }
-}
+});
 
 // ── 2. SCRIPT EXECUTION ─────────────────────────────────────────
 
@@ -170,10 +212,12 @@ const scripts = [
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
+  { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
+  { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
@@ -200,6 +244,11 @@ const scripts = [
   // `git ls-files` on the REAL tree. Running it here validated nothing and
   // exited 0 no matter what, which is how five unregistered files shipped.
   // It now runs from ROOT in section 5.
+  { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
+  // Same reasoning as above: the bare run needs AGENTS.md and the real
+  // modes/ tree sitting next to it, which this throwaway single-file copy
+  // does not have. It runs from ROOT alongside the SYSTEM_PATHS coverage
+  // check below.
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -211,11 +260,19 @@ const scripts = [
 
 const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
+  // Never copied, at any depth: dependency trees and git metadata. Nothing run
+  // from the throwaway copy reads them (module resolution walks up into the
+  // real ROOT/node_modules, which is how the root-level exclusion already
+  // worked), and a nested web/node_modules is ~400 MB on a machine that has
+  // installed the web app's deps — copying it dominated this section (#2387).
+  const EXCLUDE_AT_ANY_DEPTH = new Set(['node_modules', '.git']);
+
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
-    // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
-    // Match by basename ONLY at the repo root so nested fixture subdirs such as
-    // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+    if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
+    // Everything else is a top-level workspace dir (data/, reports/, …) and is
+    // matched by basename ONLY at the repo root, so nested fixture subdirs such
+    // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
@@ -229,8 +286,8 @@ try {
   };
 
   const excludeDirs = [
-    'node_modules',
-    '.git',
+    // node_modules and .git are not listed here — EXCLUDE_AT_ANY_DEPTH above
+    // drops them wherever they occur, root included.
     'data',
     'reports',
     '.career-ops-web',
@@ -265,7 +322,10 @@ try {
     } else if (allowFail) {
       warn(`${name} exited with error (expected without user data)`);
     } else {
-      fail(`${name} crashed`);
+      // Include the child's exit status and streams. Without them a CI-only
+      // failure arrives as a bare `<name> crashed`: no stack, no assertion
+      // text, no exit code, and nothing a reader can act on.
+      fail(`${name} crashed${formatRunFailure()}`);
     }
   }
 } finally {
@@ -701,7 +761,7 @@ try {
   // matched literal IPv4 patterns and bracketless IPv6, so several Chromium-
   // routable bypasses (0.0.0.0, [::], [::1] (bracketed), [::ffff:127.0.0.1],
   // localhost.) slipped through. These cases keep that regression covered.
-  const { rejectPrivateOrInvalid } = await import(
+  const { rejectPrivateOrInvalid, setHostResolver } = await import(
     pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
   );
   const blockCases = [
@@ -750,105 +810,108 @@ try {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
   }
 
-  // SSRF redirect routing tests
-  const dnsModule = await import('dns/promises');
-  const { mock } = await import('node:test');
-
-  // Stub resolve4, resolve6, and lookup to test the DNS path
-  mock.method(dnsModule.default, 'resolve4', (hostname) => {
-    if (hostname === 'ssrf-blocked-host.local') {
-      return Promise.resolve(['127.0.0.1']);
-    }
-    return Promise.resolve([]);
-  });
-  mock.method(dnsModule.default, 'resolve6', (hostname) => {
-    return Promise.resolve([]);
-  });
-  mock.method(dnsModule.default, 'lookup', (hostname, options) => {
-    if (hostname === 'ssrf-blocked-host.local') {
-      const addr = { address: '127.0.0.1', family: 4 };
-      return Promise.resolve(options?.all ? [addr] : addr);
-    }
-    return Promise.reject(new Error('DNS lookup failure'));
+  // SSRF redirect routing tests.
+  //
+  // The resolver is injected rather than mocked on the dns module (#2386): the
+  // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
+  // reach, so the previous `mock.method(dnsModule.default, …)` stub never
+  // applied. The test passed anyway — the real resolver found nothing for
+  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // so the loopback-rejection branch under test was never executed, and each
+  // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
+  // hands back a loopback address, which is the case that matters, and keeps
+  // the whole section off the network.
+  const restoreHostResolver = setHostResolver(async (hostname) => {
+    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // Every other host in this section is a stand-in for a normal public site.
+    return ['93.184.216.34'];
   });
 
-  let routeCallback = null;
-  const mockPageInstance = {
-    _blockedByGuard: null,
-    async route(pattern, callback) {
-      routeCallback = callback;
-    },
-    async goto() {
-      if (routeCallback) {
-        let aborted = false;
-        const mockRoute = {
-          request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
-          abort: async () => {
-            aborted = true;
-          },
-          continue: async () => {}
-        };
-        await routeCallback(mockRoute);
-        if (aborted) {
-          throw new Error('net::ERR_BLOCKED_BY_CLIENT');
-        }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com/redirected'; },
-    async evaluate() { return 'body text'; }
-  };
-
-  const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
-  if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host') {
-    pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
-  } else {
-    fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
-  }
-
-  // Restore DNS mocks
-  mock.reset();
-
-  let legitimateRouteCallback = null;
-  const mockPageLegitimate = {
-    _blockedByGuard: null,
-    async route(pattern, callback) {
-      legitimateRouteCallback = callback;
-    },
-    async goto() {
-      if (legitimateRouteCallback) {
-        let continued = false;
-        const mockRoute = {
-          request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
-          abort: async () => {},
-          continue: async () => {
-            continued = true;
+  try {
+    let routeCallback = null;
+    const mockPageInstance = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        routeCallback = callback;
+      },
+      async goto() {
+        if (routeCallback) {
+          let aborted = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            abort: async () => {
+              aborted = true;
+            },
+            continue: async () => {}
+          };
+          await routeCallback(mockRoute);
+          if (aborted) {
+            throw new Error('net::ERR_BLOCKED_BY_CLIENT');
           }
-        };
-        await legitimateRouteCallback(mockRoute);
-        if (!continued) {
-          throw new Error('Blocked legitimate request');
         }
-      }
-      return { status: () => 200 };
-    },
-    async waitForTimeout() {},
-    url() { return 'https://example.com'; },
-    async evaluate(fn) {
-      const fnStr = fn.toString();
-      if (fnStr.includes('body')) {
-        return 'legitimate page body';
-      }
-      return ['Apply'];
-    }
-  };
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com/redirected'; },
+      async evaluate() { return 'body text'; }
+    };
 
-  const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
-  if (legitimateResult.result === 'active') {
-    pass('SSRF redirect guard allows legitimate subresource requests');
-  } else {
-    fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
+    // The reason has to name the loopback address. `blocked_host` alone is also
+    // what an unresolvable host produces, so asserting on the code by itself
+    // cannot tell "guard rejected 127.0.0.1" from "host resolved to nothing" —
+    // that ambiguity is exactly what hid the broken mock (#2386).
+    if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host'
+        && /private target IP 127\.0\.0\.1/.test(redirectResult.reason ?? '')) {
+      pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
+    } else {
+      fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
+    }
+
+    let legitimateRouteCallback = null;
+    const mockPageLegitimate = {
+      _blockedByGuard: null,
+      async route(pattern, callback) {
+        legitimateRouteCallback = callback;
+      },
+      async goto() {
+        if (legitimateRouteCallback) {
+          let continued = false;
+          const mockRoute = {
+            request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
+            abort: async () => {},
+            continue: async () => {
+              continued = true;
+            }
+          };
+          await legitimateRouteCallback(mockRoute);
+          if (!continued) {
+            throw new Error('Blocked legitimate request');
+          }
+        }
+        return { status: () => 200 };
+      },
+      async waitForTimeout() {},
+      url() { return 'https://example.com'; },
+      async evaluate(fn) {
+        const fnStr = fn.toString();
+        if (fnStr.includes('body')) {
+          return 'legitimate page body';
+        }
+        return ['Apply'];
+      }
+    };
+
+    const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
+    if (legitimateResult.result === 'active') {
+      pass('SSRF redirect guard allows legitimate subresource requests');
+    } else {
+      fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    }
+  } finally {
+    // Always put the real resolver back, even if an assertion above throws:
+    // a leaked stub would silently answer for every later suite in this process.
+    restoreHostResolver();
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
@@ -1016,6 +1079,21 @@ for (const f of skillEntrypoints) {
     pass('every tracked file is covered by SYSTEM_PATHS or USER_PATHS');
   } else {
     fail(`SYSTEM_PATHS coverage gap — a new file is unregistered and update-system will not ship it:\n${(cov.stderr || cov.stdout || '').trim()}`);
+  }
+}
+
+// Same shape, for the untrusted-external-content directive: every mode that
+// ingests raw external text must reference the canonical AGENTS.md rule, or
+// a new/edited mode can silently lose it with no signal until it's exploited.
+{
+  const untrusted = spawnSync(process.execPath, [join(ROOT, 'validate-untrusted-content-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (untrusted.status === 0) {
+    pass('canonical untrusted-external-content directive is present and referenced by every ingesting mode');
+  } else {
+    fail(`Untrusted-content directive coverage gap:\n${(untrusted.stderr || untrusted.stdout || '').trim()}`);
   }
 }
 
@@ -4292,9 +4370,15 @@ try {
   writeFileSync(dryRunPortals, fixture);
   const beforeDryRun = readFileSync(dryRunPortals, 'utf-8');
   try {
+    // fix-slugs probes live Greenhouse/Ashby/Lever endpoints before it decides
+    // what to rewrite, so on a connected machine this child runs to the timeout
+    // and is killed. That is fine: the assertion below is about disk writes, not
+    // about network reachability, and a dry run must not write at any point in
+    // its life. The timeout is therefore kept short (#2387) - 15 s bought
+    // nothing but 15 s.
     execFileSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', dryRunPortals, '--dry-run'], {
       cwd: ROOT,
-      timeout: 15000,
+      timeout: 2000,
     });
   } catch {
     // Network is reachable-or-not in CI; either way, no write should occur.
@@ -4957,6 +5041,7 @@ try {
   const {
     buildLocationFilter,
     locationHintFromUrl,
+    titleSignalsRemote,
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
@@ -5225,6 +5310,112 @@ try {
     pass('URL hint is boundary-matched as well (Indianapolis URL survives, India URL does not)');
   } else {
     fail('URL hint must use the same word-boundary matching as the location string');
+  }
+
+  // Case 24: a remote marker in the TITLE satisfies `allow` when the location
+  // names only a city/state. Radancy/TalentBrew tenants (Optum, Kaiser) report
+  // the hiring office as the location and state remoteness in the title, so a
+  // country/region `allow` list rejected genuinely remote US roles. Measured
+  // live on careers.unitedhealthgroup.com: 14 PM-family postings, 0 passed.
+  const remoteTitleFilter = buildLocationFilter({
+    allow: ['remote', 'united states', 'usa', 'us', 'new york'],
+    block: ['india', 'united kingdom', 'london'],
+  });
+  if (
+    remoteTitleFilter('Costa Mesa, California', undefined, 'Sr. PBM Client Implementation Project Manager - Remote') === true &&
+    remoteTitleFilter('Las Vegas, Nevada', undefined, 'Program Manager - Remote') === true &&
+    remoteTitleFilter('St Louis, Missouri', undefined, 'Clinical Program Manager (Case Management) - Remote in MO') === true &&
+    remoteTitleFilter('Phoenix, Arizona', undefined, 'Project Manager (Remote)') === true &&
+    remoteTitleFilter('Dallas, Texas', undefined, 'IT Program Manager, Remote - US') === true
+  ) {
+    pass('a remote marker in the title satisfies allow when the location is city-only');
+  } else {
+    fail('title-stated remote roles are still being rejected for a city-only location');
+  }
+
+  // Case 25: the rescue must NOT widen `block`. It runs after the block tier, so
+  // a remote title can never pull in an excluded country.
+  if (
+    remoteTitleFilter('Bengaluru, Karnataka, India', undefined, 'Program Manager - Remote') === false &&
+    remoteTitleFilter('London, United Kingdom', undefined, 'Project Manager - Remote') === false &&
+    remoteTitleFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/PM_R1', 'Program Manager - Remote') === false
+  ) {
+    pass('a remote title never rescues a blocked location (block still wins, URL hint included)');
+  } else {
+    fail('remote-title rescue must not override the block tier');
+  }
+
+  // Case 26: only a work-arrangement marker counts. "Remote Sensing" is a GIS
+  // domain compound — Esri, a tracked company, posts on-site roles with exactly
+  // that phrase, so a bare /remote/ test would silently admit them.
+  if (
+    remoteTitleFilter('Redlands, California', undefined, 'Remote Sensing Program Manager') === false &&
+    remoteTitleFilter('Austin, Texas', undefined, 'Remote Monitoring Project Manager') === false &&
+    titleSignalsRemote('Remote Sensing Analyst') === false &&
+    titleSignalsRemote('Program Manager - Remote') === true &&
+    titleSignalsRemote('Telremote Engineer') === false
+  ) {
+    pass('remote-title detection ignores domain compounds (Remote Sensing/Monitoring) and mid-word hits');
+  } else {
+    fail('remote-title detection must not fire on "Remote Sensing"-style compounds');
+  }
+
+  // Case 27a: an explicit negation must lose. "Non-Remote"/"Not Remote" satisfy
+  // REMOTE_TITLE_RE on their own — the delimiter clears the lookbehind and the
+  // trailing position clears the lookahead — so without a negation guard an
+  // explicitly on-site role would bypass a non-empty `allow` list.
+  if (
+    titleSignalsRemote('Project Manager - Non-Remote') === false &&
+    titleSignalsRemote('Project Manager - Not Remote') === false &&
+    titleSignalsRemote('Office Manager (Non-Remote)') === false &&
+    titleSignalsRemote('Program Manager - NonRemote') === false &&
+    titleSignalsRemote('Program Manager - No Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Non-Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Not Remote') === false
+  ) {
+    pass('an explicit negation ("Non-Remote"/"Not Remote") never counts as a remote marker');
+  } else {
+    fail('negated remote titles are being admitted — an on-site role can bypass allow');
+  }
+
+  // Case 27b: the negation guard must not over-reach. `[\s-]*` spans only spaces
+  // and hyphens, so a word-initial "non"/"not" in an unrelated token cannot
+  // reach across to "remote".
+  if (
+    titleSignalsRemote('Nonprofit Program Manager - Remote') === true &&
+    titleSignalsRemote('Not-for-Profit Program Manager - Remote') === true &&
+    titleSignalsRemote('Nordic Program Manager - Remote') === true &&
+    titleSignalsRemote('Notary Operations Manager - Remote') === true
+  ) {
+    pass('the negation guard does not misfire on Nonprofit/Not-for-Profit/Nordic/Notary titles');
+  } else {
+    fail('negation guard is over-rejecting legitimate remote titles');
+  }
+
+  // Case 27c: the negation separator must be at least as broad as the marker's
+  // own delimiter lookahead. An ASCII-only [\s-] let every non-ASCII dash through
+  // — en dash, em dash, non-breaking hyphen, figure dash and minus all still read
+  // as remote, trivially sidestepping the guard.
+  const negatedDashes = ['-', '–', '—', '‑', '‒', '−', '', ' ', '/'];
+  if (negatedDashes.every((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) === false)) {
+    pass('the negation guard survives Unicode dash variants (en/em/non-breaking/figure/minus)');
+  } else {
+    const leak = negatedDashes.filter((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) !== false);
+    fail(`negated titles leak through with separator(s): ${JSON.stringify(leak)}`);
+  }
+
+  // Case 27: unchanged behavior — on-site city-only roles with no remote marker
+  // stay rejected, and malformed/absent titles are inert.
+  if (
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Senior Project Manager I') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, undefined) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 42) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, '   ') === false &&
+    remoteTitleFilter('United States', undefined, 'Program Manager') === true
+  ) {
+    pass('on-site city-only roles stay rejected; non-string/blank titles are inert');
+  } else {
+    fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
   if (
@@ -5722,6 +5913,146 @@ try {
     fail('parseDate validation wrong');
   }
 
+  // extractContacts — recorded outreach is usually a NAME (LinkedIn produces no
+  // email), so an email-only parser reports contacts: [] for rows that do have a
+  // human attached. "no contact" then reads identically to "contact with no
+  // email on file", which inverts the meaning of the field.
+  {
+    const nameOnly = cadence.extractContacts('reached out to recruiter Julia Masera (LinkedIn)');
+    if (nameOnly.length === 1 && nameOnly[0].name === 'Julia Masera' && nameOnly[0].email === null) {
+      pass('extractContacts finds a name-only contact with no email on file');
+    } else {
+      fail(`extractContacts name-only got ${JSON.stringify(nameOnly)}`);
+    }
+    if (nameOnly[0] && nameOnly[0].channel === 'linkedin') {
+      pass('extractContacts carries the channel through when the notes name one');
+    } else {
+      fail(`extractContacts should report channel 'linkedin', got ${JSON.stringify(nameOnly[0])}`);
+    }
+
+    const emailed = cadence.extractContacts('Emailed Jane Doe at jane.doe@acme.com');
+    if (emailed.length === 1 && emailed[0].email === 'jane.doe@acme.com' && emailed[0].channel === 'email') {
+      pass('extractContacts still resolves an email contact (regression)');
+    } else {
+      fail(`extractContacts email-case got ${JSON.stringify(emailed)}`);
+    }
+
+    if (cadence.extractContacts('On-archetype fit; no submission yet').length === 0) {
+      pass('extractContacts reports no contact when the notes carry none');
+    } else {
+      fail('extractContacts should find nothing in notes with no outreach');
+    }
+
+    // A bare capitalized word pair must not be mistaken for a contact — only a
+    // named outreach verb qualifies, or the field fills with company names.
+    if (cadence.extractContacts('Strong fit for Acme Corp; Series B').length === 0) {
+      pass('extractContacts does not treat a capitalized company name as a contact');
+    } else {
+      fail(`extractContacts false-positived on a company name: ${JSON.stringify(cadence.extractContacts('Strong fit for Acme Corp; Series B'))}`);
+    }
+
+    // MULTIPLICITY: two contacts in one note, reached on DIFFERENT channels.
+    // A whole-note channel scan tags both with whichever channel word appears
+    // first, so the second contact is silently attributed to the wrong channel.
+    {
+      const two = cadence.extractContacts('Messaged recruiter Asha Beirne on LinkedIn; called hiring manager Bob Smith');
+      const asha = two.find(c => c.name === 'Asha Beirne');
+      const bob = two.find(c => c.name === 'Bob Smith');
+      if (two.length === 2 && asha && bob) {
+        pass('extractContacts finds both contacts when one note names two people');
+      } else {
+        fail(`extractContacts two-contact case got ${JSON.stringify(two)}`);
+      }
+      if (asha?.channel === 'linkedin' && bob?.channel === 'phone') {
+        pass('extractContacts derives each contact channel from its own statement, not the whole note');
+      } else {
+        fail(`per-contact channel wrong: asha=${JSON.stringify(asha?.channel)} bob=${JSON.stringify(bob?.channel)}`);
+      }
+    }
+
+    // MERGE: one outreach statement naming a person AND their email is ONE
+    // contact, not an email-only contact plus a separate name-only duplicate.
+    {
+      const merged = cadence.extractContacts('contacted Jane Doe at jane.doe@acme.com');
+      if (merged.length === 1 && merged[0].name === 'Jane Doe' && merged[0].email === 'jane.doe@acme.com') {
+        pass('extractContacts merges a name and email from the same outreach statement');
+      } else {
+        fail(`extractContacts merge-case got ${JSON.stringify(merged)}`);
+      }
+    }
+
+    // DEDUP: the same address repeated in a note is one contact, not two.
+    {
+      const repeated = cadence.extractContacts('emailed jane.doe@acme.com; followed up jane.doe@acme.com');
+      if (repeated.length === 1) {
+        pass('extractContacts deduplicates a repeated email address');
+      } else {
+        fail(`extractContacts repeated-email got ${JSON.stringify(repeated)}`);
+      }
+      // Address case must not defeat the dedup.
+      const cased = cadence.extractContacts('emailed Jane.Doe@Acme.com; then jane.doe@acme.com again');
+      if (cased.length === 1) {
+        pass('extractContacts deduplicates emails case-insensitively');
+      } else {
+        fail(`extractContacts case-variant email got ${JSON.stringify(cased)}`);
+      }
+    }
+
+    // The same person named twice across statements stays one contact.
+    {
+      const dup = cadence.extractContacts('messaged recruiter Ryan Hill; recruiter Ryan Hill replied');
+      if (dup.length === 1 && dup[0].name === 'Ryan Hill') {
+        pass('extractContacts does not double-count a person named in two statements');
+      } else {
+        fail(`extractContacts repeated-name got ${JSON.stringify(dup)}`);
+      }
+    }
+
+    // LATE BRIDGE: a name-only and an email-only record can be recorded
+    // separately, then a later statement names BOTH and proves they are one
+    // person. Leaving two records behind reports two contacts where the note
+    // itself says there is one.
+    {
+      const bridged = cadence.extractContacts('recruiter Ann Lee; emailed ann.lee@acme.com; contacted Ann Lee at ann.lee@acme.com');
+      if (bridged.length === 1 && bridged[0].name === 'Ann Lee' && bridged[0].email === 'ann.lee@acme.com') {
+        pass('extractContacts coalesces name-only and email-only records once a later statement bridges them');
+      } else {
+        fail(`extractContacts late-bridge got ${JSON.stringify(bridged)}`);
+      }
+    }
+
+    // A hyphenated or apostrophed name is still a name. Dropping it reports
+    // "no contact" for a row that names a person, which is the exact silence
+    // this parser exists to remove.
+    {
+      const punct = cadence.extractContacts('reached out to recruiter Mary-Jane O’Brien (LinkedIn)');
+      if (punct.length === 1 && punct[0].name === 'Mary-Jane O’Brien') {
+        pass('extractContacts handles hyphenated and apostrophed names');
+      } else {
+        fail(`extractContacts punctuated-name got ${JSON.stringify(punct)}`);
+      }
+    }
+
+    // An email with no name attached still yields a contact (name null).
+    {
+      const bare = cadence.extractContacts('sent CV to careers@acme.com');
+      if (bare.length === 1 && bare[0].email === 'careers@acme.com' && bare[0].name === null) {
+        pass('extractContacts keeps a bare email contact with no name');
+      } else {
+        fail(`extractContacts bare-email got ${JSON.stringify(bare)}`);
+      }
+    }
+
+    // The summary printer reads contacts[0].email directly; a name-only contact
+    // must not surface as a literal "null" in that column.
+    const label = cadence.contactLabel(cadence.extractContacts('messaged recruiter Asha Beirne')[0]);
+    if (label === 'Asha Beirne') {
+      pass('contactLabel shows the name when the contact has no email');
+    } else {
+      fail(`contactLabel should fall back to the name, got ${JSON.stringify(label)}`);
+    }
+  }
+
   // parseAppliedDate — extracts the real submission date from notes (the
   // tracker `date` column is the evaluation date), case-insensitive.
   if (cadence.parseAppliedDate('Applied 2026-06-09 via Personio; raised part-time') === '2026-06-09') {
@@ -5750,6 +6081,256 @@ try {
     pass('parseAppliedDate does not match inside "reapplied"');
   } else {
     fail('parseAppliedDate should not match the date inside "reapplied"');
+  }
+  // An estimated apply date is written "Applied ~YYYY-MM-DD". Without tolerating
+  // the tilde the note is skipped and the cadence silently falls back to the
+  // evaluation date — the same wrong-age failure the notes lookup exists to fix.
+  if (cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)') === '2026-06-09') {
+    pass('parseAppliedDate tolerates an estimated "Applied ~YYYY-MM-DD" date');
+  } else {
+    fail(`parseAppliedDate should tolerate "~", got ${JSON.stringify(cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)'))}`);
+  }
+  if (cadence.parseAppliedDate('reapplied ~2026-06-09 after rejection') === null) {
+    pass('parseAppliedDate still refuses "reapplied" when a tilde is present');
+  } else {
+    fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
+  }
+  // A malformed value must be rejected, not silently truncated to a plausible
+  // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
+  // measured application date and quietly shift the whole cadence — worse than
+  // the honest evaluation-date fallback, because nothing marks it as a guess.
+  const trailingJunk = [
+    ['Applied 2026-06-091', 'a trailing digit'],
+    ['Applied ~2026-06-091', 'a trailing digit after a tilde'],
+    ['Applied 2026-06-09-foo', 'a hyphenated suffix'],
+    ['Applied 2026-06-09foo', 'an unseparated word suffix'],
+    ['Applied 2026-06-09_v2', 'an underscore suffix'],
+    ['Applied 2026-06-09-2026-06-10', 'an ambiguous date range'],
+  ];
+  for (const [notes, label] of trailingJunk) {
+    if (cadence.parseAppliedDate(notes) === null) {
+      pass(`parseAppliedDate rejects ${label} instead of truncating (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // A leading digit is the mirror-image malformation and must fail the same way.
+  if (cadence.parseAppliedDate('Applied 12026-06-09') === null) {
+    pass('parseAppliedDate rejects a leading extra digit');
+  } else {
+    fail(`parseAppliedDate should reject "Applied 12026-06-09", got ${JSON.stringify(cadence.parseAppliedDate('Applied 12026-06-09'))}`);
+  }
+  // Rejecting a malformed candidate must not swallow a valid one later in the
+  // note — the scan has to continue past the bad match, not stop at it.
+  if (cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real') === '2026-06-17') {
+    pass('parseAppliedDate skips a malformed date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the malformed date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real'))}`);
+  }
+  // A date can match the token shape and still not exist. These must not be
+  // returned as MEASURED application dates: parseDate() rolls them over
+  // (2026-06-31 -> 2026-07-01), so an impossible date silently becomes a real
+  // but wrong one and shifts the cadence by days. The honest
+  // evaluation-date fallback is strictly better than a fabricated date.
+  const impossibleDates = [
+    ['Applied 2026-06-31', 'a 31st in a 30-day month'],
+    ['Applied 2026-02-30', 'a 30th in February'],
+    ['Applied 2026-02-29', 'a 29th of February in a non-leap year'],
+    ['Applied 2026-13-01', 'a 13th month'],
+    ['Applied 2026-00-10', 'a zero month'],
+    ['Applied 2026-06-00', 'a zero day'],
+  ];
+  const VALIDATE = { requireValidCalendarDate: true };
+  for (const [notes, label] of impossibleDates) {
+    if (cadence.parseAppliedDate(notes, VALIDATE) === null) {
+      pass(`parseAppliedDate rejects ${label} when calendar validation is requested (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes, VALIDATE))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Validation is OPT-IN. followup-seed.mjs depends on receiving the raw
+  // candidate so it can throw INVALID_DATE and make the user fix the typo;
+  // filtering unconditionally would turn that loud, fixable error into a
+  // silent wrong answer.
+  if (cadence.parseAppliedDate('Applied 2026-06-31') === '2026-06-31') {
+    pass('parseAppliedDate returns the raw candidate by default so callers can reject it loudly');
+  } else {
+    fail(`parseAppliedDate default mode must not swallow an impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31'))}`);
+  }
+  // A real leap day must still be accepted — the validity check must not
+  // over-reject.
+  if (cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE) === '2024-02-29') {
+    pass('parseAppliedDate accepts a real leap day under validation');
+  } else {
+    fail(`parseAppliedDate should accept 2024-02-29, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE))}`);
+  }
+  // The continued-scan contract applies to calendar-invalid candidates too.
+  if (cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE) === '2026-06-30') {
+    pass('parseAppliedDate skips an impossible date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE))}`);
+  }
+  // isRealCalendarDate is exported so callers share one definition of validity.
+  if (cadence.isRealCalendarDate('2024-02-29') && !cadence.isRealCalendarDate('2026-02-29') && !cadence.isRealCalendarDate('nope')) {
+    pass('isRealCalendarDate distinguishes a real leap day from an impossible one');
+  } else {
+    fail('isRealCalendarDate mis-classifies a calendar date');
+  }
+  // Date.UTC() maps years 0-99 onto 1900-1999, so a literal ISO year below
+  // 0100 would be validated against the wrong year entirely.
+  if (cadence.isRealCalendarDate('0096-02-29') && !cadence.isRealCalendarDate('0097-02-29')) {
+    pass('isRealCalendarDate preserves a literal ISO year below 0100');
+  } else {
+    fail(`isRealCalendarDate mishandles a sub-0100 year: 0096-02-29=${cadence.isRealCalendarDate('0096-02-29')} 0097-02-29=${cadence.isRealCalendarDate('0097-02-29')}`);
+  }
+  // And the source must degrade to the fallback, not report a fabricated date.
+  {
+    const r = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-31' });
+    if (r.appliedDate === '2026-06-01' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back when the notes date is not a real calendar date');
+    } else {
+      fail(`resolveAppliedDate impossible-date case got ${JSON.stringify(r)}`);
+    }
+  }
+  if (cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17') === '2026-06-17') {
+    pass('parseAppliedDate skips a "reapplied" match and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip "reapplied" and continue, got ${JSON.stringify(cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17'))}`);
+  }
+  // Two valid dates: the first still wins (already covered for a status date;
+  // this pins it for two literal "applied" mentions).
+  if (cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req') === '2026-06-09') {
+    pass('parseAppliedDate keeps the first of two "applied" dates');
+  } else {
+    fail(`parseAppliedDate should keep the first applied date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req'))}`);
+  }
+  // Reverse ordering: a later malformed candidate must not disturb the earlier
+  // valid match the scan already found.
+  if (cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)') === '2026-06-09') {
+    pass('parseAppliedDate keeps a valid first date despite a later malformed one');
+  } else {
+    fail(`parseAppliedDate should keep the valid first date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)'))}`);
+  }
+  // Boundary characters that legitimately terminate a date must keep matching —
+  // a boundary guard that also rejects these would break real tracker notes.
+  const validTerminators = [
+    ['Applied 2026-06-09', 'end of string'],
+    ['Applied 2026-06-09.', 'a period'],
+    ['Applied 2026-06-09; noted', 'a semicolon'],
+    ['Applied 2026-06-09)', 'a closing paren'],
+    ['Applied 2026-06-09\nvia Personio', 'a newline'],
+  ];
+  for (const [notes, label] of validTerminators) {
+    if (cadence.parseAppliedDate(notes) === '2026-06-09') {
+      pass(`parseAppliedDate still matches a date terminated by ${label}`);
+    } else {
+      fail(`parseAppliedDate should match with ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Nullish notes must not throw (the tracker's Notes cell can be absent).
+  if (cadence.parseAppliedDate(null) === null && cadence.parseAppliedDate(undefined) === null) {
+    pass('parseAppliedDate returns null for nullish notes');
+  } else {
+    fail('parseAppliedDate should return null for null/undefined notes');
+  }
+
+  // resolveAppliedDate — reports WHICH date the cadence is measured from, so a
+  // consumer can tell a real application date from the evaluation-date proxy.
+  // Without it a fallback age is indistinguishable from a measured one.
+  {
+    const measured = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-09 via Personio' });
+    if (measured.appliedDate === '2026-06-09' && measured.appDateSource === 'notes') {
+      pass('resolveAppliedDate reports source "notes" when the apply date is recorded');
+    } else {
+      fail(`resolveAppliedDate notes-case got ${JSON.stringify(measured)}`);
+    }
+
+    const inferred = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'On-archetype fit; no submission yet' });
+    if (inferred.appliedDate === '2026-06-01' && inferred.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate flags the evaluation-date proxy as a fallback, not a measured date');
+    } else {
+      fail(`resolveAppliedDate fallback-case got ${JSON.stringify(inferred)}`);
+    }
+
+    const estimated = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied ~2026-06-09' });
+    if (estimated.appliedDate === '2026-06-09' && estimated.appDateSource === 'notes') {
+      pass('resolveAppliedDate treats an estimated "~" apply date as a recorded date, not a fallback');
+    } else {
+      fail(`resolveAppliedDate estimated-case got ${JSON.stringify(estimated)}`);
+    }
+
+    // A malformed note must degrade to the honest fallback, not to a truncated
+    // date wearing the "notes" provenance label.
+    const malformed = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-091 (typo)' });
+    if (malformed.appliedDate === '2026-06-01' && malformed.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back rather than trusting a truncated apply date');
+    } else {
+      fail(`resolveAppliedDate malformed-case got ${JSON.stringify(malformed)}`);
+    }
+  }
+
+  // analyze() output contract: every emitted entry must carry appDateSource, and
+  // the value must match how the date was actually obtained. The unit tests above
+  // only cover the helper — this pins the field on the JSON consumers read, which
+  // is where a silently-inferred age would actually do damage.
+  {
+    // realpath: on macOS the tmpdir is a symlink, and followup-cadence.mjs's
+    // CLI guard compares import.meta.url (realpath-resolved) against argv[1].
+    // A symlinked path silently suppresses main() and yields empty stdout.
+    const e2eTmp = realpathSync(mkdtempSync(join(tmpdir(), 'co-cadence-e2e-')));
+    try {
+      copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
+      copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
+      copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
+      symlinkSync(join(ROOT, 'node_modules'), join(e2eTmp, 'node_modules'), 'dir');
+      mkdirSync(join(e2eTmp, 'data'), { recursive: true });
+      writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
+        '# Applications Tracker',
+        '',
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+        '|---|------|---------|------|-------|--------|-----|--------|-------|',
+        '| 901 | 2026-06-01 | ExactCo | Head of AI | 4.5/5 | Applied | ✅ | [901](reports/901-exactco-2026-06-01.md) | Applied 2026-06-09 via Personio |',
+        '| 902 | 2026-06-02 | EstimateCo | Head of AI | 4.4/5 | Applied | ✅ | [902](reports/902-estimateco-2026-06-02.md) | Applied ~2026-06-10 (date estimated) |',
+        '| 903 | 2026-06-03 | FallbackCo | Head of AI | 4.3/5 | Applied | ✅ | [903](reports/903-fallbackco-2026-06-03.md) | On-archetype fit; no apply date recorded |',
+        '| 904 | 2026-06-04 | TypoCo | Head of AI | 4.2/5 | Applied | ✅ | [904](reports/904-typoco-2026-06-04.md) | Applied 2026-06-091 typo in the tracker |',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const e2eOut = execFileSync(NODE, [join(e2eTmp, 'followup-cadence.mjs')], {
+        cwd: e2eTmp,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: '' },
+      });
+      const e2e = JSON.parse(e2eOut.trim());
+      const byNum = new Map((e2e.entries || []).map(entry => [entry.num, entry]));
+
+      const e2eCases = [
+        [901, '2026-06-09', 'notes', 'an exact "Applied YYYY-MM-DD" note'],
+        [902, '2026-06-10', 'notes', 'an estimated "Applied ~YYYY-MM-DD" note'],
+        [903, '2026-06-03', 'evaluation-date-fallback', 'notes with no apply date'],
+        [904, '2026-06-04', 'evaluation-date-fallback', 'a malformed apply date in the notes'],
+      ];
+      for (const [num, expectedDate, expectedSource, label] of e2eCases) {
+        const entry = byNum.get(num);
+        if (entry && entry.appliedDate === expectedDate && entry.appDateSource === expectedSource) {
+          pass(`analyze() emits appDateSource "${expectedSource}" for ${label}`);
+        } else {
+          fail(`analyze() entry #${num} (${label}) got ${JSON.stringify(entry && { appliedDate: entry.appliedDate, appDateSource: entry.appDateSource })}`);
+        }
+      }
+
+      const missingSource = (e2e.entries || []).filter(entry => !['notes', 'evaluation-date-fallback'].includes(entry.appDateSource));
+      if ((e2e.entries || []).length === 4 && missingSource.length === 0) {
+        pass('analyze() stamps every emitted entry with a known appDateSource');
+      } else {
+        fail(`analyze() emitted ${(e2e.entries || []).length} entries, ${missingSource.length} without a known appDateSource`);
+      }
+    } catch (e2eErr) {
+      fail(`analyze() appDateSource end-to-end check crashed: ${e2eErr.message}`);
+    } finally {
+      rmSync(e2eTmp, { recursive: true, force: true });
+    }
   }
 
   // Status normalization (strips bold + trailing date, lowercases, maps aliases)
@@ -5803,13 +6384,20 @@ try {
 
   rmSync(cadenceTmp, { recursive: true, force: true });
 
-  // Urgency decision tree (CADENCE defaults: applied_first=7, max_followups=2, responded_initial=1, interview_thankyou=1)
+  // Urgency decision tree (CADENCE defaults: applied_first=7, max_followups=2,
+  // responded_initial=1, responded_subsequent=3, interview_thankyou=1).
+  // For responded/interview a logged follow-up CLEARS overdue and the clock
+  // restarts from the last touch (modes/followup.md cadence table).
   const urgencyCases = [
     [['applied', 7, null, 0], 'overdue', 'applied past applied_first → overdue'],
     [['applied', 3, null, 0], 'waiting', 'applied within window → waiting'],
     [['applied', 30, null, 2], 'cold', 'applied at max follow-ups → cold'],
     [['responded', 0, null, 0], 'urgent', 'responded before responded_initial → urgent'],
     [['interview', 1, null, 0], 'overdue', 'interview past thank-you window → overdue'],
+    [['responded', 5, 1, 1], 'waiting', 'responded: logged follow-up clears overdue'],
+    [['responded', 5, 3, 1], 'overdue', 'responded: re-overdue responded_subsequent days after last touch'],
+    [['interview', 5, 0, 1], 'waiting', 'interview: logged thank-you clears overdue'],
+    [['interview', 9, 4, 1], 'overdue', 'interview: re-overdue after the subsequent cadence lapses'],
   ];
   for (const [args, expected, label] of urgencyCases) {
     const got = cadence.computeUrgency(...args);
@@ -5822,11 +6410,114 @@ try {
     [['applied', '2026-05-01', null, 0], '2026-05-08', 'first applied follow-up = appDate + applied_first'],
     [['applied', '2026-05-01', null, 2], null, 'cold (max follow-ups) → null'],
     [['interview', '2026-05-01', null, 0], '2026-05-02', 'interview = appDate + interview_thankyou'],
+    [['interview', '2026-05-01', '2026-05-02', 1], '2026-05-05', 'interview after thank-you = lastFollowup + responded_subsequent'],
   ];
   for (const [args, expected, label] of nextCases) {
     const got = cadence.computeNextFollowupDate(...args);
     if (got === expected) pass(`computeNextFollowupDate: ${label}`);
     else fail(`computeNextFollowupDate ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // Impossible calendar dates: regex-valid strings that yield an Invalid Date
+  // (TRUTHY!) used to crash addDays().toISOString() and kill the whole analysis
+  // over one bad row — parseDate must reject them and the scheduler must degrade.
+  if (cadence.parseDate('2026-13-45') === null && cadence.parseDate('2026-02-31') === null) {
+    pass('parseDate rejects impossible calendar dates (2026-13-45, 2026-02-31)');
+  } else {
+    fail('parseDate should reject impossible calendar dates');
+  }
+  let impossibleCrashed = false;
+  let impossibleResult;
+  try {
+    impossibleResult = cadence.computeNextFollowupDate('applied', '2026-05-01', '2026-13-45', 1);
+  } catch {
+    impossibleCrashed = true;
+  }
+  if (!impossibleCrashed && impossibleResult === null) {
+    pass('computeNextFollowupDate degrades to null on an impossible logged date (no crash)');
+  } else {
+    fail(`computeNextFollowupDate on impossible date: crashed=${impossibleCrashed}, result=${JSON.stringify(impossibleResult)}`);
+  }
+
+  // parseFollowupsContent — both log formats coexist in data/follow-ups.md:
+  // table rows (canonical) and legacy web bullets `- YYYY-MM-DD · #NUM Co — note`.
+  const mixedLog = [
+    '# Follow-ups',
+    '',
+    '| num | appNum | date | company | role | channel | contact | notes |',
+    '|---|---|---|---|---|---|---|---|',
+    '| 1 | 42 | 2026-06-20 | Acme | Platform Lead | Email | jane@acme.com | Pinged recruiter |',
+    '- 2026-07-02 · #68 Intelix.AI (client TBD -- Global FS) — Followed up',
+    '- 2026-07-01 · #42 Acme',
+    '- 2026-06-30 · Orphan Co — no app number, must be skipped',
+    'random prose line, also skipped',
+  ].join('\n');
+  const parsedLog = cadence.parseFollowupsContent(mixedLog);
+  if (parsedLog.length === 3) {
+    pass('parseFollowupsContent reads table rows + attributable bullets, skips the rest');
+  } else {
+    fail(`parseFollowupsContent expected 3 entries, got ${parsedLog.length}: ${JSON.stringify(parsedLog)}`);
+  }
+  const tableRow = parsedLog.find(f => f.num === 1);
+  if (tableRow && tableRow.appNum === 42 && tableRow.channel === 'Email' && tableRow.contact === 'jane@acme.com') {
+    pass('parseFollowupsContent keeps full fidelity for table rows');
+  } else {
+    fail(`table row parsed wrong: ${JSON.stringify(tableRow)}`);
+  }
+  const bullet = parsedLog.find(f => f.appNum === 68);
+  if (bullet && bullet.num === null && bullet.date === '2026-07-02' &&
+      bullet.company === 'Intelix.AI (client TBD -- Global FS)' &&
+      bullet.channel === 'Other' && bullet.notes === 'Followed up') {
+    pass('parseFollowupsContent maps bullets to channel Other with company + note split on em-dash');
+  } else {
+    fail(`bullet parsed wrong: ${JSON.stringify(bullet)}`);
+  }
+  const noteless = parsedLog.find(f => f.appNum === 42 && f.num === null);
+  if (noteless && noteless.date === '2026-07-01' && noteless.company === 'Acme' && noteless.notes === '') {
+    pass('parseFollowupsContent accepts a bullet without the trailing — note');
+  } else {
+    fail(`noteless bullet parsed wrong: ${JSON.stringify(noteless)}`);
+  }
+
+  // Next-date overrides (pins): `- next #N YYYY-MM-DD (set YYYY-MM-DD)` lines
+  // pin an app's next follow-up date until a follow-up logged after the pin
+  // resumes the cadence. Last pin per app wins; impossible dates are ignored.
+  const pinContent = [
+    '| 1 | 42 | 2026-06-20 | Acme | Lead | Email |  | ping |',
+    '- next #42 2026-07-10 (set 2026-07-01)',
+    '- next #7 2026-07-04',
+    '- next #42 2026-07-12 (set 2026-07-02)',
+    '- next #9 2026-13-45 (set 2026-07-01)',
+  ].join('\n');
+  const pins = cadence.parseNextOverrides(pinContent);
+  const pin42 = pins.get(42);
+  if (pin42 && pin42.date === '2026-07-12' && pin42.setDate === '2026-07-02') {
+    pass('parseNextOverrides: last pin per application wins');
+  } else {
+    fail(`pin #42 parsed wrong: ${JSON.stringify(pin42)}`);
+  }
+  const pin7 = pins.get(7);
+  if (pin7 && pin7.date === '2026-07-04' && pin7.setDate === '2026-07-04' && !pins.has(9)) {
+    pass('parseNextOverrides: missing set-date defaults to pin date; impossible dates ignored');
+  } else {
+    fail(`pin defaults/impossible handling wrong: ${JSON.stringify([pin7, pins.has(9)])}`);
+  }
+  if (cadence.parseFollowupsContent(pinContent).length === 1) {
+    pass('pin lines are NOT counted as follow-ups');
+  } else {
+    fail('pin lines leaked into parseFollowupsContent');
+  }
+  const pinCases = [
+    [[pin42, null], '2026-07-12', 'active with no follow-ups logged'],
+    [[pin42, '2026-07-01'], '2026-07-12', 'active when the last touch predates the pin'],
+    [[pin42, '2026-07-02'], '2026-07-12', 'same-day tie favors the pin (log-then-pin flow)'],
+    [[pin42, '2026-07-03'], null, 'a follow-up logged after the pin resumes the cadence'],
+    [[undefined, '2026-07-03'], null, 'no pin → null'],
+  ];
+  for (const [args, expected, label] of pinCases) {
+    const got = cadence.resolveNextOverride(...args);
+    if (got === expected) pass(`resolveNextOverride: ${label}`);
+    else fail(`resolveNextOverride ${label}: expected ${expected}, got ${got}`);
   }
 } catch (e) {
   fail(`follow-up cadence module crashed: ${e.message}`);
@@ -6849,7 +7540,17 @@ try {
       '| 32 | 2026-01-10 | Cohere | Senior Software Engineer, Agent Infrastructure | 4.0/5 | Evaluated | ❌ | [32](../reports/014-cohere-agent-infra.md) | distinct role — higher score |\n' +
       // Exact company+role duplicate of #32 (same title, both Evaluated) — must
       // collapse to one, keeping the higher score.
-      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n');
+      '| 33 | 2026-01-11 | Cohere | Senior Software Engineer, Agent Infrastructure | 3.7/5 | Evaluated | ❌ | [33](../reports/033-cohere-agent-dup.md) | exact-title duplicate |\n' +
+      // A Hired row vs a later exact-title repost. Hired must rank as an
+      // advanced status: the accepted-job record can never lose a dedup
+      // contest to a higher-scored repost.
+      '| 34 | 2026-01-05 | HiredCo | Platform Engineer | 3.8/5 | Hired | ❌ | [34](../reports/034-hiredco.md) | the accepted job |\n' +
+      '| 35 | 2026-01-12 | HiredCo | Platform Engineer | 4.2/5 | Evaluated | ❌ | [35](../reports/035-hiredco-repost.md) | repost of the accepted job |\n' +
+      // Two DIFFERENT roles sharing a stale duplicate tracker number (the
+      // known merge-bug artifact, verify-pipeline Check 12). A bare number
+      // match must not read as same-report identity.
+      '| 36 | 2026-01-06 | NumCo | Data Engineer | 3.9/5 | Applied | ❌ | [36](../reports/036-numco-data.md) | duplicate-number, applied |\n' +
+      '| 36 | 2026-01-12 | NumCo | ML Engineer | 4.5/5 | Evaluated | ❌ | [37](../reports/037-numco-ml.md) | duplicate-number, different role |\n');
 
     const dedupResult = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
     if (dedupResult === null) {
@@ -6907,12 +7608,101 @@ try {
       } else {
         fail(`dedup-tracker exact-duplicate handling broken: ${cohereAgentInfra.length} Cohere Agent Infrastructure rows`);
       }
+
+      // Regression: Hired was missing from STATUS_RANK, so it ranked 0 — the
+      // advanced-status guard never fired and a higher-scored repost deleted
+      // the accepted-job record.
+      const hiredRows = deduped.split('\n').filter(l => l.includes('HiredCo'));
+      if (hiredRows.length === 2 && hiredRows.some(l => l.includes('Hired'))) {
+        pass('dedup-tracker protects a Hired row from an exact-title repost');
+      } else {
+        fail(`dedup-tracker deleted the Hired row: ${hiredRows.length} HiredCo rows survive`);
+      }
+
+      // Regression: a bare tracker-number match short-circuited roleMatch, so
+      // two different roles sharing a stale duplicate # merged and the Applied
+      // row of a different opening was deleted.
+      const numcoRows = deduped.split('\n').filter(l => l.includes('NumCo'));
+      if (numcoRows.length === 2 && numcoRows.some(l => l.includes('Applied'))) {
+        pass('dedup-tracker keeps different roles that share a stale duplicate tracker number');
+      } else {
+        fail(`dedup-tracker merged different roles across a duplicate tracker number: ${numcoRows.length} NumCo rows survive`);
+      }
     }
   } finally {
     rmSync(dedupTmp, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
+}
+
+// ── DEDUP BLIND-VIA CHANNEL KEY: NON-LATIN AGENCIES (#2393) ──────────────
+// Unknown-employer rows (Company `?`) group by their Via channel. dedup-tracker
+// keyed that group with the file-local normalizeCompany(), which strips
+// [^a-z0-9] — so リクルート and パーソル both keyed to '' and two genuinely
+// separate agency submissions for one role landed in the same cluster, and the
+// lower-scored row was DELETED. merge-tracker already compares Via with the
+// Unicode-aware normalizeVia(); dedup must use the same key. A same-agency
+// re-blast must still collapse, otherwise the fix would just be "never merge".
+console.log('\n🧪 Testing dedup blind-via channel key with non-Latin agencies (#2393)...');
+try {
+  const viaDedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-via-'));
+  try {
+    mkdirSync(join(viaDedupTmp, 'data'));
+    const tracker = join(viaDedupTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Same role, unknown employer, two DIFFERENT non-Latin agencies —
+      // two real submissions, both must survive.
+      '| 61 | 2026-03-01 | ? | リクルート | Backend Engineer, Payments Platform | 4.0/5 | Evaluated | ❌ | [61](../reports/061-blind-a.md) | first agency |\n' +
+      '| 62 | 2026-03-02 | ? | パーソル | Backend Engineer, Payments Platform | 4.1/5 | Evaluated | ❌ | [62](../reports/062-blind-b.md) | second agency |\n' +
+      // (b) Symmetric case: a via-less blind row must not collide with a
+      // non-Latin agency just because both used to key to ''.
+      '| 63 | 2026-03-03 | ? | — | Frontend Engineer, Checkout | 3.8/5 | Evaluated | ❌ | [63](../reports/063-blind-c.md) | no agency named |\n' +
+      '| 64 | 2026-03-04 | ? | リクルート | Frontend Engineer, Checkout | 4.2/5 | Evaluated | ❌ | [64](../reports/064-blind-d.md) | agency listing |\n' +
+      // (c) Control: the SAME agency re-blasting one listing is a genuine
+      // duplicate and must still collapse to the higher-scored row.
+      '| 65 | 2026-03-05 | ? | Hays | Data Engineer, Warehouse | 3.5/5 | Evaluated | ❌ | [65](../reports/065-blind-e.md) | first sighting |\n' +
+      '| 66 | 2026-03-06 | ? | Hays | Data Engineer, Warehouse | 4.4/5 | Evaluated | ❌ | [66](../reports/066-blind-f.md) | same agency re-blast |\n');
+
+    const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
+    if (r === null) {
+      fail('dedup-tracker.mjs crashed during blind-via channel key test (#2393)');
+    } else {
+      const out = readFileSync(tracker, 'utf-8');
+
+      const paymentsRows = out.split('\n').filter(l => l.includes('Backend Engineer, Payments Platform'));
+      if (paymentsRows.length === 2
+          && paymentsRows.some(l => l.includes('リクルート'))
+          && paymentsRows.some(l => l.includes('パーソル'))) {
+        pass('dedup-tracker keeps two blind rows submitted via different non-Latin agencies (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed distinct non-Latin agency channels: ${paymentsRows.length} Payments Platform rows`);
+      }
+
+      const checkoutRows = out.split('\n').filter(l => l.includes('Frontend Engineer, Checkout'));
+      if (checkoutRows.length === 2
+          && checkoutRows.some(l => l.includes('リクルート'))
+          && checkoutRows.some(l => l.includes('| — |'))) {
+        pass('dedup-tracker keeps a via-less blind row separate from a non-Latin agency row (#2393)');
+      } else {
+        fail(`dedup-tracker collapsed a via-less blind row into an agency channel: ${checkoutRows.length} Checkout rows`);
+      }
+
+      const warehouseRows = out.split('\n').filter(l => l.includes('Data Engineer, Warehouse'));
+      if (warehouseRows.length === 1 && warehouseRows[0].includes('4.4/5')) {
+        pass('dedup-tracker still collapses a same-agency re-blast of one blind listing (#2393)');
+      } else {
+        fail(`dedup-tracker same-agency blind dedup broken: ${warehouseRows.length} Warehouse rows`);
+      }
+    }
+  } finally {
+    rmSync(viaDedupTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
 }
 
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
@@ -10567,7 +11357,14 @@ try {
 
   // 55.3 canonical statuses (templates/states.yml → web status pills/actions)
   const statesSrc = readFileSync(join(ROOT, 'templates', 'states.yml'), 'utf-8');
-  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'interview', 'offer', 'rejected', 'discarded'];
+  // Every id in states.yml, hardcoded ON PURPOSE — deriving this list from the
+  // file it guards would make the check vacuous. It protected only 6 of the 9,
+  // so `responded`, `skip` and `hired` could be deleted from states.yml and this
+  // check still passed while claiming it "keeps every canonical status id".
+  // 55.3b below reads states.yml dynamically, so it inherits any such loss
+  // instead of catching it: with `hired` removed both checks went green while
+  // set-status.mjs would reject the terminal-success state as invalid.
+  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
   const missingStates = CANONICAL_STATE_IDS.filter((s) => !new RegExp(`^  - id: ${s}$`, 'm').test(statesSrc));
   if (missingStates.length === 0) {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');
@@ -10630,6 +11427,64 @@ try {
         pass('assistant preamble prose enumerates every canonical state (#2249)');
       } else {
         fail(`assistant preamble missing canonical state(s) in prose (#2249): ${proseDrift.join(' | ')}`);
+      }
+    }
+  }
+
+  // 55.3c the web's hand-copied cadence baseline must match the core's defaults.
+  // web/src/lib/followups.ts keeps CADENCE_DEFAULTS "kept IDENTICAL to
+  // DEFAULT_CADENCE" by comment alone — the same wish that let states.ts's
+  // FALLBACK drift (#2282). Web keys carry a `_days` suffix (except
+  // applied_max_followups); compare values under that mapping. Until #2369
+  // replaces the copy with the --json cadenceConfig, CI is the invariant.
+  {
+    const coreCad = readFileSync(join(ROOT, 'followup-cadence.mjs'), 'utf-8')
+      .match(/export const DEFAULT_CADENCE = \{([\s\S]*?)\};/)?.[1] ?? '';
+    const webCadPath = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
+    if (coreCad && existsSync(webCadPath)) {
+      const webCad = readFileSync(webCadPath, 'utf-8')
+        .match(/CADENCE_DEFAULTS[^=]*=\s*\{([\s\S]*?)\};/)?.[1] ?? '';
+      const pairs = (block) => Object.fromEntries(
+        [...block.matchAll(/([a-z_]+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+      const core = pairs(coreCad);
+      const web = pairs(webCad);
+      const cadDrift = [];
+      for (const [k, v] of Object.entries(core)) {
+        const webKey = k === 'applied_max_followups' ? k : `${k}_days`;
+        if (!(webKey in web)) cadDrift.push(`${webKey} missing in web`);
+        else if (web[webKey] !== v) cadDrift.push(`${webKey}=${web[webKey]} vs core ${k}=${v}`);
+      }
+      if (Object.keys(web).length !== Object.keys(core).length) {
+        cadDrift.push(`key count ${Object.keys(web).length} vs core ${Object.keys(core).length}`);
+      }
+      if (cadDrift.length === 0) {
+        pass('web CADENCE_DEFAULTS matches core DEFAULT_CADENCE under the _days mapping (#2369)');
+      } else {
+        fail(`web cadence baseline drifted from followup-cadence.mjs (#2369): ${cadDrift.join(' | ')}`);
+      }
+    }
+  }
+
+  // 55.3d the web onboarding banner's prereq list must match doctor.mjs.
+  // doctorState() in web/src/lib/career-ops.ts hand-copies USER_LAYER_PREREQS
+  // as a deliberate fast-path (server components can't execFile doctor per
+  // render) — if the core gains a fifth prereq, the banner silently stops
+  // asking for it and the user believes they're configured. Same mechanism as
+  // #2282, different symptom (career-ops-ui's census, 31-jul).
+  {
+    const corePrereqBlock = readFileSync(join(ROOT, 'doctor.mjs'), 'utf-8')
+      .match(/const USER_LAYER_PREREQS = \[([\s\S]*?)\n\];/)?.[1] ?? '';
+    const corePrereqs = [...corePrereqBlock.matchAll(/path:\s*'([^']+)'/g)].map((m) => m[1]);
+    const webDoctorPath = join(ROOT, 'web', 'src', 'lib', 'career-ops.ts');
+    if (corePrereqs.length > 0 && existsSync(webDoctorPath)) {
+      const webPrereqBlock = readFileSync(webDoctorPath, 'utf-8')
+        .match(/const prereqs[^=]*=\s*\[([\s\S]*?)\n\s*\];/)?.[1] ?? '';
+      const webPrereqs = new Set([...webPrereqBlock.matchAll(/\[\s*"([^"]+)"/g)].map((m) => m[1]));
+      const missingPrereqs = corePrereqs.filter((p) => !webPrereqs.has(p));
+      if (missingPrereqs.length === 0 && webPrereqs.size === corePrereqs.length) {
+        pass('web doctorState prereqs match doctor.mjs USER_LAYER_PREREQS (#2369)');
+      } else {
+        fail(`web onboarding prereqs drifted from doctor.mjs (#2369): missing=[${missingPrereqs.join(', ')}] webCount=${webPrereqs.size} coreCount=${corePrereqs.length}`);
       }
     }
   }

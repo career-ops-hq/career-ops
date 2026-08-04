@@ -933,7 +933,9 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 			}
 		}
 
-		if norm == "offer" {
+		// A hire proves an offer was received and accepted, so it counts here
+		// too — same reasoning as everOffer in stats.mjs's computeFunnel().
+		if norm == "offer" || norm == "hired" {
 			pm.TotalOffers++
 		}
 		if norm != "skip" && norm != "rejected" && norm != "discarded" {
@@ -947,11 +949,16 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 
 	// Funnel: each stage counts all apps that reached at least that stage.
 	// An app in "interview" has passed through evaluated -> applied -> responded -> interview.
+	// "hired" is terminal success and proves every earlier stage (a landed job
+	// proves the offer, the interviews, the response, and the submission), so it
+	// counts into all four tiers — matching computeFunnel() in stats.mjs, the
+	// canonical funnel definition, whose docstring already describes this exact
+	// math as mirroring this function.
 	total := len(apps)
-	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"]
-	interview := statusCounts["interview"] + statusCounts["offer"]
-	offer := statusCounts["offer"]
+	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	offer := statusCounts["offer"] + statusCounts["hired"]
 
 	pm.FunnelStages = []model.FunnelStage{
 		{Label: "Evaluated", Count: total, Pct: 100.0},
