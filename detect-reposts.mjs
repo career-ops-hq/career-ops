@@ -34,8 +34,6 @@ const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
 const DEFAULT_WINDOW_DAYS = 90;
 
 // --- CLI args ---
-const KNOWN_FLAGS = ['--summary', '--window', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--window'];
 
 const USAGE = `Usage:
   node detect-reposts.mjs                       # full JSON repost clusters to stdout
