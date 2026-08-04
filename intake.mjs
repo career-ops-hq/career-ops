@@ -175,7 +175,11 @@ function listSourceFiles() {
 function extractAll() {
   const extractor = detectPdfExtractor();
   const sources = listSourceFiles().map((abs) => {
-    const path = relative(DOCS_DIR, abs);
+    // Normalise to forward slashes: this path is the key in intake-state.json
+    // and is echoed back to `--text`, so it must not vary by platform. On
+    // Windows relative() yields `cv\master.md`, which would both break the
+    // folder split below and make a state file unportable across machines.
+    const path = relative(DOCS_DIR, abs).split(sep).join('/');
     const cls = classifySource(path);
     const base = { path, folder: path.includes('/') ? path.split('/')[0] : '(root)' };
     if (cls.kind === 'unsupported') {
