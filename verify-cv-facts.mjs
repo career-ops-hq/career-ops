@@ -60,9 +60,72 @@ function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, 'utf-8') : '';
 }
 
+// Unicode decimal-digit blocks, by the code point of their zero. Every claim
+// pattern in this file is written with ASCII `\d`, so a CV that spells its
+// numbers in any other script produced ZERO claims and the gate reported a
+// pass without having checked anything — in ar, hi, ja, zh and zh-TW, all of
+// which ship mode sets. NFKC alone is not enough: it folds full-width digits
+// (ja/zh) but leaves Arabic-Indic, Persian and Devanagari untouched.
+const DIGIT_ZEROS = [
+  0x0660, // Arabic-Indic (ar)
+  0x06f0, // Extended Arabic-Indic (fa, ur)
+  0x0966, // Devanagari (hi)
+  0x09e6, // Bengali
+  0x0a66, // Gurmukhi
+  0x0ae6, // Gujarati
+  0x0b66, // Oriya
+  0x0be6, // Tamil
+  0x0c66, // Telugu
+  0x0ce6, // Kannada
+  0x0d66, // Malayalam
+  0x0e50, // Thai
+  0x0ed0, // Lao
+  0x0f20, // Tibetan
+  0x1040, // Myanmar
+  0x17e0, // Khmer
+  0x1810, // Mongolian
+];
+
+/**
+ * Rewrite every Unicode decimal digit as its ASCII counterpart, plus the
+ * separators and percent signs that travel with them, so the claim patterns
+ * see the same numbers whatever script wrote them.
+ *
+ * Applied to the generated document AND to the sources, so it can only ever
+ * make MORE claims visible on both sides — it cannot hide one.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function foldDigits(text) {
+  // NFKC first: it maps full-width digits and ％ to ASCII outright.
+  let out = text.normalize('NFKC');
+  out = out.replace(/\p{Nd}/gu, (char) => {
+    const cp = char.codePointAt(0) ?? 0;
+    if (cp >= 0x30 && cp <= 0x39) return char;
+    for (const zero of DIGIT_ZEROS) {
+      const value = cp - zero;
+      if (value >= 0 && value <= 9) return String(value);
+    }
+    return char; // a decimal digit from a block we don't list: left as-is
+  });
+  // Arabic separators and percent sign, which NFKC does not fold either.
+  out = out
+    .replace(/\u066a/g, '%')   // ٪ Arabic percent sign
+    .replace(/\u066b/g, '.')   // ٫ Arabic decimal separator
+    .replace(/\u066c/g, ',');  // ٬ Arabic thousands separator
+  // A SPACE-grouped thousand ("16 181", common in fr/ru/sv and as NNBSP in
+  // typeset text) has to be joined here, before extraction: the claim pattern
+  // reads a number as `\d[\d,.]*`, so it would stop at the space and extract
+  // "181 users" — a claim the sources never contain, failing a truthful CV.
+  // The `(?<!\d)\d{1,3}` guard keeps it to real grouping: in "in 2026 100
+  // users" the left part is four digits, so nothing is joined.
+  return out.replace(/(?<!\d)(\d{1,3})[\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1');
+}
+
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
 export function stripMarkup(text) {
-  return text
+  return foldDigits(String(text))
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     // Only strip things that actually look like tags: `<name …>` or `</name>`.
@@ -78,9 +141,25 @@ export function stripMarkup(text) {
     .trim();
 }
 
-/** Normalize a claim for case- and whitespace-insensitive comparison. */
+/**
+ * Normalize a claim for case- and whitespace-insensitive comparison.
+ *
+ * Thousands separators are removed FIRST, so the same number compares equal
+ * however it is grouped: "16,181" / "16 181" / "16181". Without that step the
+ * old rule turned "16,181" into "16 181" while an ungrouped source stayed
+ * "16181", and the two never matched — a truthful CV failed the gate because
+ * of a comma. That bites hardest in the scripts folded above, since Arabic and
+ * Devanagari numerals are usually written without a separator at all.
+ *
+ * Only a separator followed by EXACTLY three digits is removed, so a decimal
+ * comma ("1,2 million") and ordinary prose are left alone.
+ */
 export function normalizeClaim(claim) {
-  return claim.toLowerCase().replace(/[,\s]+/g, ' ').trim();
+  return String(claim)
+    .toLowerCase()
+    .replace(/(\d)[,\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
+    .replace(/[,\s]+/g, ' ')
+    .trim();
 }
 
 /** Normalize a non-metric fact and remove terminal punctuation. */
@@ -286,8 +365,10 @@ function runSelfTest() {
   ].join(' ');
 
   equal('truthful modifier restatement', auditClaims('Reached 16,181 users', source).invented, []);
-  equal('inflated modifier count', auditClaims('Reached 94,772 active users', source).invented, ['94 772 users']);
-  equal('new training noun', auditClaims('Drove 900,000 enrollments', source).invented, ['900 000 enrollments']);
+  // The normalized claim now carries no thousands separator, since grouping no
+  // longer decides whether two spellings of the same number match.
+  equal('inflated modifier count', auditClaims('Reached 94,772 active users', source).invented, ['94772 users']);
+  equal('new training noun', auditClaims('Drove 900,000 enrollments', source).invented, ['900000 enrollments']);
   equal('truthful currency', auditClaims('Managed a $550K budget', source).invented, []);
   equal('inflated currency', auditClaims('Managed a $900K budget', source).invented, ['$900k']);
   equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
@@ -303,6 +384,32 @@ function runSelfTest() {
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
     ['proven track record']
   );
+
+  // Non-ASCII digits: every claim pattern here is written with ASCII \d, so a
+  // CV in ar/hi/ja/zh produced ZERO claims and the gate reported a pass having
+  // checked nothing — in five markets this repo ships mode sets for.
+  const foldSource = 'Reached 16,181 active users across 80 courses. Cut cost 60%.';
+  equal('fabricated full-width metric is caught', auditClaims('Reached ９４，７７２ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Arabic-Indic metric is caught', auditClaims('Reached ٩٤٧٧٢ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Devanagari metric is caught', auditClaims('Reached ९४७७२ users', foldSource).invented, ['94772 users']);
+  equal('fabricated Arabic percentage is caught', auditClaims('Cut cost ٩٩٪', foldSource).invented, ['99%']);
+  // …and the folding must not turn a TRUTHFUL localized CV red.
+  equal('truthful Arabic-Indic metric passes', auditClaims('Reached ١٦١٨١ users', foldSource).invented, []);
+  equal('truthful full-width metric passes', auditClaims('Reached １６，１８１ users', foldSource).invented, []);
+
+  // Thousands grouping must not decide whether a claim matches: the extraction
+  // pattern stops at a space, so "16 181 users" used to yield "181 users" — a
+  // claim no source contains.
+  equal('space-grouped thousands compare equal', auditClaims('Reached 16 181 users', foldSource).invented, []);
+  equal('ungrouped compares equal to a grouped source', auditClaims('Reached 16181 users', foldSource).invented, []);
+  equal('a fabricated space-grouped number is still caught', auditClaims('Reached 94 772 users', foldSource).invented, ['94772 users']);
+  // Multi-group values fold in full: `.replace(/…/g)` evaluates each separator
+  // against the ORIGINAL string, where every group is preceded by a space, not
+  // a digit, so the lookbehind passes at each one (CodeRabbit asked).
+  equal('a multi-group number folds completely', auditClaims('Reached 1 234 567 users', 'Reached 1234567 active users.').invented, []);
+  equal('an eight-digit multi-group number folds too', auditClaims('Reached 12 345 678 users', 'Reached 12345678 active users.').invented, []);
+  // A four-digit left part is a year, not a group: nothing is joined.
+  equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;

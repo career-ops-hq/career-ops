@@ -17,9 +17,22 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { parseNextOverrides, resolveNextOverride, normalizeStatus, addDays, parseDate } from './followup-cadence.mjs';
-
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
+
+// Pin the cadence source BEFORE followup-cadence.mjs is evaluated: it resolves
+// its cadence at module load from CAREER_OPS_PROFILE and otherwise falls back
+// to the USER's config/profile.yml, so a customized followup_cadence turned
+// these date assertions red on a healthy install (#2268). The spawned
+// followup-seed.mjs inherits the same pin through run()'s env.
+//
+// The import below must stay DYNAMIC: ESM hoists static imports above every
+// statement here, so a static one would run the module first and the pin would
+// do nothing.
+process.env.CAREER_OPS_PROFILE = DEFAULT_CADENCE_PROFILE;
+
+const { parseNextOverrides, resolveNextOverride, normalizeStatus, addDays, parseDate } =
+  await import('./followup-cadence.mjs');
 const NODE = process.execPath;
 const SCRIPT = join(ROOT, 'followup-seed.mjs');
 
@@ -64,6 +77,9 @@ function run(args, sandbox, extraEnv = {}) {
     ...process.env,
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_FOLLOWUPS: sandbox.followups,
+    // Explicit, not inherited: the child resolves its cadence from this or
+    // falls back to the user's real config/profile.yml (#2268).
+    CAREER_OPS_PROFILE: DEFAULT_CADENCE_PROFILE,
     CAREER_OPS_FOLLOWUPS_LOCK: sandbox.lock,
     ...extraEnv,
   };

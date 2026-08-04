@@ -23,6 +23,8 @@
     "img-to-pdf": "node img-to-pdf.mjs",
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "cv:verify-facts": "node verify-cv-facts.mjs",
+    "test:cv-visual": "playwright test --config=playwright.cv.config.mjs",
+    "test:cv-visual:update": "playwright test --config=playwright.cv.config.mjs --update-snapshots",
     "sync-check": "node cv-sync-check.mjs",
     "update:check": "node update-system.mjs check",
     "update:test": "node updater-migration-tests.mjs",

@@ -336,6 +336,96 @@ try {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
+  // 15. opencode.jsonc with comments AND a trailing comma → detected (#2252).
+  //     OpenCode accepts JSONC; JSON.parse throwing on it used to be swallowed
+  //     by the catch and reported as "no Playwright MCP server configured".
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-15-'));
+    try {
+      writeFileSync(join(dir, 'opencode.jsonc'), [
+        '{',
+        '  // Playwright drives the SPA job boards',
+        '  "mcp": {',
+        '    "playwright": {',
+        '      "type": "local",',
+        '      "command": ["npx", "@playwright/mcp", "--headless"], /* inline */',
+        '      "enabled": true,',
+        '    },',
+        '  },',
+        '}',
+      ].join('\n'));
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#15 opencode.jsonc')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('opencode.jsonc with comments + trailing commas → detected (#2252)');
+      } else {
+        fail(`#15 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 16. A .json file keeps STRICT parsing: comments there are still malformed,
+  //     so the config reads as unconfigured exactly as before. The tolerance is
+  //     scoped to the extension that declares it, not granted repo-wide.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-16-'));
+    try {
+      writeFileSync(join(dir, 'opencode.json'),
+        '{\n  // not valid JSON\n  "mcp": { "playwright": { "command": ["npx", "@playwright/mcp"] } }\n}');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#16 commented .json')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('a commented opencode.json still reads as unconfigured — .json stays strict');
+      } else {
+        fail(`#16 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 17. opencode.json still wins when both files exist and only it is valid —
+  //     adding .jsonc to the list must not shadow the original filename.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-17-'));
+    try {
+      writeFileSync(join(dir, 'opencode.json'),
+        JSON.stringify({ mcp: { playwright: { type: 'local', command: ['npx', '@playwright/mcp'] } } }));
+      writeFileSync(join(dir, 'opencode.jsonc'), '{ "mcp": {} }');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#17 both files')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('opencode.json is still read when an unrelated opencode.jsonc sits next to it');
+      } else {
+        fail(`#17 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 18. A .jsonc that is malformed beyond comments/trailing commas must stay
+  //     unconfigured — the parser tolerates two extensions, it does not guess.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-18-'));
+    try {
+      writeFileSync(join(dir, 'opencode.jsonc'), '{ "mcp": { "playwright": { "command": [ }');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#18 malformed .jsonc')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('a genuinely malformed opencode.jsonc still reads as unconfigured');
+      } else {
+        fail(`#18 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
 } catch (e) {
   fail(`opencode-mcp-detection tests crashed: ${e.message}`);
 }
