@@ -17,6 +17,7 @@
  *      node detect-reposts.mjs --summary   (human-readable table)
  *      node detect-reposts.mjs --window 60 (override 90-day window)
  *      node detect-reposts.mjs --self-test
+ *      node detect-reposts.mjs --help
  *
  * Issue #1205 — github.com/santifer/career-ops
  */
@@ -33,6 +34,16 @@ const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
 const DEFAULT_WINDOW_DAYS = 90;
 
 // --- CLI args ---
+const KNOWN_FLAGS = ['--summary', '--window', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--window'];
+
+const USAGE = `Usage:
+  node detect-reposts.mjs                       # full JSON repost clusters to stdout
+  node detect-reposts.mjs --summary             # human-readable table
+  node detect-reposts.mjs --window 60           # override the default 90-day window
+  node detect-reposts.mjs --self-test           # run the in-memory test suite
+  node detect-reposts.mjs --help                # print this usage block and exit`;
+
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
@@ -480,6 +491,11 @@ function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
   if (selfTestMode) {
     runSelfTest();
   }
