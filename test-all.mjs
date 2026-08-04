@@ -24,7 +24,11 @@
  */
 
 
+<<<<<<< HEAD
+import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
+=======
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
+>>>>>>> upstream/main
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
@@ -244,11 +248,14 @@ const scripts = [
   // `git ls-files` on the REAL tree. Running it here validated nothing and
   // exited 0 no matter what, which is how five unregistered files shipped.
   // It now runs from ROOT in section 5.
+<<<<<<< HEAD
+=======
   { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
   // Same reasoning as above: the bare run needs AGENTS.md and the real
   // modes/ tree sitting next to it, which this throwaway single-file copy
   // does not have. It runs from ROOT alongside the SYSTEM_PATHS coverage
   // check below.
+>>>>>>> upstream/main
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
@@ -260,6 +267,13 @@ const scripts = [
 
 const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
 try {
+<<<<<<< HEAD
+  const copyDirSync = (src, dest, exclude = []) => {
+    const name = src.split(/[\\/]/).pop();
+    // Exclude only top-level workspace dirs (data/, reports/, node_modules, …).
+    // Match by basename ONLY at the repo root so nested fixture subdirs such as
+    // test-fixtures/upgrade/state-*/data and .../reports still get copied.
+=======
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
   // real ROOT/node_modules, which is how the root-level exclusion already
@@ -273,6 +287,7 @@ try {
     // Everything else is a top-level workspace dir (data/, reports/, …) and is
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
+>>>>>>> upstream/main
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
@@ -286,8 +301,13 @@ try {
   };
 
   const excludeDirs = [
+<<<<<<< HEAD
+    'node_modules',
+    '.git',
+=======
     // node_modules and .git are not listed here — EXCLUDE_AT_ANY_DEPTH above
     // drops them wherever they occur, root included.
+>>>>>>> upstream/main
     'data',
     'reports',
     '.career-ops-web',
@@ -810,6 +830,42 @@ try {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
   }
 
+<<<<<<< HEAD
+  // SSRF redirect routing tests
+  const dnsModule = await import('dns/promises');
+  const { mock } = await import('node:test');
+
+  // Stub resolve4, resolve6, and lookup to test the DNS path
+  mock.method(dnsModule.default, 'resolve4', (hostname) => {
+    if (hostname === 'ssrf-blocked-host.local') {
+      return Promise.resolve(['127.0.0.1']);
+    }
+    return Promise.resolve([]);
+  });
+  mock.method(dnsModule.default, 'resolve6', (hostname) => {
+    return Promise.resolve([]);
+  });
+  mock.method(dnsModule.default, 'lookup', (hostname, options) => {
+    if (hostname === 'ssrf-blocked-host.local') {
+      const addr = { address: '127.0.0.1', family: 4 };
+      return Promise.resolve(options?.all ? [addr] : addr);
+    }
+    return Promise.reject(new Error('DNS lookup failure'));
+  });
+
+  let routeCallback = null;
+  const mockPageInstance = {
+    _blockedByGuard: null,
+    async route(pattern, callback) {
+      routeCallback = callback;
+    },
+    async goto() {
+      if (routeCallback) {
+        let aborted = false;
+        const mockRoute = {
+          request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+          abort: async () => {
+            aborted = true;
   // SSRF redirect routing tests.
   //
   // The resolver is injected rather than mocked on the dns module (#2386): the
@@ -912,6 +968,7 @@ try {
     // Always put the real resolver back, even if an assertion above throws:
     // a leaked stub would silently answer for every later suite in this process.
     restoreHostResolver();
+>>>>>>> upstream/main
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
@@ -1096,7 +1153,6 @@ for (const f of skillEntrypoints) {
     fail(`Untrusted-content directive coverage gap:\n${(untrusted.stderr || untrusted.stdout || '').trim()}`);
   }
 }
-
 // The plugin manifest ships in two locations: .claude-plugin/plugin.json is
 // canonical (Claude Code + Copilot CLI both read it), and .github/plugin/
 // plugin.json exists only because the awesome-copilot marketplace validator
@@ -4379,6 +4435,7 @@ try {
     execFileSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', dryRunPortals, '--dry-run'], {
       cwd: ROOT,
       timeout: 2000,
+    });
     });
   } catch {
     // Network is reachable-or-not in CI; either way, no write should occur.

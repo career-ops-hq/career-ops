@@ -854,7 +854,6 @@ Exit codes:
 - `3` when a bare numeric selector triggers the report-number mismatch guard (`report-number-mismatch`).
 
 ---
-
 ## stats.mjs
 
 Aggregates lifetime pipeline stats into one JSON report. Stats include tracker, scanner, portals, follow-ups and runs. Reads from data/applications.md, data/scan-history.tsv, portals.yml, data/follow-ups.md and data/scan-runs.tsv. If a file doesn't exist yet, the section turns into null.

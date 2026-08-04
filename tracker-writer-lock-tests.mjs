@@ -97,7 +97,6 @@ function watchForContention(dir, lockDir) {
     close() {},
   };
 }
-
 function trackerTable(rows) {
   return `# Applications Tracker
 

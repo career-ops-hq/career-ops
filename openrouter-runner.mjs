@@ -28,6 +28,7 @@ import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { anonymizeContext } from './utils/privacy-filter.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -345,15 +346,17 @@ async function callOpenRouter(systemPrompt, userMessage) {
 }
 
 // ---------------------------------------------------------------------------
-// Context loading
+// Context loading & Privacy Redaction
 // ---------------------------------------------------------------------------
+
 function loadContext() {
-  return {
+  const ctx = {
     cv:          readFile('cv.md')               ?? 'CV not found.',
     profile:     readFile('config/profile.yml')  ?? '',
     shared:      readFile('modes/_shared.md')    ?? '',
     profileMode: readFile('modes/_profile.md')   ?? '',
   };
+  return anonymizeContext(ctx);
 }
 
 export function buildSystemPrompt(modeContent, ctx) {

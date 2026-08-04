@@ -98,7 +98,6 @@ export function flagValue(args, flag) {
   if (idx === -1) return undefined;
   return args[idx + 1];
 }
-
 // ── Session file parsing ────────────────────────────────────────────
 
 /**
@@ -421,7 +420,6 @@ async function runSelfTest() {
   check(flagValue(['--from='], '--from') === '', 'flagValue reports an explicitly empty value as empty, not absent');
   check(flagValue(['--dir=/tmp/x=y'], '--dir') === '/tmp/x=y', 'flagValue keeps later "=" characters in the value');
   check(flagValue(['--to=2020-01-07', '--from=2020-01-01'], '--from') === '2020-01-01', 'flagValue matches its own flag, not a similarly-shaped neighbour');
-
   // parseSessionFile: well-formed session with two competency tags.
   const goodSession = [
     '---',
