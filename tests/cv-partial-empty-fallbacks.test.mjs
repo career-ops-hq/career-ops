@@ -127,8 +127,10 @@ function blockSuffixedTemplate() {
     const renamed = readFileSync(file, 'utf-8')
       .replaceAll('ORG_EMPTY', 'ORG_BLOCK_EMPTY')
       .replaceAll('YEAR_EMPTY', 'YEAR_BLOCK_EMPTY');
-    if (!renamed.includes(`<!--ORG_BLOCK_EMPTY--><span class="${prefix}-org">`)) {
-      fail(`${section}.html no longer defines the ORG_EMPTY fallback this fixture renames`);
+    for (const [field, cell] of [['ORG', 'org'], ['YEAR', 'year']]) {
+      if (!renamed.includes(`<!--${field}_BLOCK_EMPTY--><span class="${prefix}-${cell}">`)) {
+        fail(`${section}.html no longer defines the ${field}_EMPTY fallback this fixture renames`);
+      }
     }
     writeFileSync(file, renamed);
   }
