@@ -125,6 +125,9 @@ export function parseYCPayload(payload) {
     const name = typeof item.name === 'string' ? item.name.trim() : '';
     if (!name) continue;
 
+    // YC marks dead/exited companies via `status`; probing their boards only 404s.
+    if (typeof item.status === 'string' && item.status.trim() && item.status !== 'Active') continue;
+
     // Prefer explicit slug; derive from name as fallback.
     const rawSlug = typeof item.slug === 'string' ? item.slug.trim()
       : name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -307,14 +310,14 @@ export function toPortalEntry(company) {
  * Fetch the Y Combinator public company list and return parsed SeedCompany entries.
  *
  * Uses the public YC API (no auth, no API key). The response is a JSON object
- * with a `companies` array. We fetch page 1 with a large per_page to get the
- * most recent batch; subsequent pages can be fetched if needed (most users want
- * the latest batch anyway).
+ * with a `companies` array plus `page`/`totalPages` pagination fields. The API
+ * caps page size server-side (~30/page; `per_page` is ignored), so the whole
+ * portfolio is walked page by page up to `maxPages`, newest batches first.
  *
  * @param {{ timeoutMs?: number, maxPages?: number }} [opts]
  * @returns {Promise<SeedCompany[]>}
  */
-export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = 3 } = {}) {
+export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = 300 } = {}) {
   /** @type {SeedCompany[]} */
   const all = [];
   const seen = new Set();
@@ -340,10 +343,11 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
       }
     }
 
-    // The YC API pagination: stop when we receive fewer than 1000 companies.
+    // The API caps page size server-side (~30/page; per_page is ignored) and
+    // reports totalPages — follow its signal instead of guessing from batch size.
     const raw = /** @type {any} */ (payload);
-    const batchSize = Array.isArray(raw?.companies) ? raw.companies.length : 0;
-    if (batchSize < 1000) break;
+    const totalPages = Number.isInteger(raw?.totalPages) ? raw.totalPages : page;
+    if (page >= totalPages) break;
   }
 
   return all;
