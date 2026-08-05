@@ -1095,9 +1095,18 @@ for (const f of userFiles) {
 }
 
 const batchRunnerSource = readFile('batch/batch-runner.sh');
-const minScoreSkipIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "skipped"');
-const minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
-const completedStateIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "completed"', minScoreSkipIndex);
+// Match any update_state entrypoint (bare, _retrying, _unlocked) so this asserts
+// the gate's ordering rather than one spelling of the call.
+const SKIPPED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "skipped"/;
+const COMPLETED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "completed"/;
+const minScoreSkipIndex = batchRunnerSource.search(SKIPPED_STATE_WRITE);
+let minScoreReturnIndex = -1;
+let completedStateIndex = -1;
+if (minScoreSkipIndex !== -1) {
+  minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
+  const completedOffset = batchRunnerSource.slice(minScoreSkipIndex).search(COMPLETED_STATE_WRITE);
+  completedStateIndex = completedOffset === -1 ? -1 : minScoreSkipIndex + completedOffset;
+}
 if (
   minScoreSkipIndex !== -1 &&
   minScoreReturnIndex !== -1 &&
