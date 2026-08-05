@@ -39,6 +39,7 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
+import bamboohr from './providers/bamboohr.mjs';
 import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -112,6 +113,14 @@ const SOURCES = {
         h => h === `${tenant}.${instance}.myworkdayjobs.com` && h.endsWith('.myworkdayjobs.com'),
       );
     },
+  },
+  bamboohr: {
+    provider: bamboohr,
+    dataset: `${DATASET_BASE}/bamboohr_companies.json`,
+    // Dataset entries are plain tenant slugs: "<tenant>"
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://${slug}.bamboohr.com`, h => h === `${slug}.bamboohr.com`)
+      : null,
   },
 };
 

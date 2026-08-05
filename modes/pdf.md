@@ -22,13 +22,14 @@
 13. Inject keywords naturally into existing achievements (NEVER invent)
 14. Apply the six-second clarity gate from `modes/heuristics/recruiter-side.md`: top third must make target role, strongest fit, and proof obvious
 15. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase (e.g. "John Doe" → "john-doe") → `{candidate}`
-16. Build the render payload (see the **JSON Input Schema** below) from the tailored content — emit compact structured JSON, **not** full HTML markup — and write it to `/tmp/cv-{candidate}-{company}.json`
-17. Run: `node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json output/cv-{candidate}-{company}.html {template}` — where `{template}` is the path printed by **Selecting the template** below (omit the argument to use the base `cv-template.html`). The script merges the payload into that template, owning every tag, CSS class, and the HTML escaping. Write to `output/` (NOT a temp dir — the recorded HTML is what the dashboard's `D` hotkey regenerates from, so it must survive temp cleanup)
-18. Run the fact gate: `node verify-cv-facts.mjs output/cv-{candidate}-{company}.html`
+16. Resolve the output folder: create `output/{YYYY-MM-DD}/` (date-stamped by scan/session date). All outputs for the same session go here.
+17. Build the render payload (see the **JSON Input Schema** below) from the tailored content — emit compact structured JSON, **not** full HTML markup — and write it to `output/{YYYY-MM-DD}/cv-{candidate}-{company}.json`
+18. Run: `node build-cv-html.mjs output/{YYYY-MM-DD}/cv-{candidate}-{company}.json output/{YYYY-MM-DD}/cv-{candidate}-{company}.html {template}` — where `{template}` is the path printed by **Selecting the template** below (omit the argument to use the base `cv-template.html`). The script merges the payload into that template, owning every tag, CSS class, and the HTML escaping. Write to `output/{YYYY-MM-DD}/` (NOT a temp dir — the recorded HTML is what the dashboard's `D` hotkey regenerates from, so it must survive temp cleanup)
+19. Run the fact gate: `node verify-cv-facts.mjs output/{YYYY-MM-DD}/cv-{candidate}-{company}.html`
     - This is a hard gate before PDF rendering.
     - If it fails, stop and fix the generated HTML by removing invented metrics or adding verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`.
-19. Execute: `node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --format={letter|a4} --report={report number}` — `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact PDF. Omit it only for one-off CVs with no tracker entry.
-20. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
+20. Execute: `node generate-pdf.mjs output/{YYYY-MM-DD}/cv-{candidate}-{company}.html output/{YYYY-MM-DD}/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --format={letter|a4} --report={report number}` — `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact PDF. Omit it only for one-off CVs with no tracker entry.
+21. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
 
 ## ATS Rules (clean parsing)
 

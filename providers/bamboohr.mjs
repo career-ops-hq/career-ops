@@ -106,6 +106,10 @@ export function parseBambooHRResponse(json, companyName, origin) {
         url: `${origin}/careers/${encodeURIComponent(id)}`,
         company: companyName,
         location,
+        // BambooHR /careers/list exposes only currently-open roles with no
+        // publish date — stamp "now" so reverse scans (--since N) treat them
+        // as fresh. scan-history.tsv dedup still prevents re-adding.
+        postedAt: Date.now(),
       };
     });
 }

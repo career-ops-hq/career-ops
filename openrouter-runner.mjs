@@ -49,7 +49,7 @@ const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const MAX_TOKENS            = 8192;
 const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const MODEL_TIMEOUT_MS      = 300_000; // abort a single model call after 300 s
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -353,6 +353,10 @@ function buildSystemPrompt(modeContent, ctx) {
     ctx.profileMode,
     modeContent,
     '---',
+    'CRITICAL: You CANNOT use any tool calls, function calls, <tool_call> blocks, or FUNCTIONS.* commands.',
+    'All candidate context (CV, profile, article-digest) is provided below in this prompt.',
+    'Simply write your evaluation in plain text. No special syntax needed.',
+    '---',
     'CANDIDATE PROFILE (YAML):',
     ctx.profile,
     '---',
@@ -625,6 +629,11 @@ async function cmdEvaluate(input, ctx) {
     console.error(`OpenRouter error: ${e.message}`);
     return null;
   }
+
+  // Strip tool_call artifacts — the model sometimes outputs raw <tool_call> JSON
+  // even though the system prompt says not to. Clean it before score parsing.
+  result = result.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                 .replace(/FUNCTIONS\.\w+[\s\S]*?(?=\n|$)/gi, '');
 
   let reservedNumbers;
   try {

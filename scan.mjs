@@ -178,15 +178,25 @@ export function buildLocationFilter(locationFilter) {
 }
 
 // ── Posting-age filter ──────────────────────────────────────────────
-// Optional opt-in. If `max_posting_age_days` is absent (or not a positive
-// integer) in portals.yml, every offer passes. An offer is skipped only when
-// the provider supplied a postedAt (epoch ms) AND it is older than N days.
+// Optional opt-in. If `max_posting_age_days` or `max_posting_age_hours` is absent
+// (or not a positive integer) in portals.yml, every offer passes. An offer is skipped only when
+// the provider supplied a postedAt (epoch ms) AND it is older than N days/hours.
 // Offers with no date always pass — same "don't penalize missing data"
 // convention as the location filter. `now` is injectable for deterministic tests.
 export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
   const max = Number(maxAgeDays);
   if (!Number.isInteger(max) || max <= 0) return () => true;
   const cutoff = now - max * 24 * 60 * 60 * 1000; // N days in ms, subtracted from now
+  return (postedAt) => {
+    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
+    return postedAt >= cutoff;
+  };
+}
+
+export function buildPostingAgeFilterHours(maxAgeHours, now = Date.now()) {
+  const max = Number(maxAgeHours);
+  if (!Number.isInteger(max) || max <= 0) return () => true;
+  const cutoff = now - max * 60 * 60 * 1000; // N hours in ms, subtracted from now
   return (postedAt) => {
     if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
     return postedAt >= cutoff;
@@ -1344,7 +1354,10 @@ async function main() {
   }
 
   const locationFilter = buildLocationFilter(config.location_filter);
-  const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
+  const postingAgeHours = config.max_posting_age_hours ?? config.date_filter?.max_age_hours;
+  const postingAgeFilter = postingAgeHours
+    ? buildPostingAgeFilterHours(postingAgeHours)
+    : buildPostingAgeFilter(config.max_posting_age_days);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
@@ -1651,7 +1664,7 @@ async function main() {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
   }
   console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
-  if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
+  if (config.max_posting_age_days != null || config.max_posting_age_hours != null || config.date_filter?.max_age_hours != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
   console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);

@@ -407,7 +407,7 @@ When spawning headless workers for batch processing, use the appropriate command
 
 - Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Scripts in `.mjs`, configuration in YAML
-- Output in `output/` (gitignored), Reports in `reports/`
+- Output in `output/{YYYY-MM-DD}/` (date-stamped folders, gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
 - Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1

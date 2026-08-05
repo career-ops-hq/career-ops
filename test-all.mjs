@@ -3418,6 +3418,7 @@ try {
     buildLocationFilter,
     buildContentFilter,
     buildPostingAgeFilter,
+    buildPostingAgeFilterHours,
     shouldDedupScanHistoryRow,
     formatPipelineOffer,
     formatScanHistoryRow,
@@ -3450,6 +3451,33 @@ try {
     pass('posting-age filter is opt-in: absent / 0 / negative / non-integer config disables it');
   } else {
     fail('posting-age filter should be a pass-all no-op when unconfigured or misconfigured');
+  }
+
+  // ── posting-age filter (max_posting_age_hours) ──
+  // Same opt-in semantics as the days filter, at hour granularity.
+  const HOUR = 60 * 60 * 1000;
+  const hoursFilter = buildPostingAgeFilterHours(48, NOW);
+  if (
+    hoursFilter(NOW - 10 * HOUR) === true && // fresh → pass
+    hoursFilter(NOW - 60 * HOUR) === false && // older than 48h → skip
+    hoursFilter(NOW - 48 * HOUR) === true && // exactly at the cutoff → kept (>=)
+    hoursFilter(undefined) === true && // no provider date → pass
+    hoursFilter(Number.NaN) === true && // malformed date → pass
+    hoursFilter('2026-01-01') === true // non-number → pass
+  ) {
+    pass('posting-age filter (hours) skips only dated offers older than N hours; missing/invalid dates pass');
+  } else {
+    fail('posting-age filter (hours) did not gate on age / missing-date correctly');
+  }
+  if (
+    buildPostingAgeFilterHours(undefined, NOW)(NOW - 9999 * HOUR) === true &&
+    buildPostingAgeFilterHours(0, NOW)(NOW - 9999 * HOUR) === true &&
+    buildPostingAgeFilterHours(-5, NOW)(NOW - 9999 * HOUR) === true &&
+    buildPostingAgeFilterHours(3.5, NOW)(NOW - 9999 * HOUR) === true // non-integer → disabled
+  ) {
+    pass('posting-age filter (hours) is opt-in: absent / 0 / negative / non-integer config disables it');
+  } else {
+    fail('posting-age filter (hours) should be a pass-all no-op when unconfigured or misconfigured');
   }
 
   const filter = buildLocationFilter({
