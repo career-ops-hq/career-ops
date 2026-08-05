@@ -12,8 +12,10 @@ source-annotated additions to `config/profile.yml` / `cv.md` /
 | `diplomas/` | Transcripts, degree certificates |
 | `references/` | Reference letters |
 
-Everything in this folder is **user layer**: gitignored (except this README
-and `.gitkeep`), never touched by the updater, never leaves your machine.
+Your source documents here are **user layer**: gitignored, never touched by
+the updater, never leaving your machine. `README.md` and `.gitkeep` are the
+system-owned scaffold for the folder — they are tracked, and the updater does
+maintain them.
 Extraction is fully local — `.md`/`.txt`/`.tex` are read directly; PDFs with
 a text layer use `pdftotext` if installed (`brew install poppler` /
 `apt install poppler-utils`). Scanned/image-only PDFs, images, and `.docx`
