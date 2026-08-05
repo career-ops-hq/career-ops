@@ -10,9 +10,11 @@
 //
 // Paginated 50/page via `?page=N` (0-indexed); the response carries
 // `total_pages`, so iteration is bounded by min(total_pages, max_pages).
-// Default cap is modest; the board is several thousand roles, so either
-// raise `max_pages` on the entry or narrow server-side with `q:` (the feed
-// runs full-text search with synonym expansion, e.g. "ml", "swe", "nyc").
+// Page budgets are sized in 50-job pages: the default scan covers
+// DEFAULT_MAX_PAGES × 50 = 300 jobs, and MAX_PAGES_CAP spans the whole
+// board (~350 pages / ~17.5k jobs live). Either raise `max_pages` on the
+// entry or narrow server-side with `q:` (the feed runs full-text search
+// with synonym expansion, e.g. "ml", "swe", "nyc").
 //
 // Every request carries `source=career-ops` — the feed's documented optional
 // attribution param, echoed in the response; it does not change results.
@@ -23,8 +25,8 @@
 const FEED_BASE = 'https://speedrun-talent-network.com/api/v1/jobs';
 const TRUSTED_HOST = 'speedrun-talent-network.com';
 const PER_PAGE = 50;
-const DEFAULT_MAX_PAGES = 3;
-const MAX_PAGES_CAP = 120;
+const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
+const MAX_PAGES_CAP = 350; // spans the full board (~17.5k jobs live)
 
 /** @param {string} url */
 function assertFeedUrl(url) {

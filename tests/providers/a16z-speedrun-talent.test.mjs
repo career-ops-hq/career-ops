@@ -168,8 +168,38 @@ try {
   if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() falls back to joined keywords[] when q: is absent');
   else fail(`keywords fallback q = ${JSON.stringify(new URL(kwCalls[0]).searchParams.get('q'))}`);
 
-  // MAX_PAGES_CAP: an oversized max_pages is clamped to 120, and the
-  // truncation warning fires (spied via console.error, restored in finally).
+  // DEFAULT_MAX_PAGES: with no max_pages on the entry, the default budget
+  // covers 6 pages × 50 = 300 jobs — the same 300-job default scan the
+  // pre-#2419 constants encoded as 3 × 100. Pages derive from the requested
+  // `page` param with page-distinct ids, so duplicated or skipped requests
+  // cannot pass.
+  const defCalls = [];
+  const defCtx = {
+    fetchJson: async (url) => {
+      const p = Number(new URL(url).searchParams.get('page'));
+      defCalls.push(p);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(p * 50 + i)), total: 16830, page: p, page_size: 50, total_pages: 337 };
+    },
+  };
+  const defWarnings = [];
+  const defRealConsoleError = console.error;
+  let defJobs;
+  try {
+    console.error = (...args) => defWarnings.push(args.join(' '));
+    defJobs = await provider.fetch({ name: 'a16z speedrun talent network' }, defCtx);
+  } finally {
+    console.error = defRealConsoleError;
+  }
+  const defPagesOk = defCalls.length === 6 && defCalls.every((p, i) => p === i);
+  const defDistinct = defJobs && new Set(defJobs.map((j) => j.url)).size === 300;
+  if (defPagesOk && defJobs.length === 300 && defDistinct) pass('fetch() default budget covers pages 0..5 → 300 distinct jobs');
+  else fail(`default budget = ${JSON.stringify({ calls: defCalls, jobs: defJobs?.length })}`);
+  if (defWarnings.some((w) => w.includes('truncated at max_pages=6'))) pass('fetch() warns when the default budget truncates the feed');
+  else fail(`default-budget truncation warning missing; captured = ${JSON.stringify(defWarnings)}`);
+
+  // MAX_PAGES_CAP: an oversized max_pages is clamped to 350 — sized to span
+  // the live board (~350 total_pages) — and the truncation warning fires
+  // (spied via console.error, restored in finally).
   const bigCalls = [];
   const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 500 }; } };
   const warnings = [];
@@ -180,9 +210,9 @@ try {
   } finally {
     console.error = realConsoleError;
   }
-  if (bigCalls.length === 120) pass('fetch() clamps max_pages to the 120-page cap');
+  if (bigCalls.length === 350) pass('fetch() clamps max_pages to the 350-page cap');
   else fail(`cap clamp fetched ${bigCalls.length} pages`);
-  if (warnings.some((w) => w.includes('truncated at max_pages=120'))) pass('fetch() warns when the cap truncates the feed');
+  if (warnings.some((w) => w.includes('truncated at max_pages=350'))) pass('fetch() warns when the cap truncates the feed');
   else fail(`cap warning missing; captured = ${JSON.stringify(warnings)}`);
 
   // fetch(): malformed payload throws with a useful message.
