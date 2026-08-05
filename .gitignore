@@ -96,6 +96,10 @@ data/model-blacklist.json
 *.mov
 *.mp4
 
+# IDE-specific local config
+.idea/
+.vscode/
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
@@ -103,6 +107,10 @@ data/model-blacklist.json
 .opencode/memory/
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
 opencode.json
+# Claude Code project-level MCP server config — commonly ends up holding
+# personal server credentials (e.g. a plugin's API token) once a user adds
+# an MCP server, same risk class as .env.
+.mcp.json
 career-dashboard
 career-dashboard.exe
 package-lock.json
