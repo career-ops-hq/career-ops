@@ -877,9 +877,58 @@ export function removeAdditionsNotInHead(pathspec, protectedPaths = new Set(), c
   }
 }
 
-function addPaths(paths) {
+/**
+ * Is a repo-relative path present in the index?
+ *
+ * Used to tell "tracked but ignored" (stageable, and `-f` will do it) apart from
+ * "never tracked" (a deleted one is an unmatched pathspec, which no flag fixes).
+ *
+ * Expects a literal single-file path: it reports whether `ls-files` matched
+ * anything, not whether it matched this exact entry. A directory pathspec would
+ * report true for any tracked file beneath it, and a wrong-case path reports
+ * false even on a case-insensitive filesystem, since `ls-files` does not fold.
+ *
+ * @param {string} path - Repo-relative path.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {boolean}
+ */
+export function isTracked(path, ctx = {}) {
+  const runGit = ctx.git || git;
+  try {
+    return runGit('ls-files', '--', path).trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stage the update's own system-layer paths.
+ *
+ * `-f` is required, not defensive. Every path here is one the updater owns and
+ * just checked out from FETCH_HEAD, but `git add` refuses an explicitly-named
+ * ignored path and exits 1 — and because .gitignore is intentionally not in
+ * SYSTEM_PATHS, a user's own rule can shadow a system file at any time.
+ *
+ * The trigger is specifically a DIRECTORY-level rule. git skips ignore rules for
+ * an already-tracked file, so `writing-samples/README.md` under a `writing-
+ * samples/README.md` rule stages fine — but under a blanket `writing-samples/`
+ * it does not, because the match comes from the ignored directory. That blanket
+ * shape is the one users reach for when hardening a checkout.
+ *
+ * The failure is quiet in the worst way: git stages the paths it accepted and
+ * still exits non-zero, so apply() aborts before committing and leaves the
+ * update on disk, staged, uncommitted — and repeats it on every later release.
+ * Forcing the add keeps the updater able to commit files it owns whatever the
+ * local ignore rules say; it can never reach a user path, because the caller
+ * builds this list from the system manifest.
+ *
+ * @param {string[]} paths - Repo-relative paths to stage.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ */
+export function addPaths(paths, ctx = {}) {
   if (paths.length === 0) return;
-  git('add', '--', ...paths);
+  const runGit = ctx.git || git;
+  runGit('add', '-f', '--', ...paths);
 }
 
 function dashboardGoSourcesChanged() {
@@ -1349,7 +1398,13 @@ async function apply() {
     const dismissFile = join(ROOT, '.update-dismissed');
     if (existsSync(dismissFile)) {
       unlinkSync(dismissFile);
-      pathsToStage.push('.update-dismissed');
+      // Only stage the marker when it was actually tracked. It is gitignored by
+      // default, so for most users it was never in the index — and `git add` on
+      // a deleted, never-tracked path is a fatal "pathspec did not match any
+      // files" (exit 128) that `-f` does not rescue. Staging it unconditionally
+      // meant that dismissing an update and then applying one broke the commit
+      // in a stock checkout, with no local customization involved.
+      if (isTracked('.update-dismissed')) pathsToStage.push('.update-dismissed');
     }
 
     try {
