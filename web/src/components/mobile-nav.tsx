@@ -10,8 +10,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
-import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { NAV_SECTIONS, isActivePath } from "@/lib/nav-items";
 import { useJobs } from "@/components/jobs/job-store";
+import { CommandPaletteLauncher } from "@/components/command-palette";
 
 // Mobile navigation (< md): a glass top bar + a right-side slide-over drawer that
 // mirrors the desktop sidebar (nav + workers + usage + theme). Premium details:
@@ -105,16 +106,17 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="Career-Ops startsida">
           <CoMark size={26} />
           <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
         </Link>
         <div className="ml-auto flex items-center gap-0.5">
+          <CommandPaletteLauncher compact />
           <ThemeToggle />
           <button
             type="button"
             onClick={() => setOpen(true)}
-            aria-label="Open menu"
+            aria-label="Öppna meny"
             aria-expanded={open}
             className="relative inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
@@ -130,7 +132,7 @@ export function MobileNav() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation menu"
+        aria-label="Navigeringsmeny"
         inert={!open}
         className={cn("co-mdrawer border-l border-border bg-surface md:hidden", open && "open")}
         onTouchStart={onTouchStart}
@@ -138,41 +140,48 @@ export function MobileNav() {
         onTouchEnd={onTouchEnd}
       >
         <div className="flex items-center justify-between px-4 py-3">
-          <span className={`${instrumentSerif.className} text-lg text-landing`}>Menu</span>
+          <span className={`${instrumentSerif.className} text-lg text-landing`}>Meny</span>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Close menu"
+            aria-label="Stäng meny"
             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <X className="size-5" />
           </button>
         </div>
 
-        <nav className="flex flex-col gap-1 px-3">
-          {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
-            const active = isActivePath(href, pathname);
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-3 text-[15px] transition-colors",
-                  active ? "bg-brand-soft text-brand-text" : "text-muted hover:bg-surface-hover hover:text-foreground",
-                )}
-              >
-                <Icon className="size-5" />
-                {label}
-                {chip && (
-                  <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
-                    {chip}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
+        <div className="px-3 pb-2"><CommandPaletteLauncher /></div>
+        <nav className="flex flex-col gap-5 px-3" aria-label="Huvudmeny">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.id}>
+              <p className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{section.label}</p>
+              <div className="flex flex-col gap-0.5">
+                {section.items.map(({ href, label, description, icon: Icon, chip }) => {
+                  const active = isActivePath(href, pathname);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      title={description}
+                      onClick={() => setOpen(false)}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-[15px] transition-colors",
+                        active ? "bg-brand-soft font-medium text-brand-text" : "text-muted hover:bg-surface-hover hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="size-5" />
+                      {label}
+                      {chip && (
+                        <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">{chip}</span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className="px-3">

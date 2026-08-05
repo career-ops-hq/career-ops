@@ -4,8 +4,8 @@ import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
-  description: "The official, local-first web experience for career-ops.",
+  title: "Career-Ops — professionell jobbsökning",
+  description: "En lokal och lättanvänd arbetsyta för hela din jobbsökning.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "career-ops" },
@@ -28,7 +28,7 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('career-ops:the
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
-      lang="en"
+      lang="sv"
       suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >

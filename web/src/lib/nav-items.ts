@@ -1,25 +1,69 @@
-import { LayoutDashboard, Compass, ListChecks, Send, Radar, BarChart3, FileText, Settings } from "lucide-react";
+import {
+  LayoutDashboard,
+  Compass,
+  ListChecks,
+  Send,
+  Radar,
+  BarChart3,
+  FileText,
+  Settings,
+  WandSparkles,
+  Activity,
+  CircleHelp,
+} from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
+import { NAVIGATION_SECTIONS, searchNavigation } from "@/lib/navigation-model.mjs";
 
-// Single source of truth for the app's primary destinations — shared by the
-// desktop sidebar and the mobile nav so they can never drift.
 export type NavItem = {
   href: string;
   label: string;
+  description: string;
+  keywords: readonly string[];
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   chip?: string;
+  shortcut?: string;
 };
 
-export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Today", icon: LayoutDashboard },
-  { href: "/explore", label: "Explore", icon: Compass, chip: "New" },
-  { href: "/pipeline", label: "Pipeline", icon: ListChecks },
-  { href: "/followups", label: "Follow-ups", icon: Send },
-  { href: "/portals", label: "Portals", icon: Radar },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/cv", label: "CV", icon: FileText },
-  { href: "/config", label: "Config", icon: Settings },
-];
+export type NavSection = {
+  id: string;
+  label: string;
+  items: NavItem[];
+};
+
+const ICONS: Record<string, NavItem["icon"]> = {
+  dashboard: LayoutDashboard,
+  explore: Compass,
+  pipeline: ListChecks,
+  followups: Send,
+  apply: WandSparkles,
+  portals: Radar,
+  analytics: BarChart3,
+  cv: FileText,
+  jobs: Activity,
+  settings: Settings,
+  guide: CircleHelp,
+};
+
+export const NAV_SECTIONS: NavSection[] = NAVIGATION_SECTIONS.map((section) => ({
+  id: section.id,
+  label: section.label,
+  items: section.items.map((item) => ({
+    ...item,
+    keywords: [...item.keywords],
+    icon: ICONS[item.iconKey] ?? CircleHelp,
+  })),
+}));
+
+export const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
+
+export function searchNavItems(query: string): NavItem[] {
+  const orderedHrefs = searchNavigation(query).map((item) => item.href);
+  const itemsByHref = new Map(NAV_ITEMS.map((item) => [item.href, item]));
+  return orderedHrefs.flatMap((href) => {
+    const item = itemsByHref.get(href);
+    return item ? [item] : [];
+  });
+}
 
 export function isActivePath(href: string, pathname: string): boolean {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);

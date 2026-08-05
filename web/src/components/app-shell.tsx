@@ -16,7 +16,8 @@ import { BetaBanner } from "@/components/beta/beta-banner";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
-import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { NAV_SECTIONS, isActivePath } from "@/lib/nav-items";
+import { CommandPalette, CommandPaletteLauncher } from "@/components/command-palette";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -34,30 +35,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               career-ops
             </span>
           </Link>
-          <nav className="flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
-              const active = isActivePath(href, pathname);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    active
-                      ? "bg-brand-soft text-brand-text"
-                      : "text-muted hover:bg-surface-hover hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4" />
-                  {label}
-                  {chip && (
-                    <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
-                      {chip}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+          <CommandPaletteLauncher />
+          <nav className="mt-5 flex flex-col gap-5" aria-label="Huvudmeny">
+            {NAV_SECTIONS.map((section) => (
+              <div key={section.id}>
+                <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{section.label}</p>
+                <div className="flex flex-col gap-0.5">
+                  {section.items.map(({ href, label, description, icon: Icon, chip }) => {
+                    const active = isActivePath(href, pathname);
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        title={description}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                          active
+                            ? "bg-brand-soft font-medium text-brand-text"
+                            : "text-muted hover:bg-surface-hover hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="size-4" />
+                        {label}
+                        {chip && (
+                          <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
+                            {chip}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
           <WorkerPills />
@@ -72,6 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
         <main className="flex-1 overflow-x-hidden">{children}</main>
         <AssistantConsole />
+        <CommandPalette />
         <FirstScoreView />
         <BetaBanner />
       </div>
