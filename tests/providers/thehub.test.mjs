@@ -27,11 +27,11 @@ try {
 
   // normalizeHubJob — full mapping.
   const full = normalizeHubJob(
-    { title: '  Staff Engineer  ', id: 'abc123', company: { name: '  Light  ' }, location: { address: '  London, UK  ' } },
+    { title: '  Staff Engineer  ', id: 'abc123', company: { name: '  Acme Corp  ' }, location: { address: '  London, UK  ' } },
     'Fallback',
   );
   if (full && full.title === 'Staff Engineer' && full.url === 'https://thehub.io/jobs/abc123'
-      && full.company === 'Light' && full.location === 'London, UK') {
+      && full.company === 'Acme Corp' && full.location === 'London, UK') {
     pass('normalizeHubJob maps title/id/company.name/location.address');
   } else {
     fail(`normalizeHubJob full row = ${JSON.stringify(full)}`);
@@ -41,6 +41,17 @@ try {
   const assembled = normalizeHubJob({ title: 'R', id: 'r', location: { locality: 'Berlin', country: 'Germany' }, isRemote: true }, 'X');
   if (assembled?.location === 'Berlin, Germany, Remote') pass('normalizeHubJob assembles locality/country and appends "Remote" when isRemote');
   else fail(`normalizeHubJob assembled location = ${JSON.stringify(assembled?.location)}`);
+
+  // The remote pass returns some jobs with no `location` key at all (observed live,
+  // e.g. freelance postings) — must resolve to just "Remote", not throw or leave a
+  // stray comma.
+  const noLocRemote = normalizeHubJob({ title: 'R', id: 'nlr', isRemote: true });
+  const noLocOnsite = normalizeHubJob({ title: 'R', id: 'nlo' });
+  if (noLocRemote?.location === 'Remote' && noLocOnsite?.location === '') {
+    pass('normalizeHubJob resolves a missing location to "Remote" (isRemote) or "" (not remote), never throwing');
+  } else {
+    fail(`normalizeHubJob missing-location results = ${JSON.stringify({ remote: noLocRemote?.location, onsite: noLocOnsite?.location })}`);
+  }
 
   // company fallbacks: entry name, then "The Hub".
   const coEntry = normalizeHubJob({ title: 'T', id: 'c1', company: {} }, 'Entry Name');
