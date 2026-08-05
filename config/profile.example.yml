@@ -151,6 +151,9 @@ cv:
   # Recognized names: summary, competencies, experience, projects, education,
   # certifications, awards, skills. An unrecognized name is reported and ignored.
   #
+  # Applies to the HTML output only. With output_format: latex the order comes
+  # from templates/cv-template.tex and this setting does nothing.
+  #
   # This exists so the order can live in your profile instead of in
   # templates/cv-template.html, which update-system.mjs restores on every update.
   # cv.md stays the source of truth: the section-order guard still compares the

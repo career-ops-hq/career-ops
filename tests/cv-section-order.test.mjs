@@ -15,6 +15,12 @@ import { tmpdir } from 'os';
 
 console.log('\nCV section order from config/profile.yml (#2533)');
 
+// Wall-clock budget for the scan-complexity assertions below. Deliberately far
+// above what the linear scans cost (single-digit ms) so a loaded CI runner
+// can't trip it, and far below what the superlinear implementations they
+// replaced cost on the fixtures used (several seconds each).
+const TIME_BUDGET_MS = 2000;
+
 // Section titles the builders render for each key, mirroring
 // DEFAULT_SECTION_TITLES in build-cv-html.mjs. Used to turn the shipped
 // template into a realistic rendered document.
@@ -153,12 +159,21 @@ try {
 
   // ── The no-op contract ────────────────────────────────────────────────────
 
+  const single = captureWarnings(() => reorderCvSections(FIXTURE, ['skills']));
   if (reorderCvSections(FIXTURE, []) === FIXTURE
       && reorderCvSections(FIXTURE, undefined) === FIXTURE
-      && reorderCvSections(FIXTURE, ['skills']) === FIXTURE) {
+      && single.value === FIXTURE) {
     pass('reorderCvSections is byte-identical with no order, an empty order, or a single name');
   } else {
     fail('reorderCvSections should be a no-op without at least two named sections');
+  }
+  // A single name is a no-op that looks like a setting, so it says so. An empty
+  // or absent list is not a statement at all, so it stays quiet.
+  if (single.warnings.some(w => w.includes('skills'))
+      && captureWarnings(() => reorderCvSections(FIXTURE, [])).warnings.length === 0) {
+    pass('a one-name order reports that it states no relationship; an empty one is silent');
+  } else {
+    fail(`single-name handling: ${JSON.stringify(single.warnings)}`);
   }
 
   const alreadyInOrder = reorderCvSections(FIXTURE, ['education', 'skills']);
@@ -351,19 +366,26 @@ try {
 
   // The markup scan runs over every candidate section, so no template should be
   // able to stall a render through it. Both shapes below defeated an earlier
-  // regex-based scanner: a run of complete comments made it exponential (4.4s at
-  // 28 repetitions), and a run of unterminated ones made it quadratic (728ms at
-  // 32k). Thresholds are set so a regression is reported rather than hanging the
-  // suite, since a scan that never returns produces no failure at all.
+  // regex-based scanner: a run of complete comments made it exponential, and a
+  // run of unterminated ones made it quadratic.
+  //
+  // On the bound: it has to sit far enough above the linear cost that a loaded
+  // CI runner can't cross it, and far enough below the regressed cost to still
+  // fail. Those pull in opposite directions, so the *fixtures* are sized rather
+  // than the threshold loosened — each one is large enough that the regressed
+  // implementation needs several seconds, while the linear scan stays in
+  // single-digit milliseconds. Sizing them any larger would make a regression
+  // hang the suite instead of reporting, and a scan that never returns produces
+  // no failure at all.
   for (const [label, filler] of [
-    ['complete comments', '<!-- x --> '.repeat(28) + 'y'],
-    ['unterminated comments', '<!--'.repeat(32000)],
+    ['complete comments', '<!-- x --> '.repeat(30) + 'y'],
+    ['unterminated comments', '<!--'.repeat(96000)],
   ]) {
     const noisy = FIXTURE.replace('  <!-- EDUCATION -->', `  ${filler}\n  <!-- EDUCATION -->`);
     const started = Date.now();
     reorderCvSections(noisy, ['skills', 'education']);
     const elapsed = Date.now() - started;
-    if (elapsed < 500) {
+    if (elapsed < TIME_BUDGET_MS) {
       pass(`a run of ${label} is scanned linearly (${elapsed}ms)`);
     } else {
       fail(`scanning a run of ${label} took ${elapsed}ms — superlinear scanning is back`);
@@ -460,19 +482,149 @@ try {
   // it 16k x 16k if the lookup is a scan — 619ms before this became a search,
   // against 13ms after.
   {
-    const many = '<script></script><!-- EXPERIENCE -->'.repeat(16000)
+    const many = '<script></script><!-- EXPERIENCE -->'.repeat(48000)
       + '<div class="cv"><!-- EDUCATION --><div class="section"><div class="section-title">Education</div>E</div>'
       + '<!-- SKILLS --><div class="section"><div class="section-title">Skills</div>K</div></div>';
     const started = Date.now();
     const shuffled = reorderCvSections(many, ['skills', 'education']);
     const elapsed = Date.now() - started;
-    if (elapsed < 500 && shuffled.indexOf('Skills') < shuffled.indexOf('Education')) {
-      pass(`raw-text ranges are consulted by search, not by scan (16k ranges and markers in ${elapsed}ms)`);
-    } else if (elapsed >= 500) {
-      fail(`16k interleaved ranges and markers took ${elapsed}ms — a lookup is linear again`);
+    if (elapsed < TIME_BUDGET_MS && shuffled.indexOf('Skills') < shuffled.indexOf('Education')) {
+      pass(`raw-text ranges are consulted by search, not by scan (48k ranges and markers in ${elapsed}ms)`);
+    } else if (elapsed >= TIME_BUDGET_MS) {
+      fail(`48k interleaved ranges and markers took ${elapsed}ms — a lookup is linear again`);
     } else {
       fail('the scaling fixture stopped reordering, so it no longer measures the lookup path');
     }
+  }
+
+  // sectionKey() falls back to the normalized title when SECTION_ALIASES has no
+  // entry for it, so a CV rendered with titles outside that table produces
+  // blocks that are real and movable but can never match a configured name.
+  // Without a warning that is indistinguishable, from the user's side, from a
+  // setting that does nothing — the failure this feature exists to remove.
+  const unknownTitles = `<html><body><div class="cv">
+  <!-- EDUCATION -->
+  <div class="section"><div class="section-title">Ausbildung</div><div>Uni</div></div>
+
+  <!-- SKILLS -->
+  <div class="section"><div class="section-title">Kenntnisse</div><div>Node.js</div></div>
+</div></body></html>`;
+  const unknownRun = captureWarnings(() => reorderCvSections(unknownTitles, ['skills', 'education']));
+  if (unknownRun.value === unknownTitles
+      && unknownRun.warnings.some(w => w.includes('Ausbildung') && w.includes('Kenntnisse'))) {
+    pass('a CV whose titles are outside the alias table says so, instead of quietly doing nothing');
+  } else {
+    fail(`unrecognized rendered titles went unreported: ${JSON.stringify(unknownRun.warnings)}`);
+  }
+
+  // The report has to key on which names failed to resolve, not on how many
+  // sections were placed: here two of three names resolve, the two that do are
+  // already in the requested order, so nothing changes and a count-based check
+  // would see a successful reorder and stay silent.
+  const partial = `<html><body><div class="cv">
+  <!-- PROJECTS -->
+  <div class="section"><div class="section-title">Projects</div><div>P</div></div>
+  <!-- EDUCATION -->
+  <div class="section"><div class="section-title">Education</div><div>E</div></div>
+  <!-- SKILLS -->
+  <div class="section"><div class="section-title">Kenntnisse</div><div>K</div></div>
+</div></body></html>`;
+  const partialRun = captureWarnings(() => reorderCvSections(partial, ['skills', 'projects', 'education']));
+  if (partialRun.value === partial
+      && partialRun.warnings.some(w => w.includes('"skills"') && w.includes('Kenntnisse'))) {
+    pass('a partly-resolving order that changes nothing still names what it could not resolve');
+  } else {
+    fail(`partial resolution went unreported: ${JSON.stringify(partialRun.warnings)}`);
+  }
+
+  // The title is quoted back into a terminal, so it is untrusted output: an
+  // escape sequence would let a CV repaint the console or forge a line of it,
+  // and an unbounded title would bury the warning it belongs to.
+  const ESC = String.fromCharCode(27);
+  const hostileTitle = unknownTitles
+    .replace('Ausbildung', `${ESC}[31mFAKE ERROR${ESC}[0m`)
+    .replace('Kenntnisse', 'X'.repeat(500));
+  const hostileRun = captureWarnings(() => reorderCvSections(hostileTitle, ['skills', 'education']));
+  const emitted = hostileRun.warnings.join('\n');
+  if (emitted.includes(ESC)) {
+    fail('control characters from a rendered title survived into a warning');
+  } else if (emitted.length >= 700) {
+    fail(`a 500-character title produced a ${emitted.length}-character warning — it is not being truncated`);
+  } else {
+    pass('a rendered title is stripped of control characters and truncated before it reaches a warning');
+  }
+
+  // A control character is not the only way text rewrites a terminal line:
+  // U+202E reverses what follows, so a title can be made to read as output the
+  // tool produced. And truncating by UTF-16 unit can cut a surrogate pair in
+  // half, emitting a lone surrogate into the log.
+  const RTL_OVERRIDE = '‮';
+  const bidiAndAstral = unknownTitles
+    .replace('Ausbildung', `${RTL_OVERRIDE}gnudlibsuA`)
+    .replace('Kenntnisse', '😀'.repeat(80));
+  const bidiRun = captureWarnings(() => reorderCvSections(bidiAndAstral, ['skills', 'education']));
+  const bidiText = bidiRun.warnings.join('\n');
+  const hasLoneSurrogate = [...bidiText].some(ch => {
+    const code = ch.charCodeAt(0);
+    return code >= 0xd800 && code <= 0xdfff && ch.length === 1;
+  });
+  if (!bidiText.includes(RTL_OVERRIDE) && !hasLoneSurrogate) {
+    pass('bidi overrides are stripped and truncation never splits a surrogate pair');
+  } else {
+    fail(`title sanitization leaked ${bidiText.includes(RTL_OVERRIDE) ? 'a bidi override' : 'a lone surrogate'}`);
+  }
+
+  // The report is per-name, not per-render, and says only what can be checked.
+  // Whether an unresolved name is an absent optional section or the section
+  // under an unidentifiable heading is not knowable here, so the message states
+  // both facts and draws no conclusion. It must not depend on whether the
+  // document changed: an order that was already satisfied changes no bytes and
+  // is a success, while a partly-resolving order can change none and be a
+  // failure — the byte count distinguishes neither.
+  const alreadySatisfied = FIXTURE.replace('>Certifications<', '>Portfolio<');
+  const satisfiedRun = captureWarnings(() => reorderCvSections(alreadySatisfied, ['education', 'skills', 'awards']));
+  const swapRun = captureWarnings(() => reorderCvSections(alreadySatisfied, ['skills', 'education', 'awards']));
+  const namesAwardsAndPortfolio = (w) => w.includes('"awards"') && w.includes('Portfolio') && !w.includes('changed nothing');
+  // Byte-for-byte equality of the emitted warnings, not merely "both mention
+  // awards" — the claim is that the report does not vary with the outcome, and
+  // a weaker check would hold even if the wording differed between the paths.
+  if (satisfiedRun.value === alreadySatisfied && swapRun.value !== alreadySatisfied
+      && JSON.stringify(satisfiedRun.warnings) === JSON.stringify(swapRun.warnings)
+      && satisfiedRun.warnings.some(namesAwardsAndPortfolio)) {
+    pass('the unresolved-name report is identical whether the order was already satisfied or had to be applied');
+  } else {
+    fail(`report depends on whether bytes changed: satisfied=${JSON.stringify(satisfiedRun.warnings)} swapped=${JSON.stringify(swapRun.warnings)}`);
+  }
+
+  // And it stays quiet when every configured name resolved, however many
+  // unidentifiable headings the CV carries elsewhere.
+  const allResolved = captureWarnings(() => reorderCvSections(alreadySatisfied, ['skills', 'education']));
+  if (allResolved.warnings.length === 0) {
+    pass('no report when every configured name resolved, whatever else the CV renders');
+  } else {
+    fail(`spurious report when all names resolved: ${JSON.stringify(allResolved.warnings)}`);
+  }
+
+  // The same must not fire when the setting simply had nothing to do: an
+  // English CV missing an optional section is ordinary, not a misconfiguration.
+  const quiet = captureWarnings(() => reorderCvSections(FIXTURE, ['skills', 'awards']));
+  if (quiet.warnings.length === 0) {
+    pass('a recognized-but-absent section still warns about nothing');
+  } else {
+    fail(`unexpected warning for an ordinary absent section: ${JSON.stringify(quiet.warnings)}`);
+  }
+
+  // Nor when the reorder worked. A custom heading elsewhere in the CV is the
+  // user's business; the warning is about the setting failing, not about the
+  // alias table being incomplete in the abstract.
+  const mixed = FIXTURE.replace('>Certifications<', '>Auszeichnungen<');
+  const mixedRun = captureWarnings(() => reorderCvSections(mixed, ['skills', 'education']));
+  if (JSON.stringify(renderedTitles(mixedRun.value)) === JSON.stringify(
+        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Auszeichnungen', 'Education'])
+      && mixedRun.warnings.length === 0) {
+    pass('an unrecognized title elsewhere is silent when the configured sections did resolve');
+  } else {
+    fail(`spurious warning or wrong order with a mixed-language CV: ${JSON.stringify(mixedRun.warnings)} ${JSON.stringify(renderedTitles(mixedRun.value))}`);
   }
 
   // A cover letter has no sections at all — the same call must leave it alone.

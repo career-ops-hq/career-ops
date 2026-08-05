@@ -339,6 +339,45 @@ export const CV_SECTION_KEYS = [...new Set(SECTION_ALIASES.values())];
 const SECTION_MARKER_RE = /<!--\s+[A-Z][A-Z ]*-->/g;
 const SECTION_TITLE_RE = /class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
 
+const DISPLAY_TITLE_MAX = 60;
+
+/**
+ * A rendered section title, made safe to quote back in a console warning.
+ *
+ * The title comes out of the CV, and a warning goes to a terminal or a log, so
+ * it is untrusted output rather than untrusted input: C0/C1 controls are
+ * dropped (an ANSI escape here would let a CV repaint the operator's console or
+ * forge a line of output), and the result is truncated, since nothing stops a
+ * heading being thousands of characters long.
+ *
+ * @param {string} raw - Inner markup of the title element.
+ * @returns {string}
+ */
+function displayTitle(raw) {
+  const text = raw
+    .replace(/<[^>]+>/g, ' ')
+    // C0/C1 controls, then the bidi overrides and isolates. Both let text
+    // rewrite a terminal line rather than merely occupy it: an escape repaints
+    // it, and U+202E reverses what follows, so a title can appear to be output
+    // the tool produced. Stripped rather than escaped — a section heading has
+    // no legitimate use for either.
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Truncate by code point, not UTF-16 unit, so the cap can't end on half a
+  // surrogate pair; then step back off any trailing combining marks so it
+  // can't end on a mark whose base character was just removed. Marks *within*
+  // the cap are left alone — they are ordinary in many scripts, and the length
+  // bound is what keeps a stacked run from running away.
+  const points = [...text];
+  if (points.length <= DISPLAY_TITLE_MAX) return text;
+  const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
+  while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join('')}…`;
+}
+
 /**
  * The text of the first real section title in html[start, end), skipping any
  * that sits in raw text (a heading quoted inside a script names nothing).
@@ -620,7 +659,14 @@ function isStructuralTail(html, from) {
  * cover letter untouched.
  *
  * @param {string} html
- * @returns {{blocks: {key: string, start: number, end: number}[], ambiguous: Set<string>}}
+ * @returns {{
+ *   blocks: {key: string, start: number, end: number, title: string}[],
+ *   ambiguous: Set<string>,
+ *   unrecognized: Map<string, string>,
+ * }} `blocks` are the movable sections, each carrying its title as rendered (see
+ *   displayTitle). `ambiguous` holds keys whose extent could not be established.
+ *   `unrecognized` maps key -> title for sections the alias table cannot name,
+ *   which are movable but can never match a configured name.
  */
 function extractSectionBlocks(html) {
   // A marker quoted inside a script or style is text, not a section boundary.
@@ -661,10 +707,19 @@ function extractSectionBlocks(html) {
       continue;
     }
 
-    blocks.push({ key, start, end });
+    blocks.push({ key, start, end, title: displayTitle(title) });
   }
 
-  return { blocks, ambiguous };
+  // Titles the alias table doesn't cover. sectionKey() falls back to the
+  // normalized title, so such a block is real and movable but can never match a
+  // configured name — and without this, a CV rendered with titles outside
+  // SECTION_ALIASES makes cv.sections do nothing at all, silently.
+  const unrecognized = new Map();
+  for (const block of blocks) {
+    if (!CV_SECTION_KEYS.includes(block.key)) unrecognized.set(block.key, block.title);
+  }
+
+  return { blocks, ambiguous, unrecognized };
 }
 
 /**
@@ -690,12 +745,19 @@ function extractSectionBlocks(html) {
  * @returns {string}
  */
 export function reorderCvSections(html, order) {
-  if (!Array.isArray(order) || order.length < 2) return html;
+  if (!Array.isArray(order) || order.length === 0) return html;
+  if (order.length < 2) {
+    // Not an error, but not a no-op worth staying quiet about either: one name
+    // states no relationship, so there is nothing to apply and the user would
+    // otherwise be left thinking the setting took effect.
+    console.warn(`⚠️  config/profile.yml cv.sections lists only "${order[0]}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
+    return html;
+  }
 
   // No early return on an empty block list: a CV whose sections are all
   // ambiguous produces none, and silently doing nothing is the failure mode
   // this feature exists to remove. The per-name loop below reports first.
-  const { blocks, ambiguous } = extractSectionBlocks(html);
+  const { blocks, ambiguous, unrecognized } = extractSectionBlocks(html);
 
   const byKey = new Map();
   for (const block of blocks) {
@@ -703,6 +765,7 @@ export function reorderCvSections(html, order) {
   }
 
   const chosen = [];
+  const unresolved = [];
   const seen = new Set();
   for (const name of order) {
     if (seen.has(name)) {
@@ -724,12 +787,35 @@ export function reorderCvSections(html, order) {
       // template put it, and the user would otherwise see a setting that
       // silently does nothing.
       console.warn(`⚠️  config/profile.yml cv.sections lists "${name}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
+    } else {
+      // Recognized and unambiguous but with no block. Ordinarily that just means
+      // the section isn't in this CV (an optional one with no entries is
+      // stripped before the PDF step), which is not worth a warning on its own.
+      unresolved.push(name);
     }
-    // Recognized and unambiguous but simply absent (an optional section with no
-    // entries is stripped before the PDF step) — ordinary, so no warning: it
-    // just has no slot to take part in.
   }
-  if (chosen.length < 2) return html;
+
+  // It is worth one when the CV also renders titles the alias table can't name,
+  // because then "not in this CV" may be a misreading: the section could be
+  // sitting right there under a heading nothing could identify.
+  //
+  // Whether that is what happened is not knowable here — an unresolved name may
+  // equally be an optional section with no entries. So the report states only
+  // what is checkable (this name matched nothing; these titles are unidentified)
+  // and leaves the conclusion to the reader. Deliberately not conditioned on
+  // whether the document changed: a name that did nothing did nothing, whether
+  // or not its neighbours moved, and treating "output identical" as the failure
+  // signal misreads an order that was already satisfied.
+  const reportUnresolved = () => {
+    if (unresolved.length === 0 || unrecognized.size === 0) return;
+    const names = unresolved.map(name => `"${name}"`).join(', ');
+    const titles = [...unrecognized.values()].map(title => `"${title}"`).join(', ');
+    console.warn(`⚠️  config/profile.yml cv.sections names ${names}, which matched no section in this CV. The CV also renders ${unrecognized.size} section title(s) the section-order alias table doesn't recognize (${titles}) — if one of those is the section you meant, its title needs an entry in SECTION_ALIASES in generate-pdf.mjs. Otherwise the name has no effect and can be dropped.`);
+  };
+  if (chosen.length < 2) {
+    reportUnresolved();
+    return html;
+  }
 
   // The slots are the named sections' own positions, in document order; the
   // sections fill them in the configured order. No separate sibling check is
@@ -744,7 +830,10 @@ export function reorderCvSections(html, order) {
     out += html.slice(chosen[i].start, chosen[i].end);
     cursor = slots[i].end;
   }
-  return out + html.slice(cursor);
+
+  const reordered = out + html.slice(cursor);
+  reportUnresolved();
+  return reordered;
 }
 
 /**
