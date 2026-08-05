@@ -103,26 +103,26 @@ test("buildPrompt: memory is injected only when non-empty", () => {
   assert.ok(!/Durable notes/.test(without));
 });
 
-test("buildPrompt: every kind that can act carries its no-overreach clause", () => {
-  // Given the kinds whose tools let them change something. This is a prompt-level
-  // guarantee the tool scopes cannot express, so each must carry it — an earlier
-  // version of this test was named for research and checked evaluate, leaving one
-  // kind unverified.
-  const forbids = {
+test("buildPrompt: every kind carries a no-submission clause", () => {
+  // AGENTS.md states the rule unconditionally: "NEVER submit an application without
+  // the user reviewing it first ... always STOP before clicking Submit/Send/Apply".
+  // It applies to research too. An earlier version of this test excused research on
+  // the grounds that it holds no write tool, but that does not prove it cannot act:
+  // its scope still includes WebFetch and WebSearch, so the prompt has to say it.
+  const clauses = {
     pdf: /Do not submit anything anywhere/i,
     evaluate: /NEVER submit an application/i,
+    research: /never submit, send, or click Apply/i,
     "fix-portal": /Never touch any other company/i,
   };
-  for (const [kind, pattern] of Object.entries(forbids)) {
-    assert.match(buildPrompt({ kind, ...ARGS }), pattern, `${kind} must carry its no-overreach clause`);
+  for (const [kind, pattern] of Object.entries(clauses)) {
+    assert.match(buildPrompt({ kind, ...ARGS }), pattern, `${kind} must carry its no-submission clause`);
   }
 });
 
-test("buildPrompt: research needs no such clause because it cannot act", () => {
-  // Given research investigates the user's OWN portfolio and is denied every
-  // write-capable tool, so there is nothing for it to submit to. Its protection is
-  // the tool scope, not prompt text — asserted here so that reasoning is visible
-  // rather than looking like an omission.
+test("buildPrompt: research is read-only by tools as well as by instruction", () => {
+  // Belt and braces: the clause above is prompt-level, and the scope backs it by
+  // denying every write-capable tool. Neither alone is the whole guarantee.
   assert.equal(grantsWriteCapability(toolScopeFor("research")), false);
   assert.match(buildPrompt({ kind: "research", ...ARGS }), /report:/i);
 });
