@@ -312,6 +312,7 @@ const SYSTEM_PATHS = [
   'LICENSE',
   'CITATION.cff',
   '.editorconfig',
+  '.gitattributes',
   '.github/',
   'package.json',
   'build-cv-latex.mjs',
