@@ -658,14 +658,21 @@ process_offer() {
             const status = typeof obj.status === "string" ? obj.status : "";
             const error = typeof obj.error === "string" ? obj.error : "";
             const score = typeof obj.score === "number" ? String(obj.score) : "";
-            process.stdout.write(status + "\t" + error + "\t" + score);
+            process.stdout.write(status + "\x1f" + error + "\x1f" + score);
           } catch {
             process.stdout.write("");
           }
         });
       ' 2>/dev/null || true)
       if [[ -n "$parsed" ]]; then
-        IFS=$'\t' read -r parsed_status parsed_error parsed_score <<< "$parsed"
+        # \x1f (US), not \t: tab is IFS *whitespace*, so bash collapses runs of it
+        # and strips leading/trailing ones. On the common path -- a worker that
+        # succeeded, so `error` is empty -- the two tabs around that empty field
+        # collapse into one, `score` slides into parsed_error, and parsed_score
+        # comes back empty. The `elif` below then never fires and every
+        # successful offer records score "-". A non-whitespace delimiter gets
+        # one-field-per-unit splitting with empty fields preserved.
+        IFS=$'\x1f' read -r parsed_status parsed_error parsed_score <<< "$parsed"
         if [[ "$parsed_status" == "failed" ]]; then
           worker_failed_match="failed"
           worker_error_match="$parsed_error"

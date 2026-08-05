@@ -584,7 +584,25 @@ function isExcludedFundingItem(item) {
     // funding leads. Same symbol-edge class as the fix in #2227. For every
     // other alternative (all of which end in a word character) \b and the
     // lookarounds are equivalent, so their behaviour is unchanged.
-    /(?<!\w)(acquires?|acquired|acquisition|merger|spac|ipo|bankruptcy|layoffs?|cuts?\s+\d+%|earnings|quarterly results)(?!\w)/i,
+    /(?<!\w)(acquires?|acquired|acquisition|merger|spac|ipo|bankruptcy|layoffs?|earnings|quarterly results)(?!\w)/i,
+    // A layoff announced in the same headline as a raise is the case #2404
+    // fixed, but it only covered one spelling — "cuts N%". These reach the
+    // same reader with the same harm, the tool recommending a company that
+    // just announced job losses:
+    //   "raises $40M …, then cuts 30 % of staff"    (a space before the percent)
+    //   "raises $40M …, then cuts 1,200 jobs"       (a count, no percent)
+    //   "raises $40M … and lays off 300 employees"  (a different verb)
+    //
+    // EVERY form requires a workforce noun, percent included. The percent
+    // alternative used to sit in the group above with no such requirement, so
+    // "cuts 30% of cloud costs" — a cost story at a company that may well
+    // still be hiring — was excluded as if it were a layoff. Scoping it here
+    // fixes that and makes the two numeric forms consistent, which splitting
+    // them did not (CodeRabbit review). The optional "of its/the/their"
+    // carries the spellings the corpus uses ("cuts 15% of its workforce").
+    /(?<!\w)(cuts?|axes|slashes|eliminates|sheds)\s+\d[\d,.]*\s*(?:%\s*)?(?:of\s+)?(?:its\s+|the\s+|their\s+)?(jobs|roles|positions|staff|employees|workers|workforce|headcount)(?!\w)/i,
+    // Plural too: "amid workforce reductions" bypassed the singular-only form.
+    /\b(lays?\s+off|laying\s+off|laid\s+off|job\s+cuts|workforce\s+reductions?|headcount\s+reductions?|staff\s+reductions?)\b/i,
     /\b(public offering|registered direct offering|private placement|atm offering|offering of common stock)\b/i,
     /\braises?\s+\$[\d,.]+(?:\.\d+)?\s*(?:billion|million|bn|m|b|k)?\s+fund\b/i,
     /\b(venture fund|vc fund|investment fund|private equity fund|capital fund|fund ii|fund iii|fund iv|new fund)\b/i,

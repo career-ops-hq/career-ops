@@ -22,7 +22,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, detectColumns, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
-import { resolveTrackerPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
@@ -78,8 +78,10 @@ const TRACKER_LOCK_DIR = trackerLockDirFor(APPS_FILE);
 
 // The reports/ dir sits at the repo root, which is the tracker's parent in the
 // data/ layout (data/applications.md) and the tracker's own dir at root layout.
-const REPORTS_ROOT = basename(TRACKER_DIR) === 'data' ? dirname(TRACKER_DIR) : TRACKER_DIR;
-const PDF_INDEX_FILE = join(REPORTS_ROOT, 'data', 'pdf-index.tsv');
+// Shared with sync-pdf-flags.mjs so the two agree on where a workspace's
+// siblings live — they disagreed before #2471.
+const REPORTS_ROOT = resolveWorkspaceRoot(APPS_FILE);
+const PDF_INDEX_FILE = resolvePdfIndexPath(APPS_FILE);
 
 /**
  * Normalize report links before writing them into the tracker file.
@@ -225,6 +227,82 @@ function extractReqNumber(notes) {
 }
 
 /**
+ * Company equality for duplicate detection.
+ *
+ * normalizeCompany() strips everything outside [a-z0-9], so a company name
+ * written entirely in a non-Latin script (CJK, Cyrillic, Arabic, …) normalizes
+ * to the empty string — and every such name would compare equal to every other
+ * one. That collapses DIFFERENT companies into one row as soon as their roles
+ * fuzzy-match (six Japanese companies posting データエンジニア → one row).
+ * When the normalized key carries no signal, fall back to raw trimmed
+ * equality so distinct non-Latin companies stay distinct; the unknown-employer
+ * `?` marker still matches itself, so the #1596 cross-channel guard keeps its
+ * existing behavior.
+ *
+ * @param {string} a - Company cell from one side of the comparison.
+ * @param {string} b - Company cell from the other side.
+ * @returns {boolean} True when the two cells name the same company.
+ */
+function companiesMatch(a, b) {
+  const key = normalizeCompany(String(a));
+  if (key !== normalizeCompany(String(b))) return false;
+  return key !== '' || String(a).trim() === String(b).trim();
+}
+
+/**
+ * Combine an existing row's Notes with a re-evaluation's Notes.
+ *
+ * The update path used to overwrite Notes with
+ * `Re-eval {date} ({old}→{new}). {new notes}`, discarding the existing cell
+ * outright (#2392 gap 2). The Notes column is not decoration: it carries the
+ * `Applied YYYY-MM-DD` marker that followup-cadence.mjs prefers over the Date
+ * column (dropping it silently resets the follow-up clock to the evaluation
+ * date), the req/job number that this script's OWN sibling-req guard reads back
+ * via extractReqNumber(), contact addresses, and whatever the user wrote with
+ * `set-status --note`. None of it is recoverable: applications.md is gitignored
+ * and no .bak is written.
+ *
+ * Format: the existing notes are kept verbatim and FIRST, with the re-eval
+ * marker and any new notes appended after them. Order is deliberate, not
+ * cosmetic — parseAppliedDate() and extractReqNumber() both return their FIRST
+ * match, so leading with the established text keeps a row's apply date and req
+ * number stable across re-evaluations instead of letting each new evaluation's
+ * text take over. The cost is that Notes grows by one clause per re-evaluation.
+ *
+ * @param {string} existingNotes - Notes cell currently on the tracker row.
+ * @param {object} addition - Parsed TSV addition (uses `notes` and `date`).
+ * @param {number} oldScore - Score currently on the row.
+ * @param {number} newScore - Score from the addition.
+ * @returns {string} Combined Notes cell.
+ */
+function mergeNotes(existingNotes, addition, oldScore, newScore) {
+  // Trailing period trimmed only so the '. ' join does not produce '..'; no
+  // other character of the existing text is touched. The tracker's "no data"
+  // sentinels (the looksLikeScoreCell set minus the score-only DUP) count as
+  // empty here: a placeholder cell collapses to the marker instead of gaining
+  // a `—. ` separator the row never had (#2483).
+  const prevRaw = String(existingNotes ?? '').trim();
+  const prev = ['—', '-', 'N/A'].includes(prevRaw)
+    ? ''
+    : prevRaw.replace(/\s*\.\s*$/, '');
+  const incoming = String(addition.notes ?? '').trim();
+  const marker = `Re-eval ${addition.date} (${oldScore}→${newScore})`;
+  // Re-running the same evaluation would otherwise repeat its own text; the
+  // marker still records that the re-evaluation happened. Repeats are detected
+  // per CLAUSE — the same '. ' separator this function joins with — not by raw
+  // substring: `prev.includes(incoming)` dropped any new note that happened to
+  // appear INSIDE an existing clause ("Remote" vanished against "Remote OK").
+  // A clause equals the incoming text either bare or in the marker-prefixed
+  // form a previous run of this function appended (`{marker}: {incoming}`).
+  const clause = (s) => s.replace(/\.+$/, '').trim();
+  const incomingClause = clause(incoming);
+  const isRepeat = incoming !== '' && prev.split(/\.\s+/).map(clause)
+    .some(c => c === incomingClause || c.endsWith(`: ${incomingClause}`));
+  const tail = incoming && !isRepeat ? `${marker}: ${incoming}` : marker;
+  return prev ? `${prev}. ${tail}` : tail;
+}
+
+/**
  * Parse a score cell into a numeric value for score-upgrade decisions.
  *
  * The merge path compares old and new scores to decide whether to update an
@@ -309,6 +387,23 @@ function buildRow(o) {
   if (COLMAP.location != null) cells.push(cell(o.location) || '—');
   cells.push(o.score, o.status, o.pdf, o.report, cell(o.notes));
   return `| ${cells.join(' | ')} |`;
+}
+
+// Header + separator for the DETECTED layout, mirroring buildRow's column
+// order. The abort path below prints these as repair guidance, so hard-coding
+// the nine-column form would hand a user with a Via or Location column a
+// header that silently drops it — repair instructions that reintroduce the
+// drift they exist to fix.
+function buildHeaderRows() {
+  const labels = ['#', 'Date', 'Company'];
+  if (COLMAP.via != null) labels.push('Via');
+  labels.push('Role');
+  if (COLMAP.location != null) labels.push('Location');
+  labels.push('Score', 'Status', 'PDF', 'Report', 'Notes');
+  return {
+    header: `| ${labels.join(' | ')} |`,
+    separator: `|${labels.map((l) => '-'.repeat(Math.max(3, l.length + 2))).join('|')}|`,
+  };
 }
 
 /**
@@ -625,6 +720,36 @@ tsvFiles.sort((a, b) => {
 console.log(`📥 Found ${tsvFiles.length} pending additions`);
 
 const newLines = [];
+// TSVs whose evaluation could not be applied to the tracker. They are kept out
+// of merged/ so a re-run picks them up, and they make the process exit non-zero
+// instead of reporting a success that did not happen.
+const failedAdditions = [];
+
+/**
+ * Replace one tracker row line wherever it currently lives.
+ *
+ * A row added earlier in THIS run is still queued in `newLines` and has not
+ * been spliced into `appLines` yet, so an update targeting it would not be
+ * found by an appLines-only lookup (#2392 gap 3). Searching both keeps the
+ * intra-run dedup below able to update a row it just created.
+ *
+ * @param {string} oldLine - The row line as it currently stands.
+ * @param {string} updatedLine - Replacement row line.
+ * @returns {boolean} True when the line was found and replaced.
+ */
+function replaceTrackerLine(oldLine, updatedLine) {
+  const idx = appLines.indexOf(oldLine);
+  if (idx >= 0) {
+    appLines[idx] = updatedLine;
+    return true;
+  }
+  const pendingIdx = newLines.indexOf(oldLine);
+  if (pendingIdx >= 0) {
+    newLines[pendingIdx] = updatedLine;
+    return true;
+  }
+  return false;
+}
 
 for (const file of tsvFiles) {
   const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
@@ -671,10 +796,9 @@ for (const file of tsvFiles) {
     // appearing for two different companies is sequence drift, not a duplicate.
     // Without the company guard, a NewCo TSV with report [1] silently overwrites
     // the existing tracker row [1] belonging to an unrelated company.
-    const normCompany = normalizeCompany(addition.company);
     duplicate = existingApps.find(app => {
       const existingReportNum = extractReportNum(app.report);
-      return existingReportNum === reportNum && normalizeCompany(app.company) === normCompany;
+      return existingReportNum === reportNum && companiesMatch(app.company, addition.company);
     });
     if (duplicate) reportNumMatched = true;
   }
@@ -686,18 +810,25 @@ for (const file of tsvFiles) {
     // 067 while the tracker was already at #69). A bare num collision across
     // *different* companies is that drift, not a duplicate — matching on num
     // alone silently merges a brand-new role into an unrelated existing row.
-    const normCompany = normalizeCompany(addition.company);
     duplicate = existingApps.find(app =>
-      app.num === addition.num && normalizeCompany(app.company) === normCompany
+      app.num === addition.num && companiesMatch(app.company, addition.company)
+      // Same-run num collisions are reservation races, not row-id references:
+      // two TSVs that both claimed num=5 for DIFFERENT roles at one company
+      // are two distinct evaluations, and folding them keeps the first title
+      // with the second score (main renumbers and keeps both via the
+      // #1704/#1733 path). For a row queued THIS run, only accept the num
+      // match when the roles also fuzzy-match — consistent with tier-3's
+      // cross-run semantics. For rows already on disk, num remains the
+      // tracker row id and behavior is unchanged.
+      && (!app.addedThisRun || roleFuzzyMatch(addition.role, app.role))
     );
   }
 
   if (!duplicate) {
     // Company + role fuzzy match
-    const normCompany = normalizeCompany(addition.company);
     const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
-      if (normalizeCompany(app.company) !== normCompany) return false;
+      if (!companiesMatch(app.company, addition.company)) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
       // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
       // to the same empty company key, but the same role via two DIFFERENT
@@ -727,20 +858,42 @@ for (const file of tsvFiles) {
 
     if (newScore > oldScore) {
       console.log(`🔄 Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`);
-      const lineIdx = appLines.indexOf(duplicate.raw);
-      if (lineIdx >= 0) {
-        const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
-        const updatedLine = buildRow({
-          num: duplicate.num, date: addition.date, company: addition.company,
-          role: reportNumMatched ? addition.role : duplicate.role,
-          via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
-          score: addition.score, status: duplicate.status, pdf,
-          report: addition.report,
-          notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
-        });
-        appLines[lineIdx] = updatedLine;
+      const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
+      const updatedLine = buildRow({
+        num: duplicate.num, date: addition.date, company: addition.company,
+        role: reportNumMatched ? addition.role : duplicate.role,
+        via: addition.via || duplicate.via || '—',
+        location: addition.location || duplicate.location || '—',
+        score: addition.score, status: duplicate.status, pdf,
+        report: addition.report,
+        notes: mergeNotes(duplicate.notes, addition, oldScore, newScore),
+      });
+      if (replaceTrackerLine(duplicate.raw, updatedLine)) {
+        // Refresh the cached row from the line just written (#2392). `raw` was
+        // captured when applications.md was parsed and used to be left stale
+        // after the write, so a SECOND addition matching this same row found
+        // nothing at indexOf(), fell through a branch with no else, and was
+        // archived as merged — the evaluation was gone with no warning and no
+        // recoverable copy (the tracker is gitignored and no .bak is written).
+        // The stale `score` was just as damaging: the second comparison read
+        // the pre-update score, so which of several re-evaluations survived
+        // depended on TSV filename sort order. Re-parsing the written line is
+        // the faithful refresh — the cached row then holds exactly what a fresh
+        // read of the tracker would produce. syncPdfFlags() has always kept its
+        // cache in step this way; the update path did not.
+        const refreshed = parseAppLine(updatedLine);
+        if (refreshed) Object.assign(duplicate, refreshed);
+        else duplicate.raw = updatedLine;
         updated++;
+      } else {
+        // Unreachable once `raw` is refreshed above, but never silent again: a
+        // row we cannot locate means the addition was NOT applied, so say so,
+        // keep the TSV out of merged/, and fail the run.
+        console.error(
+          `❌ ${file}: could not locate tracker row #${duplicate.num} ` +
+          `(${duplicate.company} — ${duplicate.role}) to update; this evaluation was NOT merged.`,
+        );
+        failedAdditions.push(file);
       }
     } else {
       console.log(`⏭️  Skip: ${addition.company} — ${addition.role} (existing #${duplicate.num} ${oldScore} >= new ${newScore})`);
@@ -775,6 +928,24 @@ for (const file of tsvFiles) {
       report: addition.report, notes: addition.notes,
     });
     newLines.push(newLine);
+    // Register the row with the dedup index right away (#2392 gap 3). All
+    // three dedup tiers search `existingApps`, which only ever held rows read
+    // from the file, so two TSVs for the same company+role in ONE run both
+    // appended and the tracker gained duplicate rows — the exact outcome
+    // CLAUDE.md's "NEVER create new entries if company+role already exists"
+    // rule forbids. The parsed row's `raw` is the queued line, and
+    // replaceTrackerLine() knows how to find it in `newLines`, so a later
+    // higher-scored addition updates it in place just like a row already on
+    // disk.
+    const parsedNew = parseAppLine(newLine);
+    if (parsedNew) {
+      // Mark the row as queued this run: tier-2 treats a num collision with a
+      // same-run row as a reservation race unless the roles also fuzzy-match
+      // (see the tier-2 guard above). Object.assign() in the update path never
+      // deletes the flag, so it survives in-place refreshes within the run.
+      parsedNew.addedThisRun = true;
+      existingApps.push(parsedNew);
+    }
     added++;
     console.log(`➕ Add #${entryNum}: ${addition.company} — ${addition.role} (${addition.score})`);
   }
@@ -792,24 +963,49 @@ if (newLines.length > 0) {
       break;
     }
   }
-  if (insertIdx >= 0) {
-    appLines.splice(insertIdx, 0, ...newLines);
+  if (insertIdx < 0) {
+    // #2394: no separator row means no insert point. The old code left
+    // insertIdx at -1, skipped the splice with no else, then carried on to
+    // write the file, archive every TSV into merged/ and print "+N added" —
+    // so a tracker whose table header had been damaged (or a fresh file that
+    // only ever got its `# Applications Tracker` line) swallowed a whole batch
+    // of evaluations while reporting success. Nothing survived: the tracker is
+    // gitignored and merge-tracker keeps no .bak.
+    //
+    // Abort before writing anything. Leaving the tracker and the additions dir
+    // exactly as they were makes the run a no-op that replays cleanly once the
+    // table is repaired.
+    console.error(`❌ Aborting merge: ${basename(APPS_FILE)} has no table separator row ("|---|------|...").`);
+    console.error(`   There is no insert point for ${newLines.length} new row(s), so NOTHING was written and no TSV was archived.`);
+    console.error('   Repair the tracker table header, then re-run — the pending additions in');
+    console.error(`   ${ADDITIONS_DIR} will merge then. Expected header:`);
+    const { header, separator } = buildHeaderRows();
+    console.error(`     ${header}`);
+    console.error(`     ${separator}`);
+    for (const line of newLines) console.error(`   not merged: ${line}`);
+    trackerLock.release();
+    process.exit(1);
   }
+  appLines.splice(insertIdx, 0, ...newLines);
 }
 
 // Write back
 if (!DRY_RUN) {
   writeFileAtomic(APPS_FILE, appLines.join('\n'));
 
-  // Move processed files to merged/
+  // Move processed files to merged/ — but only the ones actually applied.
+  // Archiving a TSV whose row never reached the tracker is what turns a bug
+  // into permanent data loss, since applications.md is gitignored and no backup
+  // is written.
   if (!existsSync(MERGED_DIR)) mkdirSync(MERGED_DIR, { recursive: true });
-  for (const file of tsvFiles) {
+  const archivable = tsvFiles.filter(f => !failedAdditions.includes(f));
+  for (const file of archivable) {
     renameSync(join(ADDITIONS_DIR, file), join(MERGED_DIR, file));
   }
-  console.log(`\n✅ Moved ${tsvFiles.length} TSVs to merged/`);
+  console.log(`\n✅ Moved ${archivable.length} TSVs to merged/`);
 }
 
-console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped`);
+console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped${failedAdditions.length ? `, ❌${failedAdditions.length} NOT merged` : ''}`);
 if (DRY_RUN) console.log('(dry-run — no changes written)');
 trackerLock.release();
 
@@ -830,4 +1026,14 @@ if (VERIFY && !DRY_RUN) {
   } catch (e) {
     process.exit(1);
   }
+}
+
+// Any addition that could not be applied fails the run. The TSVs stay in the
+// additions dir, so re-running after the tracker is repaired merges them once.
+if (failedAdditions.length > 0) {
+  console.error(
+    `\n❌ ${failedAdditions.length} addition(s) were NOT merged and were left in ${ADDITIONS_DIR}: ` +
+    failedAdditions.join(', '),
+  );
+  process.exit(1);
 }

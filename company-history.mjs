@@ -581,12 +581,15 @@ async function runSelfTest() {
   const NOW = new Date('2026-07-09T00:00:00Z');
   const row = (num, company, status, date, notes = '') => ({ num, date, company, role: 'Engineer', score: '4/5', status, pdf: '✅', report: `reports/${num}.md`, notes });
 
-  // --- join fixtures: case/punct variants meet under one key; "" excluded -> unjoinable ---
+  // --- join fixtures: case/punct variants meet under one key; only a genuinely
+  // keyless company is unjoinable. A non-Latin name is NOT keyless (#2429):
+  // normalizeCompany() folds script-preserving, so 株式会社 keys as itself and
+  // gets a real card instead of being discarded as unparseable data. ---
   {
     const rows = [
       row(1, 'Acme Inc.', 'Applied', '2026-01-01'),
       row(2, 'ACME, INC', 'Applied', '2026-01-02'),
-      row(3, '株式会社', 'Applied', '2026-01-03'), // normalizeCompany -> "" (non a-z0-9)
+      row(3, '?', 'Applied', '2026-01-03'), // punctuation only -> genuinely keyless
     ];
     const result = buildCompanyCards(
       { trackerRows: rows, followupRows: [], repostClusters: [], sourcesLoaded: { tracker: true, followups: false, scanHistory: false, statusLog: false } },
@@ -594,7 +597,22 @@ async function runSelfTest() {
     );
     check(result.companies.length === 1, 'case/punct company variants join under one key');
     check(result.companies[0].responsiveness.facts.length === 2, 'both joined rows contribute facts to the single card');
-    check(result.dataQuality.unjoinable === 1, 'empty-key company (non-Latin, strips to "") is excluded and counted as unjoinable');
+    check(result.dataQuality.unjoinable === 1, 'a punctuation-only company key is excluded and counted as unjoinable');
+  }
+
+  // --- non-Latin companies are first-class, and distinct from each other (#2429) ---
+  {
+    const rows = [
+      row(4, 'アクメ株式会社', 'Applied', '2026-01-01'),
+      row(5, 'グロベックス合同会社', 'Applied', '2026-01-02'),
+      row(6, 'Яндекс', 'Applied', '2026-01-03'),
+    ];
+    const result = buildCompanyCards(
+      { trackerRows: rows, followupRows: [], repostClusters: [], sourcesLoaded: { tracker: true, followups: false, scanHistory: false, statusLog: false } },
+      { now: NOW, silenceWindowDays: 28 },
+    );
+    check(result.companies.length === 3, 'three different non-Latin companies produce three cards, not one');
+    check(result.dataQuality.unjoinable === 0, 'a non-Latin company name is joinable, not a data-quality defect');
   }
 
   // --- label goldens ---

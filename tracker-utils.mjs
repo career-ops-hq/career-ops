@@ -13,6 +13,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'pat
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import yaml from 'js-yaml';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
  * Minimum age before directory age alone may condemn an ownerless lock or
@@ -45,15 +46,23 @@ export function rebuildRow(parts) {
  * Normalize company names for same-company lookups across tracker scripts.
  *
  * Company names can contain spaces, punctuation, or branding variants in the
- * tracker and incoming rows. Removing non-alphanumeric characters gives every
- * consumer (merge-tracker dedup, set-status row resolution) the same stable
- * company key, so a row one script would match is never missed by another.
+ * tracker and incoming rows. Folding them gives every consumer (merge-tracker
+ * dedup, set-status/outcome row resolution, company-history grouping, the
+ * scan blacklist) the same stable company key, so a row one script would match
+ * is never missed by another.
+ *
+ * Script-preserving via the shared normalizeTextKey(): the previous
+ * `[^a-z0-9]` filter DELETED every non-Latin name, so アクメ株式会社,
+ * グロベックス合同会社 and Яндекс all produced `''` and compared equal to each
+ * other — merge-tracker then treated applications at different companies as
+ * the same row and silently overwrote one (#2429). `?` still folds to `''`,
+ * which is what the #1596 cross-channel Via guard depends on.
  *
  * @param {string} name - Company name from the tracker or an input row.
- * @returns {string} Lowercase alphanumeric company key.
+ * @returns {string} Case-folded, punctuation-free, script-preserving key.
  */
 export function normalizeCompany(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalizeTextKey(name);
 }
 
 /**
@@ -91,6 +100,45 @@ export function resolveTrackerPath(rootDir) {
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');
   return canonicalizeTrackerPath(raw);
+}
+
+/**
+ * Resolve the workspace root that owns a tracker, i.e. where `reports/` and
+ * `data/` sit: the tracker's parent in the `data/applications.md` layout, and
+ * the tracker's own directory in the root `applications.md` layout.
+ *
+ * Derive sibling paths from THIS rather than from a script's own location, so
+ * that pointing `CAREER_OPS_TRACKER` at another workspace moves the whole set
+ * together. A script that mixes the two (tracker from the env, manifest from
+ * its own directory) reads one workspace and writes another — which is how the
+ * merge-tracker suite came to read a developer's real `data/pdf-index.tsv`
+ * while writing an isolated temp tracker.
+ *
+ * @param {string} trackerPath - Tracker path, typically from resolveTrackerPath().
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRoot(trackerPath) {
+  const trackerDir = dirname(trackerPath);
+  return basename(trackerDir) === 'data' ? dirname(trackerDir) : trackerDir;
+}
+
+/**
+ * Resolve the PDF manifest (`data/pdf-index.tsv`) for the workspace that owns
+ * a tracker. `CAREER_OPS_PDF_INDEX` overrides it explicitly.
+ *
+ * One definition for every reader, because the manifest path was previously
+ * rebuilt from a literal in each script — and each picked its own base
+ * directory, so `merge-tracker.mjs` derived it from the tracker while
+ * `sync-pdf-flags.mjs` and `find.mjs` used their own install directory. Scripts
+ * that resolve the tracker from `CAREER_OPS_TRACKER` then read one workspace's
+ * manifest against another's tracker (#2471).
+ *
+ * @param {string} trackerPath - Tracker path, typically from resolveTrackerPath().
+ * @returns {string} Absolute path to the PDF manifest.
+ */
+export function resolvePdfIndexPath(trackerPath) {
+  return process.env.CAREER_OPS_PDF_INDEX
+    || join(resolveWorkspaceRoot(trackerPath), 'data', 'pdf-index.tsv');
 }
 
 /**

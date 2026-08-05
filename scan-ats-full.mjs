@@ -43,7 +43,7 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 
@@ -255,7 +255,20 @@ function parseArgs(argv) {
     const kv = args.find(a => a.startsWith(flag + '='));
     return kv ? kv.split('=').slice(1).join('=') : null;
   };
-  const sinceDays = Number(valueOf('--since')) || 3;
+  // Validated by the SAME parser scan.mjs uses, so one flag name cannot mean
+  // two different things (#2498). `Number(...) || 3` silently swallowed every
+  // malformed operand: `--since abc` and `--since 0` became 3 while the user
+  // believed they had scanned the window they typed; `--since -5` put the
+  // cutoff in the FUTURE so nothing was ever eligible, which reads exactly like
+  // "no new postings"; `--since 1e400` became Infinity → an -Infinity cutoff,
+  // i.e. no window at all. Only the DEFAULT stays local: absent --since means
+  // 3 days here, where scan.mjs means no bound.
+  const sinceArg = parseSinceDays(args);
+  if (sinceArg.error) {
+    console.error(`Error: ${sinceArg.error}`);
+    process.exit(1);
+  }
+  const sinceDays = sinceArg.days ?? 3;
   const limit = Number(valueOf('--limit')) || Infinity;
   const atsArg = valueOf('--ats');
   // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).
@@ -717,6 +730,10 @@ async function main() {
     }
   };
 
+  // Run-level, because resolverOutage below is per-source and long out of
+  // scope by the time the checkpoint's fate is decided at the end of main().
+  let stoppedByOutage = false;
+
   for (const name of opts.ats) {
     const source = SOURCES[name];
     // Stats are accumulated BEFORE the completed-source skip: on --resume a
@@ -753,6 +770,15 @@ async function main() {
     let errors = 0;
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
+    // The board whose failure tripped the breaker. `name` is only the ATS
+    // vendor, and the resume offset is only a position — neither tells the user
+    // which board to try by hand once the resolver is back.
+    let resolverOutageCompany = null;
+    // Latest progress reported by parallelEach. It computes both on every item
+    // but keeps neither, and a run stopped mid-source needs them after the
+    // call returns to checkpoint where it actually stopped (#2283).
+    let lastDone = 0;
+    let lastResumeAt = 0;
     const truncated = [];
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
@@ -778,13 +804,21 @@ async function main() {
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
         if (isResolverFailure(err)) {
-          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT) resolverOutage = true;
+          // Record only the first board past the limit: in-flight boards keep
+          // failing after the flag is set, and the last of them is not the one
+          // that tripped it.
+          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT && !resolverOutage) {
+            resolverOutage = true;
+            resolverOutageCompany = entry.name;
+          }
         } else {
           consecutiveResolverFailures = 0;
         }
         if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: ${err.message}`);
       }
     }, ({ done, resumeAt }) => {
+      lastDone = done;
+      lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
@@ -831,10 +865,36 @@ async function main() {
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
-      log(`\n  ⛔ stopped ${name}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
+      stoppedByOutage = true;
+      // The counter was bumped by the FULL entries.length up front, but the
+      // breaker left entries.length - lastDone boards unattempted. Correct the
+      // live counter, not just the checkpoint payload: this run's own summary
+      // and --json would otherwise report companies nobody ever contacted as
+      // scanned. Correcting it here also gives the checkpoint the right figure
+      // for free — a resumed run re-adds its own slice, so a checkpoint holding
+      // the full slice makes the completed portion count twice.
+      totalCompaniesScanned -= entries.length - lastDone;
+      // Pin the resume point here rather than leaving the last periodic write
+      // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
+      // it can be up to 500 boards behind where the breaker actually stopped —
+      // and --resume would replay all of them against the resolver that just
+      // refused.
+      let checkpointWritten = false;
+      if (!opts.dryRun) {
+        checkpointWritten = writeCheckpoint({
+          ...checkpointBase(),
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
+          counters: snapshotCounters(),
+        });
+      }
+      log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
       log(`     CAREER_OPS_NO_DNS_CACHE=1 only if you know the cache is at fault.`);
+      // Only claim resumability when a checkpoint actually exists: --dry-run
+      // writes none, and a failed write (ENOSPC, read-only volume) leaves at
+      // best the last periodic checkpoint — nothing at the offset named here.
+      if (checkpointWritten) log(`     Rerun with --resume once the resolver recovers — checkpointed at company ${startAt + lastResumeAt} of ${name}.`);
       break;
     }
     completedSources.add(name);
@@ -937,8 +997,10 @@ async function main() {
     }
   }
 
-  // Sweep completed — the checkpoint's job is done.
-  if (!opts.dryRun && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
+  // Sweep completed — the checkpoint's job is done. A run the breaker stopped
+  // did NOT complete: deleting here would destroy the resume point the outage
+  // branch just wrote, which is the one case --resume exists for (#2283).
+  if (!opts.dryRun && !stoppedByOutage && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
 
   // The authoritative machine-readable result: lets a caller (e.g. the web)
   // tell a *degraded* scan (capped / stale dataset / undated dropped) apart
@@ -952,6 +1014,11 @@ async function main() {
       companiesAvailable: totalCompaniesAvailable,
       companiesScanned: totalCompaniesScanned,
       capHit,
+      // The most degraded outcome this payload can report: the sweep did not
+      // finish its sources, and a checkpoint is waiting for --resume. Without
+      // it a caller can't tell a stopped run from a complete one except by
+      // stat'ing the checkpoint file itself.
+      stoppedByOutage,
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,

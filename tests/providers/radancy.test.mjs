@@ -75,6 +75,20 @@ try {
   if (partialJobs.length === 2 && partialCalls === 2) pass('radancy.fetch() preserves jobs from earlier pages when a later page fetch throws');
   else fail(`radancy.fetch() partial-failure handling wrong: ${partialJobs.length} jobs after ${partialCalls} calls`);
 
+  // A FIRST-page failure means the board is unreachable, not empty. It must
+  // throw so scan/portal-health record a failure instead of "live but empty".
+  let radFirstErr = null;
+  try {
+    await radancy.fetch(
+      { name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' },
+      { sleep: async () => {}, fetchText: async () => { throw new Error('tenant down'); } },
+    );
+  } catch (err) {
+    radFirstErr = err;
+  }
+  if (radFirstErr?.message === 'tenant down') pass('radancy.fetch() throws when the first page fetch fails (dead board ≠ empty board)');
+  else fail('radancy.fetch() swallowed a first-page failure into []');
+
   // fetch — stops on a page whose ids are all already-seen (server clamped
   // ?p= to the last page, or looped), NOT just on a literally empty page.
   // fresh === 0 must halt pagination without appending duplicate jobs.
@@ -248,6 +262,31 @@ try {
   const emptyFragJobs = await radancy.fetch({ name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' }, emptyFragCtx);
   if (emptyFragJobs.length === 2 && emptyText > 0) pass('radancy.fetch() falls back when the fragment parses to zero rows');
   else fail(`radancy.fetch() empty-fragment fallback = ${emptyFragJobs.length} jobs, ${emptyText} text calls`);
+
+  // A resolved fragment request is proof of life even with zero rows: when the
+  // HTML fallback then fails (e.g. 403 on ?p=1), fetch() must NOT throw
+  // "unreachable" for a tenant it just talked to — it returns what it has.
+  {
+    let zeroErr = null;
+    let zeroJobs = null;
+    try {
+      zeroJobs = await radancy.fetch(
+        { name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' },
+        {
+          sleep: async () => {},
+          fetchJson: async () => ({ results: '', hasJobs: false }),
+          fetchText: async () => { throw new Error('403 on the HTML page'); },
+        },
+      );
+    } catch (err) {
+      zeroErr = err;
+    }
+    if (!zeroErr && Array.isArray(zeroJobs) && zeroJobs.length === 0) {
+      pass('radancy.fetch() does not throw when the fragment resolved (zero rows) and the HTML fallback fails (fragment success = proof of life)');
+    } else {
+      fail(`radancy.fetch() fragment proof-of-life wrong: ${zeroErr ? `threw "${zeroErr.message}"` : JSON.stringify(zeroJobs)}`);
+    }
+  }
 
   // max_jobs bounds the fragment walk.
   const capCtx = { sleep: async () => {}, fetchJson: async () => ({ results: LEGACY_UHG, hasJobs: true }), fetchText: async () => { throw new Error('unused'); } };

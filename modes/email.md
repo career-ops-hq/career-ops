@@ -66,6 +66,7 @@ Read:
 - `config/profile.yml`
 - `cv.md`
 - `article-digest.md` if it exists
+- `modes/_writing.md` — shared writing guidance (Voice DNA guardrail, Writing Style calibration, Professional Writing rules). An application email is candidate-facing prose, the same category that module governs (#2006)
 - `modes/_profile.md` if it exists
 - `modes/_custom.md` if it exists
 - `voice-dna.md` if it exists, for writing style only
@@ -78,7 +79,14 @@ the email should be. It must never introduce contact details, work experience,
 or other factual claims.
 
 Use `voice-dna.md` only as a writing guardrail. It must never introduce factual
-claims.
+claims. Precedence for voice is unchanged: `modes/_profile.md` wins over
+`voice-dna.md`, which wins over the generic defaults in `_writing.md`. Loading
+the module adds a standard where this mode had none; it never overrides the
+user's own rules.
+
+`_writing.md` governs wording only. This mode's output contract — variants,
+attachment checklist, subject/body structure, the draft-only rule — is set here
+and is not affected by it.
 
 ### Profile fields
 
@@ -472,8 +480,12 @@ extra emphasis -- it should read as a practical note, not a demand.
 
 ## Style Rules
 
+`_writing.md` → Professional Writing & ATS Compatibility carries the shared
+cliché list and specifics-over-abstractions rule. These are the email-specific
+additions.
+
 - No corporate-speak.
-- No "passionate about", "perfect fit", "unique opportunity", or vague praise.
+- No "perfect fit", "unique opportunity", or vague praise (the shared list covers "passionate about" and its relatives).
 - No exaggerated authorship claims.
 - Short paragraphs. Prefer 150-250 words for HR applications.
 - Keep the proof easy to scan.

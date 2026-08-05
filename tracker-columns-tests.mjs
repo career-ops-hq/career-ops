@@ -48,6 +48,9 @@ function runScript(script, args, sandbox) {
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_ADDITIONS: sandbox.additions,
     CAREER_OPS_TRACKER_LOCK: sandbox.lock,
+    // Pinned for the same reason as the tracker: keep the fixture isolated from
+    // the real reports/ dir. See makeSandbox.
+    ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
   };
   try {
     const stdout = execFileSync(NODE, [join(ROOT, script), ...args], {
@@ -75,12 +78,21 @@ function makeSandbox(trackerContent, additions = {}) {
   const tracker = join(dir, 'applications.md');
   const additionsDir = join(dir, 'tracker-additions');
   const lock = join(dir, 'lock');
+  // An empty reports dir belongs in the sandbox alongside the tracker. Without
+  // it verify-pipeline scans the REAL reports/ dir and emits one "Orphan report"
+  // warning per report not referenced by this fixture's tracker -- 213 of them
+  // at 256 reports. That made Test 2 slow enough to trip its own 30s timeout
+  // under full-suite load, failing ~2 runs in 5 as "tracker-columns-tests.mjs
+  // crashed" while passing 8/8 in isolation. Same fixture bug as the #1704 block
+  // in test-all.mjs (see PATCHES.md patch 10).
+  const reportsDir = join(dir, 'reports');
   mkdirSync(additionsDir, { recursive: true });
+  mkdirSync(reportsDir, { recursive: true });
   writeFileSync(tracker, trackerContent);
   for (const [name, content] of Object.entries(additions)) {
     writeFileSync(join(additionsDir, name), content);
   }
-  return { dir, tracker, additions: additionsDir, lock };
+  return { dir, tracker, additions: additionsDir, lock, reports: reportsDir };
 }
 
 // Pin scan.mjs's extra dedupe sources inside the sandbox. The module-level

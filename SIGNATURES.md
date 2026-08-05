@@ -103,3 +103,11 @@ public commit with a stated reason.
 - @LuswetiNick | Nicholas Lusweti | 2026-07-30 | id:179443452 | src:https://github.com/santifer/career-ops/discussions/2345 | n:55
 - @Berszerker | Osman Martinez | 2026-07-31 | "dunno" | id:124474264 | src:https://github.com/santifer/career-ops/discussions/2357 | n:56
 - @demilade27 | 2026-08-02 | "lost hope but im hopeful" | id:32215629 | src:https://github.com/santifer/career-ops/discussions/2422 | n:57
+- @ahiyantra | S.S.W.(ahiyantra) | 2026-08-03 | "I wish for hiring to stop being a figurative black hole that gives no signal to most applicants." | id:45235557 | src:https://github.com/santifer/career-ops/discussions/2455 | n:58
+- @draggador | JéJé(draggador) | 2026-08-03 | "i want large companies to treat applicants like humans instead of continuing to treat them like objects" | id:87720862 | src:https://github.com/santifer/career-ops/discussions/2456 | n:59
+- @marcusblackthorn03 | R. M. B. K. | 2026-08-03 | "I could skip most of the worst parts of a job hunting process now." | id:308749780 | src:https://github.com/santifer/career-ops/discussions/2457 | n:60
+- @doradoramedia | DoraDoraMedia | 2026-08-03 | "foss projects like this help ensure that our society still has hope of avoiding worst possible futures" | id:268710757 | src:https://github.com/santifer/career-ops/discussions/2458 | n:61
+- @arijit1201 | 2026-08-03 | "I want to make the process of job-searching a worthwhile experience instead of feeling like a grueling Herculean labour." | id:36472612 | src:https://github.com/santifer/career-ops/discussions/2462 | n:62
+- @mrabro | Mohammad Rafi Abro | 2026-08-04 | id:4149030 | src:https://github.com/santifer/career-ops/discussions/2490 | n:63
+- @henryjrobinson | Henry | 2026-08-04 | "Job searching was completely broken. This gives me hopoe." | id:4121628 | src:https://github.com/santifer/career-ops/discussions/2511 | n:64
+- @sun-dev-nika | 2026-08-05 | id:290238869 | src:https://github.com/santifer/career-ops/discussions/2522 | n:65

@@ -31,7 +31,8 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
-import { pass, fail, warn, run, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -104,20 +105,64 @@ async function runDiscovered(filter = null) {
     process.exit(1);
   }
   for (const f of files) {
+    const rel = f.slice(ROOT.length + 1);
+    const src = readFileSync(f, 'utf-8');
     // Discovered suites run IN-PROCESS and share this suite's counters. A
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(readFileSync(f, 'utf-8'))) {
-      fail(`${f.slice(ROOT.length + 1)} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+    if (/\bprocess\.exit\s*\(/.test(src)) {
+      fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+      continue;
+    }
+    // A node:test suite reports through node's OWN runner, which touches none
+    // of the counters above, and it runs its tests asynchronously AFTER the
+    // import resolves — so finish()'s process.exit() killed them mid-flight and
+    // discarded the result. A deliberately failing suite dropped into tests/
+    // printed "2049 passed, 0 failed / All tests passed" and exited 0
+    // (verified 2026-08-03). That silently covered all 16 node:test suites
+    // here, including every provider test: they only ever reported under a
+    // direct `node --test`.
+    //
+    // Run those in a child process and fold the real exit code into the
+    // counters. Importing them is what loses the result, so this cannot be
+    // fixed in finish(); it has to happen where the suite is invoked.
+    if (/from ['"]node:test['"]/.test(src)) {
+      const out = run(NODE, ['--test', f]);
+      if (out === null) {
+        const detail = lastRunFailure();
+        fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
+        // Surface the runner's own summary; a bare "failed" is not actionable.
+        const tail = (detail?.stderr || detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
+        for (const line of tail) console.log(`      ${line}`);
+      } else {
+        // Both reporters: TAP prints "# pass N", the default spec reporter
+        // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
+        const count = (out.match(/^(?:#|ℹ) pass (\d+)/m) ?? [])[1];
+        pass(`${rel} — node:test suite passed${count ? ` (${count} tests)` : ''}`);
+      }
+      continue;
+    }
+    // finish() prints the global summary and exits — inside a discovered suite
+    // it forges the verdict line and decapitates every suite sorting after it,
+    // sailing past the process.exit() check above (the exit lives in helpers).
+    if (/\bfinish\s*\(\s*\)/.test(src)) {
+      fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
     await import(pathToFileURL(f).href);
   }
 }
 
-const onlyIdx = process.argv.indexOf('--only');
-const ONLY = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] ?? '') : null;
+// `--only=providers/x` must not read as "no filter": the discovered-test
+// runner exits 1 when a filter matches nothing, precisely so a path typo can
+// never turn CI green — and a silently dropped filter runs the whole suite
+// instead, which looks like a pass of the subset that was asked for.
+// `--only` supplied without a value must stay a usage error, not fall through
+// to "no filter": that would run everything and read as a pass of the subset
+// that was asked for — the same silent substitution this file's flag reading
+// was fixed for.
+const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
 if (ONLY !== null) {
   if (ONLY === '' || ONLY.startsWith('--')) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
@@ -1926,6 +1971,59 @@ if (shared.includes('_profile.md')) {
     pass('no mode references _shared.md for a writing section — all writing refs point at _writing.md (#1710)');
   } else {
     fail(`modes still reference _shared.md for writing sections (should be _writing.md): ${stale.join(', ')}`);
+  }
+
+  // #2006 — cover.md and email.md produce candidate-facing prose, so they load
+  // the shared module rather than carrying a thinner local standard. A mode
+  // that DELEGATES part of its wording rules to _writing.md and then loses the
+  // read directive silently drops those rules: the delegating prose stays,
+  // pointing at a file nobody opens. Assert the read, not just the mention.
+  //
+  // Two shapes count as a read directive, because both are used in modes/:
+  // inline ("Read `modes/_writing.md` — …", cover.md) and a bullet inside a
+  // "Read:" list (email.md). Matching only the inline form would have called
+  // email.md non-compliant while it reads the file perfectly well.
+  const WRITING_CONSUMERS = ['modes/cover.md', 'modes/email.md'];
+  // The two directive shapes are matched SEPARATELY, and the verb is required
+  // in both. Making `Read` optional would let a bare mention satisfy the guard
+  // — "Do not read `modes/_writing.md`", or a path in a table cell — so the
+  // assertion could stay green after the actual read was deleted, which is the
+  // one thing it exists to catch.
+  const readsWritingModule = (source) => {
+    let inReadList = false;
+    for (const line of source.split(/\r?\n/)) {
+      // Inline: "Read `modes/_writing.md` — …" (cover.md).
+      if (/^\s*Read\b[^\n]*`modes\/_writing\.md`/i.test(line)) return true;
+      // Bullet under a "Read:" header (email.md). The list ends at the first
+      // non-bullet, non-blank line.
+      if (/^\s*Read:\s*$/i.test(line)) { inReadList = true; continue; }
+      if (inReadList && /^\s*[-*]\s*`modes\/_writing\.md`/.test(line)) return true;
+      if (inReadList && line.trim() && !/^\s*[-*]/.test(line)) inReadList = false;
+    }
+    return false;
+  };
+  const missingRead = WRITING_CONSUMERS.filter((path) => !readsWritingModule(readFile(path)));
+  if (missingRead.length === 0) {
+    pass('cover.md and email.md load modes/_writing.md (#2006)');
+  } else {
+    fail(`these modes delegate wording to _writing.md but never read it: ${missingRead.join(', ')} (#2006)`);
+  }
+
+  // The delegation must not have taken the mode-specific contracts with it:
+  // those are set locally and _writing.md says nothing about them.
+  const coverSrc = readFile('modes/cover.md');
+  const emailSrc = readFile('modes/email.md');
+  const contractsIntact =
+    /350-420 words/.test(coverSrc) &&
+    /Bullet format/.test(coverSrc) &&
+    /Self-check/.test(coverSrc) &&
+    /Tone consistency/.test(coverSrc) &&
+    /Attachment checklist/i.test(emailSrc) &&
+    /Do not write files unless the user explicitly asks/.test(emailSrc);
+  if (contractsIntact) {
+    pass('cover/email output contracts survived the _writing.md delegation (#2006)');
+  } else {
+    fail('a cover/email output contract (word count, bullet format, self-check, tone, attachments, draft-only) went missing (#2006)');
   }
 }
 
@@ -5045,6 +5143,9 @@ try {
     buildContentFilter,
     buildPostingAgeFilter,
     buildPostedDateFilter,
+    resolveEffectiveAfter,
+    resolveEarlyStopMs,
+    parseSinceDays,
     buildVisaFilter,
     buildCountryEligibilityFilter,
     shouldDedupScanHistoryRow,
@@ -5101,6 +5202,197 @@ try {
     pass('posted-date filter gates on an absolute after/before window; missing dates always pass');
   } else {
     fail('posted-date filter did not gate on absolute posted-date bounds correctly');
+  }
+
+  // ── --since as a lower bound, and the early-stop floor derived from it ──
+  // The invariant: the early-stop floor must never be NEWER than the oldest
+  // posting the filters still accept, or pagination stops with eligible
+  // postings unfetched.
+  const SINCE_NOW = Date.parse('2026-08-01T00:00:00Z');
+  const SINCE_DAY = 86_400_000;
+  if (
+    resolveEffectiveAfter(null, null, SINCE_NOW) === null && // neither bound → no filtering
+    resolveEffectiveAfter('2026-07-01', null, SINCE_NOW) === '2026-07-01' && // --posted-after alone
+    resolveEffectiveAfter(null, 7, SINCE_NOW) === '2026-07-25' && // --since alone, relative to now
+    // Both set: bounds AND, so the NEWER one decides. This is the case that
+    // silently dropped eligible postings when --since was hint-only — the hint
+    // stopped at Jul 25 while the filter still accepted back to Jul 1.
+    resolveEffectiveAfter('2026-07-01', 7, SINCE_NOW) === '2026-07-25' &&
+    resolveEffectiveAfter('2026-07-30', 7, SINCE_NOW) === '2026-07-30' && // absolute newer than relative
+    resolveEffectiveAfter(null, 0, SINCE_NOW) === null && // invalid day counts contribute nothing
+    resolveEffectiveAfter(null, Number.POSITIVE_INFINITY, SINCE_NOW) === null &&
+    // Finite and positive is not sufficient: a day count this large pushes the
+    // cutoff outside the representable Date range, where toISOString() throws.
+    // The helper is exported, so it must return rather than raise.
+    resolveEffectiveAfter(null, 1e300, SINCE_NOW) === null &&
+    resolveEffectiveAfter('2026-07-01', 1e300, SINCE_NOW) === '2026-07-01'
+  ) {
+    pass('--since resolves to an absolute lower bound; the newest active bound wins');
+  } else {
+    fail('effective posted-after bound is not the newest of --posted-after and --since');
+  }
+
+  // ── --since means the SAME thing in both scanners (#2498) ──────────────
+  // scan-ats-full.mjs parsed it as `Number(valueOf('--since')) || 3`, which
+  // swallowed every malformed operand: `abc`/`0` silently became 3 (the user
+  // believes they scanned the window they typed), `-5` produced a cutoff in the
+  // FUTURE so nothing was ever eligible (reads exactly like "no new postings"),
+  // and `1e400` became Infinity → an -Infinity cutoff, i.e. no window at all.
+  // Both CLIs now share parseSinceDays, so the flag cannot mean two things.
+  {
+    const bad = [
+      [['--since', 'abc'], 'a non-numeric operand'],
+      [['--since', '-5'], 'a negative day count'],
+      [['--since', '0'], 'a zero day count'],
+      [['--since', '1e400'], 'Infinity'],
+      [['--since', '1e300'], 'a count outside the representable Date range'],
+      [['--since'], 'a missing operand'],
+      [['--since', '--posted-after', '2026-01-01'], 'an operand that is really the next flag'],
+      [['--since=7', '--since'], 'duplicate occurrences'],
+    ];
+    const leaked = bad.filter(([args]) => parseSinceDays(args).error === null);
+    if (leaked.length === 0) {
+      pass('parseSinceDays rejects every malformed --since operand instead of coercing it (#2498)');
+    } else {
+      fail(`parseSinceDays accepted malformed --since: ${JSON.stringify(leaked.map(([a]) => a))}`);
+    }
+    const good =
+      parseSinceDays(['--since', '7']).days === 7 &&
+      parseSinceDays(['--since=7']).days === 7 &&
+      // Absent is NOT an error — the default is the caller's to choose
+      // (scan.mjs: no bound; scan-ats-full.mjs: 3 days).
+      parseSinceDays([]).days === null && parseSinceDays([]).error === null;
+    if (good) {
+      pass('parseSinceDays accepts both spellings and leaves the default to the caller (#2498)');
+    } else {
+      fail('parseSinceDays mishandled a valid --since or the absent case');
+    }
+    // Source-level: neither scanner may re-introduce a private coercion.
+    const atsSrc = readFileSync(join(ROOT, 'scan-ats-full.mjs'), 'utf-8');
+    if (/parseSinceDays\(/.test(atsSrc) && !/Number\(valueOf\('--since'\)\)/.test(atsSrc)) {
+      pass('scan-ats-full.mjs derives --since from the shared parser, not its own Number() coercion (#2498)');
+    } else {
+      fail('scan-ats-full.mjs parses --since itself again — the two scanners can disagree (#2498)');
+    }
+  }
+
+  if (
+    resolveEarlyStopMs(null, null, SINCE_NOW) === null && // no CLI window → early stop disabled
+    resolveEarlyStopMs(null, 30, SINCE_NOW) === null && // config alone must not enable it
+    resolveEarlyStopMs('2026-07-25', null, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    // max_posting_age_days is the newer bound here (Jul 27 vs Jul 25), so it
+    // decides — stopping at Jul 25 would page deeper than eligibility requires,
+    // which is merely wasteful; stopping NEWER than the filter would be a bug.
+    resolveEarlyStopMs('2026-07-25', 5, SINCE_NOW) === SINCE_NOW - 5 * SINCE_DAY &&
+    // ...and when the CLI window is the newer bound, it wins.
+    resolveEarlyStopMs('2026-07-25', 60, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') &&
+    resolveEarlyStopMs('2026-07-25', 0, SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z') && // invalid config ignored
+    resolveEarlyStopMs('2026-07-25', 'abc', SINCE_NOW) === Date.parse('2026-07-25T00:00:00Z')
+  ) {
+    pass('early-stop floor is the newest active lower bound, and stays off without a CLI window');
+  } else {
+    fail('early-stop floor is not derived from every active lower bound');
+  }
+
+  // The contract, stated as one assertion: for a range of bound combinations,
+  // nothing the early-stop skips would have survived the filter anyway.
+  {
+    const cases = [
+      { after: null, since: 7, maxAge: null },
+      { after: '2026-07-01', since: 7, maxAge: null },
+      { after: '2026-07-01', since: null, maxAge: 30 },
+      { after: '2026-07-20', since: 3, maxAge: 10 },
+      { after: null, since: 14, maxAge: 5 },
+    ];
+    const violations = cases.filter(({ after, since, maxAge }) => {
+      const eff = resolveEffectiveAfter(after, since, SINCE_NOW);
+      const floor = resolveEarlyStopMs(eff, maxAge, SINCE_NOW);
+      if (floor === null) return false;
+      const dateOk = buildPostedDateFilter(eff, null);
+      const ageOk = buildPostingAgeFilter(maxAge, SINCE_NOW);
+      // One second older than the floor: the first posting pagination would
+      // skip. It must already be ineligible.
+      const justOutside = floor - 1000;
+      return dateOk(justOutside) && ageOk(justOutside);
+    });
+    if (violations.length === 0) {
+      pass('early stop never skips a dated posting the filters would have accepted');
+    } else {
+      fail(`early stop would skip eligible postings for: ${JSON.stringify(violations)}`);
+    }
+  }
+
+  // The contract above holds for dated postings only. Undated ones pass every
+  // date filter, so the early stop CAN narrow results — pinned here so the
+  // behaviour and modes/scan.md can't drift apart. Change this test only
+  // alongside the doc.
+  {
+    const { pageIsPastWindow } = await import(pathToFileURL(join(ROOT, 'providers', 'workday.mjs')).href);
+    const floor = SINCE_NOW - 7 * SINCE_DAY;
+    const stale = floor - 30 * SINCE_DAY; // well past the 2-day jitter margin
+    const fresh = SINCE_NOW - SINCE_DAY;
+    const undated = { postedAt: undefined };
+
+    if (
+      // No window → the hint is inert, whatever the page holds.
+      pageIsPastWindow([{ postedAt: stale }], null) === false &&
+      // Tenants like adventhealth: no dates anywhere. Protected — this is what
+      // scan.mjs's includeUndated:true keeps alive downstream.
+      pageIsPastWindow([undated, undated], floor) === false &&
+      // A fresh dated posting holds pagination open.
+      pageIsPastWindow([{ postedAt: fresh }, undated], floor) === false &&
+      // KNOWN LIMITATION: the dated postings are stale, the undated ones are
+      // eligible, and pagination stops anyway. Undated postings on later pages
+      // are lost. Fixing it lives in workday.mjs and costs the optimisation on
+      // every mixed tenant.
+      pageIsPastWindow([{ postedAt: stale }, undated], floor) === true
+    ) {
+      pass('early stop ignores undated postings — all-undated pages are safe, mixed pages are not');
+    } else {
+      fail('workday early-stop no longer matches the undated-posting behaviour documented in modes/scan.md');
+    }
+  }
+
+  // The assertions above exercise the resolver in-process. --since is rejected
+  // earlier than that, in main()'s argv parsing, so nothing above would catch a
+  // regression there — hence the real binary. Each case fails before scan.mjs
+  // loads config or opens a socket, so these stay offline and quick.
+  //
+  // stderr is matched, not just the exit code: every one of these paths exits 1,
+  // and so would an unrelated startup failure. The message is what proves the
+  // flag was read and refused.
+  {
+    const sinceCli = (...argv) => spawnSync(NODE, [join(ROOT, 'scan.mjs'), ...argv], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const NO_VALUE = '--since expects a positive number of days, got (no value)';
+    const sinceCases = [
+      { argv: ['--since'], want: NO_VALUE, why: 'flag with no operand' },
+      { argv: ['--since='], want: NO_VALUE, why: 'empty inline operand' },
+      // The next token is a flag, not a value. Consuming it would scan the full
+      // window while looking like it had honoured --since.
+      { argv: ['--since', '--posted-after', '2026-07-01'], want: NO_VALUE, why: 'operand stealing' },
+      { argv: ['--since', '0'], want: 'got "0"', why: 'zero days' },
+      { argv: ['--since', '-3'], want: 'got "-3"', why: 'negative days' },
+      // Passes a bare `> 0` test; only Number.isFinite rejects it.
+      { argv: ['--since', 'Infinity'], want: 'got "Infinity"', why: 'non-finite' },
+      // Finite and positive, but the derived cutoff is outside Date's range.
+      { argv: ['--since', '1e300'], want: 'is too large to express as a date', why: 'out-of-range cutoff' },
+      // Reading only the first occurrence would let this one through.
+      { argv: ['--since=7', '--since'], want: '--since given 2 times; pass it once', why: 'repeated flag' },
+    ];
+    const badCases = sinceCases.filter(({ argv, want }) => {
+      const r = sinceCli(...argv);
+      return r.status !== 1 || !String(r.stderr).includes(want);
+    });
+    if (badCases.length === 0) {
+      pass('scan.mjs --since rejects bad input at the CLI (exit 1, with the reason named)');
+    } else {
+      fail(`scan.mjs --since accepted or misreported: ${badCases.map((c) => c.why).join(', ')}`);
+    }
   }
 
   const filter = buildLocationFilter({
@@ -6282,7 +6574,17 @@ try {
       copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
       copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
       copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
-      symlinkSync(join(ROOT, 'node_modules'), join(e2eTmp, 'node_modules'), 'dir');
+      // 'junction' on Windows, not 'dir': a directory symlink needs
+      // SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless
+      // Developer Mode is on, so this threw EPERM and failed the test on an
+      // ordinary Windows checkout. Junctions need no privilege, and the two
+      // constraints they add are already met — the target is absolute and is a
+      // directory on a local volume. The type argument is ignored off Windows.
+      symlinkSync(
+        join(ROOT, 'node_modules'),
+        join(e2eTmp, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       mkdirSync(join(e2eTmp, 'data'), { recursive: true });
       writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
         '# Applications Tracker',
@@ -7168,6 +7470,89 @@ try {
   fail(`verify-pipeline report checks crashed: ${e.message}`);
 }
 
+// ── VERIFY-PIPELINE ORPHAN REFERENCE RESOLUTION (#1425 follow-up) ────────────
+// Check 10 resolves "is this report referenced?" three ways. Two of them were
+// wrong:
+//   (a) a cell may carry SEVERAL links ("[901](…) / [902](…)" — a re-evaluation
+//       keeping both reports on record). A single .match() sees only the first,
+//       so every later link false-positives as an orphan.
+//   (b) the row's own number was credited UNCONDITIONALLY. Row and report
+//       numbers are independent counters that diverge in normal operation
+//       (#1733), so a row that links elsewhere silently "references" an
+//       unrelated report sharing its number, masking a real orphan.
+console.log('\n🧪 Testing verify-pipeline orphan reference resolution (#1425 follow-up)');
+try {
+  const orTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-orphan-'));
+  try {
+    const orReports = join(orTmp, 'reports');
+    mkdirSync(orReports, { recursive: true });
+    const orTracker = join(orTmp, 'applications.md');
+    const orEnv = { ...process.env, CAREER_OPS_TRACKER: orTracker, CAREER_OPS_REPORTS: orReports };
+    const rpt = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 3.1\n\`\`\`\n`;
+
+    // 901 + 902: one posting evaluated twice; row 900 keeps BOTH on record.
+    // 950: a genuine orphan whose number collides with row 950, which links 955.
+    // 955: the report row 950 actually points at.
+    // 970: referenced ONLY by the row-number fallback (its row carries no link).
+    writeFileSync(join(orReports, '901-acme-2026-02-01.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '902-acme-2026-02-09.md'), rpt('Acme', 'Director of Platform'));
+    writeFileSync(join(orReports, '950-globex-2026-03-02.md'), rpt('Globex', 'QA Manager'));
+    writeFileSync(join(orReports, '955-initech-2026-03-05.md'), rpt('Initech', 'Test Lead'));
+    writeFileSync(join(orReports, '970-hooli-2026-03-06.md'), rpt('Hooli', 'Release Manager'));
+
+    writeFileSync(orTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 900 | 2026-02-01 | Acme | Director of Platform | 3.1/5 | Evaluated | ❌ | ' +
+        '[901](reports/901-acme-2026-02-01.md) / [902](reports/902-acme-2026-02-09.md) | re-eval |\n' +
+      '| 950 | 2026-03-05 | Initech | Test Lead | 3.1/5 | Evaluated | ❌ | ' +
+        '[955](reports/955-initech-2026-03-05.md) | row number collides with orphan report 950 |\n' +
+      '| 970 | 2026-03-06 | Hooli | Release Manager | 3.1/5 | Evaluated | ❌ | — | legacy row, no markdown link |\n');
+
+    const orOut = run(NODE, ['verify-pipeline.mjs'], { env: orEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (orOut === null) {
+      fail('verify-pipeline crashed on the orphan-reference fixture');
+    } else {
+      // (a) second link of a dual-link cell must NOT be an orphan.
+      if (/Orphan report[^\n]*902-acme/.test(orOut)) {
+        fail('dual-link cell: second link (902) falsely flagged as orphan — .match() sees only the first');
+      } else {
+        pass('dual-link report cell resolves BOTH links, not just the first (#1425 follow-up)');
+      }
+      if (/Orphan report[^\n]*901-acme/.test(orOut)) {
+        fail('dual-link cell: first link (901) falsely flagged as orphan');
+      } else {
+        pass('dual-link report cell resolves its first link');
+      }
+      // (b) a row's own number must not mask an unrelated orphan sharing it.
+      if (/Orphan report[^\n]*#950[^\n]*950-globex/.test(orOut)) {
+        pass('row number does not mask an unrelated orphan sharing it (#1733 divergence)');
+      } else {
+        fail('orphan 950 masked by row 950, which links report 955 — row number credited unconditionally');
+      }
+      if (/Orphan report[^\n]*955-initech/.test(orOut)) {
+        fail('linked report 955 falsely flagged as orphan');
+      } else {
+        pass('report referenced by a linking row is not flagged');
+      }
+      // A link-less row is the ONE case where the row number is still the only
+      // signal. Report 970 exists on disk, so this assertion can genuinely fail
+      // if the fallback is dropped.
+      if (/Orphan report[^\n]*970-hooli/.test(orOut)) {
+        fail('link-less legacy row lost its row-number fallback — report 970 flagged');
+      } else {
+        pass('link-less row still falls back to its own number');
+      }
+    }
+  } finally {
+    rmSync(orTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline orphan reference resolution crashed: ${e.message}`);
+}
+
 // ── VERIFY-PIPELINE DUPLICATE TRACKER NUMBER (#1704) ────────────
 // A tracker # must be a unique row id. Two rows sharing a # is never
 // legitimate (unlike Check 2's company+role dedup, which can false-positive
@@ -7705,6 +8090,112 @@ try {
   fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
 }
 
+// ── VERIFY-PIPELINE GROUPING KEYS: NON-LATIN COMPANIES AND ROLES (#2393) ──
+// Same root cause as the blind-via key above, one layer up. verify-pipeline
+// keyed Check 2 (duplicate tracker rows), Check 9 (duplicate report files) and
+// Check 11 (Via channels) by stripping [^a-z0-9], which erases CJK outright.
+// On a Japanese pipeline every company AND every role keyed to '', so unrelated
+// rows were reported as one "possible duplicates" cluster and the real signal
+// drowned — while Check 11 saw every non-Latin agency as 'direct' and never
+// fired. Controls: genuine same-company+same-role pairs must still be flagged.
+console.log('\n🧪 Testing verify-pipeline grouping keys with non-Latin text (#2393)...');
+try {
+  const vpKeyTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-unicode-'));
+  try {
+    const vpKeyReports = join(vpKeyTmp, 'reports');
+    mkdirSync(vpKeyReports, { recursive: true });
+    const vpKeyTracker = join(vpKeyTmp, 'applications.md');
+    const vpKeyEnv = {
+      ...process.env, CAREER_OPS_TRACKER: vpKeyTracker, CAREER_OPS_REPORTS: vpKeyReports,
+    };
+    const jaReport = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 4.0\n\`\`\`\n`;
+
+    // Two different roles at one non-Latin company: not duplicate reports.
+    writeFileSync(join(vpKeyReports, '001-yamabuki-2026-01-04.md'), jaReport('株式会社ヤマブキ', 'データアナリスト'));
+    writeFileSync(join(vpKeyReports, '002-yamabuki-2026-01-05.md'), jaReport('株式会社ヤマブキ', 'バックエンドエンジニア（アプリ基盤）'));
+    // Control: the same non-Latin role twice must still be caught.
+    writeFileSync(join(vpKeyReports, '003-kogane-2026-01-06.md'), jaReport('株式会社コガネ', 'プロダクトエンジニア'));
+    writeFileSync(join(vpKeyReports, '004-kogane-2026-01-07.md'), jaReport('株式会社コガネ', 'プロダクトエンジニア'));
+
+    writeFileSync(vpKeyTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Different non-Latin companies AND different non-Latin roles.
+      '| 1 | 2026-01-04 | 株式会社アカネ | — | バックエンドエンジニア（自社サービス「配膳便」） | 4.1/5 | Evaluated | ❌ | [1](reports/001-yamabuki-2026-01-04.md) | ok |\n' +
+      '| 2 | 2026-01-05 | 株式会社コガネ | — | プロダクトエンジニア（サーバサイド/フロントエンド両面） | 4.1/5 | Evaluated | ❌ | [2](reports/002-yamabuki-2026-01-05.md) | ok |\n' +
+      // (b) One company, two genuinely different non-Latin roles.
+      '| 3 | 2026-01-06 | 株式会社ヤマブキ | — | データアナリスト | 3.2/5 | Evaluated | ❌ | [3](reports/003-kogane-2026-01-06.md) | ok |\n' +
+      '| 4 | 2026-01-07 | 株式会社ヤマブキ | — | バックエンドエンジニア（アプリ基盤） | 4.4/5 | Evaluated | ❌ | [4](reports/004-kogane-2026-01-07.md) | ok |\n' +
+      // (c) Control: identical non-Latin company+role is a real duplicate.
+      '| 5 | 2026-01-08 | 株式会社ミドリ | — | フルスタックエンジニア | 4.3/5 | Evaluated | ❌ | — | first |\n' +
+      '| 6 | 2026-01-09 | 株式会社ミドリ | — | フルスタックエンジニア | 4.3/5 | Evaluated | ❌ | — | second |\n' +
+      // (d) Check 11: one role reached through two non-Latin agencies.
+      '| 7 | 2026-01-10 | 株式会社アオゾラ | リクルート | 会計プロダクトエンジニア | 4.0/5 | Applied | ❌ | — | via A |\n' +
+      '| 8 | 2026-01-11 | 株式会社アオゾラ | パーソル | 会計プロダクトエンジニア | 4.0/5 | Applied | ❌ | — | via B |\n' +
+      // (e) Combining marks: Devanagari matras carry meaning and have no
+      // precomposed form, so NFKC cannot fold them into the base letter.
+      // Dropping \p{M} would key कंपनी and कपनी identically — the same
+      // collision as (a), one script over, and modes/hi ships a Hindi market.
+      '| 9 | 2026-01-12 | कंपनी सॉफ्टवेयर | — | बैकएंड इंजीनियर | 4.0/5 | Evaluated | ❌ | — | with matras |\n' +
+      '| 10 | 2026-01-13 | कपनी सफटवयर | — | बकएड इजीनियर | 4.0/5 | Evaluated | ❌ | — | matras stripped |\n');
+
+    const vpKeyOut = run(NODE, ['verify-pipeline.mjs'], { env: vpKeyEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (vpKeyOut === null) {
+      fail('verify-pipeline crashed on non-Latin grouping fixture (#2393)');
+    } else {
+      const dupLines = vpKeyOut.split('\n').filter(l => l.includes('Possible duplicates'));
+
+      if (!dupLines.some(l => /#1\b/.test(l) && /#2\b/.test(l))) {
+        pass('verify-pipeline keeps distinct non-Latin companies apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered unrelated non-Latin companies: ${dupLines.join(' | ')}`);
+      }
+
+      if (!dupLines.some(l => /#3\b/.test(l) && /#4\b/.test(l))) {
+        pass('verify-pipeline keeps distinct non-Latin roles at one company apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered distinct non-Latin roles: ${dupLines.join(' | ')}`);
+      }
+
+      if (dupLines.some(l => /#5\b/.test(l) && /#6\b/.test(l))) {
+        pass('verify-pipeline still flags a genuine non-Latin duplicate row pair (#2393)');
+      } else {
+        fail('verify-pipeline missed a genuine duplicate with identical non-Latin company+role');
+      }
+
+      const dupReportLines = vpKeyOut.split('\n').filter(l => l.includes('Duplicate reports for same company+role'));
+      if (!dupReportLines.some(l => l.includes('001-yamabuki') && l.includes('002-yamabuki'))) {
+        pass('verify-pipeline keeps two non-Latin roles under one company slug apart (#2393)');
+      } else {
+        fail(`verify-pipeline clustered distinct non-Latin report roles: ${dupReportLines.join(' | ')}`);
+      }
+      if (dupReportLines.some(l => l.includes('003-kogane') && l.includes('004-kogane'))) {
+        pass('verify-pipeline still flags two reports for one non-Latin company+role (#2393)');
+      } else {
+        fail('verify-pipeline missed a genuine duplicate report pair with a non-Latin role');
+      }
+
+      if (vpKeyOut.includes('Cross-channel duplicate') && vpKeyOut.includes('リクルート') && vpKeyOut.includes('パーソル')) {
+        pass('verify-pipeline flags one role reached via two non-Latin agencies (#2393)');
+      } else {
+        fail('verify-pipeline missed a cross-channel duplicate between two non-Latin agencies');
+      }
+
+      if (!dupLines.some(l => /#9\b/.test(l) && /#10\b/.test(l))) {
+        pass('verify-pipeline keeps Devanagari names differing only by combining marks apart');
+      } else {
+        fail(`verify-pipeline collapsed Devanagari names that differ by matras: ${dupLines.join(' | ')}`);
+      }
+    }
+  } finally {
+    rmSync(vpKeyTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline non-Latin grouping key tests crashed (#2393): ${e.message}`);
+}
+
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
 // `parts.slice(1, -1)`, which assumes the closing `|` produced a trailing empty
 // cell. A valid row written WITHOUT a trailing pipe keeps its real last cell
@@ -8201,6 +8692,101 @@ try {
   }
 } catch (e) {
   fail(`non-Latin via guard tests crashed: ${e.message}`);
+}
+
+// ── MERGE-TRACKER: DISTINCT NON-LATIN COMPANIES (#2429) ───────────
+// Sibling of the #1603 via guard, one column over. normalizeCompany() stripped
+// [^a-z0-9], so EVERY non-Latin company name folded to '' and compared equal to
+// every other one — merge-tracker's company+role fallback then treated
+// applications at two different companies as the same row and silently
+// overwrote one. applications.md is gitignored with no .bak, so the losing
+// evaluation was unrecoverable.
+console.log('\n🧪 Testing merge-tracker with distinct non-Latin companies (#2429)...');
+try {
+  const { normalizeCompany } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
+
+  // Unit: distinct scripts must produce distinct, non-empty keys.
+  const keys = ['アクメ株式会社', 'グロベックス合同会社', 'Яндекс', '北京字节跳动'].map(normalizeCompany);
+  if (keys.every(k => k !== '') && new Set(keys).size === keys.length) {
+    pass('normalizeCompany gives every non-Latin company a distinct non-empty key (#2429)');
+  } else {
+    fail(`non-Latin company keys collapsed: ${JSON.stringify(keys)}`);
+  }
+  // Combining marks must SURVIVE the fold. Indic matras have no precomposed
+  // form, so a key that strips \p{M} makes Devanagari कंपनी and कपनी (and क
+  // and का) identical — re-introducing, for the shipped hi/ar locales, exactly
+  // the collision this fix removes for ja/zh/ru. This is why normalizeCompany
+  // delegates to normalizeTextKey (which keeps \p{M}) rather than to a
+  // company-local fold (#2429 review, #2445).
+  const markPairs = [['कंपनी', 'कपनी'], ['क', 'का']];
+  if (markPairs.every(([a, b]) => normalizeCompany(a) !== normalizeCompany(b))) {
+    pass('company keys keep combining marks, so Devanagari names differing only in matras stay distinct (#2429)');
+  } else {
+    fail('combining marks stripped from the company key — Indic names differing only in matras now collide');
+  }
+  // The `?` unknown-employer marker MUST still fold to '' — the #1596
+  // cross-channel guard depends on those rows sharing one key.
+  if (normalizeCompany('?') === '' && normalizeCompany('—') === '') {
+    pass('punctuation-only company still folds to the empty key, preserving the #1596 guard (#2429)');
+  } else {
+    fail('punctuation-only company no longer folds to empty — the #1596 cross-channel guard is broken');
+  }
+  // NFKC: full-width and half-width spellings are the same company.
+  if (normalizeCompany('ＡＣＭＥ') === normalizeCompany('ACME')) {
+    pass('NFKC folds full-width and half-width company spellings together (#2429)');
+  } else {
+    fail('full-width company name did not fold to its half-width spelling');
+  }
+  // Latin path unchanged.
+  if (normalizeCompany('Acme Inc.') === 'acmeinc' && normalizeCompany('ACME, INC') === 'acmeinc') {
+    pass('Latin company keys are unchanged by the Unicode-aware fold (#2429)');
+  } else {
+    fail('Latin company key changed — existing dedup/selector behaviour would shift');
+  }
+
+  // End-to-end: two different non-Latin companies, fuzzy-matching role titles.
+  const coTmp = mkdtempSync(join(tmpdir(), 'career-ops-nonlatin-co-'));
+  try {
+    mkdirSync(join(coTmp, 'data'));
+    mkdirSync(join(coTmp, 'reports'));
+    const additionsDir = join(coTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(coTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-04 | アクメ株式会社 | Backend Engineer, Payments Platform | 4.0/5 | Evaluated | ❌ | [1](../reports/001-acme-2026-01-04.md) | first company |\n');
+    for (const n of ['001-acme-2026-01-04', '002-globex-2026-01-05']) {
+      writeFileSync(join(coTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // DIFFERENT company, same role title → a real second application that must
+    // be ADDED, not silently merged over the first.
+    writeFileSync(join(additionsDir, '002-globex.tsv'),
+      '2\t2026-01-05\tグロベックス合同会社\tBackend Engineer, Payments Platform\tEvaluated\t4.1/5\t❌\t[2](reports/002-globex-2026-01-05.md)\tsecond company\n');
+
+    const coResult = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (coResult === null) {
+      fail('merge-tracker.mjs crashed during non-Latin company test (#2429)');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+      if (merged.includes('アクメ株式会社') && merged.includes('グロベックス合同会社')) {
+        pass('two different non-Latin companies stay two rows (#2429)');
+      } else {
+        fail('a non-Latin company was silently overwritten by a different one — the evaluation is unrecoverable (#2429)');
+      }
+      const rows = merged.split('\n').filter(l => l.startsWith('| ') && /\| \d+ \|/.test(l));
+      if (rows.length === 2) {
+        pass('merge-tracker added the second non-Latin company instead of merging (#2429)');
+      } else {
+        fail(`expected 2 tracker rows after merge, got ${rows.length}`);
+      }
+    }
+  } finally {
+    rmSync(coTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`non-Latin company tests crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER TSV COLUMN-ORDER TOLERANCE (#1427) ─────────────
@@ -10404,6 +10990,28 @@ try {
   }
 } catch (e) {
   fail(`gemini-eval systemInstruction source test crashed: ${e.message}`);
+}
+
+// ── 44f. openai-tailor — host-gated prompt-cache breakpoint (#1709, #2432) ──
+// openai-tailor.mjs runs on import (arg parse + fetch), so it can't be imported
+// to unit-test the helper — assert the host-gated shape at the source level,
+// same approach as 44c for its sibling openai-eval.mjs.
+console.log('\n44f. openai-tailor — host-gated prompt-cache breakpoint (#1709, #2432)');
+try {
+  const src = readFileSync(join(ROOT, 'openai-tailor.mjs'), 'utf-8');
+  const checks = [
+    // api.openai.com gets a plain-string system message (auto-caches; may reject the field)
+    { name: 'openai-tailor gates cache_control off for api.openai.com', re: /host === 'api\.openai\.com'\)\s*return\s*\{\s*role:\s*'system',\s*content:\s*prompt\s*\}/ },
+    // other OpenAI-compatible hosts get the ephemeral cache_control breakpoint, text preserved
+    { name: 'openai-tailor sends an ephemeral cache_control breakpoint to compatible gateways', re: /text:\s*prompt,\s*cache_control:\s*\{\s*type:\s*'ephemeral'\s*\}/ },
+    // and it's actually wired into the request, keyed on the resolved endpoint host
+    { name: 'openai-tailor builds the system message via buildSystemMessage(systemPrompt, endpointHost)', re: /buildSystemMessage\(systemPrompt,\s*endpointHost\)/ },
+  ];
+  const missing = checks.filter((c) => !c.re.test(src));
+  if (missing.length === 0) pass('openai-tailor host-gates the #1709 prompt-cache breakpoint and wires it into the request');
+  else fail(`openai-tailor prompt-cache wiring missing: ${missing.map((m) => m.name).join('; ')}`);
+} catch (e) {
+  fail(`openai-tailor prompt-cache source test crashed: ${e.message}`);
 }
 
 // ── 44e. ollama-eval — temperature must live in options ────────

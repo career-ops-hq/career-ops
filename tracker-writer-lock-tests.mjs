@@ -17,6 +17,11 @@ const NODE = process.execPath;
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
 let passed = 0;
 let failed = 0;
+// Run-level evidence that acquireTrackerLock still emits its recover guard.
+// See the consumer inside runWhileLocked for why this is counted per run
+// rather than asserted per case (#2436).
+let contentionWatchedCases = 0;
+let contentionObservedCases = 0;
 
 function pass(message) { console.log(`PASS ${message}`); passed++; }
 function fail(message) { console.error(`FAIL ${message}`); failed++; }
@@ -218,7 +223,26 @@ async function runWhileLocked({
     // entries already have a stronger, script-specific ordering signal (their
     // pre-lock review prompt), and a writer parked at that prompt has not
     // reached the lock yet, so the guard wait is skipped for them.
-    await contention?.wait(CONTENTION_WAIT_MS);
+    //
+    // The boolean IS the discrimination signal, so it is consumed rather than
+    // discarded (#2436) — but at RUN level, not per case, and the difference
+    // is not a softening. `acquireTrackerLock` creates the guard and removes
+    // it in a `finally` around one `lockCanRecover()` call, so it exists for
+    // well under a millisecond, re-created on each ~retryMs attempt. The
+    // watcher samples with readdirSync, so a single miss means "the sampler
+    // was unlucky", not "the guard is gone" — and on Windows CI it misses
+    // often enough that a per-case failure would be red on a healthy tree
+    // (measured: 3 of 8 observed).
+    //
+    // Across a whole run the two causes separate cleanly: a sampling miss
+    // still leaves other cases observing the guard, while the regression this
+    // must catch — the guard renamed, removed, or made conditional — takes
+    // every case to zero. That is asserted after the matrix.
+    if (contention) {
+      contentionWatchedCases++;
+      if (await contention.wait(CONTENTION_WAIT_MS)) contentionObservedCases++;
+      else console.log(`NOTE ${name}: recover guard not sampled within ${CONTENTION_WAIT_MS}ms — fell back to timing-dependent ordering for this case`);
+    }
     // Simulate the current lock owner committing another row. The waiting
     // writer must read this fresh version after acquiring the lock; a writer
     // that reads before locking will erase row #99 with its stale snapshot.
@@ -801,6 +825,34 @@ async function testLiveRecoverGuardIsNotEvicted() {
 await testFreshOwnerlessLockIsNotStolen();
 await testAgedOwnerlessLockStillRecovers();
 await testLiveRecoverGuardIsNotEvicted();
+
+// #2436: the guard-watched cases depend on the recover guard to order the
+// fixture mutation after the writer's own read. If it stops being emitted they
+// all silently fall back to timing, each burning CONTENTION_WAIT_MS first — the
+// suite stays green (or returns to flaking) with nothing pointing at the cause.
+// One observation is enough to prove the signal exists; zero across the whole
+// matrix is the regression.
+if (contentionWatchedCases === 0) {
+  // Skipping the assertion when nothing was watched would reproduce the very
+  // defect this file is fixing: a matrix change that drops every guard-watched
+  // case leaves the suite green while nothing validates the recover guard at
+  // all. Zero watched cases is itself the regression (CodeRabbit review).
+  fail('no guard-watched case ran — the matrix no longer exercises the recover guard, so nothing validates the mutation ordering signal');
+} else if (contentionObservedCases > 0) {
+  pass(`recover guard observed in ${contentionObservedCases}/${contentionWatchedCases} guard-watched cases — the mutation ordering signal is live`);
+} else if (process.platform === 'win32') {
+  // The signal is SAMPLED: acquireTrackerLock removes the guard in a `finally`
+  // around one lockCanRecover() call, so it exists for well under a
+  // millisecond, and the watcher looks for it with readdirSync. On Windows
+  // that sampling is unreliable enough to miss every window in a run — one CI
+  // leg observed 3 of 8, another 0 of 8 on the same commit — so failing here
+  // reports the sampler's luck, not the guard's existence, and turns a healthy
+  // tree red at random. Reported, not enforced, on this platform.
+  console.log(`NOTE recover guard not sampled in any of the ${contentionWatchedCases} guard-watched cases on win32 — the ordering signal could not be observed here; the assertion is enforced on platforms where sampling is reliable`);
+  passed++;
+} else {
+  fail(`recover guard never observed in any of the ${contentionWatchedCases} guard-watched cases — acquireTrackerLock has stopped emitting it, so every one of them fell back to timing-dependent ordering`);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
