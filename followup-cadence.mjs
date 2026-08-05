@@ -290,9 +290,19 @@ export { parseFollowups as parseFollowupsContent };
 // follow-up logged on/after the pin's set-date resumes the normal schedule.
 // Stored in data/follow-ups.md as directive lines:
 //   - next #42 2026-07-10 (set 2026-07-02)
+//   - next #42 2026-07-10 (set 2026-07-02) — why the date was pinned
 // The `(set …)` part records when the pin was made; if omitted (hand-written)
 // it defaults to the pinned date itself. The LAST pin line per application wins.
-const OVERRIDE_RE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?\s*$/i;
+//
+// A trailing `— note` is accepted and ignored. Pins are written by hand as
+// often as by `followup-seed.mjs`, and a hand-written pin almost always wants
+// to record WHY the date moved. Anchoring the pattern immediately after the
+// `(set …)` group made every annotated pin fail to match — silently, since a
+// non-matching line is indistinguishable from an ordinary bullet. The failure
+// mode is the dangerous direction: the pin vanishes, the computed cadence
+// takes over, and the application reports overdue when the user had
+// explicitly deferred it.
+const OVERRIDE_RE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?(?:\s*[—–-].*)?\s*$/i;
 
 export function parseNextOverrides(content) {
   const byApp = new Map();

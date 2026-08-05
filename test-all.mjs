@@ -6821,6 +6821,26 @@ try {
     if (got === expected) pass(`resolveNextOverride: ${label}`);
     else fail(`resolveNextOverride ${label}: expected ${expected}, got ${got}`);
   }
+
+  // A pin may carry a trailing `— note` explaining why the date moved. Hand
+  // written pins nearly always do. Anchoring the pattern right after `(set …)`
+  // made those pins silently unparseable, which is the dangerous direction:
+  // the deferral disappears and the row reports overdue again.
+  const annotatedPins = cadence.parseNextOverrides([
+    '- next #50 2026-08-11 (set 2026-08-04) — messaged 2026-08-04, give it a week',
+    '- next #51 2026-08-11 (set 2026-08-04) - ascii hyphen note',
+    '- next #52 2026-08-11 — note with no set-date',
+  ].join('\n'));
+  if (annotatedPins.get(50)?.date === '2026-08-11' && annotatedPins.get(50)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: em-dash annotated pin still parses');
+  } else {
+    fail(`annotated pin dropped: ${JSON.stringify(annotatedPins.get(50))}`);
+  }
+  if (annotatedPins.get(51)?.date === '2026-08-11' && annotatedPins.get(52)?.setDate === '2026-08-11') {
+    pass('parseNextOverrides: hyphen notes and annotated set-less pins parse');
+  } else {
+    fail(`annotated pin variants wrong: ${JSON.stringify([annotatedPins.get(51), annotatedPins.get(52)])}`);
+  }
 } catch (e) {
   fail(`follow-up cadence module crashed: ${e.message}`);
 }
