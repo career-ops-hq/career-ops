@@ -34,6 +34,7 @@
 // User-Agent is sent to reduce (not eliminate) WAF friction.
 
 import { decodeEntities } from './_html-entities.mjs';
+import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 
 const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud\.com$/i;
 
@@ -43,9 +44,6 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 8_000;
 const INTER_PAGE_DELAY_MS = 150;  // WAF-aware spacing between same-host pages
-
-// Browser-like UA reduces WAF friction; ORC's requisitions API needs no auth.
-const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
 // facetsList is a fixed constant on the finder; %3B is the encoded ';' separator.
 const FACETS_LIST = 'LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS';
@@ -273,7 +271,7 @@ export default {
 
       const json = await fetchPageWithRetry(ctx, apiUrl, {
         redirect: 'error',
-        headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
+        headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
       });
 
       const parsed = parseOracleResponse(json, site, entry.name);

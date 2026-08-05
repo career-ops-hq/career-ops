@@ -27,6 +27,8 @@
  * (no slashes / traversal), and server-side redirects are refused.
  */
 
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+
 const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template.
@@ -206,7 +208,7 @@ export async function checkLivenessViaApi(url) {
     try {
       res = await fetch(apiUrl, {
         method: 'GET',
-        headers: { 'user-agent': 'career-ops-liveness/1.0', accept: 'application/json' },
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json' },
         redirect: 'error', // refuse server-side redirects (SSRF + ambiguity guard)
         signal: controller.signal,
       });

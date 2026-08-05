@@ -184,6 +184,7 @@ const SYSTEM_PATHS = [
   'providers/',
   'seeds/',
   'tests/',
+  'user-agent.mjs',
   'doctor.mjs',
   // doctor.mjs imports this one: an install that receives the new doctor
   // without it would crash on startup.

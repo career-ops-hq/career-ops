@@ -24,6 +24,8 @@
  *   const companies = await fetchYCCompanies();
  */
 
+import { DEFAULT_USER_AGENT } from '../user-agent.mjs';
+
 // ── Constants ────────────────────────────────────────────────────────
 
 /**
@@ -33,7 +35,6 @@
 export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops-seeds/1.0)';
 
 /**
  * YC public company API.

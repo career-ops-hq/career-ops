@@ -2,19 +2,11 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
+import { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT } from '../user-agent.mjs';
+
+export { BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.3)';
-
-/**
- * Browser-like User-Agent for providers that must clear WAF/CDN bot
- * management blocking the default career-ops UA outright (seen live:
- * Glints' firewall, Geico's Cloudflare-gated Workday tenant). Shared so
- * every provider working around such a block bumps one constant instead
- * of drifting Chrome versions independently per file.
- */
-export const BROWSER_LIKE_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
   const controller = new AbortController();
