@@ -7,7 +7,7 @@
 # phantom diff. Explicit eol=lf keeps checkouts byte-identical everywhere;
 # bash entrypoints (cops) break outright under CRLF.
 
-* text=auto
+* text=auto eol=lf
 
 # Source and config
 *.mjs   text eol=lf
