@@ -6841,6 +6841,57 @@ try {
   } else {
     fail(`annotated pin variants wrong: ${JSON.stringify([annotatedPins.get(51), annotatedPins.get(52)])}`);
   }
+
+  // Retire directives: `- cleared #N YYYY-MM-DD — reason` drops one
+  // application out of the cadence without closing the application.
+  const clearedContent = [
+    '| 1 | 60 | 2026-07-20 | Acme | Lead | Email |  | ping |',
+    '- cleared #60 2026-08-04 — no contact on file',
+    '- cleared #61 2026-08-01',
+    '- cleared #61 2026-08-04 — last directive wins',
+    '- cleared #62 2026-13-45 — impossible date',
+  ].join('\n');
+  const clearedMap = cadence.parseClearedDirectives(clearedContent);
+  if (clearedMap.get(60)?.setDate === '2026-08-04' && clearedMap.get(61)?.setDate === '2026-08-04' && !clearedMap.has(62)) {
+    pass('parseClearedDirectives: last directive wins; impossible dates ignored');
+  } else {
+    fail(`cleared parsed wrong: ${JSON.stringify([...clearedMap])}`);
+  }
+  if (cadence.parseFollowupsContent(clearedContent).length === 1) {
+    pass('cleared lines are NOT counted as follow-ups');
+  } else {
+    fail('cleared lines leaked into parseFollowupsContent');
+  }
+  const cleared60 = clearedMap.get(60);
+  const retireCases = [
+    [[cleared60, null], true, 'retired with no follow-ups logged'],
+    [[cleared60, '2026-08-01'], true, 'stays retired when the last touch predates it'],
+    [[cleared60, '2026-08-04'], true, 'same-day tie favors the retirement'],
+    [[cleared60, '2026-08-05'], false, 'a follow-up logged after it revives the cadence'],
+    [[undefined, '2026-08-05'], false, 'no directive → not retired'],
+  ];
+  for (const [args, expected, label] of retireCases) {
+    const got = cadence.isRetired(...args);
+    if (got === expected) pass(`isRetired: ${label}`);
+    else fail(`isRetired ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // End to end: a retired row leaves `entries` and stops counting as
+  // actionable, but is still counted so the retirement stays visible.
+  const retireTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 70 | 2026-06-01 | Acme | Lead | 4.0/5 | Applied | ✅ | [70](reports/70.md) | Applied 2026-06-01 |',
+    '| 71 | 2026-06-01 | Beta | Lead | 4.0/5 | Applied | ✅ | [71](reports/71.md) | Applied 2026-06-01 |',
+  ].join('\n');
+  const before = cadence.analyzeFromContent(retireTracker, '');
+  const after = cadence.analyzeFromContent(retireTracker, '- cleared #70 2026-08-04 — no channel');
+  if (before.metadata.actionable === 2 && after.metadata.actionable === 1 &&
+      after.metadata.retired === 1 && !after.entries.some(e => e.num === 70)) {
+    pass('analyzeFromContent: retired application leaves entries and actionable count');
+  } else {
+    fail(`retire integration wrong: ${JSON.stringify([before.metadata, after.metadata])}`);
+  }
 } catch (e) {
   fail(`follow-up cadence module crashed: ${e.message}`);
 }

@@ -325,6 +325,48 @@ export function resolveNextOverride(override, lastFollowupDate) {
   return override.date;
 }
 
+// --- Retire directives ---
+// Not every application has a reachable human behind it. A cold ATS submission
+// with no contact on file has no follow-up channel at all, yet the cadence
+// keeps reporting it overdue every week forever. A dashboard whose overdue
+// count is mostly un-actionable rows trains the user to stop reading it, which
+// costs far more than the rows themselves.
+//
+// A retire directive drops ONE application out of the cadence:
+//   - cleared #42 2026-08-04 — no contact on file, no warm path
+// The date records when the retirement was made. This closes the follow-up
+// loop only — it does NOT close the application. The tracker row keeps its
+// status and any inbound reply is still caught by reply-watch.
+//
+// Like a pin, a retirement is revoked by a follow-up logged after it, so
+// re-engaging a retired application resumes its normal cadence with no
+// bookkeeping. The LAST directive per application wins, and a retirement
+// outranks a pin on the same application: retiring is the more explicit
+// "stop surfacing this", and reviving it is a one-line edit either way.
+const CLEARED_RE = /^-\s+cleared\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s*[—–-].*)?\s*$/i;
+
+export function parseClearedDirectives(content) {
+  const byApp = new Map();
+  for (const line of String(content ?? '').split('\n')) {
+    const m = line.match(CLEARED_RE);
+    if (!m) continue;
+    const setDate = m[2];
+    if (!parseDate(setDate)) continue; // an impossible date never poisons the analysis
+    const appNum = parseInt(m[1]);
+    byApp.set(appNum, { appNum, setDate });
+  }
+  return byApp;
+}
+
+// Mirrors resolveNextOverride's revival rule, including the same-day tie:
+// "log a final follow-up, then retire" is the common flow, so a follow-up
+// dated the same day as the retirement does not undo it.
+export function isRetired(cleared, lastFollowupDate) {
+  if (!cleared) return false;
+  if (lastFollowupDate && lastFollowupDate > cleared.setDate) return false;
+  return true;
+}
+
 // --- Extract contacts from notes ---
 // Outreach recorded in notes is usually a NAME, not an email — LinkedIn, the
 // most common channel, never produces one. An email-only parser therefore
@@ -530,6 +572,7 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
 
   const followups = parseFollowups(followupsContent);
   const overrides = parseNextOverrides(String(followupsContent ?? ''));
+  const cleared = parseClearedDirectives(followupsContent);
 
   // Group follow-ups by app number
   const followupsByApp = new Map();
@@ -579,6 +622,14 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
       urgency = daysBetween(parseDate(nextOverride), now) >= 0 ? 'overdue' : 'waiting';
     }
 
+    // A retirement outranks a pin: it means "there is no channel here", which
+    // no computed or pinned date can make true.
+    const retired = isRetired(cleared.get(app.num), lastFollowupDate);
+    if (retired) {
+      urgency = 'retired';
+      nextFollowupDate = null;
+    }
+
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
@@ -618,19 +669,26 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
   const urgencyOrder = { urgent: 0, overdue: 1, waiting: 2, cold: 3 };
   entries.sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
 
+  // Retired applications are counted but not listed — surfacing them in the
+  // entries array would defeat the point of retiring them, and the count keeps
+  // the retirement visible enough to be reconsidered.
+  const retiredCount = entries.filter(e => e.urgency === 'retired').length;
+  const active = entries.filter(e => e.urgency !== 'retired');
+
   const filtered = overdueOnly
-    ? entries.filter(e => e.urgency === 'overdue' || e.urgency === 'urgent')
-    : entries;
+    ? active.filter(e => e.urgency === 'overdue' || e.urgency === 'urgent')
+    : active;
 
   return {
     metadata: {
       analysisDate: now.toISOString().split('T')[0],
       totalTracked: apps.length,
-      actionable: entries.length,
-      overdue: entries.filter(e => e.urgency === 'overdue').length,
-      urgent: entries.filter(e => e.urgency === 'urgent').length,
-      cold: entries.filter(e => e.urgency === 'cold').length,
-      waiting: entries.filter(e => e.urgency === 'waiting').length,
+      actionable: active.length,
+      overdue: active.filter(e => e.urgency === 'overdue').length,
+      urgent: active.filter(e => e.urgency === 'urgent').length,
+      cold: active.filter(e => e.urgency === 'cold').length,
+      waiting: active.filter(e => e.urgency === 'waiting').length,
+      retired: retiredCount,
     },
     entries: filtered,
     cadenceConfig: CADENCE,
