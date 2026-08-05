@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { pass, fail, run, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, run, lastRunFailure, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nintake.mjs — multi-source profile intake (#1723)');
 
@@ -122,6 +122,22 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
     if (escaped === null) pass('--text refuses paths that resolve outside documents/');
     else fail('--text followed a path outside documents/');
 
+    // existsSync() passes for a directory, so an unreadable/non-regular target
+    // reaches readFileSync and used to throw EISDIR as an uncaught stack trace.
+    // It must fail the controlled way instead (#1843 review finding).
+    //
+    // Asserting on stderr, not just the exit code: an uncaught exception also
+    // exits nonzero, so `run() === null` alone cannot tell a stack trace from a
+    // handled error and would pass against the unfixed code.
+    mkdirSync(join(docsDir, 'cv', 'notes.md'));
+    const unreadable = run(NODE, ['intake.mjs', '--text', 'cv/notes.md'], { env });
+    const errOut = (lastRunFailure() || {}).stderr || '';
+    if (unreadable === null && errOut.includes('Could not read cv/notes.md') && !/^\s+at /m.test(errOut)) {
+      pass('--text reports an unreadable/non-regular source as a handled error, not a stack trace');
+    } else {
+      fail(`--text on a directory should fail controllably, got exit=${JSON.stringify(unreadable)} stderr=${JSON.stringify(errOut.slice(0, 200))}`);
+    }
+
     const selfTest = run(NODE, ['intake.mjs', '--self-test'], { env });
     if (selfTest !== null && selfTest.includes('0 failed')) pass('intake.mjs --self-test passes');
     else fail('intake.mjs --self-test failed');
@@ -170,6 +186,23 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
       pass('a source symlinked out of documents/ is still scanned and readable');
     } else {
       fail(`symlinked-out source broken: entry=${JSON.stringify(linked)}, text=${JSON.stringify(text)}`);
+    }
+
+    // Two aliases onto one folder: the walk keeps whichever it reaches first,
+    // and that path is the key in intake-state.json. readdirSync order is
+    // filesystem-dependent, so the alias could differ between machines and an
+    // ingested source would resurface as new (#1843 review finding).
+    //
+    // `current` sorts before `cv`, so this also pins the half that sorting
+    // alone gets wrong: the real directory must win over the link, not merely
+    // win consistently.
+    symlinkSync(join(docsDir, 'cv'), join(docsDir, 'current'));
+    const aliased = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const aliasHits = aliased && aliased.sources.filter((s) => s.path.endsWith('master.md'));
+    if (aliasHits && aliasHits.length === 1 && aliasHits[0].path === 'cv/master.md') {
+      pass('a folder reachable by both a real path and a symlink is reported under the real one');
+    } else {
+      fail(`aliased folder resolved to the wrong/unstable path: ${JSON.stringify((aliasHits || []).map((s) => s.path))}`);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

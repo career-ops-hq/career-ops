@@ -149,7 +149,20 @@ function listSourceFiles() {
     try { real = realpathSync(dir); } catch { return; }
     if (walked.has(real)) return;
     walked.add(real);
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // `walked` keeps whichever alias of a folder the walk reaches first, and
+    // that path becomes the key in intake-state.json. readdirSync order is
+    // filesystem-dependent, so with two ways in — documents/cv plus a symlink
+    // documents/current -> cv — the key could differ between machines and an
+    // already ingested source would resurface as new.
+    //
+    // Real directories first, then symlinks, each alphabetically. Sorting
+    // alone would be deterministic but wrong: `current` sorts before `cv`, so
+    // the link would win and the user's actual folder name would vanish from
+    // the report. A real path is always the better name for what it points at.
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .sort((a, b) => Number(a.isSymbolicLink()) - Number(b.isSymbolicLink()));
+    for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name === 'README.md' && dir === DOCS_DIR) continue;
       const abs = join(dir, entry.name);
       // Follow symlinks (a symlinked master CV is a natural setup) —
@@ -296,7 +309,12 @@ function runSelfTest() {
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
+
+// A function, not a bare `if (isMain)` block, so the success paths can `return`
+// instead of calling process.exit(0). `--text` writes a whole CV to stdout and
+// is meant to be piped; process.exit() is synchronous and can truncate a pipe
+// write that hasn't drained. Falling off the end leaves exitCode at 0.
+function main() {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) runSelfTest();
 
@@ -315,18 +333,27 @@ if (isMain) {
     if (!existsSync(abs)) { console.error(`Not found: ${target}`); process.exit(1); }
     const cls = classifySource(target);
     let text;
-    if (cls.kind === 'direct') text = readFileSync(abs, 'utf-8');
-    else if (cls.kind === 'pdf') {
-      const extractor = detectPdfExtractor();
-      if (!extractor) { console.error(PDF_INSTALL_HINT); process.exit(1); }
-      text = extractor.extract(abs);
-    } else { console.error(`Unsupported source: ${cls.reason}`); process.exit(1); }
+    // existsSync() only proves the name resolves — a directory called `cv.md`,
+    // a file the user can't read, or a malformed PDF all throw from here. Fail
+    // the way extractAll() does (first line of the message, nonzero) instead of
+    // dumping a stack trace at someone who mistyped a path.
+    try {
+      if (cls.kind === 'direct') text = readFileSync(abs, 'utf-8');
+      else if (cls.kind === 'pdf') {
+        const extractor = detectPdfExtractor();
+        if (!extractor) { console.error(PDF_INSTALL_HINT); process.exit(1); }
+        text = extractor.extract(abs);
+      } else { console.error(`Unsupported source: ${cls.reason}`); process.exit(1); }
+    } catch (err) {
+      console.error(`Could not read ${target}: ${String(err.message || err).split('\n')[0]}`);
+      process.exit(1);
+    }
     if (!text.trim()) {
       console.error('No text extracted — likely a scanned/image-only PDF; convert or re-export with a text layer.');
       process.exit(1);
     }
     process.stdout.write(text);
-    process.exit(0);
+    return;
   }
 
   const result = extractAll();
@@ -335,8 +362,10 @@ if (isMain) {
     const only = args.slice(commitIdx + 1).filter((a) => !a.startsWith('--'));
     const count = commitState(result, only);
     console.log(`Recorded ${count} source(s) as ingested → ${STATE_FILE}`);
-    process.exit(0);
+    return;
   }
   if (args.includes('--summary')) printSummary(result);
   else console.log(JSON.stringify(result, null, 2));
 }
+
+if (isMain) main();
