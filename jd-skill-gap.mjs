@@ -79,7 +79,9 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
   'im'
 );
 
-const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)$/;
+// `\r?$` is required, not cosmetic: JS treats \r as a line terminator, so `.`
+// cannot consume it and a bare `$` never matches on a CRLF-split line.
+const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
 
 // A conservative skill-token extractor: pulls comma/slash/and-separated
 // technical-looking tokens out of a requirement bullet, rather than treating
