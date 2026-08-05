@@ -159,10 +159,15 @@ try {
     fail(`hackernews.fetch() API calls: search=${searchFetched} item=${itemFetched}`);
   }
 
-  if (searchParams?.get('tags') === 'story,author_whoishiring' && searchParams?.get('hitsPerPage') === '5') {
+  if (
+    searchParams !== null &&
+    searchParams.get('tags') === 'story,author_whoishiring' &&
+    searchParams.get('hitsPerPage') === '5' &&
+    !searchParams.has('query')
+  ) {
     pass('hackernews.fetch() searches by the whoishiring account tag, not free text');
   } else {
-    fail(`hackernews.fetch() search params: tags=${searchParams?.get('tags')} hitsPerPage=${searchParams?.get('hitsPerPage')}`);
+    fail(`hackernews.fetch() search params: tags=${searchParams?.get('tags')} hitsPerPage=${searchParams?.get('hitsPerPage')} query=${searchParams?.get('query')}`);
   }
 
   if (jobs.length === 2) {
