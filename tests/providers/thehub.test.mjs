@@ -211,6 +211,58 @@ try {
   if (badThrew) pass('thehub.fetch() throws on unexpected API response shape');
   else fail('thehub.fetch() should throw when jobs.docs is absent');
 
+  // #2379 contract: a dead board (first request fails) must still surface as
+  // a failure — no try/catch may swallow it.
+  let firstFailThrew = false;
+  try {
+    await thehub.fetch({ name: 'The Hub' }, { fetchJson: async () => { throw new Error('HTTP 500'); } });
+  } catch { firstFailThrew = true; }
+  if (firstFailThrew) {
+    pass('thehub.fetch() still throws when the very first request fails (dead board reads as failure)');
+  } else {
+    fail('thehub.fetch() swallowed a first-request failure');
+  }
+
+  // A later page failing mid-pagination (after page 1 already succeeded)
+  // must keep what's already collected instead of discarding it.
+  const blipReq = [];
+  const blipJobs = await thehub.fetch(
+    { name: 'The Hub' },
+    {
+      fetchJson: async (url) => {
+        blipReq.push(url);
+        const page = Number(new URL(url).searchParams.get('page'));
+        if (page === 1) return { jobs: { docs: Array.from({ length: 15 }, (_, i) => mk(i)), page: 1, pages: 3, limit: 15 } };
+        throw new Error('HTTP 503');
+      },
+    },
+  );
+  if (blipReq.length === 2 && blipJobs.length === 15) {
+    pass('thehub.fetch() keeps already-collected region-pass jobs when a later page fails');
+  } else {
+    fail(`thehub.fetch() region-pass partial failure: requested ${blipReq.length}, returned ${blipJobs.length} jobs (expected 2 requests, 15 jobs)`);
+  }
+
+  // The remote pass failing after the region pass already succeeded must not
+  // discard the region-pass results (the "one bad pass shouldn't sink the
+  // other" case Scott-Emberson flagged on PR #2524).
+  const remoteFailReq = [];
+  const remoteFailJobs = await thehub.fetch(
+    { name: 'The Hub', thehub: { includeRemote: true } },
+    {
+      fetchJson: async (url) => {
+        remoteFailReq.push(url);
+        if (url.includes('isRemote=true')) throw new Error('HTTP 500');
+        return { jobs: { docs: [mk('region-only')], page: 1, pages: 1, limit: 15 } };
+      },
+    },
+  );
+  if (remoteFailReq.length === 2 && remoteFailJobs.length === 1) {
+    pass('thehub.fetch() keeps region-pass jobs when the remote pass fails after the region pass already succeeded');
+  } else {
+    fail(`thehub.fetch() remote-pass failure: requested ${remoteFailReq.length}, returned ${remoteFailJobs.length} jobs (expected 2 requests, 1 job)`);
+  }
+
 } catch (e) {
   fail(`thehub provider tests crashed: ${e.message}`);
 }

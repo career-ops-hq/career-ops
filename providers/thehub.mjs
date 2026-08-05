@@ -107,23 +107,43 @@ export function normalizeHubJob(j, fallbackCompany) {
  * Paginates one query mode (`?countryCode=X` or `?isRemote=true`) up to
  * `maxPages`, normalizing and appending each hit into `byUrl` (keyed by url,
  * so a job present in both passes is only counted once).
+ *
+ * `state.succeededOnce` is shared across both passes: a dead board should
+ * still read as a failure, but once anything has resolved — in this pass or
+ * an earlier one — a later failure (mid-pagination, or the remote pass
+ * failing after the region pass already landed) must not discard what's
+ * already collected (same `succeededOnce`/`firstErr` idiom as
+ * tencent/meituan/alibaba/phenom/radancy/successfactors after #2379).
+ * Returns `false` when the pass stopped early on a failure (region-pass
+ * caller uses this to skip the remote pass), `true` otherwise.
+ *
  * @param {string} query the query string beyond `?`, e.g. `countryCode=EU` or `isRemote=true`
  * @param {number} maxPages
  * @param {string | undefined} fallbackCompany
  * @param {Map<string, {title: string, url: string, company: string, location: string}>} byUrl
  * @param {{ fetchJson: (url: string, opts?: object) => Promise<any> }} ctx
+ * @param {{ succeededOnce: boolean }} state
+ * @returns {Promise<boolean>}
  */
-async function fetchScope(query, maxPages, fallbackCompany, byUrl, ctx) {
+async function fetchScope(query, maxPages, fallbackCompany, byUrl, ctx, state) {
   for (let page = 1; page <= maxPages; page++) {
     const url = `${FEED_BASE}?page=${page}&${query}`;
-    // redirect:'error' prevents SSRF via server-side redirects
-    const json = await ctx.fetchJson(url, { redirect: 'error' });
-    const jobs = json && json.jobs;
-    if (!jobs || !Array.isArray(jobs.docs)) {
-      throw new Error(
-        `thehub: unexpected API response on page ${page} — expected { jobs: { docs: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
-      );
+    let jobs;
+    try {
+      // redirect:'error' prevents SSRF via server-side redirects
+      const json = await ctx.fetchJson(url, { redirect: 'error' });
+      jobs = json && json.jobs;
+      if (!jobs || !Array.isArray(jobs.docs)) {
+        throw new Error(
+          `thehub: unexpected API response on page ${page} — expected { jobs: { docs: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+        );
+      }
+    } catch (err) {
+      if (!state.succeededOnce) throw err;
+      console.error(`  ⚠ thehub: query "${query}" page ${page} failed (${err.message}) — keeping the ${byUrl.size} jobs collected so far`);
+      return false;
     }
+    state.succeededOnce = true;
     for (const j of jobs.docs) {
       const normalized = normalizeHubJob(j, fallbackCompany);
       if (normalized && !byUrl.has(normalized.url)) byUrl.set(normalized.url, normalized);
@@ -132,6 +152,7 @@ async function fetchScope(query, maxPages, fallbackCompany, byUrl, ctx) {
     if (jobs.docs.length < PER_PAGE) break;
     if (Number.isInteger(jobs.pages) && page >= jobs.pages) break;
   }
+  return true;
 }
 
 /** @type {Provider} */
@@ -143,9 +164,12 @@ export default {
     const { countryCode, includeRemote } = parseThehubConfig(entry);
     const fallbackCompany = entry?.name;
     const byUrl = new Map();
+    const state = { succeededOnce: false };
 
-    await fetchScope(`countryCode=${encodeURIComponent(countryCode)}`, maxPages, fallbackCompany, byUrl, ctx);
-    if (includeRemote) await fetchScope('isRemote=true', maxPages, fallbackCompany, byUrl, ctx);
+    const regionOk = await fetchScope(`countryCode=${encodeURIComponent(countryCode)}`, maxPages, fallbackCompany, byUrl, ctx, state);
+    if (regionOk && includeRemote) {
+      await fetchScope('isRemote=true', maxPages, fallbackCompany, byUrl, ctx, state);
+    }
 
     return [...byUrl.values()];
   },
