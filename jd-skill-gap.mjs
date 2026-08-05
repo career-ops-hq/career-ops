@@ -504,6 +504,27 @@ Benefits and Perks (US Only)
   eq('does not extract "Deep" as a skill', dispositionSkills.includes('Deep'), false);
   eq('does not extract "Interest" as a skill', dispositionSkills.includes('Interest'), false);
 
+  // Regression (#2540): a JD saved with CRLF line endings extracted zero skills.
+  // JS treats \r as a line terminator, so `.` cannot consume it and the bare `$`
+  // in BULLET_LINE_RE (no `m` flag) never matched — every requirement bullet
+  // failed the test and the run returned an empty list, which reads exactly like
+  // "no gaps" instead of erroring. Parity between the two line endings is the
+  // property that was broken, so both variants are built explicitly: with
+  // core.autocrlf the template literal below is already CRLF in a Windows
+  // checkout, and an unnormalized fixture would compare CRLF against CRLF and
+  // pass on the broken regex.
+  const lineEndingJd = `
+# Role
+
+## Requirements
+- Python, FastAPI, PostgreSQL
+- Experience with Kubernetes
+`;
+  const lfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n'));
+  const crlfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
+  eq('CRLF JD extracts the same skills as the LF JD', crlfSkills, lfSkills);
+  eq('CRLF JD extracts a non-zero number of skills', crlfSkills.length > 0, true);
+
   // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
   // must not read as a gap. Before the shared skill-extract canonicalization,
   // classify compared the two literally — "k8s" in the CV vs "Kubernetes" in
