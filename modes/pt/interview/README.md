@@ -8,7 +8,7 @@ Um conjunto de competências reutilizáveis para preparar uma entrevista de pont
 |---|---|---|
 | Planejador de preparação | `plan.md` | Dada uma descrição da vaga e a data da entrevista, monta um plano de preparação estruturado e dividido em blocos de tempo |
 | Entrevistador de simulação | `practice.md` | Conduz perguntas de entrevista simulada com feedback estruturado |
-| Debrief pós-entrevista | `debrief.md` | Após uma entrevista real, fecha lacunas e atualiza a question bank |
+| Debrief pós-entrevista | `debrief.md` | Após uma entrevista real, fecha lacunas e atualiza o banco de perguntas |
 
 ## Competências relacionadas (na pasta `modes/` acima)
 
@@ -27,7 +27,7 @@ Estas competências pressupõem que os arquivos abaixo existam (padrões do care
 | `config/profile.yml` | Perfil do candidato — vagas-alvo, remuneração, narrativa |
 | `modes/_profile.md` | Arquétipos, narrativa e deal-breakers do candidato |
 | `interview-prep/story-bank.md` | Histórias STAR+R acumuladas |
-| `interview-prep/question-bank.md` | Question bank com rastreamento de lacunas (criada no primeiro uso) |
+| `interview-prep/question-bank.md` | Banco de perguntas com rastreamento de lacunas (criado no primeiro uso) |
 | `interview-prep/interview-prep-guide.md` | Princípios gerais de entrevista (opcional) |
 | `interview-prep/{company}-{role}.md` | Arquivo de preparação específico da vaga |
 | `interview-prep/retracted-claims.md` | Alegações que o candidato rejeitou como indefensáveis — barreira rígida na simulação e no debrief (formato: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`) |
