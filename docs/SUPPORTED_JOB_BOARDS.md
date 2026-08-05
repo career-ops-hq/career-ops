@@ -50,7 +50,7 @@ are shared helpers and are not loaded as providers.
 | No Fluff Jobs | API | Auto-detects `nofluffjobs.com` and reads its public `/api/search/posting` API (Polish/EU tech board); paginates up to `max_pages` (default 5). |
 | NoDesk | RSS | Reads the public `https://nodesk.co/remote-jobs/index.xml` feed and parses it in-process. Configure with `provider: nodesk`. |
 | Oracle Recruiting Cloud (ORC) | API | Auto-detects `<tenant>.fa[.<region>][.ocs].oraclecloud.com` careers URLs (e.g. JPMorgan Chase, BNY Mellon, American Express) and reads the public zero-auth `recruitingCEJobRequisitions` REST API. Paginates by offset up to a safety cap (25 pages / ~5,000 jobs); pagination is driven by returned list length and `TotalJobsCount`, not the unreliable `hasMore` flag some tenants always report `false`. |
-| Personio | RSS | Auto-detects `<slug>.jobs.personio.de` or `.com` hosts and parses the public XML jobs feed. |
+| Personio | Parser | Auto-detects `<slug>.jobs.personio.de` or `.com` hosts and parses the public XML jobs feed; falls back to scraping the careers page HTML for tenants that have disabled the XML feed. |
 | Phenom People | API | Reads Phenom "CareerConnect" career sites (e.g. `careers.allianz.com`) via the public no-auth `POST {origin}/widgets` JSON endpoint on the branded host. Point `careers_url`/`api` at the Phenom host (or set `provider: phenom`). |
 | Pinpoint | API | Auto-detects `<slug>.pinpointhq.com` boards and reads the public zero-auth `/postings.json` per-tenant feed. |
 | Radancy | Parser | Reads Radancy (TalentBrew) career sites (e.g. `careers.munichre.com`) via the server-rendered `/{lang}/search-jobs?p={N}` results page (1-based pagination). Select with `provider: radancy`. |
