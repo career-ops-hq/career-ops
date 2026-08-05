@@ -917,19 +917,62 @@ function rebuildDashboardBinaryIfNeeded() {
 // match the failure-handling already used throughout apply().
 function curlGet(url, extraArgs = []) {
   return new Promise((resolve) => {
-    execFile(
-      'curl',
-      ['--silent', '--fail', '--max-time', '10', ...extraArgs, url],
-      { encoding: 'utf-8', timeout: 12000 },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-        } else {
-          resolve(stdout.trim());
+    // Keep the failure reason on every path: "offline" must be diagnosable.
+    // ENOENT (curl not on PATH), HTTP 403 (--fail, e.g. API rate limit), a
+    // proxy/TLS failure, and a real network outage all land in the callback
+    // and are handled by the fallback below. A corrupt or non-executable
+    // curl on PATH additionally makes execFile throw synchronously on
+    // Windows (spawn EFTYPE) instead of calling back — catch that too so a
+    // broken curl degrades to the fallback instead of crashing check().
+    try {
+      execFile(
+        'curl',
+        ['--silent', '--fail', '--max-time', '10', ...extraArgs, url],
+        { encoding: 'utf-8', timeout: 12000 },
+        (error, stdout) => {
+          if (error) {
+            resolve({ ok: false, detail: error.code || error.message.split('\n')[0] });
+          } else {
+            resolve({ ok: true, body: stdout.trim() });
+          }
         }
-      }
-    );
+      );
+    } catch (error) {
+      resolve({ ok: false, detail: error.code || error.message.split('\n')[0] });
+    }
   });
+}
+
+// Fallback for the both-curl-failed path: query upstream over the SAME
+// transport apply() uses. curl failing is not proof of being offline — curl
+// may be missing from PATH (ENOENT), the proxy may be configured only in git
+// config (http.proxy) with no HTTPS_PROXY env var, raw.githubusercontent.com
+// or api.github.com may be filtered while github.com itself is reachable, or
+// the request may simply exceed curl's 10s budget where git gets 300s. In all
+// of those, `apply` would succeed, so `check` must not report "offline".
+// Release Please tags (career-ops-vX.Y.Z) are matched by SEMVER_RE's
+// `(?:^|-)` anchor; the highest semver tag is the latest release.
+// Pure tag-parsing half of the fallback, exported for tests: given raw
+// `git ls-remote --tags` output, return the highest semver among the tags
+// (peeled ^{} refs collapse onto their tag; non-semver tags are ignored).
+export function highestSemverTag(lsRemoteOutput) {
+  let best = '';
+  for (const line of String(lsRemoteOutput || '').split('\n')) {
+    const tag = (line.split('\t')[1] || '')
+      .replace('refs/tags/', '')
+      .replace(/\^\{\}$/, '');
+    const match = tag.match(SEMVER_RE);
+    if (match && (!best || compareVersions(match[1], best) > 0)) best = match[1];
+  }
+  return best;
+}
+
+function gitRemoteVersion() {
+  try {
+    return highestSemverTag(gitQuiet('ls-remote', '--tags', CANONICAL_REPO));
+  } catch {
+    return ''; // unreachable over git too — genuinely offline
+  }
 }
 
 async function check() {
@@ -955,9 +998,9 @@ async function check() {
     ]),
   ]);
 
-  if (rawVersion !== null) {
+  if (rawVersion.ok) {
     try {
-      const raw = parseVersionFile(rawVersion);
+      const raw = parseVersionFile(rawVersion.body);
       const match = raw.match(SEMVER_RE);
       remote = match ? match[1] : '';
     } catch {
@@ -965,9 +1008,9 @@ async function check() {
     }
   }
 
-  if (releaseRaw !== null) {
+  if (releaseRaw.ok) {
     try {
-      const release = JSON.parse(releaseRaw);
+      const release = JSON.parse(releaseRaw.body);
       changelog = release.body || '';
       const rawTag = String(release.tag_name || '').trim();
       const match = rawTag.match(SEMVER_RE);
@@ -978,14 +1021,28 @@ async function check() {
   }
 
   if (!remote && !releaseVersion) {
-    // Both curl calls returned null → genuine network failure.
-    // If one returned non-null but unparseable, remote/releaseVersion are
-    // empty strings, which still reaches the offline branch — that's the
-    // right conservative behaviour (no version = can't determine status).
-    const bothNetworkFailed = rawVersion === null && releaseRaw === null;
-    const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
-    console.log(JSON.stringify({ status, local }));
-    return;
+    // Both curl calls failed → curl-level network failure. But check() and
+    // apply() use different transports (curl vs git), so before declaring
+    // the machine offline, ask upstream over git — the transport apply()
+    // will actually use. If git can see the remote, report the version it
+    // found instead of a false "offline" (which contradicts an apply that
+    // succeeds seconds later).
+    // If one call succeeded but was unparseable, remote/releaseVersion are
+    // empty strings and we fall through to no-remote-version — the right
+    // conservative behaviour (no version = can't determine status).
+    const bothNetworkFailed = !rawVersion.ok && !releaseRaw.ok;
+    if (bothNetworkFailed) {
+      remote = gitRemoteVersion();
+    }
+    if (!remote) {
+      const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
+      const payload = { status, local };
+      if (bothNetworkFailed) {
+        payload.detail = `curl VERSION: ${rawVersion.detail}; curl releases: ${releaseRaw.detail}; git ls-remote also failed`;
+      }
+      console.log(JSON.stringify(payload));
+      return;
+    }
   }
 
   // Use the higher version between VERSION file and GitHub Release
