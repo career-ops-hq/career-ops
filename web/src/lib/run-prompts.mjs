@@ -11,6 +11,33 @@
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 
 /**
+ * Is this company name safe to interpolate into a shell command inside a prompt?
+ *
+ * The fix-portal prompt tells the agent to run
+ * `node verify-portals.mjs --add "<company>"`, and fix-portal is one of the kinds
+ * that still holds Bash. Company names are not always the user's own typing — they
+ * reach the dashboard from public ATS listings — so a crafted one could close the
+ * quote and append a command. Allow the characters real company names use and
+ * refuse the rest. The caller turns a refusal into a 400 rather than sanitizing,
+ * because a silently rewritten name would resolve the wrong portal.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isShellSafeCompanyName(name) {
+  return typeof name === "string"
+    && name.length > 0
+    && name.length <= 80
+    && SAFE_COMPANY_NAME.test(name)
+    // A single & is needed (AT&T, Marks & Spencer); && is a command separator and
+    // appears in no real company name. Every other chaining character — ; | $ `
+    // quotes, newline — is already outside the character class.
+    && !name.includes("&&");
+}
+
+const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
+
+/**
  * The exact prompt each worker kind is sent.
  *
  * Lives in a plain .mjs so it can be asserted on as a VALUE: the pdf prompt is

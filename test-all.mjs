@@ -12272,6 +12272,31 @@ try {
             }
             if (c === '/' && next === '/') { line = true; continue; }
             if (c === '/' && next === '*') { block = true; i++; continue; }
+            // A `/` here can also open a REGEX literal, and a quote inside one (say
+            // /["']/) would otherwise flip the scanner into string state and swallow
+            // the rest of the file. Distinguish regex from division the usual way:
+            // regex can only follow an operator or an opener, never a value.
+            if (c === '/') {
+              const prev = out.replace(/\s+$/, '').slice(-1);
+              if (prev === '' || '(,=:[!&|?{};+-*%~^<>'.includes(prev)) {
+                out += c;
+                for (i++; i < src.length; i++) {
+                  const r = src[i];
+                  out += r;
+                  if (r === '\\') { out += src[i + 1] ?? ''; i++; continue; }
+                  if (r === '[') { // a class can contain an unescaped `/`
+                    for (i++; i < src.length && src[i] !== ']'; i++) {
+                      out += src[i];
+                      if (src[i] === '\\') { out += src[i + 1] ?? ''; i++; }
+                    }
+                    out += src[i] ?? '';
+                    continue;
+                  }
+                  if (r === '/' || r === '\n') break;
+                }
+                continue;
+              }
+            }
             if (c === '"' || c === "'" || c === '`') { quote = c; out += c; continue; }
             out += c;
           }

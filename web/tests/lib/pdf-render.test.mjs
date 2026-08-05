@@ -453,3 +453,28 @@ test("pdfRunOutcome: a no-output verdict outranks an otherwise healthy envelope"
   assert.equal(outcome.ok, false);
   assert.equal(outcome.message, "nothing came back");
 });
+
+test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
+  // Given the same report rendered twice, the second CV shorter than the first.
+  // route.ts clears no stale scratch file because this function is documented to
+  // rewrite the HTML before any render — a claim that rests entirely on
+  // writeFileSync truncating. Switch to an append flag, or to a write-then-rename
+  // helper, and every other test here stays green while the renderer reads the tail
+  // of a previous run's CV.
+  const dir = makeScratchDir();
+  const paths = { html: join(dir, "cv-web-018.html"), finalPdf: join(dir, "out.pdf") };
+  const long = `<!DOCTYPE html><html><body>${"X".repeat(4000)}</body></html>`;
+  const short = "<!DOCTYPE html><html><body>short</body></html>";
+  try {
+    // When the long document is written and then the short one to the same path
+    assert.equal(writeCvHtml({ pdfPaths: paths, html: long }).ok, true);
+    assert.equal(writeCvHtml({ pdfPaths: paths, html: short }).ok, true);
+
+    // Then the file is exactly the short document, with nothing left over
+    const onDisk = readFileSync(paths.html, "utf8");
+    assert.equal(onDisk, short);
+    assert.ok(!onDisk.includes("XXXX"), "trailing bytes from the earlier write survived");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

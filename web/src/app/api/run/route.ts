@@ -6,7 +6,7 @@ import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { buildPrompt } from "@/lib/run-prompts.mjs";
+import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
@@ -43,6 +43,17 @@ export async function POST(req: Request) {
       JSON.stringify({
         error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
       }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // fix-portal's prompt puts this straight into a shell command the agent runs, and
+  // a company name can arrive from a public ATS listing rather than the user's own
+  // typing. Refuse rather than sanitize: a silently rewritten name would repair the
+  // wrong portal.
+  if (kind === "fix-portal" && !isShellSafeCompanyName(input)) {
+    return new Response(
+      JSON.stringify({ error: "That company name has characters I can't safely pass to the portal checker — rename it in portals.yml first." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -141,6 +152,15 @@ export async function POST(req: Request) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
+      let stderrBuf = "";
+      // Widened over time: auth/login/quota failures are the most common real error
+      // and a narrow regex missed them (silent false "success").
+      const STDERR_FAILURE = /error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i;
+      const flagStderrLine = (line: string) => {
+        if (!line.trim() || !STDERR_FAILURE.test(line)) return;
+        sawError = true;
+        send({ type: "error", msg: line.trim().slice(0, 200) });
+      };
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
       // pdf-mode's agent only tailors content now (rendering moved to the
@@ -230,11 +250,17 @@ export async function POST(req: Request) {
         }
       });
       child.stderr.on("data", (chunk: string) => {
-        // Widened: auth/login/quota failures are the most common real error and
-        // the old narrow regex missed them (silent false "success").
-        if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(chunk)) {
-          sawError = true;
-          send({ type: "error", msg: chunk.trim().slice(0, 200) });
+        // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
+        // raw chunk both misses an error split across two of them and can match a
+        // fragment that is not the word it looks like. sawError feeds pdfRunOutcome,
+        // where a false positive fails a run whose PDF rendered fine, so the
+        // boundary has to be settled before the regex sees it.
+        stderrBuf += chunk;
+        let nl;
+        while ((nl = stderrBuf.indexOf("\n")) !== -1) {
+          const line = stderrBuf.slice(0, nl);
+          stderrBuf = stderrBuf.slice(nl + 1);
+          flagStderrLine(line);
         }
       });
       // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
@@ -279,6 +305,8 @@ export async function POST(req: Request) {
 
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
       child.on("close", (code) => {
+        // A trailing line with no newline would otherwise never be tested.
+        if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
         // A client disconnect can fire cancel() (which kills `child`) before
         // this event finally arrives — killing a process doesn't make its
         // 'close' event disappear, just delays it. Without this guard a pdf

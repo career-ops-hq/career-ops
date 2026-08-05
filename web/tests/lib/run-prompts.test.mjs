@@ -9,8 +9,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt } from "../../src/lib/run-prompts.mjs";
+import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
+import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
 const ARGS = { input: "018", memory: "", today: "2026-08-04" };
 
@@ -102,10 +103,47 @@ test("buildPrompt: memory is injected only when non-empty", () => {
   assert.ok(!/Durable notes/.test(without));
 });
 
-test("buildPrompt: research and pdf both forbid submitting anything", () => {
-  // Given the two kinds that touch a real application
-  // Then neither is permitted to submit — a prompt-level guarantee the tool
-  // scopes cannot express
-  assert.match(buildPrompt({ kind: "pdf", ...ARGS }), /Do not submit anything anywhere/i);
-  assert.match(buildPrompt({ kind: "evaluate", ...ARGS }), /NEVER submit an application/i);
+test("buildPrompt: every kind that can act carries its no-overreach clause", () => {
+  // Given the kinds whose tools let them change something. This is a prompt-level
+  // guarantee the tool scopes cannot express, so each must carry it — an earlier
+  // version of this test was named for research and checked evaluate, leaving one
+  // kind unverified.
+  const forbids = {
+    pdf: /Do not submit anything anywhere/i,
+    evaluate: /NEVER submit an application/i,
+    "fix-portal": /Never touch any other company/i,
+  };
+  for (const [kind, pattern] of Object.entries(forbids)) {
+    assert.match(buildPrompt({ kind, ...ARGS }), pattern, `${kind} must carry its no-overreach clause`);
+  }
+});
+
+test("buildPrompt: research needs no such clause because it cannot act", () => {
+  // Given research investigates the user's OWN portfolio and is denied every
+  // write-capable tool, so there is nothing for it to submit to. Its protection is
+  // the tool scope, not prompt text — asserted here so that reasoning is visible
+  // rather than looking like an omission.
+  assert.equal(grantsWriteCapability(toolScopeFor("research")), false);
+  assert.match(buildPrompt({ kind: "research", ...ARGS }), /report:/i);
+});
+
+test("isShellSafeCompanyName: allows real company names", () => {
+  // Given names the scanner and portals.yml legitimately contain
+  for (const name of ["Acme Corp", "Nestlé S.A.", "AT&T", "Foo (EU)", "Zeta+Co", "Bar/Baz", "O'Neill Ltd"]) {
+    // Then they pass, so the guard cannot break a legitimate fix-portal run
+    assert.equal(isShellSafeCompanyName(name), true, name);
+  }
+});
+
+test("isShellSafeCompanyName: refuses anything that could close the quote", () => {
+  // Given the fix-portal prompt interpolates this into `--add "<company>"` for a
+  // kind that holds Bash, and company names can come from public ATS listings
+  for (const name of ['x";true`;', "a$(id)", "a`id`", "a|b", "a&&b", "a;b", "a\nb", 'a" ; rm -rf ~ ; "b']) {
+    // Then each is refused — the route turns this into a 400 rather than rewriting
+    assert.equal(isShellSafeCompanyName(name), false, name);
+  }
+  // ...as are the degenerate inputs
+  assert.equal(isShellSafeCompanyName(""), false);
+  assert.equal(isShellSafeCompanyName("x".repeat(81)), false);
+  assert.equal(isShellSafeCompanyName(undefined), false);
 });
