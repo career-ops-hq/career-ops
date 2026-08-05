@@ -81,6 +81,25 @@ console.log('\n🧪 Testing update-check git fallback...');
   }
 }
 
+// ── prefix mode anchors the ENTIRE remainder ────────────────────────────
+// career-ops-v1.25.0-preview-v99.0.0 passes the startsWith check, and
+// SEMVER_RE's (?:^|-) anchor would match its trailing -v99.0.0 — the
+// remainder after the prefix must be exactly the version, nothing more.
+{
+  const malformed = 'aaaa\trefs/tags/career-ops-v1.25.0-preview-v99.0.0';
+  if (highestSemverTag(malformed, 'career-ops-v') === '') {
+    pass('highestSemverTag("career-ops-v") rejects a prefix-matching tag with trailing content (no 99.0.0 fabrication)');
+  } else {
+    fail(`highestSemverTag malformed remainder = ${JSON.stringify(highestSemverTag(malformed, 'career-ops-v'))}`);
+  }
+  const mixed = `${malformed}\nbbbb\trefs/tags/career-ops-v1.25.0`;
+  if (highestSemverTag(mixed, 'career-ops-v') === '1.25.0') {
+    pass('highestSemverTag("career-ops-v") still picks the real release next to a malformed sibling tag');
+  } else {
+    fail(`highestSemverTag malformed+real = ${JSON.stringify(highestSemverTag(mixed, 'career-ops-v'))}`);
+  }
+}
+
 // ── plain v-prefixed and bare tags (SEMVER_RE's shapes, unfiltered mode) ─
 {
   if (highestSemverTag('aaaa\trefs/tags/v2.0.0\nbbbb\trefs/tags/1.9.9') === '2.0.0') {
@@ -144,6 +163,12 @@ console.log('\n🧪 Testing update-check git fallback...');
     pass('offline/no-remote-version JSON distinguishes git-failed from git-reachable-but-tagless in detail');
   } else {
     fail('detail field no longer distinguishes git transport failure from a tagless remote');
+  }
+
+  if (/git ls-remote also failed: \$\{gitProbe\.detail\}/.test(src) && /detail: error\.code \|\| String\(error\.message \|\| error\)\.split\('\\n'\)\[0\]/.test(src)) {
+    pass('the git failure reason (error.code or first message line) is preserved into payload.detail');
+  } else {
+    fail('git failure detail is discarded again — offline payloads lose the git-side diagnosis');
   }
 
   if (/console\.log\(JSON\.stringify\(payload\)\);\s*return;/.test(src)) {

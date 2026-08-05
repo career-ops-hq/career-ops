@@ -957,7 +957,10 @@ function curlGet(url, extraArgs = []) {
 // (peeled ^{} refs collapse onto their tag; non-semver tags are ignored;
 // a stray \r survives a CRLF-translating wrapper and would defeat
 // SEMVER_RE's $ anchor, so it is stripped). When tagPrefix is given, only
-// tags starting with it count.
+// tags starting with it count, and the ENTIRE remainder after the prefix
+// must be the version — SEMVER_RE's (?:^|-) anchor would otherwise let a
+// tag like career-ops-v1.25.0-preview-v99.0.0 report 99.0.0.
+const PREFIXED_SEMVER_RE = /^v?(\d+\.\d+\.\d+)$/i;
 export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
   let best = '';
   for (const line of String(lsRemoteOutput || '').split('\n')) {
@@ -966,15 +969,19 @@ export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
       .replace('refs/tags/', '')
       .replace(/\^\{\}$/, '');
     if (tagPrefix && !tag.startsWith(tagPrefix)) continue;
-    const match = tag.match(SEMVER_RE);
+    const candidate = tagPrefix ? tag.slice(tagPrefix.length) : tag;
+    const match = candidate.match(tagPrefix ? PREFIXED_SEMVER_RE : SEMVER_RE);
     if (match && (!best || compareVersions(match[1], best) > 0)) best = match[1];
   }
   return best;
 }
 
-// Returns the latest career-ops release version reachable over git,
-// '' when upstream is reachable but carries no matching release tag, and
-// null when the git transport failed too (genuinely offline).
+// Probes upstream over git. Returns { ok: true, version } on success —
+// version is '' when upstream is reachable but carries no matching release
+// tag — and { ok: false, detail } when the git transport failed too
+// (genuinely offline), with detail carrying error.code or the first
+// error-message line, mirroring curlGet()'s convention, so offline
+// payloads stay diagnosable on the git side as well.
 function gitRemoteVersion() {
   try {
     // Direct execFileSync rather than gitQuiet: this probe runs on every
@@ -994,9 +1001,10 @@ function gitRemoteVersion() {
     // prefix, or a foreign component overtaking career-ops' version number
     // would fabricate a permanent false update-available on exactly the
     // curl-blocked machines this fallback serves.
-    return highestSemverTag(out, 'career-ops-v');
-  } catch {
-    return null; // unreachable over git too — genuinely offline
+    return { ok: true, version: highestSemverTag(out, 'career-ops-v') };
+  } catch (error) {
+    // Unreachable over git too — genuinely offline. Keep the reason.
+    return { ok: false, detail: error.code || String(error.message || error).split('\n')[0] };
   }
 }
 
@@ -1059,19 +1067,20 @@ async function check() {
     let gitProbe = null;
     if (bothNetworkFailed) {
       gitProbe = gitRemoteVersion();
-      if (gitProbe) remote = gitProbe;
+      if (gitProbe.ok && gitProbe.version) remote = gitProbe.version;
     }
     if (!remote) {
-      // gitProbe === null → the git transport failed too: genuinely
-      // offline. gitProbe === '' → git reached upstream but found no
-      // career-ops release tag: the network is fine, we just cannot
-      // determine a version — that is no-remote-version, not offline.
-      const status = bothNetworkFailed && gitProbe === null ? 'offline' : 'no-remote-version';
+      // gitProbe.ok === false → the git transport failed too: genuinely
+      // offline. gitProbe.ok with an empty version → git reached upstream
+      // but found no career-ops release tag: the network is fine, we just
+      // cannot determine a version — no-remote-version, not offline.
+      const gitFailed = gitProbe !== null && !gitProbe.ok;
+      const status = bothNetworkFailed && gitFailed ? 'offline' : 'no-remote-version';
       const payload = { status, local };
       if (bothNetworkFailed) {
         payload.detail = `curl VERSION: ${rawVersion.detail}; curl releases: ${releaseRaw.detail}; ` +
-          (gitProbe === null
-            ? 'git ls-remote also failed'
+          (gitFailed
+            ? `git ls-remote also failed: ${gitProbe.detail}`
             : 'git ls-remote reachable but returned no career-ops release tags');
       }
       console.log(JSON.stringify(payload));
