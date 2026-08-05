@@ -126,6 +126,91 @@ try {
   } else {
     fail(`merge-tracker did not resolve accepted -> Hired: ${acceptedRow.trim()}`);
   }
+
+  // --- Re-evaluation write-through, both directions -----------------------
+  // A re-evaluation that scores LOWER used to hit a bare `else`: the row kept
+  // its stale optimistic score, the new report was orphaned, and the TSV was
+  // archived to merged/ as though it had landed.
+  const SEED = '| 7 | 2026-02-01 | Initech | Payments PM | 3.8/5 | Evaluated | ✅ | '
+    + '[7](../reports/7-initech-2026-02-01.md) | Req R5639. stretch apply |\n';
+
+  const down = runMergeDetailed({
+    '8-initech.tsv': '8\t2026-03-01\tInitech\tPayments PM\tEvaluated\t3.0/5\t✅\t[8](reports/8-initech-2026-03-01.md)\tre-scored: req is 12 months old, rails gap is a gate\n',
+  }, { rows: SEED });
+  const downRow = down.tracker.split('\n').find(l => /\bInitech\b/.test(l)) || '';
+
+  if (/\|\s*3\.0\/5\s*\|/.test(downRow) && !/\|\s*3\.8\/5\s*\|/.test(downRow)) {
+    pass('re-evaluation with a LOWER score writes through (no silent skip)');
+  } else {
+    fail(`lower-scored re-eval did not write through: ${downRow.trim()}`);
+  }
+
+  if (/\[8\]/.test(downRow) && !/\[7\]\(/.test(downRow)) {
+    pass('downgrade re-points the Report link at the newer report');
+  } else {
+    fail(`downgrade left a stale report link: ${downRow.trim()}`);
+  }
+
+  // The fuzzy matcher can mis-pair genuinely different roles (role-matcher.mjs
+  // drops "Senior" and short tokens), so a downgrade must stay recoverable.
+  if (/Superseded report \[7\] \(was 3\.8\/5\)/.test(downRow)) {
+    pass('downgrade records the superseded report number in Notes');
+  } else {
+    fail(`downgrade did not record the superseded report: ${downRow.trim()}`);
+  }
+
+  // mergeNotes() keeps the existing cell verbatim and FIRST (#2483), so the
+  // seeded Req number — which this script's own sibling-req guard reads back —
+  // must survive the downgrade rather than being overwritten by it.
+  if (/Req R5639/.test(downRow)) {
+    pass('downgrade preserves the existing Notes (req number still readable)');
+  } else {
+    fail(`downgrade discarded the existing Notes: ${downRow.trim()}`);
+  }
+
+  if (/DOWNGRADE/.test(down.output) && /🔽/.test(down.output)) {
+    pass('downgrade is announced on stdout, not merged silently');
+  } else {
+    fail(`downgrade was not announced: ${down.output.trim()}`);
+  }
+
+  if (/🔄1 updated/.test(down.output) && /⏭️0 skipped/.test(down.output)) {
+    pass('downgrade counts as an update, not a skip');
+  } else {
+    fail(`downgrade counters wrong: ${down.output.trim()}`);
+  }
+
+  // An upgrade must keep behaving exactly as before this change.
+  const up = runMergeDetailed({
+    '9-initech.tsv': '9\t2026-03-01\tInitech\tPayments PM\tEvaluated\t4.5/5\t✅\t[9](reports/9-initech-2026-03-01.md)\tre-scored up after JD refresh\n',
+  }, { rows: SEED });
+  const upRow = up.tracker.split('\n').find(l => /\bInitech\b/.test(l)) || '';
+
+  if (/\|\s*4\.5\/5\s*\|/.test(upRow) && /Re-eval 2026-03-01 \(3\.8→4\.5\)/.test(upRow)) {
+    pass('re-evaluation with a HIGHER score still writes through unchanged');
+  } else {
+    fail(`upgrade path regressed: ${upRow.trim()}`);
+  }
+
+  if (!/Superseded report/.test(upRow) && !/DOWNGRADE/.test(up.output)) {
+    pass('upgrade does not add the superseded-report marker');
+  } else {
+    fail(`upgrade wrongly marked as a downgrade: ${upRow.trim()}`);
+  }
+
+  // Equal scores write through too: the notes and report link are still fresher
+  // than what the row holds, and no superseded marker is warranted.
+  const same = runMergeDetailed({
+    '10-initech.tsv': '10\t2026-03-02\tInitech\tPayments PM\tEvaluated\t3.8/5\t✅\t[10](reports/10-initech-2026-03-02.md)\tsame score, fresher read\n',
+  }, { rows: SEED });
+  const sameRow = same.tracker.split('\n').find(l => /\bInitech\b/.test(l)) || '';
+
+  if (/\[10\]/.test(sameRow) && /Re-eval 2026-03-02 \(3\.8→3\.8\)/.test(sameRow)
+      && !/Superseded report/.test(sameRow) && /🔄1 updated/.test(same.output)) {
+    pass('equal-scored re-evaluation writes through without a superseded marker');
+  } else {
+    fail(`equal-score re-eval mishandled: ${sameRow.trim()} | ${same.output.trim()}`);
+  }
 } catch (e) {
   fail(`merge-tracker.mjs tests crashed: ${e.message}`);
 }
@@ -165,19 +250,22 @@ try {
   }
 
   // The score comparison must read the CURRENT row, not the parse-time
-  // snapshot: a lower-scored addition arriving after a higher-scored one must
-  // be skipped rather than overwriting it.
+  // snapshot. Since #2411 a lower-scored addition writes through rather than
+  // being skipped, so what the stale snapshot would corrupt is no longer *which*
+  // row survives but what the re-eval marker claims: against the parse-time
+  // score this renders `(4.0→4.2)` and silently mis-states the history the row
+  // is supposed to preserve. Asserting the marker keeps the original invariant
+  // under test, on the behaviour that replaced the skip.
   const downgrade = runMergeDetailed({
     'a-001-acme.tsv': '1\t2026-02-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.7/5\t❌\t[1](reports/001-acme-2026-01-01.md)\thigh\n',
     'b-001-acme.tsv': '1\t2026-03-01\tAcme\tStaff Data Platform Engineer\tEvaluated\t4.2/5\t❌\t[1](reports/001-acme-2026-01-01.md)\tlow\n',
   }, { rows: seeded });
   const downgradeRows = dataRows(downgrade.tracker);
-  // Both the surviving row AND the accounting have to be right: against the
-  // stale-snapshot code the 4.2 addition compared against the parse-time 4.0,
-  // was announced as an update, and only failed to overwrite because its
-  // indexOf() lookup silently missed. Same file on disk, opposite reason.
-  if (downgradeRows.length === 1 && /4\.7\/5/.test(downgradeRows[0]) && /⏭️1 skipped/.test(downgrade.output)) {
-    pass('a later lower-scored addition is skipped against the CURRENT score, not the parse-time one');
+  if (downgradeRows.length === 1
+      && /4\.2\/5/.test(downgradeRows[0])
+      && /Re-eval 2026-03-01 \(4\.7→4\.2\)/.test(downgradeRows[0])
+      && /🔄2 updated/.test(downgrade.output)) {
+    pass('a later lower-scored addition writes through against the CURRENT score, not the parse-time one');
   } else {
     fail(`stale score comparison mishandled the downgrade: ${downgradeRows.join(' // ')} | ${downgrade.output.split('\n').find(l => l.includes('Summary:')) || '(no summary)'}`);
   }

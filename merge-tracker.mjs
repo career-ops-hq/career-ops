@@ -273,9 +273,15 @@ function companiesMatch(a, b) {
  * @param {object} addition - Parsed TSV addition (uses `notes` and `date`).
  * @param {number} oldScore - Score currently on the row.
  * @param {number} newScore - Score from the addition.
+ * @param {string} [extraMarker] - Appended to the re-eval marker, before any
+ *   incoming notes. Used by the downgrade path to record the superseded report
+ *   (#2411). It rides on the marker rather than on `addition.notes` so that the
+ *   repeat detection below keeps comparing the user's own text against the
+ *   user's own text — a generated fragment in that comparison would make every
+ *   downgrade look like a new note and defeat it.
  * @returns {string} Combined Notes cell.
  */
-function mergeNotes(existingNotes, addition, oldScore, newScore) {
+function mergeNotes(existingNotes, addition, oldScore, newScore, extraMarker = '') {
   // Trailing period trimmed only so the '. ' join does not produce '..'; no
   // other character of the existing text is touched. The tracker's "no data"
   // sentinels (the looksLikeScoreCell set minus the score-only DUP) count as
@@ -286,7 +292,9 @@ function mergeNotes(existingNotes, addition, oldScore, newScore) {
     ? ''
     : prevRaw.replace(/\s*\.\s*$/, '');
   const incoming = String(addition.notes ?? '').trim();
-  const marker = `Re-eval ${addition.date} (${oldScore}→${newScore})`;
+  const marker = extraMarker
+    ? `Re-eval ${addition.date} (${oldScore}→${newScore}) — ${extraMarker}`
+    : `Re-eval ${addition.date} (${oldScore}→${newScore})`;
   // Re-running the same evaluation would otherwise repeat its own text; the
   // marker still records that the re-evaluation happened. Repeats are detected
   // per CLAUSE — the same '. ' separator this function joins with — not by raw
@@ -856,48 +864,68 @@ for (const file of tsvFiles) {
     const newScore = parseScore(addition.score);
     const oldScore = parseScore(duplicate.score);
 
-    if (newScore > oldScore) {
-      console.log(`🔄 Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`);
-      const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
-      const updatedLine = buildRow({
-        num: duplicate.num, date: addition.date, company: addition.company,
-        role: reportNumMatched ? addition.role : duplicate.role,
-        via: addition.via || duplicate.via || '—',
-        location: addition.location || duplicate.location || '—',
-        score: addition.score, status: duplicate.status, pdf,
-        report: addition.report,
-        notes: mergeNotes(duplicate.notes, addition, oldScore, newScore),
-      });
-      if (replaceTrackerLine(duplicate.raw, updatedLine)) {
-        // Refresh the cached row from the line just written (#2392). `raw` was
-        // captured when applications.md was parsed and used to be left stale
-        // after the write, so a SECOND addition matching this same row found
-        // nothing at indexOf(), fell through a branch with no else, and was
-        // archived as merged — the evaluation was gone with no warning and no
-        // recoverable copy (the tracker is gitignored and no .bak is written).
-        // The stale `score` was just as damaging: the second comparison read
-        // the pre-update score, so which of several re-evaluations survived
-        // depended on TSV filename sort order. Re-parsing the written line is
-        // the faithful refresh — the cached row then holds exactly what a fresh
-        // read of the tracker would produce. syncPdfFlags() has always kept its
-        // cache in step this way; the update path did not.
-        const refreshed = parseAppLine(updatedLine);
-        if (refreshed) Object.assign(duplicate, refreshed);
-        else duplicate.raw = updatedLine;
-        updated++;
-      } else {
-        // Unreachable once `raw` is refreshed above, but never silent again: a
-        // row we cannot locate means the addition was NOT applied, so say so,
-        // keep the TSV out of merged/, and fail the run.
-        console.error(
-          `❌ ${file}: could not locate tracker row #${duplicate.num} ` +
-          `(${duplicate.company} — ${duplicate.role}) to update; this evaluation was NOT merged.`,
-        );
-        failedAdditions.push(file);
-      }
+    // A re-evaluation writes through in BOTH directions. A lower score is not
+    // noise to discard — it is newer information, and often the most valuable
+    // kind: a targeting/policy change, a freshly-discovered staleness signal (a
+    // requisition turning out to be a year old), or a gap re-weighted from
+    // "ramp-up item" to "decisive gate". The former `newScore > oldScore` gate
+    // sent all of those to a bare `else`, so the tracker kept asserting a stale
+    // optimistic score, the new report was orphaned, and the TSV was archived to
+    // merged/ as if it had landed (#2411). Equal scores write through too, since
+    // the notes and report link are still fresher than what the row holds.
+    //
+    // Because the fuzzy matcher can mis-pair genuinely different roles (see
+    // role-matcher.mjs — "Senior" is a stopword and short tokens are dropped), a
+    // downgrade records the superseded report number so a bad match stays
+    // recoverable from the tracker alone. mergeNotes() keeps the existing cell
+    // verbatim and first, so a second downgrade preserves the earlier marker
+    // rather than overwriting it.
+    const downgrade = newScore < oldScore;
+    const oldReportNum = extractReportNum(duplicate.report);
+    const supersededNote = downgrade && oldReportNum && oldReportNum !== reportNum
+      ? `Superseded report [${oldReportNum}] (was ${oldScore}/5)`
+      : '';
+
+    console.log(
+      `${downgrade ? '🔽' : '🔄'} Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`
+      + (downgrade ? ' — DOWNGRADE, re-eval scored lower' : ''),
+    );
+    const pdf = reportNum && pdfIndex.has(String(reportNum)) ? '✅' : duplicate.pdf;
+    const updatedLine = buildRow({
+      num: duplicate.num, date: addition.date, company: addition.company,
+      role: reportNumMatched ? addition.role : duplicate.role,
+      via: addition.via || duplicate.via || '—',
+      location: addition.location || duplicate.location || '—',
+      score: addition.score, status: duplicate.status, pdf,
+      report: addition.report,
+      notes: mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote),
+    });
+    if (replaceTrackerLine(duplicate.raw, updatedLine)) {
+      // Refresh the cached row from the line just written (#2392). `raw` was
+      // captured when applications.md was parsed and used to be left stale
+      // after the write, so a SECOND addition matching this same row found
+      // nothing at indexOf(), fell through a branch with no else, and was
+      // archived as merged — the evaluation was gone with no warning and no
+      // recoverable copy (the tracker is gitignored and no .bak is written).
+      // The stale `score` was just as damaging: the second comparison read
+      // the pre-update score, so which of several re-evaluations survived
+      // depended on TSV filename sort order. Re-parsing the written line is
+      // the faithful refresh — the cached row then holds exactly what a fresh
+      // read of the tracker would produce. syncPdfFlags() has always kept its
+      // cache in step this way; the update path did not.
+      const refreshed = parseAppLine(updatedLine);
+      if (refreshed) Object.assign(duplicate, refreshed);
+      else duplicate.raw = updatedLine;
+      updated++;
     } else {
-      console.log(`⏭️  Skip: ${addition.company} — ${addition.role} (existing #${duplicate.num} ${oldScore} >= new ${newScore})`);
-      skipped++;
+      // Unreachable once `raw` is refreshed above, but never silent again: a
+      // row we cannot locate means the addition was NOT applied, so say so,
+      // keep the TSV out of merged/, and fail the run.
+      console.error(
+        `❌ ${file}: could not locate tracker row #${duplicate.num} ` +
+        `(${duplicate.company} — ${duplicate.role}) to update; this evaluation was NOT merged.`,
+      );
+      failedAdditions.push(file);
     }
   } else {
     // New entry - preserve the TSV's reserved ID whenever it is actually
