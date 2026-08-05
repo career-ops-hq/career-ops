@@ -34,6 +34,20 @@ function makeRepo() {
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
+  // Isolate the fixture from the contributor's global git config. A global
+  // core.excludesFile is the one that matters here — these assertions are ABOUT
+  // ignore resolution, so a stray global rule silently changes the result (the
+  // failure mode reported in #2269). Signing and hooks would break the commits.
+  //
+  // Point at an empty file/dir rather than /dev/null: git on Windows maps that
+  // to `nul` and dies with "fatal: cannot use nul as an exclude file".
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
+  writeFileSync(emptyExcludes, '');
+  mkdirSync(emptyHooks, { recursive: true });
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.excludesFile', emptyExcludes);
+  g('config', 'core.hooksPath', emptyHooks);
   return { dir, g, ctx: { git: g } };
 }
 
@@ -102,17 +116,34 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   writeFileSync(join(dir, 'dirlevel/F.md'), 'v2');
   writeFileSync(join(dir, 'filelevel/F.md'), 'v2');
 
+  // Probe the boundary through a PLAIN add, not addPaths. addPaths always
+  // passes -f, under which both cases stage fine — so asserting through it
+  // could never detect the boundary moving.
   let fileLevelThrew = null;
   try {
-    addPaths(['filelevel/F.md'], ctx);
+    g('add', '--', 'filelevel/F.md');
   } catch (err) {
     fileLevelThrew = err;
   }
   if (!fileLevelThrew) {
     pass('a file-level ignore rule over a tracked path was never the problem');
   } else {
-    fail('file-level ignore rule now blocks staging — the boundary moved');
+    fail('file-level ignore rule now blocks a plain add — the boundary moved');
   }
+
+  let plainDirThrew = null;
+  try {
+    g('add', '--', 'dirlevel/F.md');
+  } catch (err) {
+    plainDirThrew = err;
+  }
+  if (plainDirThrew) {
+    pass('a directory-level rule blocks a plain add — this is why -f is required');
+  } else {
+    fail('a plain add no longer fails on a directory-level rule — -f may be unnecessary');
+  }
+
+  g('reset', '-q');
 
   let dirLevelThrew = null;
   try {
@@ -223,11 +254,18 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   }
 
   // And with the guard applied (marker filtered out), the same batch stages.
-  addPaths(['AGENTS.md'], ctx);
-  if (stagedPaths(g).has('AGENTS.md')) {
+  // Guarded like every other call here: an unguarded throw would abort the file
+  // before fail() reports and before the cleanup below runs.
+  let recoveryThrew = null;
+  try {
+    addPaths(['AGENTS.md'], ctx);
+  } catch (err) {
+    recoveryThrew = err;
+  }
+  if (!recoveryThrew && stagedPaths(g).has('AGENTS.md')) {
     pass('the same batch stages once the untracked marker is filtered out');
   } else {
-    fail('filtering the marker did not restore staging');
+    fail(`filtering the marker did not restore staging: ${recoveryThrew?.message.split('\n')[0] ?? 'not staged'}`);
   }
   rmSync(dir, { recursive: true, force: true });
 }
