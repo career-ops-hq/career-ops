@@ -38,6 +38,7 @@ are shared helpers and are not loaded as providers.
 | Jobicy | API | Reads the board-wide `https://jobicy.com/api/v2/remote-jobs?count=50` JSON feed (remote-jobs aggregator). Configure with `provider: jobicy` in a `job_boards:` entry. |
 | Jobspresso | RSS | Reads the public WordPress `https://jobspresso.co/?feed=job_feed` XML job feed and parses it in-process. Configure with `provider: jobspresso` in a `job_boards:` entry. |
 | Jobstreet / SEEK | API | Uses the public SEEK chalice-search JSON API for Jobstreet and SEEK sites. Configure explicitly with `provider: jobstreet`. |
+| join.com | Parser | Auto-detects `join.com/companies/<slug>` careers URLs and parses the `__NEXT_DATA__` JSON embedded in the server-rendered HTML (no separate API). Paginates `?page=N` up to the page's own reported `pagination.pageCount`. |
 | JustJoin.it | API | Auto-detects `justjoin.it/job-offers/...` URLs and reads the public `justjoin.it/api/candidate-api/offers` API (Polish/EU tech board); paginates up to `max_pages` (default 50). |
 | Landing.jobs | API | Reads the board-wide `https://landing.jobs/api/v1/jobs` JSON feed (tech, Europe). Configure with `provider: landingjobs`; company is derived from the posting URL slug. |
 | LaraJobs | RSS | Reads the board-wide `https://larajobs.com/feed` RSS feed (Laravel / PHP jobs) and parses it in-process. Configure with `provider: larajobs`; company and location come from the feed's `job:` namespace. |
