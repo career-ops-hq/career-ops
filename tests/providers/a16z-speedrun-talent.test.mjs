@@ -197,23 +197,69 @@ try {
   if (defWarnings.some((w) => w.includes('truncated at max_pages=6'))) pass('fetch() warns when the default budget truncates the feed');
   else fail(`default-budget truncation warning missing; captured = ${JSON.stringify(defWarnings)}`);
 
-  // MAX_PAGES_CAP: an oversized max_pages is clamped to 350 — sized to span
-  // the live board (~350 total_pages) — and the truncation warning fires
-  // (spied via console.error, restored in finally).
+  // MAX_PAGES_CAP: an oversized max_pages is clamped to 1000 and the
+  // truncation warning fires (spied via console.error, restored in finally).
+  // Pages derive from the requested `page` param with page-distinct ids —
+  // 1000 identical re-fetches of page 0 would fail the sequence assertion.
+  const mkCapCtx = (calls) => ({
+    fetchJson: async (url) => {
+      const p = Number(new URL(url).searchParams.get('page'));
+      calls.push(p);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(p * 50 + i)), total_pages: 1500 };
+    },
+  });
   const bigCalls = [];
-  const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 500 }; } };
   const warnings = [];
   const realConsoleError = console.error;
+  let bigJobs;
   try {
     console.error = (...args) => warnings.push(args.join(' '));
-    await provider.fetch({ max_pages: 9999 }, bigCtx);
+    bigJobs = await provider.fetch({ max_pages: 9999 }, mkCapCtx(bigCalls));
   } finally {
     console.error = realConsoleError;
   }
-  if (bigCalls.length === 350) pass('fetch() clamps max_pages to the 350-page cap');
-  else fail(`cap clamp fetched ${bigCalls.length} pages`);
-  if (warnings.some((w) => w.includes('truncated at max_pages=350'))) pass('fetch() warns when the cap truncates the feed');
+  const bigPagesOk = bigCalls.length === 1000 && bigCalls.every((p, i) => p === i);
+  if (bigPagesOk && new Set(bigJobs.map((j) => j.url)).size === 1000 * 50) pass('fetch() clamps max_pages to the 1000-page cap (pages 0..999, distinct jobs)');
+  else fail(`cap clamp = ${JSON.stringify({ calls: bigCalls.length, jobs: bigJobs?.length })}`);
+  if (warnings.some((w) => w.includes('truncated at max_pages=1000'))) pass('fetch() warns when the cap truncates the feed');
   else fail(`cap warning missing; captured = ${JSON.stringify(warnings)}`);
+
+  // Cap boundary from both directions: max_pages=1000 is NOT clamped
+  // (exactly 1000 calls), max_pages=1001 IS (also 1000) — pins the cap at
+  // exactly 1000 against off-by-one regressions in resolveMaxPages.
+  const atCapCalls = [];
+  const atCapReal = console.error;
+  try {
+    console.error = () => {};
+    await provider.fetch({ max_pages: 1000 }, mkCapCtx(atCapCalls));
+  } finally {
+    console.error = atCapReal;
+  }
+  const overCapCalls = [];
+  const overCapReal = console.error;
+  try {
+    console.error = () => {};
+    await provider.fetch({ max_pages: 1001 }, mkCapCtx(overCapCalls));
+  } finally {
+    console.error = overCapReal;
+  }
+  if (atCapCalls.length === 1000 && overCapCalls.length === 1000) pass('fetch() cap boundary: max_pages=1000 runs unclamped, 1001 clamps to 1000');
+  else fail(`cap boundary = ${JSON.stringify({ at: atCapCalls.length, over: overCapCalls.length })}`);
+
+  // Invalid max_pages values (0, non-integer string) fall back to the
+  // 6-page default — pins resolveMaxPages' guard to the new default.
+  for (const [label, bad] of [['0', 0], ['"350" (string)', '350']]) {
+    const badCalls = [];
+    const badReal = console.error;
+    try {
+      console.error = () => {};
+      await provider.fetch({ max_pages: bad }, mkCapCtx(badCalls));
+    } finally {
+      console.error = badReal;
+    }
+    if (badCalls.length === 6) pass(`fetch() falls back to the 6-page default for invalid max_pages=${label}`);
+    else fail(`invalid max_pages=${label} fetched ${badCalls.length} pages`);
+  }
 
   // fetch(): malformed payload throws with a useful message.
   let threw = false;
