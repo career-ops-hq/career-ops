@@ -85,8 +85,12 @@ bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
-*.bak
+# Backup files. Two shapes exist: `{file}.bak` (normalize-statuses.mjs,
+# dedup-tracker.mjs, tracker.mjs) and `{file}.bak-{ISO timestamp}`
+# (web/src/lib/core/safe-write.ts). A plain `*.bak` glob misses the timestamped
+# form, which for cv.md or portals.yml leaves a file holding the same PII as the
+# original sitting untracked in the repo root. Trailing `*` covers both.
+*.bak*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
