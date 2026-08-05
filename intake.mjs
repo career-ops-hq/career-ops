@@ -144,24 +144,40 @@ function listSourceFiles() {
   // documents/ — re-enters it until the path length gives out, reporting
   // one CV a dozen times over. Two links to the same folder collapse too.
   const walked = new Set();
+
+  // Every directory reachable without following a link, by real path. Dirent's
+  // isDirectory() is false for a symlink, so this pass naturally stays inside
+  // the real tree.
+  //
+  // It exists because the walk keeps whichever alias of a folder it reaches
+  // first, and that path becomes the key in intake-state.json. With two ways
+  // into one folder — documents/cv plus a symlink documents/current -> cv — the
+  // key would otherwise depend on readdirSync order, which is filesystem
+  // dependent: the same documents/ could produce `cv/master.md` on one machine
+  // and `current/master.md` on another, and an already ingested source would
+  // resurface as new. Knowing the real directories up front lets a link step
+  // aside for the path the user actually created.
+  const realDirs = new Set();
+  const claimRealDirs = (dir) => {
+    let real;
+    try { real = realpathSync(dir); } catch { return; }
+    if (realDirs.has(real)) return;
+    realDirs.add(real);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isDirectory()) claimRealDirs(join(dir, entry.name));
+    }
+  };
+  claimRealDirs(DOCS_DIR);
+
   const walk = (dir) => {
     let real;
     try { real = realpathSync(dir); } catch { return; }
     if (walked.has(real)) return;
     walked.add(real);
-    // `walked` keeps whichever alias of a folder the walk reaches first, and
-    // that path becomes the key in intake-state.json. readdirSync order is
-    // filesystem-dependent, so with two ways in — documents/cv plus a symlink
-    // documents/current -> cv — the key could differ between machines and an
-    // already ingested source would resurface as new.
-    //
-    // Real directories first, then symlinks, each alphabetically. Sorting
-    // alone would be deterministic but wrong: `current` sorts before `cv`, so
-    // the link would win and the user's actual folder name would vanish from
-    // the report. A real path is always the better name for what it points at.
+    // Sorted so the traversal itself doesn't vary with readdirSync order.
     const entries = readdirSync(dir, { withFileTypes: true })
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-      .sort((a, b) => Number(a.isSymbolicLink()) - Number(b.isSymbolicLink()));
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name === 'README.md' && dir === DOCS_DIR) continue;
       const abs = join(dir, entry.name);
@@ -177,8 +193,19 @@ function listSourceFiles() {
           isFile = st.isFile();
         } catch { continue; }
       }
-      if (isDir) walk(abs);
-      else if (isFile) out.push(abs);
+      if (isDir) {
+        // A link onto a directory that is already in the tree under its own
+        // name adds nothing but a second alias — skip it wherever it sits, so
+        // documents/a/link -> documents/z cannot claim `z` before the walk
+        // reaches it. Links pointing outside documents/ have no real in-tree
+        // name, so they are still followed.
+        if (entry.isSymbolicLink()) {
+          let target;
+          try { target = realpathSync(abs); } catch { continue; }
+          if (realDirs.has(target)) continue;
+        }
+        walk(abs);
+      } else if (isFile) out.push(abs);
     }
   };
   walk(DOCS_DIR);

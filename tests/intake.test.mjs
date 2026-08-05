@@ -204,6 +204,23 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
     } else {
       fail(`aliased folder resolved to the wrong/unstable path: ${JSON.stringify((aliasHits || []).map((s) => s.path))}`);
     }
+
+    // Same rule, one level down — the case a per-directory sort cannot fix.
+    // The walk enters real `a/` before it ever reaches `z/`, so a link inside
+    // `a` claims z's real path first and z is skipped on arrival (#1843 review
+    // follow-up). Deleting the link would then report z's unchanged source as
+    // new, because the state key was `a/link/...`.
+    mkdirSync(join(docsDir, 'a'));
+    mkdirSync(join(docsDir, 'z'));
+    writeFileSync(join(docsDir, 'z', 'deep.md'), '# Deep CV\n');
+    symlinkSync(join(docsDir, 'z'), join(docsDir, 'a', 'link'));
+    const nested = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const deepHits = nested && nested.sources.filter((s) => s.path.endsWith('deep.md'));
+    if (deepHits && deepHits.length === 1 && deepHits[0].path === 'z/deep.md') {
+      pass('a link nested under an earlier directory still yields to the real path');
+    } else {
+      fail(`nested alias won over the real path: ${JSON.stringify((deepHits || []).map((s) => s.path))}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
