@@ -948,30 +948,55 @@ function curlGet(url, extraArgs = []) {
 // may be missing from PATH (ENOENT), the proxy may be configured only in git
 // config (http.proxy) with no HTTPS_PROXY env var, raw.githubusercontent.com
 // or api.github.com may be filtered while github.com itself is reachable, or
-// the request may simply exceed curl's 10s budget where git gets 300s. In all
-// of those, `apply` would succeed, so `check` must not report "offline".
-// Release Please tags (career-ops-vX.Y.Z) are matched by SEMVER_RE's
-// `(?:^|-)` anchor; the highest semver tag is the latest release.
+// the request may simply exceed curl's 10s budget (the git probe below gets
+// 30s, and apply's fetch minutes). In all of those, `apply` would succeed,
+// so `check` must not report "offline".
+
 // Pure tag-parsing half of the fallback, exported for tests: given raw
 // `git ls-remote --tags` output, return the highest semver among the tags
-// (peeled ^{} refs collapse onto their tag; non-semver tags are ignored).
-export function highestSemverTag(lsRemoteOutput) {
+// (peeled ^{} refs collapse onto their tag; non-semver tags are ignored;
+// a stray \r survives a CRLF-translating wrapper and would defeat
+// SEMVER_RE's $ anchor, so it is stripped). When tagPrefix is given, only
+// tags starting with it count.
+export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
   let best = '';
   for (const line of String(lsRemoteOutput || '').split('\n')) {
     const tag = (line.split('\t')[1] || '')
+      .replace(/\r$/, '')
       .replace('refs/tags/', '')
       .replace(/\^\{\}$/, '');
+    if (tagPrefix && !tag.startsWith(tagPrefix)) continue;
     const match = tag.match(SEMVER_RE);
     if (match && (!best || compareVersions(match[1], best) > 0)) best = match[1];
   }
   return best;
 }
 
+// Returns the latest career-ops release version reachable over git,
+// '' when upstream is reachable but carries no matching release tag, and
+// null when the git transport failed too (genuinely offline).
 function gitRemoteVersion() {
   try {
-    return highestSemverTag(gitQuiet('ls-remote', '--tags', CANONICAL_REPO));
+    // Direct execFileSync rather than gitQuiet: this probe runs on every
+    // session start, so it gets its own short budget (30s) instead of the
+    // general 120s git timeout, and GIT_TERMINAL_PROMPT=0 keeps a captive
+    // portal or a credential-rewriting gitconfig from popping an
+    // interactive prompt out of a silent background check.
+    const out = execFileSync('git', ['ls-remote', '--tags', CANONICAL_REPO], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+    // Upstream is a release-please monorepo (career-ops-v*, web-v*,
+    // manifesto-v*, plus historical bare tags): filter to this component's
+    // prefix, or a foreign component overtaking career-ops' version number
+    // would fabricate a permanent false update-available on exactly the
+    // curl-blocked machines this fallback serves.
+    return highestSemverTag(out, 'career-ops-v');
   } catch {
-    return ''; // unreachable over git too — genuinely offline
+    return null; // unreachable over git too — genuinely offline
   }
 }
 
@@ -1031,14 +1056,23 @@ async function check() {
     // empty strings and we fall through to no-remote-version — the right
     // conservative behaviour (no version = can't determine status).
     const bothNetworkFailed = !rawVersion.ok && !releaseRaw.ok;
+    let gitProbe = null;
     if (bothNetworkFailed) {
-      remote = gitRemoteVersion();
+      gitProbe = gitRemoteVersion();
+      if (gitProbe) remote = gitProbe;
     }
     if (!remote) {
-      const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
+      // gitProbe === null → the git transport failed too: genuinely
+      // offline. gitProbe === '' → git reached upstream but found no
+      // career-ops release tag: the network is fine, we just cannot
+      // determine a version — that is no-remote-version, not offline.
+      const status = bothNetworkFailed && gitProbe === null ? 'offline' : 'no-remote-version';
       const payload = { status, local };
       if (bothNetworkFailed) {
-        payload.detail = `curl VERSION: ${rawVersion.detail}; curl releases: ${releaseRaw.detail}; git ls-remote also failed`;
+        payload.detail = `curl VERSION: ${rawVersion.detail}; curl releases: ${releaseRaw.detail}; ` +
+          (gitProbe === null
+            ? 'git ls-remote also failed'
+            : 'git ls-remote reachable but returned no career-ops release tags');
       }
       console.log(JSON.stringify(payload));
       return;
