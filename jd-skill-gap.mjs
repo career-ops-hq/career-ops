@@ -156,7 +156,17 @@ const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
 // a word char / # / + so a sentence-ending period is never swallowed into
 // the token ("Docker." still extracts as "Docker"). The leading \b stays:
 // tokens start with [A-Z], a word char, where \b and (?<!\w) are equivalent.
-const SKILL_TOKEN_RE = /\b([A-Z][A-Za-z0-9+.#]{0,29}[A-Za-z0-9+#](?:\.[a-z]{2,4})?)(?!\w)/g;
+// The trailing guard is Unicode-aware. `\w` is ASCII, so an accented letter did
+// not count as "still inside a word" and the token was emitted TRUNCATED:
+// "Maîtrise" yielded "Ma" and "Expérience" yielded "Exp", both reported as
+// required skills. That is over-extraction — the failure this file calls
+// unrecoverable, since it invents gaps the user then tries to close.
+//
+// Only the boundary changed: an accented word is still not extracted as a
+// skill (the opening [A-Z][A-Za-z0-9+.#] stays ASCII on purpose, so ordinary
+// capitalised French prose does not become "required skills"); it is simply no
+// longer emitted as a fragment of itself.
+const SKILL_TOKEN_RE = /\b([A-Z][A-Za-z0-9+.#]{0,29}[A-Za-z0-9+#](?:\.[a-z]{2,4})?)(?![\p{L}\p{N}_])/gu;
 
 // Deliberately broad: this list exists specifically to stop generic
 // capitalized nouns/adjectives from JD bullets (e.g. "Bachelor's degree
@@ -836,8 +846,31 @@ Maintained the internal Fabrikam-SDK build.
   eq('and so is the bare "Exigences"',
     scanJd('Exigences\n- Docker\n').skills, ['Docker']);
 
-  // Accent folding must not leak into the extracted skill text itself.
-  eq('a skill keeps its accents', scanJd('Exigences\n- Développement Python\n').skills.includes('Python'), true);
+  // Each French closer is exercised ALONE. In a fixture where "Avantages"
+  // comes first, the block is already closed and removing any later pattern
+  // would not fail the test (CodeRabbit review).
+  eq('the compensation closer works on its own',
+    scanJd('Exigences\n- Python et Django\n\nRémunération\n- Selon Profil Negociable\n').skills,
+    ['Python', 'Django']);
+  eq('the how-to-apply closer works on its own',
+    scanJd('Exigences\n- Python\n\nComment postuler\n- Envoyez votre CV Aujourd\'hui\n').skills,
+    ['Python']);
+
+  // An accented word must not be emitted as a TRUNCATED fragment of itself.
+  // `\w` is ASCII, so the trailing guard did not see "î" as still-inside-a-word
+  // and "Maîtrise" was extracted as the skill "Ma" — a gap the user cannot
+  // close because it does not exist.
+  eq('an accented word yields no fragment',
+    scanJd('Exigences\n- Maîtrise de Python\n- Expérience en Sécurité\n').skills,
+    ['Python']);
+  // And it is not extracted whole either: the opening class stays ASCII on
+  // purpose, so ordinary capitalised French prose never becomes a requirement.
+  eq('an accented word is not extracted as a skill',
+    scanJd('Exigences\n- Développement web\n').skills, []);
+  // Legitimate tokens with punctuation are untouched by the new boundary.
+  eq('punctuated tokens still extract',
+    scanJd('Requirements\n- Node.js, C++, C# and Python3\n').skills,
+    ['Node.js', 'C++', 'C#', 'Python3']);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
