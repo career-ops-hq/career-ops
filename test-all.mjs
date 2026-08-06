@@ -6826,10 +6826,17 @@ try {
   // written pins nearly always do. Anchoring the pattern right after `(set …)`
   // made those pins silently unparseable, which is the dangerous direction:
   // the deferral disappears and the row reports overdue again.
+  // All three dash characters the pattern accepts are covered: em dash (what
+  // this project's own docs and logs use), ASCII hyphen (what a plain-text
+  // editor produces), and en dash (what macOS substitution silently turns a
+  // hyphen into). The en-dash case is the one most likely to appear without
+  // the author intending it, so an untested branch there is the easiest
+  // regression to ship.
   const annotatedPins = cadence.parseNextOverrides([
     '- next #50 2026-08-11 (set 2026-08-04) — messaged 2026-08-04, give it a week',
     '- next #51 2026-08-11 (set 2026-08-04) - ascii hyphen note',
     '- next #52 2026-08-11 — note with no set-date',
+    '- next #53 2026-08-11 (set 2026-08-04) – en-dash note',
   ].join('\n'));
   if (annotatedPins.get(50)?.date === '2026-08-11' && annotatedPins.get(50)?.setDate === '2026-08-04') {
     pass('parseNextOverrides: em-dash annotated pin still parses');
@@ -6840,6 +6847,11 @@ try {
     pass('parseNextOverrides: hyphen notes and annotated set-less pins parse');
   } else {
     fail(`annotated pin variants wrong: ${JSON.stringify([annotatedPins.get(51), annotatedPins.get(52)])}`);
+  }
+  if (annotatedPins.get(53)?.date === '2026-08-11' && annotatedPins.get(53)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: en-dash annotated pin parses');
+  } else {
+    fail(`en-dash annotated pin dropped: ${JSON.stringify(annotatedPins.get(53))}`);
   }
 
   // Retire directives: `- cleared #N YYYY-MM-DD — reason` drops one
