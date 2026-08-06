@@ -67,6 +67,22 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
+    // French. The repo ships a fr/ market mode set and a JD is written in its
+    // market's language, so an English-only list makes this check inert on
+    // every francophone posting — the same "missed phrasing yields zero
+    // skills" failure the list above was already widened once to fix.
+    // Matched after accent folding (see foldAccents), so "Profil recherche"
+    // and "Profil recherché" are the same heading.
+    'profil\\s+recherche',
+    'votre\\s+profil',
+    'competences\\s+(?:requises|attendues|techniques)',
+    'competences',
+    'exigences',
+    'pre-?requis',
+    'qualifications\\s+requises',
+    'ce\\s+que\\s+nous\\s+recherchons',
+    'experience\\s+requise',
+    'vous\\s+etes',
   ].join('|') + ')s?\\b.*$',
   'im'
 );
@@ -92,9 +108,37 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'equal\\s+opportunity', 'eeo', 'diversity',
     'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
     'our\\s+(?:stack|process|values|mission)',
+    // French closers. Without these a francophone requirements block stays
+    // open to end-of-file and sweeps the perks list into "required skills" —
+    // exactly what the English closers above exist to prevent.
+    'avantages?',
+    'ce\\s+que\\s+nous\\s+offrons',
+    'nous\\s+offrons',
+    'remuneration',
+    'salaire',
+    'a\\s+propos\\s+(?:de\\s+nous|de\\s+l|du\\s+poste|de\\s+la\\s+societe)',
+    'processus\\s+de\\s+recrutement',
+    'comment\\s+postuler',
+    'pour\\s+postuler',
+    'notre\\s+(?:stack|processus|mission|equipe)',
   ].join('|') + ')\\b.*$',
   'im'
 );
+
+/**
+ * Strip diacritics for heading matching only.
+ *
+ * A posting writes "Profil recherché" or "Rémunération"; a config or another
+ * posting writes the same heading unaccented. Folding at the test site keeps
+ * ONE spelling in each pattern list above instead of two per entry, and never
+ * touches the text the skills themselves are read from.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function foldAccents(line) {
+  return line.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 
 // `\r?$` is required, not cosmetic: JS treats \r as a line terminator, so `.`
 // cannot consume it and a bare `$` never matches on a CRLF-split line.
@@ -162,17 +206,21 @@ function scanJd(jdText) {
   for (const line of lines) {
     // Checked before the requirement test so a heading that satisfies both
     // (e.g. "Why this role") closes the block rather than reopening it.
-    if (NON_REQUIREMENT_HEADER_RE.test(line)) {
+    const headingProbe = foldAccents(line);
+    if (NON_REQUIREMENT_HEADER_RE.test(headingProbe)) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(line)) {
+    if (REQUIREMENT_HEADER_RE.test(headingProbe)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
+    // Six levels from #2721, accent-folded probe from the French fix: a `#####`
+    // heading closes the block, and it is tested unaccented so `Rémunération`
+    // and `Remuneration` are the same closer.
+    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headingProbe)) {
       inRequirementsBlock = false;
     }
 
@@ -753,6 +801,43 @@ Maintained the internal Fabrikam-SDK build.
     diagnoseExtraction(unreadableJd, []).message.length > 0,
     true
   );
+
+  // ── French headings ──────────────────────────────────────────────
+  // The heading lists were English-only, so this check was inert on every
+  // francophone posting: same body, same skills, zero extracted — and the
+  // repo ships a fr/ market mode set precisely because those postings exist.
+  const frJd = [
+    'Poste: Developpeur Backend',
+    '',
+    'Profil recherché',
+    '- Python et Django',
+    '- PostgreSQL',
+    '',
+    'Avantages',
+    '- Mutuelle et Tickets Restaurant',
+    '',
+    'Rémunération',
+    '- Selon profil',
+  ].join('\n');
+  eq('a French requirements heading opens the block', scanJd(frJd).skills, ['Python', 'Django', 'PostgreSQL']);
+  eq('a French JD is not reported as section-less', scanJd(frJd).sawRequirementSection, true);
+
+  // The closers matter as much as the openers: without them the block runs to
+  // end-of-file and turns perks into reported skill gaps — the exact failure
+  // the English closers exist to prevent.
+  eq('the French perks section closes the block',
+    scanJd(frJd).skills.some((s) => /mutuelle|restaurant|profil/i.test(s)), false);
+
+  // Accents are folded for the heading test only, so both spellings open it.
+  eq('an unaccented French heading works too',
+    scanJd('Profil recherche\n- Python\n').skills, ['Python']);
+  eq('other French openers are recognised',
+    scanJd('Compétences requises\n- Django\n').skills, ['Django']);
+  eq('and so is the bare "Exigences"',
+    scanJd('Exigences\n- Docker\n').skills, ['Docker']);
+
+  // Accent folding must not leak into the extracted skill text itself.
+  eq('a skill keeps its accents', scanJd('Exigences\n- Développement Python\n').skills.includes('Python'), true);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
