@@ -4,9 +4,9 @@
   Field placeholders filled per entry:
     TITLE      — certification name
     ORG_BLOCK  — conditional: cert-org span with org text when present;
-                 falls back to empty cert-org span (ORG_EMPTY) for table-cell alignment
+                 falls back to empty cert-org span (ORG_BLOCK_EMPTY) for table-cell alignment
     YEAR_BLOCK — conditional: cert-year span with year text when present;
-                 falls back to empty cert-year span (YEAR_EMPTY) for alignment
+                 falls back to empty cert-year span (YEAR_BLOCK_EMPTY) for alignment
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
@@ -17,7 +17,7 @@
   {{YEAR_BLOCK}}
 </div>
 <!--ORG_BLOCK--><span class="cert-org">{{ORG}}</span><!--/ORG_BLOCK-->
-<!--ORG_EMPTY--><span class="cert-org"></span><!--/ORG_EMPTY-->
+<!--ORG_BLOCK_EMPTY--><span class="cert-org"></span><!--/ORG_BLOCK_EMPTY-->
 <!--YEAR_BLOCK--><span class="cert-year">{{YEAR}}</span><!--/YEAR_BLOCK-->
-<!--YEAR_EMPTY--><span class="cert-year"></span><!--/YEAR_EMPTY-->
+<!--YEAR_BLOCK_EMPTY--><span class="cert-year"></span><!--/YEAR_BLOCK_EMPTY-->
 <!--/ENTRY-->

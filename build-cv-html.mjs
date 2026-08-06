@@ -901,8 +901,13 @@ async function runSelfTest() {
     console.error(`Self-test failed (cert variant): ${err.message}`);
     process.exit(1);
   }
-  // The partial should emit an empty <span class="cert-org"> for alignment.
-  if (!certHtml.includes('class="cert-org"')) {
+  // The partial should emit an EMPTY <span class="cert-org"></span> for the
+  // org-less row, so the table columns stay aligned. Assert the empty span
+  // specifically: a bare `includes('class="cert-org"')` is satisfied by the
+  // second entry (which has an org), so it passes even when the fallback never
+  // fires -- which is exactly how the ORG_EMPTY/ORG_BLOCK_EMPTY suffix
+  // mismatch shipped unnoticed.
+  if (!certHtml.includes('<span class="cert-org"></span>')) {
     console.error('Self-test failed: cert-org empty-block not emitted for table alignment');
     process.exit(1);
   }
