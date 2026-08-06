@@ -111,7 +111,14 @@ export function normalizeCompanyName(name) {
     .toLowerCase()
     .replace(/\([^)]*\)/g, ' ')
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9 ]/g, ' ')
+    // Keep letters and numbers from any script, not just ASCII. The old
+    // [^a-z0-9 ] class deleted every non-Latin character, so a company name
+    // written in Japanese, Cyrillic, Greek, etc. collapsed to '' and
+    // matchInvite bailed with zero candidates even when the exact tracker row
+    // was present (issue #2517). \p{L}\p{N} keeps the letters/digits and drops
+    // only punctuation and symbols, matching the ASCII behaviour for Latin
+    // names while leaving non-Latin names intact.
+    .replace(/[^\p{L}\p{N} ]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

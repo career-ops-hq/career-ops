@@ -118,6 +118,23 @@ eq('Zoom URL with explicit port detected as Zoom', extractPlatform('Join: https:
 eq('Microsoft Teams URL with explicit port detected as Microsoft Teams', extractPlatform('https://teams.microsoft.com:8443/l/meetup-join/abc'), 'Microsoft Teams');
 eq('Google Meet URL with explicit port detected as Google Meet', extractPlatform('https://meet.google.com:443/xyz-abcd-efg'), 'Google Meet');
 
+// --- Non-Latin company names (issue #2517) ---
+// normalizeCompanyName used to strip every non-ASCII character, so a company
+// name in a non-Latin script collapsed to '' and matchInvite returned zero
+// candidates even when the exact tracker row was present.
+eq('normalizeCompanyName keeps a Japanese name instead of emptying it', normalizeCompanyName('アクメ株式会社'), 'アクメ株式会社');
+eq('normalizeCompanyName lowercases and keeps a Cyrillic name', normalizeCompanyName('Яндекс'), 'яндекс');
+eq('normalizeCompanyName keeps a Greek name', normalizeCompanyName('Ακμή'), 'ακμή');
+eq('normalizeCompanyName still strips punctuation and legal suffix around non-Latin text', normalizeCompanyName('«アクメ», Inc.'), 'アクメ');
+// Latin behaviour is unchanged: punctuation still dropped, suffix still stripped.
+eq('normalizeCompanyName still reduces a Latin name with punctuation', normalizeCompanyName('Acme, Inc.'), 'acme');
+// matchInvite must surface the exact non-Latin row, not return [].
+const nonLatinRows = [
+  { num: 1, company: 'アクメ株式会社', role: 'SWE', status: 'Applied', date: '2026-01-01', notes: '' },
+  { num: 2, company: 'Acme Inc', role: 'SWE', status: 'Applied', date: '2026-01-01', notes: '' },
+];
+eq('matchInvite returns the exact Japanese-named row (issue #2517)', matchInvite({ company: 'アクメ株式会社' }, nonLatinRows).map(c => c.appNumber), [1]);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log('Failures:', failures.join(', '));
