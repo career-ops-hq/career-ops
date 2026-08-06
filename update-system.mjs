@@ -109,6 +109,7 @@ const SYSTEM_PATHS = [
   'modes/intake.md',
   'documents/.gitkeep',
   'documents/README.md',
+  'modes/ats-score.md',
   'modes/update.md',
   'modes/agent-inbox.md',
   'modes/reply-watch.md',
