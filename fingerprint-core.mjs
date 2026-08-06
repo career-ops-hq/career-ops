@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'crypto';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 /** Descriptions shorter than this (after normalization) carry too little
  * signal to distinguish real matches from boilerplate — skip them. */
@@ -166,10 +167,22 @@ function maxDistanceFor(threshold) {
   return 64;
 }
 
-/** Company key for "different employer" checks — same normalization family as
- * the tracker tooling (lowercase alphanumerics). */
+/**
+ * Company key for "different employer" checks.
+ *
+ * Delegates to the shared normalizeTextKey() (#2393/#2445) rather than the
+ * `[a-z0-9]` strip it used to carry. That strip DELETED every non-Latin name,
+ * so アクメ株式会社, グロベックス合同会社 and Яндекс all keyed to '' and compared
+ * equal — and because findCrossListings() SKIPS same-key pairs as re-posts,
+ * an identical posting shared between two genuinely different non-Latin
+ * employers was silently never reported as a cross-listing. The Latin
+ * equivalent was reported normally (#2500).
+ *
+ * The key keeps combining marks, so Devanagari/Arabic names differing only in
+ * matras stay distinct rather than collapsing into one "employer".
+ */
 function companyKey(name) {
-  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalizeTextKey(String(name ?? ''));
 }
 
 /**

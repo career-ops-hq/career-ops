@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.24.0",
+  "version": "1.25.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "engines": {
@@ -92,6 +92,6 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
-    "playwright": "1.62.0"
+    "playwright": "1.62.1"
   }
 }

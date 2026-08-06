@@ -43,7 +43,7 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 
@@ -255,7 +255,20 @@ function parseArgs(argv) {
     const kv = args.find(a => a.startsWith(flag + '='));
     return kv ? kv.split('=').slice(1).join('=') : null;
   };
-  const sinceDays = Number(valueOf('--since')) || 3;
+  // Validated by the SAME parser scan.mjs uses, so one flag name cannot mean
+  // two different things (#2498). `Number(...) || 3` silently swallowed every
+  // malformed operand: `--since abc` and `--since 0` became 3 while the user
+  // believed they had scanned the window they typed; `--since -5` put the
+  // cutoff in the FUTURE so nothing was ever eligible, which reads exactly like
+  // "no new postings"; `--since 1e400` became Infinity → an -Infinity cutoff,
+  // i.e. no window at all. Only the DEFAULT stays local: absent --since means
+  // 3 days here, where scan.mjs means no bound.
+  const sinceArg = parseSinceDays(args);
+  if (sinceArg.error) {
+    console.error(`Error: ${sinceArg.error}`);
+    process.exit(1);
+  }
+  const sinceDays = sinceArg.days ?? 3;
   const limit = Number(valueOf('--limit')) || Infinity;
   const atsArg = valueOf('--ats');
   // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).

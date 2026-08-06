@@ -11,7 +11,7 @@
 import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { pass, fail, finish, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\n🔒 user-layer files are git-ignored');
 
@@ -46,4 +46,3 @@ if (!line) {
   }
 }
 
-finish();

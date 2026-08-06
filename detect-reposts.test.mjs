@@ -1195,6 +1195,24 @@ const noWindowOut = execFileSync('node', [scriptPath, '--window'], {
 const noWindowJson = JSON.parse(noWindowOut);
 eq('--window without value falls back to 90', noWindowJson.metadata.windowDays, 90);
 
+// Test --help flag
+const helpOut = execFileSync('node', [scriptPath, '--help'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+ok('--help prints usage', helpOut.includes('Usage:'));
+ok('--help documents --summary', helpOut.includes('--summary'));
+ok('--help documents --window', helpOut.includes('--window'));
+ok('--help documents --self-test', helpOut.includes('--self-test'));
+ok('--help documents --help', helpOut.includes('--help'));
+
+// Test -h flag
+const hOut = execFileSync('node', [scriptPath, '-h'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+ok('-h prints usage', hOut.includes('Usage:'));
+
 // ============================================================================
 // RESULTS
 // ============================================================================

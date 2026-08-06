@@ -13,6 +13,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'pat
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import yaml from 'js-yaml';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
  * Minimum age before directory age alone may condemn an ownerless lock or
@@ -45,15 +46,23 @@ export function rebuildRow(parts) {
  * Normalize company names for same-company lookups across tracker scripts.
  *
  * Company names can contain spaces, punctuation, or branding variants in the
- * tracker and incoming rows. Removing non-alphanumeric characters gives every
- * consumer (merge-tracker dedup, set-status row resolution) the same stable
- * company key, so a row one script would match is never missed by another.
+ * tracker and incoming rows. Folding them gives every consumer (merge-tracker
+ * dedup, set-status/outcome row resolution, company-history grouping, the
+ * scan blacklist) the same stable company key, so a row one script would match
+ * is never missed by another.
+ *
+ * Script-preserving via the shared normalizeTextKey(): the previous
+ * `[^a-z0-9]` filter DELETED every non-Latin name, so アクメ株式会社,
+ * グロベックス合同会社 and Яндекс all produced `''` and compared equal to each
+ * other — merge-tracker then treated applications at different companies as
+ * the same row and silently overwrote one (#2429). `?` still folds to `''`,
+ * which is what the #1596 cross-channel Via guard depends on.
  *
  * @param {string} name - Company name from the tracker or an input row.
- * @returns {string} Lowercase alphanumeric company key.
+ * @returns {string} Case-folded, punctuation-free, script-preserving key.
  */
 export function normalizeCompany(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalizeTextKey(name);
 }
 
 /**

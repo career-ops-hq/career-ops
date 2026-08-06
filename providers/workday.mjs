@@ -314,11 +314,17 @@ export default {
     // (a full-directory scan can hit this on dozens of tenants).
     //
     // "raise max_pages" only applies when `entry` is a real portals.yml
-    // tracked_companies entry (scan.mjs, sinceMs === null). scan-ats-full.mjs's
-    // reverse scan (the only caller that sets ctx.sinceMs) synthesizes entries
-    // from the external dataset — there's no portal entry to edit, and no
-    // fixed cap can guarantee full coverage of an unbounded company
-    // directory anyway, so there's nothing else to suggest.
+    // tracked_companies entry — there is something to edit. scan-ats-full.mjs's
+    // reverse scan synthesizes entries from the external dataset, so there's no
+    // portal entry to point at, and no fixed cap can guarantee full coverage of
+    // an unbounded company directory anyway; nothing else to suggest there.
+    //
+    // The branch below keys on `sinceMs === null` as a proxy for that
+    // distinction. Since #2418 the proxy is no longer exact: `scan.mjs --since`
+    // also sets ctx.sinceMs, so those runs take the else branch and get the
+    // terser message even though they DO have a portals.yml entry to raise.
+    // Harmless (the cap is still surfaced, just without the suggestion) but
+    // worth knowing before trusting the proxy — see #2495.
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (sinceMs === null) {

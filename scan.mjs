@@ -324,6 +324,55 @@ export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
 // provider early-stop hint. Kept as one function so they cannot drift.
 
 /**
+ * Parse and validate `--since <days>` from an argv slice.
+ *
+ * Shared by scan.mjs and scan-ats-full.mjs so ONE flag name cannot mean two
+ * different things. scan-ats-full.mjs used `Number(valueOf('--since')) || 3`,
+ * which silently swallowed every malformed operand: `--since abc` and
+ * `--since 0` both became 3 (the user believes they scanned the window they
+ * typed), `--since -5` produced a cutoff in the FUTURE so nothing was ever
+ * eligible (indistinguishable from "no new postings"), and `--since 1e400`
+ * became Infinity → an -Infinity cutoff, i.e. no window at all (#2498).
+ *
+ * Returns the day count, or null when the flag is absent — the DEFAULT is the
+ * caller's to choose (scan.mjs: no bound; scan-ats-full.mjs: 3 days), only the
+ * validation is shared. `error` is a ready-to-print message; callers print and
+ * exit rather than this throwing, so both CLIs fail the same way.
+ *
+ * @param {string[]} args - argv slice.
+ * @returns {{days: number|null, error: string|null}}
+ */
+export function parseSinceDays(args) {
+  // Every occurrence is collected, not just the first match of either form:
+  // picking one and ignoring the rest means `--since=7 --since` succeeds while
+  // an occurrence with no value goes unread.
+  const occurrences = args.filter((a) => a === '--since' || a.startsWith('--since='));
+  if (occurrences.length > 1) {
+    return { days: null, error: `--since given ${occurrences.length} times; pass it once` };
+  }
+  if (occurrences.length === 0) return { days: null, error: null };
+  const occ = occurrences[0];
+  const next = args[args.indexOf('--since') + 1];
+  const raw = occ.startsWith('--since=')
+    ? occ.slice('--since='.length)
+    : (next != null && !next.startsWith('--') ? next : null);
+  const n = raw == null || raw === '' ? NaN : Number(raw);
+  // Number.isFinite also rejects Infinity and 1e309, which pass a bare `> 0`
+  // test and would yield an -Infinity cutoff (i.e. silently no window).
+  if (!Number.isFinite(n) || n <= 0) {
+    return { days: null, error: `--since expects a positive number of days, got ${raw == null || raw === '' ? '(no value)' : `"${raw}"`}` };
+  }
+  // Finite and positive is not enough: 1e300 days lands outside the ±8.64e15ms
+  // range a Date can represent, so the derived cutoff is an Invalid Date and
+  // toISOString() throws. Reject it here rather than let it surface as an
+  // unhandled "Invalid time value" mid-scan.
+  if (Number.isNaN(new Date(Date.now() - n * 86_400_000).getTime())) {
+    return { days: null, error: `--since ${raw} is too large to express as a date` };
+  }
+  return { days: n, error: null };
+}
+
+/**
  * Collapse --posted-after and --since into a single absolute lower bound.
  *
  * @param {string|null} postedAfter - YYYY-MM-DD from --posted-after, or null.
@@ -1954,42 +2003,15 @@ async function main() {
   // built a bare makeHttpCtx(), so every Workday tenant paginated to its
   // max_pages cap on every run however stale the deep pages were.
   //
-  // Flag presence is tracked separately from its operand. `--since` with no
-  // value, `--since=`, and `--since --posted-after X` must all fail rather than
-  // silently degrade to "no window", which would look like a fast scan that
-  // simply found less — indistinguishable from success. Number.isFinite also
-  // rejects Infinity and 1e309, which pass a bare `> 0` test and would yield an
-  // -Infinity cutoff.
-  // Every occurrence is collected, not just the first match of either form:
-  // picking one and ignoring the rest means `--since=7 --since` succeeds while
-  // an occurrence with no value goes unread.
-  const sinceOccurrences = args.filter((a) => a === '--since' || a.startsWith('--since='));
-  if (sinceOccurrences.length > 1) {
-    console.error(`Error: --since given ${sinceOccurrences.length} times; pass it once`);
+  // Flag presence, operand validity, duplicate occurrences and the
+  // out-of-Date-range case are all handled by the SHARED parseSinceDays(), so
+  // scan-ats-full.mjs cannot disagree about what --since means (#2498).
+  const since = parseSinceDays(args);
+  if (since.error) {
+    console.error(`Error: ${since.error}`);
     process.exit(1);
   }
-  let sinceDays = null;
-  if (sinceOccurrences.length === 1) {
-    const occ = sinceOccurrences[0];
-    const next = args[args.indexOf('--since') + 1];
-    const raw = occ.startsWith('--since=')
-      ? occ.slice('--since='.length)
-      : (next != null && !next.startsWith('--') ? next : null);
-    const n = raw == null || raw === '' ? NaN : Number(raw);
-    if (!Number.isFinite(n) || n <= 0) {
-      console.error(`Error: --since expects a positive number of days, got ${raw == null || raw === '' ? '(no value)' : `"${raw}"`}`);
-      process.exit(1);
-    }
-    // Finite and positive is not enough: 1e300 days lands outside the ±8.64e15ms
-    // range a Date can represent, so the derived cutoff is an Invalid Date and
-    // toISOString() throws. Reject it here rather than let it surface as an
-    // unhandled "Invalid time value" mid-scan.
-    if (Number.isNaN(new Date(Date.now() - n * 86_400_000).getTime())) {
-      console.error(`Error: --since ${raw} is too large to express as a date`);
-      process.exit(1);
-    }
-    sinceDays = n;
-  }
+  const sinceDays = since.days;
 
   const effectiveAfter = resolveEffectiveAfter(postedAfter, sinceDays);
 

@@ -277,8 +277,14 @@ function companiesMatch(a, b) {
  */
 function mergeNotes(existingNotes, addition, oldScore, newScore) {
   // Trailing period trimmed only so the '. ' join does not produce '..'; no
-  // other character of the existing text is touched.
-  const prev = String(existingNotes ?? '').trim().replace(/\s*\.\s*$/, '');
+  // other character of the existing text is touched. The tracker's "no data"
+  // sentinels (the looksLikeScoreCell set minus the score-only DUP) count as
+  // empty here: a placeholder cell collapses to the marker instead of gaining
+  // a `—. ` separator the row never had (#2483).
+  const prevRaw = String(existingNotes ?? '').trim();
+  const prev = ['—', '-', 'N/A'].includes(prevRaw)
+    ? ''
+    : prevRaw.replace(/\s*\.\s*$/, '');
   const incoming = String(addition.notes ?? '').trim();
   const marker = `Re-eval ${addition.date} (${oldScore}→${newScore})`;
   // Re-running the same evaluation would otherwise repeat its own text; the
