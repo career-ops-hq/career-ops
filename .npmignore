@@ -73,8 +73,9 @@ bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
-*.bak
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs and
+# web/src/lib/core/safe-write.ts (timestamped user-layer snapshots).
+*.bak*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json

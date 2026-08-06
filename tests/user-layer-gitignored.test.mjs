@@ -46,3 +46,23 @@ if (!line) {
   }
 }
 
+// safe-write.ts names backups like `cv.md.bak-2026-08-05T16-55-08-641Z`.
+// The old `*.bak` pattern did not match those timestamped paths, so a
+// reflexive `git add .` could stage PII sitting in the repo root.
+const timestampedBackupProbes = [
+  'cv.md.bak-2026-08-05T16-55-08-641Z',
+  'config/profile.yml.bak-2026-08-05T16-55-08-641Z',
+  'portals.yml.bak-2026-08-05T16-55-08-641Z',
+  'cv.md.bak10',
+];
+
+for (const path of timestampedBackupProbes) {
+  let ignored = true;
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: ROOT });
+  } catch {
+    ignored = false;
+  }
+  if (ignored) pass(`${path} is git-ignored`);
+  else fail(`${path} is NOT git-ignored — a timestamped backup could expose PII`);
+}
