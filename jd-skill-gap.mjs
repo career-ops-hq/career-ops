@@ -162,11 +162,15 @@ const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
 // required skills. That is over-extraction — the failure this file calls
 // unrecoverable, since it invents gaps the user then tries to close.
 //
+// \p{M} covers COMBINING marks: in decomposed (NFD) text the accent is its own
+// code point, so "Expérience" is "Expe" + U+0301 and a guard of letters alone
+// still emitted "Expe" (CodeRabbit review).
+//
 // Only the boundary changed: an accented word is still not extracted as a
 // skill (the opening [A-Z][A-Za-z0-9+.#] stays ASCII on purpose, so ordinary
 // capitalised French prose does not become "required skills"); it is simply no
 // longer emitted as a fragment of itself.
-const SKILL_TOKEN_RE = /\b([A-Z][A-Za-z0-9+.#]{0,29}[A-Za-z0-9+#](?:\.[a-z]{2,4})?)(?![\p{L}\p{N}_])/gu;
+const SKILL_TOKEN_RE = /\b([A-Z][A-Za-z0-9+.#]{0,29}[A-Za-z0-9+#](?:\.[a-z]{2,4})?)(?![\p{L}\p{N}_\p{M}])/gu;
 
 // Deliberately broad: this list exists specifically to stop generic
 // capitalized nouns/adjectives from JD bullets (e.g. "Bachelor's degree
@@ -867,6 +871,17 @@ Maintained the internal Fabrikam-SDK build.
   // purpose, so ordinary capitalised French prose never becomes a requirement.
   eq('an accented word is not extracted as a skill',
     scanJd('Exigences\n- Développement web\n').skills, []);
+  // Decomposed (NFD) text: the accent is a separate combining code point, so a
+  // guard of letters alone still let "Expe" through.
+  eq('a decomposed accent yields no fragment either',
+    scanJd(('Exigences\n- Expérience en Python\n').normalize('NFD')).skills, ['Python']);
+
+  // The company-information closer, exercised alone — nothing else in the
+  // fixtures reaches it, so a regression in that pattern would pass silently.
+  eq('the company-information closer works on its own',
+    scanJd('Exigences\n- Python\n\nÀ propos de nous\n- Startup Fondee A Dakar\n').skills,
+    ['Python']);
+
   // Legitimate tokens with punctuation are untouched by the new boundary.
   eq('punctuated tokens still extract',
     scanJd('Requirements\n- Node.js, C++, C# and Python3\n').skills,
