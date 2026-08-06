@@ -4945,16 +4945,43 @@ console.log('\n12c. Materialized skill index mode');
 
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
+  // The fixture stages the very paths career-ops legitimately tracks - .agents/,
+  // .claude/, .opencode/ - and those are exactly the paths agent-tool users
+  // exclude machine-wide. A fresh `git init` still honours the ambient global
+  // and system config, so on such a machine `git add` refused the path and the
+  // whole block aborted into a single "crashed" failure that read like a
+  // regression in materializeSkillEntrypoints (#2269).
+  //
+  // Fix the class rather than the instance: pin the global and system config to
+  // an empty file outside the fixture work tree, so nothing ambient reaches it -
+  // init.templateDir and core.autocrlf as much as core.excludesFile. Same shape
+  // as the GIT_CONFIG_GLOBAL pin in upgrade-tests.mjs. Empty on purpose; the
+  // fixture's own `git config` calls below set everything it actually needs.
+  const gitConfigRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitcfg-'));
+  const gitConfigPath = join(gitConfigRoot, 'gitconfig');
+  writeFileSync(gitConfigPath, '');
+  // That pin alone does NOT close the ignore path. When core.excludesFile is
+  // unset git falls back to the XDG default ~/.config/git/ignore, and that
+  // fallback is independent of which config file it just read - so the excludes
+  // path has to be pointed somewhere inert explicitly, below. An empty real file
+  // rather than /dev/null, which git rejects as an excludes source on Windows
+  // ("fatal: cannot use nul as an exclude file"); empty-string semantics work on
+  // both platforms tested but are not worth depending on.
+  const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
+  writeFileSync(emptyExcludes, '');
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigPath, GIT_CONFIG_SYSTEM: gitConfigPath };
   const gitRun = (args, opts = {}) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
     timeout: 30000,
+    env: gitEnv,
     ...opts,
   }).trim();
   const gitRaw = (args) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
     timeout: 30000,
+    env: gitEnv,
   });
 
   try {
@@ -4969,14 +4996,46 @@ console.log('\n12c. Materialized skill index mode');
     const pointer = '../../../.agents/skills/career-ops/SKILL.md';
 
     gitRun(['init']);
+    // core.excludesFile is only the GLOBAL layer. `git init` also seeds
+    // .git/info/exclude from a template, which GIT_TEMPLATE_DIR can still point
+    // at an ambient one, so empty that layer too rather than assume it is inert.
+    writeFileSync(join(fixtureRoot, '.git', 'info', 'exclude'), '');
     gitRun(['config', 'core.symlinks', 'false']);
+    gitRun(['config', 'core.excludesFile', emptyExcludes]);
     gitRun(['config', 'user.email', 'test@example.com']);
     gitRun(['config', 'user.name', 'Test User']);
 
     writeFileSync(join(canonicalDir, 'SKILL.md'), fixtureSkill);
     writeFileSync(join(claudeDir, 'SKILL.md'), pointer);
     writeFileSync(join(opencodeDir, 'SKILL.md'), pointer);
-    gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+    // Guard the isolation itself, as a first-class assertion. If the pin above
+    // ever stops taking effect the fixture cannot stage its own input, and every
+    // assertion below collapses into a single "crashed" carrying git's ignore
+    // message - which reads as a regression in materializeSkillEntrypoints
+    // rather than an environment leak. Name the real cause here instead.
+    //
+    // Both shapes have to be caught, because git reports them differently: an
+    // ignored path named EXPLICITLY makes `git add` exit non-zero, while an
+    // ignored path merely covered by a directory pathspec (the `.claude/skills/`
+    // add further down) is skipped silently and exits 0. So run the add and the
+    // index check together, and let one assertion speak for both.
+    let canonicalStaged = '';
+    try {
+      gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+      canonicalStaged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
+    } catch {
+      // Left empty: the assertion below is the report.
+    }
+    if (canonicalStaged) {
+      pass('skill index-mode fixture is isolated from ambient git ignore rules (#2269)');
+    } else {
+      fail('skill index-mode fixture: canonical entrypoint did not stage - ambient git config reached the fixture (#2269)');
+      fail('materialized skill entrypoints stage as regular files, not symlink blobs (skipped: fixture not staged)');
+      fail('materialized skill blobs contain canonical skill content (skipped: fixture not staged)');
+      const reported = new Error('fixture staging precondition failed');
+      reported.alreadyReported = true;
+      throw reported;
+    }
 
     const pointerBlob = gitRun(['hash-object', '-w', '--stdin'], { input: pointer });
     gitRun(['update-index', '--add', '--cacheinfo', `120000,${pointerBlob},.claude/skills/career-ops/SKILL.md`]);
@@ -5004,9 +5063,12 @@ console.log('\n12c. Materialized skill index mode');
       fail('materialized skill blobs do not contain canonical skill content');
     }
   } catch (e) {
-    fail(`skill entrypoint index-mode test crashed: ${e.message}`);
+    // The staging-precondition branch already reported all three assertions
+    // individually; re-reporting here would double-count and re-bury the cause.
+    if (!e?.alreadyReported) fail(`skill entrypoint index-mode test crashed: ${e.message}`);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(gitConfigRoot, { recursive: true, force: true });
   }
 }
 
