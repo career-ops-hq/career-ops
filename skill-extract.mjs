@@ -44,7 +44,39 @@ export const SKILL_TOKENS = [
   'Computer Vision', 'NLP',
   // Analytics / enterprise
   'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
+  // ── Certifications, frameworks and methodologies (added 2026-08-07) ──────
+  // Every token above this line is an engineering tool. That made `upskill`
+  // structurally blind to the gap class that actually screens out delivery and
+  // program-management candidates: credentials. Measured on a 138-report corpus,
+  // PMP appeared in 41 reports and ITIL in 26, while the top-ranked gap the tool
+  // could see scored 1.9 off a SINGLE report. The vocabulary, not the scoring,
+  // was the constraint.
+  //
+  // Longest-first within each family so alternation prefers the specific form
+  // ('Lean Six Sigma' before 'Six Sigma'), matching the existing
+  // 'React Native'-before-'React' convention above.
+  'PMI-ACP', 'PgMP', 'CAPM', 'PMBOK', 'PMP',
+  'PRINCE2', 'Certified ScrumMaster', 'CSPO',
+  'ITIL', 'COBIT', 'TOGAF',
+  'Lean Six Sigma', 'Six Sigma',
+  'CISSP', 'CISM', 'CIPP',
+  // DELIBERATELY OMITTED — 'CSM'. It is a legitimate abbreviation for Certified
+  // ScrumMaster, but in this corpus it far more often means Customer Success
+  // Manager, which is a documented FAIL family (lessons-learned 2026-07-03,
+  // blocked in portals.yml → title_filter.negative). Adding it would turn every
+  // CSM-shaped rejection into a phantom certification gap. 'Certified
+  // ScrumMaster' is listed in full above and carries no such collision.
+  //
+  // 'SAFe' is NOT here either — it is handled case-sensitively below, for the
+  // same reason 'Go' is: 'safe' is an everyday English word.
 ];
+
+// 'SAFe' cannot join the case-insensitive list — "a safe environment", "safe to
+// assume", "safety" would all register a certification. Same failure mode as
+// 'Go', and the same fix: a separate CASE-SENSITIVE pass matching only the exact
+// standalone token 'SAFe'. The trailing (?!\w) keeps "SAFety" from matching
+// while still allowing "SAFe 6", "SAFe," and "(SAFe)".
+const SAFE_CERT_PATTERN = /(?<!\w)SAFe(?!\w)/;
 
 // \b fails at symbol edges (\bC\+\+\b needs a word char AFTER the +, \b\.NET
 // needs one BEFORE the dot), so C++/C#/.NET would never match standalone.
@@ -100,6 +132,17 @@ export const CANONICAL = {
   'c++': 'C++', 'c#': 'C#', '.net': '.NET',
   'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
   'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
+  // Certifications / methodologies (2026-08-07). Uppercase display forms, since
+  // DISPLAY lowercases its keys and these are acronyms rather than title-case
+  // words — without these, "pmp" in a JD would canonicalize to "Pmp" and miss
+  // the known-skills set, the exact drift class this module exists to prevent.
+  'pmp': 'PMP', 'pmi-acp': 'PMI-ACP', 'pgmp': 'PgMP', 'capm': 'CAPM',
+  'pmbok': 'PMBOK', 'prince2': 'PRINCE2', 'cspo': 'CSPO',
+  'certified scrummaster': 'Certified ScrumMaster',
+  'itil': 'ITIL', 'cobit': 'COBIT', 'togaf': 'TOGAF',
+  'lean six sigma': 'Lean Six Sigma', 'six sigma': 'Six Sigma',
+  'cissp': 'CISSP', 'cism': 'CISM', 'cipp': 'CIPP',
+  'safe': 'SAFe',
 };
 
 /**
@@ -128,5 +171,6 @@ export function extractSkills(text) {
     found.add(canonicalize(m[0]));
   }
   if (GO_SKILL_PATTERN.test(text)) found.add('Go');
+  if (SAFE_CERT_PATTERN.test(text)) found.add('SAFe');
   return found;
 }
