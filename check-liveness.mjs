@@ -26,8 +26,17 @@ import {
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
+const USAGE = `Usage:
+  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] <url1> [url2] ...
+  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt`;
+
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
 
   // Portals like pracuj.pl serve a Cloudflare anti-bot wall to headless Chromium.
   // On a challenge we retry once in a headed browser (which clears it); pass
