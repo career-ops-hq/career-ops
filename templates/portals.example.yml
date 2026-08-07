@@ -363,6 +363,10 @@ search_queries:
     query: 'site:jobs.lever.co ("AI Engineer" OR "Machine Learning") ("visa sponsorship" OR "H-1B")'
     enabled: false
 
+  - name: Wellfound - AI + Visa sponsorship
+    query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" ("visa sponsorship" OR "will sponsor")'
+    enabled: true
+
   # -- Ashby --
   - name: Ashby — AI PM
     query: 'site:jobs.ashbyhq.com "AI Product Manager" OR "Senior Product Manager AI" remote'
@@ -392,6 +396,24 @@ search_queries:
   - name: Greenhouse — AI Engineer
     query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "AI Engineer" OR "LLM" OR "Agentic" remote'
     enabled: true
+
+  # -- Wellfound --
+  - name: Wellfound — AI PM
+    query: 'site:wellfound.com "AI Product Manager" OR "Senior Product Manager" AI remote'
+    enabled: true
+
+  - name: Wellfound — Solutions Architect
+    query: 'site:wellfound.com "Solutions Architect" AI OR automation remote'
+    enabled: true
+    
+  - name: Wellfound — AI Engineer
+    query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" remote'
+    enabled: true
+
+  - name: Wellfound — Agentic
+    query: 'site:wellfound.com "Agentic" OR "AI Agent" OR "Automation Architect" remote'
+    enabled: true
+
 
   # -- Workable --
   - name: Workable — AI Roles
