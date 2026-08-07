@@ -34,10 +34,11 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
     <button
       type="button"
       onClick={() => {
-        // n + from ride along so the Apply page can mark this row Applied and
-        // return the user to the page they left. Read straight off the handler's
-        // own location: usePathname() drops the query and hash, which is where
-        // the list filter and the row anchor live.
+        // n + from ride along so the Apply page can mark this row Applied,
+        // return the user to the page they left, and resolve THIS report's own
+        // tailored CV rather than the newest one for the company. Read straight
+        // off the handler's own location: usePathname() drops the query and
+        // hash, which is where the list filter and the row anchor live.
         const { pathname, search, hash } = window.location;
         apply.open(url!, { prefill: true, company, n, from: `${pathname}${search}${hash}` });
         router.push("/apply");
