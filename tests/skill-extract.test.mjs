@@ -52,6 +52,33 @@ try {
     fail(`canonicalize => k8s=${canonicalize('k8s')} graphql=${canonicalize('graphql')} unknown=${canonicalize('SomeNicheFramework')}`);
   }
 
+  // Certifications: recognized, but 'SAFe' must never be reachable from the
+  // everyday word "safe" — through extractSkills OR through the exported
+  // canonicalize(). SAFe is deliberately absent from SKILL_TOKENS and from
+  // CANONICAL, and is matched only by the case-sensitive SAFE_CERT_PATTERN.
+  const certs = extractSkills('PMP and PMI-ACP required; ITIL and CISSP preferred; SAFe a plus.');
+  if (certs.has('PMP') && certs.has('PMI-ACP') && certs.has('ITIL') && certs.has('CISSP') && certs.has('SAFe')) {
+    pass('extractSkills recognizes certification tokens (PMP, PMI-ACP, ITIL, CISSP, SAFe)');
+  } else {
+    fail(`extractSkills certifications => ${[...certs].join(',')}`);
+  }
+
+  const prose = extractSkills('Maintain a safe working environment; safety is our priority.');
+  if (!prose.has('SAFe')) pass('extractSkills does not read the word "safe" in prose as the SAFe certification');
+  else fail(`extractSkills prose-safe boundary => ${[...prose].join(',')}`);
+
+  if (canonicalize('safe') === 'safe' && canonicalize('SAFe') === 'SAFe') {
+    pass('canonicalize leaves "safe" unchanged and does not fold it into "SAFe"');
+  } else {
+    fail(`canonicalize safe-boundary => safe=${canonicalize('safe')} SAFe=${canonicalize('SAFe')}`);
+  }
+
+  // 'CSM' is deliberately NOT a token: in job-posting text it far more often
+  // means Customer Success Manager than Certified ScrumMaster.
+  const csm = extractSkills('This role is part Customer Success Manager (CSM), partnered with an AE.');
+  if (csm.size === 0) pass('extractSkills does not treat "CSM" as a certification (Customer Success Manager collision)');
+  else fail(`extractSkills CSM collision => ${[...csm].join(',')}`);
+
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');
   else fail('extractSkills should return {} for empty/null');

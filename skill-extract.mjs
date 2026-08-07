@@ -142,7 +142,14 @@ export const CANONICAL = {
   'itil': 'ITIL', 'cobit': 'COBIT', 'togaf': 'TOGAF',
   'lean six sigma': 'Lean Six Sigma', 'six sigma': 'Six Sigma',
   'cissp': 'CISSP', 'cism': 'CISM', 'cipp': 'CIPP',
-  'safe': 'SAFe',
+  // NOTE: no 'safe' entry here, deliberately. canonicalize() lowercases its
+  // input before reading this map, so a 'safe' key would make
+  // canonicalize('safe') return 'SAFe' — re-opening through the exported
+  // canonicalize() the exact everyday-word hole that keeping SAFe out of
+  // SKILL_TOKENS closes for extractSkills(). Without the key, both cases land
+  // on the unknown-token pass-through and are returned unchanged: 'SAFe' stays
+  // 'SAFe', 'safe' stays 'safe'. The certification is recognized only by
+  // SAFE_CERT_PATTERN, which is case-sensitive by design.
 };
 
 /**
