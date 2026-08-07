@@ -180,13 +180,14 @@ export default {
 // since `-` is a non-word character and satisfies `\b` on both sides of it.
 const classToken = (token) => `(?=[^>]*\\bclass="(?:[^"]*\\s)?${token}(?:\\s[^"]*)?")`;
 
-// All three supported themes render some element carrying one of these exact
+// All four supported themes render some element carrying one of these exact
 // class tokens — the "jv-job-list" wrapper (<table>/<div>) around the whole
-// list, the per-row "jv-job-list-name"/"jv-job-list-location" cells, the
-// anchor variant's "jv-job-item" row class, or the category variant's
-// "jv-job"/"jv-job-name" row markup — regardless of whether any given row
-// ends up producing a valid job (e.g. one row dropped for a bad href scheme
-// still leaves its markers behind). Their total absence is what separates
+// list, the per-row "jv-job-list-name"/"jv-job-list-location" cells (shared
+// by the table and div-table variants), the anchor variant's "jv-job-item"
+// row class, or the category variant's "jv-job"/"jv-job-name" row markup —
+// regardless of whether any given row ends up producing a valid job (e.g.
+// one row dropped for a bad href scheme still leaves its markers behind).
+// Their total absence is what separates
 // "known layout, genuinely no jobs right now (or every row got filtered)"
 // from "client-rendered faceted-search theme this provider can't scrape at
 // all": the latter never emits any of this markup in the initial HTML,
