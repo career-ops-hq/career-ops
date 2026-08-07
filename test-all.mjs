@@ -6521,6 +6521,15 @@ try {
   } else {
     fail('parseAppliedDate should keep its own date after a sentence break');
   }
+  // ...but a SEMICOLON is not a boundary: it joins independent clauses inside
+  // one sentence, so the subject carries across it and the date is still the
+  // referenced row's.
+  const semicolonRef = '#154 is already live; applied 2026-08-04. Not submitted here yet.';
+  if (cadence.parseAppliedDate(semicolonRef) === null) {
+    pass('parseAppliedDate: a semicolon does NOT end the row-reference scope');
+  } else {
+    fail(`parseAppliedDate semicolon scope: got ${JSON.stringify(cadence.parseAppliedDate(semicolonRef))}, want null`);
+  }
   // When EVERY apply-date belongs to another row, the note does not state this
   // row's date. Degrade to the labelled evaluation-date fallback rather than
   // report a real-but-foreign date as measured.

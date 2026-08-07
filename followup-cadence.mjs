@@ -206,6 +206,14 @@ const CROSS_REF_LOOKBACK = 120;
  * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
  * row's own date.
  *
+ * A SEMICOLON IS NOT A BOUNDARY. It joins independent clauses inside one
+ * sentence, so the subject carries across it: "#154 is already live; applied
+ * 2026-08-04" is still about #154. Treating `;` as a break let that foreign
+ * date through as measured. Where the reading is genuinely ambiguous the tie
+ * goes to "cross-referenced", because the two errors are not symmetric — a
+ * false positive degrades to the labelled evaluation-date fallback, while a
+ * false negative reports another row's date as this row's measured one.
+ *
  * Both failure directions are survivable, which is why a heuristic is
  * acceptable here: a false positive degrades to the labelled evaluation-date
  * fallback, and a false negative is just today's behaviour.
@@ -219,7 +227,7 @@ function isCrossReferencedMention(text, index) {
   let refEnd = -1;
   for (const m of window.matchAll(/#\d+\b/g)) refEnd = m.index + m[0].length;
   if (refEnd === -1) return false;
-  return !/[.;!?]\s/.test(window.slice(refEnd));
+  return !/[.!?]\s/.test(window.slice(refEnd));
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a
