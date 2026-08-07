@@ -46,6 +46,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 
 try {
@@ -1969,8 +1970,9 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
-  const companyFlag = args.indexOf('--company');
-  const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
+  // flagValue reads both `--flag value` and `--flag=value`; a bare indexOf misses
+  // the second form entirely and silently falls back to the unfiltered default.
+  const filterCompany = flagValue(args, '--company')?.toLowerCase() ?? null;
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -1979,10 +1981,8 @@ async function main() {
     const d = new Date(`${s}T00:00:00Z`);
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   };
-  const postedAfterFlag = args.indexOf('--posted-after');
-  const postedAfter = postedAfterFlag !== -1 ? args[postedAfterFlag + 1] : null;
-  const postedBeforeFlag = args.indexOf('--posted-before');
-  const postedBefore = postedBeforeFlag !== -1 ? args[postedBeforeFlag + 1] : null;
+  const postedAfter = flagValue(args, '--posted-after') ?? null;
+  const postedBefore = flagValue(args, '--posted-before') ?? null;
   if (postedAfter != null && !isValidIsoDate(postedAfter)) {
     console.error(`Error: --posted-after expects YYYY-MM-DD, got "${postedAfter}"`);
     process.exit(1);
