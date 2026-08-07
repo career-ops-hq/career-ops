@@ -99,8 +99,14 @@ are defined:
   (`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid). The
   deterministic scanner never sets it.
 
-When more than one is present the order is `posted:` → `trust:` → `note:`. Treat
-them as hints when triaging; none changes how you process the URL.
+- `| rank: {score}/5 — {reason}` — an **opt-in** LLM relevance annotation written
+  only by `node rank-pipeline.mjs`, never by a scan. The score is 0–5 to one
+  decimal and always carries a one-line reason, so you can disagree with it. It
+  is advisory only: the ranker never removes, reorders, or hides a row, and an
+  unranked row means nothing was spent on it — not that it scored badly.
+
+When more than one is present the order is `posted:` → `trust:` → `note:` →
+`rank:`. Treat them as hints when triaging; none changes how you process the URL.
 
 ## Intelligent JD detection from URL
 

@@ -205,6 +205,7 @@ const SYSTEM_PATHS = [
   'skill-extract.mjs',
   'stats.mjs',
   'detect-reposts.mjs',
+  'rank-pipeline.mjs',
   'discover-ats.mjs',
   'discover-ats.test.mjs',
   'check-table-freshness.mjs',

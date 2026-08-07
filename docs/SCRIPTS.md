@@ -43,6 +43,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify:portals` | `verify-portals.mjs` | Probe ATS endpoints to confirm portals.yml slugs resolve (network) |
 | `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
+| `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
 | `npm run ollama:eval` | `ollama-eval.mjs` | Evaluate a JD with a local Ollama model |
 | `npm run openai:eval` | `openai-eval.mjs` | Evaluate a JD via any OpenAI-compatible endpoint |
@@ -809,6 +810,42 @@ within a 90-day window — a strong ghost-job / re-listing signal.
 npm run reposts                 # JSON
 node detect-reposts.mjs --summary
 ```
+
+---
+
+## rank-pipeline
+
+Opt-in LLM relevance re-ranker for `data/pipeline.md`. **Off by default and not
+part of any scan** — `scan.mjs` stays 100% zero-token, and this costs nothing
+unless you run it yourself.
+
+It **annotates, it does not filter**: each pending row gains a labeled
+`rank: {score}/5 — {reason}` segment, riding after `posted:`/`trust:`/`note:`
+like any other labeled segment. No row is removed, reordered, or hidden — the
+reason is there so you can disagree with the score. An entry the model scores
+but cannot explain is left un-annotated rather than reduced to a bare number.
+
+Cost is bounded and reported. Only pending (`- [ ]`) rows that are not already
+annotated are eligible, `--limit` caps each run (default 20, hard ceiling 200
+that the flag cannot raise), and a summary prints the entries ranked, the number
+of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
+row is skipped, so you can work through a large pipeline in bounded passes.
+
+The ranking is done by whichever agent CLI you already have installed (the
+Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
+`copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
+dependency, no new network endpoint.
+
+```bash
+node rank-pipeline.mjs                  # rank up to 20 pending entries
+node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --cli codex      # override auto-detection
+node rank-pipeline.mjs --dry-run        # print annotations, write nothing
+```
+
+Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
+`scan-ats-full.mjs` use, and the file is re-read inside the lock — so a
+concurrent scan cannot lose rows to this script.
 
 ---
 

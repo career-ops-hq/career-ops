@@ -250,6 +250,7 @@ const scripts = [
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
+  { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
