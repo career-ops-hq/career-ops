@@ -37,6 +37,45 @@ The actual model behind each tier depends on your CLI. See the mapping table in 
 
 ---
 
+## 2b. Already Paying for a Subscription? Make Sure You Are Using It
+
+If you pay for a plan (Claude Pro/Max, or the equivalent on another CLI) and you are *also* being charged per token, the usual cause is an API key sitting in your environment: **most CLIs prefer an explicit key over your logged-in subscription.** The tool cannot tell that you would rather spend the plan you already bought.
+
+This section is Claude Code specific because that is where the question comes up most. Other CLIs have their own precedence rules: check their docs, but the shape of the problem is the same.
+
+### Check which one you are on
+
+```bash
+echo $ANTHROPIC_API_KEY     # anything printed here is being billed per token
+```
+
+Inside Claude Code, `/status` reports the active login and shows an API-key row when a key is in use, and `/usage` shows plan usage on a subscription versus a session dollar cost on a key.
+
+### Switch to the subscription
+
+1. Remove the key from wherever it is exported (`~/.zshrc`, `~/.bashrc`, `~/.profile`, a project `.env`, or another tool that sets it for you). `unset ANTHROPIC_API_KEY` only affects the current shell, so edit the file too or it comes back on the next terminal.
+2. Restart the terminal.
+3. Run `/login` in Claude Code and sign in.
+
+`ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
+
+### The batch mode is the exception worth knowing
+
+`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+
+```bash
+claude setup-token          # requires an active Claude subscription
+```
+
+Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment the batch runs in. It is a credential: treat it like one, and never commit it.
+
+### Two things worth expecting
+
+- **Plan limits are windows, not balances.** On a subscription you get rolling usage windows rather than a credit balance, so a heavy scan can pause you until the window resets. `spend_tier: economy` and the pre-screen gate above exist precisely to make high-volume days cheaper.
+- **Details change.** Auth precedence and command names come from the CLI, not from career-ops. If something here does not match what you see, the vendor's own docs are the source of truth: [Claude Code authentication](https://code.claude.com/docs/en/authentication) and [managing costs](https://code.claude.com/docs/en/costs).
+
+---
+
 ## 3. Configuring Alternative CLI Setups
 
 Different CLIs offer different levels of flexibility for model routing. The two most common options for budget setups are **OpenCode** and **Qwen CLI**.

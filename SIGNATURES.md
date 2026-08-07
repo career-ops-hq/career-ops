@@ -111,3 +111,5 @@ public commit with a stated reason.
 - @mrabro | Mohammad Rafi Abro | 2026-08-04 | id:4149030 | src:https://github.com/santifer/career-ops/discussions/2490 | n:63
 - @henryjrobinson | Henry | 2026-08-04 | "Job searching was completely broken. This gives me hopoe." | id:4121628 | src:https://github.com/santifer/career-ops/discussions/2511 | n:64
 - @sun-dev-nika | 2026-08-05 | id:290238869 | src:https://github.com/santifer/career-ops/discussions/2522 | n:65
+- @namnhatpham1995 | 2026-08-07 | "thank you for a great project, I really love career-ops" | id:50907520 | src:https://github.com/santifer/career-ops/discussions/2571 | n:66
+- @Andrei-WongE | Andrei-WongE | 2026-08-07 | id:44266405 | src:https://github.com/santifer/career-ops/discussions/2574 | n:67
