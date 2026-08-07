@@ -756,6 +756,108 @@ Hybrid Remote<span>,</span>
     fail(`jobvite.fetch() both-ambiguous: threw=${bothAmbiguousThrew}, message=${bothAmbiguousMessage}`);
   }
 
+  // ── fetch() — /search pagination on the retry path ──
+
+  // /search reports its own pagination as a "{start}-{end} of {total}" text
+  // node (e.g. "1-50 of 241" on a live tenant) — confirmed against several
+  // live boards. A single search-results page for a small fixture board.
+  const searchPageHtml = (jobs, start, end, total) => {
+    const rows = jobs.map(([id, title]) =>
+      `<tr><td class="jv-job-list-name"><a href="/pagetest/job/${id}">${title}</a></td><td class="jv-job-list-location">Remote</td></tr>`,
+    ).join('');
+    return `<table class="jv-job-list"><tbody>${rows}</tbody></table><div class="jv-pagination-text">${start}-${end} of ${total}</div>`;
+  };
+
+  // 5 total jobs, page size 2 → ceil(5/2) = 3 pages (p=0,1,2) needed.
+  const paginatedPages = {
+    search: searchPageHtml([['p1', 'Job 1'], ['p2', 'Job 2']], 1, 2, 5),
+    'search?p=1': searchPageHtml([['p3', 'Job 3'], ['p4', 'Job 4']], 3, 4, 5),
+    'search?p=2': searchPageHtml([['p5', 'Job 5']], 5, 5, 5),
+  };
+  let paginatedUrls = [];
+  const paginatedCtx = {
+    async fetchText(url) {
+      paginatedUrls.push(url);
+      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      const key = url.split('/pagetest/')[1];
+      return paginatedPages[key];
+    },
+  };
+  const paginatedJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, paginatedCtx);
+  const expectedPaginatedUrls = [
+    'https://jobs.jobvite.com/pagetest/jobs',
+    'https://jobs.jobvite.com/pagetest/search',
+    'https://jobs.jobvite.com/pagetest/search?p=1',
+    'https://jobs.jobvite.com/pagetest/search?p=2',
+  ];
+  if (JSON.stringify(paginatedUrls) === JSON.stringify(expectedPaginatedUrls)) {
+    pass('jobvite.fetch() follows /search pagination across all reported pages');
+  } else {
+    fail(`jobvite.fetch() pagination URLs: ${JSON.stringify(paginatedUrls)}`);
+  }
+  if (paginatedJobs.length === 5 && paginatedJobs[4]?.title === 'Job 5') {
+    pass('jobvite.fetch() merges jobs from every /search page');
+  } else {
+    fail(`jobvite.fetch() paginated result: ${JSON.stringify(paginatedJobs)}`);
+  }
+
+  // A /search page with no pagination text at all is the whole board — no
+  // extra requests.
+  let noPagerUrls = [];
+  const noPagerCtx = {
+    async fetchText(url) {
+      noPagerUrls.push(url);
+      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      return '<table class="jv-job-list"><tbody><tr><td class="jv-job-list-name"><a href="/pagetest/job/x1">Solo Job</a></td><td class="jv-job-list-location">Remote</td></tr></tbody></table>';
+    },
+  };
+  const noPagerJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, noPagerCtx);
+  if (noPagerUrls.length === 2 && noPagerJobs.length === 1) {
+    pass('jobvite.fetch() makes no extra requests when /search has no pagination text');
+  } else {
+    fail(`jobvite.fetch() no-pager: urls=${JSON.stringify(noPagerUrls)}, jobs=${noPagerJobs.length}`);
+  }
+
+  // ctx.maxPages (the liveness probe's cap) stops pagination after the
+  // first page, same convention as join.mjs/workday.mjs.
+  let ctxCapUrls = [];
+  const ctxCapCtx = {
+    maxPages: 1,
+    async fetchText(url) {
+      ctxCapUrls.push(url);
+      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      const key = url.split('/pagetest/')[1];
+      return paginatedPages[key];
+    },
+  };
+  const ctxCapJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, ctxCapCtx);
+  if (ctxCapUrls.length === 2 && ctxCapJobs.length === 2) {
+    pass('jobvite.fetch() honors ctx.maxPages and stops after the first /search page');
+  } else {
+    fail(`jobvite.fetch() ctx.maxPages cap: urls=${JSON.stringify(ctxCapUrls)}, jobs=${ctxCapJobs.length}`);
+  }
+
+  // entry.max_pages caps how many /search pages get fetched, same as
+  // ctx.maxPages but user-configurable via the portal entry.
+  let entryCapUrls = [];
+  const entryCapCtx = {
+    async fetchText(url) {
+      entryCapUrls.push(url);
+      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      const key = url.split('/pagetest/')[1];
+      return paginatedPages[key];
+    },
+  };
+  const entryCapJobs = await jobvite.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest', max_pages: 2 },
+    entryCapCtx,
+  );
+  if (entryCapUrls.length === 3 && entryCapJobs.length === 4) {
+    pass('jobvite.fetch() honors entry.max_pages');
+  } else {
+    fail(`jobvite.fetch() entry.max_pages cap: urls=${JSON.stringify(entryCapUrls)}, jobs=${entryCapJobs.length}`);
+  }
+
 } catch (e) {
   fail(`jobvite provider tests crashed: ${e.message}`);
 }

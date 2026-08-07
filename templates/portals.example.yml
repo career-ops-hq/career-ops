@@ -682,6 +682,8 @@ search_queries:
 #   careers_url: https://jobs.jobvite.com/exampleco       # any jobs.jobvite.com/<companyId>[/jobs] host
 #   # api: https://jobs.jobvite.com/api/company/exampleco/jobs   # legacy form, still accepted;
 #                                                                 # careers_url above is preferred
+#   # max_pages: 20           # optional — only used on the /search fallback (a tenant whose /jobs
+#                              # is a client-rendered search-splash page); default 20, 50 jobs/page
 #   enabled: true
 #
 # - name: 腾讯 (Tencent)

@@ -135,9 +135,75 @@ function buildCareersUrl(companyId) {
 // points at). That page carries the same known-layout markup when the tenant
 // has open roles, or the same defused-empty-board wording (see
 // EMPTY_BOARD_MARKER) when it genuinely doesn't — see fetch() below.
-/** @param {string} companyId */
-function buildSearchUrl(companyId) {
-  return `${ORIGIN}/${encodeURIComponent(companyId)}/search`;
+//
+// Unlike /jobs (never seen paginated on a live tenant, even one with ~80
+// postings), /search always paginates at 50/page and reports it via a
+// `"{start}-{end} of {total}"` text node — reason enough to try /jobs first
+// rather than defaulting to /search everywhere: for any tenant where /jobs
+// already works, it's a single request with no pagination bookkeeping,
+// where /search would need at least a second request past 50 postings.
+/** @param {string} companyId @param {number} [page] - 0-indexed */
+function buildSearchUrl(companyId, page = 0) {
+  const base = `${ORIGIN}/${encodeURIComponent(companyId)}/search`;
+  return page > 0 ? `${base}?p=${page}` : base;
+}
+
+// Mirrors workday.mjs/join.mjs's pagination safety cap: bounded regardless
+// of what the page reports as its total, so a compromised/misbehaving
+// upstream can't drive this into fetching an unbounded number of pages.
+// Override with `max_pages` on the portal entry.
+const SEARCH_DEFAULT_MAX_PAGES = 20;
+const SEARCH_MAX_PAGES_CAP = 200;
+
+/** @param {{ max_pages?: number }} entry */
+function resolveSearchMaxPages(entry) {
+  const v = entry?.max_pages;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, SEARCH_MAX_PAGES_CAP);
+  return SEARCH_DEFAULT_MAX_PAGES;
+}
+
+// Jobvite's own pagination widget on /search: a text node reading e.g.
+// "1-50 of 241" (whitespace around the numbers varies, hence \s+ throughout
+// rather than literal spaces).
+const SEARCH_PAGINATION_TEXT = /(\d+)\s*-\s*(\d+)\s+of\s+(\d+)/;
+
+/**
+ * Fetch every /{slug}/search page and merge the results. Only called after
+ * /jobs itself came up ambiguous (see fetch()) — parseJobviteHtml on the
+ * first page still throws its own error (naming the tenant) if /search is
+ * *also* ambiguous, which is intentionally left to propagate uncaught.
+ *
+ * @param {string} companyId
+ * @param {{ name: string, max_pages?: number }} entry
+ * @param {{ fetchText: (url: string, opts?: object) => Promise<string>, maxPages?: number }} ctx
+ */
+async function fetchSearchPages(companyId, entry, ctx) {
+  const firstUrl = buildSearchUrl(companyId);
+  assertJobviteUrl(firstUrl);
+  const firstHtml = await ctx.fetchText(firstUrl, { redirect: 'error', headers: { accept: 'text/html' } });
+  const jobs = parseJobviteHtml(firstHtml, entry.name);
+
+  const m = firstHtml.match(SEARCH_PAGINATION_TEXT);
+  if (!m) return jobs; // no pager on this page — it's everything there is
+
+  const pageSize = Number(m[2]) - Number(m[1]) + 1;
+  const total = Number(m[3]);
+  if (!(pageSize > 0) || !(total > pageSize)) return jobs;
+
+  // Honor a context page cap the same way join.mjs/workday.mjs do — set by
+  // verify-portals' liveness probe so it only needs page 0 to confirm the
+  // board is live, not its full count. No effect on real scans, which don't
+  // set ctx.maxPages.
+  const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+  const pagesToFetch = Math.min(Math.ceil(total / pageSize), resolveSearchMaxPages(entry), ctxCap);
+
+  for (let page = 1; page < pagesToFetch; page++) {
+    const url = buildSearchUrl(companyId, page);
+    assertJobviteUrl(url);
+    const html = await ctx.fetchText(url, { redirect: 'error', headers: { accept: 'text/html' } });
+    jobs.push(...parseJobviteHtml(html, entry.name));
+  }
+  return jobs;
 }
 
 /** @type {Provider} */
@@ -167,13 +233,11 @@ export default {
     } catch {
       // /jobs had no known layout markers and no confirmed-empty wording —
       // ambiguous, not necessarily unsupported (see buildSearchUrl above).
-      // Retry against /search before concluding the theme really can't be
-      // scraped; if this also comes up empty-handed, let its own error
-      // (naming the tenant) propagate instead of the first one.
-      const searchUrl = buildSearchUrl(companyId);
-      assertJobviteUrl(searchUrl);
-      const searchHtml = await ctx.fetchText(searchUrl, { redirect: 'error', headers: { accept: 'text/html' } });
-      return parseJobviteHtml(searchHtml, entry.name);
+      // Retry against /search (paginating as needed) before concluding the
+      // theme really can't be scraped; if that also comes up empty-handed,
+      // let its own error (naming the tenant) propagate instead of the
+      // first one.
+      return fetchSearchPages(companyId, entry, ctx);
     }
   },
 };
