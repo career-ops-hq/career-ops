@@ -6502,6 +6502,42 @@ try {
   } else {
     fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
   }
+  // #2607 — a note citing ANOTHER row's apply date must not win. Notes routinely
+  // reference a sibling requisition's timeline for context, and that citation
+  // reads exactly like this row's own date to a positional scan.
+  const crossRefNote =
+    'STRATEGY DECISION NEEDED: #154 Sr PM M&A is already live in the same ATS '
+    + '(applied 2026-08-04) - recommend applying anyway. TIER A flagship CV '
+    + 'required. APPLIED 2026-08-06 - submitted directly by Jason.';
+  if (cadence.parseAppliedDate(crossRefNote) === '2026-08-06') {
+    pass('parseAppliedDate ignores a date cited about another row (#2607)');
+  } else {
+    fail(`parseAppliedDate cross-reference: got ${JSON.stringify(cadence.parseAppliedDate(crossRefNote))}, want 2026-08-06`);
+  }
+  // The reference's scope ends at a sentence boundary — otherwise any note that
+  // mentions a sibling row would lose its own date.
+  if (cadence.parseAppliedDate('Sibling #140 was slow. Applied 2026-08-06.') === '2026-08-06') {
+    pass('parseAppliedDate: a sentence boundary ends the row-reference scope');
+  } else {
+    fail('parseAppliedDate should keep its own date after a sentence break');
+  }
+  // When EVERY apply-date belongs to another row, the note does not state this
+  // row's date. Degrade to the labelled evaluation-date fallback rather than
+  // report a real-but-foreign date as measured.
+  const onlyForeign = 'Same posting as #140 (applied 2026-07-20). Not yet submitted.';
+  if (cadence.parseAppliedDate(onlyForeign) === null) {
+    pass('parseAppliedDate returns null when every applied date is a cross-reference');
+  } else {
+    fail(`parseAppliedDate should not adopt a foreign date, got ${JSON.stringify(cadence.parseAppliedDate(onlyForeign))}`);
+  }
+  {
+    const r = cadence.resolveAppliedDate({ notes: onlyForeign, date: '2026-07-25' });
+    if (r.appliedDate === '2026-07-25' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate labels a cross-reference-only note as the evaluation-date fallback');
+    } else {
+      fail(`resolveAppliedDate cross-ref-only: got ${JSON.stringify(r)}`);
+    }
+  }
   // A malformed value must be rejected, not silently truncated to a plausible
   // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
   // measured application date and quietly shift the whole cadence — worse than

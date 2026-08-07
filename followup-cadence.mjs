@@ -164,10 +164,62 @@ export function parseDate(dateStr) {
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
-  for (const m of String(notes).matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) return m[1];
+  const text = String(notes);
+
+  const matches = [];
+  for (const m of text.matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+    if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
   }
+  if (matches.length === 0) return null;
+
+  // Drop dates that belong to a DIFFERENT row before choosing. Notes routinely
+  // cite a sibling requisition's timeline for context — "#154 is already live
+  // in the same ATS (applied 2026-08-04)" — and that citation reads exactly
+  // like this row's own apply date to a positional scan (#2607).
+  const own = matches.filter(m => !isCrossReferencedMention(text, m.index));
+
+  // First-wins is preserved among a row's OWN dates: a later status date must
+  // not displace the submission date (see the fixture in test-all.mjs).
+  // Cross-reference filtering is orthogonal to that ordering rule.
+  if (own.length > 0) return own[0].date;
+
+  // Every apply-date in the note belongs to another row, so this note does not
+  // state when THIS row was submitted. Returning null degrades to the labelled
+  // evaluation-date fallback, which is the honest answer — the alternative is
+  // reporting a real but foreign date as `appDateSource: 'notes'`, i.e.
+  // measured, which is precisely the failure the header comment warns about.
   return null;
+}
+
+// How far back to look for a row reference. Long enough to span a clause like
+// "#154 Sr PM M&A is already live in the same ATS (applied ...)", short enough
+// that an unrelated "#123" earlier in a long note does not reach forward and
+// disqualify a genuine date.
+const CROSS_REF_LOOKBACK = 120;
+
+/**
+ * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
+ *
+ * Heuristic, and deliberately a narrow one: a `#NNN` row reference shortly
+ * before the date, with no sentence boundary between them, means the date is
+ * inside that reference's clause. A sentence break ends the reference's scope,
+ * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
+ * row's own date.
+ *
+ * Both failure directions are survivable, which is why a heuristic is
+ * acceptable here: a false positive degrades to the labelled evaluation-date
+ * fallback, and a false negative is just today's behaviour.
+ *
+ * @param {string} text
+ * @param {number} index - offset of the "applied" match within `text`
+ * @returns {boolean}
+ */
+function isCrossReferencedMention(text, index) {
+  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  let refEnd = -1;
+  for (const m of window.matchAll(/#\d+\b/g)) refEnd = m.index + m[0].length;
+  if (refEnd === -1) return false;
+  return !/[.;!?]\s/.test(window.slice(refEnd));
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a
