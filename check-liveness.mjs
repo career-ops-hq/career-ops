@@ -37,7 +37,7 @@ async function main() {
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(USAGE);
-    process.exit(0);
+    return;
   }
 
   // Portals like pracuj.pl serve a Cloudflare anti-bot wall to headless Chromium.
@@ -53,7 +53,8 @@ async function main() {
 
   if (positional.length === 0) {
     console.error(USAGE);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   let urls;
@@ -116,10 +117,10 @@ async function main() {
   if (browser) await browser.close();
 
   console.log(`\nResults: ${active} active  ${expired} expired  ${uncertain} uncertain  (${viaApi} via API, no browser)`);
-  if (expired > 0 || uncertain > 0) process.exit(1);
+  if (expired > 0 || uncertain > 0) process.exitCode = 1;
 }
 
 main().catch(err => {
   console.error('Fatal:', err.message);
-  process.exit(1);
+  process.exitCode = 1;
 });
