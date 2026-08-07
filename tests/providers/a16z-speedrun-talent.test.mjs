@@ -1,5 +1,6 @@
 // tests/providers/a16z-speedrun-talent.test.mjs
 import { pass, fail, ROOT } from '../helpers.mjs';
+import { fetchJsonWithRetry } from '../../providers/_http.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -168,22 +169,98 @@ try {
   if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() falls back to joined keywords[] when q: is absent');
   else fail(`keywords fallback q = ${JSON.stringify(new URL(kwCalls[0]).searchParams.get('q'))}`);
 
-  // MAX_PAGES_CAP: an oversized max_pages is clamped to 120, and the
+  // DEFAULT_MAX_PAGES: with no max_pages on the entry, the default budget
+  // covers 6 pages × 50 = 300 jobs — the same 300-job default scan the
+  // pre-#2419 constants encoded as 3 × 100. Pages derive from the requested
+  // `page` param with page-distinct ids, so duplicated or skipped requests
+  // cannot pass.
+  const defCalls = [];
+  const defCtx = {
+    fetchJson: async (url) => {
+      const p = Number(new URL(url).searchParams.get('page'));
+      defCalls.push(p);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(p * 50 + i)), total: 16830, page: p, page_size: 50, total_pages: 337 };
+    },
+  };
+  const defWarnings = [];
+  const defRealConsoleError = console.error;
+  let defJobs;
+  try {
+    console.error = (...args) => defWarnings.push(args.join(' '));
+    defJobs = await provider.fetch({ name: 'a16z speedrun talent network' }, defCtx);
+  } finally {
+    console.error = defRealConsoleError;
+  }
+  const defPagesOk = defCalls.length === 6 && defCalls.every((p, i) => p === i);
+  const defDistinct = defJobs && new Set(defJobs.map((j) => j.url)).size === 300;
+  if (defPagesOk && defJobs.length === 300 && defDistinct) pass('fetch() default budget covers pages 0..5 → 300 distinct jobs');
+  else fail(`default budget = ${JSON.stringify({ calls: defCalls, jobs: defJobs?.length })}`);
+  if (defWarnings.some((w) => w.includes('truncated at max_pages=6'))) pass('fetch() warns when the default budget truncates the feed');
+  else fail(`default-budget truncation warning missing; captured = ${JSON.stringify(defWarnings)}`);
+
+  // MAX_PAGES_CAP: an oversized max_pages is clamped to 1000 and the
   // truncation warning fires (spied via console.error, restored in finally).
+  // Pages derive from the requested `page` param with page-distinct ids —
+  // 1000 identical re-fetches of page 0 would fail the sequence assertion.
+  const mkCapCtx = (calls) => ({
+    fetchJson: async (url) => {
+      const p = Number(new URL(url).searchParams.get('page'));
+      calls.push(p);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(p * 50 + i)), total_pages: 1500 };
+    },
+  });
   const bigCalls = [];
-  const bigCtx = { fetchJson: async (url) => { bigCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 500 }; } };
   const warnings = [];
   const realConsoleError = console.error;
+  let bigJobs;
   try {
     console.error = (...args) => warnings.push(args.join(' '));
-    await provider.fetch({ max_pages: 9999 }, bigCtx);
+    bigJobs = await provider.fetch({ max_pages: 9999 }, mkCapCtx(bigCalls));
   } finally {
     console.error = realConsoleError;
   }
-  if (bigCalls.length === 120) pass('fetch() clamps max_pages to the 120-page cap');
-  else fail(`cap clamp fetched ${bigCalls.length} pages`);
-  if (warnings.some((w) => w.includes('truncated at max_pages=120'))) pass('fetch() warns when the cap truncates the feed');
+  const bigPagesOk = bigCalls.length === 1000 && bigCalls.every((p, i) => p === i);
+  if (bigPagesOk && new Set(bigJobs.map((j) => j.url)).size === 1000 * 50) pass('fetch() clamps max_pages to the 1000-page cap (pages 0..999, distinct jobs)');
+  else fail(`cap clamp = ${JSON.stringify({ calls: bigCalls.length, jobs: bigJobs?.length })}`);
+  if (warnings.some((w) => w.includes('truncated at max_pages=1000'))) pass('fetch() warns when the cap truncates the feed');
   else fail(`cap warning missing; captured = ${JSON.stringify(warnings)}`);
+
+  // Cap boundary from both directions: max_pages=1000 is NOT clamped
+  // (exactly 1000 calls), max_pages=1001 IS (also 1000) — pins the cap at
+  // exactly 1000 against off-by-one regressions in resolveMaxPages.
+  const atCapCalls = [];
+  const atCapReal = console.error;
+  try {
+    console.error = () => {};
+    await provider.fetch({ max_pages: 1000 }, mkCapCtx(atCapCalls));
+  } finally {
+    console.error = atCapReal;
+  }
+  const overCapCalls = [];
+  const overCapReal = console.error;
+  try {
+    console.error = () => {};
+    await provider.fetch({ max_pages: 1001 }, mkCapCtx(overCapCalls));
+  } finally {
+    console.error = overCapReal;
+  }
+  if (atCapCalls.length === 1000 && overCapCalls.length === 1000) pass('fetch() cap boundary: max_pages=1000 runs unclamped, 1001 clamps to 1000');
+  else fail(`cap boundary = ${JSON.stringify({ at: atCapCalls.length, over: overCapCalls.length })}`);
+
+  // Invalid max_pages values (0, non-integer string) fall back to the
+  // 6-page default — pins resolveMaxPages' guard to the new default.
+  for (const [label, bad] of [['0', 0], ['"350" (string)', '350']]) {
+    const badCalls = [];
+    const badReal = console.error;
+    try {
+      console.error = () => {};
+      await provider.fetch({ max_pages: bad }, mkCapCtx(badCalls));
+    } finally {
+      console.error = badReal;
+    }
+    if (badCalls.length === 6) pass(`fetch() falls back to the 6-page default for invalid max_pages=${label}`);
+    else fail(`invalid max_pages=${label} fetched ${badCalls.length} pages`);
+  }
 
   // fetch(): malformed payload throws with a useful message.
   let threw = false;
@@ -194,6 +271,122 @@ try {
   }
   if (threw) pass('fetch() throws on a payload without jobs[]');
   else fail('fetch() did not throw on malformed payload');
+
+  // ── transient upstream failures must not kill the whole board (#2506) ──
+  // 350 pages at 50/page: one 5xx anywhere in that range used to abort the
+  // provider and return NOTHING. Retries are bounded, use ctx.sleep so the
+  // test never wall-clock waits, and a PERSISTENT failure must still throw —
+  // a silent partial board is worse than a loud empty one.
+  const okPage = { jobs: [{ id: 'a1', title: 'Backend Engineer', company_name: 'Acme', url: 'https://speedrun-talent-network.com/jobs/a1' }], total_pages: 1 };
+
+  {
+    let attempts = 0;
+    const slept = [];
+    const flakyCtx = {
+      sleep: async (ms) => { slept.push(ms); },
+      fetchJson: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          const err = new Error('HTTP 500 Internal Server Error');
+          err.status = 500;
+          throw err;
+        }
+        return okPage;
+      },
+    };
+    const jobs = await provider.fetch({}, flakyCtx);
+    if (attempts === 2 && jobs.length === 1) pass('fetch() retries a transient 5xx and still returns the page (#2506)');
+    else fail(`transient 5xx not retried: attempts=${attempts}, jobs=${jobs.length}`);
+    if (slept.length === 1 && slept[0] > 0) pass('fetch() backs off between attempts via ctx.sleep (#2506)');
+    else fail(`unexpected backoff pattern: ${JSON.stringify(slept)}`);
+  }
+
+  {
+    // Persistent failure: still throws, no silent partial.
+    let attempts = 0;
+    const deadCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        attempts += 1;
+        const err = new Error('HTTP 503 Service Unavailable');
+        err.status = 503;
+        throw err;
+      },
+    };
+    let persistentThrew = false;
+    try { await provider.fetch({}, deadCtx); } catch { persistentThrew = true; }
+    if (persistentThrew && attempts === 3) pass('fetch() gives up loudly after 3 bounded attempts, never a silent partial (#2506)');
+    else fail(`persistent failure handling wrong: threw=${persistentThrew}, attempts=${attempts}`);
+  }
+
+  {
+    // Every jittered delay must stay within the policy's maxDelayMs. The cap is
+    // applied to the backoff MINUS the jitter, so the total honours the limit
+    // without the jitter being erased at the cap (where de-synchronising
+    // concurrent retries matters most).
+    //
+    // Math.random is stubbed so the CAPPED attempts are deterministically
+    // distinct: an earlier version of this test checked every delay, which
+    // included the pre-cap 400/800 steps and therefore passed even if all
+    // cap-level delays were identical — it did not test the property it named.
+    const slept = [];
+    const maxDelayMs = 1_000;
+    const ctx = {
+      sleep: async (ms) => { slept.push(ms); },
+      fetchJson: async () => { const e = new Error('HTTP 500'); e.status = 500; throw e; },
+    };
+    const realRandom = Math.random;
+    const seq = [0, 0.25, 0.5, 0.75, 1];
+    let i = 0;
+    Math.random = () => seq[i++ % seq.length];
+    try {
+      await fetchJsonWithRetry(ctx, 'https://example.test/x', {}, { retries: 5, baseDelayMs: 400, maxDelayMs });
+    } catch { /* expected */ } finally {
+      Math.random = realRandom;
+    }
+    // baseDelayMs 400 → 400, 800, then every later attempt sits at the cap.
+    const capped = slept.slice(2);
+    if (slept.every((ms) => ms >= 0 && ms <= maxDelayMs)) pass('retry backoff never exceeds maxDelayMs once jitter is added (#2506)');
+    else fail(`a jittered delay left [0, maxDelayMs]: ${JSON.stringify(slept)}`);
+    if (capped.length > 1 && new Set(capped).size > 1) pass('jitter survives AT THE CAP, so concurrent retries de-synchronise (#2506)');
+    else fail(`capped delays were identical — jitter erased at the cap: ${JSON.stringify(capped)}`);
+  }
+
+  {
+    // A maxDelayMs below the jitter must not drive the backoff negative and
+    // hand ctx.sleep a negative delay.
+    const slept = [];
+    const ctx = {
+      sleep: async (ms) => { slept.push(ms); },
+      fetchJson: async () => { const e = new Error('HTTP 500'); e.status = 500; throw e; },
+    };
+    try {
+      await fetchJsonWithRetry(ctx, 'https://example.test/x', {}, { retries: 3, baseDelayMs: 400, maxDelayMs: 100 });
+    } catch { /* expected */ }
+    if (slept.length > 0 && slept.every((ms) => ms >= 0 && ms <= 100)) {
+      pass('a maxDelayMs below the jitter still yields non-negative delays inside the cap (#2506)');
+    } else {
+      fail(`sub-jitter maxDelayMs produced out-of-range delays: ${JSON.stringify(slept)}`);
+    }
+  }
+
+  {
+    // A non-retryable 4xx must fail fast — retrying a bad request burns time.
+    let attempts = 0;
+    const badReqCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        attempts += 1;
+        const err = new Error('HTTP 404 Not Found');
+        err.status = 404;
+        throw err;
+      },
+    };
+    let fastFailed = false;
+    try { await provider.fetch({}, badReqCtx); } catch { fastFailed = true; }
+    if (fastFailed && attempts === 1) pass('fetch() does not retry a non-retryable 4xx (#2506)');
+    else fail(`4xx retry behaviour wrong: threw=${fastFailed}, attempts=${attempts}`);
+  }
 } catch (e) {
   fail(`a16z-speedrun-talent provider test crashed: ${e?.stack || e}`);
 }

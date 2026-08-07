@@ -64,6 +64,52 @@ function checkNodeVersion() {
   };
 }
 
+// El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas
+// preguntando por cuota y coste, y la causa mas repetida es esta. Aviso, nunca
+// fallo: tener una clave puesta es una eleccion legitima, lo que no es legitimo
+// es que el usuario no sepa que la esta usando en vez del plan que ya paga.
+function checkBillingSource() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  // Enabled means SET TO A TRUTHY VALUE, not merely present. These switches are
+  // documented as `=1`, so `CLAUDE_CODE_USE_BEDROCK=0` is how someone turns one
+  // off — and mere presence would then report "requests bill to your cloud
+  // account" at exactly the user who just said they don't. A billing check that
+  // misreads an explicit opt-out causes the confusion it exists to remove.
+  // Matches the repo's own env-flag convention (=== '1' in merge-tracker.mjs
+  // and update-system.mjs), while also accepting `true` since these are
+  // third-party switches users copy from assorted docs.
+  const cloud = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']
+    .filter((v) => /^(1|true|yes|on)$/i.test(String(process.env[v] ?? '').trim()));
+
+  if (cloud.length) {
+    return {
+      warn: true,
+      label: `${cloud[0]} is set, so requests bill to your cloud account, not to a Claude subscription.`,
+      fix: [
+        'Intentional? Nothing to do.',
+        `Not intentional: unset ${cloud[0]} and restart your terminal.`,
+      ],
+    };
+  }
+
+  const which = key ? 'ANTHROPIC_API_KEY' : (authToken ? 'ANTHROPIC_AUTH_TOKEN' : null);
+  if (!which) {
+    return { pass: true, label: 'Billing source: no API key in the environment (a Claude subscription will be used if you are logged in)' };
+  }
+
+  return {
+    warn: true,
+    label: `${which} is set, so it takes precedence over any Claude subscription: this session bills per token even if you pay for Pro or Max.`,
+    fix: [
+      'Intentional (you meant to use API credits)? Nothing to do.',
+      `Not intentional: remove the export of ${which} from ~/.zshrc, ~/.bashrc, ~/.profile or a project .env, restart your terminal, and run /login.`,
+      'Batch runs are the exception: `claude -p` workers do not use the interactive login, so they need `claude setup-token` exported as CLAUDE_CODE_OAUTH_TOKEN.',
+      'Details: docs/RUNNING_ON_A_BUDGET.md section 2b.',
+    ],
+  };
+}
+
 function checkDependencies() {
   if (existsSync(join(projectRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
@@ -404,6 +450,7 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
+    checkBillingSource(),
     checkDependencies(),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot, activeCli),

@@ -1,4 +1,6 @@
 // @ts-check
+import { fetchJsonWithRetry } from './_http.mjs';
+
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // a16z speedrun talent network provider — board-wide aggregator feed (a16z
@@ -10,9 +12,10 @@
 //
 // Paginated 50/page via `?page=N` (0-indexed); the response carries
 // `total_pages`, so iteration is bounded by min(total_pages, max_pages).
-// Default cap is modest; the board is several thousand roles, so either
-// raise `max_pages` on the entry or narrow server-side with `q:` (the feed
-// runs full-text search with synonym expansion, e.g. "ml", "swe", "nyc").
+// Page budgets are sized in 50-job pages — see DEFAULT_MAX_PAGES and
+// MAX_PAGES_CAP below. Either raise `max_pages` on the entry or narrow
+// server-side with `q:` (the feed runs full-text search with synonym
+// expansion, e.g. "ml", "swe", "nyc").
 //
 // Every request carries `source=career-ops` — the feed's documented optional
 // attribution param, echoed in the response; it does not change results.
@@ -23,8 +26,14 @@
 const FEED_BASE = 'https://speedrun-talent-network.com/api/v1/jobs';
 const TRUSTED_HOST = 'speedrun-talent-network.com';
 const PER_PAGE = 50;
-const DEFAULT_MAX_PAGES = 3;
-const MAX_PAGES_CAP = 120;
+const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
+// Runaway bound, not a coverage target: iteration already stops at the
+// feed's reported total_pages (or a short page), so on an honest feed the
+// cap costs nothing and full-board sweeps keep working as the board grows.
+// It only bites a misbehaving feed or an absurd max_pages entry — so it
+// sits well above plausible board size (~353 pages / ~17.6k jobs as of
+// 2026-08), same policy as workday.mjs's cap.
+const MAX_PAGES_CAP = 1000;
 
 /** @param {string} url */
 function assertFeedUrl(url) {
@@ -150,8 +159,13 @@ export default {
       const params = new URLSearchParams({ page: String(page), source: 'career-ops' });
       if (q) params.set('q', q);
       const url = `${FEED_BASE}?${params}`;
-      // redirect:'error' prevents SSRF via server-side redirects
-      const json = await ctx.fetchJson(url, { redirect: 'error' });
+      // redirect:'error' prevents SSRF via server-side redirects.
+      // Retried on transient upstream failures (429/5xx/timeout): this board
+      // paginates into the hundreds of pages, so a single blip mid-sweep used
+      // to abort the whole provider and return NOTHING. Retries are bounded
+      // and, once exhausted, the error still propagates — a silent partial
+      // board would be worse than an loud empty one (#2506).
+      const json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' });
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
           `a16z-speedrun-talent: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
