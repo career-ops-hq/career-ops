@@ -10,7 +10,8 @@ export function pdfPathForReport(indexText, reportNumber) {
   for (const line of String(indexText ?? "").split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
     const columns = line.split("\t");
-    if (Number.parseInt(columns[0]?.trim() ?? "", 10) === reportNumber) {
+    const indexedReport = columns[0]?.trim() ?? "";
+    if (/^\d+$/.test(indexedReport) && Number(indexedReport) === reportNumber) {
       const pdf = columns[1]?.trim();
       return pdf || null;
     }

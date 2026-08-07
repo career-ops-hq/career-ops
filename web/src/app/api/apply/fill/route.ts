@@ -18,6 +18,12 @@ export async function POST(req: Request) {
   }
   const { sessionId, answers = {}, fields = [], handoff, company, application } = body;
   if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+  if (company !== undefined && typeof company !== "string") {
+    return Response.json({ error: "company must be a string" }, { status: 400 });
+  }
+  if (application !== undefined && typeof application !== "string") {
+    return Response.json({ error: "application must be a string" }, { status: 400 });
+  }
 
   // Resolve the tailored CV server-side (never trust a client path): by the
   // offer's company if known, else best-effort from the form title.
