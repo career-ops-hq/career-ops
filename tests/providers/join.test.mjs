@@ -126,6 +126,52 @@ try {
     fail(`join.fetch() ctx.maxPages wrong: calls=${cappedCalls}, jobs=${cappedJobs.length}`);
   }
 
+  // fetch() — DEFAULT_MAX_PAGES caps pagination even when the page's own
+  // reported pagination.pageCount is far higher, and warns about it. Applies
+  // regardless of ctx.maxPages (unset here), unlike the health-check cap.
+  let bigBoardCalls = 0;
+  const bigBoardCtx = {
+    fetchText: async () => {
+      bigBoardCalls++;
+      return nextDataHtml([{ title: `Job ${bigBoardCalls}`, idParam: String(bigBoardCalls), city: {} }], 9999);
+    },
+  };
+  const bigBoardWarnings = [];
+  const realConsoleError = console.error;
+  console.error = (...args) => bigBoardWarnings.push(args.join(' '));
+  let bigBoardJobs;
+  try {
+    bigBoardJobs = await joinProvider.fetch(entry, bigBoardCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (bigBoardCalls === 50 && bigBoardJobs.length === 50) {
+    pass('join.fetch() caps pagination at DEFAULT_MAX_PAGES=50 even when pagination.pageCount reports far more');
+  } else {
+    fail(`join.fetch() DEFAULT_MAX_PAGES cap wrong: calls=${bigBoardCalls}, jobs=${bigBoardJobs?.length}`);
+  }
+  if (bigBoardWarnings.some((w) => w.includes('truncated at max_pages=50'))) {
+    pass('join.fetch() warns when DEFAULT_MAX_PAGES truncates the board');
+  } else {
+    fail(`join.fetch() truncation warning missing; captured = ${JSON.stringify(bigBoardWarnings)}`);
+  }
+
+  // fetch() — entry.max_pages overrides the default, clamped at MAX_PAGES_CAP.
+  let overrideCalls = 0;
+  const overrideCtx = {
+    fetchText: async () => {
+      overrideCalls++;
+      return nextDataHtml([{ title: `Job ${overrideCalls}`, idParam: String(overrideCalls), city: {} }], 9999);
+    },
+  };
+  const overrideEntry = { name: 'Acme', careers_url: 'https://join.com/companies/acme-corp', max_pages: 3 };
+  const overrideJobs = await joinProvider.fetch(overrideEntry, overrideCtx);
+  if (overrideCalls === 3 && overrideJobs.length === 3) {
+    pass('join.fetch() honors entry.max_pages as an override on the default cap');
+  } else {
+    fail(`join.fetch() entry.max_pages override wrong: calls=${overrideCalls}, jobs=${overrideJobs?.length}`);
+  }
+
   // fetch() — missing/unexpected __NEXT_DATA__ structure throws instead of
   // silently returning an empty list (so a scan doesn't mistake a parse
   // failure for a genuinely empty board).
