@@ -28,7 +28,9 @@ import { checkLivenessViaApi } from './liveness-api.mjs';
 
 const USAGE = `Usage:
   node check-liveness.mjs [--no-fallback] [--throttle[=ms]] <url1> [url2] ...
-  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt`;
+  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt
+  node check-liveness.mjs --help                  # print this usage block and exit
+  node check-liveness.mjs -h                      # alias for --help`;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -50,8 +52,7 @@ async function main() {
   const positional = args.filter((a) => a !== '--no-fallback' && a !== throttleArg);
 
   if (positional.length === 0) {
-    console.error('Usage: node check-liveness.mjs [--no-fallback] [--throttle[=ms]] <url1> [url2] ...');
-    console.error('       node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt');
+    console.error(USAGE);
     process.exit(1);
   }
 

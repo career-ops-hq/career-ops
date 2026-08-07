@@ -30,12 +30,20 @@ ok('--help prints usage', helpOut.includes('Usage:'));
 ok('--help documents --no-fallback', helpOut.includes('--no-fallback'));
 ok('--help documents --throttle', helpOut.includes('--throttle'));
 ok('--help documents --file', helpOut.includes('--file'));
+ok('--help documents --help', helpOut.includes('--help'));
+ok('--help documents -h', helpOut.includes('-h'));
 
 const hOut = execFileSync('node', [scriptPath, '-h'], {
   encoding: 'utf-8',
   timeout: 10000,
 });
 ok('-h prints usage', hOut.includes('Usage:'));
+
+const helpWithMissingFile = execFileSync('node', [scriptPath, '--help', '--file', '/definitely/missing'], {
+  encoding: 'utf-8',
+  timeout: 10000,
+});
+ok('--help exits before file read', helpWithMissingFile.includes('Usage:'));
 
 try {
   execFileSync('node', [scriptPath], {
