@@ -22,7 +22,7 @@
  *      node upskill.mjs --self-test
  */
 
-import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
@@ -139,14 +139,25 @@ export function yamlValueText(raw) {
     return raw;
   }
   const out = [];
+  // YAML anchors/aliases can produce a genuinely cyclic object graph
+  //   root: &a
+  //     self: *a
+  // which js-yaml resolves into a real JS cycle (doc.root.self === doc.root).
+  // An unguarded walk chases that forever and dies with a RangeError, killing
+  // the whole run — the parse try/catch above cannot help, because the throw
+  // happens here, not in yamlLoad(). The WeakSet also collapses a non-cyclic
+  // alias reused in several places, which is harmless: the caller turns this
+  // into a Set of skills, so emitting a value once is sufficient.
+  const seen = new WeakSet();
   const walk = (node) => {
     if (node == null) return;
     const t = typeof node;
     if (t === 'string' || t === 'number' || t === 'boolean') { out.push(String(node)); return; }
+    if (t !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
     if (Array.isArray(node)) { node.forEach(walk); return; }
-    if (t === 'object') {
-      for (const [k, v] of Object.entries(node)) { out.push(String(k)); walk(v); }
-    }
+    for (const [k, v] of Object.entries(node)) { out.push(String(k)); walk(v); }
   };
   walk(doc);
   return out.join('\n');
@@ -174,6 +185,30 @@ export function stripMarkdownComments(raw) {
  */
 export function knownSkillsText(cvRaw, profileRaw) {
   return [stripMarkdownComments(cvRaw), yamlValueText(profileRaw)].join('\n');
+}
+
+/**
+ * Contents of an OPTIONAL file, or '' when it cannot be read as one.
+ *
+ * `existsSync(p) ? readFileSync(p) : ''` looks safe and is not: existsSync is
+ * true for a DIRECTORY, and reading that path throws EISDIR. Aggregate mode had
+ * no try/catch around those reads, so a `cv.md/` directory — or any unreadable
+ * path — killed the run instead of degrading to empty input. The targeted path
+ * already swallowed read errors, so the two disagreed about the same files.
+ *
+ * Both now share this one reader. Missing, unreadable, and not-a-file all
+ * collapse to '', which is what "optional" is supposed to mean.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+export function readOptionalText(filePath) {
+  try {
+    if (!statSync(filePath).isFile()) return '';
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
 }
 
 // --- Machine Summary + Gap table parsing ---
@@ -368,8 +403,8 @@ function analyze(minReports) {
   }
 
   const knownText = knownSkillsText(
-    existsSync(CV_FILE) ? readFileSync(CV_FILE, 'utf-8') : '',
-    existsSync(PROFILE_FILE) ? readFileSync(PROFILE_FILE, 'utf-8') : '',
+    readOptionalText(CV_FILE),
+    readOptionalText(PROFILE_FILE),
   );
   const knownSkills = extractSkills(knownText);
 
@@ -644,6 +679,33 @@ soft_gaps:
     if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
       failures.push('known-skills: markdown comment not stripped');
     }
+
+    // A YAML alias can produce a genuinely cyclic object. Without a visited-set
+    // the walk recurses until the stack dies, taking the whole run with it —
+    // and the parse try/catch cannot help, because the throw is in the walk.
+    const cyclicYaml = 'root: &a\n  name: Python\n  self: *a\n';
+    // Load ONCE and compare within that graph — two separate loads produce two
+    // independent object trees, so a cross-load identity check never holds and
+    // would assert nothing.
+    const cyclicDoc = yamlLoad(cyclicYaml);
+    if (cyclicDoc?.root?.self !== cyclicDoc?.root) {
+      failures.push('known-skills: cyclic fixture no longer produces a cycle — rewrite it, not the guard');
+    }
+    try {
+      if (!extractSkills(yamlValueText(cyclicYaml)).has('Python')) {
+        failures.push('known-skills: cyclic YAML lost a real value');
+      }
+    } catch (e) {
+      failures.push(`known-skills: cyclic YAML alias threw (${e.constructor.name}) instead of terminating`);
+    }
+
+    // Optional files: missing, unreadable, and not-a-file must all read as ''.
+    if (readOptionalText(join(CAREER_OPS, 'no-such-file-xyz.md')) !== '') {
+      failures.push('readOptionalText: a missing file should read as empty');
+    }
+    if (readOptionalText(CAREER_OPS) !== '') {
+      failures.push('readOptionalText: a DIRECTORY should read as empty, not throw EISDIR');
+    }
   }
 
   if (failures.length > 0) {
@@ -769,18 +831,13 @@ if (urlTextIdx !== -1 || directUrl) {
     // Assemble the known-skills text (cv + profile), matching aggregate mode.
     // Targeted mode additionally falls back to cv-example.md when cv.md is absent
     // so a fresh checkout still produces a meaningful comparison.
-    let profileRaw = '';
-    if (existsSync(PROFILE_FILE)) {
-      try { profileRaw = readFileSync(PROFILE_FILE, 'utf-8'); } catch (e) {}
-    }
-    let activeCvFile = CV_FILE;
-    if (!existsSync(activeCvFile)) {
-      activeCvFile = join(CAREER_OPS, 'cv-example.md');
-    }
-    let cvRaw = '';
-    if (existsSync(activeCvFile)) {
-      try { cvRaw = readFileSync(activeCvFile, 'utf-8'); } catch (e) {}
-    }
+    const profileRaw = readOptionalText(PROFILE_FILE);
+    let cvRaw = readOptionalText(CV_FILE);
+    // Fall back to the shipped example when cv.md is absent OR unreadable, so a
+    // fresh checkout still produces a meaningful comparison. Keyed on the read
+    // result rather than existsSync: a cv.md that exists but cannot be read is,
+    // for this purpose, the same as one that is not there.
+    if (!cvRaw) cvRaw = readOptionalText(join(CAREER_OPS, 'cv-example.md'));
 
     const { gaps: gapList, excludedAsKnown, knownSkills } =
       computeTargetedGaps(targetText, knownSkillsText(cvRaw, profileRaw));
