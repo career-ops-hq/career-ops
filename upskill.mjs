@@ -96,6 +96,86 @@ const LOW_FIT_SCORE = 4.0;
 import { extractSkills } from './skill-extract.mjs';
 export { extractSkills };
 
+// --- Known-skills text assembly ---
+// The known-skills set is built by running extractSkills() over cv.md and
+// config/profile.yml. Feeding those files in RAW means every skill named in a
+// COMMENT registers as a skill the user has, and is then suppressed from the
+// gap map — silently, permanently, and with no way to tell "suppressed because
+// known" from "never appeared".
+//
+// The failure is inverted, which is what makes it nasty: a comment written to
+// record that the user does NOT have something is the thing that makes this
+// believe they do. Realistic triggers, all ordinary config hygiene:
+//
+//   # not using Kubernetes anymore, moved to ECS
+//   # considering a Snowflake migration in 2027
+//   # removed the CISSP line 2026-07-05, was never accurate
+//
+// Both helpers below are pure and exported for unit testing.
+
+/**
+ * Text of a YAML config with comments removed, for skill extraction.
+ *
+ * Parsing and re-serializing drops comments for free — no regex has to guess
+ * whether a `#` is a comment or lives inside a quoted string. Keys are kept
+ * alongside values: the reported bug is about comments, and dropping keys
+ * would silently narrow what counts as known (`skills: {Python: expert}` puts
+ * the skill in key position), which is a different behaviour change than the
+ * one being fixed here.
+ *
+ * An unparseable file falls back to the raw text — the previous behaviour —
+ * so a malformed profile degrades to "slightly over-eager" rather than
+ * "no known skills at all", which would flood the gap map with false gaps.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function yamlValueText(raw) {
+  if (!raw) return '';
+  let doc;
+  try {
+    doc = yamlLoad(raw);
+  } catch {
+    return raw;
+  }
+  const out = [];
+  const walk = (node) => {
+    if (node == null) return;
+    const t = typeof node;
+    if (t === 'string' || t === 'number' || t === 'boolean') { out.push(String(node)); return; }
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (t === 'object') {
+      for (const [k, v] of Object.entries(node)) { out.push(String(k)); walk(v); }
+    }
+  };
+  walk(doc);
+  return out.join('\n');
+}
+
+/**
+ * Markdown with HTML comments removed. `cv.md` ships from a template carrying
+ * `<!-- ... -->` guidance, and users leave their own notes in the same form.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function stripMarkdownComments(raw) {
+  return String(raw ?? '').replace(/<!--[\s\S]*?-->/g, '\n');
+}
+
+/**
+ * The text the known-skills set is extracted from. Single definition so the
+ * aggregate and targeted paths cannot drift — the drift class #1896 exists to
+ * prevent.
+ *
+ * @param {string} cvRaw       raw cv.md (or cv-example.md)
+ * @param {string} profileRaw  raw config/profile.yml
+ * @returns {string}
+ */
+export function knownSkillsText(cvRaw, profileRaw) {
+  return [stripMarkdownComments(cvRaw), yamlValueText(profileRaw)].join('\n');
+}
+
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
 function parseMachineSummary(content) {
@@ -287,10 +367,10 @@ function analyze(minReports) {
     };
   }
 
-  const knownText = [
+  const knownText = knownSkillsText(
     existsSync(CV_FILE) ? readFileSync(CV_FILE, 'utf-8') : '',
     existsSync(PROFILE_FILE) ? readFileSync(PROFILE_FILE, 'utf-8') : '',
-  ].join('\n');
+  );
   const knownSkills = extractSkills(knownText);
 
   const { gaps, excludedAsKnown, totalLowFit } = aggregateGaps(parsedReports, knownSkills);
@@ -518,11 +598,59 @@ soft_gaps:
     }
   }
 
+  // --- known-skills text: comments must never register as known skills ---
+  // A comment recording that the user does NOT have something must not make it
+  // count as known and suppress it from the gap map.
+  {
+    const profile = [
+      'candidate:',
+      '  full_name: "Test User"',
+      '# We dropped Kubernetes last year and never picked up Terraform.',
+      'skills:',
+      '  - Python',
+    ].join('\n');
+    const cv = '# CV\n\n<!-- template note: list Snowflake if you have used it -->\n\n## Skills\nSQL, AWS\n';
+
+    const leaked = extractSkills([cv, profile].join('\n'));
+    if (!leaked.has('Kubernetes') || !leaked.has('Snowflake')) {
+      failures.push('known-skills: fixture no longer reproduces the raw-concat leak — rewrite it, not the fix');
+    }
+
+    const fixed = extractSkills(knownSkillsText(cv, profile));
+    for (const ghost of ['Kubernetes', 'Terraform', 'Snowflake']) {
+      if (fixed.has(ghost)) failures.push(`known-skills: "${ghost}" leaked from a comment`);
+    }
+    for (const real of ['Python', 'SQL', 'AWS']) {
+      if (!fixed.has(real)) failures.push(`known-skills: real skill "${real}" was dropped`);
+    }
+
+    // A skill in KEY position stays known — dropping keys would silently narrow
+    // what counts as known, a different behaviour change than removing comments.
+    if (!extractSkills(yamlValueText('skills:\n  Python: expert\n')).has('Python')) {
+      failures.push('known-skills: key-position skill dropped');
+    }
+
+    // Parsing beats regex-stripping: a '#' inside a quoted string is not a comment.
+    if (!extractSkills(yamlValueText('note: "uses C# daily"\n')).has('C#')) {
+      failures.push('known-skills: "#" inside a quoted string was treated as a comment');
+    }
+
+    // Unparseable YAML degrades to the raw text (previous behaviour). Returning
+    // nothing would empty the known-skills set and flood the map with false gaps.
+    if (!yamlValueText('key: [unclosed\n  bad: : :').includes('unclosed')) {
+      failures.push('known-skills: unparseable YAML should fall back to raw text');
+    }
+
+    if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
+      failures.push('known-skills: markdown comment not stripped');
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing)');
+  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing, known-skills comment handling)');
   process.exit(0);
 }
 
@@ -641,20 +769,21 @@ if (urlTextIdx !== -1 || directUrl) {
     // Assemble the known-skills text (cv + profile), matching aggregate mode.
     // Targeted mode additionally falls back to cv-example.md when cv.md is absent
     // so a fresh checkout still produces a meaningful comparison.
-    const knownTextChunks = [];
+    let profileRaw = '';
     if (existsSync(PROFILE_FILE)) {
-      try { knownTextChunks.push(readFileSync(PROFILE_FILE, 'utf-8')); } catch (e) {}
+      try { profileRaw = readFileSync(PROFILE_FILE, 'utf-8'); } catch (e) {}
     }
     let activeCvFile = CV_FILE;
     if (!existsSync(activeCvFile)) {
       activeCvFile = join(CAREER_OPS, 'cv-example.md');
     }
+    let cvRaw = '';
     if (existsSync(activeCvFile)) {
-      try { knownTextChunks.push(readFileSync(activeCvFile, 'utf-8')); } catch (e) {}
+      try { cvRaw = readFileSync(activeCvFile, 'utf-8'); } catch (e) {}
     }
 
     const { gaps: gapList, excludedAsKnown, knownSkills } =
-      computeTargetedGaps(targetText, knownTextChunks.join('\n'));
+      computeTargetedGaps(targetText, knownSkillsText(cvRaw, profileRaw));
 
     console.log(JSON.stringify({
       mode: 'targeted',
