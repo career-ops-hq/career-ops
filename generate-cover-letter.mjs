@@ -172,8 +172,29 @@ export function buildHtml(payload, templatePath) {
   // the original template. A single regex pass (rather than iterative
   // split/join) ensures a substituted value that itself contains a {{TOKEN}}
   // sequence is left literal instead of being re-interpreted as a placeholder.
-  // Tokens with no entry in the map are left untouched.
-  return html.replace(/\{\{[A-Z_]+\}\}/g, (token) => replacements[token] ?? token);
+  //
+  // A token with no entry in the map is a template the renderer cannot fill —
+  // a custom cover-letter template (KINDS.cover in cv-templates.mjs) carrying a
+  // typo'd or unsupported token. Collect those DURING the pass rather than
+  // scanning the result: a scan of the output cannot tell a template token from
+  // the same sequence appearing inside a substituted value, which is exactly
+  // what the single pass above is careful to leave literal.
+  const unresolved = new Set();
+  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+    const value = replacements[token];
+    if (value == null) {
+      unresolved.add(token);
+      return token;
+    }
+    return value;
+  });
+
+  // Fail loudly, matching build-cv-html.mjs and build-cv-latex.mjs. Shipping a
+  // letter with a literal {{TOKEN}} in it is worse than not producing one.
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
+  return rendered;
 }
 
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
