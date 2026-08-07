@@ -333,6 +333,19 @@ Two separate axes:
 
 **Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
+### Aggregator Listings -- Confirm at the Employer
+
+Job aggregators keep stale, filled, and ghost listings live long after the employer closed the req. A closed role's aggregator page still renders a title, a description, and an Apply button, so `check-liveness.mjs` reads it as `active` — the aggregator page itself proves nothing. **A listing sourced from an aggregator is UNCONFIRMED by default: it is not a real opening until the employer says so.** This covers Wellfound / LinkedIn / Instahyre / Cutshort / Internshala / Naukri and similar, however the listing arrived — pasted, scanned, or found via WebSearch.
+
+**Before an aggregator listing is evaluated, applied to, or presented to the user as live:**
+
+1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
+2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv` or on the tracker row — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+4. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
+
+This is a confirmation step, not a replacement for `check-liveness.mjs` — run the liveness checker against the **employer** URL once you have it. The headless-batch exception above still applies.
+
 ---
 
 ## CI/CD, Community and Governance
