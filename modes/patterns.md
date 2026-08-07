@@ -38,11 +38,11 @@ Parse the JSON output. It contains:
 |-----|----------|
 | `metadata` | Total entries, date range, analysis date, counts by outcome |
 | `funnel` | Count per status stage (evaluated, applied, interview, offer, etc.) |
-| `scoreComparison` | Avg/min/max score per outcome group (positive, negative, self_filtered, pending) |
-| `archetypeBreakdown` | Per-archetype: total, positive, negative, self_filtered, conversion rate |
+| `scoreComparison` | Avg/min/max score per outcome group (positive, negative, awaiting, self_filtered, pending) |
+| `archetypeBreakdown` | Per-archetype: total, submitted, positive, negative, awaiting, self_filtered, conversionRate, decidedRate |
 | `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite; each `percentage` is a share of `blockerBase` |
 | `blockerBase` | Entries carrying a non-empty gaps array — the denominator for `blockerAnalysis[].percentage` |
-| `remotePolicy` | Per-policy bucket: total, positive, negative, conversion rate |
+| `remotePolicy` | Per-policy bucket: total, submitted, positive, negative, awaiting, conversionRate, decidedRate |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
 | `viaChannelAnalysis` | Via channel analysis (#1596): per-agency advance rate + agency-vs-direct aggregate (see below) |
@@ -157,7 +157,7 @@ Write the report to `reports/pattern-analysis-{YYYY-MM-DD}.md`.
 
 **Applications analyzed:** {total}
 **Date range:** {from} to {to}
-**Outcomes:** {positive} positive, {negative} negative, {self_filtered} self-filtered, {pending} pending
+**Outcomes:** {positive} positive, {awaiting} awaiting a reply, {negative} negative, {self_filtered} self-filtered, {pending} not sent
 
 ---
 
@@ -177,13 +177,16 @@ Show each status with count and percentage of total. Use a simple table:
 |---------|-----------|-----|-----|-------|
 | Positive | X.X/5 | X.X | X.X | X |
 | Negative | ... | | | |
+| Awaiting | ... | | | |
 | Self-filtered | ... | | | |
 | Pending | ... | | | |
 
 ## Archetype Performance
 
-Table with each archetype, total applications, positive outcomes, conversion rate.
+Table with each archetype, applications **sent** (`submitted`), positive outcomes, `conversionRate` and `decidedRate`.
 Highlight the best-performing archetype and the worst.
+
+Read the two rates as different questions. `conversionRate` = positives over everything sent, so a segment where most applications are still unanswered reads low by construction. `decidedRate` = positives over the applications the employer has actually answered, and is `null` while nothing is decided — report that as "no data yet", never as 0%.
 
 ## Top Blockers
 
@@ -194,6 +197,8 @@ gap-bearing entries, not the share of all applications.
 ## Remote Policy Patterns
 
 Table showing conversion rate by remote policy bucket (global, regional, geo-restricted, hybrid/onsite).
+
+**Never call a segment bad on `conversionRate` alone.** A bucket whose applications are all still unanswered shows a low `conversionRate` and a `null` `decidedRate` — that is silence, not rejection, and retiring a lane on it is how a working channel gets dropped. State `0%` as a negative signal only when `positive` is 0 **and** `decided` is at least 2, and name the decided count alongside it.
 
 ## Tech Stack Gaps
 
@@ -228,7 +233,7 @@ Example:
 > **Pattern Analysis Complete** (24 applications, Apr 7-8)
 >
 > Key findings:
-> - Geo-restricted roles are 0% conversion (7 of 24) -- stop evaluating US/Canada-only postings
+> - Geo-restricted roles: 0 of 7 **decided** applications advanced -- stop evaluating US/Canada-only postings
 > - Regional/global remote roles convert at 57-67% -- these are your sweet spot
 > - No positive outcomes below 4.2/5 -- consider this your score floor
 >
@@ -257,7 +262,8 @@ For reference, outcomes are classified as:
 
 | Status | Outcome |
 |--------|---------|
-| Interview, Offer, Responded, Applied | **Positive** (invested effort or got traction) |
+| Interview, Offer, Responded, Hired | **Positive** (the employer moved it forward) |
+| Applied | **Awaiting** (sent, no answer yet — counts in the conversion denominator, never as a success) |
 | Rejected, Discarded | **Negative** (company said no or offer closed) |
 | SKIP, NO APLICAR | **Self-filtered** (user decided not to apply) |
-| Evaluated | **Pending** (no action taken yet) |
+| Evaluated | **Pending** (never sent) |

@@ -16,6 +16,7 @@
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -104,11 +105,17 @@ function normalizeStatus(raw) {
   return ALIASES[clean] || clean;
 }
 
-function classifyOutcome(status) {
+export function classifyOutcome(status) {
   const s = normalizeStatus(status);
   // 'hired' is the strongest positive outcome — a landed job. It must not fall
   // through to the 'pending' default, which would drag conversion rates down.
-  if (['hired', 'interview', 'offer', 'responded', 'applied'].includes(s)) return 'positive';
+  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
+  // 'applied' is SENT, not successful — no recorded answer yet. It gets its
+  // own bucket so it can sit in the conversion DENOMINATOR without inflating
+  // the numerator; counting it as positive reports the user's own sending
+  // activity back at them as traction. Mirrors ADVANCED_STATUSES, which already
+  // excludes 'applied' for the vendor/via channel-yield analysis.
+  if (s === 'applied') return 'awaiting';
   if (['rejected', 'discarded'].includes(s)) return 'negative';
   if (['skip'].includes(s)) return 'self_filtered';
   return 'pending'; // evaluated
@@ -134,6 +141,51 @@ function discardableBase(enriched) {
 // contribute a blocker and must not pad the denominator.
 function gapBearingBase(enriched) {
   return enriched.filter(e => e.report?.gaps?.length > 0).length;
+}
+
+// Outcome buckets a breakdown row carries. Kept in one place so a new bucket
+// cannot be added to classifyOutcome without every counter learning about it —
+// `entry[outcome]++` on a missing key silently writes NaN.
+export const OUTCOME_BUCKETS = ['positive', 'negative', 'self_filtered', 'pending', 'awaiting'];
+
+// Sample floors for the prescriptive recommendations. Small on purpose: they
+// do not claim statistical confidence, they stop a single row from becoming
+// an instruction ("avoid X", "set the threshold at Y").
+const MIN_SUBMITTED_FOR_RECOMMENDATION = 2;
+const MIN_DECIDED_FOR_AVOID = 2;
+const MIN_POSITIVE_SCORES_FOR_THRESHOLD = 3;
+
+/** A zeroed counter row for the per-segment breakdowns. */
+export function newOutcomeCounts() {
+  const row = { total: 0 };
+  for (const bucket of OUTCOME_BUCKETS) row[bucket] = 0;
+  return row;
+}
+
+/**
+ * Rates for one breakdown row.
+ *
+ * `conversionRate` divides by SUBMITTED (positive + negative + awaiting), never
+ * by `total`: `total` also counts Evaluated rows that were never sent, so
+ * dividing by it answers "what share of the evaluated pile did I apply to",
+ * which is not a conversion rate.
+ *
+ * `decidedRate` is the stricter reading — of the applications with a recorded
+ * outcome (positive or negative), how many advanced. It is `null` (not 0)
+ * when nothing is decided yet, so an untested segment reads as "no data"
+ * instead of "0%". `decided` is returned as a count so callers gate on facts
+ * rather than on a rounded percentage.
+ */
+export function withOutcomeRates(data) {
+  const submitted = data.positive + data.negative + data.awaiting;
+  const decided = data.positive + data.negative;
+  return {
+    ...data,
+    submitted,
+    decided,
+    conversionRate: submitted > 0 ? Math.round((data.positive / submitted) * 100) : 0,
+    decidedRate: decided > 0 ? Math.round((data.positive / decided) * 100) : null,
+  };
 }
 
 // Statuses that count as a submitted application for channel-yield analysis
@@ -453,6 +505,9 @@ requirement_importance:
   for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
     if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
   }
+  // Outcome buckets and rate helpers are covered by
+  // tests/analyze-patterns-outcomes.test.mjs (unit + end-to-end fixture).
+
   if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
   if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
   if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
@@ -1058,7 +1113,7 @@ function analyze() {
   }
 
   // --- Score comparison by outcome ---
-  const scoresByOutcome = { positive: [], negative: [], self_filtered: [], pending: [] };
+  const scoresByOutcome = Object.fromEntries(OUTCOME_BUCKETS.map((b) => [b, []]));
   for (const e of enriched) {
     if (e.score > 0) scoresByOutcome[e.outcome].push(e.score);
   }
@@ -1074,26 +1129,24 @@ function analyze() {
     };
   };
 
-  const scoreComparison = {
-    positive: scoreStats(scoresByOutcome.positive),
-    negative: scoreStats(scoresByOutcome.negative),
-    self_filtered: scoreStats(scoresByOutcome.self_filtered),
-    pending: scoreStats(scoresByOutcome.pending),
-  };
+  // Same bucket list as the counters and metadata, so a bucket cannot exist in
+  // one output and be missing from another.
+  const scoreComparison = Object.fromEntries(
+    OUTCOME_BUCKETS.map((bucket) => [bucket, scoreStats(scoresByOutcome[bucket])])
+  );
 
   // --- Archetype breakdown ---
   const archetypeMap = new Map();
   for (const e of enriched) {
     const arch = e.report?.archetype || 'Unknown';
-    if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!archetypeMap.has(arch)) archetypeMap.set(arch, newOutcomeCounts());
     const entry = archetypeMap.get(arch);
     entry.total++;
     entry[e.outcome]++;
   }
   const archetypeBreakdown = [...archetypeMap.entries()].map(([archetype, data]) => ({
     archetype,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+    ...withOutcomeRates(data),
   })).sort((a, b) => b.total - a.total);
 
   // --- Blocker / discard-reason / technology analysis ---
@@ -1111,30 +1164,28 @@ function analyze() {
   const remoteMap = new Map();
   for (const e of enriched) {
     const policy = e.remoteBucket;
-    if (!remoteMap.has(policy)) remoteMap.set(policy, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!remoteMap.has(policy)) remoteMap.set(policy, newOutcomeCounts());
     const entry = remoteMap.get(policy);
     entry.total++;
     entry[e.outcome]++;
   }
   const remotePolicy = [...remoteMap.entries()].map(([policy, data]) => ({
     policy,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+    ...withOutcomeRates(data),
   })).sort((a, b) => b.total - a.total);
 
   // --- Company size breakdown ---
   const sizeMap = new Map();
   for (const e of enriched) {
     const size = e.companySize;
-    if (!sizeMap.has(size)) sizeMap.set(size, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!sizeMap.has(size)) sizeMap.set(size, newOutcomeCounts());
     const entry = sizeMap.get(size);
     entry.total++;
     entry[e.outcome]++;
   }
   const companySizeBreakdown = [...sizeMap.entries()].map(([size, data]) => ({
     size,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
+    ...withOutcomeRates(data),
   })).sort((a, b) => b.total - a.total);
 
   // --- ATS vendor / channel analysis (algorithmic-monoculture aware) ---
@@ -1204,13 +1255,22 @@ function analyze() {
   const viaChannelAnalysis = buildViaChannelAnalysis(submitted, isAdvanced);
 
   // --- Score threshold analysis ---
+  // 'positive' no longer includes bare Applied rows, so the floor is the lowest
+  // score that actually got traction — a smaller, more honest sample. A single
+  // Responded at 5.0 must not become "set the threshold at 5/5": the range is
+  // always reported, the prescription waits for a minimum sample.
   const positiveScores = scoresByOutcome.positive.filter(s => s > 0);
   const minPositiveScore = positiveScores.length > 0 ? Math.min(...positiveScores) : 0;
+  const thresholdSufficient = positiveScores.length >= MIN_POSITIVE_SCORES_FOR_THRESHOLD;
   const scoreThreshold = {
     recommended: minPositiveScore > 0 ? Math.floor(minPositiveScore * 10) / 10 : 3.5,
-    reasoning: positiveScores.length > 0
-      ? `Lowest score among positive outcomes is ${minPositiveScore}. No applications below this score led to progress.`
-      : 'Not enough positive outcome data to determine threshold.',
+    sampleSize: positiveScores.length,
+    sufficientSample: thresholdSufficient,
+    reasoning: positiveScores.length === 0
+      ? 'Not enough positive outcome data to determine threshold.'
+      : thresholdSufficient
+        ? `Lowest score among ${positiveScores.length} positive outcomes is ${minPositiveScore}. No applications below this score led to progress.`
+        : `Lowest score among positive outcomes so far is ${minPositiveScore}, but only ${positiveScores.length} positive outcome(s) carry a score (${MIN_POSITIVE_SCORES_FOR_THRESHOLD} needed before this is a threshold).`,
     positiveRange: positiveScores.length > 0
       ? `${Math.min(...positiveScores)} - ${Math.max(...positiveScores)}`
       : 'N/A',
@@ -1242,32 +1302,40 @@ function analyze() {
     });
   }
 
-  // Score threshold recommendation
-  if (minPositiveScore > 3.0) {
+  // Score threshold recommendation — only once enough positive outcomes carry
+  // a score; below the floor the threshold is an observation, not an action.
+  if (thresholdSufficient && minPositiveScore > 3.0) {
     recommendations.push({
       action: `Set minimum score threshold at ${scoreThreshold.recommended}/5 before generating PDFs`,
-      reasoning: `No positive outcomes below ${minPositiveScore}/5. Scores below this are wasted effort.`,
+      reasoning: `None of the ${positiveScores.length} positive outcomes scored below ${minPositiveScore}/5.`,
       impact: 'medium',
     });
   }
 
-  // Best archetype recommendation
-  const bestArchetype = archetypeBreakdown.filter(a => a.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
+  // Best archetype recommendation. Gated on `submitted`, not `total`: a segment
+  // of rows that were evaluated and never sent has no conversion to speak of,
+  // and gating on `total` let it reach the recommendation as if it did.
+  const bestArchetype = archetypeBreakdown.filter(a => a.submitted >= MIN_SUBMITTED_FOR_RECOMMENDATION).sort((a, b) => b.conversionRate - a.conversionRate)[0];
   if (bestArchetype && bestArchetype.conversionRate > 0) {
     recommendations.push({
       action: `Double down on "${bestArchetype.archetype}" roles (${bestArchetype.conversionRate}% conversion rate)`,
-      reasoning: `${bestArchetype.positive} of ${bestArchetype.total} applications in this archetype led to positive outcomes.`,
+      reasoning: `${bestArchetype.positive} of ${bestArchetype.submitted} applications sent in this archetype led to positive outcomes.`,
       impact: 'medium',
     });
   }
 
   // Remote policy recommendation
   const bestRemote = remotePolicy.filter(r => r.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
-  const worstRemote = remotePolicy.filter(r => r.total >= 2 && r.conversionRate === 0)[0];
+  // "0% conversion" is only a claim once something was actually DECIDED — a
+  // bucket of applications still awaiting a reply is silence, not a rejection.
+  // Gate on the COUNTS, not on the rounded rate: 1 positive out of 201 decided
+  // rounds to 0% yet is not "none advanced", and 1 negative + 1 awaiting is a
+  // single data point, not a pattern.
+  const worstRemote = remotePolicy.filter(r => r.positive === 0 && r.decided >= MIN_DECIDED_FOR_AVOID)[0];
   if (worstRemote) {
     recommendations.push({
-      action: `Avoid "${worstRemote.policy}" roles (0% conversion across ${worstRemote.total} applications)`,
-      reasoning: `None of the ${worstRemote.total} applications with "${worstRemote.policy}" policy led to progress.`,
+      action: `Avoid "${worstRemote.policy}" roles (0 of ${worstRemote.decided} decided outcomes advanced, ${worstRemote.submitted} sent)`,
+      reasoning: `None of the ${worstRemote.decided} decided applications with "${worstRemote.policy}" policy led to progress.`,
       impact: 'medium',
     });
   }
@@ -1319,12 +1387,11 @@ function analyze() {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
       analysisDate: new Date().toISOString().split('T')[0],
-      byOutcome: {
-        positive: enriched.filter(e => e.outcome === 'positive').length,
-        negative: enriched.filter(e => e.outcome === 'negative').length,
-        self_filtered: enriched.filter(e => e.outcome === 'self_filtered').length,
-        pending: enriched.filter(e => e.outcome === 'pending').length,
-      },
+      // Built from OUTCOME_BUCKETS so a new bucket cannot be added to
+      // classifyOutcome and then quietly go missing from the summary.
+      byOutcome: Object.fromEntries(
+        OUTCOME_BUCKETS.map((bucket) => [bucket, enriched.filter(e => e.outcome === bucket).length])
+      ),
     },
     funnel,
     scoreComparison,
@@ -1392,7 +1459,9 @@ function printSummary(result) {
   console.log('\nREMOTE POLICY');
   console.log('-'.repeat(40));
   for (const r of remotePolicy) {
-    console.log(`  ${r.policy.padEnd(20)} ${String(r.total).padStart(2)} total, ${r.positive} positive (${r.conversionRate}%)`);
+    // A segment nobody has answered yet prints n/a, not 0%: silence is not a result.
+    const decidedLabel = r.decidedRate === null ? 'n/a' : `${r.decidedRate}%`;
+    console.log(`  ${r.policy.padEnd(20)} ${String(r.submitted).padStart(2)} sent, ${r.awaiting} awaiting, ${r.positive} positive of ${r.decided} decided (${decidedLabel})`);
   }
 
   // Tech gaps
@@ -1461,16 +1530,21 @@ function printSummary(result) {
 }
 
 // --- Run ---
-if (args.includes('--self-test')) {
-  runSelfTest();
+// Guarded so the module can be imported for its pure helpers without running an
+// analysis and printing JSON to stdout. Same idiom as followup-cadence.mjs,
+// which stats.mjs already imports.
+if (isMainModule(import.meta.url)) {
+  if (args.includes('--self-test')) {
+    runSelfTest();
+  }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-const result = analyze();
-
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (result.error) process.exit(1);
