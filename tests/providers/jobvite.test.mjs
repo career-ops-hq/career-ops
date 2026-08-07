@@ -309,6 +309,24 @@ Hybrid Remote<span>,</span>
     }
   }
 
+  // Regression: the empty-board sentence appearing outside its own <p>
+  // wrapper (unrelated prose elsewhere on the page, not the actual empty
+  // state) must NOT suppress the throw — only the exact `<p>…</p>` form
+  // Jobvite renders for a genuinely empty board counts.
+  const looseWordingHtml = '<html><body><article><div>Some unrelated copy mentioning that ' +
+    'there are currently no open jobs. in a totally different sentence context.</div></article></body></html>';
+  let looseWordingThrew = false;
+  try {
+    parseJobviteHtml(looseWordingHtml, 'Acme');
+  } catch {
+    looseWordingThrew = true;
+  }
+  if (looseWordingThrew) {
+    pass('parseJobviteHtml still throws when the empty-board sentence appears outside its own <p> wrapper');
+  } else {
+    fail('parseJobviteHtml should not treat loose unrelated text matching the empty-board sentence as a confirmed-empty board');
+  }
+
   // ── parseJobviteHtml — anchor/div layout (a second real theme variant) ──
 
   // NOTE: this variant is confirmed against a live tenant (see
@@ -665,8 +683,8 @@ Hybrid Remote<span>,</span>
     mockCtx,
   );
 
-  if (capturedUrl === 'https://jobs.jobvite.com/acme/jobs') {
-    pass('jobvite.fetch() requests the correct careers page URL');
+  if (capturedUrl === 'https://jobs.jobvite.com/acme/jobs?fr=true&nl=1') {
+    pass('jobvite.fetch() requests the correct careers page URL, framed to bypass a branded-domain redirect');
   } else {
     fail(`jobvite.fetch() fetched: ${JSON.stringify(capturedUrl)}`);
   }
@@ -713,11 +731,13 @@ Hybrid Remote<span>,</span>
   const retrySuccessCtx = {
     async fetchText(url) {
       retryUrls.push(url);
-      return url.endsWith('/search') ? SAMPLE_HTML : AMBIGUOUS_HTML;
+      return new URL(url).pathname.endsWith('/search') ? SAMPLE_HTML : AMBIGUOUS_HTML;
     },
   };
   const retriedJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/acme' }, retrySuccessCtx);
-  if (retryUrls.length === 2 && retryUrls[0] === 'https://jobs.jobvite.com/acme/jobs' && retryUrls[1] === 'https://jobs.jobvite.com/acme/search') {
+  if (retryUrls.length === 2
+    && retryUrls[0] === 'https://jobs.jobvite.com/acme/jobs?fr=true&nl=1'
+    && retryUrls[1] === 'https://jobs.jobvite.com/acme/search?fr=true&nl=1') {
     pass('jobvite.fetch() retries against /{slug}/search when /jobs is ambiguous');
   } else {
     fail(`jobvite.fetch() retry URLs: ${JSON.stringify(retryUrls)}`);
@@ -743,17 +763,18 @@ Hybrid Remote<span>,</span>
   // propagates instead of the /jobs one.
   let bothAmbiguousThrew = false;
   let bothAmbiguousMessage = '';
-  const bothAmbiguousCtx = { async fetchText() { return AMBIGUOUS_HTML; } };
+  let bothAmbiguousCalls = 0;
+  const bothAmbiguousCtx = { async fetchText() { bothAmbiguousCalls++; return AMBIGUOUS_HTML; } };
   try {
     await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/acme' }, bothAmbiguousCtx);
   } catch (e) {
     bothAmbiguousThrew = true;
     bothAmbiguousMessage = e.message;
   }
-  if (bothAmbiguousThrew && /Acme/.test(bothAmbiguousMessage)) {
-    pass('jobvite.fetch() throws (naming the tenant) when both /jobs and /search are ambiguous');
+  if (bothAmbiguousThrew && /Acme/.test(bothAmbiguousMessage) && bothAmbiguousCalls === 2) {
+    pass('jobvite.fetch() throws (naming the tenant) when both /jobs and /search are ambiguous, after actually attempting the /search retry');
   } else {
-    fail(`jobvite.fetch() both-ambiguous: threw=${bothAmbiguousThrew}, message=${bothAmbiguousMessage}`);
+    fail(`jobvite.fetch() both-ambiguous: threw=${bothAmbiguousThrew}, message=${bothAmbiguousMessage}, calls=${bothAmbiguousCalls}`);
   }
 
   // ── fetch() — /search pagination on the retry path ──
@@ -774,21 +795,27 @@ Hybrid Remote<span>,</span>
     'search?p=1': searchPageHtml([['p3', 'Job 3'], ['p4', 'Job 4']], 3, 4, 5),
     'search?p=2': searchPageHtml([['p5', 'Job 5']], 5, 5, 5),
   };
+  // Every request now carries ?fr=true&nl=1 (see withFrameParams in
+  // providers/jobvite.mjs) — strip those to recover the plain page key
+  // (`search`, `search?p=1`, …) these mock fixtures are keyed by.
+  const pageKey = (url) => {
+    const p = new URL(url).searchParams.get('p');
+    return p ? `search?p=${p}` : 'search';
+  };
   let paginatedUrls = [];
   const paginatedCtx = {
     async fetchText(url) {
       paginatedUrls.push(url);
-      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
-      const key = url.split('/pagetest/')[1];
-      return paginatedPages[key];
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      return paginatedPages[pageKey(url)];
     },
   };
   const paginatedJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, paginatedCtx);
   const expectedPaginatedUrls = [
-    'https://jobs.jobvite.com/pagetest/jobs',
-    'https://jobs.jobvite.com/pagetest/search',
-    'https://jobs.jobvite.com/pagetest/search?p=1',
-    'https://jobs.jobvite.com/pagetest/search?p=2',
+    'https://jobs.jobvite.com/pagetest/jobs?fr=true&nl=1',
+    'https://jobs.jobvite.com/pagetest/search?fr=true&nl=1',
+    'https://jobs.jobvite.com/pagetest/search?p=1&fr=true&nl=1',
+    'https://jobs.jobvite.com/pagetest/search?p=2&fr=true&nl=1',
   ];
   if (JSON.stringify(paginatedUrls) === JSON.stringify(expectedPaginatedUrls)) {
     pass('jobvite.fetch() follows /search pagination across all reported pages');
@@ -801,13 +828,60 @@ Hybrid Remote<span>,</span>
     fail(`jobvite.fetch() paginated result: ${JSON.stringify(paginatedJobs)}`);
   }
 
+  // Regression: the same posting reappearing on a later page (the listing
+  // can shift between our page requests) must be deduped by URL, not
+  // double-counted.
+  const dupePages = {
+    search: searchPageHtml([['d1', 'Job 1'], ['d2', 'Job 2']], 1, 2, 5),
+    'search?p=1': searchPageHtml([['d2', 'Job 2'], ['d3', 'Job 3']], 3, 4, 5), // d2 repeats
+    'search?p=2': searchPageHtml([['d4', 'Job 4']], 5, 5, 5),
+  };
+  const dupeCtx = {
+    async fetchText(url) {
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      return dupePages[pageKey(url)];
+    },
+  };
+  const dupeJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, dupeCtx);
+  const dupeUrls = dupeJobs.map((j) => j.url);
+  if (dupeJobs.length === 4 && new Set(dupeUrls).size === 4) {
+    pass('jobvite.fetch() dedupes a posting that reappears on a later /search page');
+  } else {
+    fail(`jobvite.fetch() cross-page dedup: ${JSON.stringify(dupeUrls)}`);
+  }
+
+  // Regression: a later page failing (page >= 1) must not discard postings
+  // already collected from earlier pages — only the *first* page failing
+  // (nothing collected yet) should propagate.
+  const laterPageFailCalls = [];
+  const laterPageFailCtx = {
+    async fetchText(url) {
+      laterPageFailCalls.push(url);
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      const key = pageKey(url);
+      if (key === 'search?p=1') return AMBIGUOUS_HTML; // this page comes up empty-handed
+      return paginatedPages[key];
+    },
+  };
+  const laterPageFailJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, laterPageFailCtx);
+  if (laterPageFailJobs.length === 2 && laterPageFailJobs[0]?.title === 'Job 1') {
+    pass('jobvite.fetch() keeps earlier-page results when a later /search page comes up ambiguous');
+  } else {
+    fail(`jobvite.fetch() later-page-failure result: ${JSON.stringify(laterPageFailJobs)}`);
+  }
+  if (laterPageFailCalls.length === 3) {
+    pass('jobvite.fetch() stops paginating after a later page fails, instead of retrying it forever');
+  } else {
+    fail(`jobvite.fetch() later-page-failure call count: ${laterPageFailCalls.length} (expected 3)`);
+  }
+
   // A /search page with no pagination text at all is the whole board — no
   // extra requests.
   let noPagerUrls = [];
   const noPagerCtx = {
     async fetchText(url) {
       noPagerUrls.push(url);
-      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
       return '<table class="jv-job-list"><tbody><tr><td class="jv-job-list-name"><a href="/pagetest/job/x1">Solo Job</a></td><td class="jv-job-list-location">Remote</td></tr></tbody></table>';
     },
   };
@@ -825,9 +899,8 @@ Hybrid Remote<span>,</span>
     maxPages: 1,
     async fetchText(url) {
       ctxCapUrls.push(url);
-      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
-      const key = url.split('/pagetest/')[1];
-      return paginatedPages[key];
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      return paginatedPages[pageKey(url)];
     },
   };
   const ctxCapJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/pagetest' }, ctxCapCtx);
@@ -843,9 +916,8 @@ Hybrid Remote<span>,</span>
   const entryCapCtx = {
     async fetchText(url) {
       entryCapUrls.push(url);
-      if (url.endsWith('/jobs')) return AMBIGUOUS_HTML;
-      const key = url.split('/pagetest/')[1];
-      return paginatedPages[key];
+      if (new URL(url).pathname.endsWith('/jobs')) return AMBIGUOUS_HTML;
+      return paginatedPages[pageKey(url)];
     },
   };
   const entryCapJobs = await jobvite.fetch(

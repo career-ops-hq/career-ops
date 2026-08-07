@@ -28,6 +28,12 @@ import { decodeEntities } from './_html-entities.mjs';
 // retries once against /{companyId}/search, which is also slug-derived and
 // gets the same SSRF pinning.
 //
+// A tenant on a branded custom domain doesn't serve jobs.jobvite.com content
+// at all by default — every request 302s to the tenant's own site. Every
+// request this provider makes carries `?fr=true&nl=1` (see withFrameParams)
+// to route around that instead, reproduced from that branded page's own
+// iframe embed rather than a documented API.
+//
 // Wire in via a `tracked_companies:` entry with:
 //   careers_url: https://jobs.jobvite.com/{companyId}
 // or explicitly with:
@@ -126,6 +132,28 @@ function buildCareersUrl(companyId) {
   return `${ORIGIN}/${encodeURIComponent(companyId)}/jobs`;
 }
 
+// A tenant configured with a branded custom domain doesn't serve its job
+// list from jobs.jobvite.com directly — visiting /{slug}/jobs there 302s
+// straight to the tenant's own site (e.g. synergybis.com), which is why
+// fetch() used to give up on these entirely. That branded page embeds the
+// real listing back from jobs.jobvite.com in an <iframe>, and the iframe's
+// own src is what tips this off: `?fr=true&nl=1` ("framed" + the same
+// newsletter-banner param /jobs already carries) makes jobs.jobvite.com
+// render the listing directly instead of issuing the redirect — reproduced
+// from a live branded tenant's actual iframe src, not a documented API.
+// Appending it to every request, not just detected branded-domain tenants,
+// was verified to be a no-op on a normal tenant's /jobs or /search response
+// (same markup, same job count) — so there's no need to special-case which
+// tenants actually require it, or to try distinguishing a redirect failure
+// from any other fetch error to decide whether to retry with it.
+/** @param {string} url */
+function withFrameParams(url) {
+  const u = new URL(url);
+  u.searchParams.set('fr', 'true');
+  u.searchParams.set('nl', '1');
+  return u.href;
+}
+
 // The "classic" theme's /{slug}/jobs is a full listing, but on the
 // client-rendered ("faceted search") theme it's often just a search-splash
 // landing page — a hero, a filter form, maybe a small featured-jobs teaser —
@@ -168,20 +196,30 @@ function resolveSearchMaxPages(entry) {
 const SEARCH_PAGINATION_TEXT = /(\d+)\s*-\s*(\d+)\s+of\s+(\d+)/;
 
 /**
- * Fetch every /{slug}/search page and merge the results. Only called after
- * /jobs itself came up ambiguous (see fetch()) — parseJobviteHtml on the
- * first page still throws its own error (naming the tenant) if /search is
- * *also* ambiguous, which is intentionally left to propagate uncaught.
+ * Fetch every /{slug}/search page and merge the results, deduped by URL
+ * (a listing can shift between page requests — e.g. a posting closes or a
+ * new one opens between two of our fetches — which without this could hand
+ * the same job back from two adjacent pages). Only called after /jobs
+ * itself came up ambiguous (see fetch()) — parseJobviteHtml on this first
+ * /search page still throws its own error (naming the tenant) if /search is
+ * *also* ambiguous, which is intentionally left to propagate uncaught: at
+ * that point we have zero results to fall back to, so there is nothing
+ * partial worth preserving. A *later* page failing (page >= 1) is different
+ * — we already have real postings from earlier pages by then, and losing
+ * all of them over one bad page would be worse than returning a merely
+ * incomplete list — so that case stops pagination and returns what was
+ * collected so far instead of propagating.
  *
  * @param {string} companyId
  * @param {{ name: string, max_pages?: number }} entry
  * @param {{ fetchText: (url: string, opts?: object) => Promise<string>, maxPages?: number }} ctx
  */
 async function fetchSearchPages(companyId, entry, ctx) {
-  const firstUrl = buildSearchUrl(companyId);
+  const firstUrl = withFrameParams(buildSearchUrl(companyId));
   assertJobviteUrl(firstUrl);
   const firstHtml = await ctx.fetchText(firstUrl, { redirect: 'error', headers: { accept: 'text/html' } });
   const jobs = parseJobviteHtml(firstHtml, entry.name);
+  const seenUrls = new Set(jobs.map((j) => j.url));
 
   const m = firstHtml.match(SEARCH_PAGINATION_TEXT);
   if (!m) return jobs; // no pager on this page — it's everything there is
@@ -198,10 +236,20 @@ async function fetchSearchPages(companyId, entry, ctx) {
   const pagesToFetch = Math.min(Math.ceil(total / pageSize), resolveSearchMaxPages(entry), ctxCap);
 
   for (let page = 1; page < pagesToFetch; page++) {
-    const url = buildSearchUrl(companyId, page);
+    const url = withFrameParams(buildSearchUrl(companyId, page));
     assertJobviteUrl(url);
-    const html = await ctx.fetchText(url, { redirect: 'error', headers: { accept: 'text/html' } });
-    jobs.push(...parseJobviteHtml(html, entry.name));
+    let pageJobs;
+    try {
+      const html = await ctx.fetchText(url, { redirect: 'error', headers: { accept: 'text/html' } });
+      pageJobs = parseJobviteHtml(html, entry.name);
+    } catch {
+      break; // a later page came up empty-handed — keep what earlier pages already found
+    }
+    for (const job of pageJobs) {
+      if (seenUrls.has(job.url)) continue;
+      seenUrls.add(job.url);
+      jobs.push(job);
+    }
   }
   return jobs;
 }
@@ -218,14 +266,16 @@ export default {
   async fetch(entry, ctx) {
     const companyId = resolveCompanyId(entry);
     if (!companyId) throw new Error(`jobvite: cannot derive company ID for ${entry.name}`);
-    const careersUrl = buildCareersUrl(companyId);
+    const careersUrl = withFrameParams(buildCareersUrl(companyId));
     assertJobviteUrl(careersUrl);
     // redirect:'error' keeps the fetch pinned to jobs.jobvite.com — a stale
     // or invalid slug redirects to search.jobvite.com, and that redirect
-    // should surface as a fetch failure, not silently follow. It also
-    // catches a tenant configured with a branded custom domain: Jobvite
-    // 302s those straight to the tenant's own site (e.g. synergybis.com),
-    // and that redirect should fail loudly too rather than silently
+    // should surface as a fetch failure, not silently follow. withFrameParams
+    // above handles the *other* redirect this host issues — a tenant on a
+    // branded custom domain — by asking for the listing in the same "framed"
+    // form the branded page itself embeds, rather than the interstitial that
+    // 302s to it; a redirect happening anyway (an even less common failure
+    // this doesn't account for) still fails loudly here rather than silently
     // fetching a page this provider was never meant to parse.
     const html = await ctx.fetchText(careersUrl, { redirect: 'error', headers: { accept: 'text/html' } });
     try {
@@ -300,13 +350,17 @@ const KNOWN_LAYOUT_MARKER = new RegExp(
 // Jobvite hardcodes one of these two exact sentences (verified against live
 // tenants — the wording differs by page, not by theme) for a genuinely empty
 // board: "There are currently no open jobs." on the /jobs landing page,
-// "No results found." on the /search results page. Both are literal,
-// specific enough that a false-positive match elsewhere on the page is not
-// a realistic concern. A page carrying this wording is client-rendered (no
-// KNOWN_LAYOUT_MARKER present) yet the *emptiness* itself is server-rendered
-// and trustworthy — this is what tells "genuinely zero jobs" apart from
-// "can't tell, the real list loads via JS" for that theme.
-const EMPTY_BOARD_MARKER = /There are currently no open jobs\.|No results found\./;
+// "No results found." on the /search results page — each as the sole text
+// content of a <p> element (`<p class="jv-text-center">There are currently
+// no open jobs.</p>`, `<p ng-non-bindable>No results found.</p>`). Anchoring
+// to that <p>…</p> wrapper, not just the bare sentence, keeps an unrelated
+// occurrence elsewhere on the page (this is plain English prose, not a
+// unique token) from masking a real parsing gap as a confirmed-empty board;
+// a page carrying this wording is client-rendered (no KNOWN_LAYOUT_MARKER
+// present) yet the *emptiness* itself is server-rendered and trustworthy —
+// this is what tells "genuinely zero jobs" apart from "can't tell, the real
+// list loads via JS" for that theme.
+const EMPTY_BOARD_MARKER = /<p\b[^>]*>\s*(?:There are currently no open jobs\.|No results found\.)\s*<\/p>/;
 
 const LIST_PATTERNS = [
   // An intervening `<td>` (e.g. a department/type column) can sit between
