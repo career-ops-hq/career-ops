@@ -111,6 +111,14 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     const state = fixtureStateFor(oldTag);
     const { manifest } = seedFixture(install, { state });
 
+    // Dismiss an update before applying one — the shape a user reaches by
+    // running `update-system.mjs dismiss` and then `apply`. The marker is
+    // gitignored and never tracked, so staging it after apply() deletes it is a
+    // fatal unmatched pathspec and the update never commits. Costs nothing when
+    // the marker is filtered out; without that guard both the `apply exits 0`
+    // and the oracle-blob assertions below go RED.
+    writeFileSync(join(install, '.update-dismissed'), new Date(0).toISOString());
+
     // New-path delta for the #1998-class assertion: concrete files in the
     // target's SYSTEM_PATHS that don't exist at the old tag but do at target.
     const newConcrete = targetSystemPaths.filter((p) => !p.endsWith('/'))

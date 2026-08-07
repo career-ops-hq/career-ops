@@ -771,6 +771,39 @@ export function removeAdditionsNotInHead(pathspec, protectedPaths = new Set(), c
   }
 }
 
+/**
+ * Is a repo-relative path present in the index?
+ *
+ * Used to tell "tracked" (a deletion that must be staged to be committed) apart
+ * from "never tracked" (a deleted one is an unmatched pathspec, which no flag
+ * fixes). Reads the index, so a worktree deletion does not change the answer
+ * and callers are free to probe on either side of an unlink. Callers that are
+ * about to delete should probe first anyway: this can throw, and probing first
+ * keeps the file on disk so a retry sees the same state.
+ *
+ * Deliberately does NOT catch. `ls-files` exits 0 with empty output when
+ * nothing matches, so "untracked" is a successful return, never an exception —
+ * which means a throw here is an abnormal git failure (a timeout, an unreadable
+ * index, git failing to launch), not an answer. Swallowing it would report
+ * "untracked" for a path that IS tracked and silently drop a deletion that has
+ * to be staged, leaving the worktree dirty after an update that printed
+ * success. Let the caller's error handling see it instead.
+ *
+ * Expects a literal single-file path: it reports whether `ls-files` matched
+ * anything, not whether it matched this exact entry. A directory pathspec would
+ * report true for any tracked file beneath it, and a wrong-case path reports
+ * false even on a case-insensitive filesystem, since `ls-files` does not fold.
+ *
+ * @param {string} path - Repo-relative path.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {boolean}
+ * @throws if the git probe itself fails.
+ */
+export function isTracked(path, ctx = {}) {
+  const runGit = ctx.git || git;
+  return runGit('ls-files', '--', path).trim().length > 0;
+}
+
 function addPaths(paths) {
   if (paths.length === 0) return;
   git('add', '--', ...paths);
@@ -1176,8 +1209,22 @@ async function apply() {
     const pathsToStage = [...updated];
     const dismissFile = join(ROOT, '.update-dismissed');
     if (existsSync(dismissFile)) {
+      // Only stage the marker when git actually tracks it. It is gitignored by
+      // default, so on a stock checkout it is not in the index — and `git add`
+      // on a deleted, never-tracked path is a fatal "pathspec did not match any
+      // files" that takes the whole batch down with it. Staging it
+      // unconditionally meant dismissing an update and then applying one broke
+      // the commit, with no local customization involved.
+      //
+      // Probe BEFORE unlinking. isTracked reads the index, which a worktree
+      // deletion does not touch, so the answer is identical either way — but
+      // the probe can throw on an abnormal git failure, and doing it first
+      // leaves the marker on disk when it does. A retry then re-enters this
+      // block and re-probes, instead of finding the marker already gone and
+      // skipping a deletion it still owed the commit.
+      const dismissMarkerTracked = isTracked('.update-dismissed');
       unlinkSync(dismissFile);
-      pathsToStage.push('.update-dismissed');
+      if (dismissMarkerTracked) pathsToStage.push('.update-dismissed');
     }
 
     try {
