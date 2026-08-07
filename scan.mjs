@@ -42,7 +42,7 @@ import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -709,14 +709,17 @@ export function buildSalaryFilter(salaryFilter) {
 }
 
 export function companyMatch(jobCompany, windowCompany) {
-  const cleanNoSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const c1NoSpaces = cleanNoSpaces(jobCompany);
-  const c2NoSpaces = cleanNoSpaces(windowCompany);
-  if (c1NoSpaces === c2NoSpaces) return true;
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry erased
+  // non-Latin scripts outright, so 株式会社アカネ and 合同会社ゾロ both cleaned
+  // to '' and the equality check below reported two unrelated companies as the
+  // same one. The empty guard is part of the fix, not decoration — "no usable
+  // signal on either side" must never read as "identical".
+  const c1NoSpaces = normalizeTextKey(jobCompany);
+  const c2NoSpaces = normalizeTextKey(windowCompany);
+  if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const cleanWithSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const c1WithSpaces = cleanWithSpaces(jobCompany);
-  const c2WithSpaces = cleanWithSpaces(windowCompany);
+  const c1WithSpaces = normalizeTextKey(jobCompany, ' ');
+  const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
   const regex1 = new RegExp('\\b' + c2WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
@@ -1277,13 +1280,27 @@ function isRoleLocationSuffix(tag) {
  * @returns {string} Normalized role key.
  */
 export function normalizeRoleForDedup(role) {
-  let title = String(role ?? '').toLowerCase();
+  // NFKC up front so full-width brackets fold to their ASCII forms while the
+  // suffix loop can still see them: "Engineer （Remote）" now strips the same
+  // way "Engineer (Remote)" always did.
+  //
+  // This does NOT make the loop understand non-Latin suffixes — the tag itself
+  // is still matched against the English-only ROLE_LOCATION_SUFFIXES set via
+  // normalizeRoleSuffixTag(), which carries its own [a-z0-9] strip. So
+  // "エンジニア（東京）" and "エンジニア（大阪）" remain two keys. Teaching the
+  // suffix vocabulary other scripts is a separate change (new vocabulary, not
+  // a key fix) and is deliberately out of scope here.
+  let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
     const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
     if (!match || !isRoleLocationSuffix(match[1])) break;
     title = title.slice(0, match.index).trimEnd();
   }
-  return title.replace(/[^a-z0-9]+/g, ' ').trim();
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
+  // every non-Latin title to '', so バックエンドエンジニア and フロントエンド
+  // エンジニア at one company shared a dedupe key and the scan dropped the
+  // second as already-seen. Space separator keeps the word-collapsing shape.
+  return normalizeTextKey(title, ' ');
 }
 
 /**
