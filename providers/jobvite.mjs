@@ -142,23 +142,31 @@ export default {
   },
 };
 
-// Jobvite ships (at least) two server-rendered list layouts for the same
+// Jobvite ships (at least) three server-rendered list layouts for the same
 // "classic" career-site theme:
-//   table:  <td class="jv-job-list-name"><a href="{path}">{Title}</a></td>
-//           <td class="jv-job-list-location">{City, Country}</td>
-//   anchor: <a href="{path}" class="jv-job-item …">
-//             <div class="jv-job-list-name[ extra-class]">{Title}</div>
-//             <div class="jv-job-list-location[ extra-class]">{City, Country}</div>
-//           </a>
-// Both are tried; results are merged and deduped by URL. Neither covers the
+//   table:    <td class="jv-job-list-name"><a href="{path}">{Title}</a></td>
+//             <td class="jv-job-list-location">{City, Country}</td>
+//   anchor:   <a href="{path}" class="jv-job-item …">
+//               <div class="jv-job-list-name[ extra-class]">{Title}</div>
+//               <div class="jv-job-list-location[ extra-class]">{City, Country}</div>
+//             </a>
+//   category: <div class="jv-job">
+//               <a class="jv-job-name" href="{path}">{Title} <span>{City,
+//               Country}</span></a>
+//             </div>
+//             (job rows grouped under per-category <table class="jv-job-list">
+//             headers; title and location share one anchor instead of two
+//             separate cells/divs)
+// All three are tried; results are merged and deduped by URL. None cover the
 // client-rendered ("faceted search") theme some tenants use instead — that
 // one loads its job list via JS after page load, nothing to scrape from the
 // initial HTML (see KNOWN_LAYOUT_MARKER below, which makes that case throw
 // instead of silently reading as "zero jobs").
 //
-// Only the table layout is exercised against a live tenant; the anchor/div
-// path rests on fixtures reconstructed from Jobvite's published theme CSS —
-// flag it if you find a live tenant on that variant that this doesn't match.
+// Confirmed against live tenants: table (jacksonfamilywines), category (arc).
+// The anchor/div path rests on fixtures reconstructed from Jobvite's
+// published theme CSS — flag it if you find a live tenant on that variant
+// that this doesn't match.
 // Matches a class token as a whitespace-delimited word within a class
 // attribute found anywhere among a tag's attributes — not anchored to
 // attribute order (class needn't be first) and not fooled by a hyphenated
@@ -166,18 +174,19 @@ export default {
 // since `-` is a non-word character and satisfies `\b` on both sides of it.
 const classToken = (token) => `(?=[^>]*\\bclass="(?:[^"]*\\s)?${token}(?:\\s[^"]*)?")`;
 
-// Both supported themes render some element carrying one of these exact
+// All three supported themes render some element carrying one of these exact
 // class tokens — the "jv-job-list" wrapper (<table>/<div>) around the whole
-// list, the per-row "jv-job-list-name"/"jv-job-list-location" cells, or the
-// anchor variant's "jv-job-item" row class — regardless of whether any given
-// row ends up producing a valid job (e.g. one row dropped for a bad href
-// scheme still leaves its td/div markers behind). Their total absence is
-// what separates "known layout, genuinely no jobs right now (or every row
-// got filtered)" from "client-rendered faceted-search theme this provider
-// can't scrape at all": the latter never emits any of this markup in the
-// initial HTML, since the list loads via JS after page load.
+// list, the per-row "jv-job-list-name"/"jv-job-list-location" cells, the
+// anchor variant's "jv-job-item" row class, or the category variant's
+// "jv-job"/"jv-job-name" row markup — regardless of whether any given row
+// ends up producing a valid job (e.g. one row dropped for a bad href scheme
+// still leaves its markers behind). Their total absence is what separates
+// "known layout, genuinely no jobs right now (or every row got filtered)"
+// from "client-rendered faceted-search theme this provider can't scrape at
+// all": the latter never emits any of this markup in the initial HTML,
+// since the list loads via JS after page load.
 const KNOWN_LAYOUT_MARKER = new RegExp(
-  `<[a-z]+\\b(?:${classToken('jv-job-list')}|${classToken('jv-job-list-name')}|${classToken('jv-job-list-location')}|${classToken('jv-job-item')})`,
+  `<[a-z]+\\b(?:${classToken('jv-job-list')}|${classToken('jv-job-list-name')}|${classToken('jv-job-list-location')}|${classToken('jv-job-item')}|${classToken('jv-job')}|${classToken('jv-job-name')})`,
   'i',
 );
 
@@ -210,6 +219,18 @@ const LIST_PATTERNS = [
   new RegExp(
     `<a\\s+[^>]*?href="([^"]+)"[^>]*>(?:(?!<\\/?a\\b)[\\s\\S])*?<div\\b${classToken('jv-job-list-name')}[^>]*>([\\s\\S]*?)<\\/div>` +
     `(?:(?!<\\/?a\\b)[\\s\\S])*?<div\\b${classToken('jv-job-list-location')}[^>]*>([\\s\\S]*?)<\\/div>(?:(?!<\\/?a\\b)[\\s\\S])*?<\\/a>`,
+    'g',
+  ),
+  // Category variant (e.g. arc): title and location share a single anchor
+  // instead of separate cells/divs — `<a class="jv-job-name" href="{path}">
+  // {Title} <span>{City, Country}</span></a>` — rows are grouped under
+  // per-category `<table class="jv-job-list">` headers, but that grouping is
+  // irrelevant here since the pattern matches each `<a class="jv-job-name">`
+  // directly regardless of its ancestor table. The title capture is bounded
+  // by `<span` or `</a>` (not just `<span`) so a row with no location span
+  // at all still yields a title instead of failing to match.
+  new RegExp(
+    `<a\\b${classToken('jv-job-name')}[^>]*?href="([^"]+)"[^>]*>((?:(?!<span\\b|<\\/a\\b)[\\s\\S])*?)<span\\b[^>]*>([\\s\\S]*?)<\\/span>(?:(?!<\\/a\\b)[\\s\\S])*?<\\/a>`,
     'g',
   ),
 ];

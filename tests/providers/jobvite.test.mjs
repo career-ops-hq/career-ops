@@ -454,6 +454,95 @@ Hybrid Remote<span>,</span>
     fail(`parseJobviteHtml unrelated-anchor regression: ${JSON.stringify(unrelatedJobs)}`);
   }
 
+  // ── parseJobviteHtml — category layout (a third real theme variant, confirmed live at arc) ──
+
+  // Fixture reproduces the real structure found on jobs.jobvite.com/arc/jobs/viewall:
+  // rows grouped under per-category `<table class="jv-job-list">` headers,
+  // title and location sharing a single `<a class="jv-job-name">` instead of
+  // separate cells/divs. This is the theme variant that motivated the
+  // KNOWN_LAYOUT_MARKER check in the first place — its outer wrapper reuses
+  // the same "jv-job-list" class as the table layout, so a naive "does the
+  // page mention jv-job-list anywhere" check would wrongly call this
+  // "recognized" and swallow the whole board as a silent [] without the
+  // dedicated jv-job/jv-job-name markers and LIST_PATTERN entry below.
+  const CATEGORY_HTML = `
+    <h3 class="h2">Customer Service</h3>
+    <table class="jv-job-list">
+      <thead><tr><th>Job listing</th><th>Job location</th></tr></thead>
+      <tbody>
+        <div class="jv-job">
+          <a class="jv-job-name" href="/arc/job/o7tyAfws">Customer Service Rep <span>
+            Sacramento,
+            California
+          </span></a>
+        </div>
+        <div class="jv-job">
+          <a class="jv-job-name" href="/arc/job/olgnAfwi">Sales &amp; Support Lead <span>
+            Columbia,
+            Maryland
+          </span></a>
+        </div>
+      </tbody>
+    </table>
+    <h3 class="h2">Operations</h3>
+    <table class="jv-job-list">
+      <thead><tr><th>Job listing</th><th>Job location</th></tr></thead>
+      <tbody>
+        <div class="jv-job">
+          <a class="jv-job-name" href="/arc/job/ozCpAfwU">Operations Coordinator <span>
+            Cincinnati,
+            Ohio
+          </span></a>
+        </div>
+      </tbody>
+    </table>
+  `;
+
+  const categoryJobs = parseJobviteHtml(CATEGORY_HTML, 'Arc');
+
+  if (categoryJobs.length === 3) {
+    pass('parseJobviteHtml matches the category layout across multiple category tables');
+  } else {
+    fail(`parseJobviteHtml category variant count: ${categoryJobs.length} (expected 3)`);
+  }
+  if (categoryJobs[0]?.title === 'Customer Service Rep' && categoryJobs[0]?.location === 'Sacramento, California') {
+    pass('parseJobviteHtml category variant maps title/location from a shared anchor');
+  } else {
+    fail(`parseJobviteHtml category variant job0: ${JSON.stringify(categoryJobs[0])}`);
+  }
+  if (categoryJobs[0]?.url === 'https://jobs.jobvite.com/arc/job/o7tyAfws') {
+    pass('parseJobviteHtml category variant resolves relative href');
+  } else {
+    fail(`parseJobviteHtml category variant url: ${JSON.stringify(categoryJobs[0]?.url)}`);
+  }
+  if (categoryJobs[1]?.title === 'Sales & Support Lead') {
+    pass('parseJobviteHtml category variant decodes HTML entities in title');
+  } else {
+    fail(`parseJobviteHtml category variant entity decode: ${JSON.stringify(categoryJobs[1]?.title)}`);
+  }
+  if (categoryJobs[2]?.title === 'Operations Coordinator' && categoryJobs[2]?.location === 'Cincinnati, Ohio') {
+    pass('parseJobviteHtml category variant matches across a second category table');
+  } else {
+    fail(`parseJobviteHtml category variant job2: ${JSON.stringify(categoryJobs[2])}`);
+  }
+
+  // A row missing its location <span> entirely is dropped rather than kept
+  // with a blank location — mirrors the table layout's "row missing its
+  // location cell must be dropped" regression above — but the page as a
+  // whole must not be misread as an unsupported layout just because one row
+  // has no span: the jv-job/jv-job-name markers from the surrounding markup
+  // (present elsewhere in this fixture) keep it out of the throw path.
+  const NO_LOCATION_SPAN_HTML = '<table class="jv-job-list"><tbody>' +
+    '<div class="jv-job"><a class="jv-job-name" href="/arc/job/nospan">No Location Listed</a></div>' +
+    '<div class="jv-job"><a class="jv-job-name" href="/arc/job/hasspan">Has Location <span>Remote</span></a></div>' +
+    '</tbody></table>';
+  const noLocationSpanJobs = parseJobviteHtml(NO_LOCATION_SPAN_HTML, 'Arc');
+  if (noLocationSpanJobs.length === 1 && noLocationSpanJobs[0]?.title === 'Has Location' && noLocationSpanJobs[0]?.location === 'Remote') {
+    pass('parseJobviteHtml category variant drops a row missing its location span instead of merging into the next row');
+  } else {
+    fail(`parseJobviteHtml category variant no-span row: ${JSON.stringify(noLocationSpanJobs)}`);
+  }
+
   // ── fetch() integration ────────────────────────────────────────
 
   let capturedUrl = null;
