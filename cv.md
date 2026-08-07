@@ -4,10 +4,11 @@
 **Email:** bashiraaliya@gmail.com
 **Phone:** +1-678-594-1031
 **LinkedIn:** linkedin.com/in/aaliya-bashir/
+**Portfolio:** https://bus-ops-deck.vercel.app
 
 ## Professional Summary
 
-Strategic program and operations leader with 16+ years of experience translating complex data, systems, and stakeholder needs into clear business decisions. Deep strengths in executive storytelling, dashboard development, process improvement, cross-functional project leadership, enterprise change management, and sustainability-focused program execution. Currently supports Total Rewards and labor optimization work in healthcare, with hands-on experience building executive-ready analytics, streamlining workflows, and connecting people-program investments to organizational value. Brings a Harvard-backed sustainability and innovation lens that supports ESG-oriented strategy, stakeholder alignment, and operational execution. Known for bringing structure to ambiguity, leading through influence, and helping smart teams move critical work forward.
+Strategic program and operations leader with 16+ years of experience translating complex data, systems, and stakeholder needs into clear business decisions. Deep strengths in executive storytelling, dashboard development, process improvement, cross-functional project leadership, enterprise change management, and sustainability-focused program execution. Most recently supported Total Rewards and labor optimization work in healthcare, with hands-on experience building executive-ready analytics, streamlining workflows, and connecting people-program investments to organizational value. Brings a Harvard-backed sustainability and innovation lens that supports ESG-oriented strategy, stakeholder alignment, and operational execution. Known for bringing structure to ambiguity, leading through influence, and helping smart teams move critical work forward.
 
 ## Core Strengths
 
@@ -26,7 +27,7 @@ Strategic program and operations leader with 16+ years of experience translating
 
 ### Wellstar Health System, Atlanta, GA
 **Technical Program Manager - Total Rewards**
-Jan 2025 - Present
+Jan 2025 - Jul 2026
 
 - Support enterprise work tied to Total Rewards and Labor Optimization, synthesizing complex people-program data into dashboards, presentations, and leadership-ready insights.
 - Build executive storytelling materials that connect benefits and workforce initiatives to ROI, utilization, operational impact, and employee experience.
@@ -34,6 +35,7 @@ Jan 2025 - Present
 - Use Power BI, Tableau, SQL, Excel, and PowerQuery to analyze large datasets, surface trends, and improve the speed and quality of decision-making.
 - Coordinate across multiple stakeholders to streamline reporting, reduce data silos, and create repeatable processes that improve visibility across teams.
 - Serve as a connector between technical, operational, and leadership audiences, translating business questions into actionable analysis and next-step recommendations.
+- Role ended in July 2026 as part of a layoff.
 
 ### Harvard Medical School, Remote
 **Program Manager**
