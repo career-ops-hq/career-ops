@@ -503,12 +503,55 @@ append_recovery_record() {
     "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" > "$rec"
 }
 
+# A recovery record is ALWAYS older than whatever $STATE_FILE holds for the
+# same id: the record is only written when the lock was unreachable, so any
+# row present for that id now was written afterwards by a path that did reach
+# the lock. Merging it blindly therefore rolls a finished offer backwards --
+# the score and completed_at are overwritten, and since rate_limited and
+# failed are NOT terminal, the offer re-enters pending selection in main()
+# and gets evaluated a second time. Cost: one lost evaluation plus one
+# duplicate run, on a path that by construction only fires when something
+# already went wrong.
+#
+# Terminal set mirrors the pending-selection guard in main() exactly. Keep
+# the two in sync: adding a terminal status there without adding it here
+# reopens this rollback for that status.
+recovery_record_is_superseded() {
+  local current="$1"
+  [[ "$current" == "completed" || "$current" == "skipped" ]]
+}
+
+# Merge one recovery record, but only into a row that has not already reached
+# a terminal state. The status read happens INSIDE the lock deliberately: a
+# check-then-write gap would let a worker finish between the two and
+# reintroduce the same rollback. get_status is a lock-free reader (plain awk
+# over $STATE_FILE), so calling it here does not re-enter the non-reentrant
+# mkdir lock.
+#
+# Exit codes: 0 merged · 3 superseded (record is stale, caller should drop
+# it) · anything else is a real failure. 3 avoids colliding with the 1 that
+# acquire_state_lock returns when the lock itself is unreachable.
+reconcile_one_unlocked() {
+  local id="$1"
+  local current
+  current=$(get_status "$id")
+  if recovery_record_is_superseded "$current"; then
+    echo "    Superseded: offer id=$id already '$current' in state — discarding stale recovery record (would have rolled it back to '$3')."
+    return 3
+  fi
+  update_state_unlocked "$@"
+}
+
+reconcile_one() {
+  run_with_state_lock reconcile_one_unlocked "$@"
+}
+
 # Merge any recovery records left by a prior run into $STATE_FILE. Runs
 # single-threaded at the very start of main(), before any worker is spawned,
 # so there is no lock contention here — this is the one place these records
 # are guaranteed a clean shot at the lock. Each record file is deleted only
-# after its transition lands in $STATE_FILE; failures leave the file in
-# place for the run after that.
+# after its transition lands in $STATE_FILE (or is found to be superseded);
+# genuine failures leave the file in place for the run after that.
 reconcile_recovery_records() {
   [[ -d "$RECOVERY_DIR" ]] || return 0
 
@@ -524,8 +567,9 @@ reconcile_recovery_records() {
   fi
 
   echo "=== Reconciling ${#rec_files[@]} recovery record(s) from a prior interrupted run ==="
-  local merged=0 still_failed=0
+  local merged=0 superseded=0 still_failed=0
   local rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries
+  local rc
   for f in "${rec_files[@]}"; do
     rid=""
     IFS=$'\t' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries < "$f" || true
@@ -534,15 +578,23 @@ reconcile_recovery_records() {
       rm -f "$f"
       continue
     fi
-    if update_state "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries"; then
+    rc=0
+    reconcile_one "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries" || rc=$?
+    if (( rc == 0 )); then
       rm -f "$f"
       merged=$((merged + 1))
+    elif (( rc == 3 )); then
+      # Stale by definition, not a failure — the row it targets already
+      # finished. Dropping the file is correct; keeping it would retry the
+      # same rollback on every subsequent run.
+      rm -f "$f"
+      superseded=$((superseded + 1))
     else
       still_failed=$((still_failed + 1))
     fi
   done
 
-  echo "    Merged: $merged | Still unrecovered: $still_failed"
+  echo "    Merged: $merged | Superseded: $superseded | Still unrecovered: $still_failed"
   if (( still_failed > 0 )); then
     echo "    WARN: $still_failed record(s) could not be merged even single-threaded — check $STATE_LOCK_DIR for a genuinely stuck lock. Unmerged records remain in $RECOVERY_DIR." >&2
   else

@@ -9268,6 +9268,72 @@ try {
   fail(`Batch rate-limit pause test crashed: ${e.message}`);
 }
 
+// ── 13b. RECOVERY-RECORD RECONCILE MUST NOT ROLL BACK TERMINAL ROWS ──
+
+console.log('\n13b. Recovery-record reconcile vs terminal state');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // The offer already reached a terminal state, with a score and a
+  // completion timestamp worth protecting.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+  ].join('\n') + '\n');
+
+  // A recovery record written EARLIER, while the lock was jammed, carrying
+  // the pre-success rate_limited transition. Merging it blindly would drop
+  // the score and re-queue the offer (rate_limited is not terminal).
+  writeFileSync(join(recoveryDir, 'rec-stale1'),
+    '42\thttps://example.com/forty-two\trate_limited\t2026-08-07T00:00:00Z\t\t900\t-\trate limited\t1\n');
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: process.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('42\t')) || '').split('\t');
+  const [, , rowStatus, , rowCompleted, , rowScore] = row;
+
+  if (rowStatus === 'completed' && rowScore === '8.5' && rowCompleted === '2026-08-07T00:05:00Z') {
+    pass('reconcile leaves a terminal row intact when the recovery record is older');
+  } else {
+    fail(`reconcile rolled back a terminal row: status=${rowStatus} score=${rowScore} completed=${rowCompleted}`);
+  }
+
+  if (!existsSync(join(recoveryDir, 'rec-stale1'))) {
+    pass('reconcile discards the superseded recovery record instead of retrying it every run');
+  } else {
+    fail('superseded recovery record was left in place — it would retry the rollback on every subsequent run');
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record reconcile test crashed: ${e.message}`);
+}
+
 // ── 14. BATCH SPEND TIER MODEL ROUTING ───────────────────────────
 
 console.log('\n14. Batch spend_tier model routing');
