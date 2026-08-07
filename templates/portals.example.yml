@@ -645,7 +645,7 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent, getro. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -867,6 +867,37 @@ search_queries:
 # - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
 #   careers_url: https://mercedes-benz.app.beesite.de   # the *.app.beesite.de host, not the branded front
 #   provider: beesite
+#   enabled: true
+#
+# - name: Atomico Portfolio               # London. Pan-European growth-stage VC, $5B+ AUM,
+#                                          # 200+ portfolio companies (Klarna, Lime, Hinge Health among alumni).
+#   careers_url: https://careers.atomico.com/jobs   # the board's own jobs page; collection_id auto-resolves from it
+#   provider: getro                       # opaque vanity domain, no auto-detection
+#   max_pages: 100         # optional page cap (20 jobs/page, default 100, max 1500) —
+#                          # raise it for a large board (e.g. Accel-scale boards need ~1240)
+#   # getro:
+#   #   collection_id: 36986   # optional manual override — skips the collection_id resolution fetch
+#   enabled: true
+#
+# - name: Cherry Ventures Portfolio        # Berlin/London/Stockholm. Early-stage European VC, ~$1B AUM,
+#                                          # ~160 portfolio companies (FlixBus, Flink).
+#   careers_url: https://talent.cherry.vc/jobs
+#   provider: getro
+#   max_pages: 100
+#   enabled: true
+#
+# - name: HV Capital Portfolio             # Munich/Berlin. One of Europe's largest early-to-growth VCs,
+#                                          # ~€2.8B AUM, 200+ portfolio companies (Zalando, HelloFresh, Delivery Hero, FlixBus).
+#   careers_url: https://hv.getro.com/jobs
+#   provider: getro
+#   max_pages: 100
+#   enabled: true
+#
+# - name: Point Nine Portfolio             # Berlin. Early-stage "angel-VC" for B2B SaaS/AI, smaller fund (~$550M AUM),
+#                                          # ~90 portfolio companies (early Zendesk, Algolia, Contentful, Revolut rounds).
+#   careers_url: https://jobs.pointnine.com/jobs
+#   provider: getro
+#   max_pages: 100
 #   enabled: true
 #
 # -- Remote-job feeds (no careers_url, no extra fields) --
