@@ -161,6 +161,19 @@ try {
     else fail(`fetch() override = ${JSON.stringify({ calls: calls.map((c) => c.type), jobsLen: jobs.length })}`);
   }
 
+  // fetch(): an all-zero string override ("0", "000") is rejected — a numeric
+  // override of 0 already fails Number.isInteger(v) && v > 0; the string form
+  // must reject it too, not silently accept it via a bare /^\d+$/ test.
+  {
+    const ctx = { fetchText: async () => nextDataHtml, fetchJson: async () => ({ results: { jobs: [] } }) };
+    let threwZero = false;
+    let threwZeroPadded = false;
+    try { await provider.fetch({ name: 'Zero Override', careers_url: 'https://careers.acme-vc.example/jobs', getro: { collection_id: '0' } }, ctx); } catch (e) { threwZero = /invalid getro\.collection_id override/.test(String(e?.message)); }
+    try { await provider.fetch({ name: 'Zero Override', careers_url: 'https://careers.acme-vc.example/jobs', getro: { collection_id: '000' } }, ctx); } catch (e) { threwZeroPadded = /invalid getro\.collection_id override/.test(String(e?.message)); }
+    if (threwZero && threwZeroPadded) pass('fetch() rejects an all-zero string getro.collection_id override ("0", "000")');
+    else fail(`fetch() all-zero override = ${JSON.stringify({ threwZero, threwZeroPadded })}`);
+  }
+
   // fetch(): unresolvable network.id throws a clear error.
   {
     const ctx = { fetchText: async () => '<html>broken page</html>', fetchJson: async () => ({ results: { jobs: [] } }) };
@@ -233,6 +246,7 @@ try {
     const ctx = {
       fetchText: async () => nextDataHtml,
       fetchJson: async () => { calls += 1; return { results: { jobs: Array.from({ length: 20 }, (_, i) => mkJob(i)), count: 1_000_000 } }; },
+      sleep: async () => {}, // no-op so inter-page delays don't slow the test suite down
     };
     let jobs;
     try {

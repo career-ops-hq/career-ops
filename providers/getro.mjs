@@ -38,7 +38,7 @@ const MAX_PAGES_CAP = 1500;
 // between tenants). Getro showed no rate-limit evidence in manual testing,
 // but a large board (Accel: ~1,238 pages) is still a long burst of
 // same-host requests without some pacing.
-const INTER_PAGE_DELAY_MS = 120;
+const INTER_PAGE_DELAY_MS = 150;
 
 function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
@@ -76,7 +76,7 @@ function resolveOverrideCollectionId(entry) {
   const v = entry?.getro?.collection_id;
   if (v === undefined || v === null) return null;
   if (Number.isInteger(v) && v > 0) return String(v);
-  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return v.trim();
+  if (typeof v === 'string' && /^\d+$/.test(v.trim()) && /[1-9]/.test(v.trim())) return v.trim();
   throw new Error(`getro: ${entry?.name || 'entry'} has an invalid getro.collection_id override: ${JSON.stringify(v)} (must be a positive integer)`);
 }
 
@@ -258,7 +258,12 @@ export default {
       try {
         json = await ctx.fetchJson(searchUrl, postOpts(page));
       } catch (err) {
-        console.error(`⚠️  getro: ${entry?.name || collectionId} truncated at page ${page} of ${pageCap} (${jobs.length} jobs): ${err.message}`);
+        // `err` is not guaranteed to be an Error — a promise may reject with
+        // anything, and reading .message off null would throw *inside* the
+        // catch, defeating the graceful-truncate guarantee below (mirrors
+        // providers/greenhouse.mjs's /offices enrichment catch).
+        const cause = err instanceof Error ? err.message : String(err);
+        console.error(`⚠️  getro: ${entry?.name || collectionId} truncated at page ${page} of ${pageCap} (${jobs.length} jobs): ${cause}`);
         break;
       }
 
