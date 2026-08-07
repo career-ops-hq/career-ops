@@ -666,6 +666,81 @@ Hybrid Remote<span>,</span>
     fail(`parseJobviteHtml div-table variant missing-location row: ${JSON.stringify(divTableMissingLocJobs)}`);
   }
 
+  // ── parseJobviteHtml — single-cell layout (a fifth real theme variant, confirmed against a live tenant) ──
+
+  // Fixture reproduces the real structure seen on a live tenant (company name
+  // and job IDs below are fictional; see providers/jobvite.mjs's top-of-file
+  // comment for the actual verified tenant): title and location share one
+  // `<td class="jv-job-list-name">`, both nested inside the row's single
+  // `<a>` — title in a generic, non-jv-prefixed `<div class="title">`
+  // instead of one of this file's tracked class tokens, followed by a
+  // trailing decorative div (an "arrow"/chevron icon on the live tenant)
+  // that must not bleed into the location.
+  const SINGLE_CELL_HTML = `
+    <table class="jv-job-list"><tbody>
+      <tr>
+        <td class="jv-job-list-name">
+          <a href="/initrode/job/sc001">
+            <div class="title">Aero Controls Engineer</div>
+            <div class="jv-job-list-location">
+              Remote,
+              United States
+            </div>
+            <div class="arrow"><img src="//example.com/icon.svg" /></div>
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td class="jv-job-list-name">
+          <a href="/initrode/job/sc002">
+            <div class="title">Controls &amp; Instrumentation Technician</div>
+            <div class="jv-job-list-location">Berlin, Germany</div>
+          </a>
+        </td>
+      </tr>
+    </tbody></table>
+  `;
+
+  const singleCellJobs = parseJobviteHtml(SINGLE_CELL_HTML, 'Initrode');
+
+  if (singleCellJobs.length === 2) {
+    pass('parseJobviteHtml matches the single-cell layout');
+  } else {
+    fail(`parseJobviteHtml single-cell variant count: ${singleCellJobs.length} (expected 2)`);
+  }
+  if (singleCellJobs[0]?.title === 'Aero Controls Engineer' && singleCellJobs[0]?.location === 'Remote, United States') {
+    pass('parseJobviteHtml single-cell variant maps title/location, skipping a trailing decorative div');
+  } else {
+    fail(`parseJobviteHtml single-cell variant job0: ${JSON.stringify(singleCellJobs[0])}`);
+  }
+  if (singleCellJobs[0]?.url === 'https://jobs.jobvite.com/initrode/job/sc001') {
+    pass('parseJobviteHtml single-cell variant resolves relative href');
+  } else {
+    fail(`parseJobviteHtml single-cell variant url: ${JSON.stringify(singleCellJobs[0]?.url)}`);
+  }
+  if (singleCellJobs[1]?.title === 'Controls & Instrumentation Technician' && singleCellJobs[1]?.location === 'Berlin, Germany') {
+    pass('parseJobviteHtml single-cell variant decodes entities and handles a row with no trailing decorative div');
+  } else {
+    fail(`parseJobviteHtml single-cell variant job1: ${JSON.stringify(singleCellJobs[1])}`);
+  }
+
+  // Regression: must not cross-match the classic table pattern (which
+  // expects the location in a *separate* <td>) — a row missing its location
+  // div entirely must be dropped, not have the table pattern swallow the
+  // whole cell's content as a garbled "title".
+  const SINGLE_CELL_NO_LOCATION_HTML = `
+    <table class="jv-job-list"><tbody>
+      <tr><td class="jv-job-list-name"><a href="/initrode/job/nolo"><div class="title">No Location Here</div></a></td></tr>
+      <tr><td class="jv-job-list-name"><a href="/initrode/job/hasloc"><div class="title">Has Location</div><div class="jv-job-list-location">Remote</div></a></td></tr>
+    </tbody></table>
+  `;
+  const singleCellNoLocJobs = parseJobviteHtml(SINGLE_CELL_NO_LOCATION_HTML, 'Initrode');
+  if (singleCellNoLocJobs.length === 1 && singleCellNoLocJobs[0]?.title === 'Has Location' && singleCellNoLocJobs[0]?.location === 'Remote') {
+    pass('parseJobviteHtml single-cell variant drops a row missing its location div instead of merging into the next row');
+  } else {
+    fail(`parseJobviteHtml single-cell variant no-location row: ${JSON.stringify(singleCellNoLocJobs)}`);
+  }
+
   // ── fetch() integration ────────────────────────────────────────
 
   let capturedUrl = null;
