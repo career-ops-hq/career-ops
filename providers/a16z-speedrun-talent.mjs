@@ -1,4 +1,6 @@
 // @ts-check
+import { fetchJsonWithRetry } from './_http.mjs';
+
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // a16z speedrun talent network provider — board-wide aggregator feed (a16z
@@ -157,8 +159,13 @@ export default {
       const params = new URLSearchParams({ page: String(page), source: 'career-ops' });
       if (q) params.set('q', q);
       const url = `${FEED_BASE}?${params}`;
-      // redirect:'error' prevents SSRF via server-side redirects
-      const json = await ctx.fetchJson(url, { redirect: 'error' });
+      // redirect:'error' prevents SSRF via server-side redirects.
+      // Retried on transient upstream failures (429/5xx/timeout): this board
+      // paginates into the hundreds of pages, so a single blip mid-sweep used
+      // to abort the whole provider and return NOTHING. Retries are bounded
+      // and, once exhausted, the error still propagates — a silent partial
+      // board would be worse than an loud empty one (#2506).
+      const json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' });
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
           `a16z-speedrun-talent: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
