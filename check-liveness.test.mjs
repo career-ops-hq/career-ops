@@ -31,7 +31,7 @@ ok('--help documents --no-fallback', helpOut.includes('--no-fallback'));
 ok('--help documents --throttle', helpOut.includes('--throttle'));
 ok('--help documents --file', helpOut.includes('--file'));
 ok('--help documents --help', helpOut.includes('--help'));
-ok('--help documents -h', helpOut.includes('-h'));
+ok('--help documents -h', helpOut.includes('node check-liveness.mjs -h'));
 
 const hOut = execFileSync('node', [scriptPath, '-h'], {
   encoding: 'utf-8',
