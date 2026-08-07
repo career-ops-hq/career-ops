@@ -141,7 +141,14 @@ console.log('\n🧪 Testing update-check git fallback...');
 {
   const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
 
-  if (/if \(bothNetworkFailed\)\s*\{\s*gitProbe = gitRemoteVersion\(\)/.test(src)) {
+  // The stderr retry notice sits between the guard and the probe call, so
+  // the pattern spans the guard block. The (?!\n    \}) lookahead refuses to
+  // cross the guard's own closing brace (4-space indent, alone on its line) —
+  // without it, moving the probe call to just AFTER the guard would still
+  // match. The call-site count keeps the probe from appearing anywhere else.
+  const gatedProbe = /if \(bothNetworkFailed\)\s*\{(?:(?!\n    \})[\s\S]){0,700}?gitProbe = gitRemoteVersion\(\)/.test(src);
+  const probeCallSites = (src.match(/(?<!function )gitRemoteVersion\(\)/g) || []).length;
+  if (gatedProbe && probeCallSites === 1) {
     pass('check() consults gitRemoteVersion() only inside the both-curls-failed guard (never on the parseable-failure path)');
   } else {
     fail('the git fallback is no longer gated on bothNetworkFailed — it must not run on the no-remote-version path');
@@ -181,5 +188,36 @@ console.log('\n🧪 Testing update-check git fallback...');
     pass('curlGet() catches synchronous execFile throws (broken curl on PATH: spawn EFTYPE) instead of crashing check()');
   } else {
     fail('curlGet() no longer guards the synchronous execFile throw path');
+  }
+
+  // ── session-start latency budget ceiling ──────────────────────────────
+  // AGENTS.md runs check() at session start; its worst case is dead time
+  // before the user's first interaction. The curl legs run in parallel and
+  // chain into the git probe, so the two constants below bound the whole
+  // check: their sum must stay ≈10s (the pre-fallback ceiling). A raised
+  // budget here is a session-start regression on captive-portal networks.
+  const curlBudget = src.match(/const CHECK_CURL_MAX_TIME_S = (\d+);/);
+  const gitBudget = src.match(/const CHECK_GIT_PROBE_TIMEOUT_MS = (\d+);/);
+  if (curlBudget && gitBudget && Number(curlBudget[1]) + Number(gitBudget[1]) / 1000 <= 11) {
+    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + ${Number(gitBudget[1]) / 1000}s git probe ≤ 11s`);
+  } else {
+    fail('check() latency budget exceeded — curl + git probe worst case must stay ≈10s (session-start dead time)');
+  }
+
+  if (/--max-time', String\(CHECK_CURL_MAX_TIME_S\)/.test(src)
+    && /timeout: CHECK_CURL_MAX_TIME_S \* 1000 \+ 1000/.test(src)
+    && /timeout: CHECK_GIT_PROBE_TIMEOUT_MS/.test(src)) {
+    pass('all transport timeouts (curl --max-time, its JS backstop, git probe) are wired to the named budget constants');
+  } else {
+    fail('a transport timeout no longer derives from the named budget constants — the ceiling is unenforced');
+  }
+
+  // writeSync, not console.error: on Windows stderr-to-pipe writes are async
+  // and the sync git probe blocks the event loop, so a console.error here
+  // would flush AFTER the wait it announces. Pin the sync form.
+  if (/writeSync\(\s*process\.stderr\.fd,\s*`career-ops update check: GitHub unreachable over curl[\s\S]{0,220}?retrying over git/.test(src)) {
+    pass('the git retry announces itself via a SYNCHRONOUS stderr write before the blocking probe (async console.error would flush after the wait on Windows)');
+  } else {
+    fail('the retry notice is missing or no longer a synchronous stderr write — on Windows it would appear only after the probe finishes');
   }
 }

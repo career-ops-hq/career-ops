@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, writeSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -910,6 +910,17 @@ function rebuildDashboardBinaryIfNeeded() {
 
 // ── CHECK ───────────────────────────────────────────────────────
 
+// Session-start latency budget for check(): AGENTS.md runs the check on the
+// first message of every session, so its worst case is user-visible dead time
+// before the first interaction — on exactly the networks that are already
+// misbehaving (captive portals, black-hole egress that hangs rather than
+// refuses). The two curl legs run in parallel (one wall-clock leg) and the
+// git probe runs after them, so worst case ≈ CHECK_CURL_MAX_TIME_S +
+// CHECK_GIT_PROBE_TIMEOUT_MS ≈ 10s — the same ceiling the check had before
+// the git fallback existed. Healthy networks never come near either cap.
+const CHECK_CURL_MAX_TIME_S = 5;
+const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;
+
 // curl helper used by check() — curl works inside the Claude Code sandbox
 // where Node's built-in fetch() fails (ENOTFOUND) because the sandbox
 // routes network traffic through an HTTP/HTTPS proxy that fetch() does
@@ -927,11 +938,17 @@ function curlGet(url, extraArgs = []) {
     try {
       execFile(
         'curl',
-        ['--silent', '--fail', '--max-time', '10', ...extraArgs, url],
-        { encoding: 'utf-8', timeout: 12000 },
+        ['--silent', '--fail', '--max-time', String(CHECK_CURL_MAX_TIME_S), ...extraArgs, url],
+        { encoding: 'utf-8', timeout: CHECK_CURL_MAX_TIME_S * 1000 + 1000 },
         (error, stdout) => {
           if (error) {
-            resolve({ ok: false, detail: error.code || error.message.split('\n')[0] });
+            // A curl that hangs past its own --max-time gets killed by the JS
+            // backstop; error.code is null then and the message is the whole
+            // command line — map it to a terse 'timeout' instead.
+            const detail = error.killed
+              ? `timeout (${CHECK_CURL_MAX_TIME_S + 1}s)`
+              : error.code || error.message.split('\n')[0];
+            resolve({ ok: false, detail });
           } else {
             resolve({ ok: true, body: stdout.trim() });
           }
@@ -948,9 +965,9 @@ function curlGet(url, extraArgs = []) {
 // may be missing from PATH (ENOENT), the proxy may be configured only in git
 // config (http.proxy) with no HTTPS_PROXY env var, raw.githubusercontent.com
 // or api.github.com may be filtered while github.com itself is reachable, or
-// the request may simply exceed curl's 10s budget (the git probe below gets
-// 30s, and apply's fetch minutes). In all of those, `apply` would succeed,
-// so `check` must not report "offline".
+// the request may simply exceed curl's short budget (apply's git fetch gets
+// minutes). In all of those, `apply` would succeed, so `check` must not
+// report "offline".
 
 // Pure tag-parsing half of the fallback, exported for tests: given raw
 // `git ls-remote --tags` output, return the highest semver among the tags
@@ -985,16 +1002,19 @@ export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
 function gitRemoteVersion() {
   try {
     // Direct execFileSync rather than gitQuiet: this probe runs on every
-    // session start, so it gets its own short budget (30s) instead of the
-    // general 120s git timeout, and GIT_TERMINAL_PROMPT=0 keeps a captive
-    // portal or a credential-rewriting gitconfig from popping an
-    // interactive prompt out of a silent background check.
-    const out = execFileSync('git', ['ls-remote', '--tags', CANONICAL_REPO], {
+    // session start, so it shares the check's tight latency budget (see
+    // CHECK_GIT_PROBE_TIMEOUT_MS) instead of the general 120s git timeout.
+    // GIT_TERMINAL_PROMPT=0 suppresses terminal credential prompts, but on
+    // Windows Git Credential Manager pops a GUI dialog that flag does not
+    // cover — `-c credential.helper=` disables helpers entirely (safe: this
+    // is an anonymous read of a public repo) and GCM_INTERACTIVE=never is a
+    // belt-and-braces for gitconfigs that force GCM some other way.
+    const out = execFileSync('git', ['-c', 'credential.helper=', 'ls-remote', '--tags', CANONICAL_REPO], {
       cwd: ROOT,
       encoding: 'utf-8',
-      timeout: 30000,
+      timeout: CHECK_GIT_PROBE_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
     });
     // Upstream is a release-please monorepo (career-ops-v*, web-v*,
     // manifesto-v*, plus historical bare tags): filter to this component's
@@ -1066,6 +1086,17 @@ async function check() {
     const bothNetworkFailed = !rawVersion.ok && !releaseRaw.ok;
     let gitProbe = null;
     if (bothNetworkFailed) {
+      // Progress goes to stderr: stdout carries the single JSON line the
+      // agent parses, and a silent multi-second retry looks like a hang.
+      // writeSync, not console.error: on Windows, stderr writes to a pipe
+      // are async, and the execFileSync probe below blocks the event loop —
+      // a queued console.error would flush only AFTER the wait it is meant
+      // to announce.
+      writeSync(
+        process.stderr.fd,
+        `career-ops update check: GitHub unreachable over curl (VERSION: ${rawVersion.detail}; ` +
+        `releases: ${releaseRaw.detail}) — retrying over git, ≤${Math.round(CHECK_GIT_PROBE_TIMEOUT_MS / 1000)}s…\n`
+      );
       gitProbe = gitRemoteVersion();
       if (gitProbe.ok && gitProbe.version) remote = gitProbe.version;
     }
