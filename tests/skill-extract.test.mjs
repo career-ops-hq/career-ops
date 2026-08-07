@@ -56,9 +56,53 @@ try {
   // everyday word "safe" — through extractSkills OR through the exported
   // canonicalize(). SAFe is deliberately absent from SKILL_TOKENS and from
   // CANONICAL, and is matched only by the case-sensitive SAFE_CERT_PATTERN.
+  // Table-driven over EVERY certification token, asserting both halves: the
+  // token is recognized from lowercase prose, AND it canonicalizes to its
+  // display form. The second half is the one that matters — a token added to
+  // SKILL_TOKENS without a matching CANONICAL entry falls through to DISPLAY,
+  // which title-cases it ("pmp" -> "Pmp"), missing the known-skills set. That
+  // is the #1851 drift class this module exists to prevent, and it is silent.
+  const certificationCases = [
+    ['pmp', 'PMP'],
+    ['pmi-acp', 'PMI-ACP'],
+    ['pgmp', 'PgMP'],
+    ['capm', 'CAPM'],
+    ['pmbok', 'PMBOK'],
+    ['prince2', 'PRINCE2'],
+    ['certified scrummaster', 'Certified ScrumMaster'],
+    ['cspo', 'CSPO'],
+    ['itil', 'ITIL'],
+    ['cobit', 'COBIT'],
+    ['togaf', 'TOGAF'],
+    ['lean six sigma', 'Lean Six Sigma'],
+    ['six sigma', 'Six Sigma'],
+    ['cissp', 'CISSP'],
+    ['cism', 'CISM'],
+    ['cipp', 'CIPP'],
+  ];
+  const certFailures = [];
+  for (const [raw, display] of certificationCases) {
+    const found = extractSkills(`Requires ${raw} certification.`);
+    if (!found.has(display)) certFailures.push(`extract "${raw}" => ${[...found].join(',') || '(none)'}`);
+    if (canonicalize(raw) !== display) certFailures.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (certFailures.length === 0) {
+    pass(`extractSkills + canonicalize cover all ${certificationCases.length} certification tokens`);
+  } else {
+    fail(`certification coverage => ${certFailures.join(' | ')}`);
+  }
+
+  // 'Lean Six Sigma' must win over 'Six Sigma' — longest-first alternation,
+  // same convention as 'React Native' before 'React'.
+  const lss = extractSkills('Lean Six Sigma Black Belt preferred.');
+  if (lss.has('Lean Six Sigma') && !lss.has('Six Sigma')) pass('extractSkills prefers "Lean Six Sigma" over the shorter "Six Sigma"');
+  else fail(`extractSkills Lean Six Sigma precedence => ${[...lss].join(',')}`);
+
+  // SAFe is handled separately (case-sensitive pattern, absent from SKILL_TOKENS
+  // and CANONICAL), so it is asserted here rather than in the table above.
   const certs = extractSkills('PMP and PMI-ACP required; ITIL and CISSP preferred; SAFe a plus.');
   if (certs.has('PMP') && certs.has('PMI-ACP') && certs.has('ITIL') && certs.has('CISSP') && certs.has('SAFe')) {
-    pass('extractSkills recognizes certification tokens (PMP, PMI-ACP, ITIL, CISSP, SAFe)');
+    pass('extractSkills recognizes certifications alongside the case-sensitive SAFe match');
   } else {
     fail(`extractSkills certifications => ${[...certs].join(',')}`);
   }
