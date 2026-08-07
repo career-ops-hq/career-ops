@@ -142,31 +142,37 @@ export default {
   },
 };
 
-// Jobvite ships (at least) three server-rendered list layouts for the same
+// Jobvite ships (at least) four server-rendered list layouts for the same
 // "classic" career-site theme:
-//   table:    <td class="jv-job-list-name"><a href="{path}">{Title}</a></td>
-//             <td class="jv-job-list-location">{City, Country}</td>
-//   anchor:   <a href="{path}" class="jv-job-item …">
-//               <div class="jv-job-list-name[ extra-class]">{Title}</div>
-//               <div class="jv-job-list-location[ extra-class]">{City, Country}</div>
-//             </a>
-//   category: <div class="jv-job">
-//               <a class="jv-job-name" href="{path}">{Title} <span>{City,
-//               Country}</span></a>
-//             </div>
-//             (job rows grouped under per-category <table class="jv-job-list">
-//             headers; title and location share one anchor instead of two
-//             separate cells/divs)
-// All three are tried; results are merged and deduped by URL. None cover the
+//   table:     <td class="jv-job-list-name"><a href="{path}">{Title}</a></td>
+//              <td class="jv-job-list-location">{City, Country}</td>
+//   anchor:    <a href="{path}" class="jv-job-item …">
+//                <div class="jv-job-list-name[ extra-class]">{Title}</div>
+//                <div class="jv-job-list-location[ extra-class]">{City, Country}</div>
+//              </a>
+//   category:  <div class="jv-job">
+//                <a class="jv-job-name" href="{path}">{Title} <span>{City,
+//                Country}</span></a>
+//              </div>
+//              (job rows grouped under per-category <table class="jv-job-list">
+//              headers; title and location share one anchor instead of two
+//              separate cells/divs)
+//   div-table: <div class="tr">
+//                <div class="jv-job-list-name"><a href="{path}">{Title}</a></div>
+//                <div class="jv-job-list-location">{City, Country}</div>
+//              </div>
+//              (the table layout reimplemented with <div>s instead of
+//              <td>/<tr> — the name div wraps the anchor, opposite nesting
+//              from the anchor variant above)
+// All four are tried; results are merged and deduped by URL. None cover the
 // client-rendered ("faceted search") theme some tenants use instead — that
 // one loads its job list via JS after page load, nothing to scrape from the
 // initial HTML (see KNOWN_LAYOUT_MARKER below, which makes that case throw
 // instead of silently reading as "zero jobs").
 //
-// Confirmed against live tenants: table (jacksonfamilywines), category (arc).
-// The anchor/div path rests on fixtures reconstructed from Jobvite's
-// published theme CSS — flag it if you find a live tenant on that variant
-// that this doesn't match.
+// Confirmed against live tenants: table (jacksonfamilywines, egnyte),
+// category (arc), div-table (lhhcareers), anchor/div (xperi). All four real
+// theme variants have now been seen on an actual tenant.
 // Matches a class token as a whitespace-delimited word within a class
 // attribute found anywhere among a tag's attributes — not anchored to
 // attribute order (class needn't be first) and not fooled by a hyphenated
@@ -231,6 +237,22 @@ const LIST_PATTERNS = [
   // at all still yields a title instead of failing to match.
   new RegExp(
     `<a\\b${classToken('jv-job-name')}[^>]*?href="([^"]+)"[^>]*>((?:(?!<span\\b|<\\/a\\b)[\\s\\S])*?)<span\\b[^>]*>([\\s\\S]*?)<\\/span>(?:(?!<\\/a\\b)[\\s\\S])*?<\\/a>`,
+    'g',
+  ),
+  // Div-table variant (e.g. lhhcareers): the table layout's `<td>`/`<tr>`
+  // structure reimplemented with `<div>`s — `<div class="tr"><div
+  // class="jv-job-list-name"><a href="{path}">{Title}</a></div><div
+  // class="jv-job-list-location">{City, Country}</div>…</div>`. Structurally
+  // this is the table pattern with the name div *wrapping* the anchor
+  // (opposite nesting from the anchor/div variant above, where the anchor
+  // wraps the name div) — that's what keeps the two patterns from
+  // cross-matching each other's rows. `(?:(?!<div\b${classToken('tr')})
+  // [\s\S])*?` between name and location skips any intervening column
+  // (e.g. a duration div) without crossing into the next row's own
+  // `<div class="tr">` wrapper, mirroring the table pattern's `<tr>` guard.
+  new RegExp(
+    `<div\\b${classToken('jv-job-list-name')}[^>]*>\\s*<a\\s+[^>]*?href="([^"]+)"[^>]*>((?:(?!<\\/a\\b|<\\/div\\b)[\\s\\S])*?)<\\/a>\\s*<\\/div>` +
+    `(?:(?!<div\\b${classToken('tr')})[\\s\\S])*?<div\\b${classToken('jv-job-list-location')}[^>]*>([\\s\\S]*?)<\\/div>`,
     'g',
   ),
 ];

@@ -283,10 +283,11 @@ Hybrid Remote<span>,</span>
 
   // ── parseJobviteHtml — anchor/div layout (a second real theme variant) ──
 
-  // NOTE: only the table layout above is exercised against a live tenant.
-  // Everything below (anchor/div and its variants) rests on fixtures
-  // reconstructed from Jobvite's published theme CSS, not a confirmed live
-  // page — flag it if a live tenant on this variant turns up not matching.
+  // NOTE: this variant is confirmed against a live tenant (see
+  // providers/jobvite.mjs's top-of-file comment for the verification list —
+  // real tenant names are kept there, not duplicated into test fixtures).
+  // These specific attribute-order/wrapper-div/badge edge cases below still
+  // rest on fixtures, not a single confirmed live page exercising all of them.
 
   // Some tenants render the "classic" theme as <a><div>…</div></a> instead
   // of <td>…</td>, sometimes also inserting a jv-job-type div between name
@@ -454,10 +455,12 @@ Hybrid Remote<span>,</span>
     fail(`parseJobviteHtml unrelated-anchor regression: ${JSON.stringify(unrelatedJobs)}`);
   }
 
-  // ── parseJobviteHtml — category layout (a third real theme variant, confirmed live at arc) ──
+  // ── parseJobviteHtml — category layout (a third real theme variant, confirmed against a live tenant) ──
 
-  // Fixture reproduces the real structure found on jobs.jobvite.com/arc/jobs/viewall:
-  // rows grouped under per-category `<table class="jv-job-list">` headers,
+  // Fixture reproduces the real structure seen on a live tenant (company name
+  // and job IDs below are fictional; see providers/jobvite.mjs's top-of-file
+  // comment for the actual verified tenant): rows grouped under per-category
+  // `<table class="jv-job-list">` headers,
   // title and location sharing a single `<a class="jv-job-name">` instead of
   // separate cells/divs. This is the theme variant that motivated the
   // KNOWN_LAYOUT_MARKER check in the first place — its outer wrapper reuses
@@ -471,13 +474,13 @@ Hybrid Remote<span>,</span>
       <thead><tr><th>Job listing</th><th>Job location</th></tr></thead>
       <tbody>
         <div class="jv-job">
-          <a class="jv-job-name" href="/arc/job/o7tyAfws">Customer Service Rep <span>
+          <a class="jv-job-name" href="/cyberdyne/job/cd001">Customer Service Rep <span>
             Sacramento,
             California
           </span></a>
         </div>
         <div class="jv-job">
-          <a class="jv-job-name" href="/arc/job/olgnAfwi">Sales &amp; Support Lead <span>
+          <a class="jv-job-name" href="/cyberdyne/job/cd002">Sales &amp; Support Lead <span>
             Columbia,
             Maryland
           </span></a>
@@ -489,7 +492,7 @@ Hybrid Remote<span>,</span>
       <thead><tr><th>Job listing</th><th>Job location</th></tr></thead>
       <tbody>
         <div class="jv-job">
-          <a class="jv-job-name" href="/arc/job/ozCpAfwU">Operations Coordinator <span>
+          <a class="jv-job-name" href="/cyberdyne/job/cd003">Operations Coordinator <span>
             Cincinnati,
             Ohio
           </span></a>
@@ -498,7 +501,7 @@ Hybrid Remote<span>,</span>
     </table>
   `;
 
-  const categoryJobs = parseJobviteHtml(CATEGORY_HTML, 'Arc');
+  const categoryJobs = parseJobviteHtml(CATEGORY_HTML, 'Cyberdyne');
 
   if (categoryJobs.length === 3) {
     pass('parseJobviteHtml matches the category layout across multiple category tables');
@@ -510,7 +513,7 @@ Hybrid Remote<span>,</span>
   } else {
     fail(`parseJobviteHtml category variant job0: ${JSON.stringify(categoryJobs[0])}`);
   }
-  if (categoryJobs[0]?.url === 'https://jobs.jobvite.com/arc/job/o7tyAfws') {
+  if (categoryJobs[0]?.url === 'https://jobs.jobvite.com/cyberdyne/job/cd001') {
     pass('parseJobviteHtml category variant resolves relative href');
   } else {
     fail(`parseJobviteHtml category variant url: ${JSON.stringify(categoryJobs[0]?.url)}`);
@@ -533,14 +536,88 @@ Hybrid Remote<span>,</span>
   // has no span: the jv-job/jv-job-name markers from the surrounding markup
   // (present elsewhere in this fixture) keep it out of the throw path.
   const NO_LOCATION_SPAN_HTML = '<table class="jv-job-list"><tbody>' +
-    '<div class="jv-job"><a class="jv-job-name" href="/arc/job/nospan">No Location Listed</a></div>' +
-    '<div class="jv-job"><a class="jv-job-name" href="/arc/job/hasspan">Has Location <span>Remote</span></a></div>' +
+    '<div class="jv-job"><a class="jv-job-name" href="/cyberdyne/job/nospan">No Location Listed</a></div>' +
+    '<div class="jv-job"><a class="jv-job-name" href="/cyberdyne/job/hasspan">Has Location <span>Remote</span></a></div>' +
     '</tbody></table>';
-  const noLocationSpanJobs = parseJobviteHtml(NO_LOCATION_SPAN_HTML, 'Arc');
+  const noLocationSpanJobs = parseJobviteHtml(NO_LOCATION_SPAN_HTML, 'Cyberdyne');
   if (noLocationSpanJobs.length === 1 && noLocationSpanJobs[0]?.title === 'Has Location' && noLocationSpanJobs[0]?.location === 'Remote') {
     pass('parseJobviteHtml category variant drops a row missing its location span instead of merging into the next row');
   } else {
     fail(`parseJobviteHtml category variant no-span row: ${JSON.stringify(noLocationSpanJobs)}`);
+  }
+
+  // ── parseJobviteHtml — div-table layout (a fourth real theme variant, confirmed against a live tenant) ──
+
+  // Fixture reproduces the real structure seen on a live tenant (company name
+  // and job IDs below are fictional; see providers/jobvite.mjs's top-of-file
+  // comment for the actual verified tenant): the table layout reimplemented
+  // with <div>s — `<div class="tr"><div class="jv-job-list-name"><a
+  // href>{Title}</a></div><div class="jv-job-list-location">{Location}</div>
+  // </div>`. The name div wraps the anchor (opposite nesting from the
+  // anchor/div variant), which is what keeps the two patterns from
+  // cross-matching.
+  const DIV_TABLE_HTML = `
+    <div class="jv-job-list">
+      <div class="thead"><div class="tr"><div class="th">Job Title</div><div class="th">Location</div></div></div>
+      <div class="tbody">
+        <div class="tr">
+          <div class="jv-job-list-name">
+            <a href="/wayneent/job/we001">Director, New Business Developer</a>
+          </div>
+          <div class="jv-job-list-location">
+
+            United Kingdom
+
+          </div>
+          <div class="jv-job-contract-duration">Full-time</div>
+        </div>
+        <div class="tr">
+          <div class="jv-job-list-name">
+            <a href="/wayneent/job/we002">Sales &amp; Support Lead</a>
+          </div>
+          <div class="jv-job-list-location">
+            United States
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const divTableJobs = parseJobviteHtml(DIV_TABLE_HTML, 'Wayne Enterprises');
+
+  if (divTableJobs.length === 2) {
+    pass('parseJobviteHtml matches the div-table layout');
+  } else {
+    fail(`parseJobviteHtml div-table variant count: ${divTableJobs.length} (expected 2)`);
+  }
+  if (divTableJobs[0]?.title === 'Director, New Business Developer' && divTableJobs[0]?.location === 'United Kingdom') {
+    pass('parseJobviteHtml div-table variant maps title/location, skipping an intervening duration div');
+  } else {
+    fail(`parseJobviteHtml div-table variant job0: ${JSON.stringify(divTableJobs[0])}`);
+  }
+  if (divTableJobs[0]?.url === 'https://jobs.jobvite.com/wayneent/job/we001') {
+    pass('parseJobviteHtml div-table variant resolves relative href');
+  } else {
+    fail(`parseJobviteHtml div-table variant url: ${JSON.stringify(divTableJobs[0]?.url)}`);
+  }
+  if (divTableJobs[1]?.title === 'Sales & Support Lead') {
+    pass('parseJobviteHtml div-table variant decodes HTML entities in title');
+  } else {
+    fail(`parseJobviteHtml div-table variant entity decode: ${JSON.stringify(divTableJobs[1]?.title)}`);
+  }
+
+  // Regression: must not cross-match against the anchor/div variant's
+  // pattern (name div wraps the anchor here, vs. anchor wraps the name div
+  // there) — a row missing its location div must be dropped, not merged
+  // with the next row's location, same discipline as the table layout.
+  const DIV_TABLE_MISSING_LOCATION_HTML =
+    '<div class="tr"><div class="jv-job-list-name"><a href="/x/job/1">No Location Here</a></div></div>' +
+    '<div class="tr"><div class="jv-job-list-name"><a href="/x/job/2">Second Row</a></div><div class="jv-job-list-location">Berlin</div></div>';
+  const divTableMissingLocJobs = parseJobviteHtml(DIV_TABLE_MISSING_LOCATION_HTML, 'X');
+  if (divTableMissingLocJobs.length === 1 && divTableMissingLocJobs[0]?.title === 'Second Row' && divTableMissingLocJobs[0]?.location === 'Berlin') {
+    pass('parseJobviteHtml div-table variant drops a row missing its location div instead of merging into the next row');
+  } else {
+    fail(`parseJobviteHtml div-table variant missing-location row: ${JSON.stringify(divTableMissingLocJobs)}`);
   }
 
   // ── fetch() integration ────────────────────────────────────────
