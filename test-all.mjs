@@ -6168,17 +6168,70 @@ try {
 console.log('\n12. Follow-up cadence logic');
 
 try {
-  const cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+  // Pin the cadence source BEFORE followup-cadence.mjs is evaluated (#2268).
+  // Its module-level `CADENCE = resolveCadenceConfig()` reads CAREER_OPS_PROFILE at
+  // import time and otherwise falls back to the USER's config/profile.yml - so the
+  // computeUrgency / computeNextFollowupDate cases below, which encode
+  // DEFAULT_CADENCE, went red on a perfectly healthy install where the user had
+  // customized followup_cadence. #2446 pinned the two standalone suites this way;
+  // this in-process import was the piece left over.
+  //
+  // The import below must stay DYNAMIC: ESM hoists static imports above every
+  // statement in the file, so a static import would evaluate the module before this
+  // assignment and the pin would silently do nothing.
+  const CADENCE_FIXTURE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
+  const priorCadenceProfile = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = CADENCE_FIXTURE;
 
-  // CLI regression: the import.meta.url guard must still let the module run as a CLI.
-  // Data-independent — default mode emits the result as JSON: a `metadata` object when
-  // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
-  // Empty output would mean the guard wrongly suppressed main().
+  let cadence;
   let cliOut = '';
   try {
-    cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
-  } catch (cliErr) {
-    cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+
+    // CLI regression: the import.meta.url guard must still let the module run as a CLI.
+    // Data-independent — default mode emits the result as JSON: a `metadata` object when
+    // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
+    // Empty output would mean the guard wrongly suppressed main().
+    //
+    // The pin is passed explicitly: this is a FRESH process, so it re-resolves the
+    // profile on its own and would otherwise read the user's config/profile.yml no
+    // matter what the parent set.
+    try {
+      cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: CADENCE_FIXTURE },
+      });
+    } catch (cliErr) {
+      cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    }
+  } finally {
+    // Restore immediately. followup-cadence.mjs froze CADENCE at import above, so the
+    // pin has already done its job, and other modules read the same variable
+    // (scan.mjs, cv-templates.mjs, providers/_profile-keywords.mjs, plugins/_engine.mjs)
+    // - later sections must not silently inherit the fixture.
+    if (priorCadenceProfile === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = priorCadenceProfile;
+  }
+
+  // Guard the pin itself: if it ever stops taking effect, the two cadence-dependent
+  // blocks below revert to silently asserting against whatever the developer happens
+  // to have configured. This fails loudly instead.
+  //
+  // The module-private CADENCE isn't exported, but resolveCadenceConfig() with no
+  // arguments re-reads the same module-level PROFILE_FILE that CADENCE was built
+  // from - which was resolved from CAREER_OPS_PROFILE at import time. So this is a
+  // faithful proxy for "the pin was in place when the module was evaluated".
+  {
+    const pinned = cadence.resolveCadenceConfig();
+    const drift = Object.keys(cadence.DEFAULT_CADENCE)
+      .filter((k) => pinned[k] !== cadence.DEFAULT_CADENCE[k]);
+    if (drift.length === 0) {
+      pass('section 12 pins CAREER_OPS_PROFILE, so cadence resolves to the documented defaults');
+    } else {
+      fail(`section 12 cadence pin did not take effect - drifted keys: ${drift.join(', ')} (got ${JSON.stringify(pinned)})`);
+    }
   }
   let cliJson = null;
   try { cliJson = JSON.parse(cliOut.trim()); } catch { /* leave null → fail below */ }
