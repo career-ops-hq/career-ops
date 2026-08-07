@@ -281,6 +281,34 @@ Hybrid Remote<span>,</span>
     fail(`parseJobviteHtml on a recognized-but-empty layout: threw=${genuinelyEmptyThrew}, jobs=${JSON.stringify(genuinelyEmptyJobs)}`);
   }
 
+  // ── parseJobviteHtml — confirmed-empty wording on an otherwise-unrecognized page ──
+
+  // Jobvite hardcodes one of two exact sentences for a genuinely empty board
+  // depending on which page renders it — "There are currently no open jobs."
+  // on the /jobs landing page, "No results found." on the /search results
+  // page — confirmed against several live tenants. Neither page carries a
+  // KNOWN_LAYOUT_MARKER (the real list, when non-empty, only renders via JS
+  // on this theme), so without this wording the same page would throw; the
+  // literal sentence is what tells "confirmed zero" apart from "can't tell".
+  const emptyBoardCases = [
+    ['the /jobs landing page wording', '<html><body><article><p class="jv-text-center">There are currently no open jobs.</p></article></body></html>'],
+    ['the /search results page wording', '<html><body><article><p ng-non-bindable>No results found.</p></article></body></html>'],
+  ];
+  for (const [label, html] of emptyBoardCases) {
+    let threw = false;
+    let jobs = null;
+    try {
+      jobs = parseJobviteHtml(html, 'Acme');
+    } catch {
+      threw = true;
+    }
+    if (!threw && jobs && jobs.length === 0) {
+      pass(`parseJobviteHtml returns [] (not a throw) for ${label}`);
+    } else {
+      fail(`parseJobviteHtml should return [] for ${label}: threw=${threw}, jobs=${JSON.stringify(jobs)}`);
+    }
+  }
+
   // ── parseJobviteHtml — anchor/div layout (a second real theme variant) ──
 
   // NOTE: this variant is confirmed against a live tenant (see
@@ -672,6 +700,60 @@ Hybrid Remote<span>,</span>
     pass('jobvite.fetch() throws when company ID cannot be resolved');
   } else {
     fail('jobvite.fetch() should throw when company ID is missing');
+  }
+
+  // ── fetch() — /search retry on an ambiguous /jobs landing page ──
+
+  // /jobs is sometimes just a search-splash landing page for the
+  // client-rendered theme (no known markers, no confirmed-empty wording) —
+  // the real results live at /{slug}/search instead. fetch() should retry
+  // there once before giving up.
+  const AMBIGUOUS_HTML = '<html><body><div id="app"></div></body></html>';
+  let retryUrls = [];
+  const retrySuccessCtx = {
+    async fetchText(url) {
+      retryUrls.push(url);
+      return url.endsWith('/search') ? SAMPLE_HTML : AMBIGUOUS_HTML;
+    },
+  };
+  const retriedJobs = await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/acme' }, retrySuccessCtx);
+  if (retryUrls.length === 2 && retryUrls[0] === 'https://jobs.jobvite.com/acme/jobs' && retryUrls[1] === 'https://jobs.jobvite.com/acme/search') {
+    pass('jobvite.fetch() retries against /{slug}/search when /jobs is ambiguous');
+  } else {
+    fail(`jobvite.fetch() retry URLs: ${JSON.stringify(retryUrls)}`);
+  }
+  if (retriedJobs.length === 3) {
+    pass('jobvite.fetch() returns the jobs found on the /search retry');
+  } else {
+    fail(`jobvite.fetch() retry result: ${retriedJobs.length} jobs (expected 3)`);
+  }
+
+  // No retry at all when /jobs already resolves (known markers or confirmed
+  // empty) — the common case shouldn't pay for a second request.
+  let noRetryCalls = 0;
+  const noRetryCtx = { async fetchText() { noRetryCalls++; return SAMPLE_HTML; } };
+  await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/acme' }, noRetryCtx);
+  if (noRetryCalls === 1) {
+    pass('jobvite.fetch() does not retry when /jobs already resolves');
+  } else {
+    fail(`jobvite.fetch() made ${noRetryCalls} fetchText calls when /jobs already resolved (expected 1)`);
+  }
+
+  // Both /jobs and /search ambiguous: the /search error (naming the tenant)
+  // propagates instead of the /jobs one.
+  let bothAmbiguousThrew = false;
+  let bothAmbiguousMessage = '';
+  const bothAmbiguousCtx = { async fetchText() { return AMBIGUOUS_HTML; } };
+  try {
+    await jobvite.fetch({ name: 'Acme', careers_url: 'https://jobs.jobvite.com/acme' }, bothAmbiguousCtx);
+  } catch (e) {
+    bothAmbiguousThrew = true;
+    bothAmbiguousMessage = e.message;
+  }
+  if (bothAmbiguousThrew && /Acme/.test(bothAmbiguousMessage)) {
+    pass('jobvite.fetch() throws (naming the tenant) when both /jobs and /search are ambiguous');
+  } else {
+    fail(`jobvite.fetch() both-ambiguous: threw=${bothAmbiguousThrew}, message=${bothAmbiguousMessage}`);
   }
 
 } catch (e) {

@@ -22,6 +22,12 @@ import { decodeEntities } from './_html-entities.mjs';
 // branded-domain apply link) — either form is restricted to http:/https: and
 // is display-only, never fetched here.
 //
+// /{companyId}/jobs is sometimes just a search-splash landing page rather
+// than the actual listing (a theme quirk, not a naming inconsistency — see
+// buildSearchUrl below); when the first fetch comes up ambiguous, fetch()
+// retries once against /{companyId}/search, which is also slug-derived and
+// gets the same SSRF pinning.
+//
 // Wire in via a `tracked_companies:` entry with:
 //   careers_url: https://jobs.jobvite.com/{companyId}
 // or explicitly with:
@@ -120,6 +126,20 @@ function buildCareersUrl(companyId) {
   return `${ORIGIN}/${encodeURIComponent(companyId)}/jobs`;
 }
 
+// The "classic" theme's /{slug}/jobs is a full listing, but on the
+// client-rendered ("faceted search") theme it's often just a search-splash
+// landing page — a hero, a filter form, maybe a small featured-jobs teaser —
+// with the real results rendered separately at /{slug}/search (itself a
+// plain GET, no query params needed for "show everything"; this is exactly
+// what the landing page's own `<form jv-search-form action="/{slug}/search">`
+// points at). That page carries the same known-layout markup when the tenant
+// has open roles, or the same defused-empty-board wording (see
+// EMPTY_BOARD_MARKER) when it genuinely doesn't — see fetch() below.
+/** @param {string} companyId */
+function buildSearchUrl(companyId) {
+  return `${ORIGIN}/${encodeURIComponent(companyId)}/search`;
+}
+
 /** @type {Provider} */
 export default {
   id: 'jobvite',
@@ -136,9 +156,25 @@ export default {
     assertJobviteUrl(careersUrl);
     // redirect:'error' keeps the fetch pinned to jobs.jobvite.com — a stale
     // or invalid slug redirects to search.jobvite.com, and that redirect
-    // should surface as a fetch failure, not silently follow.
+    // should surface as a fetch failure, not silently follow. It also
+    // catches a tenant configured with a branded custom domain: Jobvite
+    // 302s those straight to the tenant's own site (e.g. synergybis.com),
+    // and that redirect should fail loudly too rather than silently
+    // fetching a page this provider was never meant to parse.
     const html = await ctx.fetchText(careersUrl, { redirect: 'error', headers: { accept: 'text/html' } });
-    return parseJobviteHtml(html, entry.name);
+    try {
+      return parseJobviteHtml(html, entry.name);
+    } catch {
+      // /jobs had no known layout markers and no confirmed-empty wording —
+      // ambiguous, not necessarily unsupported (see buildSearchUrl above).
+      // Retry against /search before concluding the theme really can't be
+      // scraped; if this also comes up empty-handed, let its own error
+      // (naming the tenant) propagate instead of the first one.
+      const searchUrl = buildSearchUrl(companyId);
+      assertJobviteUrl(searchUrl);
+      const searchHtml = await ctx.fetchText(searchUrl, { redirect: 'error', headers: { accept: 'text/html' } });
+      return parseJobviteHtml(searchHtml, entry.name);
+    }
   },
 };
 
@@ -196,6 +232,17 @@ const KNOWN_LAYOUT_MARKER = new RegExp(
   `<[a-z]+\\b(?:${classToken('jv-job-list')}|${classToken('jv-job-list-name')}|${classToken('jv-job-list-location')}|${classToken('jv-job-item')}|${classToken('jv-job')}|${classToken('jv-job-name')})`,
   'i',
 );
+
+// Jobvite hardcodes one of these two exact sentences (verified against live
+// tenants — the wording differs by page, not by theme) for a genuinely empty
+// board: "There are currently no open jobs." on the /jobs landing page,
+// "No results found." on the /search results page. Both are literal,
+// specific enough that a false-positive match elsewhere on the page is not
+// a realistic concern. A page carrying this wording is client-rendered (no
+// KNOWN_LAYOUT_MARKER present) yet the *emptiness* itself is server-rendered
+// and trustworthy — this is what tells "genuinely zero jobs" apart from
+// "can't tell, the real list loads via JS" for that theme.
+const EMPTY_BOARD_MARKER = /There are currently no open jobs\.|No results found\./;
 
 const LIST_PATTERNS = [
   // An intervening `<td>` (e.g. a department/type column) can sit between
@@ -265,11 +312,15 @@ const LIST_PATTERNS = [
  * rows, and they sort last among dated results.
  *
  * Throws rather than returning `[]` when zero jobs matched AND the page
- * carries none of the known-layout markers (see KNOWN_LAYOUT_MARKER) — that
- * combination means the tenant is on an unsupported theme (most likely the
- * client-rendered "faceted search" layout), not that the board is genuinely
- * empty. A recognized layout with zero matching rows still returns `[]`,
- * since that's a real answer.
+ * carries neither a known-layout marker (see KNOWN_LAYOUT_MARKER) nor
+ * Jobvite's own confirmed-empty wording (see EMPTY_BOARD_MARKER) — that
+ * combination means the page is genuinely ambiguous (most likely a
+ * search-splash landing page on the client-rendered "faceted search" theme,
+ * whose real results live elsewhere — see fetch()'s /search retry), not
+ * that the board is confirmed empty. A recognized layout with zero matching
+ * rows, or the literal "no jobs" wording, still returns `[]`, since both are
+ * real, trustworthy answers even though this provider can't render the rest
+ * of that theme's markup.
  *
  * @param {unknown} html - raw HTML text of the careers page
  * @param {string} companyName - value to write into job.company
@@ -304,9 +355,9 @@ export function parseJobviteHtml(html, companyName) {
     }
   }
 
-  if (out.length === 0 && !KNOWN_LAYOUT_MARKER.test(html)) {
+  if (out.length === 0 && !KNOWN_LAYOUT_MARKER.test(html) && !EMPTY_BOARD_MARKER.test(html)) {
     throw new Error(
-      `jobvite: ${companyName} — no known Jobvite layout markers found in the careers page; ` +
+      `jobvite: ${companyName} — no known Jobvite layout markers and no confirmed-empty wording found in the careers page; ` +
       'this tenant is likely on the client-rendered ("faceted search") theme, which this provider does not support',
     );
   }
