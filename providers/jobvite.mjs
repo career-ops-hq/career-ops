@@ -153,13 +153,33 @@ export default {
 // Both are tried; results are merged and deduped by URL. Neither covers the
 // client-rendered ("faceted search") theme some tenants use instead — that
 // one loads its job list via JS after page load, nothing to scrape from the
-// initial HTML.
+// initial HTML (see KNOWN_LAYOUT_MARKER below, which makes that case throw
+// instead of silently reading as "zero jobs").
+//
+// Only the table layout is exercised against a live tenant; the anchor/div
+// path rests on fixtures reconstructed from Jobvite's published theme CSS —
+// flag it if you find a live tenant on that variant that this doesn't match.
 // Matches a class token as a whitespace-delimited word within a class
 // attribute found anywhere among a tag's attributes — not anchored to
 // attribute order (class needn't be first) and not fooled by a hyphenated
 // near-miss like "jv-job-list-name-mobile" the way `\bTOKEN\b` would be,
 // since `-` is a non-word character and satisfies `\b` on both sides of it.
 const classToken = (token) => `(?=[^>]*\\bclass="(?:[^"]*\\s)?${token}(?:\\s[^"]*)?")`;
+
+// Both supported themes render some element carrying one of these exact
+// class tokens — the "jv-job-list" wrapper (<table>/<div>) around the whole
+// list, the per-row "jv-job-list-name"/"jv-job-list-location" cells, or the
+// anchor variant's "jv-job-item" row class — regardless of whether any given
+// row ends up producing a valid job (e.g. one row dropped for a bad href
+// scheme still leaves its td/div markers behind). Their total absence is
+// what separates "known layout, genuinely no jobs right now (or every row
+// got filtered)" from "client-rendered faceted-search theme this provider
+// can't scrape at all": the latter never emits any of this markup in the
+// initial HTML, since the list loads via JS after page load.
+const KNOWN_LAYOUT_MARKER = new RegExp(
+  `<[a-z]+\\b(?:${classToken('jv-job-list')}|${classToken('jv-job-list-name')}|${classToken('jv-job-list-location')}|${classToken('jv-job-item')})`,
+  'i',
+);
 
 const LIST_PATTERNS = [
   // An intervening `<td>` (e.g. a department/type column) can sit between
@@ -197,14 +217,22 @@ const LIST_PATTERNS = [
 /**
  * Parse a Jobvite careers page (server-rendered HTML) into jobs. Exported for
  * unit tests. No posting date is exposed on the list page, so `postedAt` is
- * omitted.
+ * omitted — date filters (`--since`, `max_age_days`) never exclude Jobvite
+ * rows, and they sort last among dated results.
+ *
+ * Throws rather than returning `[]` when zero jobs matched AND the page
+ * carries none of the known-layout markers (see KNOWN_LAYOUT_MARKER) — that
+ * combination means the tenant is on an unsupported theme (most likely the
+ * client-rendered "faceted search" layout), not that the board is genuinely
+ * empty. A recognized layout with zero matching rows still returns `[]`,
+ * since that's a real answer.
  *
  * @param {unknown} html - raw HTML text of the careers page
  * @param {string} companyName - value to write into job.company
  * @returns {Array<{title: string, url: string, company: string, location: string}>}
  */
 export function parseJobviteHtml(html, companyName) {
-  if (typeof html !== 'string' || !html) return [];
+  if (typeof html !== 'string') return [];
 
   const out = [];
   const seen = new Set();
@@ -231,5 +259,13 @@ export function parseJobviteHtml(html, companyName) {
       out.push({ title, url, company: companyName, location: clean(m[3]) });
     }
   }
+
+  if (out.length === 0 && !KNOWN_LAYOUT_MARKER.test(html)) {
+    throw new Error(
+      `jobvite: ${companyName} — no known Jobvite layout markers found in the careers page; ` +
+      'this tenant is likely on the client-rendered ("faceted search") theme, which this provider does not support',
+    );
+  }
+
   return out;
 }

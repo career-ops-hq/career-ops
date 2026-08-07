@@ -234,24 +234,59 @@ Hybrid Remote<span>,</span>
     fail(`parseJobviteHtml malformed-entity handling: ${JSON.stringify(malformedJobs[0]?.title)}`);
   }
 
-  // null / bad input
+  // null / non-string input — defensive no-op, not a real fetch outcome
+  // (ctx.fetchText always resolves to a string), so this stays a quiet [].
   if (parseJobviteHtml(null, 'X').length === 0) {
     pass('parseJobviteHtml returns [] for null input');
   } else {
     fail('parseJobviteHtml should return [] for null input');
   }
-  if (parseJobviteHtml('', 'X').length === 0) {
-    pass('parseJobviteHtml returns [] for empty string input');
-  } else {
-    fail('parseJobviteHtml should return [] for empty string input');
+
+  // Unsupported layout: zero jobs matched AND no known-layout marker present
+  // must throw, not return [] — a silent [] here is indistinguishable from a
+  // genuinely empty board (the failure mode #2379 fixed for dead boards).
+  const unsupportedCases = [
+    ['empty string input', ''],
+    ['a page with no Jobvite job markup at all', '<html>no job tables here</html>'],
+    ['the client-rendered "faceted search" theme (job list loads via JS, nothing in initial HTML)', '<html><body><div id="app"></div></body></html>'],
+  ];
+  for (const [label, html] of unsupportedCases) {
+    let threw = false;
+    try {
+      parseJobviteHtml(html, 'Acme');
+    } catch (e) {
+      threw = /Acme/.test(e.message);
+    }
+    if (threw) {
+      pass(`parseJobviteHtml throws (naming the tenant) for ${label}`);
+    } else {
+      fail(`parseJobviteHtml should throw naming the tenant for ${label}`);
+    }
   }
-  if (parseJobviteHtml('<html>no job tables here</html>', 'X').length === 0) {
-    pass('parseJobviteHtml returns [] when no job rows match');
+
+  // A recognized layout with genuinely zero rows (the wrapper class is
+  // present, just no job rows inside it) is a real answer and must still
+  // return [] quietly rather than throw.
+  const genuinelyEmptyHtml = '<table class="jv-job-list"><tbody></tbody></table>';
+  let genuinelyEmptyThrew = false;
+  let genuinelyEmptyJobs = [];
+  try {
+    genuinelyEmptyJobs = parseJobviteHtml(genuinelyEmptyHtml, 'Acme');
+  } catch {
+    genuinelyEmptyThrew = true;
+  }
+  if (!genuinelyEmptyThrew && genuinelyEmptyJobs.length === 0) {
+    pass('parseJobviteHtml returns [] (not a throw) for a recognized layout with genuinely zero rows');
   } else {
-    fail('parseJobviteHtml should return [] when no job rows match');
+    fail(`parseJobviteHtml on a recognized-but-empty layout: threw=${genuinelyEmptyThrew}, jobs=${JSON.stringify(genuinelyEmptyJobs)}`);
   }
 
   // ── parseJobviteHtml — anchor/div layout (a second real theme variant) ──
+
+  // NOTE: only the table layout above is exercised against a live tenant.
+  // Everything below (anchor/div and its variants) rests on fixtures
+  // reconstructed from Jobvite's published theme CSS, not a confirmed live
+  // page — flag it if a live tenant on this variant turns up not matching.
 
   // Some tenants render the "classic" theme as <a><div>…</div></a> instead
   // of <td>…</td>, sometimes also inserting a jv-job-type div between name
