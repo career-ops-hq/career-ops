@@ -11276,17 +11276,23 @@ try {
     fail('companyMatch matched two empty/absent company names');
   }
 
-  // -- Controls: the checks must still fire on genuinely identical input --
-  if (companyRoleDedupKey('株式会社アカネ', 'バックエンドエンジニア')
-      === companyRoleDedupKey('株式会社アカネ', 'バックエンドエンジニア')) {
-    pass('control: identical Japanese company+role still produces one dedupe key');
+  // -- Controls: the checks must still fire on equivalent input --
+  // Comparing a call against itself would be a tautology (a pure function on
+  // the same arguments), so these vary the surface form instead — half-width
+  // katakana and full-width spacing — and additionally require the shared key
+  // to carry the role. Equality alone would still hold if both sides keyed to
+  // '', which is precisely the bug being fixed.
+  const ctrlKey = companyRoleDedupKey('株式会社アカネ', 'バックエンドエンジニア');
+  const ctrlKeyVariant = companyRoleDedupKey('株式会社アカネ', '　ﾊﾞｯｸｴﾝﾄﾞｴﾝｼﾞﾆｱ　');
+  if (ctrlKey === ctrlKeyVariant && ctrlKey !== '株式会社アカネ::') {
+    pass('control: equivalent Japanese company+role (half-width kana, full-width spacing) still dedupes to one non-empty key');
   } else {
-    fail('control failed: identical Japanese company+role no longer dedupes');
+    fail(`control failed: ${JSON.stringify(ctrlKey)} vs ${JSON.stringify(ctrlKeyVariant)}`);
   }
-  if (companyMatch('株式会社アカネ', '株式会社アカネ') === true) {
-    pass('control: identical Japanese company names still match');
+  if (companyMatch('株式会社アカネ', '　株式会社ｱｶﾈ　') === true) {
+    pass('control: equivalent Japanese company names (half-width kana, full-width spacing) still match');
   } else {
-    fail('control failed: identical Japanese company names no longer match');
+    fail('control failed: equivalent Japanese company names no longer match');
   }
 
   // NFKC folds half-width katakana onto the canonical form, so the same title
