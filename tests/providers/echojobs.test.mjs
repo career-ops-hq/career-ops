@@ -39,13 +39,58 @@ try {
     fail(`normalizeEchojobsJob => ${JSON.stringify(n)}`);
   }
 
-  // remote fallback when no listed place
+  // remote/hybrid fallback when no listed place — kept distinguishable (#2258)
+  // so a location_filter.block: ["Hybrid"] rule can still catch a hybrid role;
+  // collapsing both to "Remote" would make that block unmatchable.
   const remote = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/1', locations: [], remote_type: 'remote' });
   const hybrid = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/2', remote_type: 'hybrid' });
-  if (remote?.location === 'Remote' && hybrid?.location === 'Remote') {
-    pass('normalizeEchojobsJob falls back to "Remote" for a placeless remote OR hybrid role');
+  if (remote?.location === 'Remote' && hybrid?.location === 'Hybrid') {
+    pass('normalizeEchojobsJob falls back to "Remote" for a placeless remote role, "Hybrid" for a placeless hybrid one (#2258)');
   } else {
     fail(`remote/hybrid fallback => ${JSON.stringify([remote?.location, hybrid?.location])}`);
+  }
+
+  // on_site with no listed place gets no location fallback at all — only
+  // remote/hybrid roles are placeless-tolerant.
+  const onSiteNoPlace = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/3', remote_type: 'on_site' });
+  if (onSiteNoPlace?.location === '') {
+    pass('normalizeEchojobsJob leaves location empty for a placeless on_site role (no false Remote/Hybrid)');
+  } else {
+    fail(`on_site placeless fallback => ${JSON.stringify(onSiteNoPlace?.location)}`);
+  }
+
+  // a hybrid role that DOES list a city keeps the city and gains the marker,
+  // so block: ["Hybrid"] is not half-working (#2258).
+  const hybridWithCity = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/4', locations: ['Berlin'], remote_type: 'hybrid' });
+  if (hybridWithCity?.location === 'Berlin · Hybrid') {
+    pass('normalizeEchojobsJob appends the Hybrid marker to a hybrid role that lists a city (#2258)');
+  } else {
+    fail(`hybrid with city => ${JSON.stringify(hybridWithCity?.location)}`);
+  }
+
+  // the marker is never doubled when the board already spells it out
+  const hybridSpelledOut = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/5', locations: ['Berlin (Hybrid)'], remote_type: 'hybrid' });
+  if (hybridSpelledOut?.location === 'Berlin (Hybrid)') {
+    pass('normalizeEchojobsJob does not double the marker when the location already says Hybrid');
+  } else {
+    fail(`hybrid already spelled out => ${JSON.stringify(hybridSpelledOut?.location)}`);
+  }
+
+  // a placed remote role is left alone — only hybrid gets a marker appended
+  const remoteWithCity = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/6', locations: ['Berlin'], remote_type: 'remote' });
+  if (remoteWithCity?.location === 'Berlin') {
+    pass('normalizeEchojobsJob leaves a placed remote role untouched (no marker beyond the #2258 scope)');
+  } else {
+    fail(`remote with city => ${JSON.stringify(remoteWithCity?.location)}`);
+  }
+
+  // remote_type is a third-party field: casing/whitespace must not smuggle an
+  // unmarked hybrid through.
+  const hybridOddCasing = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/7', locations: ['Berlin'], remote_type: ' Hybrid ' });
+  if (hybridOddCasing?.location === 'Berlin · Hybrid') {
+    pass('normalizeEchojobsJob matches remote_type case/whitespace-insensitively');
+  } else {
+    fail(`hybrid odd casing => ${JSON.stringify(hybridOddCasing?.location)}`);
   }
 
   // company fallback to the entry name

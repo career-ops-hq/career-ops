@@ -43,6 +43,7 @@ import { outputLanguageInstruction, parseOutputLanguage } from './profile-langua
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
+import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env before anything else
@@ -97,6 +98,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --file <path>    Read JD from a file instead of inline text
     --model <name>   Gemini model to use (default: gemini-3.6-flash)
     --no-save        Do not save report to reports/ directory
+    --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
 
   SETUP
@@ -115,6 +117,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 let jdText = '';
 let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
+let noCompress = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -128,6 +131,8 @@ for (let i = 0; i < args.length; i++) {
     modelName = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
+  } else if (args[i] === '--no-compress') {
+    noCompress = true;
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
@@ -235,37 +240,38 @@ const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
-// Build the system prompt (mirrors the Claude skill router logic)
+// Build the system prompt with token budget management
 // ---------------------------------------------------------------------------
+const { contextBody, budgetReport } = buildBudgetedPrompt({
+  sharedContent: sharedContext,
+  ofertaContent: ofertaLogic,
+  cvContent,
+  profileYml,
+  profileContent,
+  jdText,
+  noCompress,
+  maxTokens: 1_048_576, // gemini-2.5-flash context window
+});
+
+// Log token budget info
+if (budgetReport.compressed) {
+  console.log(`📊  Token budget: ${budgetReport.beforeTokens} → ${budgetReport.afterTokens} tokens (saved ${budgetReport.beforeTokens - budgetReport.afterTokens})`);
+  console.log(`    Trimmed sections: ${budgetReport.removed.join(', ')}`);
+  if (budgetReport.overBudget) {
+    console.log(`    ⚠️  Still ${budgetReport.afterTokens - budgetReport.budget} tokens over budget after compression`);
+  }
+} else if (budgetReport.overBudget) {
+  console.log(`⚠️  Token budget: ${budgetReport.totalTokens} tokens exceeds ${budgetReport.budget} limit by ${budgetReport.totalTokens - budgetReport.budget}`);
+} else {
+  console.log(`📊  Token budget: ${budgetReport.totalTokens} tokens (within ${budgetReport.budget} limit)`);
+}
+
 const systemPrompt = `You are career-ops, an AI-powered job search assistant.
 You evaluate job offers against the user's CV using a structured A-G scoring system.
 
 Your evaluation methodology is defined below. Follow it exactly.
 
-═══════════════════════════════════════════════════════
-SYSTEM CONTEXT (_shared.md)
-═══════════════════════════════════════════════════════
-${sharedContext}
-
-═══════════════════════════════════════════════════════
-EVALUATION MODE (oferta.md)
-═══════════════════════════════════════════════════════
-${ofertaLogic}
-
-═══════════════════════════════════════════════════════
-CANDIDATE RESUME (cv.md)
-═══════════════════════════════════════════════════════
-${cvContent}
-
-═══════════════════════════════════════════════════════
-CANDIDATE PROFILE & TARGETS (config/profile.yml)
-═══════════════════════════════════════════════════════
-${profileYml}
-
-═══════════════════════════════════════════════════════
-USER ARCHETYPES & NARRATIVE (_profile.md)
-═══════════════════════════════════════════════════════
-${profileContent}
+${contextBody}
 
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION

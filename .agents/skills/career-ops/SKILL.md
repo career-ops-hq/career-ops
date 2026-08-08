@@ -1,10 +1,14 @@
 ---
 name: career-ops
-description: AI job search command center -- evaluate offers, tailor CVs, scan portals, track applications. Use when the user pastes a job description or URL, asks to evaluate an offer, tailor a resume or cover letter, scan job boards, prepare for an interview, or track/update their applications.
+description: >-
+  AI job search command center -- evaluate offers, generate CVs, scan portals,
+  track applications. Use when the user pastes a job URL or JD, asks to scan
+  portals, generate a CV/PDF, track applications, prepare for interviews, draft
+  outreach/emails, or run any career-ops mode.
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | update]"
+argument-hint: "[scan | discover | deep | pdf | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -15,6 +19,7 @@ career-ops is a multi-CLI job-search command center. The routing below is shared
 ## Invocation Notes
 
 - CLIs with slash-command registration can expose this router as `/career-ops`.
+- In Cursor, this skill lives at `.cursor/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
 - The routing semantics below stay the same regardless of whether the entrypoint is a slash command or a natural-language prompt.
@@ -44,6 +49,7 @@ Determine the mode from `$mode`:
 | `interview-prep` | `interview-prep` |
 | `interview` | `interview` |
 | `eu-swe` | `regional/eu-swe` |
+| `eu-fintech` | `regional/eu-fintech` |
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
@@ -61,6 +67,7 @@ Determine the mode from `$mode`:
 | `pipeline` | `pipeline` |
 | `apply` | `apply` |
 | `scan` | `scan` |
+| `discover` | `discover` |
 | `batch` | `batch` |
 | `patterns` | `patterns` |
 | `offer-prep` | `offer-prep` |
@@ -68,6 +75,7 @@ Determine the mode from `$mode`:
 | `upskill` | `upskill` |
 | `followup` | `followup` |
 | `reply-watch` | `reply-watch` |
+| `outcome` | `outcome` |
 | `interview-redflag` | `interview-redflag` |
 | `update` | `update` |
 | `cover` | `cover` |
@@ -123,6 +131,7 @@ Available commands:
   /career-ops interview-prep → Generate company-specific interview prep doc
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
+  /career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
@@ -139,12 +148,14 @@ Available commands:
   /career-ops agent-inbox → Queue/drain requests for the next session (data/agent-inbox.md)
   /career-ops apply     → Live application assistant (reads form + generates answers)
   /career-ops scan      → Scan portals and discover new offers
+  /career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
   /career-ops batch     → Batch processing with parallel workers
   /career-ops patterns  → Analyze rejection patterns and improve targeting
   /career-ops offer-prep → Read a received offer/contract with the candidate: clause walk + lawyer questions (not legal advice)
   /career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
   /career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
+  /career-ops outcome   → Record application outcome & archive artifacts
   /career-ops update    → Update career-ops system files with diff preview + compat check
 
 Inbox: add URLs to data/pipeline.md → /career-ops pipeline
@@ -169,7 +180,7 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `p
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `cover`, `email`, `add`, `offer-prep`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`
 
 ### Modes delegated to subagent
 

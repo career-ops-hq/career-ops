@@ -52,11 +52,13 @@ const TRUST = {
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
-  // Strip a leading currency symbol and a trailing 3-letter ISO-4217-style alpha
-  // token (any case — "450k SEK", "80-90k eur"). Exactly three letters, so the
-  // lone "k" magnitude suffix ("80k") is never eaten, and prose ("competitive")
-  // still fails the numeric match below even after losing its last three letters.
-  s = s.replace(/^[€$£¥]\s*/, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
+  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
+  // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
+  // three letters, so the lone "k" magnitude suffix ("80k") is never eaten, and
+  // prose ("competitive") still fails the numeric match below even after losing
+  // its last three letters.
+  s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(numStr.replace(/,/g, ''));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
@@ -371,6 +373,10 @@ function selfTest() {
   assert(parseAmount('9ok') === null, 'typo -> null');
   assert(parseAmount('450k SEK')?.mid === 450000, 'generic trailing ISO token stripped (450k SEK)');
   assert(parseAmount('80-90k eur')?.mid === 85000, 'lowercase trailing ISO token stripped');
+  assert(parseAmount('$123,684—$254,644 USD')?.mid === 189164, 'US range, symbol on both bounds, em dash');
+  assert(parseAmount('$123,684-$254,644 USD')?.mid === 189164, 'US range, symbol on both bounds, hyphen');
+  assert(parseAmount('€80,000-€90,000')?.min === 80000, 'EUR range, symbol on both bounds');
+  assert(parseAmount('$150,000')?.mid === 150000, 'single value with symbol still works');
 
   // parseObservations
   const obs = parseObservations(OBS_FIXTURE);

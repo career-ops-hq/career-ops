@@ -98,6 +98,20 @@ try {
   const partialJobs = await phenom.fetch({ name: 'Allianz', api: 'https://careers.allianz.com' }, partialCtx);
   if (partialJobs.length === 100 && partialCalls === 2) pass('phenom.fetch() preserves jobs from earlier pages when a later page fetch throws');
   else fail(`phenom.fetch() partial-failure handling wrong: ${partialJobs.length} jobs after ${partialCalls} calls`);
+
+  // A FIRST-page failure means the board is unreachable, not empty. It must
+  // throw so scan/portal-health record a failure instead of "live but empty".
+  let firstPageErr = null;
+  try {
+    await phenom.fetch(
+      { name: 'Allianz', api: 'https://careers.allianz.com' },
+      { sleep: async () => {}, fetchJson: async () => { throw new Error('endpoint down'); } },
+    );
+  } catch (err) {
+    firstPageErr = err;
+  }
+  if (firstPageErr?.message === 'endpoint down') pass('phenom.fetch() throws when the first page fetch fails (dead board ≠ empty board)');
+  else fail('phenom.fetch() swallowed a first-page failure into []');
 } catch (e) {
   fail(`phenom provider tests crashed: ${e.message}`);
 }

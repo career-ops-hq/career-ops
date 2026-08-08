@@ -174,7 +174,7 @@ node gemini-eval.mjs --file ./jds/my-job.txt
 npm run gemini:eval -- "职位描述文本"
 ```
 
-> **免费层：** 两种选项都无需付费。原生 CLI 使用 Google OAuth；API 脚本使用 `gemini-2.0-flash`（15 RPM，每天 1M token 免费）。
+> **免费层：** 两种选项都无需付费。原生 CLI 使用 Google OAuth；API 脚本使用 `gemini-3.6-flash`（速率限制取决于模型和层级；请参阅 Google AI 文档了解当前配额）。
 
 
 ## 用法

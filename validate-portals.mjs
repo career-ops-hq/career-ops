@@ -14,6 +14,7 @@ import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -281,8 +282,11 @@ async function main() {
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '');
+  // An explicit but empty `--file=` must reach the usage error below. Passing
+  // '' to resolve() would return the CURRENT DIRECTORY, and the script would
+  // then try to validate a directory and report a filesystem error instead.
+  const fileFlag = hasFlag(args, '--file') ? (flagValue(args, '--file') ?? '') : undefined;
+  const filePath = fileFlag === undefined ? resolve(DEFAULT_PORTALS_PATH) : (fileFlag ? resolve(fileFlag) : '');
   if (!filePath) {
     console.error('Usage: node validate-portals.mjs [--file portals.yml] [--self-test]');
     process.exit(1);

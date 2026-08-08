@@ -92,3 +92,25 @@ public commit with a stated reason.
 - @arberbakalli | Arbër Bakalli | 2026-07-23 | "How hiring should have been" | id:15056487 | src:https://github.com/santifer/career-ops/discussions/2131 | n:44
 - @harsh-kotak | Harsh Kotak | 2026-07-23 | "career-ops helped me search with a plan." | id:9409440 | src:https://github.com/santifer/career-ops/discussions/2133 | n:45
 - @asing44 | Adam Warsing | 2026-07-24 | "To approaching a turbulent space with real dignity, cheers!" | id:109570966 | src:https://github.com/santifer/career-ops/discussions/2168 | n:46
+- @cdelafosse4-ops | 2026-07-27 | id:290349063 | src:https://github.com/santifer/career-ops/discussions/2208 | n:47
+- @Saksham-Khosla | 2026-07-27 | id:294287864 | src:https://github.com/santifer/career-ops/discussions/2218 | n:48
+- @sdisaacson | Scott Isaacson | 2026-07-27 | "Whose side is your agent on?" | id:1022379 | src:https://github.com/santifer/career-ops/discussions/2219 | n:49
+- @aawbeck | Aaron Beck | 2026-07-27 | "Great tool, ty!" | id:255968200 | src:https://github.com/santifer/career-ops/discussions/2222 | n:50
+- @NotPraneeth | Sai Praneeth | 2026-07-29 | "The search mustn't stop" | id:92677364 | src:https://github.com/santifer/career-ops/discussions/2275 | n:51
+- @changeable-alcohol | X | 2026-07-29 | id:108211470 | src:https://github.com/santifer/career-ops/discussions/2287 | n:52
+- @marz1307 | Marvis Osazuwa | 2026-07-29 | "Building on it instead of around it." | id:62819238 | src:https://github.com/santifer/career-ops/pull/2311 | n:53
+- @kylekkkk61 | kylewu | 2026-07-30 | "I will be graduated next year, and I believe this can help me find a job." | id:102206550 | src:https://github.com/santifer/career-ops/discussions/2334 | n:54
+- @LuswetiNick | Nicholas Lusweti | 2026-07-30 | id:179443452 | src:https://github.com/santifer/career-ops/discussions/2345 | n:55
+- @Berszerker | Osman Martinez | 2026-07-31 | "dunno" | id:124474264 | src:https://github.com/santifer/career-ops/discussions/2357 | n:56
+- @demilade27 | 2026-08-02 | "lost hope but im hopeful" | id:32215629 | src:https://github.com/santifer/career-ops/discussions/2422 | n:57
+- @ahiyantra | S.S.W.(ahiyantra) | 2026-08-03 | "I wish for hiring to stop being a figurative black hole that gives no signal to most applicants." | id:45235557 | src:https://github.com/santifer/career-ops/discussions/2455 | n:58
+- @draggador | JéJé(draggador) | 2026-08-03 | "i want large companies to treat applicants like humans instead of continuing to treat them like objects" | id:87720862 | src:https://github.com/santifer/career-ops/discussions/2456 | n:59
+- @marcusblackthorn03 | R. M. B. K. | 2026-08-03 | "I could skip most of the worst parts of a job hunting process now." | id:308749780 | src:https://github.com/santifer/career-ops/discussions/2457 | n:60
+- @doradoramedia | DoraDoraMedia | 2026-08-03 | "foss projects like this help ensure that our society still has hope of avoiding worst possible futures" | id:268710757 | src:https://github.com/santifer/career-ops/discussions/2458 | n:61
+- @arijit1201 | 2026-08-03 | "I want to make the process of job-searching a worthwhile experience instead of feeling like a grueling Herculean labour." | id:36472612 | src:https://github.com/santifer/career-ops/discussions/2462 | n:62
+- @mrabro | Mohammad Rafi Abro | 2026-08-04 | id:4149030 | src:https://github.com/santifer/career-ops/discussions/2490 | n:63
+- @henryjrobinson | Henry | 2026-08-04 | "Job searching was completely broken. This gives me hopoe." | id:4121628 | src:https://github.com/santifer/career-ops/discussions/2511 | n:64
+- @sun-dev-nika | 2026-08-05 | id:290238869 | src:https://github.com/santifer/career-ops/discussions/2522 | n:65
+- @namnhatpham1995 | 2026-08-07 | "thank you for a great project, I really love career-ops" | id:50907520 | src:https://github.com/santifer/career-ops/discussions/2571 | n:66
+- @Andrei-WongE | Andrei-WongE | 2026-08-07 | id:44266405 | src:https://github.com/santifer/career-ops/discussions/2574 | n:67
+- @alexkons | Alekons | 2026-08-07 | id:22054290 | src:https://github.com/santifer/career-ops/discussions/2578 | n:68

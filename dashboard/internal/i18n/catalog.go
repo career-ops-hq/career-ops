@@ -21,6 +21,7 @@ type Catalog struct {
 	TabEvaluated string
 	TabApplied   string
 	TabInterview string
+	TabResponded string
 	TabTop       string
 	TabSkip      string
 	TabRejected  string
@@ -170,13 +171,16 @@ func (c *Catalog) ViewModeLabel(mode string) string {
 }
 
 // StatusLabel returns the localized display label for a canonical status ID
-// (interview, offer, responded, applied, evaluated, skip, rejected, discarded).
+// (interview, offer, hired, responded, applied, evaluated, skip, rejected,
+// discarded).
 func (c *Catalog) StatusLabel(norm string) string {
 	switch strings.ToLower(strings.TrimSpace(norm)) {
 	case "interview":
 		return c.StatusInterview
 	case "offer":
 		return c.StatusOffer
+	case "hired":
+		return c.StatusHired
 	case "responded":
 		return c.StatusResponded
 	case "applied":
@@ -231,6 +235,7 @@ var En = Catalog{
 	TabEvaluated: "EVALUATED",
 	TabApplied:   "APPLIED",
 	TabInterview: "INTERVIEW",
+	TabResponded: "RESPONDED",
 	TabTop:       "TOP ≥4",
 	TabSkip:      "SKIP",
 	TabRejected:  "REJECTED",
@@ -358,6 +363,7 @@ var Tr = Catalog{
 	TabEvaluated: "DEĞERLENDİRİLDİ",
 	TabApplied:   "BAŞVURULDU",
 	TabInterview: "MÜLAKAT",
+	TabResponded: "YANIT VERİLDİ",
 	TabTop:       "EN İYİ ≥4",
 	TabSkip:      "UYGUN DEĞİL",
 	TabRejected:  "REDDEDİLDİ",
@@ -485,6 +491,7 @@ var Es = Catalog{
 	TabEvaluated: "EVALUADAS",
 	TabApplied:   "APLICADAS",
 	TabInterview: "ENTREVISTA",
+	TabResponded: "RESPONDIDAS",
 	TabTop:       "TOP ≥4",
 	TabSkip:      "OMITIR",
 	TabRejected:  "RECHAZADAS",

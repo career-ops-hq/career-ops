@@ -255,6 +255,65 @@ try {
     else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
   }
+  // CSB: when every locale fails without one successful jobs-API request, the
+  // board is unreachable, not empty. fetch() must throw so scan/portal-health
+  // record a failure instead of "live but empty".
+  {
+    let csbErr = null;
+    let csbCalls = 0;
+    try {
+      await sf.fetch(
+        { name: 'DeadCo', careers_url: 'https://careers.deadco.example', sfVariant: 'csb' },
+        {
+          sleep: async () => {},
+          fetchText: async () => { throw new Error('discovery down'); }, // locale discovery is best-effort
+          // Each locale fails with a DISTINCT message so the assertion below
+          // pins WHICH failure fetch() surfaces, not merely THAT it throws.
+          fetchJson: async () => { csbCalls++; throw new Error(`jobs api down (call ${csbCalls})`); },
+        },
+      );
+    } catch (err) {
+      csbErr = err;
+    }
+    // Discovery is down, so both default locales (de_DE, en_US) are tried and
+    // fail → 2+ calls; the surfaced error must be the FIRST locale's, pinning
+    // the deterministic firstErr retention.
+    if (csbErr?.message === 'jobs api down (call 1)' && csbCalls >= 2) {
+      pass('successfactors CSB fetch() throws the FIRST locale failure when every locale fails (dead board ≠ empty board, deterministic error)');
+    } else {
+      fail(`successfactors CSB fetch() wrong: ${csbErr ? `threw "${csbErr.message}"` : 'swallowed an all-locales failure into []'} after ${csbCalls} jobs-API calls`);
+    }
+  }
+  // Dispatcher default path (NO sfVariant): a healthy RMK tenant with zero
+  // postings triggers the post-RMK CSB probe. The probe failing on every
+  // locale must NOT throw — RMK already answered, so the board is reachable
+  // and legitimately empty, not a dead slug.
+  {
+    let probeErr = null;
+    let probeJobs = null;
+    let probeCalls = 0;
+    try {
+      probeJobs = await sf.fetch(
+        { name: 'EmptyCo', careers_url: 'https://jobs.emptyco.example' },
+        {
+          sleep: async () => {},
+          // Serves both the RMK tile endpoint (healthy 200, zero tiles) and
+          // the best-effort /search/ locale discovery.
+          fetchText: async () => '<!DOCTYPE html>',
+          fetchJson: async () => { probeCalls++; throw new Error('no CSB endpoint on this tenant'); },
+        },
+      );
+    } catch (err) {
+      probeErr = err;
+    }
+    // probeCalls >= 1 pins that the CSB probe actually RAN — an empty array
+    // straight off the RMK path would otherwise pass this test vacuously.
+    if (!probeErr && Array.isArray(probeJobs) && probeJobs.length === 0 && probeCalls >= 1) {
+      pass('successfactors fetch() without sfVariant: empty RMK + failing CSB probe returns [] (healthy empty board ≠ dead slug)');
+    } else {
+      fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)} after ${probeCalls} jobs-API calls`);
+    }
+  }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);
 }

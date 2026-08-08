@@ -831,6 +831,13 @@ func replaceStatusInLine(line, oldStatus, newStatus string, statusField int) (st
 // that doesn't match — e.g. a custom tracker layout — it falls back to the first
 // cell that equals want exactly. Matching is whole-cell and case-insensitive,
 // never a substring, so a status word inside an earlier cell is never hit.
+//
+// Final fallback: when neither check matches (the in-memory status went stale —
+// e.g. set-status.mjs or merge-tracker.mjs rewrote the row while the dashboard
+// was open), trust canonicalIdx anyway *if* its current content normalizes to a
+// recognized canonical status. That keeps the #1180 guarantee (never rewrite a
+// non-status cell) while dropping the requirement that the UI's snapshot of the
+// old status still matches the file.
 // Returns -1 when nothing matches, so the caller leaves the row untouched rather
 // than corrupt a guess.
 func statusCellIndex(cells []string, canonicalIdx int, want string) int {
@@ -842,7 +849,21 @@ func statusCellIndex(cells []string, canonicalIdx int, want string) int {
 			return i
 		}
 	}
+	if canonicalIdx >= 0 && canonicalIdx < len(cells) && isCanonicalStatusValue(cells[canonicalIdx]) {
+		return canonicalIdx
+	}
 	return -1
+}
+
+// isCanonicalStatusValue reports whether a cell's content reads as one of the
+// known tracker statuses (in any accepted spelling/language), i.e. whether it
+// is safe to treat the cell as the Status column.
+func isCanonicalStatusValue(cell string) bool {
+	switch NormalizeStatus(cell) {
+	case "evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip":
+		return true
+	}
+	return false
 }
 
 // spliceCellValue swaps a cell's inner value while preserving its surrounding
@@ -912,7 +933,9 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 			}
 		}
 
-		if norm == "offer" {
+		// A hire proves an offer was received and accepted, so it counts here
+		// too — same reasoning as everOffer in stats.mjs's computeFunnel().
+		if norm == "offer" || norm == "hired" {
 			pm.TotalOffers++
 		}
 		if norm != "skip" && norm != "rejected" && norm != "discarded" {
@@ -926,11 +949,16 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 
 	// Funnel: each stage counts all apps that reached at least that stage.
 	// An app in "interview" has passed through evaluated -> applied -> responded -> interview.
+	// "hired" is terminal success and proves every earlier stage (a landed job
+	// proves the offer, the interviews, the response, and the submission), so it
+	// counts into all four tiers — matching computeFunnel() in stats.mjs, the
+	// canonical funnel definition, whose docstring already describes this exact
+	// math as mirroring this function.
 	total := len(apps)
-	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"]
-	interview := statusCounts["interview"] + statusCounts["offer"]
-	offer := statusCounts["offer"]
+	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	offer := statusCounts["offer"] + statusCounts["hired"]
 
 	pm.FunnelStages = []model.FunnelStage{
 		{Label: "Evaluated", Count: total, Pct: 100.0},

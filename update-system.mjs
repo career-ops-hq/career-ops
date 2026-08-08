@@ -58,17 +58,27 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
+  // .gitattributes governs how every other path below is written to disk, and
+  // `apply` checks paths out one at a time in this order: if it landed later,
+  // everything before it would be written under the old core.autocrlf setting
+  // on an existing install, silently (once text=auto is live, git status stays
+  // clean and only a second update would repair it).
+  '.gitattributes',
   'modes/README.md',
   'modes/_shared.md',
+  'modes/_writing.md',
   'modes/_profile.template.md',
   'modes/_custom.template.md',
+  'modes/_brief.template.md',
   'modes/oferta.md',
   'modes/pdf.md',
+  'modes/pdf/',
   'modes/cover.md',
   'modes/email.md',
   'modes/add.md',
   'modes/expand.md',
   'modes/scan.md',
+  'modes/discover.md',
   'modes/batch.md',
   'modes/apply.md',
   'modes/auto-pipeline.md',
@@ -76,6 +86,7 @@ const SYSTEM_PATHS = [
   'modes/deep.md',
   'modes/ofertas.md',
   'modes/pipeline.md',
+  'modes/triage.md',
   'modes/project.md',
   'modes/tracker.md',
   'modes/training.md',
@@ -95,6 +106,7 @@ const SYSTEM_PATHS = [
   'modes/update.md',
   'modes/agent-inbox.md',
   'modes/reply-watch.md',
+  'modes/outcome.md',
   'modes/ar/',
   'modes/da/',
   'modes/de/',
@@ -106,10 +118,13 @@ const SYSTEM_PATHS = [
   'modes/es/interview/',
   'modes/id/',
   'modes/it/',
+  'modes/it/interview/',
   'modes/ja/',
   'modes/ko/',
+  'modes/nl/',
   'modes/pl/',
   'modes/pt/',
+  'modes/pt/interview/',
   'modes/ru/',
   'modes/tr/',
   'modes/ua/',
@@ -126,16 +141,22 @@ const SYSTEM_PATHS = [
   'KIMI.md',
   'build-dashboard.mjs',
   'generate-pdf.mjs',
+  'theme-style.mjs',
   'generate-latex.mjs',
   'extract-latex-content.mjs',
   'patch-latex-content.mjs',
+  'lib/cli-flags.mjs',
   'lib/latex-escape.mjs',
   'lib/latex-content.mjs',
+  'lib/context-budget.mjs',
+  'lib/context-budget.test.mjs',
+  'lib/golden-budget-analysis.mjs',
   'img-to-pdf.mjs',
   'archive-posting.mjs',
   'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
+  'sync-pdf-flags.mjs',
   'tracker-links.mjs',
   'tracker.mjs',
   'find.mjs',
@@ -149,21 +170,30 @@ const SYSTEM_PATHS = [
   'tracker-aliases.json',
   'set-status.mjs',
   'set-status-tests.mjs',
+  'mark-pdf-ready.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'verify-cv-facts.mjs',
   'update-system.mjs',
   'reserve-report-num.mjs',
   'scan.mjs',
+  'pipeline-lock.mjs',
+  'portal-health-lock.mjs',
   'classify-tier.mjs',
   'scan-ats-full.mjs',
+  'scan-interamt.mjs',
+  'company-funded.mjs',
   'match-star.mjs',
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
+  'application-artifacts.mjs',
   'providers/',
   'seeds/',
   'tests/',
   'doctor.mjs',
+  // doctor.mjs imports this one: an install that receives the new doctor
+  // without it would crash on startup.
+  'jsonc-parse.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
   'liveness-api.mjs',
@@ -171,14 +201,23 @@ const SYSTEM_PATHS = [
   'browser-extract.mjs',
   'analyze-patterns.mjs',
   'upskill.mjs',
+  'skill-extract.mjs',
   'stats.mjs',
   'detect-reposts.mjs',
+  'discover-ats.mjs',
+  'discover-ats.test.mjs',
+  'check-table-freshness.mjs',
   'fingerprint-core.mjs',
   'process-quality.mjs',
   'process-quality.test.mjs',
+  'company-history.mjs',
+  'company-history.test.mjs',
   'salary-gap.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
+  'contacts.mjs',
+  'contacts.test.mjs',
+  'weekly-digest.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',
@@ -194,6 +233,8 @@ const SYSTEM_PATHS = [
   'eval-golden.mjs',
   'evals/',
   'openrouter-runner.mjs',
+  'jd-similarity.mjs',
+  'jd-similarity.test.mjs',
   'test-all.mjs',
   'detect-reposts.test.mjs',
   'test-salary-filter.mjs',
@@ -203,18 +244,23 @@ const SYSTEM_PATHS = [
   'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'verify-portals.mjs',
+  'fix-slugs.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
+  'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
   'reply-matcher.test.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
+  'outcome.mjs',
+  'tests/outcome.test.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'batch/aggregate-tokens.mjs',
   'batch/README.md',
   'utils/token-tracker.mjs',
+  'batch-tailor.mjs',
   'dashboard/',
   'templates/',
   'config/cv-facts.example.json',
@@ -225,6 +271,7 @@ const SYSTEM_PATHS = [
   '.editorconfig',
   '.agents/',
   '.claude/skills/',
+  '.cursor/skills/',
   '.opencode/skills/',
   '.opencode/commands/',
   '.claude-plugin/',
@@ -255,12 +302,14 @@ const SYSTEM_PATHS = [
   'README.pl.md',
   'README.pt-BR.md',
   'README.ru.md',
+  'README.ta.md',
   'README.ua.md',
   'README.zh-TW.md',
   'README.tr.md',
   'CHANGELOG.md',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTORS.md',
+  '.all-contributorsrc',
   'GOVERNANCE.md',
   'LEGAL_DISCLAIMER.md',
   'SECURITY.md',
@@ -275,11 +324,14 @@ const SYSTEM_PATHS = [
   'build-cv-html.mjs',
   'cv-sections-core.mjs',
   'cv-templates.mjs',
+  'playwright.cv.config.mjs',
   'test/cv-templates.test.mjs',
   'test/cover-resolver.test.mjs',
+  'test/pipeline-lock.test.mjs',
   'test/profile-photo.test.mjs',
   'templates/cv-template.zh-minimal.html',
   'test/zh-minimal-template.test.mjs',
+  'test/cv-visual/',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
@@ -293,10 +345,15 @@ const SYSTEM_PATHS = [
   'plugin-audit.mjs',
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
+  'opencode.example.json',
+  'seed-fixture.mjs',
+  'test-fixtures/',
+  'upgrade-tests.mjs',
 ];
 
 const BOOTSTRAP_PATHS = [
   '.agents/',
+  '.cursor/skills/',
   '.opencode/skills/',
   '.antigravitycli/skills/',
   '.grok/skills/',
@@ -330,6 +387,7 @@ const USER_PATHS = [
   'config/profile.yml',
   'modes/_profile.md',
   'modes/_custom.md',
+  'modes/_brief.md',
   'voice-dna.md',
   'portals.yml',
   'article-digest.md',
@@ -342,6 +400,7 @@ const USER_PATHS = [
   'config/plugins.yml',
   'plugins.local/',
   'plugins.lock',
+  'opencode.json',
   '.claude/settings.json',
   '.claude/hooks/',
 ];
@@ -435,7 +494,7 @@ function gitTimeoutEnvVar(args) {
   return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
 }
 
-function gitIn(root, ...args) {
+export function gitIn(root, ...args) {
   const timeout = gitTimeoutMs(args);
   try {
     return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
@@ -630,7 +689,9 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
   return prepared;
 }
 
-function revertPaths(paths, protectedPaths = new Set()) {
+export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
+  const runGit = ctx.git || git;
+  const root = ctx.root || ROOT;
   if (paths.length === 0) return;
   // Must restore from HEAD, not from the index (#915 bug 1). After
   // `git checkout FETCH_HEAD -- <path>` the index already holds the new
@@ -639,25 +700,25 @@ function revertPaths(paths, protectedPaths = new Set()) {
   // to the pre-update commit, which is the correct rollback target.
   for (const p of paths) {
     try {
-      git('checkout', 'HEAD', '--', p);
+      runGit('checkout', 'HEAD', '--', p);
     } catch (err) {
       const pathspec = p.endsWith('/') ? p.slice(0, -1) : p;
       // Only remove if the path genuinely doesn't exist in HEAD.
       // Other errors (permissions, corrupt refs) should re-throw.
       let existsInHead = true;
-      try { git('cat-file', '-e', `HEAD:${pathspec}`); } catch { existsInHead = false; }
+      try { runGit('cat-file', '-e', `HEAD:${pathspec}`); } catch { existsInHead = false; }
       if (existsInHead) throw err;
       // Path was newly introduced by the update — remove it so the
       // working tree is consistent with HEAD.
-      try { git('rm', '-r', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
-      try { rmSync(join(ROOT, pathspec), { recursive: true, force: true }); } catch { /* already gone */ }
+      try { runGit('rm', '-r', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
+      try { rmSync(join(root, pathspec), { recursive: true, force: true }); } catch { /* already gone */ }
     }
     // A directory pathspec that exists in HEAD checks out cleanly above, so the
     // catch never runs — but `git checkout HEAD -- docs/` only restores files
     // HEAD already knows about. Files the update introduced *under* that
     // directory are not in HEAD, so they survive the rollback as staged
     // additions and the tree is left dirtier than before the update (#2015).
-    removeAdditionsNotInHead(p, protectedPaths);
+    removeAdditionsNotInHead(p, protectedPaths, ctx);
   }
 }
 
@@ -672,14 +733,20 @@ function revertPaths(paths, protectedPaths = new Set()) {
  * @param {Set<string>} protectedPaths - Paths already dirty/staged BEFORE the
  *   update ran; never deleted, so a rollback cannot destroy the user's own
  *   pre-existing staged work under a system pathspec (#2015).
+ * @param {{git?: typeof git, root?: string}} [ctx] - Testability seam: the git
+ *   runner (defaults to the module `git`, bound to ROOT) and the working-tree
+ *   root used for filesystem deletes. Production always uses the defaults; only
+ *   the behavioral rollback test overrides them to drive a throwaway repo.
  */
-function removeAdditionsNotInHead(pathspec, protectedPaths = new Set()) {
+export function removeAdditionsNotInHead(pathspec, protectedPaths = new Set(), ctx = {}) {
+  const runGit = ctx.git || git;
+  const root = ctx.root || ROOT;
   const spec = pathspec.endsWith('/') ? pathspec.slice(0, -1) : pathspec;
   let added = '';
   try {
     // -z: NUL-delimited, unquoted output, so paths containing spaces or even
     // newlines survive intact — `split('\n').trim()` would mangle them.
-    added = git('diff', '--cached', '-z', '--name-only', '--diff-filter=A', 'HEAD', '--', spec);
+    added = runGit('diff', '--cached', '-z', '--name-only', '--diff-filter=A', 'HEAD', '--', spec);
   } catch {
     // No HEAD yet, or an unreadable pathspec — nothing safe to clean up.
     return;
@@ -690,7 +757,7 @@ function removeAdditionsNotInHead(pathspec, protectedPaths = new Set()) {
     if (protectedPaths.has(file)) continue;
     let removed = false;
     try {
-      git('rm', '-f', '--ignore-unmatch', '--', file);
+      runGit('rm', '-f', '--ignore-unmatch', '--', file);
       removed = true;
     } catch {
       // Index removal failed (lock/permission). Leave both the index entry AND
@@ -699,7 +766,7 @@ function removeAdditionsNotInHead(pathspec, protectedPaths = new Set()) {
       console.error(`Rollback: could not unstage ${file}; leaving it untouched.`);
     }
     if (removed) {
-      try { rmSync(join(ROOT, file), { force: true }); } catch { /* already gone */ }
+      try { rmSync(join(root, file), { force: true }); } catch { /* already gone */ }
     }
   }
 }
@@ -956,49 +1023,56 @@ async function apply() {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
     }
 
-    // tests/ is auto-discovered and EXECUTED (tests/**/*.test.mjs), so stale
-    // files left behind by upstream renames would run twice or crash the
-    // suite. `git checkout` never deletes upstream-removed files (see the
-    // limitation note in rollback below) — prune tracked extras against
-    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked
-    // local experiments in tests/ are never touched.
-    try {
-      let remoteTests = new Set();
+    // tests/ and test-fixtures/ are both auto-discovered and EXECUTED
+    // (tests/**/*.test.mjs run directly; test-fixtures/upgrade/<state>/ dirs are
+    // enumerated by seed-fixture.mjs's listStates() and exercised by its
+    // --self-test, which fails if a stale state lacks expected.json/required
+    // files). Stale files left behind by upstream renames would run twice,
+    // crash the suite, or make the self-test iterate a state that no longer
+    // ships upstream. `git checkout` never deletes upstream-removed files (see
+    // the limitation note in rollback below) — prune tracked extras against
+    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked local
+    // experiments in these dirs are never touched.
+    for (const prunePrefix of ['tests/', 'test-fixtures/']) {
       try {
-        remoteTests = new Set(
-          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'tests/')
-            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
-        );
-      } catch {
-        // tests/ may not exist in older targets (ls-tree throws) — nothing to
-        // prune. This is the only expected-and-silent failure in this block.
-      }
-      // An empty set means FETCH_HEAD has no tests/ at all (older target, or
-      // ls-tree quietly returning nothing) — pruning against it would delete
-      // every local test file. Only prune when the remote actually ships tests/.
-      if (remoteTests.size > 0) {
-        const localTests = git('ls-files', '--', 'tests/').split('\n').filter(Boolean);
-        for (const f of localTests) {
-          if (!remoteTests.has(f.replace(/\\/g, '/'))) {
-            // Per-file isolation: one failed unlink (locked file, permissions)
-            // must not abort pruning the rest.
-            try {
-              unlinkSync(join(ROOT, f));
-              // Raw path only: `updated` entries are reused as git pathspecs by
-              // revertPaths() and the scoped commit below. Pushed only after a
-              // successful unlink so failed deletions never enter `updated`.
-              updated.push(f);
-              console.log(`Pruned stale test file: ${f}`);
-            } catch (err) {
-              console.error(`Failed to prune stale test file ${f}: ${err.message}`);
+        let remoteFiles = new Set();
+        try {
+          remoteFiles = new Set(
+            git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', prunePrefix)
+              .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+          );
+        } catch {
+          // The dir may not exist in older targets (ls-tree throws) — nothing
+          // to prune. This is the only expected-and-silent failure here.
+        }
+        // An empty set means FETCH_HEAD has no such dir at all (older target, or
+        // ls-tree quietly returning nothing) — pruning against it would delete
+        // every local file under the prefix. Only prune when the remote actually
+        // ships the directory.
+        if (remoteFiles.size > 0) {
+          const localFiles = git('ls-files', '--', prunePrefix).split('\n').filter(Boolean);
+          for (const f of localFiles) {
+            if (!remoteFiles.has(f.replace(/\\/g, '/'))) {
+              // Per-file isolation: one failed unlink (locked file, permissions)
+              // must not abort pruning the rest.
+              try {
+                unlinkSync(join(ROOT, f));
+                // Raw path only: `updated` entries are reused as git pathspecs by
+                // revertPaths() and the scoped commit below. Pushed only after a
+                // successful unlink so failed deletions never enter `updated`.
+                updated.push(f);
+                console.log(`Pruned stale file: ${f}`);
+              } catch (err) {
+                console.error(`Failed to prune stale file ${f}: ${err.message}`);
+              }
             }
           }
         }
+      } catch (err) {
+        // Unexpected failure (e.g. ls-files threw) — surface it instead of
+        // silently skipping the prune step.
+        console.error(`Stale-file prune step failed for ${prunePrefix}: ${err.message}`);
       }
-    } catch (err) {
-      // Unexpected failure (e.g. ls-files threw) — surface it instead of
-      // silently skipping the prune step.
-      console.error(`Stale-test prune step failed: ${err.message}`);
     }
 
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
@@ -1127,7 +1201,7 @@ async function apply() {
 
       if (commitFailed) {
         const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
-        const pathspec = allTargetPaths.map(p => `"${p}"`).join(' ');
+        const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +

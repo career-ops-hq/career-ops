@@ -81,9 +81,14 @@ async function loadSqlite() {
   }
 }
 
-function openDb(DatabaseSync) {
+export function openDb(DatabaseSync) {
   mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
   const db = new DatabaseSync(DB_PATH);
+  // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+  // contention. The index is read by concurrent callers — a CLI query, a
+  // `set-status` write and the Go TUI dashboard can all hit the same db at
+  // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+  db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
   db.exec(`
     CREATE TABLE IF NOT EXISTS applications (

@@ -53,6 +53,7 @@ export default {
   },
 };
 
+/** Code point → string; '' for out-of-range values instead of throwing. */
 function fromCodePoint(cp) {
   try {
     return String.fromCodePoint(cp);
@@ -90,6 +91,7 @@ function tagText(block, tag) {
   return m ? extractText(m[1]) : "";
 }
 
+/** Validate a feed URL: https + jobspresso.co (or subdomain) only, else ''. */
 function cleanUrl(value) {
   if (!value) return "";
   const trimmed = value.trim();
