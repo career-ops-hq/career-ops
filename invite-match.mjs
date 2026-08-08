@@ -108,10 +108,20 @@ const GENERIC_DESCRIPTORS = [
  */
 export function normalizeCompanyName(name) {
   let key = String(name ?? '')
+    // NFKC before folding so full-width and half-width spellings of the same
+    // name compare equal, matching the shared normalizeTextKey() contract.
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\([^)]*\)/g, ' ')
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9 ]/g, ' ')
+    // Letters and digits of ANY script, not just [a-z0-9]: the Latin-only
+    // class DELETED every non-Latin name, so アクメ株式会社 and Яндекс both
+    // produced '' — and matchInvite() bails on an empty key, so pasting an
+    // invite from any company in the ja/ko/zh/zh-TW/ru/ua/ar/hi markets that
+    // modes/ ships returned ZERO candidates even when the row was right
+    // there. Combining marks are kept for the same reason normalizeTextKey
+    // keeps them: Indic matras have no precomposed form (#2517).
+    .replace(/[^\p{L}\p{M}\p{N} ]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -443,6 +453,34 @@ function runSelfTest() {
   check(normalizeCompanyName('Acme (Example Group)') === 'acme', 'drops parenthetical branding');
   check(normalizeCompanyName('Acme & Co') === normalizeCompanyName('Acme and Co'), '"&" normalizes the same as "and"');
   check(normalizeCompanyName('  ACME   ') === 'acme', 'trims and lowercases whitespace-padded input');
+
+  // Non-Latin company names must survive the fold (#2517). The Latin-only
+  // [a-z0-9] class deleted them entirely, so every one keyed to '' and
+  // matchInvite's `if (!targetKey) return []` bailed — pasting an invite from
+  // any company in the ja/ko/zh/zh-TW/ru/ua/ar/hi markets modes/ ships
+  // returned ZERO candidates even when the row was right there.
+  check(normalizeCompanyName('アクメ株式会社') === 'アクメ株式会社', 'a Japanese company name survives normalization');
+  check(normalizeCompanyName('Яндекс') === 'яндекс', 'a Cyrillic company name survives normalization and case-folds');
+  check(normalizeCompanyName('北京字节跳动') !== normalizeCompanyName('アクメ株式会社'), 'two different non-Latin companies keep distinct keys');
+  check(normalizeCompanyName('ＡＣＭＥ') === normalizeCompanyName('ACME'), 'NFKC folds full-width to half-width');
+  // The rest of the shipped non-Latin markets, so coverage isn't just ja/ru.
+  check(normalizeCompanyName('삼성전자') === '삼성전자', 'a Korean company name survives normalization');
+  check(normalizeCompanyName('Київстар') === 'київстар', 'a Ukrainian company name survives normalization and case-folds');
+  check(normalizeCompanyName('شركة النور') === 'شركة النور', 'an Arabic company name survives normalization, spaces intact');
+  check(normalizeCompanyName('हिन्दी टेक') === 'हिन्दी टेक', 'a Devanagari name survives normalization');
+  // The actual \p{M} invariant: names differing ONLY in combining marks must
+  // stay distinct. A mark-stripping fold would collapse these into one company.
+  check(normalizeCompanyName('कंपनी') !== normalizeCompanyName('कपनी'), 'Devanagari names differing only in matras keep distinct keys');
+  {
+    const rows = [
+      { num: 1, company: 'アクメ株式会社', role: 'エンジニア', status: 'Applied', notes: '' },
+      { num: 2, company: 'Acme Inc', role: 'Engineer', status: 'Applied', notes: '' },
+    ];
+    const jp = matchInvite({ company: 'アクメ株式会社' }, rows);
+    check(jp.length === 1 && jp[0].appNumber === 1, 'an invite from a non-Latin company matches its own tracker row');
+    const latin = matchInvite({ company: 'Acme Inc' }, rows);
+    check(latin.length === 1 && latin[0].appNumber === 2, 'the Latin path still matches its own row, unchanged');
+  }
 
   // --- companySimilarity ---
   check(companySimilarity('acme', 'acme') === 1, 'identical strings score 1');

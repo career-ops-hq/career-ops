@@ -46,6 +46,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 
 try {
@@ -63,12 +64,23 @@ const parseYaml = yaml.load;
 
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
-const SCAN_HISTORY_PATH = 'data/scan-history.tsv';
-const PIPELINE_PATH = 'data/pipeline.md';
+// Overridable for the same reason the two inputs above are (#2271). A second
+// search lane - a bridge/income track, a career-change track, a partner sharing
+// the checkout - already gets its own portals.yml and profile, but without these
+// two it still writes into the one inbox and the one dedup history. That is not
+// just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
+// lane A is silently counted as a duplicate in lane B and never shown at all.
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
 const APPLICATIONS_PATH = 'data/applications.md';
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 
-// Ensure required directories exist (fresh setup)
+// Ensure required directories exist (fresh setup). Stays literal: the paths that
+// are NOT overridable still live here. The two that are need no equivalent -
+// scan-history creates its own parent before writing, and the pipeline's parent
+// is created by acquirePipelineLock, which runs before the first pipeline write.
+// tests/scan-output-paths.test.mjs pins that, so an override into a directory
+// that does not exist yet keeps working if either of those changes.
 mkdirSync('data', { recursive: true });
 
 const CONCURRENCY = 10;
@@ -1969,8 +1981,25 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
-  const companyFlag = args.indexOf('--company');
-  const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
+  // flagValue reads both `--flag value` and `--flag=value`; a bare indexOf misses
+  // the second form entirely and silently falls back to the unfiltered default.
+  //
+  // flagValue alone cannot tell an ABSENT flag from one passed with no operand —
+  // both give undefined — so it is paired with hasFlag, per cli-flags.mjs's own
+  // guidance. Without that, a trailing `--posted-after` would fall back to "no
+  // bound" and scan everything: the same silent-default failure this fixes.
+  const requireValue = (flag) => {
+    const value = flagValue(args, flag);
+    if (value === undefined || value === '') {
+      if (hasFlag(args, flag)) {
+        console.error(`Error: ${flag} requires a value`);
+        process.exit(1);
+      }
+      return null;
+    }
+    return value;
+  };
+  const filterCompany = requireValue('--company')?.toLowerCase() ?? null;
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -1979,10 +2008,8 @@ async function main() {
     const d = new Date(`${s}T00:00:00Z`);
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   };
-  const postedAfterFlag = args.indexOf('--posted-after');
-  const postedAfter = postedAfterFlag !== -1 ? args[postedAfterFlag + 1] : null;
-  const postedBeforeFlag = args.indexOf('--posted-before');
-  const postedBefore = postedBeforeFlag !== -1 ? args[postedBeforeFlag + 1] : null;
+  const postedAfter = requireValue('--posted-after');
+  const postedBefore = requireValue('--posted-before');
   if (postedAfter != null && !isValidIsoDate(postedAfter)) {
     console.error(`Error: --posted-after expects YYYY-MM-DD, got "${postedAfter}"`);
     process.exit(1);

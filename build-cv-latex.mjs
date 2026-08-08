@@ -159,8 +159,13 @@ async function main() {
     SKILLS: buildSkills(payload.skills),
   };
 
+  // Replacer FUNCTION, not a string: escapeLatex turns `$` into `\$` but leaves
+  // the next character alone, so a bullet containing `$'` survives as the JS
+  // replacement pattern meaning "everything after the match" and splices the
+  // rest of the template into the document — silently, with a valid-looking
+  // exit 0. A replacer function's return value is inserted literally.
   for (const [key, value] of Object.entries(substitutions)) {
-    template = template.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    template = template.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }
 
   const unresolved = template.match(PLACEHOLDER_RE);
@@ -282,8 +287,9 @@ async function runSelfTest() {
     SKILLS: buildSkills(sample.skills),
   };
 
+  // Replacer function, same reason as the render path above.
   for (const [key, value] of Object.entries(substitutions)) {
-    template = template.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    template = template.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }
 
   const unresolved = template.match(PLACEHOLDER_RE);

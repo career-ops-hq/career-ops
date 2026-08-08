@@ -20,6 +20,10 @@ Pass `--limit <N>` to `batch-runner.sh` to cap the number of offers processed in
 
 Yes — career-ops is fully AI-agnostic and works with any AI coding CLI or standalone script. See [docs/RUNNING_ON_A_BUDGET.md](RUNNING_ON_A_BUDGET.md) for a full guide covering OpenCode, Qwen CLI, DeepSeek, OpenRouter, Ollama, and other local or low-cost providers, along with recommended model sizes and token-saving best practices.
 
+**For zero cost specifically**, see [docs/FREE_TIER.md](FREE_TIER.md): career-ops runs on Antigravity CLI's free tier with no API key and no paid subscription, within Google's daily caps.
+
+**And if you already pay for a plan but are being billed per token anyway**, that is usually an `ANTHROPIC_API_KEY` in your environment taking precedence over your subscription: see [the subscription section of the budget guide](RUNNING_ON_A_BUDGET.md#2b-already-paying-for-a-subscription-make-sure-you-are-using-it).
+
 ## 5. What does the "possible cross-listing" warning mean during a scan?
 
 When the scanner shows a warning like:

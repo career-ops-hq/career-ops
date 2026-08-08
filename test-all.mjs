@@ -4945,16 +4945,43 @@ console.log('\n12c. Materialized skill index mode');
 
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
+  // The fixture stages the very paths career-ops legitimately tracks - .agents/,
+  // .claude/, .opencode/ - and those are exactly the paths agent-tool users
+  // exclude machine-wide. A fresh `git init` still honours the ambient global
+  // and system config, so on such a machine `git add` refused the path and the
+  // whole block aborted into a single "crashed" failure that read like a
+  // regression in materializeSkillEntrypoints (#2269).
+  //
+  // Fix the class rather than the instance: pin the global and system config to
+  // an empty file outside the fixture work tree, so nothing ambient reaches it -
+  // init.templateDir and core.autocrlf as much as core.excludesFile. Same shape
+  // as the GIT_CONFIG_GLOBAL pin in upgrade-tests.mjs. Empty on purpose; the
+  // fixture's own `git config` calls below set everything it actually needs.
+  const gitConfigRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitcfg-'));
+  const gitConfigPath = join(gitConfigRoot, 'gitconfig');
+  writeFileSync(gitConfigPath, '');
+  // That pin alone does NOT close the ignore path. When core.excludesFile is
+  // unset git falls back to the XDG default ~/.config/git/ignore, and that
+  // fallback is independent of which config file it just read - so the excludes
+  // path has to be pointed somewhere inert explicitly, below. An empty real file
+  // rather than /dev/null, which git rejects as an excludes source on Windows
+  // ("fatal: cannot use nul as an exclude file"); empty-string semantics work on
+  // both platforms tested but are not worth depending on.
+  const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
+  writeFileSync(emptyExcludes, '');
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigPath, GIT_CONFIG_SYSTEM: gitConfigPath };
   const gitRun = (args, opts = {}) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
     timeout: 30000,
+    env: gitEnv,
     ...opts,
   }).trim();
   const gitRaw = (args) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
     timeout: 30000,
+    env: gitEnv,
   });
 
   try {
@@ -4969,14 +4996,46 @@ console.log('\n12c. Materialized skill index mode');
     const pointer = '../../../.agents/skills/career-ops/SKILL.md';
 
     gitRun(['init']);
+    // core.excludesFile is only the GLOBAL layer. `git init` also seeds
+    // .git/info/exclude from a template, which GIT_TEMPLATE_DIR can still point
+    // at an ambient one, so empty that layer too rather than assume it is inert.
+    writeFileSync(join(fixtureRoot, '.git', 'info', 'exclude'), '');
     gitRun(['config', 'core.symlinks', 'false']);
+    gitRun(['config', 'core.excludesFile', emptyExcludes]);
     gitRun(['config', 'user.email', 'test@example.com']);
     gitRun(['config', 'user.name', 'Test User']);
 
     writeFileSync(join(canonicalDir, 'SKILL.md'), fixtureSkill);
     writeFileSync(join(claudeDir, 'SKILL.md'), pointer);
     writeFileSync(join(opencodeDir, 'SKILL.md'), pointer);
-    gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+    // Guard the isolation itself, as a first-class assertion. If the pin above
+    // ever stops taking effect the fixture cannot stage its own input, and every
+    // assertion below collapses into a single "crashed" carrying git's ignore
+    // message - which reads as a regression in materializeSkillEntrypoints
+    // rather than an environment leak. Name the real cause here instead.
+    //
+    // Both shapes have to be caught, because git reports them differently: an
+    // ignored path named EXPLICITLY makes `git add` exit non-zero, while an
+    // ignored path merely covered by a directory pathspec (the `.claude/skills/`
+    // add further down) is skipped silently and exits 0. So run the add and the
+    // index check together, and let one assertion speak for both.
+    let canonicalStaged = '';
+    try {
+      gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+      canonicalStaged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
+    } catch {
+      // Left empty: the assertion below is the report.
+    }
+    if (canonicalStaged) {
+      pass('skill index-mode fixture is isolated from ambient git ignore rules (#2269)');
+    } else {
+      fail('skill index-mode fixture: canonical entrypoint did not stage - ambient git config reached the fixture (#2269)');
+      fail('materialized skill entrypoints stage as regular files, not symlink blobs (skipped: fixture not staged)');
+      fail('materialized skill blobs contain canonical skill content (skipped: fixture not staged)');
+      const reported = new Error('fixture staging precondition failed');
+      reported.alreadyReported = true;
+      throw reported;
+    }
 
     const pointerBlob = gitRun(['hash-object', '-w', '--stdin'], { input: pointer });
     gitRun(['update-index', '--add', '--cacheinfo', `120000,${pointerBlob},.claude/skills/career-ops/SKILL.md`]);
@@ -5004,9 +5063,12 @@ console.log('\n12c. Materialized skill index mode');
       fail('materialized skill blobs do not contain canonical skill content');
     }
   } catch (e) {
-    fail(`skill entrypoint index-mode test crashed: ${e.message}`);
+    // The staging-precondition branch already reported all three assertions
+    // individually; re-reporting here would double-count and re-bury the cause.
+    if (!e?.alreadyReported) fail(`skill entrypoint index-mode test crashed: ${e.message}`);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(gitConfigRoot, { recursive: true, force: true });
   }
 }
 
@@ -6168,17 +6230,70 @@ try {
 console.log('\n12. Follow-up cadence logic');
 
 try {
-  const cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+  // Pin the cadence source BEFORE followup-cadence.mjs is evaluated (#2268).
+  // Its module-level `CADENCE = resolveCadenceConfig()` reads CAREER_OPS_PROFILE at
+  // import time and otherwise falls back to the USER's config/profile.yml - so the
+  // computeUrgency / computeNextFollowupDate cases below, which encode
+  // DEFAULT_CADENCE, went red on a perfectly healthy install where the user had
+  // customized followup_cadence. #2446 pinned the two standalone suites this way;
+  // this in-process import was the piece left over.
+  //
+  // The import below must stay DYNAMIC: ESM hoists static imports above every
+  // statement in the file, so a static import would evaluate the module before this
+  // assignment and the pin would silently do nothing.
+  const CADENCE_FIXTURE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
+  const priorCadenceProfile = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = CADENCE_FIXTURE;
 
-  // CLI regression: the import.meta.url guard must still let the module run as a CLI.
-  // Data-independent — default mode emits the result as JSON: a `metadata` object when
-  // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
-  // Empty output would mean the guard wrongly suppressed main().
+  let cadence;
   let cliOut = '';
   try {
-    cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
-  } catch (cliErr) {
-    cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+
+    // CLI regression: the import.meta.url guard must still let the module run as a CLI.
+    // Data-independent — default mode emits the result as JSON: a `metadata` object when
+    // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
+    // Empty output would mean the guard wrongly suppressed main().
+    //
+    // The pin is passed explicitly: this is a FRESH process, so it re-resolves the
+    // profile on its own and would otherwise read the user's config/profile.yml no
+    // matter what the parent set.
+    try {
+      cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: CADENCE_FIXTURE },
+      });
+    } catch (cliErr) {
+      cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    }
+  } finally {
+    // Restore immediately. followup-cadence.mjs froze CADENCE at import above, so the
+    // pin has already done its job, and other modules read the same variable
+    // (scan.mjs, cv-templates.mjs, providers/_profile-keywords.mjs, plugins/_engine.mjs)
+    // - later sections must not silently inherit the fixture.
+    if (priorCadenceProfile === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = priorCadenceProfile;
+  }
+
+  // Guard the pin itself: if it ever stops taking effect, the two cadence-dependent
+  // blocks below revert to silently asserting against whatever the developer happens
+  // to have configured. This fails loudly instead.
+  //
+  // The module-private CADENCE isn't exported, but resolveCadenceConfig() with no
+  // arguments re-reads the same module-level PROFILE_FILE that CADENCE was built
+  // from - which was resolved from CAREER_OPS_PROFILE at import time. So this is a
+  // faithful proxy for "the pin was in place when the module was evaluated".
+  {
+    const pinned = cadence.resolveCadenceConfig();
+    const drift = Object.keys(cadence.DEFAULT_CADENCE)
+      .filter((k) => pinned[k] !== cadence.DEFAULT_CADENCE[k]);
+    if (drift.length === 0) {
+      pass('section 12 pins CAREER_OPS_PROFILE, so cadence resolves to the documented defaults');
+    } else {
+      fail(`section 12 cadence pin did not take effect - drifted keys: ${drift.join(', ')} (got ${JSON.stringify(pinned)})`);
+    }
   }
   let cliJson = null;
   try { cliJson = JSON.parse(cliOut.trim()); } catch { /* leave null → fail below */ }
@@ -8088,6 +8203,71 @@ try {
   }
 } catch (e) {
   fail(`dedup blind-via channel key tests crashed (#2393): ${e.message}`);
+}
+
+// ── DEDUP ORDINARY COMPANY KEY: NON-LATIN COMPANIES (#2429) ──
+// The sibling of the blind-via case directly above, on the path that runs for
+// every normal row. #2429 made tracker-utils.mjs's normalizeCompany
+// Unicode-aware and merge-tracker/set-status inherited it, but dedup-tracker
+// carried its own local [^a-z0-9] copy, so two DIFFERENT companies written in
+// a non-Latin script both keyed to '' and one row was deleted outright.
+// Controls: punctuation/spacing variants of one Latin employer must still
+// merge, and two distinct Latin employers must still stay apart.
+console.log('\n🧪 Testing dedup company key with non-Latin companies (#2429)...');
+try {
+  const coDedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-company-'));
+  try {
+    mkdirSync(join(coDedupTmp, 'data'));
+    const tracker = join(coDedupTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|-----|------|-------|--------|-----|--------|-------|\n' +
+      // (a) Two DIFFERENT non-Latin employers, same role — two real
+      // applications, both must survive.
+      '| 71 | 2026-04-01 | アクメ株式会社 | — | Backend Engineer | 4.2/5 | Evaluated | ❌ | [71](../reports/071-a.md) | first company |\n' +
+      '| 72 | 2026-04-02 | グロベックス合同会社 | — | Backend Engineer | 3.0/5 | Evaluated | ❌ | [72](../reports/072-b.md) | different company |\n' +
+      // (b) Control: presentation variants of ONE Latin employer still merge.
+      '| 73 | 2026-04-03 | Acme (Inc.) | — | Data Engineer | 3.1/5 | Evaluated | ❌ | [73](../reports/073-c.md) | punctuated |\n' +
+      '| 74 | 2026-04-04 | Acme Inc | — | Data Engineer | 4.5/5 | Evaluated | ❌ | [74](../reports/074-d.md) | same employer |\n' +
+      // (c) Control: two distinct Latin employers still stay apart.
+      '| 75 | 2026-04-05 | Globex | — | Platform Engineer | 3.9/5 | Evaluated | ❌ | [75](../reports/075-e.md) | one |\n' +
+      '| 76 | 2026-04-06 | Initech | — | Platform Engineer | 4.0/5 | Evaluated | ❌ | [76](../reports/076-f.md) | another |\n');
+
+    const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
+    if (r === null) {
+      fail('dedup-tracker.mjs crashed during non-Latin company key test (#2429)');
+    } else {
+      const out = readFileSync(tracker, 'utf-8');
+
+      const backendRows = out.split('\n').filter(l => l.includes('Backend Engineer'));
+      if (backendRows.length === 2
+          && backendRows.some(l => l.includes('アクメ株式会社'))
+          && backendRows.some(l => l.includes('グロベックス合同会社'))) {
+        pass('dedup-tracker keeps two distinct non-Latin companies apart (#2429)');
+      } else {
+        fail(`dedup-tracker merged distinct non-Latin companies: ${backendRows.length} Backend Engineer rows`);
+      }
+
+      const dataRows = out.split('\n').filter(l => l.includes('Data Engineer'));
+      if (dataRows.length === 1 && dataRows[0].includes('4.5/5')) {
+        pass('dedup-tracker still merges punctuation variants of one Latin employer (#2429)');
+      } else {
+        fail(`dedup-tracker Latin punctuation merge broken: ${dataRows.length} Data Engineer rows`);
+      }
+
+      const platformRows = out.split('\n').filter(l => l.includes('Platform Engineer'));
+      if (platformRows.length === 2) {
+        pass('dedup-tracker still keeps two distinct Latin employers apart (#2429)');
+      } else {
+        fail(`dedup-tracker merged distinct Latin employers: ${platformRows.length} Platform Engineer rows`);
+      }
+    }
+  } finally {
+    rmSync(coDedupTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup company key tests crashed (#2429): ${e.message}`);
 }
 
 // ── VERIFY-PIPELINE GROUPING KEYS: NON-LATIN COMPANIES AND ROLES (#2393) ──

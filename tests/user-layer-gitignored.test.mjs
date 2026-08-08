@@ -46,3 +46,46 @@ if (!line) {
   }
 }
 
+// safe-write.ts names backups like `cv.md.bak-2026-08-05T16-55-08-641Z`.
+// The old `*.bak` pattern did not match those timestamped paths, so a
+// reflexive `git add .` could stage PII sitting in the repo root.
+const timestampedBackupProbes = [
+  'cv.md.bak-2026-08-05T16-55-08-641Z',
+  'config/profile.yml.bak-2026-08-05T16-55-08-641Z',
+  'portals.yml.bak-2026-08-05T16-55-08-641Z',
+  'cv.md.bak10',
+];
+
+for (const path of timestampedBackupProbes) {
+  let ignored = true;
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: ROOT });
+  } catch {
+    ignored = false;
+  }
+  if (ignored) pass(`${path} is git-ignored`);
+  else fail(`${path} is NOT git-ignored — a timestamped backup could expose PII`);
+}
+
+// Not user-layer data, but the same mechanism: this one is about what a
+// reflexive `git add .` can swallow. test-all.mjs builds its script-runner
+// sandbox with mkdtempSync under the repo ROOT, and a suite interrupted
+// mid-run (a flake, a Ctrl-C) leaves that copy behind: ~650MB and ~1000
+// stageable files. The copied .gitignore does travel with it and does keep the
+// user-layer paths inside it ignored, so this is noise rather than a leak, but
+// it is noise a contributor can commit by accident.
+const scratchProbes = [
+  '.tmp-script-test-abc123/AGENTS.md',
+  '.tmp-script-test-abc123/nested/deep/file.mjs',
+];
+
+for (const path of scratchProbes) {
+  let ignored = true;
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: ROOT });
+  } catch {
+    ignored = false;
+  }
+  if (ignored) pass(`${path} is git-ignored`);
+  else fail(`${path} is NOT git-ignored — an interrupted test run leaves it stageable`);
+}

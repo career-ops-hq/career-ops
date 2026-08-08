@@ -766,7 +766,11 @@ search_queries:
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
-#   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67)
+#   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
+#   thehub:
+#     countryCode: EU        # optional; any value the API accepts. Default: EU
+#     includeRemote: false   # optional; also runs a separate isRemote=true pass, merged in. Default: false
+#   enabled: true
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
