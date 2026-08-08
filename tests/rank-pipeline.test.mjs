@@ -95,6 +95,27 @@ try {
   check('priority order is respected', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
   check('no CLI installed returns null', detectCli(CLI_CANDIDATES, () => false) === null);
 
+  // ── applying annotations: row text is not a unique identity ──
+  // pipeline.md does not enforce line uniqueness, so two byte-identical pending
+  // rows are two entries that were scored separately. Keying by row text would
+  // hand both the same segment and silently discard one score.
+  const { applyAnnotations } = mod;
+  const dupRaw = '- [ ] https://x.test/9 | Acme | Backend Engineer';
+  const dup = applyAnnotations(['## Pending', dupRaw, dupRaw].join('\n'), [
+    { raw: dupRaw, segment: 'rank: 4.0/5 — first' },
+    { raw: dupRaw, segment: 'rank: 2.0/5 — second' },
+  ]);
+  check('both duplicate rows get annotated', dup.written === 2);
+  check('each duplicate keeps its own score, in file order', /— first[\s\S]*— second/.test(dup.text));
+  check(
+    'a row already carrying rank: is left alone',
+    applyAnnotations(`${dupRaw} | rank: 1.0/5 — old`, [{ raw: dupRaw, segment: 'rank: 5.0/5 — new' }]).written === 0,
+  );
+  check(
+    'an annotation whose row vanished is a no-op, not a corruption',
+    applyAnnotations('- [ ] https://other.test | X | Y', [{ raw: dupRaw, segment: 'rank: 3.0/5 — x' }]).written === 0,
+  );
+
   // ── prompt hygiene ──
   check('postings are marked as untrusted content', /untrusted data/.test(buildPrompt(pending, '')));
 } catch (err) {

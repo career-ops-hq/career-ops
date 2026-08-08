@@ -126,6 +126,35 @@ export function appendRankAnnotation(rawLine, score, reason) {
   return `${rawLine} | ${segment}`;
 }
 
+/**
+ * Apply pending annotations to the pipeline text, consuming each exactly once.
+ *
+ * pipeline.md does not enforce line uniqueness, so two byte-identical pending
+ * rows are two separate entries that were scored separately. Matching by row
+ * text alone would give both the same segment and silently drop one score;
+ * consuming in file order gives each row its own.
+ *
+ * @param {string} text - current pipeline.md contents.
+ * @param {{raw: string, segment: string}[]} pending - annotations, in order.
+ * @returns {{text: string, written: number}}
+ */
+export function applyAnnotations(text, pending) {
+  const queue = pending.map(a => ({ ...a, used: false }));
+  let written = 0;
+  const out = String(text ?? '')
+    .split('\n')
+    .map(line => {
+      if (line.includes(RANK_LABEL)) return line;
+      const hit = queue.find(a => !a.used && a.raw === line);
+      if (!hit) return line;
+      hit.used = true;
+      written += 1;
+      return `${line} | ${hit.segment}`;
+    })
+    .join('\n');
+  return { text: out, written };
+}
+
 /** Respects --limit and the ceiling the flag cannot raise. Deterministic: file order. */
 export function selectBatch(entries, limit) {
   const n = Number(limit);
@@ -239,7 +268,11 @@ async function main(args) {
   const cvExcerpt = existsSync(CV_PATH) ? readFileSync(CV_PATH, 'utf-8').slice(0, 2000) : '';
 
   const started = Date.now();
-  const annotations = new Map(); // raw line -> segment
+  // A LIST, not a Map keyed by the row text. pipeline.md does not enforce line
+  // uniqueness, and two byte-identical pending rows are scored as two separate
+  // entries — keying by raw text would collapse them, discarding one score and
+  // applying the other twice. Each annotation is consumed once, in file order.
+  const annotations = [];
   let calls = 0;
   let skippedBatches = 0;
 
@@ -264,36 +297,29 @@ async function main(args) {
       const entry = batch[r.id];
       if (!entry) continue;
       const segment = formatRankSegment(r.score, r.reason);
-      if (segment) annotations.set(entry.raw, segment);
+      if (segment) annotations.push({ raw: entry.raw, segment, used: false });
     }
   }
 
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
   if (dryRun) {
-    for (const [raw, segment] of annotations) console.log(`${raw} | ${segment}`);
-    console.log(`\n  [dry-run] would annotate ${annotations.size} of ${selected.length} selected entr(ies).`);
+    for (const { raw, segment } of annotations) console.log(`${raw} | ${segment}`);
+    console.log(`\n  [dry-run] would annotate ${annotations.length} of ${selected.length} selected entr(ies).`);
     return 0;
   }
 
   let written = 0;
-  if (annotations.size) {
+  if (annotations.length) {
     // Re-read inside the lock: scan.mjs, scan-ats-full.mjs and a concurrent run of
     // this script all write data/pipeline.md, so the file may have moved since the
     // read above. Matching on the original raw line makes a stale target a no-op
     // rather than a corrupted row.
     await withPipelineLock(PIPELINE_PATH, () => {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
-      const updated = current
-        .split('\n')
-        .map(line => {
-          const segment = annotations.get(line);
-          if (!segment || line.includes(RANK_LABEL)) return line;
-          written += 1;
-          return `${line} | ${segment}`;
-        })
-        .join('\n');
-      if (written) writeFileSync(PIPELINE_PATH, updated);
+      const result = applyAnnotations(current, annotations);
+      written = result.written;
+      if (written) writeFileSync(PIPELINE_PATH, result.text);
     });
   }
 
@@ -367,6 +393,27 @@ function selfTest() {
   check('detect respects priority order', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
 
   check('prompt marks postings untrusted', /untrusted data/.test(buildPrompt(pending, '')));
+
+  // pipeline.md does not enforce line uniqueness. Two identical pending rows are
+  // two entries scored separately; matching by row text alone would hand both the
+  // same segment and drop one score.
+  const dupText = [
+    '## Pending',
+    '- [ ] https://x.test/9 | Acme | Backend Engineer',
+    '- [ ] https://x.test/9 | Acme | Backend Engineer',
+  ].join('\n');
+  const dupRaw = '- [ ] https://x.test/9 | Acme | Backend Engineer';
+  const dupOut = applyAnnotations(dupText, [
+    { raw: dupRaw, segment: 'rank: 4.0/5 — first' },
+    { raw: dupRaw, segment: 'rank: 2.0/5 — second' },
+  ]);
+  check('both duplicate rows are annotated', dupOut.written === 2);
+  check('duplicates take their own score, in order',
+    dupOut.text.includes('— first') && dupOut.text.includes('— second'));
+  check('an already-ranked row is skipped by applyAnnotations',
+    applyAnnotations(`${dupRaw} | rank: 1.0/5 — old`, [{ raw: dupRaw, segment: 'rank: 5.0/5 — new' }]).written === 0);
+  check('a stale target is a no-op, not a corruption',
+    applyAnnotations('- [ ] https://other.test | X | Y', [{ raw: dupRaw, segment: 'rank: 3.0/5 — x' }]).written === 0);
 
   console.log(`\n  rank-pipeline self-test: ${pass} passed, ${fail} failed\n`);
   return fail === 0 ? 0 : 1;
