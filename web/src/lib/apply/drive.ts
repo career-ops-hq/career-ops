@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Page, Frame } from "playwright-core";
-import { resolveCli } from "@/lib/clis";
+import { prepareCliLaunch, resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import type { DriveStep } from "./issue";
@@ -59,7 +59,8 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
   const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const launch = prepareCliLaunch(binPath, args);
+    const child = spawn(launch.command, launch.args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
