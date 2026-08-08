@@ -35,6 +35,15 @@ export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops-seeds/1.0)';
 
+// Runaway guard for the YC pagination walk, NOT the stop condition: the walk
+// normally ends at the API's own `totalPages` (246 as of Aug 2026, 25 per page).
+// It exists only for the case where the API stops reporting pagination metadata
+// at all. Sized well clear of the real total on purpose - a ceiling that sits
+// close to today's page count stops being a guard and becomes a silent truncation
+// the day the catalogue grows past it, which is the exact failure this file was
+// fixed for.
+const YC_MAX_PAGES = 500;
+
 /**
  * YC public company API.
  * Returns paginated JSON with company objects including name, slug, website.
@@ -124,9 +133,6 @@ export function parseYCPayload(payload) {
 
     const name = typeof item.name === 'string' ? item.name.trim() : '';
     if (!name) continue;
-
-    // YC marks dead/exited companies via `status`; probing their boards only 404s.
-    if (typeof item.status === 'string' && item.status.trim() && item.status !== 'Active') continue;
 
     // Prefer explicit slug; derive from name as fallback.
     const rawSlug = typeof item.slug === 'string' ? item.slug.trim()
@@ -317,7 +323,7 @@ export function toPortalEntry(company) {
  * @param {{ timeoutMs?: number, maxPages?: number }} [opts]
  * @returns {Promise<SeedCompany[]>}
  */
-export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = 300 } = {}) {
+export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = YC_MAX_PAGES } = {}) {
   /** @type {SeedCompany[]} */
   const all = [];
   const seen = new Set();
