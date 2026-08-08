@@ -9,7 +9,7 @@
 states:
   - id: evaluated
     label: Evaluated
-    aliases: [evaluada]
+    aliases: [evaluada, condicional, hold, evaluar, verificar]
     description: Offer evaluated with report, pending decision
     dashboard_group: evaluated
 
@@ -51,7 +51,7 @@ states:
 
   - id: skip
     label: SKIP
-    aliases: [no_aplicar, no aplicar, skip, monitor]
+    aliases: [no_aplicar, no aplicar, skip, monitor, geo blocker, geo_blocker]
     description: Doesn't fit, don't apply
     dashboard_group: skip
 
