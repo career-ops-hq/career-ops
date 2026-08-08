@@ -90,6 +90,20 @@ try {
   check('a non-array payload yields nothing', parseBatchResponse('{"id":0,"score":3}').length === 0);
   check('an entry without a score is dropped', parseBatchResponse('[{"id":0,"reason":"none"}]').length === 0);
 
+  // Number(null) === 0, Number(false) === 0, Number('') === 0 — every one of
+  // those is a valid finite number. Checking the ORIGINAL JSON value's type
+  // (not a Number(...)-coerced one) is what keeps {"id":null,"score":null} from
+  // silently annotating batch entry 0 as a 0.0/5 match.
+  check('a null id is rejected', parseBatchResponse('[{"id":null,"score":3,"reason":"x"}]').length === 0);
+  check('a boolean id is rejected', parseBatchResponse('[{"id":false,"score":3,"reason":"x"}]').length === 0);
+  check('an empty-string id is rejected', parseBatchResponse('[{"id":"","score":3,"reason":"x"}]').length === 0);
+  check('a fractional id is rejected', parseBatchResponse('[{"id":0.5,"score":3,"reason":"x"}]').length === 0);
+  check('a negative id is rejected', parseBatchResponse('[{"id":-1,"score":3,"reason":"x"}]').length === 0);
+  check('a null score is rejected', parseBatchResponse('[{"id":0,"score":null,"reason":"x"}]').length === 0);
+  check('a boolean score is rejected', parseBatchResponse('[{"id":0,"score":true,"reason":"x"}]').length === 0);
+  check('an empty-string score is rejected', parseBatchResponse('[{"id":0,"score":"","reason":"x"}]').length === 0);
+  check('id 0 / score 0 is a legitimately valid entry', parseBatchResponse('[{"id":0,"score":0,"reason":"x"}]').length === 1);
+
   // ── CLI detection (injected probe: touches no real binaries) ──
   check('the first installed CLI wins', detectCli(CLI_CANDIDATES, b => b === 'codex').bin === 'codex');
   check('priority order is respected', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
@@ -115,6 +129,30 @@ try {
     'an annotation whose row vanished is a no-op, not a corruption',
     applyAnnotations('- [ ] https://other.test | X | Y', [{ raw: dupRaw, segment: 'rank: 3.0/5 — x' }]).written === 0,
   );
+
+  // Regression: 3 byte-identical pending rows + --limit 1 selects only the
+  // first one in file order. Only that selected occurrence may end up
+  // annotated — the two unselected duplicates must stay untouched, not
+  // silently pick up the selected one's score too.
+  const tripleDupText = [
+    '## Pending',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+  ].join('\n');
+  const tripleDupPending = parsePendingEntries(tripleDupText);
+  const tripleDupSelected = selectBatch(tripleDupPending, 1);
+  check('--limit 1 selects exactly one of three duplicates', tripleDupSelected.length === 1);
+  const tripleDupOut = applyAnnotations(tripleDupText, [
+    { raw: tripleDupSelected[0].raw, segment: 'rank: 4.5/5 — only this one' },
+  ]);
+  check('only the selected duplicate is annotated', tripleDupOut.written === 1);
+  check(
+    'exactly one occurrence carries the segment',
+    (tripleDupOut.text.match(/rank: 4\.5\/5/g) ?? []).length === 1,
+  );
+  check('the two unselected duplicates remain pending, unranked',
+    parsePendingEntries(tripleDupOut.text).length === 2);
 
   // ── prompt hygiene ──
   check('postings are marked as untrusted content', /untrusted data/.test(buildPrompt(pending, '')));

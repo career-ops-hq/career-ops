@@ -819,11 +819,13 @@ Opt-in LLM relevance re-ranker for `data/pipeline.md`. **Off by default and not
 part of any scan** — `scan.mjs` stays 100% zero-token, and this costs nothing
 unless you run it yourself.
 
-It **annotates, it does not filter**: each pending row gains a labeled
+It **annotates, it does not filter**: eligible pending rows can gain a labeled
 `rank: {score}/5 — {reason}` segment, riding after `posted:`/`trust:`/`note:`
 like any other labeled segment. No row is removed, reordered, or hidden — the
 reason is there so you can disagree with the score. An entry the model scores
-but cannot explain is left un-annotated rather than reduced to a bare number.
+but cannot explain is left un-annotated rather than reduced to a bare number,
+and a whole batch is left un-annotated if the CLI call fails or returns
+unusable JSON.
 
 Cost is bounded and reported. Only pending (`- [ ]`) rows that are not already
 annotated are eligible, `--limit` caps each run (default 20, hard ceiling 200
@@ -834,7 +836,10 @@ row is skipped, so you can work through a large pipeline in bounded passes.
 The ranking is done by whichever agent CLI you already have installed (the
 Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
 `copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
-dependency, no new network endpoint.
+dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
+first ~2000 chars) and the selected postings through that CLI's own auth and
+provider handling — review your chosen CLI's data-retention/provider settings
+before running this on sensitive CV content.
 
 ```bash
 node rank-pipeline.mjs                  # rank up to 20 pending entries

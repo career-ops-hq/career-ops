@@ -199,9 +199,15 @@ export function parseBatchResponse(text) {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
+  // Check the ORIGINAL parsed value's type, not Number(...) of it: Number(null),
+  // Number(false), and Number('') all coerce to the valid finite number 0, so a
+  // malformed entry like {"id":null,"score":null} would otherwise slip through
+  // and silently annotate batch entry 0 as "0.0/5".
   return parsed
-    .filter(r => r && Number.isFinite(Number(r.id)) && Number.isFinite(Number(r.score)))
-    .map(r => ({ id: Number(r.id), score: Number(r.score), reason: String(r.reason ?? '') }));
+    .filter(r => r
+      && typeof r.id === 'number' && Number.isInteger(r.id) && r.id >= 0
+      && typeof r.score === 'number' && Number.isFinite(r.score))
+    .map(r => ({ id: r.id, score: r.score, reason: String(r.reason ?? '') }));
 }
 
 export function buildPrompt(entries, cvExcerpt) {
@@ -273,15 +279,18 @@ async function main(args) {
   // entries — keying by raw text would collapse them, discarding one score and
   // applying the other twice. Each annotation is consumed once, in file order.
   const annotations = [];
-  let calls = 0;
+  // Counts calls ATTEMPTED, not just ones that returned successfully — a call
+  // that throws or times out still spends tokens, so it must still show up in
+  // the final summary.
+  let attemptedCalls = 0;
   let skippedBatches = 0;
 
   for (let i = 0; i < selected.length; i += BATCH_SIZE) {
     const batch = selected.slice(i, i + BATCH_SIZE);
     let response;
+    attemptedCalls += 1;
     try {
       response = callCli(cli, buildPrompt(batch, cvExcerpt), model);
-      calls += 1;
     } catch (err) {
       console.error(`  batch ${i / BATCH_SIZE + 1}: CLI call failed (${err.code ?? err.message}) — entries left un-annotated`);
       skippedBatches += 1;
@@ -323,7 +332,7 @@ async function main(args) {
     });
   }
 
-  console.log(`\n  Ranked ${written} entr(ies) of ${pending.length} pending in ${calls} CLI call(s) via ${cli.bin}.`);
+  console.log(`\n  Ranked ${written} entr(ies) of ${pending.length} pending in ${attemptedCalls} CLI call(s) via ${cli.bin}.`);
   if (skippedBatches) console.log(`  ${skippedBatches} batch(es) skipped — those rows are un-annotated, not dropped.`);
   if (pending.length > selected.length) {
     console.log(`  ${pending.length - selected.length} pending entr(ies) not ranked this run (--limit ${selectBatch(pending, limit).length}). Re-run to continue.`);
@@ -386,6 +395,18 @@ function selfTest() {
   check('malformed JSON yields nothing', parseBatchResponse('{not json').length === 0);
   check('non-array yields nothing', parseBatchResponse('{"id":0}').length === 0);
   check('entries missing a score are dropped', parseBatchResponse('[{"id":0,"reason":"no score"}]').length === 0);
+  // Number(null) === 0, Number(false) === 0, Number('') === 0 — all valid finite
+  // numbers. Checking the coerced value instead of the original JSON type would
+  // let a malformed {"id":null,"score":null} entry silently pass as id 0/score 0.
+  check('a null id is rejected', parseBatchResponse('[{"id":null,"score":3,"reason":"x"}]').length === 0);
+  check('a boolean id is rejected', parseBatchResponse('[{"id":false,"score":3,"reason":"x"}]').length === 0);
+  check('an empty-string id is rejected', parseBatchResponse('[{"id":"","score":3,"reason":"x"}]').length === 0);
+  check('a fractional id is rejected', parseBatchResponse('[{"id":0.5,"score":3,"reason":"x"}]').length === 0);
+  check('a negative id is rejected', parseBatchResponse('[{"id":-1,"score":3,"reason":"x"}]').length === 0);
+  check('a null score is rejected', parseBatchResponse('[{"id":0,"score":null,"reason":"x"}]').length === 0);
+  check('a boolean score is rejected', parseBatchResponse('[{"id":0,"score":true,"reason":"x"}]').length === 0);
+  check('an empty-string score is rejected', parseBatchResponse('[{"id":0,"score":"","reason":"x"}]').length === 0);
+  check('a valid integer id and numeric score pass', parseBatchResponse('[{"id":0,"score":0,"reason":"x"}]').length === 1);
 
   const probe = bin => bin === 'codex';
   check('detect picks the installed CLI', detectCli(CLI_CANDIDATES, probe).bin === 'codex');
@@ -414,6 +435,27 @@ function selfTest() {
     applyAnnotations(`${dupRaw} | rank: 1.0/5 — old`, [{ raw: dupRaw, segment: 'rank: 5.0/5 — new' }]).written === 0);
   check('a stale target is a no-op, not a corruption',
     applyAnnotations('- [ ] https://other.test | X | Y', [{ raw: dupRaw, segment: 'rank: 3.0/5 — x' }]).written === 0);
+
+  // Regression: 3 byte-identical pending rows, --limit 1 selects only the first
+  // in file order. Only that selected occurrence may end up annotated — the two
+  // unselected duplicates must stay untouched (not silently scored too).
+  const tripleDupText = [
+    '## Pending',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+    '- [ ] https://x.test/10 | Acme | Backend Engineer',
+  ].join('\n');
+  const tripleDupPending = parsePendingEntries(tripleDupText);
+  const tripleDupSelected = selectBatch(tripleDupPending, 1);
+  check('limit 1 selects exactly one of three duplicates', tripleDupSelected.length === 1);
+  const tripleDupOut = applyAnnotations(tripleDupText, [
+    { raw: tripleDupSelected[0].raw, segment: 'rank: 4.5/5 — only this one' },
+  ]);
+  check('only the selected duplicate is annotated', tripleDupOut.written === 1);
+  check('exactly one occurrence carries the segment',
+    (tripleDupOut.text.match(/rank: 4\.5\/5/g) ?? []).length === 1);
+  check('the two unselected duplicates remain pending',
+    parsePendingEntries(tripleDupOut.text).length === 2);
 
   console.log(`\n  rank-pipeline self-test: ${pass} passed, ${fail} failed\n`);
   return fail === 0 ? 0 : 1;
