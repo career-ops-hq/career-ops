@@ -56,8 +56,18 @@ const METRIC_NOUNS = [
 // for the chain — modifiers are alphabetic only — so a wider window still
 // cannot jump across an intervening figure to bind an unrelated noun.
 const MODIFIER_WINDOW = 4;
+// The number capture takes an immediately-adjacent magnitude suffix (50k, 1.5M)
+// as part of the number, mirroring what the currency pattern below already does.
+// Without it the modifier window re-consumed that letter as a generic word, so
+// "50k users" normalized to the claim "50 users" and matched a CV that said 50 —
+// letting a 1000x inflation through the gate while a smaller "900 users" was
+// correctly caught.
+//
+// `[kKmMbB]\b` requires the suffix to END the token, so "50 million users" (space,
+// handled by the modifier window) and "50kg users" (k not at a boundary) both keep
+// their existing behaviour and still normalize to "50".
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
+  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -540,6 +550,37 @@ function runSelfTest() {
     'no cross-number binding invents evidence',
     auditClaims('Shipped 3 integrations', 'Shipped 3 features across 12 integrations').invented,
     ['3 integrations']
+  );
+
+  // A magnitude suffix belongs to the number, not the modifier window. Without
+  // that, "50k users" normalized to "50 users" and matched a CV saying 50 — the
+  // gate passed a 1000x inflation while catching a smaller "900 users".
+  equal(
+    'an inflated magnitude suffix is caught',
+    auditClaims('Grew the product to 50k users', 'Reached 50 users.').invented,
+    ['50k users']
+  );
+  equal(
+    'a magnitude claim the source supports still passes',
+    auditClaims('Grew to 50k users', 'Reached 50k users.').invented,
+    []
+  );
+  equal(
+    'a lowercase m suffix is caught too',
+    auditClaims('Drove 1.5M downloads', 'Drove 50 downloads.').invented,
+    ['1.5m downloads']
+  );
+  // The suffix must END the token, so a spelled-out magnitude and a unit that
+  // merely starts with k/m/b keep their previous normalization.
+  equal(
+    'a spelled-out magnitude is unaffected',
+    auditClaims('Reached 50 million users', 'Reached 50 million users.').invented,
+    []
+  );
+  equal(
+    'a unit beginning with a suffix letter is unaffected',
+    auditClaims('Shipped 50kg units', 'Shipped 50kg units.').invented,
+    []
   );
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
