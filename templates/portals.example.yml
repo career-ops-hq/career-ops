@@ -1972,11 +1972,6 @@ job_boards:
   # Aggregators of Swiss startup roles. No extra config — auto-detected from
   # the careers_url host.
 
-  - name: startup.ch
-    careers_url: https://www.startup.ch/jobs
-    provider: startupch
-    enabled: false
-    notes: "Swiss Startup Association job board"
 
   - name: joinup.ch
     careers_url: https://joinup.ch/browse/jobs
