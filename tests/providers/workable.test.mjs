@@ -8,15 +8,15 @@ console.log('\nProvider — workable');
 try {
   const workableModule = await import(pathToFileURL(join(ROOT, 'providers/workable.mjs')).href);
   const workable = workableModule.default;
-  const { parseWorkableMarkdown } = workableModule;
+  const { parseWorkableMarkdown, parseWorkableWidget } = workableModule;
 
   // detect() — auto-detection from careers_url
   if (workable.id === 'workable') pass('workable.id is "workable"');
   else fail(`workable.id is ${JSON.stringify(workable.id)}`);
 
   const hit = workable.detect({ name: 'TestCo', careers_url: 'https://apply.workable.com/optimile' });
-  if (hit && hit.url === 'https://apply.workable.com/optimile/jobs.md') {
-    pass('workable.detect() resolves apply.workable.com/<slug> → /jobs.md feed');
+  if (hit && hit.url === 'https://apply.workable.com/api/v1/widget/accounts/optimile?details=true') {
+    pass('workable.detect() resolves apply.workable.com/<slug> → widget API');
   } else {
     fail(`workable.detect() returned ${JSON.stringify(hit)}`);
   }
@@ -58,21 +58,96 @@ try {
   if (parseWorkableMarkdown(null, 'X').length === 0) pass('null input → empty result (no crash)');
   else fail('null input should yield empty result without crashing');
 
-  // fetch() reaches the http context on the happy path (allowed hostname).
-  await workable.fetch(
+  // -- widget API (primary path) ------------------------------------------
+  const widgetPayload = {
+    name: 'Optimile',
+    jobs: [
+      {
+        title: 'Senior AI PM',
+        shortlink: 'https://apply.workable.com/j/ABC123',
+        url: 'https://apply.workable.com/j/ABC123',
+        city: 'Ghent', country: 'Belgium',
+        published_on: '2026-04-01',
+        description: '<p>Own the <b>roadmap</b>.</p><script>alert(1)</script>',
+      },
+      {
+        title: 'Tech Lead',
+        shortlink: 'https://apply.workable.com/j/DEF456',
+        telecommuting: true,
+        published_on: '2026-03-25',
+      },
+      // dropped: off-domain permalink
+      { title: 'Evil Role', shortlink: 'https://evil.example/j/X', url: 'https://evil.example/j/X' },
+      // dropped: no title
+      { title: '   ', shortlink: 'https://apply.workable.com/j/NOPE' },
+    ],
+  };
+  const widgetJobs = parseWorkableWidget(widgetPayload, 'Optimile');
+  if (widgetJobs.length === 2) pass('parseWorkableWidget keeps only valid, on-domain, titled jobs');
+  else fail(`parseWorkableWidget returned ${widgetJobs.length} jobs, expected 2: ${JSON.stringify(widgetJobs.map(j => j.title))}`);
+
+  if (widgetJobs[0]?.location === 'Ghent, Belgium' && widgetJobs[1]?.location === 'Remote') {
+    pass('parseWorkableWidget formats location (city, country / Remote)');
+  } else {
+    fail(`locations were ${JSON.stringify(widgetJobs.map(j => j.location))}`);
+  }
+
+  if (widgetJobs[0]?.postedAt === Date.parse('2026-04-01')) pass('parseWorkableWidget maps published_on → postedAt');
+  else fail(`postedAt was ${widgetJobs[0]?.postedAt}`);
+
+  const desc = widgetJobs[0]?.description || '';
+  if (desc.includes('Own the roadmap') && !desc.includes('<') && !desc.includes('alert(1)')) {
+    pass('parseWorkableWidget strips HTML tags and script bodies from description');
+  } else {
+    fail(`description was ${JSON.stringify(desc)}`);
+  }
+
+  if (parseWorkableWidget(null, 'X').length === 0 && parseWorkableWidget({}, 'X').length === 0) {
+    pass('parseWorkableWidget tolerates null / jobs-less payloads');
+  } else {
+    fail('parseWorkableWidget should return [] for null and {} payloads');
+  }
+
+  // fetch() prefers the widget API and never touches the markdown feed when it works.
+  const apiJobs = await workable.fetch(
     { name: 'Smoke', careers_url: 'https://apply.workable.com/optimile' },
     {
       transport: 'http',
-      fetchText: async (url) => {
-        if (!url.startsWith('https://apply.workable.com/')) {
-          throw new Error('fetchText called with unexpected URL');
+      fetchJson: async (url) => {
+        if (url !== 'https://apply.workable.com/api/v1/widget/accounts/optimile?details=true') {
+          throw new Error(`fetchJson called with unexpected URL: ${url}`);
         }
-        return '| Title | Department | Location | Type | Salary | Posted | Details |\n|---|---|---|---|---|---|---|\n';
+        return widgetPayload;
       },
-      fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+      fetchText: async () => { throw new Error('markdown feed should not be used when the API succeeds'); },
     },
   );
-  pass('workable.fetch() reaches fetchText on the happy path (allowed hostname)');
+  if (apiJobs.length === 2) pass('workable.fetch() uses the widget API as the primary path');
+  else fail(`workable.fetch() via API returned ${apiJobs.length} jobs, expected 2`);
+
+  // fetch() falls back to the markdown feed when the API fails.
+  const fallbackJobs = await workable.fetch(
+    { name: 'Smoke', careers_url: 'https://apply.workable.com/optimile' },
+    {
+      transport: 'http',
+      fetchJson: async () => { throw new Error('HTTP 503'); },
+      fetchText: async (url) => {
+        if (url !== 'https://apply.workable.com/optimile/jobs.md') {
+          throw new Error(`fetchText called with unexpected URL: ${url}`);
+        }
+        return [
+          '| Title | Department | Location | Type | Salary | Posted | Details |',
+          '|---|---|---|---|---|---|---|',
+          '| Fallback Role | Product | Remote | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/optimile/jobs/view/ZZZ.md) |',
+        ].join('\n');
+      },
+    },
+  );
+  if (fallbackJobs.length === 1 && fallbackJobs[0].title === 'Fallback Role') {
+    pass('workable.fetch() falls back to the markdown feed when the widget API fails');
+  } else {
+    fail(`fallback returned ${JSON.stringify(fallbackJobs)}`);
+  }
 
   // fetch() rejects an unresolvable careers_url (no apply.workable.com match in URL).
   let rejected = false;

@@ -86,7 +86,9 @@
         \\ {{CONTACT_LINE}}\\
         \small
         % EMAIL
-        \href{mailto:{{EMAIL_URL}}}{\raisebox{-0.2\height}\faEnvelope\  \underline{{{EMAIL_DISPLAY}}}} ~
+        % EMAIL_URL already carries its scheme: sanitizeUrl() prefixes bare
+        % addresses with mailto:, so the template must not add a second one.
+        \href{{{EMAIL_URL}}}{\raisebox{-0.2\height}\faEnvelope\  \underline{{{EMAIL_DISPLAY}}}} ~
         % LINKEDIN
         \href{{{LINKEDIN_URL}}}{\raisebox{-0.2\height}\faLinkedin\ \underline{{{LINKEDIN_DISPLAY}}}}  ~
         % GITHUB
@@ -109,6 +111,12 @@
 \section{Personal Projects}
 \resumeSubHeadingListStart
 {{PROJECTS}}
+\resumeSubHeadingListEnd
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  AWARDS  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Awards \& Honors}
+\resumeSubHeadingListStart
+{{AWARDS}}
 \resumeSubHeadingListEnd
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills  %%%%%%%%%%%%%%%%%%%%%%%%%%%%

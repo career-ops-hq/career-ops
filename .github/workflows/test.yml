@@ -40,3 +40,46 @@ jobs:
       - name: Go dashboard tests
         run: go test ./...
         working-directory: dashboard
+
+  cv-visual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install deterministic CJK and PDF extraction dependencies
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk poppler-utils
+      - run: npm install --ignore-scripts
+      - run: npx playwright install chromium --with-deps
+      - run: npm run test:cv-visual
+      - name: Upload CV visual diffs and rendered previews
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: cv-visual-artifacts
+          path: |
+            test-results/cv-visual-artifacts/
+            test-results/cv-visual-results/
+          if-no-files-found: ignore
+  upgrade-gate:
+    name: Upgrade regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0            # harness needs release tags
+          persist-credentials: false # the harness only ever touches a local mirror
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'   # old updaters rebuild the dashboard during apply
+      - run: npm install --ignore-scripts
+      - name: Upgrade PR gate (newest old release -> this commit)
+        run: node upgrade-tests.mjs --pr-gate
+      - name: Canary (harness must be able to fail)
+        run: node upgrade-tests.mjs --canary

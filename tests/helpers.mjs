@@ -56,9 +56,25 @@ export function results() { return { passed, failed, warnings }; }
  * Moved verbatim from the tail of test-all.mjs — output must stay byte-identical.
  */
 export function finish() {
+  // A discovered suite under tests/ that uses node:test reports through node's
+  // own runner, which increments none of the counters above. node:test does set
+  // process.exitCode = 1 when one of its tests fails, but process.exit(0) below
+  // overwrites that -- so a failing tests/*.test.mjs printed "All tests passed"
+  // and exited 0. Verified 2026-08-03 by dropping a deliberately failing suite
+  // into tests/: "📊 2049 passed, 0 failed" / "🟢 All tests passed" / exit 0.
+  //
+  // That silently covered every node:test suite in the directory (url-identity,
+  // digest, stats, filter-precision, pipeline-state, the provider tests...):
+  // they only ever reported when run directly with `node --test`.
+  //
+  // Read before printing so the summary line tells the truth too. The counters
+  // stay authoritative for inline assertions; this only adds a failure source
+  // that was already being computed and thrown away.
+  const runnerFailed = Boolean(process.exitCode);
   console.log('\n' + '='.repeat(50));
-  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`);
-  if (failed > 0) {
+  console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
+    + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
+  if (failed > 0 || runnerFailed) {
     console.log('🔴 TESTS FAILED — do NOT push/merge until fixed\n');
     process.exit(1);
   } else if (warnings > 0) {
@@ -75,9 +91,41 @@ export function finish() {
 // to the OS), so a test can never be tricked into executing an arbitrary
 // binary — and CodeQL's uncontrolled-command-line finding is closed by
 // construction rather than dismissed (alerts #36/#41/#42).
+// Scoop installs Git for Windows under the user profile, not Program Files, so
+// a Program-Files-only list misses it entirely and getBash() falls through to
+// WSL bash. That fallback launches the script but not the environment: WSL has
+// its own PATH, so the Windows `node` (and any stub binary a test injects via
+// PATH) is invisible, and batch-runner.sh dies with `node: command not found`,
+// exit 127. run() converts that to null, the caller does `|| ''`, and the
+// assertion reports an empty argv -- which reads as a routing bug in the code
+// under test rather than a missing shell. That is what all five spend_tier
+// tests were doing on a machine where Git Bash was installed the whole time
+// (#2344).
+//
+// Kept as fixed-shape literals joined onto %USERPROFILE% / %SCOOP% rather than
+// a PATH search, so this stays an allowlist of trusted literals (see
+// resolveAllowedExecutable below and CodeQL alerts #36/#41/#42).
+const SCOOP_ROOTS = [
+  process.env.SCOOP,
+  process.env.USERPROFILE ? join(process.env.USERPROFILE, 'scoop') : null,
+].filter(Boolean);
+
 const WINDOWS_BASH_CANDIDATES = [
   'C:\\Program Files\\Git\\bin\\bash.exe',
   'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+  ...SCOOP_ROOTS.flatMap((root) => [
+    join(root, 'apps', 'git', 'current', 'bin', 'bash.exe'),
+    join(root, 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+  ]),
+];
+
+// Same discovery problem, same fix: cygpath must come from the SAME Git
+// install as the bash above. Mixing them is #1409 in reverse -- cygpath emits
+// /c/... while WSL bash expects /mnt/c/..., so the path silently fails to
+// resolve inside the shell that receives it.
+const WINDOWS_CYGPATH_CANDIDATES = [
+  'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe',
+  ...SCOOP_ROOTS.map((root) => join(root, 'apps', 'git', 'current', 'usr', 'bin', 'cygpath.exe')),
 ];
 
 /**
@@ -113,12 +161,73 @@ function resolveAllowedExecutable(cmd) {
  * @returns {string|null} Trimmed stdout, or null when the command fails.
  */
 export function run(cmd, args = [], opts = {}) {
+  // Cleared as the very first statement. resolveAllowedExecutable() throws for a
+  // command outside the allowlist, so a reset placed after it is skipped on that
+  // path and the previous run's diagnostics survive, which would let a later
+  // formatRunFailure() attribute an unrelated child's stderr to whatever failed
+  // most recently. A stale diagnostic is worse than none.
+  //
+  // Clearing here rather than on the success path also keeps the execFileSync
+  // call below byte-identical: editing that line makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // it. Nothing about what reaches the child changes either way, since the
+  // executable is still allowlisted and the arguments are still an argv vector.
+  lastFailure = null;
   const exe = resolveAllowedExecutable(cmd);
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
+    // execFileSync attaches the child's streams and exit status to the error.
+    // Keep them: callers report failure as `<name> crashed`, and without this a
+    // CI-only failure arrives as a single line with no stack, no assertion text,
+    // and no exit code, which is not enough to act on.
+    lastFailure = {
+      status: e?.status ?? null,
+      signal: e?.signal ?? null,
+      stdout: e?.stdout == null ? '' : String(e.stdout),
+      stderr: e?.stderr == null ? '' : String(e.stderr),
+    };
+    warnFallbackShell(exe);
     return null;
   }
+}
+
+/** Diagnostics from the most recent failed run(), or null if the last run succeeded. */
+let lastFailure = null;
+
+/**
+ * Diagnostics for the most recently failed run().
+ *
+ * Cleared by a successful run so a stale record is never attributed to a later
+ * command. The suite is sequential, so "most recent" is unambiguous.
+ *
+ * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ */
+export function lastRunFailure() {
+  return lastFailure;
+}
+
+/**
+ * The last failure rendered for interpolation into a failure message, or an
+ * empty string when nothing has failed, so a caller can append it
+ * unconditionally without changing its message on the success path.
+ *
+ * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
+ * @returns {string}
+ */
+export function formatRunFailure(maxChars = 2000) {
+  if (!lastFailure) return '';
+  const clip = (s) => {
+    const t = String(s ?? '').trim();
+    if (!t) return '';
+    return t.length > maxChars ? `${t.slice(0, maxChars)}\n    ... (${t.length - maxChars} more chars)` : t;
+  };
+  const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
+  const out = clip(lastFailure.stdout);
+  const err = clip(lastFailure.stderr);
+  if (out) parts.push(`\n    stdout: ${out.replace(/\n/g, '\n    ')}`);
+  if (err) parts.push(`\n    stderr: ${err.replace(/\n/g, '\n    ')}`);
+  return parts.join('');
 }
 
 /**
@@ -130,6 +239,65 @@ export function run(cmd, args = [], opts = {}) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 let bashCache = null;
+let bashSourceCache = null;
+
+/**
+ * Which probe in getBash() produced the current bash, or null before the first
+ * getBash() call.
+ *
+ * getBash() returns the bare string 'bash' from three different branches -- the
+ * WSL probe, the PATH probe, and the give-up path -- so its return value alone
+ * cannot tell a caller which shell it is about to run. On Windows those are not
+ * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
+ * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
+ * lets a failure name the shell instead of leaving the reader to infer it
+ * (#2344).
+ *
+ * @returns {'posix'|'git-bash'|'wsl'|'path'|'unresolved'|null} Resolution source.
+ */
+export function bashSource() { return bashSourceCache; }
+
+/** Sources whose shell is ambiguous or foreign, and worth naming on failure. */
+const FALLBACK_BASH_SOURCES = new Set(['wsl', 'path', 'unresolved']);
+
+let warnedFallbackShell = false;
+
+/**
+ * Say out loud, once per process, that a failing shell command ran in a
+ * fallback shell rather than Git Bash.
+ *
+ * Unconditional by design. formatRunFailure() already surfaces the child's
+ * stderr to callers that ask for it, but the shell that produced it is still
+ * invisible, and the whole failure mode of #2344 is that nobody suspects the
+ * shell: it is missing, the script dies at `node`, run() returns null, `|| ''`
+ * turns that into an empty string, and the assertion accuses the code under
+ * test of a routing bug it does not have.
+ *
+ * Two things keep this from becoming noise in the suites that provoke command
+ * failures on purpose. It fires only when getBash() landed on a fallback -- a
+ * Git Bash resolved by literal path is unambiguous and stays silent, which is
+ * every correctly provisioned machine -- and it fires at most once per process.
+ *
+ * @param {string} exe - Executable that just failed.
+ * @returns {void}
+ */
+function warnFallbackShell(exe) {
+  if (warnedFallbackShell) return;
+  if (bashCache === null || exe !== bashCache) return;
+  if (!FALLBACK_BASH_SOURCES.has(bashSourceCache)) return;
+  warnedFallbackShell = true;
+  const where = {
+    wsl: 'WSL bash (`wsl -e bash`) -- a different OS with its own PATH',
+    path: '`bash` from PATH, provenance unknown',
+    unresolved: '`bash`, which no probe could confirm exists',
+  }[bashSourceCache];
+  console.error(`    [shell] this command ran under ${where},`);
+  console.error('            because no Git Bash was found at any known location.');
+  console.error('            The Windows `node` and any PATH-injected stub binary may be invisible there,');
+  console.error('            so scripts calling node die with `node: command not found` (exit 127) and the');
+  console.error('            assertion sees an empty result. Suspect the shell before the code under test.');
+  console.error('            Install Git for Windows, or see formatRunFailure() for the raw stderr.');
+}
 
 /**
  * Resolve the bash executable to use for shell-script checks, lazily.
@@ -144,24 +312,28 @@ let bashCache = null;
  */
 export function getBash() {
   if (bashCache !== null) return bashCache;
-  if (process.platform !== 'win32') return (bashCache = 'bash');
+  if (process.platform !== 'win32') { bashSourceCache = 'posix'; return (bashCache = 'bash'); }
   for (const cmd of WINDOWS_BASH_CANDIDATES) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      bashSourceCache = 'git-bash';
       return (bashCache = cmd);
     } catch {}
   }
   try {
     // Probe via argv vector — no shell string, nothing to interpolate.
     execFileSync('wsl', ['-e', 'bash', '-c', 'true'], { stdio: 'ignore' });
+    bashSourceCache = 'wsl';
     return (bashCache = 'bash');
   } catch {}
   for (const cmd of ['bash']) {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+      bashSourceCache = 'path';
       return (bashCache = cmd);
     } catch {}
   }
+  bashSourceCache = 'unresolved';
   return (bashCache = 'bash');
 }
 
@@ -179,7 +351,7 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = existsSync('C:\\Program Files\\Git\\usr\\bin\\cygpath.exe') ? 'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe' : 'cygpath';
+    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}

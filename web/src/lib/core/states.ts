@@ -27,14 +27,33 @@ const FALLBACK: CanonicalState[] = [
   { id: "rejected", label: "Rejected", aliases: ["rechazado", "rechazada"], description: "Rejected by company", group: "rejected" },
   { id: "discarded", label: "Discarded", aliases: ["descartado", "descartada", "cerrada", "cancelada"], description: "Discarded by candidate or offer closed", group: "discarded" },
   { id: "skip", label: "SKIP", aliases: ["no_aplicar", "no aplicar", "skip", "monitor"], description: "Doesn't fit, don't apply", group: "skip" },
+  { id: "hired", label: "Hired", aliases: ["contratado", "contratada", "hired", "accepted", "accept"], description: "Offer accepted, job landed!", group: "hired" },
 ];
 
-let cache: CanonicalState[] | null = null;
+/**
+ * Cached per resolved states.yml path and keyed on the file's mtime+size (one
+ * statSync per call, no full read), mirroring loadHeaderAliases in
+ * tracker-table.mjs.
+ *
+ * A bare `if (cache) return cache` made the "READ it live" contract above true
+ * only for the first request a server process ever served: a core update that
+ * rewrote templates/states.yml (git pull, update-system.mjs apply) was then
+ * invisible until restart, so a newly canonical status was rejected by
+ * POST /api/status and a removed one kept being accepted.
+ *
+ * Failures are NEVER cached, so a states.yml that is momentarily unreadable
+ * falls back for that call only, instead of pinning FALLBACK for the lifetime
+ * of the process.
+ */
+const statesCache = new Map<string, { mtimeMs: number; size: number; states: CanonicalState[] }>();
 
 export function readCanonicalStates(): CanonicalState[] {
-  if (cache) return cache;
+  const file = path.join(careerOpsRoot(), "templates", "states.yml");
   try {
-    const raw = fs.readFileSync(path.join(careerOpsRoot(), "templates", "states.yml"), "utf8");
+    const { mtimeMs, size } = fs.statSync(file);
+    const cached = statesCache.get(file);
+    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.states;
+    const raw = fs.readFileSync(file, "utf8");
     const doc = yaml.load(raw) as { states?: unknown };
     const list = Array.isArray(doc?.states) ? doc.states : null;
     if (list && list.length) {
@@ -50,14 +69,17 @@ export function readCanonicalStates(): CanonicalState[] {
         });
       }
       if (parsed.length) {
-        cache = parsed;
+        statesCache.set(file, { mtimeMs, size, states: parsed });
         return parsed;
       }
     }
+    // Readable but unusable (empty/!states) — drop any stale entry so a
+    // repaired file is picked up on the next request rather than after a
+    // restart, and fall back for this call only.
+    statesCache.delete(file);
   } catch {
-    /* fall through to fallback */
+    /* unreadable — fall back for this call, never cache the failure */
   }
-  cache = FALLBACK;
   return FALLBACK;
 }
 

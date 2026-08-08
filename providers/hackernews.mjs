@@ -4,8 +4,9 @@
 // Hacker News "Ask HN: Who is hiring?" provider — no auth required.
 //
 // Algorithm:
-//   1. Find the current monthly hiring thread via the Algolia HN search API
-//      (search_by_date, tags=story, query="Ask HN Who is hiring").
+//   1. Find the current monthly hiring thread via the Algolia HN search API,
+//      filtered to stories posted by the "whoishiring" account
+//      (tags=story,author_whoishiring) rather than a free-text query.
 //   2. Fetch the thread's item from the Algolia items API; top-level `children`
 //      are individual job posts left as top-level comments.
 //   3. Parse each comment: the first non-empty line is treated as the title/header
@@ -15,9 +16,18 @@
 //      format doesn't match the pipe-delimited convention).
 //
 // Wire in via a `job_boards:` entry with `provider: hackernews`.
-
+//
+// NOTE: a free-text query ("Ask HN Who is hiring") against search_by_date used
+// to be the lookup here, but Algolia's free-text ranking can surface an
+// unrelated recent story that merely contains those words in its body — once
+// enough time passes since the monthly thread posted, a newer "Tell HN: ..."
+// post can outrank it in the top 5 date-sorted hits, and every one of them
+// fails the title regex below, so the provider throws "thread not found" even
+// though the actual thread is sitting a few pages back. Filtering by the
+// `whoishiring` account's own tag returns only its threads, so ordering by
+// date always surfaces the latest real one first.
 const SEARCH_URL =
-  'https://hn.algolia.com/api/v1/search_by_date?tags=story&query=Ask%20HN%20Who%20is%20hiring&hitsPerPage=5';
+  'https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=5';
 
 /** @param {string} id */
 function itemUrl(id) {

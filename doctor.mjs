@@ -9,8 +9,10 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
+import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
+import { parseConfigByExtension } from './jsonc-parse.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -21,6 +23,12 @@ const JSON_OUT = argv.includes('--json');
 // --strict adds a live ATS-slug probe of portals.yml (network). Opt-in so the
 // default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
+
+// CLIs the doctor recognises.
+const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
+
+const cliIdx = argv.indexOf('--cli');
+const cliFlag = cliIdx !== -1 ? argv[cliIdx + 1] : null;
 
 // ANSI colors (only on TTY)
 const isTTY = process.stdout.isTTY;
@@ -53,6 +61,52 @@ function checkNodeVersion() {
     pass: false,
     label: `Node.js >= 18 (found v${versionStr})`,
     fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
+  };
+}
+
+// El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas
+// preguntando por cuota y coste, y la causa mas repetida es esta. Aviso, nunca
+// fallo: tener una clave puesta es una eleccion legitima, lo que no es legitimo
+// es que el usuario no sepa que la esta usando en vez del plan que ya paga.
+function checkBillingSource() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  // Enabled means SET TO A TRUTHY VALUE, not merely present. These switches are
+  // documented as `=1`, so `CLAUDE_CODE_USE_BEDROCK=0` is how someone turns one
+  // off — and mere presence would then report "requests bill to your cloud
+  // account" at exactly the user who just said they don't. A billing check that
+  // misreads an explicit opt-out causes the confusion it exists to remove.
+  // Matches the repo's own env-flag convention (=== '1' in merge-tracker.mjs
+  // and update-system.mjs), while also accepting `true` since these are
+  // third-party switches users copy from assorted docs.
+  const cloud = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']
+    .filter((v) => /^(1|true|yes|on)$/i.test(String(process.env[v] ?? '').trim()));
+
+  if (cloud.length) {
+    return {
+      warn: true,
+      label: `${cloud[0]} is set, so requests bill to your cloud account, not to a Claude subscription.`,
+      fix: [
+        'Intentional? Nothing to do.',
+        `Not intentional: unset ${cloud[0]} and restart your terminal.`,
+      ],
+    };
+  }
+
+  const which = key ? 'ANTHROPIC_API_KEY' : (authToken ? 'ANTHROPIC_AUTH_TOKEN' : null);
+  if (!which) {
+    return { pass: true, label: 'Billing source: no API key in the environment (a Claude subscription will be used if you are logged in)' };
+  }
+
+  return {
+    warn: true,
+    label: `${which} is set, so it takes precedence over any Claude subscription: this session bills per token even if you pay for Pro or Max.`,
+    fix: [
+      'Intentional (you meant to use API credits)? Nothing to do.',
+      `Not intentional: remove the export of ${which} from ~/.zshrc, ~/.bashrc, ~/.profile or a project .env, restart your terminal, and run /login.`,
+      'Batch runs are the exception: `claude -p` workers do not use the interactive login, so they need `claude setup-token` exported as CLAUDE_CODE_OAUTH_TOKEN.',
+      'Details: docs/RUNNING_ON_A_BUDGET.md section 2b.',
+    ],
   };
 }
 
@@ -98,31 +152,99 @@ async function checkPlaywright() {
   }
 }
 
-// The browser tools (`browser_navigate` / `browser_snapshot`) that scan / pipeline /
-// apply rely on are provided by the Playwright MCP server, usually registered through a
-// project-level MCP config (for example `.mcp.json`, `.claude/settings.json`, or
-// `.claude/settings.local.json`). When no common config is detected, SPA job boards can
-// silently return empty or stale content (#522), so doctor surfaces a non-fatal warning
-// instead of letting it fail invisibly.
-const PLAYWRIGHT_MCP_WARNING = 'Playwright MCP tools not detected';
+// Per-CLI MCP config registry.
+const MCP_CONFIGS = [
+  { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'] },
+  // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
+  // there, and JSON.parse throwing on them used to read as "no MCP server
+  // configured" (#2252).
+  { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'] },
+];
 
-function playwrightMcpConfigured(root) {
-  const configFiles = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'];
-  for (const rel of configFiles) {
+// Server qualifies if its definition references the @playwright/mcp package.
+function isPlaywrightServer(server) {
+  if (!server || typeof server !== 'object') return false;
+  const blob = JSON.stringify(server).toLowerCase();
+  return blob.includes('@playwright/mcp');
+}
+
+function isPlaywrightMcpConfigured(root, activeCli) {
+  const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
+  if (!entry) return false; // known CLI but no MCP file mapping; caller warns
+  return entry.files.some((rel) => {
     const file = join(root, ...rel.split('/'));
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) return false;
     try {
-      const servers = JSON.parse(readFileSync(file, 'utf8'))?.mcpServers;
-      if (servers && typeof servers === 'object') {
-        for (const server of Object.values(servers)) {
-          if (JSON.stringify(server ?? '').toLowerCase().includes('playwright')) return true;
-        }
-      }
+      const cfg = parseConfigByExtension(file, readFileSync(file, 'utf8')) ?? {};
+      const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
+      return buckets.some((servers) => Object.values(servers).some(isPlaywrightServer));
     } catch {
-      // Malformed config — keep scanning the other locations; never crash doctor on it.
+      // Malformed config — treat as unconfigured, keep silent (matches prior behavior).
     }
+    return false;
+  });
+}
+
+// CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
+// default ('claude'). An unknown value at ANY level returns the sentinel
+// 'unknown' and produces no output — CLI-dependent checks are silently
+// skipped. .env parsing is best-effort: missing file is normal, malformed
+// values are caught per call below.
+function resolveActiveCli() {
+  if (cliFlag !== undefined && cliFlag !== null) {
+    if (!VALID_CLIS.includes(cliFlag)) {
+      return { cli: 'unknown', source: 'flag', warning: `Unknown --cli "${cliFlag}". Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: cliFlag, source: 'flag' };
   }
-  return false;
+  if (process.env.CAREER_OPS_CLI) {
+    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: 'env', warning: `CAREER_OPS_CLI="${process.env.CAREER_OPS_CLI}" is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: process.env.CAREER_OPS_CLI, source: 'env' };
+  }
+  // .env is best-effort: missing file → fall through to default. dotenv does
+  // not throw on a missing path when `quiet: true`, so no try/catch is needed.
+  dotenv.config({ path: join(projectRoot, '.env'), quiet: true });
+  if (process.env.CAREER_OPS_CLI) {
+    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: '.env', warning: `CAREER_OPS_CLI in .env is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: process.env.CAREER_OPS_CLI, source: '.env' };
+  }
+  return { cli: 'claude', source: 'default' };
+}
+
+function checkPlaywrightMcp(root, activeCli) {
+  // Unknown CLI (typo / not in VALID_CLIS).
+  if (activeCli === 'unknown') return null;
+
+  // Known CLI without an MCP file mapping.
+  const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
+  if (!entry) {
+    return {
+      warn: true,
+      label: `Playwright MCP check skipped for CLI: ${activeCli}`,
+      fix: [
+        `doctor doesn't scan MCP configs for "${activeCli}". Verify your Playwright MCP setup manually for that CLI.`,
+        `CLIs with scanning today: ${MCP_CONFIGS.map((c) => c.cli).join(', ')}.`,
+      ],
+    };
+  }
+  if (isPlaywrightMcpConfigured(root, activeCli)) {
+    return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
+  }
+  // Active CLI is known (flag/env/.env) but its MCP isn't configured.
+  return {
+    warn: true,
+    label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
+    fix: [
+      `No project-level MCP config was detected for ${activeCli}.`,
+      activeCli === 'opencode'
+        ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
+        : `Add the Playwright MCP server to your ${activeCli} config.`,
+    ],
+  };
 }
 
 // Report which scan/JD extractor is active (config/profile.yml → scan.extractor).
@@ -142,22 +264,6 @@ function checkScanExtractor(root) {
     };
   }
   return { pass: true, label: 'Scan extractor: mcp (default)' };
-}
-
-function checkPlaywrightMcp(root) {
-  if (playwrightMcpConfigured(root)) {
-    return { pass: true, label: 'Playwright MCP server configured' };
-  }
-  return {
-    warn: true,
-    label: PLAYWRIGHT_MCP_WARNING,
-    fix: [
-      'Browser-driven JD fetching and liveness checks (scan / pipeline / apply) need the',
-      'Playwright MCP server. No project-level MCP config was detected in `.mcp.json`',
-      'or `.claude/settings*.json`, so SPA job boards may return empty or stale content.',
-      'Tracking: https://github.com/santifer/career-ops/issues/506',
-    ],
-  };
 }
 
 // Single source of truth for the four user-layer prerequisites (the list
@@ -340,11 +446,14 @@ async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
 
+  const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
+
   const checks = [
     checkNodeVersion(),
+    checkBillingSource(),
     checkDependencies(),
     await checkPlaywright(),
-    checkPlaywrightMcp(projectRoot),
+    checkPlaywrightMcp(projectRoot, activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
@@ -353,7 +462,7 @@ async function main() {
     checkAutoDir('output'),
     checkAutoDir('reports'),
     checkPlugins(projectRoot),
-  ];
+  ].filter(Boolean);
 
   // Network-bound ATS slug probe — only under --strict.
   if (STRICT) {
@@ -362,6 +471,11 @@ async function main() {
 
   let failures = 0;
   let warnings = 0;
+
+  if (cliWarning) {
+    warnings++;
+    console.log(`${yellow('⚠')} ${cliWarning}`);
+  }
 
   for (const result of checks) {
     const fixes = Array.isArray(result.fix) ? result.fix : result.fix ? [result.fix] : [];
@@ -405,6 +519,7 @@ function onboardingState(root) {
   const templates = [
     { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
     { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
+    { target: 'modes/_brief.md', template: 'modes/_brief.template.md' },
   ];
   for (const { target, template } of templates) {
     const targetPath = join(root, ...target.split('/'));
@@ -422,7 +537,19 @@ function onboardingState(root) {
   const missing = USER_LAYER_PREREQS
     .filter(({ path }) => !prereqPresent(root, path))
     .map(({ path }) => path);
-  const warnings = playwrightMcpConfigured(root) ? [] : [PLAYWRIGHT_MCP_WARNING];
+
+  const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
+
+  const mcpCheck = checkPlaywrightMcp(root, activeCli);
+  const warnings = [
+    ...(cliWarning ? [cliWarning] : []),
+    ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
+  ];
+
+  const playwrightMcp = activeCli !== 'unknown' && MCP_CONFIGS.find((c) => c.cli === activeCli)
+    ? { [activeCli]: mcpCheck?.pass === true }
+    : {};
+
   let plugins = [];
   try {
     const cfg = readPluginConfigSync(root);
@@ -431,7 +558,16 @@ function onboardingState(root) {
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
   } catch { plugins = []; }
-  return { onboardingNeeded: missing.length > 0, missing, warnings, autoCopied, plugins };
+  return {
+    onboardingNeeded: missing.length > 0,
+    missing,
+    warnings,
+    autoCopied,
+    plugins,
+    playwright_mcp: playwrightMcp,
+    active_cli: activeCli,
+    cli_source: cliSource,
+  };
 }
 
 if (JSON_OUT) {

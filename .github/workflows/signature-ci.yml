@@ -58,6 +58,11 @@ jobs:
           ' 2> /tmp/reason.txt || { cat /tmp/reason.txt >> "$GITHUB_OUTPUT"; exit 1; }
       - name: Friendly ack (valid)
         if: success()
+        # Fork PRs carry a read-only token, so this comment can fail with
+        # 'Resource not accessible by integration'. The comment is cosmetic:
+        # its failure must never turn a VALID signature's check red (30-jul,
+        # first fork-signature #2311 sat blocked on exactly this).
+        continue-on-error: true
         uses: actions/github-script@v9
         with:
           script: |
@@ -68,6 +73,7 @@ jobs:
             });
       - name: Friendly fix-it (invalid)
         if: failure()
+        continue-on-error: true
         uses: actions/github-script@v9
         with:
           script: |
