@@ -257,13 +257,21 @@ function decodeEntities(s) {
       const code = body[1] === 'x' || body[1] === 'X'
         ? Number.parseInt(body.slice(2), 16)
         : Number.parseInt(body.slice(1), 10);
-      // Reject non-characters rather than emitting U+FFFD or throwing.
-      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match;
-      try {
-        return String.fromCodePoint(code);
-      } catch {
-        return match;
-      }
+      // XML 1.0 §2.2 Char — only these ranges are legal, and a bare
+      // `code <= 0x10ffff` bound is not the same test. It admits NUL, the C0
+      // controls and lone surrogates, all of which String.fromCodePoint will
+      // happily emit; an unpaired surrogate then travels into a job title, the
+      // tracker, and every document generated from it. Anything illegal is left
+      // as written rather than decoded — the raw reference is visible and inert,
+      // which is the better failure.
+      const legalXmlChar = code === 0x9 || code === 0xa || code === 0xd
+        || (code >= 0x20 && code <= 0xd7ff)
+        || (code >= 0xe000 && code <= 0xfffd)
+        || (code >= 0x10000 && code <= 0x10ffff);
+      // NaN and Infinity fail every comparison above, so they need no separate
+      // guard, and fromCodePoint cannot throw on what survives.
+      if (!legalXmlChar) return match;
+      return String.fromCodePoint(code);
     }
     return XML_ENTITIES[/** @type {keyof typeof XML_ENTITIES} */ (body)] ?? match;
   });
@@ -295,8 +303,28 @@ export function parseJobviteXml(xml, companyName) {
   if (typeof xml !== 'string' || !xml) return [];
 
   const out = [];
-  for (const m of xml.matchAll(/<job>([\s\S]*?)<\/job>/gi)) {
-    const block = m[1];
+
+  // Cursor scan rather than `xml.matchAll(/<job>([\s\S]*?)<\/job>/gi)`, for the
+  // same reason tagText() avoids a regex. On a feed carrying many `<job>` starts
+  // and no closing tag, the lazy matcher retries from each start and scans to the
+  // end of the document every time — quadratic work on a remote 1.9 MB input.
+  // indexOf walks it once: an unterminated block ends the scan instead of
+  // restarting it.
+  //
+  // Dropping the /i is not a behaviour change. tagText() already matches inner
+  // tags case-sensitively, so a `<JOB>` block would yield no <title> and be
+  // discarded on the next line regardless; the flag only ever bought extra work.
+  const OPEN = '<job>';
+  const CLOSE = '</job>';
+  let cursor = 0;
+  for (;;) {
+    const start = xml.indexOf(OPEN, cursor);
+    if (start === -1) break;
+    const from = start + OPEN.length;
+    const end = xml.indexOf(CLOSE, from);
+    if (end === -1) break; // unterminated final block — nothing further to read
+    cursor = end + CLOSE.length;
+    const block = xml.slice(from, end);
 
     const title = decodeEntities(tagText(block, 'title'));
     if (!title) continue;

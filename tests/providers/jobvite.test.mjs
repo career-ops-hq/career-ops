@@ -115,8 +115,8 @@ try {
 </result>`;
 
   const jobs = parseJobviteXml(XML, 'Tyler Technologies');
-  // Five <job> nodes in; three are dropped — empty title, no URL at all, and a
-  // malformed detail-url that URL() rejects. Only two survive.
+  // Five <job> nodes in, two dropped: an empty title and no URL at all. The
+  // malformed detail-url is NOT a drop — its apply-url is good, so it survives.
   eq('parseJobviteXml keeps only postings with a title AND a usable URL', jobs.length, 3);
 
   const first = jobs[0];
@@ -154,12 +154,39 @@ try {
       numeric[0].title, 'Sr Manager ’26 – Delivery');
   }
 
+  // #2623 review: references outside XML 1.0 §2.2 Char must survive raw rather
+  // than decode. NUL and a lone surrogate are the two that String.fromCodePoint
+  // would otherwise emit straight into a job title.
+  {
+    const illegal = parseJobviteXml(
+      '<result><job><title>Sr&#0;Manager&#xD800;Ops</title>' +
+      '<detail-url><![CDATA[https://app.jobvite.com/x]]></detail-url></job></result>', 'X');
+    eq('parseJobviteXml leaves XML-illegal numeric references undecoded',
+      illegal[0].title, 'Sr&#0;Manager&#xD800;Ops');
+  }
+
   // An unterminated tag must terminate the scan, not backtrack. Regression guard
   // for the ReDoS-shaped regex this parser deliberately avoids.
   {
     const t0 = Date.now();
     parseJobviteXml('<result><job><title>' + ' '.repeat(60000) + '</job></result>', 'X');
     eq('parseJobviteXml handles an unterminated tag without backtracking', Date.now() - t0 < 1000, true);
+  }
+
+  // #2623 review: the same guard one level out. Many `<job>` starts with no
+  // closing tag made the old lazy outer matcher rescan to end-of-document from
+  // every start — quadratic on input the feed host controls.
+  //
+  // 40k repeats is 820 KB, well under the 1.9 MB the real feed ships. Measured
+  // on the regex this replaced: 15.4s. On the cursor scan: 1ms. The threshold
+  // sits between two numbers four orders of magnitude apart, so it is a timing
+  // assertion without being a flaky one.
+  {
+    const t0 = Date.now();
+    const unclosed = parseJobviteXml('<result>' + '<job><title>x</title>'.repeat(40000) + '</result>', 'X');
+    eq('parseJobviteXml handles many unterminated <job> tags in linear time',
+      Date.now() - t0 < 1000, true);
+    eq('parseJobviteXml yields nothing from unterminated <job> blocks', unclosed.length, 0);
   }
 
   eq('parseJobviteXml returns [] for an empty feed', parseJobviteXml('<result></result>', 'X').length, 0);
@@ -200,7 +227,13 @@ try {
     const ctx = {
       fetchText: async (u) => {
         seen.push(u);
-        return u.includes('jobs.jobvite.com') ? `companyEId: 'q6NaVfwI'` : XML;
+        // Compare the parsed hostname, not a substring of the URL. `u.includes(
+        // 'jobs.jobvite.com')` also matches https://evil.example.com/jobs.jobvite.com
+        // — CodeQL flags that shape (js/incomplete-url-substring-sanitization)
+        // wherever it appears, and it is right to even in a stub: a board
+        // response returned for a host that is not the board is exactly the
+        // confusion these tests exist to catch.
+        return new URL(u).hostname === 'jobs.jobvite.com' ? `companyEId: 'q6NaVfwI'` : XML;
       },
       fetchJson: async () => ({}),
     };
