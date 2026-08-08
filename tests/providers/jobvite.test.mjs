@@ -108,15 +108,16 @@ try {
 </job>
 <job>
   <id>badUrl</id>
-  <title>Malformed URL</title>
+  <title>Malformed Detail, Good Apply</title>
   <detail-url><![CDATA[not a url]]></detail-url>
+  <apply-url><![CDATA[https://careers.example.com/jobs/42]]></apply-url>
 </job>
 </result>`;
 
   const jobs = parseJobviteXml(XML, 'Tyler Technologies');
   // Five <job> nodes in; three are dropped — empty title, no URL at all, and a
   // malformed detail-url that URL() rejects. Only two survive.
-  eq('parseJobviteXml keeps only postings with a title AND a usable URL', jobs.length, 2);
+  eq('parseJobviteXml keeps only postings with a title AND a usable URL', jobs.length, 3);
 
   const first = jobs[0];
   eq('parseJobviteXml decodes XML entities in the title',
@@ -136,6 +137,30 @@ try {
     jobs[1].url, 'https://careers.example.com/jobs/9');
   eq('parseJobviteXml omits postedAt when the date is absent',
     Object.prototype.hasOwnProperty.call(jobs[1], 'postedAt'), false);
+
+
+  // #2623 review: a present-but-malformed detail-url must not discard a posting
+  // that has a valid apply-url beside it.
+  eq('parseJobviteXml falls back to apply-url when detail-url is malformed',
+    jobs[2].url, 'https://careers.example.com/jobs/42');
+
+  // Numeric character references appear in real Jobvite titles (typographic
+  // punctuation from the source ATS), so they must decode, not survive raw.
+  {
+    const numeric = parseJobviteXml(
+      '<result><job><title>Sr Manager &#8217;26 &#x2013; Delivery</title>' +
+      '<detail-url><![CDATA[https://app.jobvite.com/x]]></detail-url></job></result>', 'X');
+    eq('parseJobviteXml decodes decimal and hex numeric character references',
+      numeric[0].title, 'Sr Manager ’26 – Delivery');
+  }
+
+  // An unterminated tag must terminate the scan, not backtrack. Regression guard
+  // for the ReDoS-shaped regex this parser deliberately avoids.
+  {
+    const t0 = Date.now();
+    parseJobviteXml('<result><job><title>' + ' '.repeat(60000) + '</job></result>', 'X');
+    eq('parseJobviteXml handles an unterminated tag without backtracking', Date.now() - t0 < 1000, true);
+  }
 
   eq('parseJobviteXml returns [] for an empty feed', parseJobviteXml('<result></result>', 'X').length, 0);
   eq('parseJobviteXml returns [] for non-string input', parseJobviteXml(null, 'X').length, 0);
@@ -166,7 +191,7 @@ try {
     eq('fetch() with a configured eId makes exactly one request', seen.length, 1);
     eq('fetch() with a configured eId hits the XML feed',
       seen[0], 'https://app.jobvite.com/CompanyJobs/Xml.aspx?c=q6NaVfwI');
-    eq('fetch() returns parsed jobs', out.length, 2);
+    eq('fetch() returns parsed jobs', out.length, 3);
   }
 
   // Discovery path: slug only → board page, then feed.
@@ -184,7 +209,7 @@ try {
     eq('fetch() discovery hits the board first', seen[0], 'https://jobs.jobvite.com/tylertech');
     eq('fetch() discovery then hits the feed with the scraped eId',
       seen[1], 'https://app.jobvite.com/CompanyJobs/Xml.aspx?c=q6NaVfwI');
-    eq('fetch() discovery returns parsed jobs', out.length, 2);
+    eq('fetch() discovery returns parsed jobs', out.length, 3);
   }
 
   // Discovery failure must name the fix rather than silently returning [].

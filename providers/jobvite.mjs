@@ -211,20 +211,62 @@ export default {
 
 /**
  * Read one tag out of a `<job>` block, unwrapping CDATA.
+ *
+ * Deliberately index-based rather than a regex. The obvious pattern here —
+ * `<name>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*</name>` — puts `\s*` either
+ * side of a lazy `[\s\S]*?`, which is polynomial-backtracking on input that
+ * never closes the tag, and this parser runs on a remote 1.9 MB document.
+ * CodeQL flags it (js/polynomial-redos, high) and it is right to. Scanning with
+ * indexOf is linear, allocation-light and easier to read.
+ *
  * @param {string} block
  * @param {string} name
  */
 function tagText(block, name) {
-  const re = new RegExp(`<${name}>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*</${name}>`, 'i');
-  const m = block.match(re);
-  return m ? m[1].trim() : '';
+  const open = `<${name}>`;
+  const close = `</${name}>`;
+  const start = block.indexOf(open);
+  if (start === -1) return '';
+  const from = start + open.length;
+  const end = block.indexOf(close, from);
+  if (end === -1) return '';
+
+  let value = block.slice(from, end).trim();
+  if (value.startsWith('<![CDATA[') && value.endsWith(']]>')) {
+    value = value.slice('<![CDATA['.length, -']]>'.length).trim();
+  }
+  return value;
 }
 
-const XML_ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&#39;': "'" };
+const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
-/** @param {string} s */
+/**
+ * Decode the XML entities that appear in this feed.
+ *
+ * Numeric references matter here and are not decorative: Jobvite titles carry
+ * typographic punctuation from the source ATS — `&#8217;` (right single quote)
+ * and `&#x2013;` (en dash) both appear in real postings. Leaving them raw puts
+ * literal `&#8217;` into a job title, which then reaches the tracker and any
+ * generated document.
+ *
+ * @param {string} s
+ */
 function decodeEntities(s) {
-  return s.replace(/&(amp|lt|gt|quot|apos|#39);/g, (m) => XML_ENTITIES[/** @type {keyof typeof XML_ENTITIES} */ (m)] ?? m);
+  return String(s).replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (match, body) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? Number.parseInt(body.slice(2), 16)
+        : Number.parseInt(body.slice(1), 10);
+      // Reject non-characters rather than emitting U+FFFD or throwing.
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match;
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return match;
+      }
+    }
+    return XML_ENTITIES[/** @type {keyof typeof XML_ENTITIES} */ (body)] ?? match;
+  });
 }
 
 /**
@@ -259,15 +301,19 @@ export function parseJobviteXml(xml, companyName) {
     const title = decodeEntities(tagText(block, 'title'));
     if (!title) continue;
 
-    const rawUrl = tagText(block, 'detail-url') || tagText(block, 'apply-url');
+    // Try detail-url first, then apply-url. Each candidate is VALIDATED before
+    // the next is considered: picking the string with `||` and validating once
+    // means a present-but-malformed detail-url discards the posting even when a
+    // perfectly good apply-url sits beside it.
     let url = '';
-    if (rawUrl) {
+    for (const candidate of [tagText(block, 'detail-url'), tagText(block, 'apply-url')]) {
+      if (!candidate) continue;
       try {
-        const p = new URL(decodeEntities(rawUrl));
+        const p = new URL(decodeEntities(candidate));
         if (p.protocol === 'http:') p.protocol = 'https:';
-        if (p.protocol === 'https:') url = p.href;
+        if (p.protocol === 'https:') { url = p.href; break; }
       } catch {
-        // malformed URL — drop posting
+        // malformed — fall through to the next candidate
       }
     }
     if (!url) continue;
