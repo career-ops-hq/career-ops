@@ -26,7 +26,7 @@
  *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
@@ -95,8 +95,19 @@ function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
   ensureFile();
-  const body = readFileSync(PATH, 'utf8').replace(/\s+$/, '');
-  writeFileSync(PATH, `${body}\n- [ ] ${stamp()} — ${text}\n`);
+  // Append rather than rewrite. This is the queue's concurrent path — anything
+  // running in the background can drop an item in — and a read-whole-file /
+  // write-whole-file cycle loses every request that lands between the two. With
+  // 30 concurrent `add` calls, half the queue vanished silently.
+  //
+  // POSIX guarantees an O_APPEND write is atomic below PIPE_BUF, and one
+  // checklist line is far under it, so concurrent appends interleave instead of
+  // clobbering. Reading the tail first only decides whether a separating newline
+  // is needed (for a file someone hand-edited without one); the write itself is
+  // still a single atomic append.
+  const existing = readFileSync(PATH, 'utf8');
+  const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
+  appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
   process.stdout.write(`Queued: ${text}\n`);
 }
 
