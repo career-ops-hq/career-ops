@@ -293,9 +293,28 @@ node openai-eval.mjs \
 ```
 
 **Approximate Token Usage:**
-- **Input:** ~3,500 tokens (System prompt + your `cv.md` + JD)
-- **Output:** ~1,000 tokens (The A-G evaluation report)
-- **Cost:** ~4,500 tokens total. At DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), this costs **less than $0.001** per evaluation.
+- **Input:** ~20,000 tokens. The static prefix alone is **17,728**: the script sends `modes/_shared.md` (4,127) plus `modes/oferta.md` (13,601) as the system prompt, and your `cv.md` and the JD come on top of that.
+- **Output:** ~1,000 tokens (the A-G evaluation report).
+- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.003 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
+
+Measure it yourself rather than trusting this paragraph, because these files grow with every release:
+
+```bash
+node --input-type=module -e "
+import { estimateTokens } from './lib/context-budget.mjs';
+import { readFileSync } from 'fs';
+for (const f of ['modes/_shared.md','modes/oferta.md','AGENTS.md'])
+  console.log(f, estimateTokens(readFileSync(f,'utf8')));"
+```
+
+### What the default path costs (this is the number most people are actually paying)
+
+The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (8,285) + `modes/_shared.md` (4,127) + `modes/oferta.md` (13,601) = about 26,000 tokens of instructions per evaluation**, before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
+
+Two things follow from that, and they are the cheapest wins available:
+
+- **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
+- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
 
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 
