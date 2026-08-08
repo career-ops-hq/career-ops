@@ -722,9 +722,38 @@ export function companyMatch(jobCompany, windowCompany) {
   const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
-  const regex1 = new RegExp('\\b' + c2WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  const regex2 = new RegExp('\\b' + c1WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  return regex1.test(c1WithSpaces) || regex2.test(c2WithSpaces);
+  // Containment: a short window name should still match a longer official one
+  // ("Acme" vs "Acme Corp"), bounded so "Acme" does not match "Acmetric".
+  //
+  // The anchors are lookarounds, not \b: JS defines \b against ASCII \w even
+  // under the u flag. Keeping the accent (rather than stripping it to a space,
+  // as the [a-z0-9] filter did before) means '\bnestlé\b' can never hold —
+  // neither side of the trailing anchor is a word character — so Nestlé
+  // Deutschland vs Nestlé would silently stop matching. Same for Ørsted, Zoë
+  // and every other name whose first or last letter is non-ASCII.
+  //
+  // The anchor class is the one normalizeTextKey keeps, deliberately. An anchor
+  // class without \p{M} would treat a Devanagari matra as a boundary and split
+  // कंपनी mid-word — the key and its boundaries have to agree on what a letter
+  // is, or they drift the way #2397 and #2445 fixed elsewhere.
+  //
+  // Non-Latin containment does not fire here (株式会社メルカリ vs メルカリ): the
+  // lookbehind sees 社, a letter, so there is no boundary to assert, and
+  // Japanese is not space-delimited so no anchor rule recovers it. Note this
+  // pair DID match before this change, but only via the '' === '' collision
+  // that erased both names — not through this path. Making it match on purpose
+  // needs corporate-form normalisation, tracked separately in #2570.
+  //
+  // compileLocationKeyword() above reached for lookarounds too, for a related
+  // reason ("\b behaves surprisingly at a punctuation edge"); its escape set is
+  // reused here because '\-' is an invalid identity escape under u. Both
+  // operands are already normalizeTextKey output — letters, marks, digits and
+  // spaces only — so the escape is defensive, not load-bearing.
+  const bounded = (name) => new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{M}\\p{N}])`,
+    'u',
+  );
+  return bounded(c2WithSpaces).test(c1WithSpaces) || bounded(c1WithSpaces).test(c2WithSpaces);
 }
 
 export function addDays(dateStr, days) {

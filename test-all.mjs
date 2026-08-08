@@ -11331,6 +11331,51 @@ try {
     fail('Latin companyMatch behavior changed');
   }
 
+  // -- Accented Latin: the containment fallback must survive keeping the accent --
+  // Before this change the [a-z0-9] strip turned é into a space, which left the
+  // \b anchors sitting on ASCII letters, so 'Nestlé Deutschland' vs 'Nestlé'
+  // matched. Preserving the accent breaks \b (it is ASCII-only in JS even under
+  // the u flag), so the anchors are Unicode lookarounds. A pure-ASCII assertion
+  // cannot detect this — the accent has to be at a word edge.
+  const accented = [
+    ['Nestlé Deutschland', 'Nestlé'],
+    ['Ørsted Energy', 'Ørsted'],
+    ['Zoë Ltd', 'Zoë'],
+    ['Telefónica Tech', 'Telefónica'],   // accent mid-word: matched on main too
+  ];
+  const accentedMiss = accented.filter(([a, b]) => companyMatch(a, b) !== true);
+  if (accentedMiss.length === 0) {
+    pass('companyMatch still matches accented Latin names at a word edge (Nestlé, Ørsted, Zoë)');
+  } else {
+    fail(`accented Latin containment lost: ${JSON.stringify(accentedMiss)}`);
+  }
+
+  // The boundary must still bound: a prefix that is not a whole word stays out.
+  if (companyMatch('Acme', 'Acmetric Ltd') === false && companyMatch('Nestlé', 'Danone') === false) {
+    pass('companyMatch keeps the containment fallback bounded (no bare-substring matching)');
+  } else {
+    fail('containment fallback over-matched: a non-word-boundary prefix was accepted');
+  }
+
+  // The anchor class must be the same one normalizeTextKey keeps, so a mark or
+  // a digit at the edge is a letter to the boundary too. Both witnesses put the
+  // character *immediately* after the candidate: a case where the next
+  // character is a space passes whatever the anchor class is, and would assert
+  // nothing. Each one flips if its class is dropped from the lookarounds.
+  const matraWitness = companyMatch('टाटा कंपनीी', 'टाटा कंपनी');       // \p{M}
+  const digitWitness = companyMatch('Acme2 Ltd', 'Acme');               // \p{N}
+  if (matraWitness === false && digitWitness === false) {
+    pass('companyMatch anchors treat combining marks and digits as letters (no split mid-word)');
+  } else {
+    fail(`anchor class too narrow: matra=${matraWitness} digit=${digitWitness} (both should be false)`);
+  }
+  // Positive direction: a genuine non-Latin containment with a space boundary.
+  if (companyMatch('कंपनी सॉफ्टवेयर', 'कंपनी') === true) {
+    pass('companyMatch matches a Devanagari name at a space boundary');
+  } else {
+    fail('Devanagari containment lost at a space boundary');
+  }
+
   // normalizeTextKey's separator arg must not disturb its existing callers.
   if (normalizeTextKey('株式会社アカネ') === '株式会社アカネ'
       && normalizeTextKey('Acme, Inc.') === 'acmeinc'
