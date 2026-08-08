@@ -148,7 +148,40 @@ wants worst-case direction; nearest wants average fairness. Name the difference,
 that newer Aave code adds explicit floor/ceil variants where an adversary could farm
 the half.
 
-## 8. Rapid-fire drill (answers in one sentence each, out loud)
+## 8. When losses are too big for the slack: deficit accounting + Umbrella (MUST-KNOW, April 2026)
+
+Three loss-absorption layers, by size:
+
+```
+dust losses      -> unbooked slack (claim-free assets; no variable, no event)
+real bad debt    -> reserve.deficit (v3.3, explicit uint128) -> Umbrella slashing
+legacy era       -> governance treasury proposals (e.g. CRV bad debt, Nov 2022, ~$1.6M)
+```
+
+Mechanics with code anchors:
+- Bad debt is CREATED in `LiquidationLogic.executeLiquidationCall`: when a liquidation
+  seizes ALL remaining collateral and debt is left over (`hasNoCollateralLeft`), the
+  leftover debt tokens are burned (`_burnBadDebt` -> `_burnDebtTokens`) and the amount is
+  added to `reserve.deficit`. Claims (aTokens) stay untouched - the hole is now BOOKED.
+- Deficit is ELIMINATED via `Pool.eliminateReserveDeficit(address asset, uint256 amount)`,
+  guarded `onlyUmbrella` - the Umbrella staking contract supplies aTokens which get
+  burned, shrinking claims back to match assets. Read it: `Pool.getReserveDeficit(asset)`.
+- The slack itself has NO code path to cover anything - it works by not existing as a
+  claim. `AToken.rescueTokens` even has `require(token != _underlyingAsset)` so it can
+  never be swept.
+
+**The live event (know this cold for the interview):** 2026-04-18, KelpDAO cross-chain
+bridge exploit, ~116.5k rsETH (~$292M) stolen; attacker posted stolen rsETH as Aave
+collateral and borrowed WETH; liquidation found the collateral worthless -> ~$200M WETH
+bad debt. As of 2026-07-27 on-chain: `reserve.deficit` for WETH ~= 52,964 WETH; DAI
+~= 2,700 DAI. First major real-world test of Umbrella's automated slashing coverage.
+Measured slack the same day (my own eth_call sweep): USDC ~+31.4k on 2.14B supply
+(~0.0015%), USDT ~+405, DAI ~+53 - dust, exactly as theory predicts.
+
+Sentence: **dust dies in the slack silently; real bad debt gets booked in
+`reserve.deficit` and paid by Umbrella stakers - nothing "behind the curtains."**
+
+## 9. Rapid-fire drill (answers in one sentence each, out loud)
 
 1. Why does my aUSDC balance grow with no transactions? -> balanceOf recomputes
    scaled x index on read; the index embeds elapsed time; nothing is minted.
