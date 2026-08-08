@@ -45,6 +45,20 @@ try {
     }
   }
 
+  // Rules of the second shape normalize-statuses.mjs also uses:
+  //   if (['evaluada'].includes(lower)) return { status: 'Evaluated' };
+  // A plain list-membership check against the already-lowercased `lower`,
+  // rather than an anchored regex. RULE_RE above never matches these, so
+  // without this pass a missing alias here (e.g. dropping 'evaluada' from
+  // states.yml) would sail through the test undetected.
+  const LIST_RULE_RE = /\[((?:'[^']*'|"[^"]*")(?:\s*,\s*(?:'[^']*'|"[^"]*"))*)\]\.includes\(lower\)\)\s*return\s*\{\s*status:\s*'([^']+)'/g;
+  for (const m of src.matchAll(LIST_RULE_RE)) {
+    for (const lit of m[1].matchAll(/'([^']*)'|"([^"]*)"/g)) {
+      const a = (lit[1] ?? lit[2] ?? '').trim();
+      if (a) extracted.push({ alias: a, expected: m[2] });
+    }
+  }
+
   extracted.length > 0
     ? pass(`extracted ${extracted.length} plain alias rule(s) from normalize-statuses.mjs`)
     : fail("extracted no alias rules — this guard's parser no longer matches normalize-statuses.mjs and is checking nothing");
