@@ -149,10 +149,13 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const failedSpawn = exits.filter((c) => c !== 0).length;
   check('every concurrent add exited cleanly', failedSpawn === 0, `${failedSpawn} non-zero exits`);
   const body = readFileSync(inbox, 'utf8');
-  const kept = body.split('\n').filter((l) => l.startsWith('- [ ]')).length;
+  const pending = body.split('\n').filter((l) => l.startsWith('- [ ]'));
+  const kept = pending.length;
   check(`all ${N} concurrently queued items survive`, kept === N, `kept=${kept} of ${N}`);
-  const distinct = new Set(body.split('\n').filter((l) => l.startsWith('- [ ]')).map((l) => l.slice(l.indexOf('— ')))).size;
-  check('no item is duplicated or truncated', distinct === N, `distinct=${distinct} of ${N}`);
+  const actual = new Set(pending.map((l) => l.slice(l.indexOf('— ') + 2)));
+  const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
+  const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
+  check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
