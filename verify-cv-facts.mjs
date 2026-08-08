@@ -570,17 +570,26 @@ function runSelfTest() {
     auditClaims('Drove 1.5M downloads', 'Drove 50 downloads.').invented,
     ['1.5m downloads']
   );
+  equal(
+    'an uppercase B suffix is caught too',
+    auditClaims('Reached 2B users', 'Reached 1B users.').invented,
+    ['2b users']
+  );
   // The suffix must END the token, so a spelled-out magnitude and a unit that
-  // merely starts with k/m/b keep their previous normalization.
+  // merely starts with k/m/b keep their previous normalization. Asserting on
+  // metricClaims directly (not auditClaims(...).invented) matters here: target
+  // and source text are identical, so an empty `invented` list would pass even
+  // if metricClaims extracted nothing at all — these assert the real claim a
+  // truthful CV would produce.
   equal(
     'a spelled-out magnitude is unaffected',
-    auditClaims('Reached 50 million users', 'Reached 50 million users.').invented,
-    []
+    [...metricClaims('Reached 50 million users')],
+    ['50 users']
   );
   equal(
     'a unit beginning with a suffix letter is unaffected',
-    auditClaims('Shipped 50kg units', 'Shipped 50kg units.').invented,
-    []
+    [...metricClaims('Shipped 50kg servers')],
+    ['50 servers']
   );
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
