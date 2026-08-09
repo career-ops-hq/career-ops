@@ -1,11 +1,16 @@
 import { spawn } from "node:child_process";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
-import { parseKimiStreamLine, prepareRunArgs } from "@/lib/cli-run.mjs";
+import {
+  noOutputMessage,
+  parseCodexStreamLine,
+  parseKimiStreamLine,
+  prepareAssistantArgs,
+} from "@/lib/cli-run.mjs";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const SYSTEM_PREAMBLE = `You are the career-ops assistant — a proactive, friendly career co-pilot for a person who is actively job-hunting. You live inside their LOCAL career-ops web dashboard (a pipeline of evaluated jobs, A–F reports, their CV, analytics) and run on their own AI CLI.
 
@@ -92,6 +97,7 @@ export async function POST(req: Request) {
   // files directly. Scope its tools so it can advise (read) but not blind-write.
   const isClaude = cliId === "claude";
   const isKimi = cliId === "kimi";
+  const isCodex = cliId === "codex";
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
   const args = isClaude
@@ -109,7 +115,7 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task",
       ]
-    : prepareRunArgs(cliId, spec.args(prompt));
+    : prepareAssistantArgs(cliId, spec.args(prompt));
 
   const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -123,13 +129,16 @@ export async function POST(req: Request) {
     start(controller) {
       let buf = "";
       let emitted = false;
+      let timedOut = false;
+      let stderr = "";
       killer = setTimeout(() => {
+        timedOut = true;
         try {
           child.kill("SIGTERM");
         } catch {
           /* ignore */
         }
-      }, 90_000);
+      }, 240_000);
       const safeClose = () => {
         if (!closed) {
           closed = true;
@@ -157,6 +166,17 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
+        if (isCodex) {
+          buf += d.toString();
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            const text = line ? parseCodexStreamLine(line) : null;
+            if (text) emit(text);
+          }
+          return;
+        }
         if (isKimi) {
           buf += d.toString();
           let nl: number;
@@ -192,7 +212,8 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        if (isKimi) return; // normal Kimi thinking/tool progress is written here
+        stderr = (stderr + s).slice(-4_000);
+        if (isKimi || isCodex) return; // normal progress and warnings are written here
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
@@ -201,14 +222,19 @@ export async function POST(req: Request) {
         safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
         safeClose();
       });
-      child.on("close", () => {
+      child.on("close", (code) => {
+        if (isCodex && buf.trim()) {
+          const text = parseCodexStreamLine(buf.trim());
+          if (text) emit(text);
+          buf = "";
+        }
         if (isKimi && buf.trim()) {
           const event = parseKimiStreamLine(buf.trim());
           if (event?.text) emit(event.text);
           buf = "";
         }
         if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
+          safeEnqueue(`_(${noOutputMessage({ cliName: spec.name, timedOut, code, stderr })})_`);
         }
         safeClose();
       });
