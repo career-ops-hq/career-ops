@@ -18,13 +18,13 @@ try {
   if (getro.id === 'getro') pass('getro.id is "getro"');
   else fail(`getro.id is ${JSON.stringify(getro.id)}`);
 
-  const okEntry = { name: 'b2v', careers_url: 'https://jobs.b2venture.vc', getro_collection: 4283 };
+  const okEntry = { name: 'ExampleVC', careers_url: 'https://jobs.examplevc.example', getro_collection: 4283 };
 
   const getHit = getro.detect(okEntry);
   if (getHit && getHit.url === 'https://api.getro.com/api/v2/collections/4283/search/jobs') pass('getro.detect() claims an explicit collection');
   else fail(`getro.detect() returned ${JSON.stringify(getHit)}`);
 
-  if (getro.detect({ name: 'X', careers_url: 'https://jobs.b2venture.vc' }) === null) {
+  if (getro.detect({ name: 'X', careers_url: 'https://jobs.examplevc.example' }) === null) {
     pass('getro.detect() returns null without an explicit getro_collection (auto-resolve entries opt in via provider: getro instead)');
   } else {
     fail('getro.detect() should not report a hit without getro_collection');
@@ -33,7 +33,7 @@ try {
   // Injection-ish / non-numeric collection ids are rejected (the id is interpolated into the API URL).
   let getroRejected = true;
   for (const bad of ['abc', '4283; DROP', '../evil', '4283/../../x', '', '0']) {
-    if (getro.detect({ name: 'X', careers_url: 'https://jobs.b2venture.vc', getro_collection: bad }) !== null) {
+    if (getro.detect({ name: 'X', careers_url: 'https://jobs.examplevc.example', getro_collection: bad }) !== null) {
       fail(`getro.detect() should reject a bad collection id: ${JSON.stringify(bad)}`);
       getroRejected = false;
     }
@@ -43,7 +43,7 @@ try {
   // A non-https careers_url is rejected — needed to build a valid referer origin.
   let getroNonHttpsThrew = false;
   try {
-    await getro.fetch({ name: 'Plaintext', careers_url: 'http://jobs.b2venture.vc', getro_collection: 4283 }, {
+    await getro.fetch({ name: 'Plaintext', careers_url: 'http://jobs.examplevc.example', getro_collection: 4283 }, {
       fetchJson: async () => { throw new Error('should not reach here'); },
     });
   } catch (e) { getroNonHttpsThrew = /https/.test(e.message); }
@@ -61,6 +61,12 @@ try {
   } else {
     fail('extractCollectionId() should return null on malformed JSON');
   }
+
+  // Attribute order/whitespace/extra attributes (e.g. a CSP nonce) shouldn't
+  // matter — only the id attribute is load-bearing for the match.
+  const reorderedNextDataHtml = '<html><script type="application/json" nonce="abc123" id="__NEXT_DATA__">{"props":{"pageProps":{"network":{"id":9911}}}}</script></html>';
+  if (extractCollectionId(reorderedNextDataHtml) === '9911') pass('extractCollectionId() tolerates reordered/extra script attributes');
+  else fail(`extractCollectionId() with reordered attributes returned ${JSON.stringify(extractCollectionId(reorderedNextDataHtml))}`);
 
   // fetch() auto-resolves collection_id from careers_url when getro_collection is absent.
   let fetchTextUrl = null;
@@ -122,12 +128,12 @@ try {
       getroOpts = opts;
       // No created_at → undated job is kept ("missing = pass"), so this test is
       // robust against the rolling 90-day pagination cutoff.
-      return { results: { count: 1, jobs: [{ title: 'Principal', url: 'https://jobs.b2venture.vc/x', organization: { name: 'Acme' }, locations: ['Zurich'] }] } };
+      return { results: { count: 1, jobs: [{ title: 'Principal', url: 'https://jobs.examplevc.example/x', organization: { name: 'Acme' }, locations: ['Zurich'] }] } };
     },
   });
   if (getroOpts?.redirect === 'error') pass('getro.fetch() passes redirect:"error"');
   else fail(`getro.fetch() should pass redirect:"error", got ${JSON.stringify(getroOpts)}`);
-  if (getroOpts?.headers?.referer === 'https://jobs.b2venture.vc/') pass('getro.fetch() sends a referer derived from careers_url');
+  if (getroOpts?.headers?.referer === 'https://jobs.examplevc.example/') pass('getro.fetch() sends a referer derived from careers_url');
   else fail(`getro.fetch() referer header = ${JSON.stringify(getroOpts?.headers?.referer)}`);
   if (getroJobs.length === 1 && getroJobs[0].company === 'Acme' && getroJobs[0].location === 'Zurich') pass('getro.fetch() normalizes a job row');
   else fail(`getro.fetch() row = ${JSON.stringify(getroJobs[0])}`);
@@ -135,7 +141,7 @@ try {
   // Multiple locations are joined, and a "Remote" tag is appended from work_mode.
   const getroLocations = await getro.fetch(okEntry, {
     fetchJson: async () => ({
-      results: { count: 1, jobs: [{ title: 'Eng', url: 'https://jobs.b2venture.vc/loc', organization: { name: 'Acme' }, locations: ['Zurich', 'Bern'], work_mode: 'remote' }] },
+      results: { count: 1, jobs: [{ title: 'Eng', url: 'https://jobs.examplevc.example/loc', organization: { name: 'Acme' }, locations: ['Zurich', 'Bern'], work_mode: 'remote' }] },
     }),
   });
   if (getroLocations[0]?.location === 'Zurich, Bern, Remote') pass('getro.fetch() joins multiple locations and appends a Remote tag from work_mode');
@@ -147,7 +153,7 @@ try {
       results: {
         count: 1,
         jobs: [{
-          title: 'VP Eng', url: 'https://jobs.b2venture.vc/sal', organization: { name: 'Acme' },
+          title: 'VP Eng', url: 'https://jobs.examplevc.example/sal', organization: { name: 'Acme' },
           compensation_amount_min_cents: 12_000_000, compensation_amount_max_cents: 15_000_000,
           compensation_currency: 'EUR', compensation_period: 'year',
         }],
@@ -161,7 +167,7 @@ try {
   }
   const getroHourly = await getro.fetch(okEntry, {
     fetchJson: async () => ({
-      results: { count: 1, jobs: [{ title: 'Contractor', url: 'https://jobs.b2venture.vc/hr', organization: { name: 'Acme' }, compensation_amount_min_cents: 5000, compensation_period: 'hour' }] },
+      results: { count: 1, jobs: [{ title: 'Contractor', url: 'https://jobs.examplevc.example/hr', organization: { name: 'Acme' }, compensation_amount_min_cents: 5000, compensation_period: 'hour' }] },
     }),
   });
   if (getroHourly[0]?.salary === undefined) pass('getro.fetch() ignores a non-annual compensation_period');
@@ -170,7 +176,7 @@ try {
   // created_at arrives as Unix seconds; postedAt must be milliseconds.
   const getroDated = await getro.fetch(okEntry, {
     fetchJson: async () => ({
-      results: { count: 1, jobs: [{ title: 'Recent', url: 'https://jobs.b2venture.vc/y', organization: { name: 'Acme' }, created_at: 1_900_000_000 }] },
+      results: { count: 1, jobs: [{ title: 'Recent', url: 'https://jobs.examplevc.example/y', organization: { name: 'Acme' }, created_at: 1_900_000_000 }] },
     }),
   });
   if (getroDated[0]?.postedAt === 1_900_000_000_000) pass('getro.fetch() converts created_at Unix seconds to epoch ms');
@@ -183,7 +189,7 @@ try {
     fetchJson: async () => {
       getroPages++;
       if (getroPages > 1500) throw new Error('getro paginated past any sane bound');
-      return { results: { count: 1_000_000_000, jobs: [{ title: 'T', url: `https://jobs.b2venture.vc/${getroPages}`, organization: { name: 'Acme' } }] } };
+      return { results: { count: 1_000_000_000, jobs: [{ title: 'T', url: `https://jobs.examplevc.example/${getroPages}`, organization: { name: 'Acme' } }] } };
     },
   });
   if (getroPages <= 1500) pass(`getro.fetch() clamps an oversized getro_max_pages override (${getroPages} pages)`);
@@ -195,7 +201,7 @@ try {
     maxPages: 1,
     fetchJson: async () => {
       getroProbePages++;
-      return { results: { count: 100, jobs: [{ title: 'T', url: 'https://jobs.b2venture.vc/p', organization: { name: 'Acme' } }] } };
+      return { results: { count: 100, jobs: [{ title: 'T', url: 'https://jobs.examplevc.example/p', organization: { name: 'Acme' } }] } };
     },
   });
   if (getroProbePages === 1) pass('getro.fetch() honors ctx.maxPages as a health-probe cap');
@@ -207,7 +213,7 @@ try {
   const getroAged = await getro.fetch({ ...okEntry, getro_max_age_days: 90 }, {
     fetchJson: async () => {
       getroAgePages++;
-      return { results: { count: 100, jobs: [{ title: 'Stale', url: `https://jobs.b2venture.vc/s${getroAgePages}`, organization: { name: 'Acme' }, created_at: staleCreatedAt }] } };
+      return { results: { count: 100, jobs: [{ title: 'Stale', url: `https://jobs.examplevc.example/s${getroAgePages}`, organization: { name: 'Acme' }, created_at: staleCreatedAt }] } };
     },
   });
   if (getroAged.length === 0 && getroAgePages === 1) pass('getro.fetch() stops pagination once postings cross getro_max_age_days');
@@ -221,18 +227,40 @@ try {
     fetchJson: async () => {
       getroRetryAttempts++;
       if (getroRetryAttempts < 3) { const err = new Error('This operation was aborted'); throw err; }
-      return { results: { count: 1, jobs: [{ title: 'Recovered', url: 'https://jobs.b2venture.vc/r', organization: { name: 'Acme' } }] } };
+      return { results: { count: 1, jobs: [{ title: 'Recovered', url: 'https://jobs.examplevc.example/r', organization: { name: 'Acme' } }] } };
     },
   });
   if (getroRetryAttempts === 3 && getroRecovered.length === 1) pass(`getro.fetch() retries a transient failure and recovers (${getroRetryAttempts} attempts)`);
   else fail(`getro.fetch() retry recovery: ${getroRetryAttempts} attempts, ${getroRecovered.length} jobs`);
 
-  // Once retries are exhausted, the page (and pagination) is truncated gracefully,
-  // not thrown out of fetch() — a partial board beats none. Non-Error rejections
-  // (a promise can reject with anything) must not crash the catch itself either.
-  const getroNonError = await getro.fetch(okEntry, { sleep: async () => {}, fetchJson: async () => { throw 'plain string rejection'; } });
-  if (Array.isArray(getroNonError) && getroNonError.length === 0) pass('getro.fetch() tolerates a non-Error rejection from fetchJson (after exhausting retries)');
-  else fail(`getro.fetch() non-Error rejection handling: ${JSON.stringify(getroNonError)}`);
+  // Once retries are exhausted on the FIRST page, fetch() throws instead of
+  // returning [] — a dead/unreachable board must not be misreported as "0
+  // open roles" (same rule every other paginating provider in this codebase
+  // follows: radancy.mjs, phenom.mjs, cryptocurrencyjobs.mjs, etc.). Non-Error
+  // rejections (a promise can reject with anything) must not crash the catch
+  // itself either.
+  let getroFirstPageThrew = false;
+  try {
+    await getro.fetch(okEntry, { sleep: async () => {}, fetchJson: async () => { throw 'plain string rejection'; } });
+  } catch (e) { getroFirstPageThrew = e.message === 'plain string rejection'; }
+  if (getroFirstPageThrew) pass('getro.fetch() throws (not []) when the first page fails after exhausting retries, tolerating a non-Error rejection');
+  else fail('getro.fetch() should throw when the first page fails, even on a non-Error rejection');
+
+  // A LATER page failing after retries is a graceful, partial truncation —
+  // the board is alive (page 0 proved it), so keep what was already fetched.
+  const getroLaterPageFail = await getro.fetch(okEntry, {
+    sleep: async () => {},
+    fetchJson: async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.page === 0) return { results: { count: 100, jobs: [{ title: 'First', url: 'https://jobs.examplevc.example/f', organization: { name: 'Acme' } }] } };
+      throw new Error('page 1 blew up');
+    },
+  });
+  if (getroLaterPageFail.length === 1 && getroLaterPageFail[0].title === 'First') {
+    pass('getro.fetch() truncates gracefully (keeps page 0) when a LATER page fails after exhausting retries');
+  } else {
+    fail(`getro.fetch() later-page failure handling: ${JSON.stringify(getroLaterPageFail)}`);
+  }
 
   // Malformed / empty payload → empty array, no crash, no infinite pagination.
   const getroEmpty = await getro.fetch(okEntry, { fetchJson: async () => ({}) });

@@ -119,7 +119,10 @@ function resolveCareersUrl(entry) {
  */
 export function extractCollectionId(html) {
   if (typeof html !== 'string') return null;
-  const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  // Match on the id attribute alone — tolerates attribute reordering, extra
+  // attributes (e.g. a CSP nonce), and whitespace variations Next.js may emit,
+  // instead of requiring an exact `id="..." type="..."` sequence.
+  const m = html.match(/<script\b[^>]*\bid="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
   if (!m) return null;
   let data;
   try {
@@ -242,6 +245,15 @@ export default {
         // anything, and reading .message off null would throw *inside* the
         // catch, defeating the graceful-truncate guarantee here.
         const cause = err instanceof Error ? err.message : String(err);
+        if (page === 0) {
+          // The FIRST page failing after retries means the board itself is
+          // unreachable, not that it has zero listings — returning [] here
+          // would misreport "dead board" as "0 open roles". Every other
+          // paginating provider in this codebase draws the same line (e.g.
+          // radancy.mjs, phenom.mjs, cryptocurrencyjobs.mjs): fail loudly on
+          // page one, truncate-with-warning on a later page.
+          throw err instanceof Error ? err : new Error(cause);
+        }
         console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page} after retries (${out.length} jobs): ${cause}`);
         break;
       }
