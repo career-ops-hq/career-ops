@@ -68,6 +68,11 @@ try {
   if (extractCollectionId(reorderedNextDataHtml) === '9911') pass('extractCollectionId() tolerates reordered/extra script attributes');
   else fail(`extractCollectionId() with reordered attributes returned ${JSON.stringify(extractCollectionId(reorderedNextDataHtml))}`);
 
+  // Single quotes and spaced-out `id = '...'` are valid HTML too.
+  const singleQuoteNextDataHtml = "<html><script id = '__NEXT_DATA__' type='application/json'>{\"props\":{\"pageProps\":{\"network\":{\"id\":9911}}}}</script></html>";
+  if (extractCollectionId(singleQuoteNextDataHtml) === '9911') pass('extractCollectionId() tolerates single-quoted / spaced id attribute');
+  else fail(`extractCollectionId() with single quotes returned ${JSON.stringify(extractCollectionId(singleQuoteNextDataHtml))}`);
+
   // fetch() auto-resolves collection_id from careers_url when getro_collection is absent.
   let fetchTextUrl = null;
   const autoJobs = await getro.fetch({ name: 'Auto Fund', careers_url: 'https://careers.examplevc.example/jobs' }, {

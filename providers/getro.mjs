@@ -120,9 +120,9 @@ function resolveCareersUrl(entry) {
 export function extractCollectionId(html) {
   if (typeof html !== 'string') return null;
   // Match on the id attribute alone — tolerates attribute reordering, extra
-  // attributes (e.g. a CSP nonce), and whitespace variations Next.js may emit,
-  // instead of requiring an exact `id="..." type="..."` sequence.
-  const m = html.match(/<script\b[^>]*\bid="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  // attributes (e.g. a CSP nonce), whitespace around `=`, and either quote
+  // style, instead of requiring an exact `id="..." type="..."` sequence.
+  const m = html.match(/<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
   if (!m) return null;
   let data;
   try {
