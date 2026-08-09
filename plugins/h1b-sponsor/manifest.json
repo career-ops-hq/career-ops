@@ -1,0 +1,15 @@
+{
+  "id": "h1b-sponsor",
+  "apiVersion": 1,
+  "name": "H-1B Sponsor Check",
+  "description": "US DOL H-1B/PERM sponsorship history per employer via api.surakshith.com",
+  "version": "0.1.0",
+  "homepage": "https://github.com/msampath/h1b-sponsor-data",
+  "humanInTheLoop": true,
+  "hooks": ["ingest"],
+  "requiredEnv": [],
+  "optionalEnv": ["H1B_API_TOKEN"],
+  "allowedHosts": ["api.surakshith.com"],
+  "entry": "index.mjs",
+  "skill": "skill.md"
+}
