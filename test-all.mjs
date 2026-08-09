@@ -699,6 +699,22 @@ try {
     const cvWdLive = await checkLivenessViaApi(wdUrl);
     globalThis.fetch = async () => ({ status: 404 });
     const cvWdGone = await checkLivenessViaApi(wdUrl);
+    // Lever: unlike Greenhouse/Workday, a 404 on the public postings API is NOT
+    // authoritative proof of removal. Lever's Confidential/Internal Postings
+    // feature explicitly excludes some live postings from the public API while
+    // the direct jobs.lever.co page keeps serving them (real-world repro:
+    // Simbe Robotics and Enable postings, 2026-08-09 — api.lever.co 404s, the
+    // live page renders the real title with a working Apply control). So a
+    // Lever 404/410 must fall through to Playwright (null), not conclude
+    // expired outright, the same "let the browser decide" treatment other
+    // ambiguous cases already get.
+    const lvUrl = 'https://jobs.lever.co/acme/abc-123-def';
+    globalThis.fetch = async () => ({ status: 200 });
+    const cvLvLive = await checkLivenessViaApi(lvUrl);
+    globalThis.fetch = async () => ({ status: 404 });
+    const cvLvGone = await checkLivenessViaApi(lvUrl);
+    globalThis.fetch = async () => ({ status: 410 });
+    const cvLvGone410 = await checkLivenessViaApi(lvUrl);
     if (cvAshbyLive?.result === 'active' && cvAshbyLive?.code === 'ashby_api_ok'
         && cvAshbyGone?.result === 'expired' && cvAshbyGone?.code === 'ashby_api_unlisted'
         && cvAshbyMalformed === null
@@ -710,6 +726,13 @@ try {
       pass('checkLivenessViaApi: 200→interpret (Ashby), malformed→null, greenhouse/workday 200→active, 404→expired, fetch error→null');
     } else {
       fail(`checkLivenessViaApi wrong: ashbyLive=${JSON.stringify(cvAshbyLive)} ashbyGone=${JSON.stringify(cvAshbyGone)} malformed=${JSON.stringify(cvAshbyMalformed)} ghLive=${JSON.stringify(cvGhLive)} gone=${JSON.stringify(cvGone)} err=${JSON.stringify(cvErr)} wdLive=${JSON.stringify(cvWdLive)} wdGone=${JSON.stringify(cvWdGone)}`);
+    }
+    if (cvLvLive?.result === 'active' && cvLvLive?.code === 'lever_api_ok'
+        && cvLvGone === null
+        && cvLvGone410 === null) {
+      pass('checkLivenessViaApi: Lever 200→active, 404/410→null (inconclusive, unlike Greenhouse/Workday — Confidential Postings can 404 on the public API while still live)');
+    } else {
+      fail(`checkLivenessViaApi (Lever) wrong: live=${JSON.stringify(cvLvLive)} gone404=${JSON.stringify(cvLvGone)} gone410=${JSON.stringify(cvLvGone410)}`);
     }
   } finally {
     globalThis.fetch = origFetch;
