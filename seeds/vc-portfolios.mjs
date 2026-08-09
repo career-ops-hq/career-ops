@@ -35,6 +35,15 @@ export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops-seeds/1.0)';
 
+// Runaway guard for the YC pagination walk, NOT the stop condition: the walk
+// normally ends at the API's own `totalPages` (246 as of Aug 2026, 25 per page).
+// It exists only for the case where the API stops reporting pagination metadata
+// at all. Sized well clear of the real total on purpose - a ceiling that sits
+// close to today's page count stops being a guard and becomes a silent truncation
+// the day the catalogue grows past it, which is the exact failure this file was
+// fixed for.
+const YC_MAX_PAGES = 500;
+
 /**
  * YC public company API.
  * Returns paginated JSON with company objects including name, slug, website.
@@ -307,14 +316,14 @@ export function toPortalEntry(company) {
  * Fetch the Y Combinator public company list and return parsed SeedCompany entries.
  *
  * Uses the public YC API (no auth, no API key). The response is a JSON object
- * with a `companies` array. We fetch page 1 with a large per_page to get the
- * most recent batch; subsequent pages can be fetched if needed (most users want
- * the latest batch anyway).
+ * with a `companies` array plus `page`/`totalPages` pagination fields. The API
+ * caps page size server-side (~30/page; `per_page` is ignored), so the whole
+ * portfolio is walked page by page up to `maxPages`, newest batches first.
  *
  * @param {{ timeoutMs?: number, maxPages?: number }} [opts]
  * @returns {Promise<SeedCompany[]>}
  */
-export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = 3 } = {}) {
+export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = YC_MAX_PAGES } = {}) {
   /** @type {SeedCompany[]} */
   const all = [];
   const seen = new Set();
@@ -340,10 +349,11 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
       }
     }
 
-    // The YC API pagination: stop when we receive fewer than 1000 companies.
+    // The API caps page size server-side (~30/page; per_page is ignored) and
+    // reports totalPages — follow its signal instead of guessing from batch size.
     const raw = /** @type {any} */ (payload);
-    const batchSize = Array.isArray(raw?.companies) ? raw.companies.length : 0;
-    if (batchSize < 1000) break;
+    const totalPages = Number.isInteger(raw?.totalPages) ? raw.totalPages : page;
+    if (page >= totalPages) break;
   }
 
   return all;

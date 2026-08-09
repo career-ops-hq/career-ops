@@ -114,3 +114,4 @@ public commit with a stated reason.
 - @namnhatpham1995 | 2026-08-07 | "thank you for a great project, I really love career-ops" | id:50907520 | src:https://github.com/santifer/career-ops/discussions/2571 | n:66
 - @Andrei-WongE | Andrei-WongE | 2026-08-07 | id:44266405 | src:https://github.com/santifer/career-ops/discussions/2574 | n:67
 - @alexkons | Alekons | 2026-08-07 | id:22054290 | src:https://github.com/santifer/career-ops/discussions/2578 | n:68
+- @raghavrallan | Raghav Rallan | 2026-08-08 | id:168067295 | src:https://github.com/santifer/career-ops/discussions/2622 | n:69

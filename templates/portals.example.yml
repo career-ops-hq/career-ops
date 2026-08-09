@@ -1934,6 +1934,50 @@ job_boards:
   #   cat_id: 68
   #   enabled: true
 
+  # ── Getro — VC portfolio "talent network" boards ───────────────────
+  # One board aggregates jobs across a fund's portfolio companies (each job
+  # belongs to the portfolio company, not the fund). Set `getro_collection` to
+  # the board's numeric network id (the `network.id` in the board page's
+  # __NEXT_DATA__). `careers_url` is reference-only. Optional knobs:
+  # `getro_max_pages` (default 40), `getro_max_age_days` (default 90, a
+  # pagination bound — newest-first, stops once postings cross the age).
+
+  - name: b2venture (portfolio)
+    careers_url: https://jobs.b2venture.vc
+    provider: getro
+    getro_collection: 4283
+    enabled: false
+    notes: "Swiss VC portfolio board (Getro)"
+
+  - name: Cherry Ventures (portfolio)
+    careers_url: https://jobs.cherry.vc
+    provider: getro
+    getro_collection: 44081
+    enabled: false
+    notes: "VC portfolio board (Getro)"
+
+  # ── Consider (getconsider.com) — VC portfolio boards ───────────────
+  # JS board backed by a same-origin JSON API. Set `consider_board` to the
+  # board id — NOT the host (Founderful's board id is "wingman"). `careers_url`
+  # supplies the board origin. Optional: `consider_size` (default 500).
+
+  - name: Founderful (portfolio)
+    careers_url: https://jobs.founderful.com/jobs
+    provider: consider
+    consider_board: wingman
+    enabled: false
+    notes: "Swiss VC portfolio board (Consider)"
+
+  # ── Swiss startup job boards ───────────────────────────────────────
+  # Aggregators of Swiss startup roles. No extra config — auto-detected from
+  # the careers_url host.
+
+
+  - name: joinup.ch
+    careers_url: https://joinup.ch/browse/jobs
+    provider: joinup
+    enabled: false
+    notes: "Swiss startup job platform (newest SSR page)"
   # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
   # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
   # listings. The feed URL is hardcoded in the provider — no careers_url
