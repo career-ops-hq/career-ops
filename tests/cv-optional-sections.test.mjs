@@ -64,7 +64,7 @@ function check(label, actual, expected) {
 const TEMPLATES = [
   { file: 'templates/cv-template.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
   { file: 'templates/resume-template.html', format: 'html', after: '<!-- END -->', hasCertifications: false, hasCompetencies: true },
-  { file: 'templates/cv-template.tex', format: 'tex', after: '%%  END  %%', hasCertifications: false, hasCompetencies: false },
+  { file: 'templates/cv-template.tex', format: 'tex', after: '%%%%  END  %%%%', hasCertifications: false, hasCompetencies: false },
 ];
 
 for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLATES) {
@@ -176,9 +176,10 @@ for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLA
   // valid (cv-templates.mjs requires only NAME/EXPERIENCE/EDUCATION). Strip
   // the sentinel from a real shipped template and the empty-skills strip must
   // become a NO-OP — bare header, intact document — never a truncated tail.
-  const sentinelToken = format === 'html' ? '<!-- END -->' : '%%%%  END  %%%%';
-  const noSentinel = template.replace(sentinelToken, '');
-  check(`${name}: fixture actually dropped the sentinel`, noSentinel.includes(sentinelToken), false);
+  // `after` IS the sentinel literal — reuse it rather than restating it here,
+  // so the two can never drift into a weaker substring of each other.
+  const noSentinel = template.replace(after, '');
+  check(`${name}: fixture actually dropped the sentinel`, noSentinel.includes(after), false);
   const strippedNoSentinel = stripEmptySections(noSentinel, { ...FULL, skills: [] }, format);
   check(`${name}: no sentinel + empty skills leaves the template untouched (fail-safe)`,
     strippedNoSentinel === noSentinel, true);
