@@ -9,6 +9,7 @@
  *      node followup-cadence.mjs --summary   (human-readable dashboard)
  *      node followup-cadence.mjs --overdue-only
  *      node followup-cadence.mjs --applied-days 10
+ *      node followup-cadence.mjs --help       (print usage and exit)
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -31,6 +32,22 @@ const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
 const appliedDaysIdx = args.indexOf('--applied-days');
 const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
+
+const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+const USAGE = `Usage:
+  node followup-cadence.mjs                 # JSON for active applications
+  node followup-cadence.mjs --summary       # human-readable dashboard
+  node followup-cadence.mjs --overdue-only  # show only overdue applications
+  node followup-cadence.mjs --applied-days 10 # override the first follow-up interval
+  node followup-cadence.mjs --help          # print this usage block and exit
+  Supported flags: ${KNOWN_FLAGS.join(', ')}`;
+
+// Keep help side-effect free: resolveCadenceConfig() reads the profile file,
+// so this branch must run before the module-level cadence is loaded.
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {

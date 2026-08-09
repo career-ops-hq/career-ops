@@ -9,6 +9,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
@@ -54,6 +55,19 @@ function eq(label, actual, expected) {
     console.log(`    actual:   ${a}`);
   }
 }
+
+const helpOutput = execFileSync(process.execPath, [join(ROOT, 'followup-cadence.mjs'), '--help'], {
+  encoding: 'utf-8',
+});
+eq(
+  '--help prints usage without reading application data',
+  helpOutput.includes('Usage:') &&
+    helpOutput.includes('--summary') &&
+    helpOutput.includes('--overdue-only') &&
+    helpOutput.includes('--applied-days') &&
+    helpOutput.includes('--help'),
+  true,
+);
 
 const APP = '2026-06-30';
 
