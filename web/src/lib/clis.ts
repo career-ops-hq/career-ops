@@ -63,6 +63,7 @@ export const KNOWN: CliSpec[] = [
   { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
+  { id: "kimi", name: "Kimi Code CLI", bin: "kimi", run: "kimi -p", url: "https://www.kimi.com/code/docs/en/", args: (p) => ["-p", p] },
   { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
   { id: "pi", name: "Pi", bin: "pi", run: "pi -p", url: "https://github.com/earendil-works/pi", args: (p) => ["--no-session", "-p", p] },
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
@@ -77,7 +78,7 @@ export const KNOWN: CliSpec[] = [
   { id: "omp", name: "Oh My Pi", bin: "omp", run: "omp -p", url: "https://github.com/can1357/oh-my-pi", args: (p) => ["-p", p] },
 ];
 
-function searchDirs(): string[] {
+export function searchDirs(): string[] {
   const home = os.homedir();
   const extra = [
     path.join(home, ".local/bin"),
@@ -85,6 +86,7 @@ function searchDirs(): string[] {
     path.join(home, ".npm-global/bin"),
     path.join(home, ".bun/bin"),
     path.join(home, ".deno/bin"),
+    path.join(home, ".kimi-code/bin"),
     path.join(home, ".opencode/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
