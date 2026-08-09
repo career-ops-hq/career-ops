@@ -52,16 +52,27 @@ try {
   // without this pass a missing alias here (e.g. dropping 'evaluada' from
   // states.yml) would sail through the test undetected.
   const LIST_RULE_RE = /\[((?:'[^']*'|"[^"]*")(?:\s*,\s*(?:'[^']*'|"[^"]*"))*)\]\.includes\(lower\)\)\s*return\s*\{\s*status:\s*'([^']+)'/g;
+  const fromListRules = [];
   for (const m of src.matchAll(LIST_RULE_RE)) {
     for (const lit of m[1].matchAll(/'([^']*)'|"([^"]*)"/g)) {
       const a = (lit[1] ?? lit[2] ?? '').trim();
-      if (a) extracted.push({ alias: a, expected: m[2] });
+      if (a) fromListRules.push({ alias: a, expected: m[2] });
     }
   }
+  extracted.push(...fromListRules);
 
-  extracted.length > 0
-    ? pass(`extracted ${extracted.length} plain alias rule(s) from normalize-statuses.mjs`)
-    : fail("extracted no alias rules — this guard's parser no longer matches normalize-statuses.mjs and is checking nothing");
+  // Each extractor is asserted separately on purpose. A combined
+  // `extracted.length > 0` passes on the regex arm alone, so if
+  // normalize-statuses.mjs reshapes its list rules and LIST_RULE_RE stops
+  // matching, that arm silently checks nothing while the test stays green —
+  // exactly the kind of quiet drift this file exists to catch.
+  extracted.length > fromListRules.length
+    ? pass(`extracted ${extracted.length - fromListRules.length} anchored alias rule(s) from normalize-statuses.mjs`)
+    : fail("extracted no anchored alias rules — RULE_RE no longer matches normalize-statuses.mjs and is checking nothing");
+
+  fromListRules.length > 0
+    ? pass(`extracted ${fromListRules.length} list-membership alias rule(s) from normalize-statuses.mjs`)
+    : fail("extracted no list-membership alias rules — LIST_RULE_RE no longer matches normalize-statuses.mjs and is checking nothing");
 
   const orphans = extracted.filter(({ alias, expected }) => {
     const resolved = resolveCanonicalState(alias, states);
