@@ -515,16 +515,28 @@ function gitTimeoutEnvVar(args) {
   return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
 }
 
-export function gitIn(root, ...args) {
+/**
+ * gitIn without the trailing/leading trim.
+ *
+ * Needed for output where whitespace is significant: `--name-only -z` emits
+ * NUL-delimited paths, and a path may legitimately begin or end with a space.
+ * Trimming the whole buffer would rewrite such a path into a different one.
+ * Everything else should keep using gitIn.
+ */
+export function gitRawIn(root, ...args) {
   const timeout = gitTimeoutMs(args);
   try {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
+    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout });
   } catch (err) {
     if (isTimeoutLikeError(err)) {
       throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
     }
     throw err;
   }
+}
+
+export function gitIn(root, ...args) {
+  return gitRawIn(root, ...args).trim();
 }
 
 function git(...args) {
@@ -903,12 +915,21 @@ function addPaths(paths) {
  * driven against a throwaway repo, matching removeAdditionsNotInHead and
  * tests/updater-rollback-behavior.test.mjs.
  *
+ * Takes a RAW git runner — one that does not trim — because a path may
+ * legitimately begin or end with a space and trimming would rewrite it.
+ *
  * @param {string[]} owned
- * @param {(...args: string[]) => string} [run] git runner; defaults to ROOT
+ * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
  * @returns {string[]} staged paths outside `owned` (empty ⇒ safe to commit the index)
  */
-export function stagedPathsOutside(owned, run = git) {
-  const staged = run('diff', '--cached', '--name-only');
+export function stagedPathsOutside(owned, run = (...args) => gitRawIn(ROOT, ...args)) {
+  // -z, and no trimming. Without it git quotes any path holding a space, quote
+  // or newline, and trimming would additionally rewrite a legitimate name: a
+  // staged ` scan.mjs` (leading space) becomes `scan.mjs`, matches an owned
+  // entry, and is silently treated as the update's own file — sweeping a user's
+  // work into the commit, which is the exact #915 bug 2 regression this guard
+  // exists to prevent. NUL-delimited output is unambiguous and unquoted.
+  const staged = run('diff', '--cached', '--name-only', '-z');
   if (!staged) return [];
 
   const files = new Set();
@@ -918,9 +939,8 @@ export function stagedPathsOutside(owned, run = git) {
     else files.add(entry);
   }
 
-  return staged.split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
+  return staged.split('\0')
+    .filter(path => path !== '')
     .filter(path => !files.has(path) && !dirs.some(dir => path.startsWith(dir)));
 }
 
@@ -1394,6 +1414,10 @@ async function apply() {
       pathsToStage.push('.update-dismissed');
     }
 
+    // Which commit form was used, so the failure path can suggest the matching
+    // recovery command. Declared outside the try because the catch reads it.
+    let usedIndexCommit = false;
+
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
       addPaths(pathsToStage);
@@ -1417,7 +1441,8 @@ async function apply() {
       // staged. Content is committed identically either way; only the mode bits
       // ride on the index-based path.
       const unrelated = stagedPathsOutside([...pathsToStage, ...materializedSkillEntrypoints]);
-      if (unrelated.length === 0) {
+      usedIndexCommit = unrelated.length === 0;
+      if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
       } else {
         git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
@@ -1436,11 +1461,18 @@ async function apply() {
       if (commitFailed) {
         const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
         const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
+        // Print the command matching the path actually taken. Suggesting the
+        // pathspec form after the index form was selected would tell the user to
+        // run the very thing that drops the staged mode bits — a recovery step
+        // that quietly reintroduces the bug it is recovering from.
+        const recovery = usedIndexCommit
+          ? `git commit -m "chore: auto-update system files to v${remote}"`
+          : `git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`;
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
           `    Please run manually to finish the update:\n` +
-          `    git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`
+          `    ${recovery}`
         );
       }
       // Otherwise, genuinely nothing to commit (already up to date)

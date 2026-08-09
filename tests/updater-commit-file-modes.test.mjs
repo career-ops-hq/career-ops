@@ -21,7 +21,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, stagedPathsOutside } from '../update-system.mjs';
+import { gitIn, gitRawIn, stagedPathsOutside } from '../update-system.mjs';
 
 // A throwaway repo pinned to core.fileMode=false, which is what makes the bug
 // reachable. On a filesystem that records the executable bit this setting is what
@@ -34,7 +34,10 @@ function makeRepo() {
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'core.fileMode', 'false');
-  return { dir, g };
+  // stagedPathsOutside needs the RAW runner: gitIn trims, which would strip a
+  // leading space off a path and defeat the very case test 8 pins.
+  const raw = (...args) => gitRawIn(dir, ...args);
+  return { dir, g, raw };
 }
 
 const modeOf = (g, ref, path) => g('ls-tree', ref, '--', path).split(/\s+/)[0];
@@ -42,7 +45,7 @@ const modeOf = (g, ref, path) => g('ls-tree', ref, '--', path).split(/\s+/)[0];
 // Commit a file, then stage the executable bit the way `git checkout
 // FETCH_HEAD -- <path>` does during an update: index only, working tree untouched.
 function repoWithStagedModeBump(name) {
-  const { dir, g } = makeRepo();
+  const { dir, g, raw } = makeRepo();
   writeFileSync(join(dir, name), 'console.log(1)\n');
   g('add', name);
   g('commit', '-qm', 'base');
@@ -100,7 +103,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
 
 // ── 4-7. stagedPathsOutside: the guard that keeps #915 bug 2 fixed ─────
 {
-  const { dir, g } = makeRepo();
+  const { dir, g, raw } = makeRepo();
   mkdirSync(join(dir, 'providers'));
   writeFileSync(join(dir, 'providers/acme.mjs'), 'x\n');
   writeFileSync(join(dir, 'scan.mjs'), 'x\n');
@@ -113,11 +116,11 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   writeFileSync(join(dir, 'scan.mjs'), 'updated\n');
   g('add', 'providers/acme.mjs', 'scan.mjs');
 
-  const clean = stagedPathsOutside(['providers/', 'scan.mjs'], g);
+  const clean = stagedPathsOutside(['providers/', 'scan.mjs'], raw);
   if (clean.length === 0) pass('stagedPathsOutside: update-owned paths only → safe to commit the index');
   else fail(`expected none outside, got [${clean}]`);
 
-  const dirCovered = stagedPathsOutside(['providers/'], g);
+  const dirCovered = stagedPathsOutside(['providers/'], raw);
   if (dirCovered.length === 1 && dirCovered[0] === 'scan.mjs') {
     pass('stagedPathsOutside: a directory entry covers files beneath it');
   } else {
@@ -129,7 +132,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   writeFileSync(join(dir, 'cv.md'), 'user edit\n');
   g('add', 'cv.md');
 
-  const withUser = stagedPathsOutside(['providers/', 'scan.mjs'], g);
+  const withUser = stagedPathsOutside(['providers/', 'scan.mjs'], raw);
   if (withUser.includes('cv.md')) {
     pass('stagedPathsOutside: an unrelated staged file is reported, forcing the scoped commit');
   } else {
@@ -139,14 +142,37 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 8. Nothing staged at all ───────────────────────────────────────────
+// ── 8. Path names are preserved exactly (raised in PR review) ──────────
+// A staged path with a leading space must NOT be normalised into a different
+// one. Trimming would turn ` scan.mjs` into `scan.mjs`, match the owned entry,
+// and silently sweep a user's file into the update commit — #915 bug 2
+// reintroduced through the guard that exists to preserve it.
 {
-  const { dir, g } = makeRepo();
+  const { dir, g, raw } = makeRepo();
+  writeFileSync(join(dir, 'scan.mjs'), 'x\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  writeFileSync(join(dir, ' scan.mjs'), 'user file, leading space\n');
+  g('add', '--', ' scan.mjs');
+
+  const outside = stagedPathsOutside(['scan.mjs'], raw);
+  if (outside.includes(' scan.mjs')) {
+    pass('stagedPathsOutside: a leading-space path is not normalised into an owned one');
+  } else {
+    fail(`leading-space path mangled or matched; got ${JSON.stringify(outside)}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 9. Nothing staged at all ───────────────────────────────────────────
+{
+  const { dir, g, raw } = makeRepo();
   writeFileSync(join(dir, 'a.mjs'), 'x\n');
   g('add', '-A');
   g('commit', '-qm', 'base');
 
-  if (stagedPathsOutside(['a.mjs'], g).length === 0) {
+  if (stagedPathsOutside(['a.mjs'], raw).length === 0) {
     pass('stagedPathsOutside: empty index → nothing outside');
   } else {
     fail('empty index should report nothing outside');
