@@ -179,9 +179,10 @@ export async function resolveEmployer(name, opts = {}) {
   return { id: String(match.id), displayName: String(match.name || q) };
 }
 
-// Number(null) === 0, so a null field would otherwise look like a real zero.
+// Number(null) === 0 and Number(' ') === 0, so a null or blank field would
+// otherwise look like a real zero.
 function num(v) {
-  if (v === null || v === undefined || v === '') return null;
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

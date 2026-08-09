@@ -47,10 +47,12 @@ Placeholder rules:
 - `{n_lca}`: LCA count, integer from `totals.n_lca`. This is the certified count where the API provides one, else the total filing count.
 - `{n_pwd}`: PWD (prevailing wage determination) count, integer from `totals.n_pwd`.
 - `{n_perm}`: PERM approval count, integer from `totals.n_perm`.
-- `{first_year}` / `{last_year}`: window years from `totals`.
+- `{first_year}` / `{last_year}`: window years from `totals`. A `none` result has no filings, so either year can be null; write `not reported` for a null year. Never print `null`.
 - `{share}`: secondary-entity share from `redFlags.staffing_shop.share`. Use `0` when `redFlags.staffing_shop` is null, or when its `share` property is null or not a number. Otherwise print the 0-1 fraction as-is (e.g. `0.87`). Never print `null`.
 
 When to skip the bullet: `friendlinessTier == "unknown"`, or the CLI exited non-zero. In that case, do not add the bullet at all.
+
+This check adds one bullet to a report in progress. It changes nothing else about the evaluation workflow: the host mode's tracker rules still apply as written, including running `node merge-tracker.mjs` after each batch of evaluations.
 
 ## Non-scoring note
 
