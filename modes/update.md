@@ -8,6 +8,7 @@ Run `node update-system.mjs check` and parse the JSON output.
 
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop.
+- If `no-remote-version`: Tell the user "Reached the update source, but couldn't find a career-ops release version to compare against. Try again later." and stop; if the JSON carries a `detail` field, show it — it says which sources failed and why. (Emitted when a source responds but yields no usable version — e.g. an unparseable VERSION file, or a git probe that reaches the remote and finds no `career-ops-v*` tag.)
 - If `dismissed`: Tell the user "Update check was previously dismissed. Clearing the dismissal and re-checking now." Remove `.update-dismissed`, then re-run `node update-system.mjs check` and branch on the new status.
 - If `update-available`: Continue to Step 2.
 

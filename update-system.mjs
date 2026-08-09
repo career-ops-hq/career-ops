@@ -915,8 +915,8 @@ function rebuildDashboardBinaryIfNeeded() {
 // before the first interaction — on exactly the networks that are already
 // misbehaving (captive portals, black-hole egress that hangs rather than
 // refuses). The two curl legs run in parallel (one wall-clock leg) and the
-// git probe runs after them, so worst case ≈ CHECK_CURL_MAX_TIME_S +
-// CHECK_GIT_PROBE_TIMEOUT_MS ≈ 10s — the same ceiling the check had before
+// git probe runs after them, so worst case = max(CHECK_CURL_MAX_TIME_S, its
+// +1s JS backstop) + CHECK_GIT_PROBE_TIMEOUT_MS ≤ 11s — ≈ the ceiling before
 // the git fallback existed. Healthy networks never come near either cap.
 const CHECK_CURL_MAX_TIME_S = 5;
 const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;

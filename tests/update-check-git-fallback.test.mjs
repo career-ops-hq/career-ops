@@ -194,14 +194,21 @@ console.log('\n🧪 Testing update-check git fallback...');
   // AGENTS.md runs check() at session start; its worst case is dead time
   // before the user's first interaction. The curl legs run in parallel and
   // chain into the git probe, so the two constants below bound the whole
-  // check: their sum must stay ≈10s (the pre-fallback ceiling). A raised
+  // check: the three terms (parallel curl legs, +1s JS backstop, git probe)
+  // must stay ≤11s wall clock — ≈ the pre-fallback ceiling. A raised
   // budget here is a session-start regression on captive-portal networks.
   const curlBudget = src.match(/const CHECK_CURL_MAX_TIME_S = (\d+);/);
   const gitBudget = src.match(/const CHECK_GIT_PROBE_TIMEOUT_MS = (\d+);/);
-  if (curlBudget && gitBudget && Number(curlBudget[1]) + Number(gitBudget[1]) / 1000 <= 11) {
-    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + ${Number(gitBudget[1]) / 1000}s git probe ≤ 11s`);
+  // Worst case sums ALL three timeout terms: curl --max-time (parallel legs =
+  // one wall-clock leg), curl's +1s JS execFile backstop (fires only when a
+  // hung curl ignores --max-time), and the git probe.
+  const worstCaseS = curlBudget && gitBudget
+    ? Number(curlBudget[1]) + 1 + Number(gitBudget[1]) / 1000
+    : Infinity;
+  if (worstCaseS <= 11) {
+    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + 1s JS backstop + ${Number(gitBudget[1]) / 1000}s git probe = ${worstCaseS}s ≤ 11s`);
   } else {
-    fail('check() latency budget exceeded — curl + git probe worst case must stay ≈10s (session-start dead time)');
+    fail('check() latency budget exceeded — curl + JS backstop + git probe worst case must stay ≤11s (session-start dead time)');
   }
 
   if (/--max-time', String\(CHECK_CURL_MAX_TIME_S\)/.test(src)
