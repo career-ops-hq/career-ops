@@ -346,9 +346,11 @@ export function computeResponsiveness(rows, followupCountsByAppNum, opts = {}) {
         stale: silentDays > staleAfterDays,
         dateBasis,
         // Real set-status.mjs syntax (it rejects unknown flags, so the
-        // instruction must only use flags that exist): the response date is
-        // recorded through --note, which appends idempotently.
-        clearInstruction: `if they actually responded, node set-status.mjs ${row.num} <state> --note "responded <date>" clears this`,
+        // instruction must only use flags that exist): --on records the real
+        // response date in the status ledger — the same file this module and
+        // funnel-velocity.mjs read dates back from. A date buried in --note
+        // free text is parsed by nothing.
+        clearInstruction: `if they actually responded, node set-status.mjs ${row.num} <state> --on <response-date> clears this`,
       });
     } else if (RESPONDED_STATUSES.has(normalized)) {
       // row.date is the EVALUATION date, not the date the company replied. Use
@@ -530,7 +532,7 @@ export function renderSummary(result) {
 
   const aged = result.hygiene?.agedApplied || [];
   if (aged.length > 0) {
-    lines.push(`  ${aged.length} aged-Applied row(s) look silent — confirm real or update (node set-status.mjs <num> <state> --note "responded <date>").`);
+    lines.push(`  ${aged.length} aged-Applied row(s) look silent — confirm real or update (node set-status.mjs <num> <state> --on <response-date>).`);
     lines.push('');
   }
 
@@ -812,12 +814,13 @@ async function runSelfTest() {
     check(!/ghost/i.test(output), 'rendered summary never contains the word "ghost"');
   }
 
-  // --- every silent fact has date + clearInstruction containing "set-status" ---
+  // --- every silent fact has date + clearInstruction with real set-status syntax ---
   {
     const result = computeResponsiveness([row(120, 'ClearCo', 'Applied', '2026-01-01')], new Map(), { now: NOW, silenceWindowDays: 28 });
     const fact = result.facts[0];
     check(!!fact.appliedDate, 'silent fact carries an appliedDate');
     check(typeof fact.clearInstruction === 'string' && fact.clearInstruction.includes('set-status'), 'silent fact clearInstruction references set-status.mjs');
+    check(fact.clearInstruction.includes('--on'), 'silent fact clearInstruction records the response date via --on (the ledger this module reads), not --note free text');
   }
 
   console.log(`\n  company-history self-test: ${pass} passed, ${fail} failed\n`);
