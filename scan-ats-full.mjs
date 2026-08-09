@@ -972,7 +972,7 @@ async function main() {
       writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
     }
     await appendToPipeline(offers);
-    appendToScanHistory(offers, date);
+    await appendToScanHistory(offers, date);
     saved = true;
     log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);
 

@@ -1800,25 +1800,36 @@ export async function appendToPipeline(offers) {
   });
 }
 
-export function appendToScanHistory(offers, date, status = 'added') {
-  // Ensure file + header exist. The header names every column the row writer
-  // (formatScanHistoryRow) emits, in the same order: the original 7 positional
-  // cols (url…location) plus the append-only trailing cols added since —
-  // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-  // normalized_company (11). Written ONLY on fresh-file creation; existing files
-  // (including headerless legacy files and older 7-col-header files) are never
-  // rewritten. All readers either skip line 0 unconditionally, detect the header
-  // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
-  // backward-compatible. `status` is parameterized so callers can record verify
-  // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
-  if (!existsSync(SCAN_HISTORY_PATH)) {
-    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
-  }
+// data/scan-history.tsv has exactly the same set of concurrent writers as
+// data/pipeline.md — scan.mjs, scan-ats-full.mjs, scan-interamt.mjs and
+// plugins.mjs — so it takes the same lock appendToPipeline does, on its own
+// path. Unlocked, two writers race in two places: the create branch below is a
+// check-then-write, and its writeFileSync truncates, so a scanner that loses
+// the race erases rows the winner already appended; and a multi-row
+// appendFileSync is not atomic, so a concurrent append can interleave mid-line.
+// Both surface as rows that silently stop counting, because every reader skips
+// a malformed line quietly.
+export async function appendToScanHistory(offers, date, status = 'added') {
+  await withPipelineLock(SCAN_HISTORY_PATH, () => {
+    // Ensure file + header exist. The header names every column the row writer
+    // (formatScanHistoryRow) emits, in the same order: the original 7 positional
+    // cols (url…location) plus the append-only trailing cols added since —
+    // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
+    // normalized_company (11). Written ONLY on fresh-file creation; existing files
+    // (including headerless legacy files and older 7-col-header files) are never
+    // rewritten. All readers either skip line 0 unconditionally, detect the header
+    // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
+    // backward-compatible. `status` is parameterized so callers can record verify
+    // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
+    if (!existsSync(SCAN_HISTORY_PATH)) {
+      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
+      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
+    }
 
-  const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
+    const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-  appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+  });
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
@@ -2507,7 +2518,7 @@ async function main() {
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
-    appendToScanHistory(verifiedOffers, date);
+    await appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
@@ -2518,7 +2529,7 @@ async function main() {
       cooldownGroups[item.status].push(item.job);
     }
     for (const [status, group] of Object.entries(cooldownGroups)) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
   // Expired postings — plus the old URLs of migrated offers — are recorded as
@@ -2528,12 +2539,12 @@ async function main() {
     ...migratedOffers.map(o => ({ ...o, url: o.previousUrl })),
   ];
   if (!dryRun && expiredForHistory.length > 0) {
-    appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+    await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
   if (!dryRun && droppedOffers.length > 0) {
-    appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
@@ -2547,7 +2558,7 @@ async function main() {
       byStatus.get(status).push(o);
     }
     for (const [status, group] of byStatus) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
 
