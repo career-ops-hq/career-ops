@@ -387,7 +387,11 @@ export function computeRunStats(content) {
     });
   }
   if (rows.length === 0) return null;
-  const completed = rows.filter((r) => r.status !== 'failed');
+  // Inclusion by 'completed', not exclusion by known failure names: any
+  // status a future scan.mjs writes is excluded from trend averages until
+  // this aggregator learns what it means. Rows from pre-status files default
+  // to 'completed' above, so old data keeps counting.
+  const completed = rows.filter((r) => r.status === 'completed');
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
