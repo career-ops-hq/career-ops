@@ -27,8 +27,13 @@ export function classifyTier(profile) {
   const lowVolume = total < 5;
   if (stale || lowVolume) return 'weak';
 
-  const staffingShare = staffing && typeof staffing.share === 'number' ? staffing.share : null;
-  const recent = hasLastYear && lastYear >= currentYear - 2;
+  // Coerce share numerically: a legacy/hand-edited cache entry can carry the
+  // share as a string, and typeof-gating would silently read "0.9" as absent.
+  const shareNum = staffing ? Number(staffing.share) : NaN;
+  const staffingShare = Number.isFinite(shareNum) ? shareNum : null;
+  // Bounded above: a last_year further out than next year is API drift, not a
+  // recent filing record.
+  const recent = hasLastYear && lastYear >= currentYear - 2 && lastYear <= currentYear + 1;
 
   // Strong: has GC evidence, recent, staffing share < 0.2 (a missing
   // staffing_shop block or non-numeric share counts as 0, matching the

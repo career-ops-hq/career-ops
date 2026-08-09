@@ -35,7 +35,7 @@ If the CLI exits non-zero or `friendlinessTier` is `unknown`, treat the check as
 
 ## Block G Signal #3 bullet
 
-When the CLI returns a real tier (`strong`, `moderate`, `staffing-shop`, `weak`, or `none`), append this bullet verbatim to Block G Signal #3 "Company Hiring Signals" in the `oferta` report, with placeholders filled in from the `--json` output. The agent reads `friendlinessTier`, `totals.n_lca`, `totals.n_pwd`, `totals.n_perm`, `totals.first_year`, `totals.last_year`, and `redFlags.staffing_shop.share` (a 0-1 fraction; use `0` if `redFlags.staffing_shop` is null).
+When the CLI returns a real tier (`strong`, `moderate`, `staffing-shop`, `weak`, or `none`), append this bullet verbatim to Block G Signal #3 "Company Hiring Signals" in the `oferta` report, with placeholders filled in from the `--json` output. The agent reads `friendlinessTier`, `totals.n_lca`, `totals.n_pwd`, `totals.n_perm`, `totals.first_year`, `totals.last_year`, and `redFlags.staffing_shop.share` (a 0-1 fraction; see the `{share}` placeholder rule below for the cases that print `0`).
 
 ```markdown
 - H-1B sponsorship history (DOL public data, {first_year}-{last_year}): tier `{friendlinessTier}`. LCAs certified: {n_lca}. PWDs: {n_pwd}. PERM approvals: {n_perm}. Secondary-entity share: {share}. Source: plugins/h1b-sponsor via api.surakshith.com; see plugin README for tier definitions.
@@ -44,17 +44,17 @@ When the CLI returns a real tier (`strong`, `moderate`, `staffing-shop`, `weak`,
 Placeholder rules:
 
 - `{friendlinessTier}`: one of `strong`, `moderate`, `staffing-shop`, `weak`, `none`. Never `unknown` (skip the bullet).
-- `{n_lca}`: certified LCA count, integer from `totals.n_lca`.
+- `{n_lca}`: LCA count, integer from `totals.n_lca`. This is the certified count where the API provides one, else the total filing count.
 - `{n_pwd}`: PWD (prevailing wage determination) count, integer from `totals.n_pwd`.
 - `{n_perm}`: PERM approval count, integer from `totals.n_perm`.
 - `{first_year}` / `{last_year}`: window years from `totals`.
-- `{share}`: secondary-entity share from `redFlags.staffing_shop.share`, a 0-1 fraction printed as-is (e.g. `0.87`). If `redFlags.staffing_shop` is null, use `0`.
+- `{share}`: secondary-entity share from `redFlags.staffing_shop.share`. Use `0` when `redFlags.staffing_shop` is null, or when its `share` property is null or not a number. Otherwise print the 0-1 fraction as-is (e.g. `0.87`). Never print `null`.
 
 When to skip the bullet: `friendlinessTier == "unknown"`, or the CLI exited non-zero. In that case, do not add the bullet at all.
 
 ## Non-scoring note
 
-This bullet is evidentiary only. It does not shift the Block G legitimacy tier (High Confidence / Proceed with Caution / Suspicious), and it does not shift the 1-5 global score. See `modes/_shared.md:91`: Block G does not affect the 1-5 global score. The bullet exists to put the sponsorship fact into the report so the user has it when making the call.
+This bullet is evidentiary only. It does not shift the Block G legitimacy tier (High Confidence / Proceed with Caution / Suspicious), and it does not shift the 1-5 global score. Block G is non-scoring by design in career-ops; the shared evaluation rules state that outright. The bullet exists to put the sponsorship fact into the report so the user has it when making the call.
 
 ## Honesty rule
 

@@ -7,6 +7,7 @@ export const BASE = 'https://api.surakshith.com/immigration/v1';
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_WAIT_MS = 10_000;
+const MAX_REDIRECTS = 3;
 
 function buildHeaders(token) {
   const h = { 'Accept': 'application/json', 'User-Agent': USER_AGENT };
@@ -33,18 +34,37 @@ function sleep(ms) {
 async function fetchWithTimeout(url, headers, timeoutMs) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
+  const baseHost = new URL(BASE).host;
   try {
-    const res = await fetch(url, { headers, signal: controller.signal });
-    // Egress guard: global fetch follows redirects by default, so a
-    // compromised or misconfigured server could bounce the request (and its
-    // query string) to another host. Refuse any response that ended up
-    // off-host rather than trusting it.
-    if (res.url && new URL(res.url).host !== new URL(BASE).host) {
-      const e = new Error(`H-1B API redirected off-host: ${new URL(res.url).host}`);
-      e.code = 'REDIRECT_OFF_HOST';
-      throw e;
+    // Egress guard: redirects are followed manually so an off-host target is
+    // rejected BEFORE the request (and its query string) is issued to it.
+    // Letting fetch follow redirects itself would send the request first and
+    // only let us notice afterwards.
+    let requestUrl = url;
+    for (let hop = 0; ; hop++) {
+      const res = await fetch(requestUrl, { headers, signal: controller.signal, redirect: 'manual' });
+      if (res.status < 300 || res.status > 399) return res;
+
+      const loc = res.headers.get('location');
+      // A 3xx without a Location header is not actionable (e.g. 304) — hand it
+      // back to the caller unchanged.
+      if (!loc) return res;
+
+      const next = new URL(loc, requestUrl);
+      // Host AND scheme must match: an http:// downgrade on the same host
+      // would resend the Authorization header in cleartext.
+      if (next.host !== baseHost || next.protocol !== new URL(BASE).protocol) {
+        const e = new Error(`H-1B API redirected off-host: ${next.protocol}//${next.host}`);
+        e.code = 'REDIRECT_OFF_HOST';
+        throw e;
+      }
+      if (hop >= MAX_REDIRECTS) {
+        const e = new Error(`H-1B API exceeded ${MAX_REDIRECTS} redirects: ${url}`);
+        e.code = 'REDIRECT_LOOP';
+        throw e;
+      }
+      requestUrl = next.href;
     }
-    return res;
   } finally {
     clearTimeout(t);
   }
@@ -107,23 +127,29 @@ async function requestJson(url, opts, { allow404 } = {}) {
 }
 
 function normalize(str) {
-  return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+  return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 // Guard against the search endpoint's nearest-neighbour behavior: it returns
-// its closest hit even for garbage input, so a fallback (non-exact) match must
-// either contain the whole normalized query (or vice versa — covers short
-// names like "IBM" -> "IBM Corporation") or share at least one meaningful
-// token (>= 4 chars) with it. Otherwise we report no match rather than a
-// confidently wrong employer.
+// its closest hit even for garbage input. A fallback (non-exact) match is
+// accepted only when one name's token list is a prefix of the other's, token
+// for token: "IBM" matches "IBM Corporation", and "Microsoft Corporation"
+// matches "Microsoft", but "Meta" does not match "Metabolic Diagnostics Inc"
+// (substring tests did, which cached a confidently wrong employer for 90
+// days). No plausible candidate -> no match, and the CLI reports unknown.
 function plausibleMatch(query, candidateName) {
-  const nq = normalize(query);
-  const nc = normalize(candidateName);
-  if (!nq || !nc) return false;
-  if (nc.includes(nq) || nq.includes(nc)) return true;
-  const tokens = s => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 4);
-  const cand = new Set(tokens(candidateName));
-  return tokens(query).some(t => cand.has(t));
+  // A leading "the" is brand styling, not identity ("Home Depot" must match
+  // "The Home Depot Inc"), so it never participates in the prefix test.
+  const tokens = s => {
+    const t = String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    return t[0] === 'the' ? t.slice(1) : t;
+  };
+  const q = tokens(query);
+  const c = tokens(candidateName);
+  if (q.length === 0 || c.length === 0) return false;
+  const isPrefix = (shorter, longer) =>
+    shorter.length <= longer.length && shorter.every((t, i) => t === longer[i]);
+  return isPrefix(q, c) || isPrefix(c, q);
 }
 
 function pickBestMatch(name, results) {
@@ -153,9 +179,15 @@ export async function resolveEmployer(name, opts = {}) {
   return { id: String(match.id), displayName: String(match.name || q) };
 }
 
+// Number(null) === 0, so a null field would otherwise look like a real zero.
+function num(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Normalizes the nested API envelope into the flat shape that tier.mjs and
-// check.mjs expect. Keeps the untouched upstream payload under _raw so no
-// data is thrown away. Missing fields stay null / 0 -- never invented.
+// check.mjs expect. Missing fields stay null / 0 -- never invented.
 function normalizeProfile(raw) {
   if (raw == null || typeof raw !== 'object') return raw;
   const employer = (raw.employer && typeof raw.employer === 'object') ? raw.employer : {};
@@ -167,30 +199,33 @@ function normalizeProfile(raw) {
     ? redFlagsRaw.staffing_shop
     : null;
 
-  const nPwd = Number(gc.pwd);
-  const nPerm = Number(gc.perm);
+  const nPwd = num(gc.pwd);
+  const nPerm = num(gc.perm);
   const evidence = gc.evidence;
   // does_gc: true when the API reports green-card evidence 'present', or when
   // any GC filings exist (pwd/perm > 0). Anything else is false, not null,
   // because tier.mjs compares strictly against `=== true`.
   const doesGc = evidence === 'present'
-    || (Number.isFinite(nPwd) && nPwd > 0)
-    || (Number.isFinite(nPerm) && nPerm > 0);
+    || (nPwd !== null && nPwd > 0)
+    || (nPerm !== null && nPerm > 0);
 
-  const firstYear = Number.isFinite(Number(years.first)) ? Number(years.first) : null;
-  const lastYear = Number.isFinite(Number(years.last)) ? Number(years.last) : null;
+  // A missing/null year stays null — it must never collapse to year 0.
+  const firstYear = num(years.first);
+  const lastYear = num(years.last);
 
   // LCA volume is a separate track from the green_card block (an employer can
   // be LCA-active with zero GC filings). Prefer the certified count — that is
   // what the Block G bullet reports — falling back to the total filing count.
-  const nCertified = Number(filings.certified);
-  const nLcaTotal = Number(filings.lca);
-  const nLca = Number.isFinite(nCertified) ? nCertified : (Number.isFinite(nLcaTotal) ? nLcaTotal : 0);
+  // The fallback runs on null, so a null `certified` no longer masks a real
+  // `lca` total the way `Number(null) === 0` did.
+  const nCertified = num(filings.certified);
+  const nLcaTotal = num(filings.lca);
+  const nLca = nCertified ?? nLcaTotal ?? 0;
 
   return {
-    n_lca: nLca,
-    n_pwd: Number.isFinite(nPwd) ? nPwd : 0,
-    n_perm: Number.isFinite(nPerm) ? nPerm : 0,
+    n_lca: nLca ?? 0,
+    n_pwd: nPwd ?? 0,
+    n_perm: nPerm ?? 0,
     does_gc: doesGc === true,
     first_year: firstYear,
     last_year: lastYear,
@@ -207,7 +242,6 @@ function normalizeProfile(raw) {
     },
     employer_name: employer.name ?? null,
     employer_id: employer.id ?? employer.ein ?? null,
-    _raw: raw,
   };
 }
 

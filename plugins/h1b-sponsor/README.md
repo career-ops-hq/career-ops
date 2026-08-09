@@ -10,8 +10,8 @@ Career-ops users evaluating US roles who need to know whether a specific employe
 
 Given a company name, the plugin:
 
-1. Resolves the name to one or more DOL employer entities.
-2. Pulls the last five years of LCA and PERM records for those entities.
+1. Resolves the name to a single best-matching DOL employer entity. If no candidate matches the name closely enough, the result is unknown rather than a guess.
+2. Pulls the last five years of LCA and PERM records for that entity.
 3. Computes a tier (see below) from filing volume, recency, GC evidence, and secondary-entity share.
 4. Returns the tier plus the counts the tier was derived from.
 
@@ -58,7 +58,13 @@ Bypass the disk cache and re-fetch from the API:
 node plugins/h1b-sponsor/check.mjs "Acme Corp" --refresh
 ```
 
-Responses are cached under `data/cache/h1b/` keyed by resolved employer. The cache file records `fetchedAt`; re-runs within the cache window return the same payload without hitting the API.
+Write the cache somewhere else, which is useful for tests and throwaway runs:
+
+```bash
+node plugins/h1b-sponsor/check.mjs "Acme Corp" --cache-dir /tmp/h1b-cache
+```
+
+Responses are cached under `data/cache/h1b/` keyed by the company name passed on the command line. Two spellings of the same employer produce two cache entries. The cache file records `fetchedAt`; re-runs with the same name within the cache window return the cached payload without hitting the API.
 
 ## Agent usage
 

@@ -3,11 +3,10 @@
 // check.mjs CLI JSON envelope). BOTH the check.mjs CLI block AND the live-API
 // integration are guarded behind H1B_API_TEST=1 — check.mjs is designed to
 // hit api.surakshith.com on cache miss, so a plain suite run must never
-// invoke it (it would touch the network and pollute data/cache/h1b/).
+// invoke it (it would touch the network and pollute the on-disk cache).
 //
-// Written in parallel with Dev A. Every block is existsSync-gated so this file
-// runs cleanly whether Dev A has landed check.mjs / lib/*.mjs / manifest.json
-// yet or not: missing files degrade to a warn(), never a fail().
+// The plugin ships all of these files, so a missing one is a real failure, not
+// a skip. Only the network-dependent blocks are opt-in (H1B_API_TEST=1).
 import { pass, fail, warn, ROOT } from '../helpers.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,7 +28,7 @@ const ENGINE_PATH = join(ROOT, 'plugins', '_engine.mjs');
 
 // ---------- manifest.json ----------
 if (!existsSync(MANIFEST_PATH)) {
-  warn('manifest.json not on disk yet (Dev A) — skipping manifest checks');
+  fail('manifest.json missing — the plugin ships it');
 } else {
   try {
     const raw = await readFile(MANIFEST_PATH, 'utf8');
@@ -91,7 +90,7 @@ if (!existsSync(MANIFEST_PATH)) {
 
 // ---------- lib/tier.mjs — classifyTier ----------
 if (!existsSync(TIER_PATH)) {
-  warn('lib/tier.mjs not on disk yet (Dev A) — skipping classifyTier checks');
+  fail('lib/tier.mjs missing — the plugin ships it');
 } else {
   try {
     const { classifyTier } = await import(pathToFileURL(TIER_PATH).href);
@@ -99,9 +98,8 @@ if (!existsSync(TIER_PATH)) {
 
     const cases = [
       { label: 'null → "unknown"', profile: null, accept: ['unknown'] },
-      // Empty object: Dev A's impl may return 'unknown' (bare fallthrough) or
-      // 'none' (nPwd+nPerm === 0). Accept either — documented in the brief.
-      { label: 'empty object → "unknown" | "none"', profile: {}, accept: ['unknown', 'none'] },
+      // Empty object has no filings at all, so it lands on the zero-total rule.
+      { label: 'empty object → "none"', profile: {}, accept: ['none'] },
       {
         label: 'staffing_shop.value:true → "staffing-shop"',
         profile: { red_flags: { staffing_shop: { value: true, share: 0.87, n_secondary: 4351, n_total: 5002 } }, n_pwd: 50, n_perm: 10, last_year: currentYear },
@@ -135,6 +133,34 @@ if (!existsSync(TIER_PATH)) {
         profile: { does_gc: false, n_lca: 500, n_pwd: 0, n_perm: 0, last_year: currentYear, red_flags: { staffing_shop: { value: false, share: 0.1 } } },
         accept: ['moderate'],
       },
+      {
+        // No last_year at all: recency cannot be established, so neither the
+        // strong nor the moderate branch can fire and it falls through to weak.
+        label: 'high volume + does_gc but no last_year → "weak"',
+        profile: { n_lca: 500, n_pwd: 10, n_perm: 5, does_gc: true },
+        accept: ['weak'],
+      },
+      {
+        // currentYear - 3 sits in the gap between the stale bound (< year - 3)
+        // and the recent bound (>= year - 2): not stale, but not recent either.
+        label: 'high volume + does_gc + last_year = currentYear - 3 → "weak"',
+        profile: { n_lca: 500, n_pwd: 10, n_perm: 5, does_gc: true, last_year: currentYear - 3 },
+        accept: ['weak'],
+      },
+      {
+        // A staffing share between 0.2 and 0.5 blocks strong but still clears
+        // the moderate bar, even with GC evidence present.
+        label: 'does_gc + recent + staffing share 0.35 → "moderate"',
+        profile: { does_gc: true, n_lca: 500, n_pwd: 10, n_perm: 5, last_year: currentYear, red_flags: { staffing_shop: { value: false, share: 0.35 } } },
+        accept: ['moderate'],
+      },
+      {
+        // The recency window is bounded above: a last_year far in the future is
+        // API drift, not a recent filing record, so it cannot mint strong.
+        label: 'does_gc + last_year = currentYear + 50 → "weak"',
+        profile: { does_gc: true, n_lca: 500, n_pwd: 10, n_perm: 5, last_year: currentYear + 50, red_flags: { staffing_shop: { value: false, share: 0.05 } } },
+        accept: ['weak'],
+      },
     ];
 
     for (const c of cases) {
@@ -155,7 +181,7 @@ if (!existsSync(TIER_PATH)) {
 
 // ---------- lib/cache.mjs — cacheKey, readCache, writeCache ----------
 if (!existsSync(CACHE_PATH)) {
-  warn('lib/cache.mjs not on disk yet (Dev A) — skipping cache checks');
+  fail('lib/cache.mjs missing — the plugin ships it');
 } else {
   const tmpCacheDir = join(tmpdir(), `h1b-cache-${randomUUID()}`);
   try {
@@ -210,6 +236,43 @@ if (!existsSync(CACHE_PATH)) {
     const negExpired = await readCache('NegCo', { cacheDir: tmpCacheDir, ttlDays: 10_000, negativeTtlDays: 1 });
     if (negExpired === null) pass('readCache honors negativeTtlDays separately from ttlDays');
     else fail(`negative readCache = ${JSON.stringify(negExpired)}`);
+
+    // Missing cache directory: a cold start must return null, not throw.
+    const missingDir = join(tmpdir(), `h1b-cache-missing-${randomUUID()}`);
+    let missing;
+    try {
+      missing = await readCache('TestCo', { cacheDir: missingDir });
+      if (missing === null) pass('readCache returns null when the cache directory does not exist');
+      else fail(`readCache on missing dir = ${JSON.stringify(missing)}`);
+    } catch (e) {
+      fail(`readCache threw on a missing cache directory: ${e.message}`);
+    }
+
+    // Entry without a `data` key is malformed — fail closed.
+    const noDataFile = join(tmpCacheDir, `${cacheKey('NoDataCo')}.json`);
+    await writeFile(
+      noDataFile,
+      JSON.stringify({ fetchedAt: new Date().toISOString() }, null, 2),
+      'utf8',
+    );
+    const noData = await readCache('NoDataCo', { cacheDir: tmpCacheDir });
+    if (noData === null) pass('readCache returns null for an entry with no data key');
+    else fail(`readCache on data-less entry = ${JSON.stringify(noData)}`);
+
+    // A future fetchedAt is clock skew or tampering — not usable either way.
+    const futureFile = join(tmpCacheDir, `${cacheKey('FutureCo')}.json`);
+    await writeFile(
+      futureFile,
+      JSON.stringify(
+        { data: { hello: 'future' }, fetchedAt: new Date(Date.now() + 7 * 86_400_000).toISOString() },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    const future = await readCache('FutureCo', { cacheDir: tmpCacheDir });
+    if (future === null) pass('readCache returns null for a future fetchedAt');
+    else fail(`readCache on future entry = ${JSON.stringify(future)}`);
   } catch (e) {
     fail(`cache tests crashed: ${e.message}`);
   } finally {
@@ -226,15 +289,18 @@ if (!existsSync(CACHE_PATH)) {
 if (process.env.H1B_API_TEST !== '1') {
   warn('CLI test skipped (set H1B_API_TEST=1 to enable; the CLI hits the live API on cache miss)');
 } else if (!existsSync(CHECK_PATH)) {
-  warn('check.mjs not on disk yet (Dev A) — skipping CLI check');
+  fail('check.mjs missing — the plugin ships it');
 } else {
+  // --cache-dir keeps the run's 30-day negative entry out of the repo's real
+  // cache tree; the tmp dir is removed once the callback has resolved.
+  const cliCacheDir = join(tmpdir(), `h1b-cli-cache-${randomUUID()}`);
   await new Promise((resolve) => {
     const env = { ...process.env };
     delete env.H1B_API_TOKEN;
     const VALID_TIERS = ['strong', 'moderate', 'staffing-shop', 'weak', 'none', 'unknown'];
     execFile(
       process.execPath,
-      [CHECK_PATH, '--json', '__definitely_not_a_real_employer_xyz__'],
+      [CHECK_PATH, '--json', '--cache-dir', cliCacheDir, '__definitely_not_a_real_employer_xyz__'],
       { env, timeout: 20_000 },
       (err, stdout, _stderr) => {
         const out = String(stdout || '');
@@ -276,13 +342,14 @@ if (process.env.H1B_API_TEST !== '1') {
       },
     );
   });
+  await rm(cliCacheDir, { recursive: true, force: true }).catch(() => {});
 }
 
 // ---------- Live-API integration (guarded) ----------
 if (process.env.H1B_API_TEST !== '1') {
   warn('live-api tests skipped (set H1B_API_TEST=1 to enable)');
 } else if (!existsSync(API_PATH) || !existsSync(TIER_PATH)) {
-  warn('live-api tests skipped — lib/api.mjs or lib/tier.mjs not on disk yet');
+  fail('lib/api.mjs or lib/tier.mjs missing — the plugin ships them');
 } else {
   try {
     const api = await import(pathToFileURL(API_PATH).href);
@@ -295,8 +362,8 @@ if (process.env.H1B_API_TEST !== '1') {
 
     if (resolved && resolved.id) {
       const profile = await api.getEmployerProfile(resolved.id, opts);
-      if (profile && (Number(profile.n_pwd) > 0 || Number(profile.n_perm) > 0)) {
-        pass(`getEmployerProfile(${resolved.id}) returned a profile with LCA volume`);
+      if (profile && (Number(profile.n_lca) > 0 || Number(profile.n_pwd) > 0 || Number(profile.n_perm) > 0)) {
+        pass(`getEmployerProfile(${resolved.id}) returned a profile with filing volume`);
       } else {
         fail(`getEmployerProfile(${resolved.id}) = ${JSON.stringify(profile).slice(0, 200)}`);
       }
