@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
+import { parseKimiStreamLine, prepareRunArgs } from "@/lib/cli-run.mjs";
 
 // AI search orchestrates modes/discover.md by running the USER'S configured CLI
 // headless (CLI-agnostic, like the assistant). Web hunting is slow → generous
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
   const prompt = `${mode}${OUTPUT_CONTRACT}${memoryLine}${knownBlock}\n\n--- USER INTENT ---\n${query}\n`;
 
   const isClaude = cliId === "claude";
+  const isKimi = cliId === "kimi";
   const args = isClaude
     ? [
         "-p",
@@ -73,7 +75,7 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task", // proposer-not-writer, by construction
       ]
-    : spec.args(prompt);
+    : prepareRunArgs(cliId, spec.args(prompt));
 
   const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -121,6 +123,17 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
+        if (isKimi) {
+          buf += d.toString();
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            const event = line ? parseKimiStreamLine(line) : null;
+            if (event?.text) emit(event.text);
+          }
+          return;
+        }
         if (!isClaude) {
           emit(d.toString());
           return;
@@ -144,6 +157,7 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        if (isKimi) return; // normal Kimi thinking/tool progress is written here
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
@@ -153,6 +167,11 @@ export async function POST(req: Request) {
         safeClose();
       });
       child.on("close", () => {
+        if (isKimi && buf.trim()) {
+          const event = parseKimiStreamLine(buf.trim());
+          if (event?.text) emit(event.text);
+          buf = "";
+        }
         if (!emitted) safeEnqueue("_(no output — is the CLI authenticated?)_");
         safeClose();
       });

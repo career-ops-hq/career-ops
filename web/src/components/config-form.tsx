@@ -11,6 +11,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { CONFIG_CHANGED_EVENT, CONFIG_KEY, patchClientConfig, readConfiguredCli } from "@/lib/client-config.mjs";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 
 type Cli = {
@@ -31,8 +32,6 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-const STORAGE_KEY = "career-ops:config";
-
 export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
   const [clis, setClis] = useState<Cli[] | null>(null);
@@ -45,7 +44,7 @@ export function ConfigForm() {
   // Load saved prefs
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(CONFIG_KEY);
       if (raw) {
         const v = JSON.parse(raw);
         // key/manual are not wired yet (nothing reads them) → never restore into
@@ -67,8 +66,19 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        const savedCli = readConfiguredCli(localStorage.getItem(CONFIG_KEY));
+        const savedIsInstalled = !!savedCli && list.some((c) => c.installed && c.id === savedCli);
+        const nextCli = savedIsInstalled ? savedCli : list.find((c) => c.installed)?.id || "";
+        setCliId(nextCli);
+        // A visible auto-selection must be real, not cosmetic. Persist it and
+        // notify the persistent assistant mounted outside this page.
+        if (nextCli && nextCli !== savedCli) {
+          localStorage.setItem(
+            CONFIG_KEY,
+            patchClientConfig(localStorage.getItem(CONFIG_KEY), { mode: "cli", cliId: nextCli }),
+          );
+          window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
+        }
       })
       .catch(() => setClis([]));
   }, []);
@@ -77,9 +87,20 @@ export function ConfigForm() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    localStorage.setItem(CONFIG_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  function selectCli(nextCliId: string) {
+    setCliId(nextCliId);
+    // Selecting an installed CLI should enable the persistent assistant
+    // immediately. The native storage event only fires in OTHER tabs, so emit a
+    // same-tab event as well.
+    const next = patchClientConfig(localStorage.getItem(CONFIG_KEY), { mode: "cli", cliId: nextCliId });
+    localStorage.setItem(CONFIG_KEY, next);
+    window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
@@ -163,7 +184,7 @@ export function ConfigForm() {
                       <button
                         type="button"
                         disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
+                        onClick={() => selectCli(c.id)}
                         className={cn(
                           "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
                           c.installed ? "" : "cursor-default",
