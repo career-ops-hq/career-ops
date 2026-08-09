@@ -690,22 +690,21 @@ const USAGE = `Usage:
   node followup-cadence.mjs --summary          # human-readable dashboard
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
-  node followup-cadence.mjs --help             # print this usage block and exit`;
+  node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(USAGE);
-    process.exit(0);
-  }
-
-  const result = analyze();
-
-  if (summaryMode) {
-    printSummary(result);
   } else {
-    console.log(JSON.stringify(result, null, 2));
-  }
+    const result = analyze();
 
-  if (result.error) process.exit(1);
+    if (summaryMode) {
+      printSummary(result);
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
+
+    if (result.error) process.exit(1);
+  }
 }
