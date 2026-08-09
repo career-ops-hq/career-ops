@@ -55,7 +55,7 @@ const writerSource = `
   const { appendToScanHistory } = await import(scanUrl);
   await appendToScanHistory([{
     url: '${URL_BASE}' + writer,
-    portal: 'testportal',
+    source: 'testportal',
     title: 'Engineer',
     company: 'Acme',
     location: 'Remote',
