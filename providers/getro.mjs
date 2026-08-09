@@ -122,7 +122,10 @@ export function extractCollectionId(html) {
   // Match on the id attribute alone — tolerates attribute reordering, extra
   // attributes (e.g. a CSP nonce), whitespace around `=`, and either quote
   // style, instead of requiring an exact `id="..." type="..."` sequence.
-  const m = html.match(/<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
+  // Requires a literal space (not just a \b word boundary) immediately before
+  // `id` so a `data-id="__NEXT_DATA__"` attribute can't false-match — `\b`
+  // alone also fires on the `-`→`i` transition inside "data-id".
+  const m = html.match(/<script\b[^>]*\sid\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/);
   if (!m) return null;
   let data;
   try {
