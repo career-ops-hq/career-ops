@@ -5,6 +5,7 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf } from "@/lib/pdf-render.mjs";
+import { parseKimiStreamLine, prepareRunArgs, runTimeoutMs } from "@/lib/cli-run.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -151,6 +152,7 @@ export async function POST(req: Request) {
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
 
   const isClaude = cliId === "claude";
+  const isKimi = cliId === "kimi";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate'/'fix-portal' run the REAL mode + persist canonical
   // artifacts → they need Write + Bash (reserve-report-num / merge-tracker /
@@ -172,7 +174,7 @@ export async function POST(req: Request) {
        "--permission-mode", "acceptEdits",
        "--allowedTools", tools.allowed,
        "--disallowedTools", tools.disallowed]
-    : spec.args(prompt);
+    : prepareRunArgs(cliId, spec.args(prompt));
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -227,7 +229,7 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      const killMs = runTimeoutMs(kind, cliId);
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
@@ -244,8 +246,28 @@ export async function POST(req: Request) {
         }
       };
 
+      const emitKimiLine = (line: string) => {
+        const event = parseKimiStreamLine(line);
+        if (!event) return;
+        for (const name of event.tools) send({ type: "tool", name });
+        if (event.text) {
+          emittedText = true;
+          send({ type: "text", text: event.text });
+        }
+      };
+
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
+        if (isKimi) {
+          buf += d.toString();
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (line) emitKimiLine(line);
+          }
+          return;
+        }
         if (!isClaude) {
           emittedText = true;
           send({ type: "text", text: d.toString() });
@@ -284,6 +306,9 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        // In print mode Kimi uses stderr for normal thinking/tool progress.
+        // Its structured stdout plus exit code are the reliable error signal.
+        if (isKimi) return;
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
@@ -338,6 +363,10 @@ export async function POST(req: Request) {
         // run could still start a brand-new render (and re-touch the tracker)
         // after the stream — and its writeToken guard — is already gone.
         if (closed) return;
+        if (isKimi && buf.trim()) {
+          emitKimiLine(buf.trim());
+          buf = "";
+        }
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Shared by both honesty gates below: a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
