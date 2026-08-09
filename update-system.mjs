@@ -888,6 +888,42 @@ function addPaths(paths) {
   git('add', '--', ...paths);
 }
 
+/**
+ * Staged paths that are NOT covered by `owned`.
+ *
+ * Used to decide whether committing the whole index is equivalent to a
+ * pathspec-scoped commit. Entries in `owned` may be directories (`providers/`,
+ * `tests/`), which cover everything beneath them, or exact file paths.
+ *
+ * Deliberately reads `--cached` rather than `git status`: only what is STAGED
+ * can end up in a commit, and an unstaged working-tree edit is irrelevant to
+ * that question.
+ *
+ * Takes the git runner as a seam (defaulting to the ROOT-bound one) so it can be
+ * driven against a throwaway repo, matching removeAdditionsNotInHead and
+ * tests/updater-rollback-behavior.test.mjs.
+ *
+ * @param {string[]} owned
+ * @param {(...args: string[]) => string} [run] git runner; defaults to ROOT
+ * @returns {string[]} staged paths outside `owned` (empty ⇒ safe to commit the index)
+ */
+export function stagedPathsOutside(owned, run = git) {
+  const staged = run('diff', '--cached', '--name-only');
+  if (!staged) return [];
+
+  const files = new Set();
+  const dirs = [];
+  for (const entry of owned) {
+    if (entry.endsWith('/')) dirs.push(entry);
+    else files.add(entry);
+  }
+
+  return staged.split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(path => !files.has(path) && !dirs.some(dir => path.startsWith(dir)));
+}
+
 function dashboardGoSourcesChanged() {
   try {
     const changed = git('diff', '--name-only', 'HEAD', '--', 'dashboard');
@@ -1365,7 +1401,27 @@ async function apply() {
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the
       // commit to exactly the files this update touched.
-      git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      //
+      // …but the pathspec form builds the commit from the WORKING TREE for those
+      // paths rather than from the index. Where `core.fileMode` is false — the
+      // default on Windows — the working tree cannot express the executable bit,
+      // so a mode change that `git checkout FETCH_HEAD -- <path>` just staged is
+      // dropped from the commit and left sitting in the index. The install is
+      // dirty the instant a "clean" update finishes, and stays dirty, because
+      // every later update re-stages the same mode and drops it again.
+      //
+      // Committing the index captures the mode. That is only equivalent to the
+      // scoped commit when the index holds nothing beyond what this update
+      // staged — which is precisely the #915 bug 2 hazard — so verify it rather
+      // than assume it, and fall back to the scoped form when anything else is
+      // staged. Content is committed identically either way; only the mode bits
+      // ride on the index-based path.
+      const unrelated = stagedPathsOutside([...pathsToStage, ...materializedSkillEntrypoints]);
+      if (unrelated.length === 0) {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`);
+      } else {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      }
     } catch (e) {
       let commitFailed = false;
       try {
