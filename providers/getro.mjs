@@ -22,7 +22,7 @@
 //
 //   - name: b2venture (portfolio)
 //     provider: getro
-//     careers_url: https://jobs.b2venture.vc
+//     careers_url: https://jobs.b2venture.vc/jobs
 //     # getro_collection: 4283   # optional — skips the auto-resolve fetch
 //     enabled: true
 //

@@ -2063,7 +2063,7 @@ job_boards:
     notes: "Swiss VC portfolio board (Getro)"
 
   - name: Cherry Ventures (portfolio)
-    careers_url: https://jobs.cherry.vc
+    careers_url: https://talent.cherry.vc/jobs
     provider: getro
     getro_collection: 44081
     enabled: false
@@ -2107,7 +2107,7 @@ job_boards:
 
   - name: Insight Partners (portfolio)  # New York. Global growth-equity/VC, one of the largest tech-focused funds,
                                          # 500+ portfolio companies worldwide.
-    careers_url: https://jobs.insightpartners.com/companies
+    careers_url: https://jobs.insightpartners.com/jobs
     provider: getro
     getro_max_pages: 700   # large global board — raise the default page cap to reach deeper pages
     enabled: false
