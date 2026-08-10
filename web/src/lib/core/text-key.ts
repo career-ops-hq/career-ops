@@ -1,6 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { normalizeTextKey as fallbackKey } from "./normalize-text-key.mjs";
 
 /**
  * ACL for the core's `normalizeTextKey` (tracker-parse.mjs) — the shared
@@ -21,27 +22,15 @@ import { careerOpsRoot } from "@/lib/career-ops";
  * Consequence, by design: the web keys with the normalizeTextKey of the user's
  * OWN core, so web dedup always matches their CLI dedup. Version skew is
  * semantic, and that's the correct behaviour — not a bug to paper over.
+ *
+ * Client components cannot use this ACL (Node-only). They import the Unicode-safe
+ * mirror from normalize-text-key.mjs instead — same algorithm, parity-tested
+ * against the core so [^a-z0-9] cannot creep back in.
  */
 
 type NormalizeTextKey = (value: unknown, separator?: string) => string;
 
 const modCache = new Map<string, NormalizeTextKey>();
-
-/**
- * Last-resort key when the core is absent (a partial checkout, or a data-only
- * install). This IS a copy, and we say so rather than pretending otherwise —
- * but it degrades toward the LEAST destructive shape: Unicode-aware, so it can
- * never reproduce the #2666 bug of silently dropping non-Latin names. Worst
- * case it disagrees with the core about some exotic separator; it will never
- * turn a company name into "".
- */
-function fallbackKey(value: unknown, separator = ""): string {
-  return String(value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
-    .trim();
-}
 
 let warned = false;
 
