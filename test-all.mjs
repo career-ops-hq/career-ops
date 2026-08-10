@@ -9276,9 +9276,11 @@ try {
   const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon-'));
   const batchDir = join(tmp, 'batch');
   const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
   mkdirSync(recoveryDir, { recursive: true });
   mkdirSync(join(tmp, 'reports'), { recursive: true });
   mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
@@ -9307,9 +9309,20 @@ try {
   writeFileSync(join(recoveryDir, 'rec-stale1'),
     '42\thttps://example.com/forty-two\trate_limited\t2026-08-07T00:00:00Z\t\t900\t-\trate limited\t1\n');
 
+  // check_prerequisites() aborts main() with "claude CLI not found" before
+  // reconcile_recovery_records() runs when `claude` is absent from PATH, which
+  // is the case on CI runners. Stub it (offer 42 is terminal, so no worker ever
+  // invokes it) so the reconcile path is actually exercised, matching test 13.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+
   run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
     cwd: tmp,
-    env: process.env,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
