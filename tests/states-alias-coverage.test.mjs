@@ -104,6 +104,51 @@ try {
   shadowed.length === 0
     ? pass('every canonical label still resolves to itself')
     : fail(`alias widening shadowed canonical label(s): ${shadowed.map(s => s.label).join(', ')}`);
+
+  // ---------------------------------------------------------------------------
+  // The reverse direction: every alias states.yml PROMISES must actually be
+  // accepted by normalize-statuses.mjs.
+  //
+  // Everything above reads states.yml through tracker-utils, so it only ever
+  // proves "the normalizer's vocabulary is listed in states.yml". It cannot see
+  // the opposite drift — states.yml advertising an alias the normalizer rejects.
+  // That gap was real: states.yml listed `rechazado`, but the rule was
+  // /^rechazada?$/i ("rechazad" + an optional "a"), which matches "rechazada" and
+  // never "rechazado", so a bare Rechazado row normalized to unknown.
+  //
+  // This calls normalizeStatus directly rather than pattern-matching source, so
+  // it cannot be fooled by a rule shape the extractors above do not parse — which
+  // is exactly how the rechazado rule escaped: its `?` is not in RULE_RE's class.
+  const { normalizeStatus } = await import(
+    pathToFileURL(join(ROOT, 'normalize-statuses.mjs')).href
+  );
+
+  const unaccepted = [];
+  for (const state of states) {
+    for (const alias of [state.label, ...(state.aliases ?? [])]) {
+      const got = normalizeStatus(alias).status;
+      if (got !== state.label) unaccepted.push(`"${alias}"->${got ?? 'unknown'} (want ${state.label})`);
+    }
+  }
+  unaccepted.length === 0
+    ? pass(`normalize-statuses accepts all ${states.reduce((n, s) => n + 1 + (s.aliases?.length ?? 0), 0)} labels and aliases states.yml declares`)
+    : fail(`states.yml declares ${unaccepted.length} value(s) normalize-statuses rejects: ${unaccepted.join(', ')}`);
+
+  // Boundary samples for the loose regex rules, which neither extractor parses.
+  // `geoblocker` (no separator) is accepted by /geo.?blocker/i but was covered by
+  // no test; the spaced and underscored forms above are the only ones asserted.
+  for (const [raw, expected] of [
+    ['geoblocker', 'SKIP'],
+    ['GEO BLOCKER', 'SKIP'],
+    ['rechazado 2026', 'Rejected'],
+    ['aplicado 2026', 'Applied'],
+    ['**Rechazado**', 'Rejected'],
+  ]) {
+    const got = normalizeStatus(raw).status;
+    got === expected
+      ? pass(`normalizeStatus("${raw}") -> ${expected}`)
+      : fail(`normalizeStatus("${raw}") -> ${got ?? 'unknown'}, expected ${expected}`);
+  }
 } catch (err) {
   fail(`states alias coverage test threw: ${err?.message ?? err}`);
 }
