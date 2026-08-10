@@ -16,6 +16,8 @@
     "merge": "node merge-tracker.mjs",
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
+    "resume:pdf:branded": "python3 scripts/build_resumes.py",
+    "resume:sync": "node resume-artifacts.mjs",
     "img-to-pdf": "node img-to-pdf.mjs",
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "cv:verify-facts": "node verify-cv-facts.mjs",

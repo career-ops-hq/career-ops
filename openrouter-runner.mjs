@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 import yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import { ensureBrandedResumePdf } from './resume-artifacts.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
@@ -166,6 +167,7 @@ function writeFile(relPath, content) {
   const full = path.join(__dirname, relPath);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content, 'utf-8');
+  ensureBrandedResumePdf(full);
 }
 
 function fileExists(relPath) {
