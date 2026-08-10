@@ -660,6 +660,7 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   phenom          *.phenompeople.com  (branded hosts like careers.allianz.com need provider: phenom explicitly)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -763,6 +764,23 @@ search_queries:
 #   max_pages: 200         # optional page cap. The API caps a page at 10 rows
 #                          # no matter what, so 200 pages ≈ 2000 postings
 #                          # (default 200, max 1000). Raise it for a huge board.
+#   enabled: true
+#
+# - name: Example Phenom Co
+#   # Phenom People "CareerConnect" career site — the branded per-company
+#   # domain many large enterprises run. Branded hosts carry no "phenom"
+#   # token, so provider: phenom must be set explicitly; only literal
+#   # *.phenompeople.com hosts auto-detect.
+#   careers_url: https://careers.exampleco.com
+#   provider: phenom
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 300) —
+#                          # raise it for a tenant with 2000+ open postings (a warning
+#                          # is logged if the cap truncates real results)
+#   phenom:                # optional widget config block
+#     lang: en_global        # widget locale (default en_global)
+#     country: global        # widget country scope (default global)
+#     urlPrefix: global/en   # public job-page path prefix (default global/en)
+#     selectedFields: { country: ["Germany"] }   # optional facet filter
 #   enabled: true
 #
 # - name: Example Avature Co
@@ -1482,6 +1500,12 @@ tracked_companies:
     careers_url: https://job-boards.greenhouse.io/hellofresh
     api: https://boards-api.greenhouse.io/v1/boards/hellofresh/jobs
     notes: "Berlin. Meal kit unicorn, large data/ML org."
+    enabled: true
+
+  - name: Allianz
+    careers_url: https://careers.allianz.com
+    provider: phenom
+    notes: "Munich. Insurance group."
     enabled: true
 
   # -- DACH fintech --
