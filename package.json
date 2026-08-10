@@ -33,6 +33,7 @@
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
+    "tracker:workbook": "node export-tracker-workbook.mjs",
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
     "upskill": "node upskill.mjs",
