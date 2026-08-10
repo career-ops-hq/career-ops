@@ -185,6 +185,7 @@ export default {
     // collected without needing a second warning.
     let stopReason = 'complete';
     let page = 0;
+    let anyPageSucceeded = false;
     for (; page < pagesToFetch; page++) {
       if (page > 0) await wait(PAGE_DELAY_MS);
       let json;
@@ -225,11 +226,19 @@ export default {
         // collected so far — a page failure doesn't discard earlier pages —
         // and log it, so a rate-limit/WAF block on page N is distinguishable
         // from a tenant that genuinely only has N*PAGE_SIZE postings.
+        // If not even the first page ever succeeded, this tenant is
+        // completely broken (wrong endpoint, dead board, hard-blocked) — a
+        // silent empty result would look identical to "zero postings" to
+        // callers. Rethrow so it surfaces as a failure instead (mirrors
+        // providers/workday.mjs, which never wraps its first-page fetch in
+        // try/catch for the same reason).
+        if (!anyPageSucceeded) throw err;
         const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
         console.error(`⚠️  phenom: ${entry.name} truncated at page ${page + 1} of ${maxPages} (${jobsSummary}): ${err.message}`);
         stopReason = 'fetch-error';
         break;
       }
+      anyPageSucceeded = true;
       const { total: pageTotal, rows } = parseRefineSearch(json, cfg);
       if (total === null) total = pageTotal;
       if (rows.length === 0) break;

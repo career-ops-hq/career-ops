@@ -150,12 +150,18 @@ try {
       throw err;
     },
   };
-  const { result: nonRetryableJobs } = await captureConsoleErrors(() =>
-    phenom.fetch({ name: 'ExampleCo', api: 'https://careers.exampleco.com' }, nonRetryableCtx));
-  if (nonRetryableJobs.length === 0 && nonRetryableCalls === 1) {
-    pass('phenom.fetch() does not retry a non-retryable 4xx (fails on the first attempt)');
+  let nonRetryableThrew = false;
+  await captureConsoleErrors(async () => {
+    try {
+      await phenom.fetch({ name: 'ExampleCo', api: 'https://careers.exampleco.com' }, nonRetryableCtx);
+    } catch {
+      nonRetryableThrew = true;
+    }
+  });
+  if (nonRetryableThrew && nonRetryableCalls === 1) {
+    pass('phenom.fetch() does not retry a non-retryable 4xx and rethrows when no page ever succeeded');
   } else {
-    fail(`phenom fetch non-retryable error wrong: ${nonRetryableJobs.length} jobs after ${nonRetryableCalls} calls`);
+    fail(`phenom fetch non-retryable error wrong: threw=${nonRetryableThrew} after ${nonRetryableCalls} calls`);
   }
 
   // fetch() pagination cap — an inflated `totalHits` must not trigger
@@ -185,10 +191,10 @@ try {
   // large tenant.
   let overriddenCalls = 0;
   const bigEntry = { name: 'BigCo', api: 'https://careers.bigco.com', max_pages: 50 };
-  const overriddenJobs = await phenom.fetch(bigEntry, {
+  const { result: overriddenJobs } = await captureConsoleErrors(() => phenom.fetch(bigEntry, {
     sleep: async () => {},
     fetchJson: async () => { overriddenCalls++; return { refineSearch: { status: 200, totalHits: 1_000_000, data: { jobs: Array.from({ length: 100 }, (_, i) => mkJob(`o${overriddenCalls}-${i}`)) } } }; },
-  });
+  }));
   if (overriddenCalls === 50 && overriddenJobs.length === 5000) {
     pass('phenom.fetch() honors entry.max_pages to raise the cap above the default');
   } else {
@@ -199,10 +205,10 @@ try {
   // override can't turn this into an unbounded scan either.
   let absurdCalls = 0;
   const absurdEntry = { name: 'AbsurdCo', api: 'https://careers.absurdco.com', max_pages: 100_000 };
-  const absurdJobs = await phenom.fetch(absurdEntry, {
+  const { result: absurdJobs } = await captureConsoleErrors(() => phenom.fetch(absurdEntry, {
     sleep: async () => {},
     fetchJson: async () => { absurdCalls++; return { refineSearch: { status: 200, totalHits: 10_000_000, data: { jobs: Array.from({ length: 100 }, (_, i) => mkJob(`a${absurdCalls}-${i}`)) } } }; },
-  });
+  }));
   if (absurdCalls === 300 && absurdJobs.length === 30_000) {
     pass('phenom.fetch() caps an absurd entry.max_pages at MAX_PAGES_CAP');
   } else {
@@ -214,10 +220,10 @@ try {
   for (const invalidMaxPages of [-5, 0, 'abc', NaN, null]) {
     let invalidCalls = 0;
     const invalidEntry = { name: 'InvalidCo', api: 'https://careers.invalidco.com', max_pages: invalidMaxPages };
-    const invalidJobs = await phenom.fetch(invalidEntry, {
+    const { result: invalidJobs } = await captureConsoleErrors(() => phenom.fetch(invalidEntry, {
       sleep: async () => {},
       fetchJson: async () => { invalidCalls++; return { refineSearch: { status: 200, totalHits: 1_000_000, data: { jobs: Array.from({ length: 100 }, (_, i) => mkJob(`i${invalidCalls}-${i}`)) } } }; },
-    });
+    }));
     const label = Number.isNaN(invalidMaxPages) ? 'NaN' : JSON.stringify(invalidMaxPages);
     if (invalidCalls === 20 && invalidJobs.length === 2000) {
       pass(`phenom.fetch() falls back to DEFAULT_MAX_PAGES for invalid max_pages=${label}`);
@@ -232,7 +238,7 @@ try {
   // meaningless for a probe-imposed stop.
   let ctxCapCalls = 0;
   const { result: ctxCapJobs, errors: ctxCapWarnings } = await captureConsoleErrors(() =>
-    phenom.fetch({ name: 'ProbeCo', api: 'https://careers.probeco.com', maxPages: 1 }, {
+    phenom.fetch({ name: 'ProbeCo', api: 'https://careers.probeco.com' }, {
       maxPages: 1,
       sleep: async () => {},
       fetchJson: async () => { ctxCapCalls++; return { refineSearch: { status: 200, totalHits: 1_000_000, data: { jobs: Array.from({ length: 100 }, (_, i) => mkJob(`p${ctxCapCalls}-${i}`)) } } }; },
