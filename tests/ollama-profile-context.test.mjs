@@ -75,14 +75,18 @@ const server = createServer((req, res) => {
       capturedSystemPrompt = '';
     }
 
-    // Include both response shapes so this test stays compatible with #2647.
-    res.end(JSON.stringify({
-      choices: [{ message: { content: responseText } }],
-      message: { role: 'assistant', content: responseText },
-      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-      prompt_eval_count: 10,
-      eval_count: 5,
-    }));
+    if (req.url === '/api/chat') {
+      res.end(JSON.stringify({
+        message: { role: 'assistant', content: responseText },
+        prompt_eval_count: 10,
+        eval_count: 5,
+      }));
+    } else {
+      res.end(JSON.stringify({
+        choices: [{ message: { content: responseText } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }));
+    }
   });
 });
 
