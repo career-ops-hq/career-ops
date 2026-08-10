@@ -82,6 +82,8 @@ export function findBin(bin: string, dirs = searchDirs()): string | null {
   return null;
 }
 
+export { prepareCliLaunch } from "./cli-launch.mjs";
+
 export function detectClis() {
   const dirs = searchDirs();
   return KNOWN.map((c) => {

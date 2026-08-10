@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { resolveCli } from "@/lib/clis";
+import { prepareCliLaunch, resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
@@ -109,7 +109,8 @@ export async function POST(req: Request) {
       ]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const launch = prepareCliLaunch(binPath, args);
+  const child = spawn(launch.command, launch.args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -120,6 +121,7 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
+      let stderrBuf = "";
       let emitted = false;
       killer = setTimeout(() => {
         try {
@@ -179,8 +181,9 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        stderrBuf += s;
         if (/error|not found|denied|fatal/i.test(s)) {
-          safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
+          emit(`\n[${spec.name}] ${s.trim()}\n`);
         }
       });
       child.on("error", (e) => {
@@ -189,7 +192,8 @@ export async function POST(req: Request) {
       });
       child.on("close", () => {
         if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
+          const detail = stderrBuf.trim();
+          safeEnqueue(detail ? `[${spec.name}] ${detail}` : "_(no output — is the CLI authenticated?)_");
         }
         safeClose();
       });
