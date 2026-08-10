@@ -16,11 +16,12 @@
  * updater-rollback-behavior.test.mjs's header note).
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
-import { highestSemverTag, SEMVER_RE } from '../update-system.mjs';
+import { highestSemverTag, SEMVER_RE, curlGet } from '../update-system.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -184,11 +185,9 @@ console.log('\n🧪 Testing update-check git fallback...');
     fail('the offline branch no longer returns immediately — check may emit two JSON lines');
   }
 
-  if (/function curlGet[\s\S]{0,1400}?catch \((?:error|err)\)\s*\{\s*resolve\(\{ ok: false/.test(src)) {
-    pass('curlGet() catches synchronous execFile throws (broken curl on PATH: spawn EFTYPE) instead of crashing check()');
-  } else {
-    fail('curlGet() no longer guards the synchronous execFile throw path');
-  }
+  // (curlGet's broken-curl guard is verified BEHAVIORALLY below, outside
+  // this source-pattern block — a position-based regex for it broke on an
+  // unrelated edit when the function grew past the character window.)
 
   // ── session-start latency budget ceiling ──────────────────────────────
   // AGENTS.md runs check() at session start; its worst case is dead time
@@ -227,4 +226,45 @@ console.log('\n🧪 Testing update-check git fallback...');
   } else {
     fail('the retry notice is missing or no longer a synchronous stderr write — on Windows it would appear only after the probe finishes');
   }
+}
+
+// ── curlGet() broken-curl guard (BEHAVIORAL) ──────────────────────────────
+// The contract: curlGet NEVER rejects or throws. A missing curl (ENOENT,
+// delivered async via the execFile callback) and a corrupt/non-executable
+// curl on PATH (delivered as a SYNCHRONOUS spawn throw on Windows — e.g.
+// EFTYPE — or an ENOEXEC-style async error on POSIX) must both resolve
+// { ok: false, detail }. This runs the code instead of pattern-matching the
+// source: the previous regex counted characters from the function head and
+// broke when an unrelated edit grew the function past its window.
+{
+  const realPath = process.env.PATH;
+  const emptyDir = mkdtempSync(join(tmpdir(), 'uc-curl-missing-'));
+  const brokenDir = mkdtempSync(join(tmpdir(), 'uc-curl-broken-'));
+  // Garbage bytes: not a valid executable image on Windows (curl.exe) and
+  // no shebang on POSIX (curl) — each platform resolves its own file.
+  writeFileSync(join(brokenDir, 'curl.exe'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+  writeFileSync(join(brokenDir, 'curl'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+  try { chmodSync(join(brokenDir, 'curl'), 0o755); } catch { /* windows: no-op */ }
+
+  const cases = [
+    ['missing curl on PATH (ENOENT callback path)', emptyDir],
+    ['corrupt curl binary on PATH (sync-throw path on Windows)', brokenDir],
+  ];
+  for (const [label, dir] of cases) {
+    process.env.PATH = dir;
+    try {
+      const res = await curlGet('http://127.0.0.1:9/unreachable');
+      if (res && res.ok === false && res.detail) {
+        pass(`curlGet() resolves { ok: false, detail: ${JSON.stringify(String(res.detail).slice(0, 24))} } with ${label} — never throws`);
+      } else {
+        fail(`curlGet() with ${label} resolved with an unexpected shape: ${JSON.stringify(res)}`);
+      }
+    } catch (error) {
+      fail(`curlGet() with ${label} THREW (${error.code || String(error.message).split('\n')[0]}) — check() would crash on this machine`);
+    } finally {
+      process.env.PATH = realPath;
+    }
+  }
+  rmSync(emptyDir, { recursive: true, force: true });
+  rmSync(brokenDir, { recursive: true, force: true });
 }

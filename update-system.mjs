@@ -926,7 +926,9 @@ const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;
 // routes network traffic through an HTTP/HTTPS proxy that fetch() does
 // not respect but curl handles transparently.  The --silent / --fail flags
 // match the failure-handling already used throughout apply().
-function curlGet(url, extraArgs = []) {
+// Exported for tests (like highestSemverTag): the broken-curl guard is
+// verified behaviorally by invoking this with a sabotaged PATH.
+export function curlGet(url, extraArgs = []) {
   return new Promise((resolve) => {
     // Keep the failure reason on every path: "offline" must be diagnosable.
     // ENOENT (curl not on PATH), HTTP 403 (--fail, e.g. API rate limit), a
