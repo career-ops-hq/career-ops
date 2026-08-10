@@ -312,7 +312,7 @@ risk_summary:
     ['https://jobs.lever.co/acme/abc-def', 'lever'],
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
-    ['https://careers.icims.com/jobs/9/x', null],
+    ['https://careers.icims.com/jobs/9/x', 'icims'],
     ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
     ['not a url', null],
     ['', null],
@@ -588,8 +588,8 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only community ATS with clean, public URL fingerprints —
-// Greenhouse, Lever, Ashby, Workday. White-labeled ATS (iCIMS/UKG/Dayforce) are
+// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
+// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
 // NOT detectable from the URL alone and are deferred until the community adds a
 // reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
 const VENDOR_HOST_PATTERNS = [
@@ -597,6 +597,7 @@ const VENDOR_HOST_PATTERNS = [
   { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
   { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
   { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
+  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
 ];
 
 function detectVendor(rawUrl) {
@@ -838,7 +839,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday'],
+    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
