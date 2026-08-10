@@ -28,29 +28,69 @@ function listFrom(v: unknown): string[] {
 /** Serialize filters into a minimal, valid portals.yml. Scalars go through
  *  JSON.stringify (a valid YAML double-quoted scalar) so arbitrary keywords —
  *  colons, quotes, leading dashes — can never break the document or inject YAML. */
-export function serializePortals(f: FilterLists): string {
-  const block = (key: string, items: string[]) =>
-    items.length ? `  ${key}:\n` + items.map((k) => `    - ${JSON.stringify(k)}`).join("\n") + "\n" : "";
+export function serializePortals(f: FilterLists, baseYaml?: string): string {
+  let doc: any = {};
+  let baseLf: any = null; // location_filter from portals.yml (used as fallback)
 
-  let out = "# Ephemeral Explorer filters — generated per-search, safe to delete.\n";
+  let baseTf: any = null;
+
+  if (baseYaml) {
+    try {
+      const base = yaml.load(baseYaml) as any;
+      if (base && typeof base === "object") {
+        // Copy ONLY the non-filter sections (companies, search_queries, job boards, etc.)
+        for (const key of Object.keys(base)) {
+          if (key !== "title_filter" && key !== "location_filter") {
+            doc[key] = base[key];
+          }
+        }
+        // Keep a reference to the saved location_filter as fallback
+        if (base.location_filter && typeof base.location_filter === "object") {
+          baseLf = base.location_filter;
+        }
+        if (base.title_filter && typeof base.title_filter === "object") {
+          baseTf = base.title_filter;
+        }
+      }
+    } catch {}
+  }
+
+  // title_filter: UI always wins
   if (f.positive.length || f.negative.length) {
-    out += "title_filter:\n";
-    out += block("positive", f.positive);
-    out += block("negative", f.negative);
+    baseTf = baseTf || {};
+    doc.title_filter = {
+      positive: Array.from(new Set([...f.positive, ...(Array.isArray(baseTf.positive) ? baseTf.positive : typeof baseTf.positive === 'string' ? [baseTf.positive] : [])])),
+      negative: Array.from(new Set([...f.negative, ...(Array.isArray(baseTf.negative) ? baseTf.negative : typeof baseTf.negative === 'string' ? [baseTf.negative] : [])]))
+    };
   }
+
+  // location_filter: UI wins when non-empty; otherwise fall back to portals.yml
+  // so the saved "Dónde buscar" config is always the default for zero-config searches.
   if (f.allow.length || f.block.length || f.alwaysAllow.length) {
-    out += "location_filter:\n";
-    out += block("always_allow", f.alwaysAllow);
-    out += block("allow", f.allow);
-    out += block("block", f.block);
+    doc.location_filter = {
+      always_allow: Array.from(new Set([...f.alwaysAllow, ...(Array.isArray(baseLf?.always_allow) ? baseLf.always_allow : typeof baseLf?.always_allow === 'string' ? [baseLf.always_allow] : [])])),
+      allow: Array.from(new Set([...f.allow, ...(Array.isArray(baseLf?.allow) ? baseLf.allow : typeof baseLf?.allow === 'string' ? [baseLf.allow] : [])])),
+      block: Array.from(new Set([...f.block, ...(Array.isArray(baseLf?.block) ? baseLf.block : typeof baseLf?.block === 'string' ? [baseLf.block] : [])]))
+    };
+  } else if (baseLf) {
+    // No UI override → use the portals.yml location_filter as-is
+    doc.location_filter = baseLf;
   }
-  return out;
+  // If neither exists → no location restriction (find everything)
+
+  return "# Ephemeral Explorer filters — generated per-search, safe to delete.\n" + yaml.dump(doc);
 }
+
+
 
 /** Write the ephemeral filter file to a temp path; caller cleans it up. */
 export function writeTempPortals(f: FilterLists): string {
   const file = path.join(os.tmpdir(), `career-ops-explore-${randomUUID()}.yml`);
-  fs.writeFileSync(file, serializePortals(f), "utf8");
+  let base = "";
+  try {
+    base = fs.readFileSync(path.join(careerOpsRoot(), "portals.yml"), "utf8");
+  } catch {}
+  fs.writeFileSync(file, serializePortals(f, base), "utf8");
   return file;
 }
 
@@ -93,16 +133,30 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     if (filters.positive.length || filters.allow.length || filters.block.length) seededFrom.push("portals.yml");
   }
 
-  if (filters.positive.length === 0) {
-    const profile = loadYaml("config/profile.yml");
-    const roles = (profile?.target_roles ?? {}) as Record<string, unknown>;
-    const fromRoles = listFrom([
-      ...(typeof roles.primary === "string" ? [roles.primary] : []),
-      ...(Array.isArray(roles.archetypes) ? roles.archetypes : []),
-    ]);
-    if (fromRoles.length) {
-      filters.positive = fromRoles;
-      seededFrom.push("profile.yml");
+  const profile = loadYaml("config/profile.yml");
+  if (profile) {
+    if (filters.positive.length === 0) {
+      const roles = (profile.target_roles ?? {}) as Record<string, unknown>;
+      const fromRoles = listFrom([
+        ...(Array.isArray(roles.primary) ? roles.primary : typeof roles.primary === "string" ? [roles.primary] : []),
+        ...(Array.isArray(roles.archetypes) ? roles.archetypes.map((a: any) => typeof a === 'object' && a !== null ? a.name : a) : []),
+      ]);
+      if (fromRoles.length) {
+        filters.positive = fromRoles;
+        if (!seededFrom.includes("profile.yml")) seededFrom.push("profile.yml");
+      }
+    }
+
+    if (filters.allow.length === 0) {
+      const loc = (profile.location ?? {}) as Record<string, unknown>;
+      const fromLoc = listFrom([
+        ...(typeof loc.country === "string" ? [loc.country] : []),
+        ...(Array.isArray(loc.authorized_in) ? loc.authorized_in : [])
+      ]);
+      if (fromLoc.length) {
+        filters.allow = Array.from(new Set(fromLoc));
+        if (!seededFrom.includes("profile.yml")) seededFrom.push("profile.yml");
+      }
     }
   }
 

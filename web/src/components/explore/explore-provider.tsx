@@ -379,6 +379,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     try {
       sessionStorage.removeItem(RESULTS_KEY);
+      localStorage.removeItem(RESULTS_KEY);
     } catch {
       /* ignore */
     }
@@ -492,14 +493,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setModeState(m);
   }, []);
 
-  // Rehydrate the last settled result set on mount (per-tab sessionStorage), unless a
-  // search is already running. Done in an effect (not a useState initializer) to avoid
-  // an SSR hydration mismatch.
+  // Rehydrate the last settled result set on mount. Prefer this tab's session
+  // snapshot, then fall back to the durable local snapshot so a tab/browser
+  // restart does not discard an expensive scan or AI search.
   useEffect(() => {
     if (runningRef.current) return;
     let snap: ResultSnapshot | null = null;
     try {
-      snap = JSON.parse(sessionStorage.getItem(RESULTS_KEY) || "null") as ResultSnapshot | null;
+      const raw = sessionStorage.getItem(RESULTS_KEY) || localStorage.getItem(RESULTS_KEY);
+      snap = JSON.parse(raw || "null") as ResultSnapshot | null;
     } catch {
       snap = null;
     }
@@ -524,7 +526,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPhase(RUNNING.has(snap.phase) ? (snap.offers.length ? "results" : "idle") : snap.phase);
   }, []);
 
-  // Persist only SETTLED states (never mid-stream) so a reload restores a complete set.
+  // Persist only SETTLED states (never mid-stream). sessionStorage preserves the
+  // current tab; localStorage is the durable fallback across tab/browser restarts.
   useEffect(() => {
     const SETTLED = new Set<Phase>(["results", "empty-current", "empty-loose", "failed", "degraded", "blocked"]);
     if (!SETTLED.has(phase)) return;
@@ -533,9 +536,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
         partial, status, error, added: [...added], aiTrace, aiCost, aiIntent,
       };
-      sessionStorage.setItem(RESULTS_KEY, JSON.stringify(snap));
+      const serialized = JSON.stringify(snap);
+      sessionStorage.setItem(RESULTS_KEY, serialized);
+      localStorage.setItem(RESULTS_KEY, serialized);
     } catch {
-      /* sessionStorage full/unavailable — non-fatal */
+      /* browser storage full/unavailable — non-fatal */
     }
   }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, added, aiTrace, aiCost, aiIntent]);
 

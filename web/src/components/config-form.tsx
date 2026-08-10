@@ -11,6 +11,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { CONFIG_CHANGED_EVENT, CONFIG_KEY, patchClientConfig, readConfiguredCli } from "@/lib/client-config.mjs";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 
 type Cli = {
@@ -31,8 +32,6 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-const STORAGE_KEY = "career-ops:config";
-
 export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
   const [clis, setClis] = useState<Cli[] | null>(null);
@@ -42,10 +41,44 @@ export function ConfigForm() {
   const [logos, setLogos] = useState(true);
   const [saved, setSaved] = useState(false);
 
+  // Profile states
+  const [country, setCountry] = useState("");
+  const [authorizedIn, setAuthorizedIn] = useState("");
+  const [preferences, setPreferences] = useState("");
+  // Location filter — these write directly to portals.yml (the scanner reads from there)
+  const [locationAllow, setLocationAllow] = useState<string[]>([]);
+  const [locationInput, setLocationInput] = useState("");
+  const [locationBlock, setLocationBlock] = useState<string[]>([]);
+  const [locationBlockInput, setLocationBlockInput] = useState("");
+  const [blockInput, setBlockInput] = useState("");
+
+  // Load saved profile
+  useEffect(() => {
+    fetch("/api/profile")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.location?.country) setCountry(d.location.country);
+        if (d.location?.authorized_in) setAuthorizedIn(d.location.authorized_in.join(", "));
+        if (d.culture_screen?.require) setPreferences(d.culture_screen.require.join("\n"));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load portals location filter
+  useEffect(() => {
+    fetch("/api/portals")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.location_filter?.allow) setLocationAllow(d.location_filter.allow);
+        if (d.location_filter?.block) setLocationBlock(d.location_filter.block);
+      })
+      .catch(() => {});
+  }, []);
+
   // Load saved prefs
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(CONFIG_KEY);
       if (raw) {
         const v = JSON.parse(raw);
         // key/manual are not wired yet (nothing reads them) → never restore into
@@ -67,19 +100,60 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        const savedCli = readConfiguredCli(localStorage.getItem(CONFIG_KEY));
+        const savedIsInstalled = !!savedCli && list.some((c) => c.installed && c.id === savedCli);
+        const nextCli = savedIsInstalled ? savedCli : list.find((c) => c.installed)?.id || "";
+        setCliId(nextCli);
+        // A visible auto-selection must be real, not cosmetic. Persist it and
+        // notify the persistent assistant mounted outside this page.
+        if (nextCli && nextCli !== savedCli) {
+          localStorage.setItem(
+            CONFIG_KEY,
+            patchClientConfig(localStorage.getItem(CONFIG_KEY), { mode: "cli", cliId: nextCli }),
+          );
+          window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
+        }
       })
       .catch(() => setClis([]));
   }, []);
 
   function save() {
-    // The API key is deliberately NOT persisted: nothing reads it yet (the
-    // key/manual panel is unwired) and a secret must never sit in clear-text
-    // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    localStorage.setItem(CONFIG_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
+
+    // Save profile.yml (country, authorized_in, culture_screen)
+    fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        country: country.trim() || undefined,
+        authorizedIn: authorizedIn ? authorizedIn.split(",").map(s => s.trim()).filter(Boolean) : undefined,
+        preferences: preferences ? preferences.split("\n").map(s => s.trim()).filter(Boolean) : undefined
+      })
+    }).catch(console.error);
+
+    // Save portals.yml location_filter (this is what the scanner actually reads)
+    fetch("/api/portals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: locationAllow,
+        block: locationBlock,
+      })
+    }).catch(console.error);
+
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  function selectCli(nextCliId: string) {
+    setCliId(nextCliId);
+    // Selecting an installed CLI should enable the persistent assistant
+    // immediately. The native storage event only fires in OTHER tabs, so emit a
+    // same-tab event as well.
+    const next = patchClientConfig(localStorage.getItem(CONFIG_KEY), { mode: "cli", cliId: nextCliId });
+    localStorage.setItem(CONFIG_KEY, next);
+    window.dispatchEvent(new Event(CONFIG_CHANGED_EVENT));
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
@@ -163,7 +237,7 @@ export function ConfigForm() {
                       <button
                         type="button"
                         disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
+                        onClick={() => selectCli(c.id)}
                         className={cn(
                           "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
                           c.installed ? "" : "cursor-default",
@@ -291,6 +365,162 @@ export function ConfigForm() {
           />
         </span>
       </button>
+
+      {/* Profile & Location Filters */}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        Dónde buscar
+      </label>
+      <div className="space-y-5 rounded-xl border border-border bg-surface/50 p-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">País de Residencia</label>
+            <input
+              type="text"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              placeholder="Ej: Colombia"
+              className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none placeholder:text-faint focus:border-brand/50"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">Autorizado para trabajar en</label>
+            <input
+              type="text"
+              value={authorizedIn}
+              onChange={(e) => setAuthorizedIn(e.target.value)}
+              placeholder="Ej: Colombia, United States"
+              className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none placeholder:text-faint focus:border-brand/50"
+            />
+            <p className="mt-1 text-[11px] text-faint">Países separados por coma. Penaliza roles que no contraten aquí.</p>
+          </div>
+        </div>
+
+        {/* Location allow chips */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
+            Ubicaciones permitidas en el escáner
+          </label>
+          <p className="mb-2 text-[11px] text-faint">
+            El escáner sólo mostrará vacantes cuya ubicación contenga alguno de estos términos. Añade Ciudad, País, &quot;Remote&quot;, &quot;LATAM&quot;, etc.
+          </p>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {Array.from(new Set(locationAllow)).map((loc) => (
+              <span key={loc} className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">
+                {loc}
+                <button type="button" aria-label={`Quitar ${loc}`} onClick={() => setLocationAllow(locationAllow.filter(l => l !== loc))} className="ml-0.5 opacity-60 hover:opacity-100">
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={locationInput}
+              onChange={(e) => setLocationInput(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === ",") && locationInput.trim()) {
+                  e.preventDefault();
+                  const val = locationInput.trim().replace(/,$/, "");
+                  if (val && !locationAllow.includes(val)) setLocationAllow([...locationAllow, val]);
+                  setLocationInput("");
+                }
+              }}
+              placeholder="Colombia, Cali, Remote, LATAM…"
+              className="flex-1 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none placeholder:text-faint focus:border-brand/50"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const val = locationInput.trim().replace(/,$/, "");
+                if (val && !locationAllow.includes(val)) setLocationAllow([...locationAllow, val]);
+                setLocationInput("");
+              }}
+              className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-sm hover:bg-surface-hover"
+            >
+              Añadir
+            </button>
+          </div>
+          {/* Quick-add suggestions */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {["Colombia", "Cali", "Bogotá", "Medellín", "Remote", "LATAM", "Worldwide"].filter(s => !locationAllow.includes(s)).map(s => (
+              <button key={s} type="button" onClick={() => setLocationAllow([...locationAllow, s])}
+                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted hover:border-brand/40 hover:text-brand">
+                + {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
+            Ubicaciones bloqueadas
+          </label>
+          <p className="mb-2 text-[11px] text-faint">
+            Cualquier vacante cuya ubicación contenga alguna de estas palabras será descartada.
+          </p>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {Array.from(new Set(locationBlock)).map((loc) => (
+              <span key={loc} className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-500">
+                {loc}
+                <button type="button" aria-label={`Quitar ${loc}`} onClick={() => setLocationBlock(locationBlock.filter(l => l !== loc))} className="ml-0.5 opacity-60 hover:opacity-100">
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={locationBlockInput}
+              onChange={(e) => setLocationBlockInput(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === ",") && locationBlockInput.trim()) {
+                  e.preventDefault();
+                  const val = locationBlockInput.trim().replace(/,$/, "");
+                  if (val && !locationBlock.includes(val)) setLocationBlock([...locationBlock, val]);
+                  setLocationBlockInput("");
+                }
+              }}
+              placeholder="US, USA, Europe, San Francisco…"
+              className="flex-1 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none placeholder:text-faint focus:border-red-500/50"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const val = locationBlockInput.trim().replace(/,$/, "");
+                if (val && !locationBlock.includes(val)) setLocationBlock([...locationBlock, val]);
+                setLocationBlockInput("");
+              }}
+              className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-sm hover:bg-surface-hover"
+            >
+              Añadir
+            </button>
+          </div>
+          {/* Quick-add suggestions */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {["US", "USA", "United States", "North America", "Europe", "UK"].filter(s => !locationBlock.includes(s)).map(s => (
+              <button key={s} type="button" onClick={() => setLocationBlock([...locationBlock, s])}
+                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted hover:border-red-500/40 hover:text-red-500">
+                + {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Contract requirements */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-foreground">Requisitos de Contrato y Empresa (Bilingüe)</label>
+          <textarea
+            value={preferences}
+            onChange={(e) => setPreferences(e.target.value)}
+            placeholder={"Contrato a término indefinido / Full-time indefinite contract\nModalidad 100% Remoto / 100% Remote"}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none placeholder:text-faint focus:border-brand/50"
+          />
+          <p className="mt-1 text-[11px] text-faint">Una regla por línea. Escribe en inglés y español para que la IA entienda ofertas en ambos idiomas.</p>
+        </div>
+      </div>
 
       <CadenceSettings />
 
