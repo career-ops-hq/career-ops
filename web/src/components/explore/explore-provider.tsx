@@ -300,7 +300,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources({});
     setError("");
     try {
-      const r = await fetch("/api/whats-new");
+      const r = await fetch("/api/whats-new?limit=all");
       if (!r.ok) {
         setError(`Couldn't load fresh matches (${r.status}).`);
         setPhase("failed");
@@ -314,7 +314,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       }
       const list: DiscoveredOffer[] = d.offers;
       setOffers(list);
-      setMatchCount(list.length);
+      const count = Number(d.count);
+      setMatchCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : list.length);
       setPhase(list.length > 0 ? "results" : "empty-current");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load fresh matches.");

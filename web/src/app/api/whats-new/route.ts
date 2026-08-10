@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { collectWhatsNew } from "@/lib/whats-new.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,11 @@ export const dynamic = "force-dynamic";
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export async function GET(req: Request) {
-  const days = Math.min(30, Math.max(1, Number(new URL(req.url).searchParams.get("days")) || 7));
+  const searchParams = new URL(req.url).searchParams;
+  const days = Math.min(30, Math.max(1, Number(searchParams.get("days")) || 7));
+  // Home only needs enough offers for its cards. Explore's explicit “See all”
+  // hand-off opts into the complete list, while `count` is always complete.
+  const offerLimit = searchParams.get("limit") === "all" ? Number.POSITIVE_INFINITY : 24;
   const cutoff = Date.now() - days * 86_400_000;
   let rows: string[];
   try {
@@ -42,30 +47,6 @@ export async function GET(req: Request) {
     };
   };
 
-  const seen = new Set<string>();
-  const offers: DiscoveredOffer[] = [];
-  let anyDated = false;
-  // Pass 1: recent-by-date (the supply loop).
-  for (let i = rows.length - 1; i >= 1 && offers.length < 24; i--) {
-    const c = rows[i].split("\t");
-    const t = Date.parse(c[1] || "");
-    if (Number.isFinite(t)) anyDated = true;
-    if (!Number.isFinite(t) || t < cutoff) continue;
-    const o = toOffer(c);
-    if (!o || seen.has(o.url)) continue;
-    seen.add(o.url);
-    offers.push(o);
-  }
-  // Fallback for LEGACY scan.mjs histories with no parseable first_seen (every row
-  // would be dropped → a false "all caught up"). Show the most-recent-by-append-order
-  // un-evaluated rows instead, so the supply loop still surfaces something.
-  if (offers.length === 0 && !anyDated) {
-    for (let i = rows.length - 1; i >= 1 && offers.length < 12; i--) {
-      const o = toOffer(rows[i].split("\t"));
-      if (!o || seen.has(o.url)) continue;
-      seen.add(o.url);
-      offers.push(o);
-    }
-  }
-  return Response.json({ offers, count: offers.length });
+  const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
+  return Response.json({ offers, count });
 }
