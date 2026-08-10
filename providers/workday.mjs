@@ -252,7 +252,11 @@ export default {
           json = await fetchJsonWithRetry(ctx, ep.api, { ...postOpts, body: makeBody(page * PAGE_SIZE) }, RETRY_POLICY);
         } catch (err) {
           const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
-          console.error(`⚠️  workday: ${entry.name} truncated at ${page + 1} of ${pagesToFetch} pages after ${RETRY_POLICY.retries + 1} attempts (${jobsSummary}): ${err.message}`);
+          // err.attempts (set by fetchJsonWithRetry) is the actual request count —
+          // a non-retryable error can end the loop after just one attempt, well
+          // short of RETRY_POLICY.retries + 1.
+          const attempts = err.attempts ?? RETRY_POLICY.retries + 1;
+          console.error(`⚠️  workday: ${entry.name} truncated at ${page + 1} of ${pagesToFetch} pages after ${attempts} attempts (${jobsSummary}): ${err.message}`);
           stopReason = 'fetch-error';
           break;
         }

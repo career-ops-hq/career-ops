@@ -61,6 +61,18 @@ if (isRetryableError(oldNodeShape) === true) {
   fail('isRetryableError(cause===undefined) should fall back to retryable');
 }
 
+// A non-TypeError error carrying the same cause.message by coincidence must
+// NOT be treated as a redirect refusal — only fetch()'s own TypeError shape
+// is trusted, since the message string alone isn't a reliable signal.
+const nonTypeErrorLookalike = Object.assign(new Error('boom'), {
+  cause: { message: UNEXPECTED_REDIRECT_CAUSE_MESSAGE },
+});
+if (isRetryableError(nonTypeErrorLookalike) === true) {
+  pass('isRetryableError(non-TypeError with matching cause.message) is true');
+} else {
+  fail('isRetryableError(non-TypeError with matching cause.message) should stay retryable');
+}
+
 // End-to-end: fetchJsonWithRetry must call ctx.fetchJson exactly once on a
 // redirect-refusal error, not retries+1 times.
 {

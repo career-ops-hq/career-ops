@@ -115,7 +115,7 @@ export function isRetryableError(err) {
   const status = err?.status;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
-  if (status === undefined && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE) return false;
+  if (status === undefined && err instanceof TypeError && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE) return false;
   return status === undefined; // network error / timeout / abort — no status set
 }
 
@@ -132,7 +132,10 @@ export function isRetryableError(err) {
  * Deliberately does NOT decide what happens when retries are exhausted: it
  * rethrows, and the caller chooses. That policy genuinely differs per provider
  * — workday truncates the tenant with a warning and keeps the pages it has,
- * while a16z must fail loudly rather than return a silent partial board.
+ * while a16z must fail loudly rather than return a silent partial board. The
+ * rethrown error carries `.attempts` (how many requests were actually made)
+ * so a caller logging a summary doesn't have to assume the full `retries + 1`
+ * — a non-retryable error can end the loop after just one.
  *
  * @param {{fetchJson: Function, sleep?: Function}} ctx - Transport context.
  * @param {string} url - Absolute URL.
@@ -148,6 +151,7 @@ export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
       return await ctx.fetchJson(url, opts);
     } catch (err) {
       lastErr = err;
+      err.attempts = attempt + 1;
       if (attempt === retries || !isRetryableError(err)) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
