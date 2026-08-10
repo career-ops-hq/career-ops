@@ -172,8 +172,7 @@ export default {
     // maxPages so the entry-cap warning below (page === maxPages) doesn't
     // misfire when it was really the probe's cap that stopped pagination.
     // No effect on real scans, which don't set ctx.maxPages.
-    const ctxMaxPages = Number(ctx?.maxPages);
-    const ctxCap = ctxMaxPages > 0 ? ctxMaxPages : Infinity;
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
     const pagesToFetch = Math.min(maxPages, ctxCap);
     const jobs = [];
     const seen = new Set();
