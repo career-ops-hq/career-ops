@@ -9347,6 +9347,78 @@ try {
   fail(`Recovery-record reconcile test crashed: ${e.message}`);
 }
 
+// ── 13c. RECOVERY-RECORD RECONCILE MUST NOT SHIFT FIELDS ON EMPTY COLUMNS ──
+
+console.log('\n13c. Recovery-record reconcile field alignment (empty interior columns)');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon2-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  // Same claude stub as test 13/13b: check_prerequisites() aborts before
+  // reconcile runs when claude is absent (CI has no claude). Offer 42 is
+  // terminal, so no worker invokes it.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+  // Only a terminal offer is in the input, so main() processes nothing and the
+  // merged row below is written solely by reconcile_recovery_records().
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // Offer 99 is NON-terminal (failed), so its recovery record takes the merge
+  // path (not the superseded path). The record has an empty completed_at
+  // (column 5) and an empty score (column 7) — exactly the interior columns a
+  // tab-collapsing `IFS=$'\t' read` would drop, shifting every later field left.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+    '99\thttps://example.com/99\tfailed\t2026-08-06T00:00:00Z\t\t800\t\tolderr\t1',
+  ].join('\n') + '\n');
+  writeFileSync(join(recoveryDir, 'rec-shift1'),
+    '99\thttps://example.com/99\tfailed\t2026-08-07T09:00:00Z\t\t901\t\trate limited\t2\n');
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('99\t')) || '').split('\t');
+  const [, , status99, , completed99, report99, score99, error99, retries99] = row;
+
+  if (status99 === 'failed' && completed99 === '' && report99 === '901' && score99 === '' && error99 === 'rate limited' && retries99 === '2') {
+    pass('reconcile merges a record with empty interior columns without shifting fields');
+  } else {
+    fail(`reconcile shifted fields on empty columns: status=${status99} completed_at=${completed99} report=${report99} score=${score99} error=${error99} retries=${retries99}`);
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record field-alignment test crashed: ${e.message}`);
+}
+
 // ── 14. BATCH SPEND TIER MODEL ROUTING ───────────────────────────
 
 console.log('\n14. Batch spend_tier model routing');

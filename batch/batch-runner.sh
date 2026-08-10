@@ -496,6 +496,10 @@ append_recovery_record() {
   error=${error//$'\r'/ }
   error=${error//$'\n'/ }
   error=${error//$'\t'/ }
+  # \x1f is used as the in-memory delimiter when this record is read back
+  # (see reconcile_recovery_records); strip it here too so a stray unit
+  # separator in $error can't inject a field boundary on the read side.
+  error=${error//$'\x1f'/ }
   mkdir -p "$RECOVERY_DIR" || return 1
   local rec
   rec=$(mktemp "$RECOVERY_DIR/rec-XXXXXX") || return 1
@@ -569,10 +573,18 @@ reconcile_recovery_records() {
   echo "=== Reconciling ${#rec_files[@]} recovery record(s) from a prior interrupted run ==="
   local merged=0 superseded=0 still_failed=0
   local rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries
+  local rline
   local rc
   for f in "${rec_files[@]}"; do
-    rid=""
-    IFS=$'\t' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries < "$f" || true
+    rline=""
+    # Don't split with `IFS=$'\t' read`: tab is IFS *whitespace*, so a run of
+    # tabs around an empty interior field (e.g. an empty completed_at on a
+    # non-terminal record) collapses to one delimiter and every later field
+    # shifts left, corrupting the merge. Read the line raw, then split on \x1f
+    # (a non-whitespace unit separator that preserves empty fields) after
+    # translating the on-disk tabs to it. Same rationale as process_offer.
+    IFS= read -r rline < "$f" || true
+    IFS=$'\x1f' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries <<< "${rline//$'\t'/$'\x1f'}"
     if [[ -z "$rid" ]]; then
       echo "    WARN: discarding unreadable recovery record $f" >&2
       rm -f "$f"
