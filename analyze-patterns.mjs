@@ -423,10 +423,22 @@ function parseTracker() {
   return entries;
 }
 
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // --- Parse a single report file ---
 function parseReport(reportPath) {
-  if (!existsSync(reportPath)) return null;
-  const content = readFileSync(reportPath, 'utf-8');
+  const content = readTextIfExists(reportPath);
+  if (content === null) return null;
   const report = {
     company: null,
     role: null,
@@ -651,18 +663,22 @@ function analyze() {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
     // Tracker links are relative to the tracker file's own directory (see
     // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links.
-    let reportPath = null;
+    // legacy root-relative links. Each candidate is guarded to reports/
+    // before the read is attempted; parseReport returns null for a missing
+    // file, so no pre-flight existsSync is needed (#2385).
+    let reportData = null;
     if (reportMatch) {
-      const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
-      const candidate = existsSync(fromTracker) ? fromTracker : join(CAREER_OPS, reportMatch[1]);
-      
-      const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-      if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
-        reportPath = existsSync(candidate) ? candidate : null;
+      const candidates = new Set([
+        join(dirname(APPS_FILE), reportMatch[1]),
+        join(CAREER_OPS, reportMatch[1]),
+      ]);
+      for (const candidate of candidates) {
+        const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+        if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) continue;
+        reportData = parseReport(candidate);
+        if (reportData) break;
       }
     }
-    const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);
     const score = Number.isFinite(trackerScore)

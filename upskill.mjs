@@ -35,6 +35,18 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
 const CV_FILE = join(CAREER_OPS, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
 
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // Bump when extraction rules change in a way that would make gap lists from
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
 // compares reports with the same schema_version, so a regex change can't
@@ -212,11 +224,16 @@ function analyze(minReports) {
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
-    const candidates = [join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])];
-    const reportPath = candidates.find(p => existsSync(p));
-    if (!reportPath) continue;
+    // The read is attempted directly instead of probing with existsSync first,
+    // which costs a full stat per report and races with the read (#2385).
+    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    let content = null;
+    for (const p of candidates) {
+      content = readTextIfExists(p);
+      if (content !== null) break;
+    }
+    if (content === null) continue;
     reportsRead += 1;
-    const content = readFileSync(reportPath, 'utf-8');
     const { score, gapText, hasMachineSummary } = parseReportGaps(content);
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
