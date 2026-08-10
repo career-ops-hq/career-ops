@@ -29,7 +29,7 @@ import {
   buildWorkdayCandidates,
   resolveCompany,
 } from './discover-ats.mjs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';

@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, e
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**

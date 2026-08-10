@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));

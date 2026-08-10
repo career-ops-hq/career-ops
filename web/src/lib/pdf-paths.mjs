@@ -8,7 +8,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 /**
  * Lowercase, non-alphanumeric runs -> single hyphen, trimmed.

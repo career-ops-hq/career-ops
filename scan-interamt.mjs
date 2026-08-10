@@ -19,7 +19,7 @@
 
 import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
