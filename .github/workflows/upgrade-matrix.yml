@@ -7,6 +7,10 @@ on:
     tags: ['career-ops-v*']
   workflow_dispatch:
 
+# The harness only ever reads the repo and writes to throwaway temp mirrors.
+permissions:
+  contents: read
+
 jobs:
   qualify:
     strategy:
@@ -18,15 +22,16 @@ jobs:
       - name: Force LF checkout on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
+          fetch-depth: 0            # harness needs release tags
+          persist-credentials: false # the harness only ever touches a local mirror
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26'
+          go-version: '1.26'   # old updaters rebuild the dashboard during apply
       - run: npm install --ignore-scripts
       - name: Full upgrade qualification (last 5 releases, own shims, rollback)
         run: node upgrade-tests.mjs --all-versions

@@ -289,7 +289,11 @@ function rollbackLeg(oldTag, targetSha) {
   try {
     const mirror = buildMirror(work, targetSha);
     const { cfg, install, manifest } = setupLeg(work, mirror, oldTag);
-    const versionBefore = readFileSync(join(install, 'VERSION'), 'utf-8');
+    // An unreadable VERSION is a leg failure to report, not an exception to
+    // escape on — a throw here would abort the remaining legs of the sweep.
+    const readVersion = () => { try { return readFileSync(join(install, 'VERSION'), 'utf-8'); } catch { return null; } };
+    const versionBefore = readVersion();
+    ok(versionBefore !== null, 'VERSION readable before apply');
     const env = { ...process.env, GIT_CONFIG_GLOBAL: cfg };
     let phase = 'apply', exitCode = 0, output = '';
     try {
@@ -298,7 +302,10 @@ function rollbackLeg(oldTag, targetSha) {
       output = execFileSync(process.execPath, ['update-system.mjs', 'rollback'], { cwd: install, encoding: 'utf-8', timeout: 120000, env });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
     ok(exitCode === 0, `${phase} exits 0 (got ${exitCode})`);
-    ok(readFileSync(join(install, 'VERSION'), 'utf-8') === versionBefore, 'VERSION restored');
+    // versionBefore !== null is part of the assertion: null === null must
+    // not pass "restored" when VERSION was never readable to begin with.
+    const versionAfter = readVersion();
+    ok(versionBefore !== null && versionAfter === versionBefore, 'VERSION restored');
     for (const [f, hash] of Object.entries(manifest)) {
       const p = join(install, f);
       ok(existsSync(p) && sha256(p) === hash, `user file intact after rollback: ${f}`);
