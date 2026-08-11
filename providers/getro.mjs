@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { fetchJsonWithRetry } from './_http.mjs';
+
 // Getro provider — VC "talent network" portfolio job boards (jobs at a fund's
 // portfolio companies). Powers b2venture, Earlybird, Point Nine, Speedinvest,
 // Cherry, HV Capital, Atomico, and many other VC boards.
@@ -52,6 +54,14 @@ const DEFAULT_MAX_PAGES = 40;      // safety cap: 40 x 20 = 800 newest jobs/boar
 // 10k sequential API calls against a third party.
 const HARD_MAX_PAGES = 200;        // 200 x 20 = 4000 newest jobs/board
 const DEFAULT_MAX_AGE_DAYS = 90;   // pagination bound only; global filter does the real cut
+// Pacing between sequential pages of the SAME board. scan.mjs runs companies
+// 10-wide, but those are different tenants on different hosts; the burst that
+// gets noticed is N back-to-back POSTs at one endpoint. Getro sits behind a
+// Datadog WAF that IP-blocks on that pattern (observed 2026-08-08: 40-page
+// boards → 403 "You've been blocked" for ~2.5h, which is silent data loss
+// because 403 is correctly non-retryable). A short sleep between pages costs
+// nothing on a parallel scan of distinct tenants and removes the signature.
+const PAGE_DELAY_MS = 250;
 
 function resolveCollection(entry) {
   const id = entry.getro_collection;
@@ -83,7 +93,15 @@ export default {
     const out = [];
     let total = Infinity;
     for (let page = 0; page < maxPages && page * HITS_PER_PAGE < total; page++) {
-      const json = await ctx.fetchJson(apiUrl, {
+      // Pace pages 1..n; page 0 is the first contact with this host and needs
+      // no delay. ctx.sleep keeps unit tests off the wall clock, matching the
+      // convention in _http.mjs.
+      if (page > 0) {
+        await (typeof ctx.sleep === 'function'
+          ? ctx.sleep(PAGE_DELAY_MS)
+          : new Promise(resolve => setTimeout(resolve, PAGE_DELAY_MS)));
+      }
+      const json = await fetchJsonWithRetry(ctx, apiUrl, {
         method: 'POST',
         // redirect:'error' — apiUrl is pinned to api.getro.com (https), so a 3xx
         // to a private/metadata IP must not be followed (matches every provider).
