@@ -39,10 +39,14 @@
  * ambiguous instead of comparing anything: silently keeping "the first" entry
  * would hide the rest of the group and risk pairing the wrong role.
  *
- * Warn-only, matching this project's human-in-the-loop philosophy: never
- * blocks, never edits cv.md or the tailored CV, never exits non-zero for a
- * title mismatch (exit 1 is reserved for usage/file errors and --self-test
- * failures).
+ * Warn-only, matching this project's human-in-the-loop philosophy, for
+ * COMPLETED comparisons: never blocks, never edits cv.md or the tailored CV,
+ * never exits non-zero for a title mismatch or an ambiguous group. Exit 1 is
+ * reserved for the check not actually running to completion — a missing or
+ * unreadable cv.md/payload, unparseable JSON, or an experience entry missing
+ * company/role/dates (which would otherwise silently narrow the comparison
+ * to only the complete entries and report a false clean bill of health) —
+ * plus --self-test failures.
  *
  * Usage:
  *   node cv-title-check.mjs /tmp/cv-jane-doe-acme.json
@@ -134,15 +138,47 @@ export function parseCvExperience(cvText) {
 
 // ── Tailored-CV payload parsing (modes/pdf.md Step 17 JSON schema) ──
 
+/**
+ * Parse `experience[]` out of the tailored-CV render payload.
+ *
+ * An entry missing `company`, `role`, or `dates` is a malformed payload, not
+ * a job the check can skip: silently dropping it would compare only the
+ * complete entries, exit 0, and report a clean bill of health for a CV that
+ * was never fully checked. Same failure category as a payload that fails to
+ * parse at all — throws so the CLI can exit non-zero and name exactly which
+ * entry/field needs fixing, instead of quietly narrowing the comparison set.
+ *
+ * @throws {Error} if any experience entry is missing company/role/dates.
+ */
 export function parseTailoredExperience(payload) {
   const experience = Array.isArray(payload?.experience) ? payload.experience : [];
-  return experience
-    .map(e => ({
-      company: String(e?.company ?? '').trim(),
-      title: String(e?.role ?? '').trim(),
-      dates: String(e?.dates ?? '').trim(),
-    }))
-    .filter(e => e.company && e.title && e.dates);
+  const parsed = [];
+  const incomplete = [];
+
+  experience.forEach((e, index) => {
+    const company = String(e?.company ?? '').trim();
+    const title = String(e?.role ?? '').trim();
+    const dates = String(e?.dates ?? '').trim();
+    const missingFields = [];
+    if (!company) missingFields.push('company');
+    if (!title) missingFields.push('role');
+    if (!dates) missingFields.push('dates');
+
+    if (missingFields.length > 0) {
+      incomplete.push(`experience[${index}] is missing ${missingFields.join(', ')}`);
+    } else {
+      parsed.push({ company, title, dates });
+    }
+  });
+
+  if (incomplete.length > 0) {
+    throw new Error(
+      `tailored CV payload has ${incomplete.length} incomplete experience entr${incomplete.length === 1 ? 'y' : 'ies'} — ` +
+      `title check cannot run on a partial comparison set: ${incomplete.join('; ')}`
+    );
+  }
+
+  return parsed;
 }
 
 // ── Normalization / matching ────────────────────────────────────────
@@ -322,6 +358,45 @@ function runSelfTest() {
   const caseOnlyResult = checkTitles(cvEntries, parseTailoredExperience(caseOnlyPayload));
   eq('case/whitespace-only title differences are not a mismatch', caseOnlyResult.mismatches.length, 0);
 
+  // An incomplete experience entry (missing a required field) must fail
+  // loudly, not be silently filtered out of the comparison set — a payload
+  // mixing one valid entry with one incomplete entry must NOT quietly
+  // compare only the valid one and report a clean result.
+  const throwsFor = (label, payload) => {
+    try {
+      parseTailoredExperience(payload);
+      failed++;
+      console.log(`  FAIL: ${label}\n    expected: throw\n    actual:   no throw`);
+    } catch {
+      passed++;
+    }
+  };
+  throwsFor('an entry missing dates throws instead of being dropped', {
+    experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer' }],
+  });
+  throwsFor('an entry missing role throws instead of being dropped', {
+    experience: [{ company: 'Acme Corp', dates: '2020-2024' }],
+  });
+  throwsFor('an entry missing company throws instead of being dropped', {
+    experience: [{ role: 'Senior Software Engineer', dates: '2020-2024' }],
+  });
+  throwsFor('one incomplete entry throws even alongside an otherwise-valid entry (no partial comparison)', {
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2020-2024' },
+      { company: 'Globex Inc.', role: 'Engineer' }, // missing dates
+    ],
+  });
+  try {
+    parseTailoredExperience({
+      experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer' }],
+    });
+    failed++;
+    console.log('  FAIL: incomplete-entry error names the missing field\n    expected: throw mentioning "dates"\n    actual:   no throw');
+  } catch (err) {
+    eq('incomplete-entry error names the missing field', err.message.includes('dates'), true);
+    eq('incomplete-entry error names the entry index', err.message.includes('experience[0]'), true);
+  }
+
   // Duplicate {company, dates} key IN cv.md (two different jobs, same range —
   // malformed but possible): must be reported as ambiguous, never resolved by
   // silently picking one cv.md entry and hiding the other.
@@ -413,6 +488,19 @@ function runSelfTest() {
     writeFileSync(join(cliTmp, 'malformed.json'), '{ this is not valid json');
     eq('CLI exits 1 on a malformed JSON payload', runCli(['malformed.json']).status, 1);
 
+    // A payload mixing one valid entry with one incomplete entry (missing
+    // dates) must fail loudly — never silently compare only the valid entry
+    // and report success as though the whole CV had been checked.
+    writeFileSync(join(cliTmp, 'partial.json'), JSON.stringify({
+      experience: [
+        { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2020-2024' },
+        { company: 'Globex Inc.', role: 'Engineer' }, // missing dates
+      ],
+    }));
+    const partialRun = runCli(['partial.json', '--summary']);
+    eq('CLI exits 1 for a payload with one incomplete experience entry (no silent partial comparison)', partialRun.status, 1);
+    eq('the exit-1 partial-payload run does not print a clean-result summary', /No title drift found/i.test(partialRun.stdout), false);
+
     // A completed comparison that FINDS a title mismatch is still warn-only:
     // exit 0, distinguishing "the check ran and found something to warn
     // about" from "the check could not run at all".
@@ -483,7 +571,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
 
     const cvEntries = parseCvExperience(readFileSync(CV_PATH, 'utf-8'));
-    const tailoredEntries = parseTailoredExperience(payload);
+    let tailoredEntries;
+    try {
+      tailoredEntries = parseTailoredExperience(payload);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
     const result = checkTitles(cvEntries, tailoredEntries);
 
     if (summaryMode) {
