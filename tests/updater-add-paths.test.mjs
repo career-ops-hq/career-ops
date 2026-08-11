@@ -292,16 +292,14 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   writeFileSync(join(dir, 'docs/prod.env'), 'SECRET=hunter2');
   writeFileSync(join(dir, 'docs/README.md'), 'updated by v-next');
 
-  // Oracle: the unexpanded force-add is what sweeps them in. If this ever stops
-  // being true the expansion is dead weight and the assertion below is vacuous.
-  let sweptThrew = null;
-  try {
-    addPaths(['docs/'], ctx);
-  } catch (err) {
-    sweptThrew = err;
-  }
+  // Oracle: the unexpanded force-add is what sweeps them in. Probed through the
+  // RAW runner, not addPaths — addPaths now refuses a directory outright, and
+  // asserting through it would only re-test that refusal. This pins git's
+  // behaviour, which is the thing the expansion exists to work around; if it
+  // ever stops being true the expansion is dead weight.
+  g('add', '-f', '--', 'docs/');
   const swept = stagedPaths(g);
-  if (!sweptThrew && swept.has('docs/prod.env') && swept.has('docs/career-dashboard')) {
+  if (swept.has('docs/prod.env') && swept.has('docs/career-dashboard')) {
     pass('-f over a directory pathspec does stage ignored files (oracle holds)');
   } else {
     fail(`oracle broken — a bare -f no longer sweeps: ${[...swept].join(', ') || '(nothing)'}`);
@@ -508,7 +506,85 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 12. a real ls-tree failure aborts instead of yielding "nothing shipped" ──
+// ── 12. rollback stages through the same expansion, against the BACKUP tree ──
+//    rollback() builds `restored` straight off SYSTEM_PATHS, so it carries the
+//    same 53 directory entries apply() does. Before this PR that was harmless
+//    (addPaths did a plain add, which skips ignored paths); making -f
+//    unconditional armed the sweep at BOTH call sites, and expanding only
+//    apply()'s would have left rollback committing a user's ignored files while
+//    claiming to restore them. The ref matters too: rollback restores what the
+//    BACKUP shipped, which is not what HEAD ships.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'backup state');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'shipped in the backup, deleted since');
+  writeFileSync(join(dir, '.gitignore'), 'career-dashboard\n*.env\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  g('branch', 'backup-pre-update-1.0.0');
+
+  // Time passes: upstream retires a file, and the user accumulates their own.
+  g('rm', '-q', '--', 'docs/RETIRED.md');
+  g('commit', '-qm', 'upstream retires a doc');
+  writeFileSync(join(dir, 'docs/career-dashboard'), 'compiled binary');
+  writeFileSync(join(dir, 'docs/prod.env'), 'SECRET=hunter2');
+
+  const restored = ['docs/'];   // exactly what rollback() pushes
+
+  // The guarantee is structural: rollback cannot reach the sweep even if its
+  // expansion is removed, because addPaths refuses a directory outright. That
+  // matters here specifically — rollback() is not exported and no harness
+  // drives it, so this refusal is what closes the call site rather than a
+  // test of rollback itself.
+  let refused = null;
+  try {
+    addPaths(restored, ctx);
+  } catch (err) {
+    refused = err;
+  }
+  // Both halves are required. Throwing is not the guarantee — NOT STAGING is.
+  // An implementation that swept the directory in and then threw would satisfy
+  // the error check alone, and the sweep is the thing being prevented.
+  const afterRefusal = stagedPaths(g);
+  if (refused && refused.message.includes('docs/') && afterRefusal.size === 0) {
+    pass('addPaths refuses rollback\'s unexpanded list without staging anything');
+  } else if (refused && afterRefusal.size > 0) {
+    fail(`addPaths threw but staged first: ${[...afterRefusal].join(', ')}`);
+  } else {
+    fail(`addPaths accepted a directory pathspec: ${[...afterRefusal].join(', ') || '(nothing staged)'}`);
+  }
+  g('reset', '-q');
+
+  const expanded = expandToShippedFiles(restored, 'backup-pre-update-1.0.0', ctx);
+  if (expanded.includes('docs/RETIRED.md')) {
+    pass('rollback expands against the backup tree, so a retired file is restorable');
+  } else {
+    fail(`expanded against the wrong ref — RETIRED.md missing: ${expanded.join(', ')}`);
+  }
+
+  // rollback() checks the backup out before it stages, which is what puts a
+  // retired file back on disk. Staging without that step would fail on an
+  // unmatched pathspec, so the order is part of the property under test.
+  g('checkout', 'backup-pre-update-1.0.0', '--', 'docs/');
+
+  let threw = null;
+  try {
+    addPaths(expanded, ctx);
+  } catch (err) {
+    threw = err;
+  }
+  const staged = stagedPaths(g);
+  if (!threw && staged.has('docs/RETIRED.md')
+      && !staged.has('docs/prod.env') && !staged.has('docs/career-dashboard')) {
+    pass('rollback restores the backup and stages no ignored user file');
+  } else {
+    fail(`rollback still swept: ${[...staged].join(', ') || threw?.message.split('\n')[0]}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 13. a real ls-tree failure aborts instead of yielding "nothing shipped" ──
 //    The absent-directory case exits 0 (test 8), so any throw is genuine. If it
 //    were swallowed, an unreadable ref would drop every file under the
 //    directory from staging while apply() carried on toward its success path.

@@ -993,6 +993,24 @@ const ADD_ARGV_BUDGET = 8000;
  */
 export function addPaths(paths, ctx = {}) {
   if (paths.length === 0) return;
+  // Enforced, not merely documented. Two call sites feed this function and both
+  // build their list from SYSTEM_PATHS, so "callers must pass files" is exactly
+  // the kind of precondition that holds until someone adds a third caller — and
+  // the failure is a user's ignored files committed silently, which nothing
+  // downstream reports. A comment could not have caught rollback(); this does.
+  //
+  // Detection is by trailing slash, which matches how SYSTEM_PATHS spells a
+  // directory and therefore both callers. It is NOT a general directory test:
+  // `git add -f -- docs` sweeps exactly as `docs/` does, and rollback()'s
+  // `removed` list holds precisely that slash-stripped form. That list only
+  // ever reaches `git commit` today; routing it here would pass this guard.
+  const dirs = paths.filter(p => p.endsWith('/'));
+  if (dirs.length > 0) {
+    throw new Error(
+      `addPaths received directory pathspec(s), which -f would sweep ignored files from: ` +
+      `${dirs.join(', ')}. Resolve them with expandToShippedFiles() first.`
+    );
+  }
   const runGit = ctx.git || git;
   let batch = [];
   let budget = 0;
@@ -1623,7 +1641,12 @@ function rollback() {
       }
     }
 
-    if (restored.length > 0) addPaths(restored);
+    // Same expansion as apply(), against the backup tree this rollback is
+    // restoring from. `restored` comes straight off SYSTEM_PATHS, so it carries
+    // the 53 directory entries, and addPaths forces every path it is given —
+    // `git add -f -- docs/` here would sweep the user's ignored files into the
+    // rollback commit exactly as it would have in apply().
+    if (restored.length > 0) addPaths(expandToShippedFiles(restored, latest));
     const rollbackPaths = [...restored, ...removed];
     try {
       // Scope the commit to the rollback paths (#915 bug 2). A bare
