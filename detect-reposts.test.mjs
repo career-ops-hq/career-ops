@@ -1300,6 +1300,36 @@ const zeroSpanOut = execFileSync('node', [scriptPath, '--min-span', '0'], {
 });
 eq('--min-span 0 is honoured as an explicit zero', JSON.parse(zeroSpanOut).metadata.minSpanDays, 0);
 
+// All-digits is not enough on its own. A long digit run converts to Infinity,
+// which is this file's original defect in a new place: an infinite floor
+// rejects every cluster, an infinite window is unbounded, and JSON.stringify
+// writes Infinity as `null` — so metadata would report a value that is not the
+// one in effect. An UNSAFE integer is the quiet version: 9007199254740993
+// silently becomes ...992, a number nobody typed.
+const overflowCases = [
+  ['--min-span', '9'.repeat(400), 'minSpanDays', 1, 'overflow --min-span falls back (never becomes an infinite floor)'],
+  ['--window', '9'.repeat(400), 'windowDays', 90, 'overflow --window falls back (never becomes an unbounded window)'],
+  ['--min-span', '9007199254740993', 'minSpanDays', 1, 'unsafe-integer --min-span falls back rather than losing precision'],
+];
+for (const [flag, value, field, expected, label] of overflowCases) {
+  const out = execFileSync('node', [scriptPath, flag, value], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  const meta = JSON.parse(out).metadata;
+  eq(label, meta[field], expected);
+}
+
+// The metadata block must always round-trip a real number, since it is what a
+// consumer reads to learn which rules produced the clusters. `null` there means
+// an Infinity got through.
+const metaSanity = JSON.parse(execFileSync('node', [scriptPath, '--min-span', '9'.repeat(400)], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+})).metadata;
+ok('metadata.minSpanDays is always a finite number, never null', Number.isFinite(metaSanity.minSpanDays));
+ok('metadata.windowDays is always a finite number, never null', Number.isFinite(metaSanity.windowDays));
+
 // Test -h flag
 const hOut = execFileSync('node', [scriptPath, '-h'], {
   encoding: 'utf-8', timeout: 10000,

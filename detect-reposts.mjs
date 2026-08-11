@@ -97,12 +97,21 @@ const selfTestMode = args.includes('--self-test');
 // Tested against Number()/Number.isInteger() as well: Number('') is 0, so an
 // empty value (`--min-span=`) would read as a deliberate zero and disable the
 // floor. A total regex has no such hole.
+// The regex is not sufficient on its own: it happily accepts a 400-digit run of
+// nines, which Number() turns into Infinity. That reproduces this file's
+// original defect in a new place — an infinite floor rejects every cluster, an
+// infinite window is unbounded, and JSON.stringify writes Infinity as `null`,
+// so metadata reports a value that is not the one in effect. A merely UNSAFE
+// integer is the quiet version of the same thing: 9007199254740993 silently
+// becomes ...992. isSafeInteger rejects both.
 const intFlag = (flag, fallback) => {
   const raw = flagValue(args, flag);
   if (raw === undefined) return fallback;
   const text = String(raw).trim();
   if (!/^\d+$/.test(text)) return fallback;
-  return Number(text);
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return parsed;
 };
 const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
