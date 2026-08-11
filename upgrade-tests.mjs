@@ -70,7 +70,7 @@ function writeGitConfig(work, mirror) {
  *  the target and the leg would go spuriously RED. */
 function pickOracle(mirror, oldTag, targetSha, systemPaths) {
   const changed = git(mirror, 'diff', '--name-only', `${oldTag}..${targetSha}`).split('\n').filter(Boolean);
-  if (changed.includes('update-system.mjs')) return 'update-system.mjs';
+  if (changed.includes('update-system.mjs')) return { oracle: 'update-system.mjs', changed };
   const managed = (f) => systemPaths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
   const candidate = changed.find((f) => {
     if (!managed(f)) return false;
