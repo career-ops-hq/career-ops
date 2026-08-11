@@ -12969,6 +12969,120 @@ try {
       }
     }
   }
+
+  // 55.7 The company/role matching key: core vs the web's declared mirror (#2666).
+  //
+  // The browser cannot reach the user's checkout, so web/src/lib/core/
+  // normalize-text-key.mjs is a COPY by necessity, declared as such. A conscious
+  // copy without an assertion is exactly the failure this repo has now hit five
+  // times (states.ts, CADENCE_DEFAULTS, doctor prereqs, the #2590 cache, and the
+  // three divergent company norms of #2666 itself).
+  //
+  // Compare CORE vs MIRROR, not core vs the derived path: the derived path
+  // imports the core, so it CANNOT diverge — asserting on it would guard the one
+  // thing that cannot break while ignoring the one that can. The mirror is also
+  // the path nobody exercises in normal operation (it only runs on a partial
+  // checkout), which is precisely why it needs a test rather than usage.
+  //
+  // Expected values are DERIVED from the core, never hand-written: a hand-written
+  // expectation would freeze today's answer and stop tracking the source.
+  const corpusPath = join(ROOT, 'tests', 'fixtures', 'company-key-corpus.json');
+  const mirrorPath = join(ROOT, 'web', 'src', 'lib', 'core', 'normalize-text-key.mjs');
+  if (!existsSync(join(ROOT, 'web', 'src'))) {
+    warn('web/ not present in this checkout — skipping the company-key parity freeze (#2666)');
+  } else if (!existsSync(corpusPath) || !existsSync(mirrorPath)) {
+    // web/ IS here, so a missing file is a move, not an absence. Failing rather
+    // than skipping: a skip is how this freeze would quietly stop guarding.
+    fail(`web/ exists but ${!existsSync(corpusPath) ? 'tests/fixtures/company-key-corpus.json' : 'web/src/lib/core/normalize-text-key.mjs'} is missing — the #2666 key parity cannot verify (moved?)`);
+  } else {
+    try {
+      const corpus = JSON.parse(readFileSync(corpusPath, 'utf-8'));
+      const core = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+      const mirror = await import(pathToFileURL(mirrorPath).href);
+      const coreFn = core.normalizeTextKey, mirrorFn = mirror.normalizeTextKey;
+      if (typeof coreFn !== 'function' || typeof mirrorFn !== 'function') {
+        fail('normalizeTextKey is not exported by the core and/or the web mirror — the #2666 parity cannot verify');
+      } else {
+        // undefined cannot be written in JSON but is a real input (a missing
+        // cell), and it is half of the null/undefined bug — so it is appended here.
+        const inputs = [...corpus.cases.map((c) => c.input), undefined];
+        const drift = [];
+        for (const sep of ['', ' ']) {
+          for (const input of inputs) {
+            const a = coreFn(input, sep), b = mirrorFn(input, sep);
+            if (a !== b) drift.push(`${JSON.stringify(input)} sep=${JSON.stringify(sep)}: core=${JSON.stringify(a)} mirror=${JSON.stringify(b)}`);
+          }
+        }
+        if (drift.length === 0) {
+          pass(`web company-key mirror matches the core on all ${inputs.length} corpus cases x2 separators (#2666)`);
+        } else {
+          fail(`web company-key mirror DRIFTED from the core — ${drift.length} case(s): ${drift.slice(0, 3).join(' | ')}`);
+        }
+        // Guard of the guard, in TWO directions, because each covers a hole the
+        // other cannot see:
+        //  (a) the RULES could regress in the core itself, and
+        //  (b) the CORPUS could be thinned until the comparison above passes
+        //      vacuously — "matches on all 0 cases" is a green that proves nothing.
+        // (b) was found by mutation: deleting Škoda and 日本電産 from the corpus
+        // left every check green, because (a) queries the core directly.
+        const inputStrings = corpus.cases.map((c) => String(c.input));
+        const mustCarry = ['Škoda', 'Koda', '日本電産', 'Nestlé'];
+        const missing = mustCarry.filter((m) => !inputStrings.includes(m));
+        const rulesHold = coreFn('Škoda', ' ') !== coreFn('Koda', ' ') && coreFn('日本電産', ' ') !== '';
+        if (missing.length === 0 && corpus.cases.length >= 10 && rulesHold) {
+          pass(`company-key corpus still carries its teeth (${corpus.cases.length} cases incl. the collision pair, rules hold) (#2666)`);
+        } else if (!rulesHold) {
+          fail('the company-key rules regressed: Škoda now collides with Koda and/or CJK keys to empty — this is the #2666 data-loss bug returning');
+        } else {
+          fail(`the company-key corpus lost its teeth: ${missing.length ? `missing ${missing.join(', ')}` : `only ${corpus.cases.length} cases left`} — the parity check above would pass without exercising the failure it exists for`);
+        }
+      }
+    } catch (err) {
+      fail(`company-key parity check could not run (${err.message}) — treat as unverified, not as passing (#2666)`);
+    }
+  }
+
+  // 55.8 Where the key comes from, per surface (#2666, structural half).
+  //
+  // Shapes are NOT interchangeable: the server can reach the user's live core
+  // (dynamic import via careerOpsRoot) and must derive from it; a "use client"
+  // component physically cannot, so it imports the shared mirror. What none of
+  // them may do is define a normalizer of its own — that is how three divergent
+  // company keys shipped in the first place.
+  //
+  // The ASCII-class check is scoped to THESE THREE FILES on purpose. A repo-wide
+  // grep for [^a-z0-9] measured 71% false positives (domain slugs, filename
+  // slugs, a regex boundary class — all legitimate), and a check that shouts at
+  // correct code gets silenced. Here the same expression would be the bug.
+  const keySurfaces = [
+    { file: join(ROOT, 'web', 'src', 'app', 'api', 'whats-new', 'route.ts'), needs: 'getNormalizeTextKey', how: 'derive from the live core' },
+    { file: join(ROOT, 'web', 'src', 'components', 'explore', 'explorer-view.tsx'), needs: 'normalize-text-key', how: 'import the shared mirror (client cannot reach the core)' },
+    { file: join(ROOT, 'web', 'src', 'app', 'actions', 'registry.ts'), needs: 'normalize-text-key', how: 'import the shared mirror' },
+  ];
+  if (existsSync(join(ROOT, 'web', 'src'))) {
+    for (const { file, needs, how } of keySurfaces) {
+      const name = file.slice(ROOT.length + 1);
+      if (!existsSync(file)) { fail(`${name} is missing — the #2666 key-source freeze cannot verify (moved?)`); continue; }
+      const src = readFileSync(file, 'utf-8');
+      if (!src.includes(needs)) {
+        fail(`${name} no longer references ${needs} — it must ${how}, never key company names on its own (#2666)`);
+      } else if (src.split('\n')
+        // Comment lines are stripped first: the honest fix for this bug ships a
+        // comment WARNING against the pattern ("never [^a-z0-9]"), and flagging
+        // that would punish the file for documenting its own trap. Measured:
+        // this exact false positive fired on explorer-view.tsx the first time
+        // this check ran. Line-level is proportionate here — the scope is three
+        // known files, and a full JS parse to catch a block comment would be
+        // more machinery than the risk deserves.
+        .filter((l) => { const t = l.trimStart(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
+        .some((l) => /\[\^a-z0-9\]/i.test(l))) {
+        fail(`${name} contains an ASCII-only character class — that is the exact key that made "Škoda" collide with "Koda" and emptied CJK names (#2666)`);
+      } else {
+        pass(`${name} takes its matching key from the right place (#2666)`);
+      }
+    }
+  }
+
 } catch (e) {
   fail(`core↔web contract freeze section crashed: ${e.message}`);
 }
