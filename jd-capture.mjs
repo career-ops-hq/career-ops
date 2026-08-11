@@ -30,9 +30,12 @@ export function reportPrefix(num) {
  * @param {number|string} reportNum  Tracker/report number.
  * @param {object} [opts]
  * @param {string} [opts.companySlug] Disambiguates when a report has several
- *   captures. A slug that begins with digits is indistinguishable from a report
- *   number by filename alone, so this is the escape hatch for that collision.
+ *   captures, and guards against a number that matched the wrong company: if no
+ *   candidate carries this slug, the lookup reports nothing found rather than
+ *   returning a capture it cannot attribute. Omit it to take the most recent
+ *   candidate unconditionally.
  * @returns {{path: string, filename: string, ext: string, candidates: string[]}|null}
+ *   null when no capture matches the report, or when companySlug matches none.
  */
 export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
   const target = Number(reportNum);
@@ -65,10 +68,19 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
 
   // Recency is a deterministic tie-break, not a quality judgement. An explicit
   // companySlug beats it, and callers get the full candidate list either way.
-  const hinted = companySlug
-    ? byRecency.find(e => e.name.toLowerCase().includes(String(companySlug).toLowerCase()))
-    : null;
-  const chosen = hinted ?? byRecency[0];
+  //
+  // A companySlug that matches nothing means every candidate belongs to some
+  // other company: the number matched, the posting did not. Falling back to a
+  // mismatch would hand the caller another company's JD, and the caller cannot
+  // tell it apart from a real hit — outcome.mjs copies it in as the permanent
+  // posting record and, counting the lookup as a success, never archives the
+  // real one. Report nothing found instead. The cost of being wrong the other
+  // way is only a re-archive from the live URL.
+  let chosen = byRecency[0];
+  if (companySlug) {
+    chosen = byRecency.find(e => e.name.toLowerCase().includes(String(companySlug).toLowerCase()));
+    if (!chosen) return null;
+  }
 
   return {
     path: join(jdsDir, chosen.name),

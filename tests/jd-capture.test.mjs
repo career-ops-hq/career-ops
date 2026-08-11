@@ -81,8 +81,22 @@ try {
   const hinted = findCaptureForReport(jds, 70, { companySlug: 'iota-old' });
   check('companySlug hint overrides the recency default', hinted?.filename === '070-iota-old.txt');
 
+  // A hint that matches nothing is not a preference the lookup may quietly drop:
+  // it means no candidate is this company's posting. Falling back to the most
+  // recent one returned a different company's JD, indistinguishable to the caller
+  // from a real hit (see the cross-company collision case below).
   const hintMiss = findCaptureForReport(jds, 70, { companySlug: 'nomatch' });
-  check('unmatched companySlug falls back to most recent', hintMiss?.filename === '070-iota-new.pdf');
+  check('unmatched companySlug reports no capture rather than guessing', hintMiss === null);
+
+  // ── cross-company prefix collision ─────────────────────────────────────────
+  // `04-mission-preborn-vp-marketing.txt` parses to report 4. When report 4 is a
+  // different company, no candidate is that company's posting, and returning the
+  // mismatch is worse than returning nothing: outcome.mjs copies the result to
+  // the outcome dir as the permanent posting record, and treats the lookup as a
+  // success, so it never archives the real posting.
+  writeCapture('04-mission-preborn-vp-marketing.txt');
+  check('companySlug matching no candidate returns null rather than another company\'s capture',
+    findCaptureForReport(jds, 4, { companySlug: 'weave' }) === null);
 
   // ── robustness ─────────────────────────────────────────────────────────────
   check('missing jds dir returns null instead of throwing', findCaptureForReport(join(testDir, 'nope'), 64) === null);
