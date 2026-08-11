@@ -131,34 +131,46 @@ export default {
 
   async fetch(_entry, ctx) {
     assertMuseUrl(FEED_BASE);
-    const allResults = [];
-    // Fetch page 0 first to discover page_count, then iterate remaining pages.
-    let pageCount = 1;
-    for (let page = 0; page < pageCount; page++) {
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+
+    // Page 0 is fetched outside the tolerant loop below and its failure is
+    // NOT caught: a completely dead board must throw, not return []. A
+    // caught page-0 failure would return an empty array indistinguishable
+    // from a healthy "0 jobs today" result -- scan.mjs's consecutive-failure
+    // detector resets its streak on any non-throwing fetch, so a themuse
+    // outage would silently reset the very detector meant to catch it.
+    // Mirrors workday.mjs, which fetches its first page outside the
+    // retry-tolerant loop (`page = 1` start) for the same reason.
+    const firstUrl = `${FEED_BASE}?page=0`;
+    // redirect:'error' prevents SSRF via server-side redirects
+    const first = await fetchPageWithRetry(ctx, firstUrl, { redirect: 'error' });
+    if (!first || !Array.isArray(first.results)) {
+      throw new Error(
+        `themuse: unexpected API response on page 0 — expected { results: [...] }, got keys: [${first ? Object.keys(first).join(', ') : 'null'}]`,
+      );
+    }
+    const allResults = [...first.results];
+    const pageCount = Number.isInteger(first.page_count) && first.page_count > 1
+      ? Math.min(first.page_count, MAX_PAGES)
+      : 1;
+
+    // Pages 1+ stay tolerant: a page that exhausts retries truncates with a
+    // warning and returns whatever was already gathered, instead of
+    // discarding it.
+    for (let page = 1; page < pageCount; page++) {
+      await sleep(INTER_PAGE_DELAY_MS, ctx);
       const url = `${FEED_BASE}?page=${page}`;
       let json;
       try {
-        // redirect:'error' prevents SSRF via server-side redirects
         json = await fetchPageWithRetry(ctx, url, { redirect: 'error' });
       } catch (err) {
-        // A transient failure that survives every retry should not discard
-        // every job already gathered from earlier pages in this run — return
-        // what was collected instead of throwing the whole board away. A
-        // failure on page 0 still surfaces as zero jobs, which scan.mjs's own
-        // empty-board reporting already covers; this only changes the
-        // behavior for page 1+.
         const attempts = Number.isInteger(err?.attempts) ? err.attempts : 1;
-        console.error(`⚠️  themuse: truncated at page ${page} of ${pageCount === 1 ? 'unknown' : pageCount} after ${attempts} attempt${attempts === 1 ? '' : 's'} (${allResults.length} jobs gathered so far): ${err.message}`);
+        console.error(`⚠️  themuse: truncated at page ${page} of ${pageCount} after ${attempts} attempt${attempts === 1 ? '' : 's'} (${allResults.length} jobs gathered so far): ${err.message}`);
         break;
       }
       if (!json || !Array.isArray(json.results)) {
         throw new Error(
           `themuse: unexpected API response on page ${page} — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
-      }
-      if (page === 0 && Number.isInteger(json.page_count) && json.page_count > 1) {
-        pageCount = Math.min(json.page_count, MAX_PAGES);
       }
       allResults.push(...json.results);
     }

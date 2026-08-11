@@ -263,6 +263,41 @@ try {
     }
   }
 
+  // fetch() page 0 is NOT in the tolerant loop — a completely dead board
+  // (every attempt on page 0 fails) must throw, not resolve to []. A caught
+  // page-0 failure would be indistinguishable from a healthy "0 jobs today"
+  // result to scan.mjs's consecutive-failure detector.
+  {
+    let calls = 0;
+    let threw = false;
+    let thrownMessage = '';
+    try {
+      await themuse.fetch(
+        { name: 'The Muse Board', provider: 'themuse' },
+        {
+          fetchJson: async () => {
+            calls++;
+            const err = new Error('HTTP 503'); err.status = 503; throw err; // every call fails, including page 0
+          },
+          sleep: async () => {},
+        },
+      );
+    } catch (err) {
+      threw = true;
+      thrownMessage = err.message;
+    }
+    if (threw) pass('themuse.fetch() throws (does not return []) when page 0 fails every retry attempt');
+    else fail('themuse.fetch() should throw on a total page-0 failure, not resolve to an empty array');
+    if (thrownMessage === 'HTTP 503') {
+      pass('themuse.fetch() propagates the real page-0 error rather than swallowing it');
+    } else {
+      fail(`themuse page-0 failure: expected the propagated error message "HTTP 503", got ${JSON.stringify(thrownMessage)}`);
+    }
+    // page 0 retried MAX_RETRIES+1=4 times, then threw -- no page 1 was ever attempted
+    if (calls === 4) pass('themuse.fetch() exhausts retries on page 0 before giving up (4 attempts)');
+    else fail(`themuse page-0 failure: expected 4 fetchJson calls, got ${calls}`);
+  }
+
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }
