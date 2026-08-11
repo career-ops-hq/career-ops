@@ -52,6 +52,16 @@ node plugins/h1b-sponsor/check.mjs "Acme Corp" --summary
 # strong: Acme Corp - 412 LCAs, 5 PWDs, 37 PERMs, active 2020-2024
 ```
 
+List every matching entity instead of checking one. A large employer files under many distinct FEINs, so a broad name returns all of them; check a specific one by passing its exact name:
+
+```bash
+node plugins/h1b-sponsor/check.mjs "Amazon" --search
+# 50 of 96 matches for "Amazon" (narrow the query to see the rest):
+#   820544687  Amazon.com Services LLC
+#   204938068  Amazon Web Services, Inc.
+#   ...
+```
+
 Bypass the disk cache and re-fetch from the API:
 
 ```bash
@@ -83,7 +93,35 @@ The API is `https://api.surakshith.com/immigration/v1`.
 - Anonymous: 30 requests per hour per (IP, ASN) pair. Enough for interactive evaluation.
 - Keyed: 200 requests per hour per key. Suitable for batch runs.
 
-To request a key, email `sms@surakshith.com` with the repo URL you plan to use it from. Set the key as `H1B_API_TOKEN` in your environment; the CLI picks it up automatically.
+Request a key yourself:
+
+```bash
+node plugins/h1b-sponsor/token.mjs request
+```
+
+It prints the token once and the `H1B_API_TOKEN=` line, and never writes any file for you. Set that variable in your shell before running the plugin:
+
+```bash
+export H1B_API_TOKEN=h1b_your_token_here
+```
+
+The CLI reads `H1B_API_TOKEN` from the environment. It does not load `.env` on its own, so put the line in `.env` only if your workflow loads that file (direnv, or `node --env-file=.env`).
+
+A new key takes up to about 60 seconds to be recognized on every server, so a 401 in the first minute is a sign to wait and retry.
+
+The same endpoint with curl, if you prefer:
+
+```bash
+curl -X POST https://api.surakshith.com/immigration/v1/keys/request
+```
+
+Minting is metered per address with a token bucket: 2 keys are available at once, then one more every 12 hours. If you are throttled or the endpoint is unreachable, email `sms@surakshith.com` with the repo URL you plan to use it from.
+
+## Who runs the backend
+
+The API at `api.surakshith.com` is operated by the plugin author (msampath). The worker is open source at https://github.com/msampath/h1b-sponsor-data, and it is built over the public US DOL disclosure files at https://www.dol.gov/agencies/eta/foreign-labor/performance.
+
+If the API goes away or starts returning errors, the plugin fails closed: results come back `unknown`, the skill skips the Block G bullet, and nothing is fabricated. Cached results keep serving until their TTL runs out.
 
 ## Tiers
 
@@ -100,12 +138,12 @@ Data comes from public US Department of Labor disclosure files (LCA, PERM). The 
 
 This is not legal or immigration advice. A tier reflects historical filings, not a company's willingness to sponsor you specifically for the role you are looking at. Talk to an immigration attorney for anything that turns on policy.
 
-## Uninstall and disable
+## Uninstall
 
-Disable without removing:
+Remove the plugin from the active config:
 
 ```bash
-node plugins.mjs disable h1b-sponsor
+node plugins.mjs remove h1b-sponsor
 ```
 
-The plugin directory can be removed from `plugins/` if you want it gone entirely. Cached responses under `data/cache/h1b/` are safe to delete at any time.
+For a bundled plugin this unregisters it and clears its consent pin; the shipped files stay in `plugins/h1b-sponsor/`, so re-adding it later just needs `node plugins.mjs enable h1b-sponsor --confirm`. To delete it entirely, remove the `plugins/h1b-sponsor/` directory. Cached responses under `data/cache/h1b/` are safe to delete at any time.

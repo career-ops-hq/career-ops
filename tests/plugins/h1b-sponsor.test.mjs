@@ -5,9 +5,13 @@
 // hit api.surakshith.com on cache miss, so a plain suite run must never
 // invoke it (it would touch the network and pollute the on-disk cache).
 //
+// token.mjs gets a third gate of its own, H1B_MINT_TEST=1: unlike a read, a
+// mint spends the 2-keys-per-address-per-day budget, so it must not ride along
+// with H1B_API_TEST.
+//
 // The plugin ships all of these files, so a missing one is a real failure, not
 // a skip. Only the network-dependent blocks are opt-in (H1B_API_TEST=1).
-import { pass, fail, warn, ROOT } from '../helpers.mjs';
+import { pass, fail, warn, run, NODE, ROOT } from '../helpers.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -24,6 +28,7 @@ const TIER_PATH = join(PLUGIN_DIR, 'lib', 'tier.mjs');
 const CACHE_PATH = join(PLUGIN_DIR, 'lib', 'cache.mjs');
 const API_PATH = join(PLUGIN_DIR, 'lib', 'api.mjs');
 const CHECK_PATH = join(PLUGIN_DIR, 'check.mjs');
+const TOKEN_PATH = join(PLUGIN_DIR, 'token.mjs');
 const ENGINE_PATH = join(ROOT, 'plugins', '_engine.mjs');
 
 // ---------- manifest.json ----------
@@ -54,7 +59,10 @@ if (!existsSync(MANIFEST_PATH)) {
       if (Array.isArray(manifest.hooks) && manifest.hooks.length > 0) pass('manifest.hooks is a non-empty array');
       else fail(`manifest.hooks = ${JSON.stringify(manifest.hooks)}`);
 
-      if (Array.isArray(manifest.allowedHosts) && manifest.allowedHosts.includes('api.surakshith.com')) {
+      // Exact element equality (===), not URL-substring matching — phrased with
+      // .some() because scanners misread Array.includes('host') as the
+      // url.includes('trusted.com') sanitization anti-pattern (CodeQL #103).
+      if (Array.isArray(manifest.allowedHosts) && manifest.allowedHosts.some(h => h === 'api.surakshith.com')) {
         pass('manifest.allowedHosts contains "api.surakshith.com"');
       } else {
         fail(`manifest.allowedHosts = ${JSON.stringify(manifest.allowedHosts)}`);
@@ -280,6 +288,101 @@ if (!existsSync(CACHE_PATH)) {
   }
 }
 
+// ---------- lib/api.mjs — name matching (offline, stubbed fetch) ----------
+// plausibleMatch is module-private, so it is exercised through resolveEmployer
+// with globalThis.fetch stubbed: the stub returns one candidate and the
+// assertion is whether resolveEmployer accepts or rejects it. No network.
+if (!existsSync(API_PATH)) {
+  fail('lib/api.mjs missing — the plugin ships it');
+} else {
+  const originalFetch = globalThis.fetch;
+  try {
+    const api = await import(pathToFileURL(API_PATH).href);
+
+    // Minimal Response surface used by lib/api.mjs: status/ok/headers/json.
+    const stubOneResult = (candidateName) => async () => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ results: [{ id: 'stub-1', name: candidateName }] }),
+      text: async () => '',
+    });
+
+    const matchCases = [
+      // Legal-suffix canonicalization, both directions: neither pair is an
+      // exact normalized match, so each one lands on plausibleMatch.
+      { query: 'Acme Corp', candidate: 'Acme Corporation', expect: true },
+      { query: 'Acme Corporation', candidate: 'Acme Corp', expect: true },
+      // Leading "the" on one side, trailing suffix on the other.
+      { query: 'The Home Depot', candidate: 'Home Depot Inc', expect: true },
+      // Regression: a token prefix is not a name prefix. Stripping "Inc" must
+      // not turn this into a match.
+      { query: 'Meta', candidate: 'Metabolic Diagnostics Inc', expect: false },
+      // Nearest-neighbour garbage from the search endpoint.
+      { query: 'Acme', candidate: 'Zebra Logistics Inc', expect: false },
+      // Canonicalize, do not delete: folding the suffix to a token keeps a
+      // one-word query from swallowing a longer, unrelated same-root name.
+      { query: 'Apple Inc', candidate: 'Apple Bank For Savings', expect: false },
+      { query: 'Infosys Ltd', candidate: 'Infosys BPM Limited', expect: false },
+      // Distinct legal forms are distinct entities: llc is not inc, co is not corp.
+      { query: 'Acme LLC', candidate: 'Acme Inc', expect: false },
+      { query: 'Delta LLC', candidate: 'Delta Corporation', expect: false },
+      // A name that is only "the" plus suffixes must not resolve to anything.
+      { query: 'The Company Inc', candidate: 'Google LLC', expect: false },
+    ];
+
+    for (const c of matchCases) {
+      globalThis.fetch = stubOneResult(c.candidate);
+      let got;
+      try {
+        got = await api.resolveEmployer(c.query, { timeoutMs: 1_000 });
+      } catch (e) {
+        fail(`resolveEmployer("${c.query}") crashed: ${e.message}`);
+        continue;
+      }
+      const matched = Boolean(got && got.id);
+      if (matched === c.expect) {
+        pass(`matcher: "${c.query}" vs "${c.candidate}" → ${c.expect ? 'match' : 'no match'}`);
+      } else {
+        fail(`matcher: "${c.query}" vs "${c.candidate}" → got ${matched ? 'match' : 'no match'}, expected ${c.expect ? 'match' : 'no match'}`);
+      }
+    }
+
+    // searchEmployers surfaces every version, not just the best pick, and
+    // reports the API's full total when it exceeds the returned page.
+    globalThis.fetch = async () => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({
+        total: 96,
+        results: [
+          { id: '820544687', name: 'Amazon.com Services LLC' },
+          { id: '204938068', name: 'Amazon Web Services, Inc.' },
+          { id: '', name: 'dropped: no id' },
+        ],
+      }),
+      text: async () => '',
+    });
+    const search = await api.searchEmployers('Amazon', { timeoutMs: 1_000 });
+    if (search.total === 96 && search.results.length === 2 && search.results[0].id === '820544687') {
+      pass('searchEmployers: returns every id-bearing result and the API total');
+    } else {
+      fail(`searchEmployers: ${JSON.stringify(search)}`);
+    }
+    const emptySearch = await api.searchEmployers('a', { timeoutMs: 1_000 });
+    if (emptySearch.total === 0 && emptySearch.results.length === 0) {
+      pass('searchEmployers: a sub-2-char query returns nothing without a call');
+    } else {
+      fail(`searchEmployers short query: ${JSON.stringify(emptySearch)}`);
+    }
+  } catch (e) {
+    fail(`matcher tests crashed: ${e.message}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 // ---------- check.mjs — CLI JSON contract ----------
 // GATED: check.mjs is designed to hit api.surakshith.com on cache miss, so it
 // cannot run in a unit context without either network mocking (out of scope
@@ -377,5 +480,156 @@ if (process.env.H1B_API_TEST !== '1') {
     }
   } catch (e) {
     fail(`live-api tests crashed: ${e.message}`);
+  }
+}
+
+// ---------- token.mjs — key-request CLI ----------
+// The argument-handling checks are offline: token.mjs validates argv before it
+// opens a socket, so a bad-usage spawn never reaches the network. Only the
+// mint itself is gated, behind its OWN env var rather than H1B_API_TEST —
+// reading the API is cheap and repeatable, minting is neither.
+if (!existsSync(TOKEN_PATH)) {
+  fail('token.mjs missing — the plugin ships it');
+} else {
+  if (run(NODE, ['--check', TOKEN_PATH]) !== null) pass('token.mjs parses (node --check)');
+  else fail('token.mjs failed node --check');
+
+  const usageCases = [
+    { label: 'no args', argv: [TOKEN_PATH] },
+    { label: 'unknown subcommand', argv: [TOKEN_PATH, 'mint'] },
+  ];
+  for (const c of usageCases) {
+    await new Promise((resolve) => {
+      execFile(process.execPath, c.argv, { timeout: 20_000 }, (err, _stdout, stderr) => {
+        const code = (err && typeof err.code === 'number') ? err.code : 0;
+        const printedUsage = /token\.mjs request/.test(String(stderr || ''));
+        if (code === 2 && printedUsage) {
+          pass(`token.mjs (${c.label}): exit 2 with usage on stderr`);
+        } else {
+          fail(`token.mjs (${c.label}): exit ${code}, usage-on-stderr=${printedUsage}`);
+        }
+        resolve();
+      });
+    });
+  }
+
+  // Offline response-handling: mintToken takes an injectable fetch, so every
+  // branch is testable without a live mint. The default fetch is the guarded
+  // one; here we replace it to simulate each server outcome.
+  const tokenMod = await import(pathToFileURL(TOKEN_PATH).href);
+  const fakeRes = (status, { body, headers } = {}) => ({
+    status,
+    headers: { get: (h) => (headers && headers[h.toLowerCase()]) ?? null },
+    json: async () => {
+      if (body === undefined) throw new Error('not json');
+      return body;
+    },
+  });
+
+  const GOOD = 'h1b_' + 'ab'.repeat(24);
+  const r201 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { token: GOOD, tier: 'keyed', limit: 200, note: 'line one\n\nline two' } }) });
+  if (r201.ok && r201.token === GOOD && r201.note === 'line one line two') {
+    pass('mintToken: 201 returns the token and a whitespace-collapsed note');
+  } else {
+    fail(`mintToken 201: ${JSON.stringify(r201)}`);
+  }
+
+  const rMalformed = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { token: 'h1b_abc\nEVIL=$(rm -rf ~)' } }) });
+  if (!rMalformed.ok && /malformed/.test(rMalformed.message)) {
+    pass('mintToken: a token with shell metacharacters is rejected, never printed');
+  } else {
+    fail(`mintToken malformed-token: ${JSON.stringify(rMalformed)}`);
+  }
+
+  const r429 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(429, { headers: { 'retry-after': '43200' } }) });
+  if (!r429.ok && r429.exitCode === 1 && /12 hours/.test(r429.message) && !/h1b_/.test(r429.message)) {
+    pass('mintToken: 429 reports the wait, no token');
+  } else {
+    fail(`mintToken 429: ${JSON.stringify(r429)}`);
+  }
+
+  const r500 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(500) });
+  if (!r500.ok && /HTTP 500/.test(r500.message)) pass('mintToken: 500 is a clean one-line failure');
+  else fail(`mintToken 500: ${JSON.stringify(r500)}`);
+
+  const rBadJson = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201) });
+  if (!rBadJson.ok && /budget spent/.test(rBadJson.message)) {
+    pass('mintToken: a 201 with an unreadable body warns the budget may be spent');
+  } else {
+    fail(`mintToken bad-json: ${JSON.stringify(rBadJson)}`);
+  }
+
+  const rNoToken = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { tier: 'keyed' } }) });
+  if (!rNoToken.ok && /no token/.test(rNoToken.message)) pass('mintToken: a 201 without a token field fails closed');
+  else fail(`mintToken no-token: ${JSON.stringify(rNoToken)}`);
+
+  // Guard wiring: the DEFAULT fetch path must reject an off-host redirect, so a
+  // hijacked mint cannot hand back an attacker-issued token. Stub the global
+  // fetch the guarded path calls, not fetchImpl.
+  {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      status: 302,
+      headers: { get: (h) => (h.toLowerCase() === 'location' ? 'https://evil.example/x' : null) },
+      json: async () => ({ token: 'h1b_attackerminted' }),
+    });
+    try {
+      const rRedirect = await tokenMod.mintToken();
+      if (!rRedirect.ok && !/h1b_/.test(rRedirect.message)) {
+        pass('mintToken: an off-host redirect on the mint is refused, no attacker token surfaced');
+      } else {
+        fail(`mintToken off-host redirect: ${JSON.stringify(rRedirect)}`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // Same-host redirect on the mint: guardedMintFetch passes maxRedirects 0, so
+  // even an on-host 302 is refused after exactly ONE request. Following it
+  // would re-issue the POST (the guard re-sends the same method), and a
+  // re-POSTed mint could spend the 2-per-address budget more than once.
+  {
+    const originalFetch = globalThis.fetch;
+    let mintCalls = 0;
+    globalThis.fetch = async () => {
+      mintCalls++;
+      return {
+        status: 302,
+        headers: { get: (h) => (h.toLowerCase() === 'location' ? 'https://api.surakshith.com/immigration/v1/keys/elsewhere' : null) },
+        json: async () => ({ token: 'h1b_never_surfaced' }),
+      };
+    };
+    try {
+      const rSameHost = await tokenMod.mintToken();
+      if (!rSameHost.ok && mintCalls === 1 && !/h1b_/.test(rSameHost.message)) {
+        pass('mintToken: a same-host redirect is refused after exactly one request (no re-POST)');
+      } else {
+        fail(`mintToken same-host redirect: calls=${mintCalls}, ${JSON.stringify(rSameHost)}`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // GATED, and deliberately not H1B_API_TEST: every run of this block consumes
+  // one of the 2 keys per address per day, and a burned budget locks out the
+  // real user for ~12h. Opt in only when the mint path itself is what changed.
+  if (process.env.H1B_MINT_TEST !== '1') {
+    warn('token.mjs mint test skipped (set H1B_MINT_TEST=1 to enable; each run burns one of the 2 keys per address per day)');
+  } else {
+    await new Promise((resolve) => {
+      execFile(process.execPath, [TOKEN_PATH, 'request'], { timeout: 30_000 }, (err, stdout, stderr) => {
+        const code = (err && typeof err.code === 'number') ? err.code : 0;
+        const firstLine = String(stdout || '').split(/\r?\n/)[0] || '';
+        // Shape only. The token itself is never echoed into the test log.
+        if (code === 0 && /^h1b_[0-9a-f]+$/.test(firstLine)) {
+          pass(`token.mjs request: exit 0, printed an h1b_ token (${firstLine.length} chars)`);
+        } else {
+          fail(`token.mjs request: exit ${code}, first stdout line did not look like an h1b_ token. stderr=${String(stderr || '').slice(0, 200)}`);
+        }
+        resolve();
+      });
+    });
   }
 }

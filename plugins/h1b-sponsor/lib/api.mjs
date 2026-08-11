@@ -31,10 +31,17 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function fetchWithTimeout(url, headers, timeoutMs) {
+// Exported so the mint CLI (token.mjs) sends its POST through the same egress
+// guard the read path uses, rather than a bare fetch that would follow a
+// redirect off-host with the freshly minted credential in the response.
+// maxRedirects: same-host redirects re-issue the request with the SAME method
+// and body, which is what a GET wants and what a mint POST must never do
+// (each re-POST could spend mint budget again). The mint passes 0.
+export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   const baseHost = new URL(BASE).host;
+  const baseProtocol = new URL(BASE).protocol;
   try {
     // Egress guard: redirects are followed manually so an off-host target is
     // rejected BEFORE the request (and its query string) is issued to it.
@@ -42,7 +49,7 @@ async function fetchWithTimeout(url, headers, timeoutMs) {
     // only let us notice afterwards.
     let requestUrl = url;
     for (let hop = 0; ; hop++) {
-      const res = await fetch(requestUrl, { headers, signal: controller.signal, redirect: 'manual' });
+      const res = await fetch(requestUrl, { method, headers, body, signal: controller.signal, redirect: 'manual' });
       if (res.status < 300 || res.status > 399) return res;
 
       const loc = res.headers.get('location');
@@ -53,13 +60,13 @@ async function fetchWithTimeout(url, headers, timeoutMs) {
       const next = new URL(loc, requestUrl);
       // Host AND scheme must match: an http:// downgrade on the same host
       // would resend the Authorization header in cleartext.
-      if (next.host !== baseHost || next.protocol !== new URL(BASE).protocol) {
+      if (next.host !== baseHost || next.protocol !== baseProtocol) {
         const e = new Error(`H-1B API redirected off-host: ${next.protocol}//${next.host}`);
         e.code = 'REDIRECT_OFF_HOST';
         throw e;
       }
-      if (hop >= MAX_REDIRECTS) {
-        const e = new Error(`H-1B API exceeded ${MAX_REDIRECTS} redirects: ${url}`);
+      if (hop >= maxRedirects) {
+        const e = new Error(`H-1B API exceeded ${maxRedirects} redirects: ${url}`);
         e.code = 'REDIRECT_LOOP';
         throw e;
       }
@@ -77,7 +84,7 @@ async function requestJson(url, opts, { allow404 } = {}) {
 
   let res;
   try {
-    res = await fetchWithTimeout(url, headers, timeoutMs);
+    res = await fetchWithTimeout(url, { headers, timeoutMs });
   } catch (err) {
     if (err && err.name === 'AbortError') {
       const e = new Error(`H-1B API timeout after ${timeoutMs}ms: ${url}`);
@@ -91,7 +98,7 @@ async function requestJson(url, opts, { allow404 } = {}) {
     const waitMs = Math.min(parseRetryAfter(res), MAX_RETRY_WAIT_MS);
     await sleep(waitMs);
     try {
-      res = await fetchWithTimeout(url, headers, timeoutMs);
+      res = await fetchWithTimeout(url, { headers, timeoutMs });
     } catch (err) {
       if (err && err.name === 'AbortError') {
         const e = new Error(`H-1B API timeout on retry after ${timeoutMs}ms: ${url}`);
@@ -130,6 +137,19 @@ function normalize(str) {
   return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+// Long legal-form words folded to their short form, so "corporation" and
+// "corp" become one token. Deleting the suffix instead was wrong: it collapsed
+// "Acme LLC" and "Acme Inc" to a bare "acme" and matched two distinct entities.
+// Canonicalizing keeps the form as a token, so different forms (llc vs inc)
+// stay different while a single form's long and short spellings unify, which is
+// exactly what the maintainer asked for (fold corp/corporation, nothing more).
+const SUFFIX_CANON = new Map([
+  ['corporation', 'corp'],
+  ['incorporated', 'inc'],
+  ['limited', 'ltd'],
+  ['company', 'co'],
+]);
+
 // Guard against the search endpoint's nearest-neighbour behavior: it returns
 // its closest hit even for garbage input. A fallback (non-exact) match is
 // accepted only when one name's token list is a prefix of the other's, token
@@ -138,11 +158,23 @@ function normalize(str) {
 // (substring tests did, which cached a confidently wrong employer for 90
 // days). No plausible candidate -> no match, and the CLI reports unknown.
 function plausibleMatch(query, candidateName) {
-  // A leading "the" is brand styling, not identity ("Home Depot" must match
-  // "The Home Depot Inc"), so it never participates in the prefix test.
+  // Normalize both names, then compare token for token, one list against the
+  // start of the other. A leading "the" is dropped ("Home Depot" must match
+  // "The Home Depot"). A trailing long-form legal word is folded to its short
+  // form, so "Acme Corp" matches "Acme Corporation" (the JD spells the short
+  // form where DOL records the long one, and that miss used to stick in the
+  // 30-day negative cache). Folding rather than deleting keeps the form as a
+  // token, so "Apple Inc" does not swallow "Apple Bank" and "Acme LLC" stays
+  // distinct from "Acme Inc"; the exact-normalized check in pickBestMatch still
+  // catches two identical names first.
   const tokens = s => {
     const t = String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    return t[0] === 'the' ? t.slice(1) : t;
+    const out = t[0] === 'the' ? t.slice(1) : t.slice();
+    if (out.length > 0) {
+      const canon = SUFFIX_CANON.get(out[out.length - 1]);
+      if (canon) out[out.length - 1] = canon;
+    }
+    return out;
   };
   const q = tokens(query);
   const c = tokens(candidateName);
@@ -177,6 +209,27 @@ export async function resolveEmployer(name, opts = {}) {
   if (!match || !match.id) return null;
 
   return { id: String(match.id), displayName: String(match.name || q) };
+}
+
+// Every matching employer the API returns, not just the best pick, so a broad
+// name like "Amazon" surfaces each distinct filing entity (they file under
+// separate FEINs and the numbers differ). Returns { total, results }; total is
+// the API's full count, which can exceed the page the endpoint returns, so the
+// caller can tell the user to narrow the query. [] results on no match or a
+// soft failure.
+export async function searchEmployers(name, opts = {}) {
+  const q = String(name || '').trim();
+  if (q.length < 2) return { total: 0, results: [] };
+
+  const url = `${BASE}/employers/search?q=${encodeURIComponent(q)}`;
+  const body = await requestJson(url, opts, { allow404: true });
+  if (!body || !Array.isArray(body.results)) return { total: 0, results: [] };
+
+  const results = body.results
+    .filter(r => r && r.id)
+    .map(r => ({ id: String(r.id), name: String(r.name || '') }));
+  const total = Number.isFinite(body.total) ? body.total : results.length;
+  return { total, results };
 }
 
 // Number(null) === 0 and Number(' ') === 0, so a null or blank field would
