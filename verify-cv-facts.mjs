@@ -180,11 +180,24 @@ export function stripMarkup(text) {
  *
  * Only a separator followed by EXACTLY three digits is removed, so a decimal
  * comma ("1,2 million") and ordinary prose are left alone.
+ *
+ * The period is in the class for the same reason the comma is, from the other
+ * side of the convention: this repo ships mode sets for markets that group
+ * with a period, so a JD or a portfolio note written "16.181 users" is a
+ * source a CV written "16,181 users" is checked against. Grouping style is not
+ * evidence of a different number, and the gate reported one as invented.
+ *
+ * The three-digit window is what makes this safe to widen: it leaves a genuine
+ * decimal alone at every precision a metric noun realistically carries ("2.5
+ * hours", "99.95 uptime"). It cannot disambiguate a three-place decimal, where
+ * "1.250 million" reads as thousands - an ambiguity the comma branch already
+ * carries in the mirror direction, and one no separator rule can resolve
+ * without knowing the document's locale. allow_metrics covers the rest.
  */
 export function normalizeClaim(claim) {
   return String(claim)
     .toLowerCase()
-    .replace(/(\d)[,\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
+    .replace(/(\d)[,.\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
     .replace(/[,\s]+/g, ' ')
     .trim();
 }
@@ -457,6 +470,19 @@ function runSelfTest() {
   // a digit, so the lookbehind passes at each one (CodeRabbit asked).
   equal('a multi-group number folds completely', auditClaims('Reached 1 234 567 users', 'Reached 1234567 active users.').invented, []);
   equal('an eight-digit multi-group number folds too', auditClaims('Reached 12 345 678 users', 'Reached 12345678 active users.').invented, []);
+  // Period grouping is the convention in several of the markets this repo
+  // ships mode sets for, so a period-grouped source and a comma-grouped CV
+  // describe the same number and must compare equal in both directions.
+  equal('a period-grouped CV matches a comma-grouped source',
+    auditClaims('Reached 16.181 users', foldSource).invented, []);
+  equal('a comma-grouped CV matches a period-grouped source',
+    auditClaims('Reached 16,181 users', 'Reached 16.181 active users.').invented, []);
+  equal('a fabricated period-grouped number is still caught',
+    auditClaims('Reached 94.772 users', foldSource).invented, ['94772 users']);
+  // Widening the class must not eat an ordinary decimal, which is what the
+  // exactly-three-digit window is for.
+  equal('a decimal is not read as grouping',
+    auditClaims('Cut build time to 2.5 hours', 'Cut build time to 2.5 hours.').invented, []);
   // A four-digit left part is a year, not a group: nothing is joined.
   equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
 
