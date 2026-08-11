@@ -253,12 +253,28 @@ function ApplyExitBar() {
   const [confirming, setConfirming] = useState(false);
   const [marking, setMarking] = useState(false);
   const [error, setError] = useState("");
+  // The status write outlives this bar when the user navigates while it is in
+  // flight. The write still lands; what must not happen is dragging them back
+  // off whatever page they moved on to once it returns.
+  // Set on mount as well as cleared on unmount: React re-runs an effect after
+  // its cleanup (StrictMode does this on every mount in development), so a
+  // cleanup-only flag latches false while the bar is still on screen.
+  const onPage = useRef(true);
+  useEffect(() => {
+    onPage.current = true;
+    return () => {
+      onPage.current = false;
+    };
+  }, []);
 
   // reset() also closes the headless form session on the user's machine —
-  // navigating away without it strands the browser this page opened.
+  // navigating away without it strands the browser this page opened. The
+  // destination is read before reset() clears the origin it comes from.
   function leave() {
+    const target = resolveReturnPath(a.from);
     a.reset();
-    router.push(resolveReturnPath(a.from));
+    if (!onPage.current) return;
+    router.push(target);
     router.refresh();
   }
 
@@ -273,12 +289,14 @@ function ApplyExitBar() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
+        if (!onPage.current) return; // moved on already; the row is unchanged
         setError(d.error || "Couldn't mark it applied — the tracker row is unchanged.");
         setMarking(false);
         return;
       }
       leave();
     } catch {
+      if (!onPage.current) return; // moved on already; the row is unchanged
       setError("Couldn't reach the tracker — the row is unchanged.");
       setMarking(false);
     }

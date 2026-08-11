@@ -136,11 +136,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
+      if (generation.current !== gen) return; // left mid-drive
       if (!finished) {
         setError("The agent stopped before reaching a form.");
         setStatus("error");
       }
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-drive
       setError(`The agent couldn't reach the form: ${e instanceof Error ? e.message : "stream error"}.`);
       setStatus("error");
     }
@@ -197,6 +199,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setIssues(d.issues ?? []);
       setStatus("ready");
     } catch {
+      if (generation.current !== gen) return; // left while it was opening
       setError("Could not open the form.");
       setStatus("error");
     }
@@ -224,6 +227,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     };
     try {
       const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
         setStatus("ready");
@@ -264,9 +268,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
+      if (generation.current !== gen) return; // left mid-prefill
       if (!got && !sawError) setError("Pre-fill ended without answers — see the diagnostics log below.");
       setStatus("ready");
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-prefill
       setError(`Couldn't pre-fill from your CV: ${e instanceof Error ? e.message : "stream error"}. See diagnostics.`);
       setStatus("ready");
     }
@@ -292,11 +298,15 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const fill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     setStatus("filling");
     setSteps([]);
     try {
       const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, handoff: true, company: companyRef.current }) });
       const d = await r.json();
+      // Also stops the escalation below from starting an agent drive on a
+      // session the user has already walked away from.
+      if (generation.current !== gen) return; // left mid-fill
       if (d.error) {
         setError(d.error);
         setStatus("error");
@@ -321,6 +331,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         await agentFillRef.current();
       }
     } catch {
+      if (generation.current !== gen) return; // left mid-fill
       setError("Fill failed.");
       setStatus("error");
     }
@@ -340,6 +351,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setStatus("filling");
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
+      if (generation.current !== gen) return; // left mid-fill
       if (!r.body) {
         setError("The agent couldn't start filling.");
         setStatus("error");
@@ -375,6 +387,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-fill
       setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}.`);
       setStatus("error");
     }
