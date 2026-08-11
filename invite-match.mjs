@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * invite-match.mjs — Interview-Invite → Tracker Matcher for career-ops
+ * invite-match.mjs — Interview-Invite / Rejection → Tracker Matcher for career-ops
  *
  * Recruiter calendar/ATS invite emails frequently name only the company
  * (generic subject lines like "Schedule Your Phone Screen") with no job
  * title or req number. Finding which `data/applications.md` row an invite
- * belongs to otherwise means a manual grep every time.
+ * belongs to otherwise means a manual grep every time. Rejection emails —
+ * the single most common ATS-generated email — have the exact same problem,
+ * and are the more frequent case in practice (#2098).
  *
  * This script extracts a company name (and, if present, a date, a
  * req/job-ID-looking token, and a call platform/medium) from pasted invite
@@ -13,19 +15,28 @@
  * candidates when the same company has multiple applications — which is
  * common. A silent wrong guess is worse than showing a short ranked list,
  * so ambiguous input always returns all plausible candidates rather than
- * picking one.
+ * picking one. The text is also classified as `invite` / `rejection` /
+ * `unknown` (see classifyEmail) — informational only, never a gate on
+ * matching.
+ *
+ * Despite the filename, this now recognizes more than interview invites
+ * (#2098). Kept as-is rather than renamed: a rename would break any doc or
+ * script that already references `invite-match.mjs` (e.g. #1495's own
+ * history) — left as a maintainer call, not blocking.
  *
  * Run: node invite-match.mjs < invite.txt          (JSON to stdout)
  *      node invite-match.mjs --file invite.txt
  *      echo "..." | node invite-match.mjs --summary
+ *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
  *      node invite-match.mjs --self-test
  *
- * Issue #1495 — github.com/santifer/career-ops
+ * Issue #1495, #2098 — github.com/santifer/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +57,23 @@ if (fileIdx !== -1 && (args[fileIdx + 1] === undefined || args[fileIdx + 1].star
   process.exit(1);
 }
 const filePathArg = fileIdx !== -1 ? args[fileIdx + 1] : null;
+
+// --apply advances a matched tracker row's status to Rejected — scoped to
+// that transition only (see issue #2098). It is deliberately NOT the general
+// #1960 "advance to Interview" flag: that issue is unclaimed and unimplemented
+// here, so an invite-classified match is never auto-applied by this flag.
+const applyMode = args.includes('--apply');
+const idIdx = args.indexOf('--id');
+if (idIdx !== -1 && (args[idIdx + 1] === undefined || args[idIdx + 1].startsWith('--'))) {
+  console.error('invite-match: --id requires a tracker # argument');
+  process.exit(1);
+}
+const idArgRaw = idIdx !== -1 ? args[idIdx + 1] : null;
+if (idArgRaw !== null && !/^\d+$/.test(idArgRaw)) {
+  console.error('invite-match: --id must be a tracker # (integer)');
+  process.exit(1);
+}
+const idArg = idArgRaw !== null ? parseInt(idArgRaw, 10) : null;
 
 // Statuses ranked above others when disambiguating same-company candidates —
 // an active application is a far more likely invite match than one already
@@ -315,6 +343,152 @@ export function extractPlatform(text) {
   return null;
 }
 
+// --- Email-type classification (#2098) ---
+
+// Phrasings that suggest a rejection email. Case-insensitive substring match
+// against the raw text — small, documented, and extensible, same discipline
+// as COMPANY_LINE_PATTERNS above: this is "does this look like a rejection",
+// not an exhaustive NLP classifier. Ordered roughly by how common each
+// phrasing is in real ATS-generated rejection templates.
+//
+// Split into a strong tier and a corroborating-only tier (mirrors the
+// strong-marker / corroborating-only-marker distinction modes/oferta.md
+// already uses for its jurisdiction-mismatch signal, and the "single
+// instance vs. corroborated" framing in modes/interview-redflag.md) — the
+// asymmetry matters because `--apply` performs an irreversible tracker write
+// gated on a `rejection` classification (#2098). A false `rejection` is the
+// unsafe direction (it can mark an active application Rejected); a false
+// `invite`/`unknown` merely causes `--apply` to safely refuse. Any phrase
+// here that is common in *non-rejection* professional correspondence
+// (reschedules, apologies for delays, unrelated bad news) must never be
+// sufficient on its own to classify as `rejection` — see CodeRabbit review
+// on PR #2100.
+//
+// Strong-tier bar (maintainer finding, PR #2100 review comment, 2026-08-07):
+// a phrase belongs here ONLY if it cannot reasonably appear outside an
+// actual candidate rejection — e.g. "we have decided not to move forward"
+// and "pursuing other candidates" are safe because they are boilerplate ATS
+// rejection language with no other plausible use. Several phrases previously
+// listed here fail that bar and can fire on a reschedule, a delay apology,
+// or an unrelated (non-candidate-directed) bad-news announcement — those
+// have been demoted to REJECTION_PHRASES_WEAK below, where they can only
+// contribute as corroborating evidence, never trigger `rejection` alone.
+const REJECTION_PHRASES_STRONG = [
+  'not been selected to advance',
+  'not selected for this position',
+  'not selected for this role',
+  'not moving forward with your application',
+  'decided not to move forward',
+  'decided to move forward with other candidates',
+  'pursue other candidates',
+  'pursuing other candidates',
+  'other candidates whose qualifications',
+  'not able to offer you a position',
+];
+
+// Corroborating-only: too generic to trigger a `rejection` classification by
+// itself (e.g. "Unfortunately we need to reschedule your interview" is a
+// benign reschedule, not a rejection). Only counts toward `rejection` when
+// it co-occurs with a strong phrase above, or with a second distinct
+// corroborating phrase — never alone. See classifyEmail() below.
+//
+// Demoted from the strong tier (maintainer finding, PR #2100 review comment,
+// 2026-08-07) because each can plausibly appear outside a rejection:
+//   - 'not been selected'          — "a candidate has not been selected yet"
+//     is delay-apology phrasing, not necessarily a rejection.
+//   - 'will not be moving forward' — generic enough to describe an
+//     unrelated project/deal, e.g. "the Q3 expansion will not be moving
+//     forward", not specific to a candidate. ('not be moving forward' is
+//     deliberately NOT also listed as a separate weak entry: it is a literal
+//     substring of 'will not be moving forward', so any text containing the
+//     latter would double-count as two "distinct" weak matches from a single
+//     utterance and defeat the two-corroborating-phrases gate below.)
+//   - 'not successful'             — extremely generic ("was not successful
+//     in reaching you", "the negotiation was not successful").
+//   - 'regret to inform'           — the classic company-wide bad-news
+//     opener (layoffs, restructuring announcements) as much as a rejection
+//     opener; not directed at the candidate by itself.
+//   - 'will not be proceeding'     — generic business phrasing (mergers,
+//     projects, purchases) with no candidate-specific anchor.
+//   - 'unable to offer you'        — also plausible mid-negotiation, e.g.
+//     "unable to offer you a higher base salary" is not a rejection.
+const REJECTION_PHRASES_WEAK = [
+  'unfortunately',
+  'not been selected',
+  'will not be moving forward',
+  'not successful',
+  'regret to inform',
+  'will not be proceeding',
+  'unable to offer you',
+];
+
+// Phrasings that suggest an interview invite. Mirrors the rejection phrase
+// lists above for
+// the opposite case; extractCompany's own patterns already do the real work
+// of the invite path, so this list exists purely for classification.
+const INVITE_PHRASES = [
+  'schedule your phone screen',
+  'schedule your interview',
+  'phone screen',
+  'interviewing with',
+  'interview with',
+  'would like to invite you',
+  'invite you to interview',
+  'next steps in the interview process',
+  'move you forward to the next round',
+  'like to set up a time',
+  'like to set up a call',
+  'book a time',
+];
+
+/**
+ * Classify pasted email text as `invite`, `rejection`, or `unknown`, and
+ * report which phrase(s) drove the call — so a human/agent can sanity-check
+ * a `rejection` classification before `--apply` performs its irreversible
+ * tracker write (#2098, CodeRabbit review on PR #2100).
+ *
+ * Rejection requires either a strong phrase (unambiguous on its own) or two
+ * distinct corroborating-only phrases together — a single corroborating-only
+ * phrase (e.g. "unfortunately") is never sufficient by itself, since it is
+ * common in unrelated professional correspondence (reschedules, delays) and
+ * a false `rejection` is the unsafe misclassification direction here.
+ *
+ * Informational only — never a gate on matching. An email that mentions both
+ * (e.g. a rejection that references an earlier phone screen: "Thank you for
+ * interviewing with us. Unfortunately, we regret to inform you...") is
+ * classified `rejection`: that language is the more decisive signal of the
+ * two, and it is also the only classification the --apply path acts on.
+ *
+ * `phraseStrength` reports whether a `rejection` classification was driven by
+ * a strong (unambiguous-on-its-own) phrase or only by weak corroborating
+ * phrases — the `--apply` confidence gate on a sole fuzzy-matched candidate
+ * requires `'strong'` before auto-writing Rejected (#2100 CodeRabbit review,
+ * see selectApplyTarget()). `null` for non-`rejection` classifications.
+ *
+ * @param {string} text - Raw pasted email text.
+ * @returns {{classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null}}
+ */
+export function classifyEmail(text) {
+  if (!text) return { classification: 'unknown', matchedPhrases: [], phraseStrength: null };
+  const lower = text.toLowerCase();
+  const strongMatches = REJECTION_PHRASES_STRONG.filter(p => lower.includes(p));
+  const weakMatches = REJECTION_PHRASES_WEAK.filter(p => lower.includes(p));
+  const isStrongRejection = strongMatches.length > 0;
+  const isRejection = isStrongRejection || weakMatches.length >= 2;
+  if (isRejection) {
+    return {
+      classification: 'rejection',
+      matchedPhrases: [...strongMatches, ...weakMatches],
+      phraseStrength: isStrongRejection ? 'strong' : 'weak',
+    };
+  }
+
+  const inviteMatches = INVITE_PHRASES.filter(p => lower.includes(p));
+  if (inviteMatches.length > 0) return { classification: 'invite', matchedPhrases: inviteMatches, phraseStrength: null };
+
+  return { classification: 'unknown', matchedPhrases: [], phraseStrength: null };
+}
+
 // --- Tracker loading ---
 function loadTracker(appsFile = APPS_FILE) {
   if (!existsSync(appsFile)) return [];
@@ -375,6 +549,13 @@ export function matchInvite(signals, trackerRows) {
       status: row.status,
       date: row.date,
       matchConfidence: Math.round(confidence * 1000) / 1000,
+      // Raw company-name similarity (1 == exact/confirmed match), separate
+      // from matchConfidence — the reqId boost or status tiebreaker can push
+      // matchConfidence above 1 for a fuzzy (non-exact) name match, so
+      // matchConfidence alone can't answer "was this an exact company-name
+      // match". The --apply sole-candidate confidence gate needs that exact
+      // answer (#2100 CodeRabbit review, see selectApplyTarget()).
+      nameScore,
     });
   }
 
@@ -387,9 +568,9 @@ export function matchInvite(signals, trackerRows) {
  * plus the signals that were extracted (so the caller/CLI can show what was
  * understood from the email, not just the result).
  *
- * @param {string} text - Raw invite email text.
+ * @param {string} text - Raw invite/rejection email text.
  * @param {Array<object>} [trackerRows] - Injectable for tests; defaults to loadTracker().
- * @returns {{signals: object, candidates: Array<object>}}
+ * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>}}
  */
 export function analyzeInvite(text, trackerRows = null) {
   const signals = {
@@ -400,15 +581,114 @@ export function analyzeInvite(text, trackerRows = null) {
   };
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
-  return { signals, candidates };
+  const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
+  return { signals, classification, matchedPhrases, phraseStrength, candidates };
+}
+
+/**
+ * Advance a single tracker row's status to Rejected, reusing set-status.mjs
+ * as a subprocess — the canonical, locked, atomic write path (#2098) — rather
+ * than duplicating its row-rewrite/locking logic here. set-status.mjs already
+ * imports its atomic-write and locking primitives from tracker-utils.mjs.
+ *
+ * Never call this on an ambiguous match — the CLI layer below is responsible
+ * for confirming a single confident candidate (or an explicit --id) before
+ * reaching this function.
+ *
+ * @param {number} appNumber - Tracker # to update (must be unambiguous).
+ * @param {{appsFile?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @returns {object} set-status.mjs's own --json result (or its structured error).
+ */
+export function applyRejectionStatus(appNumber, options = {}) {
+  const scriptPath = join(CAREER_OPS, 'set-status.mjs');
+  const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
+  try {
+    const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {
+      encoding: 'utf-8', env,
+    });
+    return JSON.parse(out);
+  } catch (err) {
+    // set-status.mjs writes JSON to stdout even on failure when --json is
+    // passed (its failWith/failUsage contract) — prefer that structured
+    // payload over a raw exception when it is present and parseable.
+    if (err.stdout) {
+      try { return JSON.parse(err.stdout); } catch { /* fall through */ }
+    }
+    return { error: err.message, code: 'apply-failed' };
+  }
+}
+
+/**
+ * Decide which (if any) candidate `--apply` should act on, given an
+ * `analyzeInvite()` result and an optional `--id` override. Pure decision
+ * logic, no I/O — pulled out of the CLI block so tests can drive every
+ * branch directly (#2100 CodeRabbit review nitpick: this branch logic had no
+ * direct test coverage).
+ *
+ * The single-candidate auto-select branch additionally requires a confidence
+ * gate: the sole candidate is only auto-applied when it is an exact/confirmed
+ * company-name match (`nameScore === 1`) AND the classification is backed by
+ * a strong rejection phrase (`phraseStrength === 'strong'`), not just a weak
+ * corroborating one. `matchInvite`'s fuzzy token-overlap scoring can return a
+ * single low-confidence candidate for a loosely-worded company name — a
+ * false auto-apply off a match that weak is the unsafe direction, since
+ * `--apply` performs an irreversible tracker write (#2100 CodeRabbit review,
+ * major finding on the old line 768-769 unconditional sole-candidate
+ * selection). A sole candidate that clears "one row matched" but not this
+ * confidence bar falls back to requiring an explicit `--id`.
+ *
+ * @param {{candidates: Array<object>, phraseStrength: 'strong'|'weak'|null}} result - analyzeInvite() output.
+ * @param {number|null} idArg - Parsed --id value, or null if not passed.
+ * @returns {{target: object}|{error: string, code: number, candidate?: object, candidates?: Array<object>}}
+ */
+export function selectApplyTarget(result, idArg) {
+  if (idArg !== null) {
+    const target = result.candidates.find(c => c.appNumber === idArg);
+    if (!target) {
+      return {
+        error: `invite-match: --id ${idArg} is not among the matched candidates — not applying.`,
+        code: 2,
+      };
+    }
+    return { target };
+  }
+
+  if (result.candidates.length === 0) {
+    return { error: 'invite-match: no matching tracker entries found — not applying.', code: 2 };
+  }
+
+  if (result.candidates.length === 1) {
+    const sole = result.candidates[0];
+    const isExactCompanyMatch = sole.nameScore === 1;
+    const isStrongRejection = result.phraseStrength === 'strong';
+    if (isExactCompanyMatch && isStrongRejection) {
+      return { target: sole };
+    }
+    return {
+      error: `invite-match: sole candidate #${sole.appNumber} did not meet the confidence bar for auto-apply `
+        + `(exact company match: ${isExactCompanyMatch}, strong rejection phrase: ${isStrongRejection}) — `
+        + `re-run with --id ${sole.appNumber} to confirm explicitly.`,
+      code: 2,
+      candidate: sole,
+    };
+  }
+
+  return {
+    error: `invite-match: ${result.candidates.length} candidates matched — ambiguous, refusing to auto-apply. `
+      + `Re-run with --id <#> to disambiguate.`,
+    code: 3,
+    candidates: result.candidates,
+  };
 }
 
 // --- Summary mode ---
 function printSummary(result) {
   console.log(`\n${'='.repeat(70)}`);
-  console.log('  Interview Invite Matcher — career-ops');
+  console.log('  Interview Invite / Rejection Matcher — career-ops');
   console.log(`${'='.repeat(70)}\n`);
 
+  console.log(`  Classification:     ${result.classification}`);
+  console.log(`  Matched phrase(s):  ${result.matchedPhrases && result.matchedPhrases.length ? result.matchedPhrases.join(', ') : '(none)'}`);
   console.log(`  Extracted company:  ${result.signals.company || '(not found)'}`);
   console.log(`  Extracted date:     ${result.signals.date || '(not found)'}`);
   console.log(`  Extracted req ID:   ${result.signals.reqId || '(not found)'}`);
@@ -556,6 +836,141 @@ function runSelfTest() {
   check(result.signals.date === '2026-07-09', 'analyzeInvite extracts date end-to-end');
   check(result.signals.platform === 'Zoom', 'analyzeInvite extracts platform end-to-end');
   check(result.candidates.length === 1 && result.candidates[0].appNumber === 103, 'analyzeInvite returns the matched candidate end-to-end');
+  check(result.classification === 'invite', 'analyzeInvite classifies an invite-phrased email as "invite" (no regression from #2098)');
+
+  // --- classifyEmail (#2098) ---
+  check(classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification === 'rejection', 'detects "decided not to move forward" as rejection');
+  check(classifyEmail('Thank you for your interest. We regret to inform you that you have not been selected to advance.').classification === 'rejection', 'detects "regret to inform" / "not been selected to advance" as rejection');
+  check(classifyEmail('After careful consideration, we have decided to move forward with other candidates whose qualifications more closely align with this role.').classification === 'rejection', 'detects "move forward with other candidates" as rejection');
+  check(classifyEmail('Unfortunately, we are not able to offer you a position at this time.').classification === 'rejection', 'detects "not able to offer you a position" as rejection');
+  check(classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification === 'invite', 'detects invite phrasing as "invite"');
+  check(classifyEmail('Looking forward to interviewing with you next Tuesday.').classification === 'invite', 'detects "interviewing with" as "invite"');
+  check(classifyEmail('Thanks for your recent purchase, here is your receipt.').classification === 'unknown', 'unrelated text classifies as "unknown"');
+  check(classifyEmail('').classification === 'unknown', 'empty text classifies as "unknown"');
+  check(classifyEmail('Thank you for interviewing with us last week. Unfortunately, we will not be moving forward with your application.').classification === 'rejection', 'rejection language wins when both invite and rejection phrasing appear (references a past interview)');
+
+  // --- CodeRabbit PR #2100: "unfortunately" alone must never be sufficient ---
+  const rescheduleOnly = classifyEmail('Unfortunately we need to push your interview to next Tuesday due to a scheduling conflict.');
+  check(rescheduleOnly.classification !== 'rejection', '"unfortunately" alone (benign reschedule) does NOT classify as rejection');
+  check(rescheduleOnly.classification === 'unknown', '"unfortunately"-only reschedule email classifies as unknown, not invite or rejection');
+
+  const weakPlusStrong = classifyEmail('Unfortunately, we have decided not to move forward with your application at this time.');
+  check(weakPlusStrong.classification === 'rejection', '"unfortunately" alongside a strong rejection phrase still classifies as rejection');
+  check(weakPlusStrong.matchedPhrases.includes('unfortunately') && weakPlusStrong.matchedPhrases.includes('decided not to move forward'), 'matchedPhrases includes both the weak and strong phrase that co-occurred');
+
+  const rejectionPhraseCheck = classifyEmail('We regret to inform you that you have not been selected.');
+  check(Array.isArray(rejectionPhraseCheck.matchedPhrases) && rejectionPhraseCheck.matchedPhrases.length > 0, 'matchedPhrases is populated for a rejection classification');
+
+  const invitePhraseCheck = classifyEmail('We would like to invite you to schedule your phone screen for next week.');
+  check(Array.isArray(invitePhraseCheck.matchedPhrases) && invitePhraseCheck.matchedPhrases.includes('schedule your phone screen'), 'matchedPhrases is populated for an invite classification');
+
+  // --- analyzeInvite classification for a rejection email (fixture rows, no file I/O) ---
+  const rejectionText = 'Dear Candidate,\n\nCompany: Example Industries\nThank you for applying. Unfortunately, we have decided not to move forward with your application at this time.';
+  const rejectionResult = analyzeInvite(rejectionText, fixtureRows);
+  check(rejectionResult.classification === 'rejection', 'analyzeInvite classifies a rejection email as "rejection"');
+  check(rejectionResult.candidates.length === 2 && rejectionResult.candidates[0].appNumber === 101, 'a rejection email still returns ranked candidates (matching is unaffected by classification), active row ranked first');
+  check(Array.isArray(rejectionResult.matchedPhrases) && rejectionResult.matchedPhrases.length > 0, 'analyzeInvite exposes matchedPhrases for a rejection classification');
+
+  // --- analyzeInvite: the false-positive CodeRabbit named must not enable --apply ---
+  const rescheduleText = 'Dear Candidate,\n\nCompany: Example Industries\nUnfortunately we need to push your interview to next Tuesday due to a scheduling conflict.';
+  const rescheduleResult = analyzeInvite(rescheduleText, fixtureRows);
+  check(rescheduleResult.classification !== 'rejection', 'analyzeInvite does not classify a benign reschedule email (containing only "unfortunately") as rejection — --apply would refuse this');
+
+  // --- classifyEmail phraseStrength (#2100 CodeRabbit major finding follow-up) ---
+  check(classifyEmail('We are sorry to inform you that we have decided not to move forward with your application.').phraseStrength === 'strong', 'a strong rejection phrase reports phraseStrength "strong"');
+  check(classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength === null, 'an invite classification reports phraseStrength null');
+  check(classifyEmail('Thanks for your recent purchase.').phraseStrength === null, 'an unknown classification reports phraseStrength null');
+
+  // --- maintainer finding, PR #2100 review comment 2026-08-07: strong-tier
+  // phrases demoted to weak must never trigger `rejection` alone, only in
+  // combination with a second corroborating phrase ---
+  check(classifyEmail('We are sorry to report the negotiation was not successful.').classification !== 'rejection', '"not successful" alone (demoted phrase, unrelated context) does not classify as rejection');
+  check(classifyEmail('We regret to inform all staff that the downtown office lease will not be renewed.').classification !== 'rejection', '"regret to inform" alone (demoted phrase, non-candidate-directed context) does not classify as rejection');
+  check(classifyEmail('Please note the Q3 expansion will not be moving forward due to budget constraints.').classification !== 'rejection', '"will not be moving forward" alone (demoted phrase, unrelated project context) does not classify as rejection');
+  check(classifyEmail('We are currently unable to offer you a start date earlier than March.').classification !== 'rejection', '"unable to offer you" alone (demoted phrase, non-rejection context) does not classify as rejection');
+
+  // --- maintainer finding (PR #2100 review, 2026-08-07): realistic
+  // non-rejection emails must never classify as `rejection`, whether via a
+  // strong phrase or a `strong` phraseStrength. This is the exact false-
+  // positive class the review flagged: reschedules, delay apologies, and
+  // unrelated (non-candidate-directed) bad-news announcements that happen to
+  // share vocabulary with genuine rejection boilerplate. A false `rejection`
+  // is the unsafe direction here because `--apply` performs an irreversible
+  // tracker write gated on it (#2098) — a missed rejection only costs one
+  // unnecessary follow-up, but a false one silently kills a live process.
+  const rescheduleEmail = 'Hi Jamie,\n\nThanks for your flexibility — we need to reschedule your interview to next week. Something came up on our end and we want to make sure we can give you our full attention. Would Tuesday or Thursday afternoon work?\n\nSorry for the back and forth.\n\nBest,\nRecruiting Team';
+  const rescheduleEmailResult = classifyEmail(rescheduleEmail);
+  check(rescheduleEmailResult.classification !== 'rejection', 'realistic reschedule email does not classify as rejection');
+  check(rescheduleEmailResult.phraseStrength !== 'strong', 'realistic reschedule email does not report phraseStrength "strong"');
+
+  const delayApologyEmail = 'Hi Alex,\n\nApologies for the delay in getting back to you — we\'re still reviewing candidates for this role and expect to have an update within the next week. Thanks so much for your patience.\n\nBest,\nTalent Acquisition Team';
+  const delayApologyEmailResult = classifyEmail(delayApologyEmail);
+  check(delayApologyEmailResult.classification !== 'rejection', 'realistic delay-apology email does not classify as rejection');
+  check(delayApologyEmailResult.phraseStrength !== 'strong', 'realistic delay-apology email does not report phraseStrength "strong"');
+
+  const redundancyAnnouncementEmail = 'Hi team,\n\nWe regret to inform everyone that, following today\'s town hall, the company will be closing our satellite office as part of a broader restructuring, and several roles across departments are affected. To be clear, this update is unrelated to any individual candidate applications currently in progress — those pipelines continue as normal.\n\nThank you for your understanding.\n\nPeople Team';
+  const redundancyAnnouncementEmailResult = classifyEmail(redundancyAnnouncementEmail);
+  check(redundancyAnnouncementEmailResult.classification !== 'rejection', 'unrelated company-wide redundancy announcement does not classify as rejection');
+  check(redundancyAnnouncementEmailResult.phraseStrength !== 'strong', 'unrelated company-wide redundancy announcement does not report phraseStrength "strong"');
+
+  // --- matchInvite nameScore exposure (#2100 CodeRabbit major finding follow-up) ---
+  const exactNameRows = [{ num: 501, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
+  const exactNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, exactNameRows);
+  check(exactNameMatch[0].nameScore === 1, 'matchInvite exposes nameScore 1 for an exact company-name match');
+  const fuzzyNameRows = [{ num: 502, company: 'Example Industries Global Holdings', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
+  const fuzzyNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fuzzyNameRows);
+  check(fuzzyNameMatch[0].nameScore < 1, 'matchInvite exposes nameScore < 1 for a partial/fuzzy company-name match');
+
+  // --- selectApplyTarget confidence gate (#2100 CodeRabbit major finding: line 768-769) ---
+  // A sole candidate that is both an exact company-name match AND backed by a
+  // strong rejection phrase auto-applies.
+  const strongExactSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 501, nameScore: 1 }], phraseStrength: 'strong' },
+    null
+  );
+  check(!strongExactSelection.error && strongExactSelection.target.appNumber === 501, 'selectApplyTarget auto-applies a sole candidate that is both an exact company match and a strong rejection classification');
+
+  // A sole candidate that is an exact company match but only weakly
+  // classified (e.g. "unfortunately" alone) must NOT auto-apply — this is
+  // the regression CodeRabbit's major finding described.
+  const weakOnlySelection = selectApplyTarget(
+    { candidates: [{ appNumber: 502, nameScore: 1 }], phraseStrength: 'weak' },
+    null
+  );
+  check(!!weakOnlySelection.error && weakOnlySelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate when the rejection classification is only weak, even with an exact company match');
+
+  // A sole candidate that is only a fuzzy/partial company-name match must NOT
+  // auto-apply even with a strong rejection phrase — this is the exact
+  // low-confidence-fuzzy-match scenario CodeRabbit flagged on line 768-769.
+  const fuzzySoleSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'strong' },
+    null
+  );
+  check(!!fuzzySoleSelection.error && fuzzySoleSelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate that is only a fuzzy/partial company-name match, even with a strong rejection classification');
+  check(fuzzySoleSelection.candidate && fuzzySoleSelection.candidate.appNumber === 503, 'selectApplyTarget exposes the near-miss candidate on a confidence-gate refusal');
+
+  // --id always overrides the confidence gate — an explicit human/agent
+  // choice is trusted regardless of nameScore/phraseStrength.
+  const idOverrideSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'weak' },
+    503
+  );
+  check(!idOverrideSelection.error && idOverrideSelection.target.appNumber === 503, 'selectApplyTarget honors an explicit --id even when the sole-candidate confidence gate would otherwise refuse');
+
+  // Zero candidates must refuse with code 2 (distinct concern from the
+  // confidence gate above, but same exit code family — "nothing to apply to").
+  const noCandidateSelection = selectApplyTarget({ candidates: [], phraseStrength: 'strong' }, null);
+  check(!!noCandidateSelection.error && noCandidateSelection.code === 2, 'selectApplyTarget refuses with code 2 when no candidates matched');
+
+  // Multiple viable candidates must refuse with code 3 (distinct from the
+  // code-2 refusals above) and expose the ranked candidates collection the
+  // CLI output logic uses to print the disambiguation list.
+  const ambiguousSelection = selectApplyTarget(
+    { candidates: [{ appNumber: 601, nameScore: 1 }, { appNumber: 602, nameScore: 1 }], phraseStrength: 'strong' },
+    null
+  );
+  check(!!ambiguousSelection.error && ambiguousSelection.code === 3, 'selectApplyTarget refuses with code 3 when multiple candidates matched');
+  check(Array.isArray(ambiguousSelection.candidates) && ambiguousSelection.candidates.length === 2, 'selectApplyTarget exposes the ranked candidate list on an ambiguous refusal');
 
   console.log(`\n  invite-match self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);
@@ -578,6 +993,49 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
 
     const result = analyzeInvite(text);
+
+    if (applyMode) {
+      // Scoped strictly to the Rejected transition (#2098) — never applies
+      // for an invite/unknown classification, and never for an ambiguous
+      // match unless the caller disambiguates with --id.
+      if (result.classification !== 'rejection') {
+        console.error(`invite-match: --apply only applies the Rejected transition, but this text classified as "${result.classification}" — not applying.`);
+        if (summaryMode) printSummary(result); else console.log(JSON.stringify(result, null, 2));
+        process.exit(1);
+      }
+
+      const selection = selectApplyTarget(result, idArg);
+      if (selection.error) {
+        console.error(selection.error);
+        if (selection.candidates) {
+          // Ambiguous multi-candidate case: the ranked list IS the
+          // actionable output (each row's # is what --id expects), so print
+          // that instead of the full JSON/summary dump the other refusal
+          // branches use.
+          for (const c of selection.candidates) {
+            console.error(`  #${c.appNumber}\t${c.company}\t${c.role}\t${c.status}\t${c.matchConfidence}`);
+          }
+        } else if (summaryMode) {
+          printSummary(result);
+        } else {
+          console.log(JSON.stringify(result, null, 2));
+        }
+        process.exit(selection.code);
+      }
+      const target = selection.target;
+
+      const applyResult = applyRejectionStatus(target.appNumber);
+      const output = { ...result, applied: applyResult };
+      if (summaryMode) {
+        printSummary(result);
+        console.log(applyResult.error
+          ? `  Apply FAILED: ${applyResult.error}\n`
+          : `  Applied: #${applyResult.num} ${applyResult.company} — ${applyResult.role}: ${applyResult.oldStatus} → ${applyResult.newStatus}\n`);
+      } else {
+        console.log(JSON.stringify(output, null, 2));
+      }
+      process.exit(applyResult.error ? 1 : 0);
+    }
 
     if (summaryMode) {
       printSummary(result);

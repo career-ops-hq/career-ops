@@ -253,6 +253,7 @@ const scripts = [
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
+  { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
   { name: 'salary-gap.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
@@ -263,6 +264,8 @@ const scripts = [
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
+  { name: 'invite-match.mjs --self-test', expectExit: 0 },
+  { name: 'invite-match.test.mjs', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
@@ -1213,9 +1216,18 @@ for (const f of userFiles) {
 }
 
 const batchRunnerSource = readFile('batch/batch-runner.sh');
-const minScoreSkipIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "skipped"');
-const minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
-const completedStateIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "completed"', minScoreSkipIndex);
+// Match any update_state entrypoint (bare, _retrying, _unlocked) so this asserts
+// the gate's ordering rather than one spelling of the call.
+const SKIPPED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "skipped"/;
+const COMPLETED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "completed"/;
+const minScoreSkipIndex = batchRunnerSource.search(SKIPPED_STATE_WRITE);
+let minScoreReturnIndex = -1;
+let completedStateIndex = -1;
+if (minScoreSkipIndex !== -1) {
+  minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
+  const completedOffset = batchRunnerSource.slice(minScoreSkipIndex).search(COMPLETED_STATE_WRITE);
+  completedStateIndex = completedOffset === -1 ? -1 : minScoreSkipIndex + completedOffset;
+}
 if (
   minScoreSkipIndex !== -1 &&
   minScoreReturnIndex !== -1 &&
@@ -2429,6 +2441,190 @@ if (
   }
 }
 
+// --- Block G pay-transparency range-width signal (#2019, re-scoped #2280) ---
+{
+  // Maintainer direction (#2280): the jurisdiction table is gone — no
+  // external YAML, no legal threshold. Only the self-computed range-width
+  // heuristic (former 13a) survives; the corroborating missing-range
+  // sub-signal (former 13b) had no trigger without the table and was removed
+  // with it.
+  const ptPath = join(ROOT, 'templates', 'pay-transparency.yml');
+  if (existsSync(ptPath)) {
+    fail('templates/pay-transparency.yml should have been removed per maintainer direction (#2280)');
+  } else {
+    pass('templates/pay-transparency.yml removed — no jurisdiction table remains (#2280)');
+  }
+
+  // oferta.md carries the standalone, table-free range-width signal
+  const ptStart = ofertaMode.indexOf('Pay-Transparency Range-Width Check');
+  const ptEnd = ofertaMode.indexOf('### Output format:', Math.max(ptStart, 0));
+  const ptSection = ptStart >= 0 && ptEnd > ptStart ? ofertaMode.slice(ptStart, ptEnd) : '';
+  if (
+    ptSection &&
+    !ptSection.includes('templates/pay-transparency.yml') &&
+    !/13b/.test(ptSection) &&
+    ptSection.includes('general heuristic') &&
+    ptSection.includes('top - bottom > 0.5 × bottom') &&
+    ptSection.includes('Phrasing discipline (mandatory)') &&
+    ptSection.includes('not legal advice')
+  ) {
+    pass('oferta Block G has the table-free, self-computed pay-transparency range-width signal (#2280)');
+  } else {
+    fail('oferta Block G missing/incomplete pay-transparency range-width section — needs table-free arithmetic heuristic, "general heuristic" framing, the documented threshold formula (top - bottom > 0.5 × bottom), phrasing discipline, not-legal-advice note, and no leftover table/13b references (#2280)');
+  }
+
+  // Phrasing discipline holds in the report-facing text: the blockquote
+  // template the agent renders must state facts, never legal accusations.
+  // (The rule text itself may quote the banned phrases to forbid them,
+  // so only '>' lines — the rendered output templates — are scanned.)
+  const ptQuoteLines = ptSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const accusatory = ptQuoteLines.filter((l) => /illegal|violation|breaking the law/i.test(l));
+  if (ptSection && ptQuoteLines.length >= 1 && accusatory.length === 0) {
+    pass('pay-transparency report template states facts only — no "illegal"/"violation"/"breaking the law" assertions (#2280)');
+  } else {
+    fail(`pay-transparency phrasing discipline broken: ${accusatory.length ? `accusatory blockquote line(s): ${accusatory[0].trim().slice(0, 80)}` : 'expected 1+ blockquote output template in the section'} (#2280)`);
+  }
+}
+
+// --- Block G minimum-wage lawyer question (#2025, reshaped #2280) ---
+// Per maintainer direction on #2027: no jurisdiction wage table, no
+// comparison/assertion against any statutory rate. This signal only does
+// the arithmetic that needs no legal table (offer -> comparable hourly
+// figure) and routes the actual compliance question to a lawyer.
+{
+  // 1. templates/minimum-wage.yml must be GONE — the reshape's whole point
+  //    is that no rate table should exist to go stale.
+  const mwPath = join(ROOT, 'templates', 'minimum-wage.yml');
+  if (!existsSync(mwPath)) {
+    pass('templates/minimum-wage.yml removed — no jurisdiction wage table ships (#2280)');
+  } else {
+    fail('templates/minimum-wage.yml still exists — maintainer direction on #2027/#2280 was to drop the rate table entirely');
+  }
+
+  // 2. oferta.md carries the reshaped section: no reference to the deleted
+  //    table, jurisdiction still resolved strictly from the JD (no
+  //    config/profile.yml fallback), the fixed-cash comparable-amount gate
+  //    and JD-hours-first normalization are preserved, and no staleness/
+  //    carve-out-eligibility machinery (which existed only to support the
+  //    now-deleted table comparison) remains.
+  const mwStart = ofertaMode.indexOf('**14. Minimum-Wage Lawyer Question**');
+  const mwEnd = ofertaMode.indexOf('### Output format:', Math.max(mwStart, 0));
+  const mwSection = mwStart >= 0 && mwEnd > mwStart ? ofertaMode.slice(mwStart, mwEnd) : '';
+  if (
+    mwSection &&
+    !mwSection.includes('templates/minimum-wage.yml') &&
+    mwSection.includes('NEVER from `config/profile.yml`') &&
+    mwSection.includes('Comparable-amount gate (mandatory)') &&
+    mwSection.includes('guaranteed, fixed cash amount') &&
+    mwSection.includes('bonuses, commissions, allowances, overtime pay, 13th-month') &&
+    mwSection.includes("JD's own stated working hours") &&
+    mwSection.includes('2080 hours/year') &&
+    mwSection.includes('always disclose in the output which hours figure was used') &&
+    mwSection.includes('Jurisdiction resolution (mandatory)') &&
+    mwSection.includes('[ask your lawyer]') &&
+    mwSection.includes('never conditioned on whether') &&
+    !mwSection.includes('staleness gate') &&
+    !mwSection.includes('Carve-out honesty') &&
+    !mwSection.includes('as_of') &&
+    !mwSection.includes('reference rate')
+  ) {
+    pass('oferta Block G signal 13 dropped the wage-table reference and staleness/carve-out-eligibility machinery while keeping jurisdiction-strict resolution (no profile fallback), the fixed-cash comparable-amount gate, and JD-hours-first normalization (#2280)');
+  } else {
+    fail('oferta Block G signal 13 missing/incomplete post-#2280 reshape — needs: no templates/minimum-wage.yml reference, jurisdiction still resolved strictly from the JD only, fixed-cash comparable-amount gate excluding ranges/variable comp, JD-hours-first normalization with 2080 fallback disclosure, [ask your lawyer] routing, unconditional firing rule, AND removal of the old staleness gate / carve-out-honesty / as_of / reference-rate language that only made sense with a table (#2280)');
+  }
+
+  // 3. Phrasing discipline: the rendered blockquote must never assert or
+  //    imply a current statutory minimum wage, never claim compliance either
+  //    way, and must route to [ask your lawyer]. (The rule text itself may
+  //    quote banned phrases to forbid them, so only '>' lines — the
+  //    rendered output template — are scanned.)
+  const mwQuoteLines = mwSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const mwAccusatory = mwQuoteLines.filter((l) => /illegal|violation|breaking the law/i.test(l));
+  const mwHasLawyerRouting = mwQuoteLines.some((l) => l.includes('[ask your lawyer]'));
+  if (mwSection && mwQuoteLines.length >= 1 && mwAccusatory.length === 0 && mwHasLawyerRouting) {
+    pass('minimum-wage report template routes to [ask your lawyer] with no "illegal"/"violation"/"breaking the law" assertions (#2280)');
+  } else {
+    fail(`minimum-wage phrasing discipline broken: ${mwAccusatory.length ? `accusatory blockquote line(s): ${mwAccusatory[0].trim().slice(0, 80)}` : (!mwHasLawyerRouting ? 'missing [ask your lawyer] routing in rendered blockquote' : 'expected a blockquote output template in the section')} (#2280)`);
+  }
+
+  // 4. The rendered lawyer question must follow santifer's exact shape from
+  //    his #2027 comment: computed hourly figure, hours basis disclosed,
+  //    jurisdiction name, statutory-minimum question, AND a mention of
+  //    special rates (student/homeworker) as a prompt — never an assertion
+  //    of eligibility, since there is no table to judge that from anymore.
+  const mwHandoffQuote = mwQuoteLines.find((l) => l.includes('[ask your lawyer]')) || '';
+  if (
+    /\/hour/i.test(mwHandoffQuote) &&
+    /statutory minimum/i.test(mwHandoffQuote) &&
+    /jurisdiction_name|\{jurisdiction/i.test(mwHandoffQuote) &&
+    /student/i.test(mwHandoffQuote) &&
+    /homeworker/i.test(mwHandoffQuote)
+  ) {
+    pass('minimum-wage lawyer question follows the maintainer-specified shape: computed hourly figure, jurisdiction placeholder, statutory-minimum question, special-rates (student/homeworker) prompt (#2280)');
+  } else {
+    fail('minimum-wage lawyer question does not match the maintainer-specified shape — must include the hourly figure, the jurisdiction placeholder, the statutory-minimum question, and a student/homeworker special-rates prompt (#2280)');
+  }
+
+  // 5. Behavioral test for the hourly-conversion arithmetic itself (the part
+  //    of the old algorithm that survives the reshape unchanged): fixed
+  //    cash amount -> comparable hourly figure, JD-stated hours preferred,
+  //    2080-hour fallback only when the JD is silent, ranges/variable comp
+  //    excluded by the comparable-amount gate.
+  {
+    function computeHourlyFigure({ advertisedComp, isRange, isVariable, period, jdStatedHoursPerYear }) {
+      if (advertisedComp == null || isRange || isVariable) return { skip: true };
+      if (period === 'hourly') {
+        return { skip: false, hourly: advertisedComp, hoursBasis: 'n/a (already hourly)' };
+      }
+      let annual = period === 'monthly' ? advertisedComp * 12 : advertisedComp;
+      const hoursPerYear = jdStatedHoursPerYear ?? 2080;
+      const hoursBasis = jdStatedHoursPerYear ? 'JD-stated' : '2080-hour fallback';
+      if (!hoursPerYear) return { skip: true };
+      return { skip: false, hourly: annual / hoursPerYear, hoursBasis };
+    }
+
+    // (a) already hourly -> passthrough
+    const hourly = computeHourlyFigure({ advertisedComp: 22.50, isRange: false, isVariable: false, period: 'hourly' });
+    // (b) annual, JD states 37.5 hrs/week * 52 = 1950 hrs/year -> preferred over 2080
+    const annualJdHours = computeHourlyFigure({ advertisedComp: 62400, isRange: false, isVariable: false, period: 'annual', jdStatedHoursPerYear: 1950 });
+    // (c) annual, JD silent on hours -> 2080 fallback
+    const annualFallback = computeHourlyFigure({ advertisedComp: 62400, isRange: false, isVariable: false, period: 'annual' });
+    // (d) monthly -> annualized first, then converted
+    const monthly = computeHourlyFigure({ advertisedComp: 5000, isRange: false, isVariable: false, period: 'monthly' });
+    // (e) comparable-amount gate: range excluded
+    const rangeSkipped = computeHourlyFigure({ advertisedComp: 17, isRange: true, isVariable: false, period: 'hourly' });
+    // (f) comparable-amount gate: variable comp (bonus/commission) excluded
+    const variableSkipped = computeHourlyFigure({ advertisedComp: 5000, isRange: false, isVariable: true, period: 'annual' });
+    // (g) null advertised_comp -> skip (pay-transparency signal's territory)
+    const nullSkipped = computeHourlyFigure({ advertisedComp: null, isRange: false, isVariable: false, period: 'hourly' });
+
+    const arithmeticOk =
+      !hourly.skip && hourly.hourly === 22.50 &&
+      !annualJdHours.skip && Math.abs(annualJdHours.hourly - 32) < 0.001 && annualJdHours.hoursBasis === 'JD-stated' &&
+      !annualFallback.skip && Math.abs(annualFallback.hourly - 30) < 0.001 && annualFallback.hoursBasis === '2080-hour fallback' &&
+      !monthly.skip && Math.abs(monthly.hourly - (60000 / 2080)) < 0.001 &&
+      rangeSkipped.skip === true &&
+      variableSkipped.skip === true &&
+      nullSkipped.skip === true;
+
+    if (arithmeticOk) {
+      pass('hourly-conversion arithmetic correctly passes through hourly figures, prefers JD-stated hours over the 2080 fallback, annualizes monthly pay before converting, and the comparable-amount gate excludes ranges/variable comp/null advertised_comp (#2280)');
+    } else {
+      fail(`hourly-conversion arithmetic produced wrong results: hourly=${JSON.stringify(hourly)} annualJdHours=${JSON.stringify(annualJdHours)} annualFallback=${JSON.stringify(annualFallback)} monthly=${JSON.stringify(monthly)} rangeSkipped=${JSON.stringify(rangeSkipped)} variableSkipped=${JSON.stringify(variableSkipped)} nullSkipped=${JSON.stringify(nullSkipped)} (#2280)`);
+    }
+  }
+
+  // 6. Signal-13 boundary check: signal 13 is the last numbered Block G
+  //    signal before "### Output format:", so slicing it for phrasing
+  //    checks elsewhere in this file must not accidentally swallow the
+  //    output-format section.
+  if (mwEnd > mwStart && mwStart >= 0) {
+    pass('signal-13 section boundary (start of signal 13 to "### Output format:") resolved correctly for slicing (#2280)');
+  } else {
+    fail('could not locate signal 14 ("**14. Minimum-Wage Lawyer Question**") or its end boundary in modes/oferta.md (#2280)');
+  }
+}
+
 // --- offer-prep mode: contract reading companion (describes, never judges) ---
 const offerPrepMode = fileExists('modes/offer-prep.md') ? readFile('modes/offer-prep.md') : '';
 if (
@@ -2610,6 +2806,112 @@ if (
   pass('router skill registers offer-prep (argument-hint, routing table, menu, standalone list; never subagent-delegated)');
 } else {
   fail('router skill missing offer-prep registration (or offer-prep leaked into the subagent-delegated section)');
+}
+
+// --- offer-prep sub-statutory-terms lawyer question (#2039, reworked per #2280) ---
+// santifer's direction on PR #2042 (2026-07-29, reasoning in #2280): a
+// jurisdiction table of category-regulation flags (floor_categories,
+// void_doctrine) is a live legal fact this system can never verify or
+// notice going stale, same as #2027's minimum-wage table — a stale flag
+// with a citation is worse than no flag at all. templates/statutory-
+// employment-minimums.yml is deleted entirely (no flags-only shape either).
+// modes/offer-prep.md now only restates the clause's own stated term (no
+// legal table needed) and routes the statutory-floor and voiding-doctrine
+// questions to the lawyer unconditionally, for every jurisdiction, never
+// gated on a table row. Tests below assert the table is gone and the
+// section fires the lawyer questions without any table-backed gating.
+{
+  // 1. The table is gone, not merely emptied.
+  const semPath = join(ROOT, 'templates', 'statutory-employment-minimums.yml');
+  if (!existsSync(semPath)) {
+    pass('templates/statutory-employment-minimums.yml deleted per maintainer direction (#2039, #2280)');
+  } else {
+    fail('templates/statutory-employment-minimums.yml should be deleted entirely per #2280 — a live legal fact this system cannot verify or notice going stale, same reasoning as #2027s minimum-wage table');
+  }
+
+  // templates/README.md carries no row for the deleted table.
+  const templatesReadme = readFile('templates/README.md');
+  if (!templatesReadme.includes('statutory-employment-minimums.yml')) {
+    pass('templates/README.md carries no row for the deleted statutory-employment-minimums.yml (#2280)');
+  } else {
+    fail('templates/README.md still references statutory-employment-minimums.yml, which was deleted per #2280');
+  }
+
+  // 2. offer-prep carries the sub-statutory-terms subsection, reworked to
+  //    route unconditionally to the lawyer list with no table lookup, no
+  //    floor_categories/void_doctrine gating, and no reintroduced ESA
+  //    figures or Waksdale narrative.
+  const semStart = offerPrepMode.indexOf('Sub-statutory-terms lawyer question');
+  const semEnd = offerPrepMode.indexOf('## Step 3', Math.max(semStart, 0));
+  const semSection = semStart >= 0 && semEnd > semStart ? offerPrepMode.slice(semStart, semEnd) : '';
+  if (
+    semSection.includes('Questions for your lawyer') &&
+    semSection.includes('#2280') &&
+    /gone and is not coming back in any shape/.test(semSection) &&
+    /Never assert a floor value, a regulation flag, a doctrine holding,\s+voidness, or violation\s+\(HARD RULE\)/.test(semSection) &&
+    semSection.includes('always a lawyer question') &&
+    semSection.includes('Render in {language.output}') &&
+    /no floor-figure statements,\s+no regulation-flag statements/.test(semSection) &&
+    /never computes, estimates, or\s+ranges a notice or severance amount/.test(semSection) &&
+    // must NOT reference the deleted table's path, or gate any behavior on
+    // its removed flag fields — `floor_categories`/`void_doctrine` may each
+    // appear at most once, in the single historical sentence explaining
+    // what the deleted table used to carry (not as active gating logic).
+    !semSection.includes('templates/statutory-employment-minimums.yml') &&
+    (semSection.match(/floor_categories/g) || []).length <= 1 &&
+    (semSection.match(/void_doctrine/g) || []).length <= 1 &&
+    !semSection.includes('Floors-absent silence') &&
+    !semSection.includes('floorMatch') &&
+    !semSection.includes('voidDoctrineMatch') &&
+    // must NOT reintroduce the removed floor value / doctrine narrative, and
+    // must NOT reintroduce a named case/doctrine (e.g. Bardal) as a factor
+    // list or asserted holding — a bare case citation belongs only in
+    // restrictive-covenants.yml's own `sources` field, never narrated here
+    !/2 weeks|3 weeks|8 weeks|26 weeks/.test(semSection) &&
+    !/Waksdale|ONCA 391|wilful.misconduct standard|Bardal/i.test(semSection)
+  ) {
+    pass('offer-prep sub-statutory-terms subsection documents the table deletion per #2280, routes unconditionally to lawyer questions with no table lookup or category/doctrine gating, never-assert hard rule, {language.output} rendering, no-calculations non-goal — and carries no reintroduced statutory figures or doctrine narrative (#2039, #2280)');
+  } else {
+    fail('offer-prep sub-statutory-terms subsection missing/incomplete, or still asserts a specific floor value / regulation flag / doctrine holding, or still gates on a table lookup — needs the #2280 table-deletion rationale, unconditional lawyer-question routing, the floor-value/flag/doctrine never-assert hard rule, {language.output} rendering, no-calculations non-goal, and must not restate the removed ESA figures or Waksdale narrative (#2039, #2280)');
+  }
+
+  // 3. Lawyer-question workflow: both the floor question and the
+  //    doctrine-directed question are present, fire unconditionally (no
+  //    table-flag gating), explicitly ask the lawyer for the current
+  //    figure/effect rather than the mode asserting one, and are routed
+  //    through {language.output} rendering at the presentation boundary.
+  const semLawyerBlock = semSection.slice(
+    Math.max(0, semSection.indexOf('Questions for your lawyer')),
+    semSection.indexOf('candidate-empowering angle') > 0
+      ? semSection.indexOf('candidate-empowering angle')
+      : undefined
+  );
+  if (
+    /at or above the statutory minimum/i.test(semLawyerBlock) &&
+    /does this clause meet it/i.test(semLawyerBlock) &&
+    /could void the whole clause/i.test(semLawyerBlock) &&
+    !/void_doctrine: true/.test(semLawyerBlock) &&
+    (semLawyerBlock.match(/Render in \{language\.output\}/g) || []).length >= 2
+  ) {
+    pass('sub-statutory-terms lawyer-question workflow generates both the statutory-floor question and the doctrine-directed question unconditionally (no table-flag gating), each asking the lawyer for the current figure/effect (never asserting one) and each rendered via [Render in {language.output}] at the presentation boundary (#2039, #2280)');
+  } else {
+    fail('sub-statutory-terms lawyer-question workflow incomplete — needs a statutory-floor question asking the lawyer for the current minimum, a doctrine-directed question about whether a defect could void the whole clause, both firing unconditionally with no void_doctrine table-flag gating, and both rendered via [Render in {language.output}] (#2039, #2280)');
+  }
+
+  // 4. Phrasing discipline holds in the report-facing text: no rendered
+  //    output template may assert a specific floor value, a regulation
+  //    flag, a doctrine holding, or a verdict about the candidate's own
+  //    clause. Only '>' lines (rendered output templates) are scanned.
+  const semQuoteLines = semSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const semAssertive = semQuoteLines.filter((l) =>
+    /(this|your|the candidate'?s?) (specific )?(clause|provision|term|contract) (is|would be|will be) (void|illegal|unenforceable|invalid|below the (statutory )?floor|in violation)/i.test(l)
+  );
+  const semFigureLeak = semQuoteLines.filter((l) => /Waksdale|ONCA 391|\b2 weeks\b|\b8 weeks\b|\b26 weeks\b/i.test(l));
+  if (semSection && semQuoteLines.length >= 1 && semAssertive.length === 0 && semFigureLeak.length === 0) {
+    pass('sub-statutory-terms rendered templates state only the clause\'s own term + the lawyer question — no void/illegal/unenforceable/below-the-floor assertions and no reintroduced statutory figures or doctrine names (#2039, #2280)');
+  } else {
+    fail(`sub-statutory-terms phrasing discipline broken: ${semAssertive.length ? `clause-directed verdict in blockquote: ${semAssertive[0].trim().slice(0, 80)}` : semFigureLeak.length ? `reintroduced statutory figure/doctrine name in blockquote: ${semFigureLeak[0].trim().slice(0, 80)}` : 'expected a blockquote output template in the section'} (#2039)`);
+  }
 }
 
 const claudeMdDoc = readFile('CLAUDE.md');
@@ -6176,7 +6478,7 @@ try {
 // ── 11b. TITLE FILTER — acronym word boundaries ──────────────────
 console.log('\n11b. Title filter — acronym word boundaries');
 try {
-  const { buildTitleFilter, compileKeyword } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { buildTitleFilter, compileKeyword, matchedTitleKeywords } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // Short all-letter acronyms match on WORD BOUNDARIES, not as substrings.
   const cooFilter = buildTitleFilter({ positive: ['coo'] });
@@ -6202,6 +6504,74 @@ try {
     pass('compileKeyword("cfo") is word-boundary anchored');
   } else {
     fail('compileKeyword("cfo") boundary behavior wrong');
+  }
+
+  // ── AND-groups (#2544) ───────────────────────────────────────────
+  // A positive entry containing " + " requires EVERY term, in any order. The
+  // substring-only list could only express exact spellings, so every variant
+  // it did not literally contain was dropped with no warning.
+  const andFilter = buildTitleFilter({ positive: ['director + engineering', 'vp + engineering'] });
+  const shouldMatch = [
+    'Director - Software Engineering',        // hyphen, not comma
+    'Director Engineering (Mobile Platform)', // no separator at all
+    'Senior Director, Platform Engineering',  // domain word in between
+    'Director of Engineering',                // the literal spelling still works
+    'VP, Software Engineering',
+  ];
+  const missed = shouldMatch.filter((t) => andFilter(t) !== true);
+  if (missed.length === 0) pass('an AND-group matches every separator and word-order variant (#2544)');
+  else fail(`AND-group missed: ${JSON.stringify(missed)}`);
+  if (andFilter('Director of Sales') === false && andFilter('Software Engineer') === false) {
+    pass('an AND-group still requires ALL its terms — one term alone is not enough');
+  } else {
+    fail('AND-group matched a title carrying only one of its terms');
+  }
+
+  // The separator needs surrounding whitespace. A bare split on "+" would turn
+  // the ordinary keyword "C++" into "c", which matches nearly every title —
+  // trading a silent drop for a silent flood.
+  const plusFilter = buildTitleFilter({ positive: ['c++'] });
+  if (plusFilter('C++ Developer') === true && plusFilter('Marketing Manager') === false) {
+    pass('"C++" stays a literal keyword — " + " is the group separator, not "+"');
+  } else {
+    fail('"C++" must not be split into an AND-group');
+  }
+
+  // Short terms inside a group keep compileKeyword's word-boundary rule.
+  const vpGroup = buildTitleFilter({ positive: ['vp + engineering'] });
+  if (vpGroup('VP, Engineering') === true && vpGroup('Revamp Engineering Process') === false) {
+    pass('a short term inside a group is still word-boundary anchored');
+  } else {
+    fail('short term inside an AND-group lost its word boundary');
+  }
+
+  // Existing configs are untouched: no " + " means the old behaviour exactly.
+  const legacy = buildTitleFilter({ positive: ['engineering manager'], negative: ['intern'] });
+  if (legacy('Engineering Manager, Payments') === true
+      && legacy('Engineering Manager Intern') === false
+      && legacy('Manager, Engineering') === false) {
+    pass('an entry without " + " keeps exact substring behaviour (backward compatible)');
+  } else {
+    fail('a plain keyword changed behaviour — the change is not backward compatible');
+  }
+
+  // matchedTitleKeywords reports the group as written, so content_filter
+  // by_title_keyword overrides keep working against the same config strings.
+  const kw = matchedTitleKeywords('Senior Director, Platform Engineering', { positive: ['director + engineering'] });
+  if (JSON.stringify(kw) === JSON.stringify(['director + engineering'])) {
+    pass('matchedTitleKeywords reports an AND-group by its raw config string');
+  } else {
+    fail(`matchedTitleKeywords returned ${JSON.stringify(kw)}`);
+  }
+
+  // Groups are positive-side only: on the negative side an entry is a veto, and
+  // " + " must stay literal there rather than silently becoming "reject when
+  // both appear" — which would veto far more than the user wrote.
+  const negGroup = buildTitleFilter({ positive: [], negative: ['foo + bar'] });
+  if (negGroup('Foo Bar Engineer') === true && negGroup('Widget foo + bar Lead') === false) {
+    pass('" + " in a negative entry stays a literal keyword, not an AND-group');
+  } else {
+    fail('a negative entry containing " + " was parsed as a group');
   }
 
   // A malformed title_filter (null / numeric / empty entries) must not crash.
@@ -6935,6 +7305,89 @@ try {
     const got = cadence.resolveNextOverride(...args);
     if (got === expected) pass(`resolveNextOverride: ${label}`);
     else fail(`resolveNextOverride ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // A pin may carry a trailing `— note` explaining why the date moved. Hand
+  // written pins nearly always do. Anchoring the pattern right after `(set …)`
+  // made those pins silently unparseable, which is the dangerous direction:
+  // the deferral disappears and the row reports overdue again.
+  // All three dash characters the pattern accepts are covered: em dash (what
+  // this project's own docs and logs use), ASCII hyphen (what a plain-text
+  // editor produces), and en dash (what macOS substitution silently turns a
+  // hyphen into). The en-dash case is the one most likely to appear without
+  // the author intending it, so an untested branch there is the easiest
+  // regression to ship.
+  const annotatedPins = cadence.parseNextOverrides([
+    '- next #50 2026-08-11 (set 2026-08-04) — messaged 2026-08-04, give it a week',
+    '- next #51 2026-08-11 (set 2026-08-04) - ascii hyphen note',
+    '- next #52 2026-08-11 — note with no set-date',
+    '- next #53 2026-08-11 (set 2026-08-04) – en-dash note',
+  ].join('\n'));
+  if (annotatedPins.get(50)?.date === '2026-08-11' && annotatedPins.get(50)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: em-dash annotated pin still parses');
+  } else {
+    fail(`annotated pin dropped: ${JSON.stringify(annotatedPins.get(50))}`);
+  }
+  if (annotatedPins.get(51)?.date === '2026-08-11' && annotatedPins.get(52)?.setDate === '2026-08-11') {
+    pass('parseNextOverrides: hyphen notes and annotated set-less pins parse');
+  } else {
+    fail(`annotated pin variants wrong: ${JSON.stringify([annotatedPins.get(51), annotatedPins.get(52)])}`);
+  }
+  if (annotatedPins.get(53)?.date === '2026-08-11' && annotatedPins.get(53)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: en-dash annotated pin parses');
+  } else {
+    fail(`en-dash annotated pin dropped: ${JSON.stringify(annotatedPins.get(53))}`);
+  }
+
+  // Retire directives: `- cleared #N YYYY-MM-DD — reason` drops one
+  // application out of the cadence without closing the application.
+  const clearedContent = [
+    '| 1 | 60 | 2026-07-20 | Acme | Lead | Email |  | ping |',
+    '- cleared #60 2026-08-04 — no contact on file',
+    '- cleared #61 2026-08-01',
+    '- cleared #61 2026-08-04 — last directive wins',
+    '- cleared #62 2026-13-45 — impossible date',
+  ].join('\n');
+  const clearedMap = cadence.parseClearedDirectives(clearedContent);
+  if (clearedMap.get(60)?.setDate === '2026-08-04' && clearedMap.get(61)?.setDate === '2026-08-04' && !clearedMap.has(62)) {
+    pass('parseClearedDirectives: last directive wins; impossible dates ignored');
+  } else {
+    fail(`cleared parsed wrong: ${JSON.stringify([...clearedMap])}`);
+  }
+  if (cadence.parseFollowupsContent(clearedContent).length === 1) {
+    pass('cleared lines are NOT counted as follow-ups');
+  } else {
+    fail('cleared lines leaked into parseFollowupsContent');
+  }
+  const cleared60 = clearedMap.get(60);
+  const retireCases = [
+    [[cleared60, null], true, 'retired with no follow-ups logged'],
+    [[cleared60, '2026-08-01'], true, 'stays retired when the last touch predates it'],
+    [[cleared60, '2026-08-04'], true, 'same-day tie favors the retirement'],
+    [[cleared60, '2026-08-05'], false, 'a follow-up logged after it revives the cadence'],
+    [[undefined, '2026-08-05'], false, 'no directive → not retired'],
+  ];
+  for (const [args, expected, label] of retireCases) {
+    const got = cadence.isRetired(...args);
+    if (got === expected) pass(`isRetired: ${label}`);
+    else fail(`isRetired ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // End to end: a retired row leaves `entries` and stops counting as
+  // actionable, but is still counted so the retirement stays visible.
+  const retireTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 70 | 2026-06-01 | Acme | Lead | 4.0/5 | Applied | ✅ | [70](reports/70.md) | Applied 2026-06-01 |',
+    '| 71 | 2026-06-01 | Beta | Lead | 4.0/5 | Applied | ✅ | [71](reports/71.md) | Applied 2026-06-01 |',
+  ].join('\n');
+  const before = cadence.analyzeFromContent(retireTracker, '');
+  const after = cadence.analyzeFromContent(retireTracker, '- cleared #70 2026-08-04 — no channel');
+  if (before.metadata.actionable === 2 && after.metadata.actionable === 1 &&
+      after.metadata.retired === 1 && !after.entries.some(e => e.num === 70)) {
+    pass('analyzeFromContent: retired application leaves entries and actionable count');
+  } else {
+    fail(`retire integration wrong: ${JSON.stringify([before.metadata, after.metadata])}`);
   }
 } catch (e) {
   fail(`follow-up cadence module crashed: ${e.message}`);
@@ -10203,6 +10656,157 @@ try {
   fail(`Batch rate-limit pause test crashed: ${e.message}`);
 }
 
+// ── 13b. RECOVERY-RECORD RECONCILE MUST NOT ROLL BACK TERMINAL ROWS ──
+
+console.log('\n13b. Recovery-record reconcile vs terminal state');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // The offer already reached a terminal state, with a score and a
+  // completion timestamp worth protecting.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+  ].join('\n') + '\n');
+
+  // A recovery record written EARLIER, while the lock was jammed, carrying
+  // the pre-success rate_limited transition. Merging it blindly would drop
+  // the score and re-queue the offer (rate_limited is not terminal).
+  writeFileSync(join(recoveryDir, 'rec-stale1'),
+    '42\thttps://example.com/forty-two\trate_limited\t2026-08-07T00:00:00Z\t\t900\t-\trate limited\t1\n');
+
+  // check_prerequisites() aborts main() with "claude CLI not found" before
+  // reconcile_recovery_records() runs when `claude` is absent from PATH, which
+  // is the case on CI runners. Stub it (offer 42 is terminal, so no worker ever
+  // invokes it) so the reconcile path is actually exercised, matching test 13.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('42\t')) || '').split('\t');
+  const [, , rowStatus, , rowCompleted, , rowScore] = row;
+
+  if (rowStatus === 'completed' && rowScore === '8.5' && rowCompleted === '2026-08-07T00:05:00Z') {
+    pass('reconcile leaves a terminal row intact when the recovery record is older');
+  } else {
+    fail(`reconcile rolled back a terminal row: status=${rowStatus} score=${rowScore} completed=${rowCompleted}`);
+  }
+
+  if (!existsSync(join(recoveryDir, 'rec-stale1'))) {
+    pass('reconcile discards the superseded recovery record instead of retrying it every run');
+  } else {
+    fail('superseded recovery record was left in place — it would retry the rollback on every subsequent run');
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record reconcile test crashed: ${e.message}`);
+}
+
+// ── 13c. RECOVERY-RECORD RECONCILE MUST NOT SHIFT FIELDS ON EMPTY COLUMNS ──
+
+console.log('\n13c. Recovery-record reconcile field alignment (empty interior columns)');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon2-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  // Same claude stub as test 13/13b: check_prerequisites() aborts before
+  // reconcile runs when claude is absent (CI has no claude). Offer 42 is
+  // terminal, so no worker invokes it.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+  // Only a terminal offer is in the input, so main() processes nothing and the
+  // merged row below is written solely by reconcile_recovery_records().
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // Offer 99 is NON-terminal (failed), so its recovery record takes the merge
+  // path (not the superseded path). The record has an empty completed_at
+  // (column 5) and an empty score (column 7) — exactly the interior columns a
+  // tab-collapsing `IFS=$'\t' read` would drop, shifting every later field left.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+    '99\thttps://example.com/99\tfailed\t2026-08-06T00:00:00Z\t\t800\t\tolderr\t1',
+  ].join('\n') + '\n');
+  writeFileSync(join(recoveryDir, 'rec-shift1'),
+    '99\thttps://example.com/99\tfailed\t2026-08-07T09:00:00Z\t\t901\t\trate limited\t2\n');
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('99\t')) || '').split('\t');
+  const [, , status99, , completed99, report99, score99, error99, retries99] = row;
+
+  if (status99 === 'failed' && completed99 === '' && report99 === '901' && score99 === '' && error99 === 'rate limited' && retries99 === '2') {
+    pass('reconcile merges a record with empty interior columns without shifting fields');
+  } else {
+    fail(`reconcile shifted fields on empty columns: status=${status99} completed_at=${completed99} report=${report99} score=${score99} error=${error99} retries=${retries99}`);
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record field-alignment test crashed: ${e.message}`);
+}
+
 // ── 14. BATCH SPEND TIER MODEL ROUTING ───────────────────────────
 
 console.log('\n14. Batch spend_tier model routing');
@@ -11404,6 +12008,175 @@ try {
   fail(`scan company+role dedup tests crashed: ${e.message}`);
 }
 
+
+// ── 45c. SCAN DEDUP/MATCH KEYS ARE UNICODE-AWARE ─────────────────────
+// Follow-up to #2393/#2397/#2445: those routed the tracker-side keys through
+// normalizeTextKey, but scan.mjs still carried two private [a-z0-9] strips.
+// On a non-Latin pipeline that strip erases the whole string, so:
+//   - normalizeRoleForDedup keyed EVERY Japanese title to '', making two
+//     genuinely different roles at one company share a dedupe key — the scan
+//     then discarded the second as already-seen.
+//   - companyMatch cleaned both sides to '' and its `c1 === c2` equality check
+//     reported two unrelated companies as a match.
+// Both directions are asserted: distinct inputs must stay distinct, and the
+// controls confirm the checks still fire on genuinely identical input.
+
+console.log('\n45c. Scan dedup/match keys are Unicode-aware (non-Latin pipelines)');
+try {
+  const {
+    normalizeRoleForDedup,
+    companyRoleDedupKey,
+    companyMatch,
+  } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeTextKey } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+
+  // -- Discrimination: distinct non-Latin roles must not share a dedupe key --
+  const beKey = companyRoleDedupKey('株式会社アカネ', 'バックエンドエンジニア');
+  const feKey = companyRoleDedupKey('株式会社アカネ', 'フロントエンドエンジニア');
+  if (beKey !== feKey) {
+    pass('companyRoleDedupKey keeps two distinct Japanese roles at one company apart');
+  } else {
+    fail(`distinct Japanese roles collapsed to one dedupe key: ${JSON.stringify(beKey)}`);
+  }
+
+  // The role half must actually carry the title, not an empty remainder.
+  if (normalizeRoleForDedup('バックエンドエンジニア') !== '') {
+    pass('normalizeRoleForDedup preserves a non-Latin title instead of keying it to ""');
+  } else {
+    fail('normalizeRoleForDedup erased a non-Latin title');
+  }
+
+  // -- Discrimination: unrelated non-Latin companies must not match --
+  if (companyMatch('株式会社アカネ', '合同会社ゾロ') === false) {
+    pass('companyMatch keeps two unrelated Japanese companies apart');
+  } else {
+    fail('companyMatch reported two unrelated Japanese companies as a match');
+  }
+
+  // An empty/absent company on both sides is "no signal", never "identical".
+  if (companyMatch('', '') === false && companyMatch(null, undefined) === false) {
+    pass('companyMatch treats empty/absent company names as no-match, not as equal');
+  } else {
+    fail('companyMatch matched two empty/absent company names');
+  }
+
+  // -- Controls: the checks must still fire on equivalent input --
+  // Comparing a call against itself would be a tautology (a pure function on
+  // the same arguments), so these vary the surface form instead — half-width
+  // katakana and full-width spacing — and additionally require the shared key
+  // to carry the role. Equality alone would still hold if both sides keyed to
+  // '', which is precisely the bug being fixed.
+  const ctrlKey = companyRoleDedupKey('株式会社アカネ', 'バックエンドエンジニア');
+  const ctrlKeyVariant = companyRoleDedupKey('株式会社アカネ', '　ﾊﾞｯｸｴﾝﾄﾞｴﾝｼﾞﾆｱ　');
+  if (ctrlKey === ctrlKeyVariant && ctrlKey !== '株式会社アカネ::') {
+    pass('control: equivalent Japanese company+role (half-width kana, full-width spacing) still dedupes to one non-empty key');
+  } else {
+    fail(`control failed: ${JSON.stringify(ctrlKey)} vs ${JSON.stringify(ctrlKeyVariant)}`);
+  }
+  if (companyMatch('株式会社アカネ', '　株式会社ｱｶﾈ　') === true) {
+    pass('control: equivalent Japanese company names (half-width kana, full-width spacing) still match');
+  } else {
+    fail('control failed: equivalent Japanese company names no longer match');
+  }
+
+  // NFKC folds half-width katakana onto the canonical form, so the same title
+  // typed either way is one role rather than two.
+  // Assert non-empty as well as equal: with the old [a-z0-9] strip both sides
+  // keyed to '' and an equality-only assertion would have passed vacuously.
+  const halfWidthKey = normalizeRoleForDedup('ｴﾝｼﾞﾆｱ');
+  if (halfWidthKey !== '' && halfWidthKey === normalizeRoleForDedup('エンジニア')) {
+    pass('normalizeRoleForDedup folds half-width katakana onto full-width (NFKC)');
+  } else {
+    fail(`half-width/full-width katakana keys wrong: ${JSON.stringify(halfWidthKey)}`);
+  }
+
+  // The NFKC pass in normalizeRoleForDedup runs BEFORE the trailing-suffix loop,
+  // which is the only thing it is there for: normalizeTextKey already NFKCs at
+  // the end, so any assertion on the final key alone cannot detect whether the
+  // early pass exists. Full-width brackets are the observable difference — the
+  // suffix matcher only recognizes ASCII "(" / "[", so without the early fold
+  // "Engineer （Remote）" keeps its tag and keys as 'engineer remote'.
+  if (normalizeRoleForDedup('Engineer （Remote）') === 'engineer'
+      && normalizeRoleForDedup('Engineer ［Berlin］') === 'engineer') {
+    pass('normalizeRoleForDedup strips full-width bracketed location/remote tags (NFKC before suffix loop)');
+  } else {
+    fail(`full-width bracketed suffix not stripped: ${JSON.stringify(normalizeRoleForDedup('Engineer （Remote）'))}`);
+  }
+
+  // -- Regression: Latin behavior and the space-separated key shape are unchanged --
+  if (normalizeRoleForDedup('Senior Engineer (Senior) (Berlin, Germany)') === 'senior engineer senior') {
+    pass('regression: Latin role keys keep their space-separated shape');
+  } else {
+    fail(`Latin role key shape changed: ${JSON.stringify(normalizeRoleForDedup('Senior Engineer (Senior) (Berlin, Germany)'))}`);
+  }
+  if (companyMatch('Acme Inc.', 'acme inc') === true && companyMatch('Acme', 'Zoro Inc') === false) {
+    pass('regression: Latin companyMatch still matches equivalents and rejects unrelated names');
+  } else {
+    fail('Latin companyMatch behavior changed');
+  }
+
+  // -- Accented Latin: the containment fallback must survive keeping the accent --
+  // Before this change the [a-z0-9] strip turned é into a space, which left the
+  // \b anchors sitting on ASCII letters, so 'Nestlé Deutschland' vs 'Nestlé'
+  // matched. Preserving the accent breaks \b (it is ASCII-only in JS even under
+  // the u flag), so the anchors are Unicode lookarounds. A pure-ASCII assertion
+  // cannot detect this — the accent has to be at a word edge.
+  const accented = [
+    ['Nestlé Deutschland', 'Nestlé'],
+    ['Ørsted Energy', 'Ørsted'],
+    ['Zoë Ltd', 'Zoë'],
+    ['Telefónica Tech', 'Telefónica'],   // accent mid-word: matched on main too
+  ];
+  const accentedMiss = accented.filter(([a, b]) => companyMatch(a, b) !== true);
+  if (accentedMiss.length === 0) {
+    pass('companyMatch still matches accented Latin names at a word edge (Nestlé, Ørsted, Zoë)');
+  } else {
+    fail(`accented Latin containment lost: ${JSON.stringify(accentedMiss)}`);
+  }
+
+  // The boundary must still bound: a prefix that is not a whole word stays out.
+  if (companyMatch('Acme', 'Acmetric Ltd') === false && companyMatch('Nestlé', 'Danone') === false) {
+    pass('companyMatch keeps the containment fallback bounded (no bare-substring matching)');
+  } else {
+    fail('containment fallback over-matched: a non-word-boundary prefix was accepted');
+  }
+
+  // The anchor class must be the same one normalizeTextKey keeps, so a mark or
+  // a digit at the edge is a letter to the boundary too. Both witnesses put the
+  // character *immediately* after the candidate: a case where the next
+  // character is a space passes whatever the anchor class is, and would assert
+  // nothing. Each one flips if its class is dropped from the lookarounds.
+  const matraWitness = companyMatch('टाटा कंपनीी', 'टाटा कंपनी');       // \p{M}
+  const digitWitness = companyMatch('Acme2 Ltd', 'Acme');               // \p{N}
+  if (matraWitness === false && digitWitness === false) {
+    pass('companyMatch anchors treat combining marks and digits as letters (no split mid-word)');
+  } else {
+    fail(`anchor class too narrow: matra=${matraWitness} digit=${digitWitness} (both should be false)`);
+  }
+  // Positive direction: a genuine non-Latin containment with a space boundary.
+  if (companyMatch('कंपनी सॉफ्टवेयर', 'कंपनी') === true) {
+    pass('companyMatch matches a Devanagari name at a space boundary');
+  } else {
+    fail('Devanagari containment lost at a space boundary');
+  }
+
+  // normalizeTextKey's separator arg must not disturb its existing callers.
+  if (normalizeTextKey('株式会社アカネ') === '株式会社アカネ'
+      && normalizeTextKey('Acme, Inc.') === 'acmeinc'
+      && normalizeTextKey('Acme, Inc.', ' ') === 'acme inc') {
+    pass('normalizeTextKey default stays solid-key; separator arg only affects opt-in callers');
+  } else {
+    fail('normalizeTextKey separator arg changed default behavior');
+  }
+  if (normalizeTextKey(null) === '' && normalizeTextKey(undefined) === '') {
+    pass('normalizeTextKey keys null/undefined to "" rather than "null"/"undefined"');
+  } else {
+    fail(`normalizeTextKey mis-keys nullish input: ${JSON.stringify(normalizeTextKey(null))}`);
+  }
+} catch (e) {
+  fail(`scan Unicode dedup/match key tests crashed: ${e.message}`);
+}
+
 // ── Plugin engine (contract + sandbox + firewall) ────────────────
 console.log('\n49. Plugin engine (contract + sandbox + firewall)');
 
@@ -12219,36 +12992,52 @@ try {
     }
   }
 
-  // 55.3c the web's hand-copied cadence baseline must match the core's defaults.
-  // web/src/lib/followups.ts keeps CADENCE_DEFAULTS "kept IDENTICAL to
-  // DEFAULT_CADENCE" by comment alone — the same wish that let states.ts's
-  // FALLBACK drift (#2282). Web keys carry a `_days` suffix (except
-  // applied_max_followups); compare values under that mapping. Until #2369
-  // replaces the copy with the --json cadenceConfig, CI is the invariant.
+  // 55.3c the cadence copy is GONE — the web now derives its baseline from the
+  // core (#2369). Two halves: the core must still EMIT the pure defaults that
+  // the web's /api/followups/cadence reads, and the web must not quietly
+  // reintroduce a local table (a fallback copy drifts exactly like the original
+  // did — states.ts FALLBACK, #2282).
   {
-    const coreCad = readFileSync(join(ROOT, 'followup-cadence.mjs'), 'utf-8')
-      .match(/export const DEFAULT_CADENCE = \{([\s\S]*?)\};/)?.[1] ?? '';
-    const webCadPath = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
-    if (coreCad && existsSync(webCadPath)) {
-      const webCad = readFileSync(webCadPath, 'utf-8')
-        .match(/CADENCE_DEFAULTS[^=]*=\s*\{([\s\S]*?)\};/)?.[1] ?? '';
-      const pairs = (block) => Object.fromEntries(
-        [...block.matchAll(/([a-z_]+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
-      const core = pairs(coreCad);
-      const web = pairs(webCad);
-      const cadDrift = [];
-      for (const [k, v] of Object.entries(core)) {
-        const webKey = k === 'applied_max_followups' ? k : `${k}_days`;
-        if (!(webKey in web)) cadDrift.push(`${webKey} missing in web`);
-        else if (web[webKey] !== v) cadDrift.push(`${webKey}=${web[webKey]} vs core ${k}=${v}`);
-      }
-      if (Object.keys(web).length !== Object.keys(core).length) {
-        cadDrift.push(`key count ${Object.keys(web).length} vs core ${Object.keys(core).length}`);
-      }
-      if (cadDrift.length === 0) {
-        pass('web CADENCE_DEFAULTS matches core DEFAULT_CADENCE under the _days mapping (#2369)');
+    // Assert the EMITTED payload, not just the source text: a regex over the
+    // source proves the literal is present, not that the contract the web
+    // parses is intact. analyzeFromContent() is the same code path --json
+    // prints, driven from strings so it needs no tracker on disk.
+    const { analyzeFromContent, DEFAULT_CADENCE } = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+    const emitted = analyzeFromContent(
+      '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-06-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | [1](../reports/001-acme.md) | t |\n',
+      '',
+    );
+    const defaults = emitted?.cadenceDefaults;
+    const cadKeys = Object.keys(DEFAULT_CADENCE);
+    const schemaOk = defaults && typeof defaults === 'object'
+      && cadKeys.length > 0
+      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && Object.keys(defaults).length === cadKeys.length;
+    if (schemaOk) {
+      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+    } else {
+      fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
+    }
+    // Every key the web maps must exist under the core's un-suffixed spelling.
+    const webKeys = ['applied_first_days', 'applied_subsequent_days', 'applied_max_followups', 'responded_initial_days', 'responded_subsequent_days', 'interview_thankyou_days'];
+    const mapped = webKeys.every((k) => {
+      const coreKey = k === 'applied_max_followups' ? k : k.replace(/_days$/, '');
+      return Number.isInteger(defaults?.[coreKey]);
+    });
+    if (mapped) {
+      pass('every web PROFILE_CADENCE_KEY maps onto a core cadenceDefaults key (#2369)');
+    } else {
+      fail('the web _days key mapping no longer lines up with the core cadenceDefaults keys (#2369)');
+    }
+    const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
+    if (existsSync(webFollowups)) {
+      const webSrc = readFileSync(webFollowups, 'utf-8');
+      if (!/export const CADENCE_DEFAULTS/.test(webSrc)) {
+        pass('web/src/lib/followups.ts keeps no hand-copied cadence table (#2369)');
       } else {
-        fail(`web cadence baseline drifted from followup-cadence.mjs (#2369): ${cadDrift.join(' | ')}`);
+        fail('CADENCE_DEFAULTS was reintroduced in web/src/lib/followups.ts — derive from the core instead (#2369)');
       }
     }
   }
@@ -12301,6 +13090,326 @@ try {
   } else {
     warn('web/src/lib/career-ops.ts not found — web layer moved? update contract freeze section');
   }
+
+  // 55.6 pdf mode must never hand the agent write access (#2185).
+  // The web's "pdf" agent tailors content and nothing else: it emits the CV
+  // through a <<cv-html>> envelope and the BACKEND writes every file. A write
+  // grant here would be unscoped, so a prompt injection in a posting or report
+  // (both enter that agent's context) could redirect it at cv.md.
+  //
+  // Asserted on VALUES — the built argv and the built prompt. FIVE source-text
+  // versions of this guard were defeated by rewriting route.ts around them (see
+  // web/src/lib/claude-invocation.mjs's header). The one structural rule left is
+  // that route.ts may not spell a tool flag itself, which is what stops an inline
+  // argv from hiding beside a legitimate claudeCliArgs() call.
+  //
+  // In the REQUIRED suite on purpose: web-ci.yml is informative-only, so asserting
+  // this only there would gate nothing. Importing is safe — these are
+  // dependency-free ESM modules and the root suite runs on Node >= 18.
+  const webLib = join(ROOT, 'web', 'src', 'lib');
+  const runRoutePath = join(ROOT, 'web', 'src', 'app', 'api', 'run', 'route.ts');
+  if (!existsSync(webLib)) {
+    // Expected for a data-only install: web/ is in no SYSTEM_PATHS entry.
+    warn('web/ not present in this checkout — skipping the pdf write-scope freeze (#2185)');
+  } else {
+    // web/ IS here, so a missing file means a move, not an absence — fail rather
+    // than skip, because a skip is how this freeze would silently stop guarding.
+    const required = {
+      'claude-invocation.mjs': join(webLib, 'claude-invocation.mjs'),
+      'cv-envelope.mjs': join(webLib, 'cv-envelope.mjs'),
+      'run-prompts.mjs': join(webLib, 'run-prompts.mjs'),
+      'api/run/route.ts': runRoutePath,
+    };
+    const missing = Object.entries(required).filter(([, f]) => !existsSync(f)).map(([name]) => name);
+    if (missing.length > 0) {
+      fail(`web/ exists but ${missing.join(', ')} is missing — the #2185 write-scope freeze cannot verify (was it moved?)`);
+    } else {
+      let invocation;
+      let prompts;
+      try {
+        invocation = await import(pathToFileURL(required['claude-invocation.mjs']).href);
+        prompts = await import(pathToFileURL(required['run-prompts.mjs']).href);
+        // Imported for its side effect of resolving: run-prompts pulls cv-envelope
+        // for CV_ENVELOPE_INSTRUCTION, so a break there would surface here anyway,
+        // but naming it keeps the failure message specific.
+        await import(pathToFileURL(required['cv-envelope.mjs']).href);
+      } catch (err) {
+        fail(`web pdf write-scope modules could not be imported (${err.message}) — the #2185 freeze cannot verify`);
+      }
+      // Gate the web unit suites from the REQUIRED check too. web-ci.yml is
+      // informative-only, so without this a contributor strengthening those files
+      // adds nothing to CI. This deliberately overlaps the value assertions below:
+      // those give a named, greppable #2185 signal and still hold if the web suite
+      // is ever trimmed, which is the failure this section exists to catch.
+      // Discovered, not hand-listed: a list silently stops gating whatever is added
+      // next, and this section previously covered 4 of the 6 files present.
+      let webUnits = [];
+      try {
+        webUnits = readdirSync(join(ROOT, 'web', 'tests', 'lib'))
+          .filter((f) => f.endsWith('.test.mjs'))
+          .sort()
+          .map((f) => `web/tests/lib/${f}`);
+      } catch (err) {
+        // Fail rather than throw to the outer catch, which would skip every value
+        // assertion below while reporting only "freeze section crashed".
+        fail(`web/tests/lib is unreadable (${err.message}) — the #2185 unit suites cannot be gated`);
+      }
+      // Three distinct states, so the message never misdescribes the failure: the
+      // unreadable case already called fail() above, an empty directory is its own
+      // fault, and only a non-empty list is actually run.
+      if (webUnits.length === 0) {
+        if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
+          fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
+        }
+      } else if (run(NODE, ['--test', ...webUnits], { timeout: 180000 }) !== null) {
+        pass('web pdf write-scope unit suites pass (#2185)');
+      } else {
+        // The signal distinguishes a timeout/kill from an assertion failure —
+        // run()'s default 30s is short for six suites in one child process.
+        const killed = lastRunFailure()?.signal;
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+      }
+
+      if (invocation && prompts) {
+        const { claudeCliArgs, argValue, toolNames, grantsWriteCapability, WRITE_CAPABLE_TOOLS } = invocation;
+        const pdfArgs = claudeCliArgs({ kind: 'pdf', prompt: 'freeze-probe' });
+        const allowed = argValue(pdfArgs, '--allowedTools');
+        const disallowed = argValue(pdfArgs, '--disallowedTools');
+
+        if (!grantsWriteCapability({ allowed, disallowed })) {
+          pass('web pdf command line grants no write-capable tool (#2185)');
+        } else {
+          const granted = WRITE_CAPABLE_TOOLS.filter((t) => toolNames(allowed).includes(t));
+          fail(`web pdf command line grants write access via ${granted.join(', ')} — an unscoped write grant is the #2185 hole`);
+        }
+
+        // Denied by name, not merely omitted: --permission-mode acceptEdits exists
+        // to auto-approve edit tools, so "unmentioned" is the one status a
+        // file-writing tool must never have.
+        const undenied = WRITE_CAPABLE_TOOLS.filter((t) => !toolNames(disallowed).includes(t));
+        if (undenied.length === 0) {
+          pass('web pdf command line explicitly denies every write-capable tool (#2185)');
+        } else {
+          fail(`web pdf command line no longer denies ${undenied.join(', ')} — #2172/#2185 guardrail weakened`);
+        }
+
+        // EVERY kind, not just pdf: a write tool that is neither allowed nor denied
+        // can still be auto-approved by --permission-mode acceptEdits, and a
+        // pdf-only probe let exactly that ship for the persisting kinds.
+        const unmentioned = [];
+        for (const kind of invocation.KNOWN_KINDS) {
+          const scope = invocation.toolScopeFor(kind);
+          const named = [...toolNames(scope.allowed), ...toolNames(scope.disallowed)];
+          for (const tool of WRITE_CAPABLE_TOOLS) {
+            if (!named.includes(tool)) unmentioned.push(`${kind}:${tool}`);
+          }
+        }
+        if (unmentioned.length === 0) {
+          pass('web tool scopes leave no write-capable tool unmentioned for any kind (#2185)');
+        } else {
+          fail(`web tool scopes leave ${unmentioned.join(', ')} neither allowed nor denied — acceptEdits may auto-approve them (#2185)`);
+        }
+
+        // The PROMPT is asserted by run-prompts.test.mjs, which this section already
+        // runs above — restating its regexes here would be two copies of one intent.
+        // What is checked here is only what that suite cannot see: that the shipped
+        // prompt is the one the route actually sends (below).
+        // The one structural rule: the route delegates its argv. If it spells any
+        // tool flag itself, an inline pdf arm could grant writes while every value
+        // check above still describes claudeCliArgs's untouched output.
+        // Strip comments with a scanner that respects string and template literals.
+        // A `.replace(/\/\/.*$/, '')` per line also fires inside strings: a URL on the
+        // same line as a tool flag deletes the flag, so a route spelling its own
+        // --allowedTools would pass unnoticed. Only `//` OUTSIDE a literal is a comment.
+        const stripJsComments = (src) => {
+          let out = '';
+          let quote = null;   // "'" | '"' | '`' when inside a literal
+          let block = false;  // inside a /* */ comment
+          let line = false;   // inside a // comment
+          for (let i = 0; i < src.length; i++) {
+            const c = src[i];
+            const next = src[i + 1];
+            if (line) { if (c === '\n') { line = false; out += c; } continue; }
+            if (block) { if (c === '*' && next === '/') { block = false; i++; } continue; }
+            if (quote) {
+              // A backslash escapes the next character, so an escaped quote does not
+              // close the literal and an escaped backslash does not escape what follows.
+              if (c === '\\') { out += c + (next ?? ''); i++; continue; }
+              if (c === quote) quote = null;
+              out += c;
+              continue;
+            }
+            if (c === '/' && next === '/') { line = true; continue; }
+            if (c === '/' && next === '*') { block = true; i++; continue; }
+            // A `/` here can also open a REGEX literal, and a quote inside one (say
+            // /["']/) would otherwise flip the scanner into string state and swallow
+            // the rest of the file. Distinguish regex from division the usual way:
+            // regex can only follow an operator or an opener, never a value.
+            if (c === '/') {
+              const prev = out.replace(/\s+$/, '').slice(-1);
+              if (prev === '' || '(,=:[!&|?{};+-*%~^<>'.includes(prev)) {
+                out += c;
+                for (i++; i < src.length; i++) {
+                  const r = src[i];
+                  out += r;
+                  if (r === '\\') { out += src[i + 1] ?? ''; i++; continue; }
+                  if (r === '[') { // a class can contain an unescaped `/`
+                    for (i++; i < src.length && src[i] !== ']'; i++) {
+                      out += src[i];
+                      if (src[i] === '\\') { out += src[i + 1] ?? ''; i++; }
+                    }
+                    out += src[i] ?? '';
+                    continue;
+                  }
+                  if (r === '/' || r === '\n') break;
+                }
+                continue;
+              }
+            }
+            if (c === '"' || c === "'" || c === '`') { quote = c; out += c; continue; }
+            out += c;
+          }
+          return out;
+        };
+        const routeCode = stripJsComments(readFileSync(runRoutePath, 'utf-8'))
+          .split('\n')
+          .filter((l) => !/^\s*import\b/.test(l))
+          .join('\n');
+        const spelledFlags = ['--allowedTools', '--disallowedTools', '--permission-mode']
+          .filter((flag) => routeCode.includes(flag));
+        const argvCallSites = (routeCode.match(/claudeCliArgs\s*\(/g) ?? []).length;
+        // `kind` must reach claudeCliArgs as a SHORTHAND property. Property order
+        // and line wrapping are free, but `{ kind: <anything> }` is refused:
+        // `claudeCliArgs({ kind: kind === "pdf" ? "evaluate" : kind, prompt })`
+        // once passed every check while pdf received the persisting scope.
+        const passesKindVerbatim = /claudeCliArgs\s*\(\s*\{(?:[^{}]*,)?\s*kind\s*[,}]/.test(routeCode);
+        if (spelledFlags.length === 0 && argvCallSites === 1 && passesKindVerbatim) {
+          pass('web run route delegates its whole argv, spelling no tool flag and remapping no kind (#2185)');
+        } else {
+          const why = spelledFlags.length > 0
+            ? `it spells ${spelledFlags.join(', ')} itself`
+            : argvCallSites !== 1
+              ? `it builds argv at ${argvCallSites} site(s), expected exactly 1`
+              : 'it does not pass `kind` through verbatim (a remapped kind hands pdf another kind\'s scope)';
+          fail(`web run route no longer delegates its argv — ${why}, so the value checks above may not describe what pdf actually ships (#2185)`);
+        }
+      }
+    }
+  }
+
+  // 55.7 The company/role matching key: core vs the web's declared mirror (#2666).
+  //
+  // The browser cannot reach the user's checkout, so web/src/lib/core/
+  // normalize-text-key.mjs is a COPY by necessity, declared as such. A conscious
+  // copy without an assertion is exactly the failure this repo has now hit five
+  // times (states.ts, CADENCE_DEFAULTS, doctor prereqs, the #2590 cache, and the
+  // three divergent company norms of #2666 itself).
+  //
+  // Compare CORE vs MIRROR, not core vs the derived path: the derived path
+  // imports the core, so it CANNOT diverge — asserting on it would guard the one
+  // thing that cannot break while ignoring the one that can. The mirror is also
+  // the path nobody exercises in normal operation (it only runs on a partial
+  // checkout), which is precisely why it needs a test rather than usage.
+  //
+  // Expected values are DERIVED from the core, never hand-written: a hand-written
+  // expectation would freeze today's answer and stop tracking the source.
+  const corpusPath = join(ROOT, 'tests', 'fixtures', 'company-key-corpus.json');
+  const mirrorPath = join(ROOT, 'web', 'src', 'lib', 'core', 'normalize-text-key.mjs');
+  if (!existsSync(join(ROOT, 'web', 'src'))) {
+    warn('web/ not present in this checkout — skipping the company-key parity freeze (#2666)');
+  } else if (!existsSync(corpusPath) || !existsSync(mirrorPath)) {
+    // web/ IS here, so a missing file is a move, not an absence. Failing rather
+    // than skipping: a skip is how this freeze would quietly stop guarding.
+    fail(`web/ exists but ${!existsSync(corpusPath) ? 'tests/fixtures/company-key-corpus.json' : 'web/src/lib/core/normalize-text-key.mjs'} is missing — the #2666 key parity cannot verify (moved?)`);
+  } else {
+    try {
+      const corpus = JSON.parse(readFileSync(corpusPath, 'utf-8'));
+      const core = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+      const mirror = await import(pathToFileURL(mirrorPath).href);
+      const coreFn = core.normalizeTextKey, mirrorFn = mirror.normalizeTextKey;
+      if (typeof coreFn !== 'function' || typeof mirrorFn !== 'function') {
+        fail('normalizeTextKey is not exported by the core and/or the web mirror — the #2666 parity cannot verify');
+      } else {
+        // undefined cannot be written in JSON but is a real input (a missing
+        // cell), and it is half of the null/undefined bug — so it is appended here.
+        const inputs = [...corpus.cases.map((c) => c.input), undefined];
+        const drift = [];
+        for (const sep of ['', ' ']) {
+          for (const input of inputs) {
+            const a = coreFn(input, sep), b = mirrorFn(input, sep);
+            if (a !== b) drift.push(`${JSON.stringify(input)} sep=${JSON.stringify(sep)}: core=${JSON.stringify(a)} mirror=${JSON.stringify(b)}`);
+          }
+        }
+        if (drift.length === 0) {
+          pass(`web company-key mirror matches the core on all ${inputs.length} corpus cases x2 separators (#2666)`);
+        } else {
+          fail(`web company-key mirror DRIFTED from the core — ${drift.length} case(s): ${drift.slice(0, 3).join(' | ')}`);
+        }
+        // Guard of the guard, in TWO directions, because each covers a hole the
+        // other cannot see:
+        //  (a) the RULES could regress in the core itself, and
+        //  (b) the CORPUS could be thinned until the comparison above passes
+        //      vacuously — "matches on all 0 cases" is a green that proves nothing.
+        // (b) was found by mutation: deleting Škoda and 日本電産 from the corpus
+        // left every check green, because (a) queries the core directly.
+        const inputStrings = corpus.cases.map((c) => String(c.input));
+        const mustCarry = ['Škoda', 'Koda', '日本電産', 'Nestlé'];
+        const missing = mustCarry.filter((m) => !inputStrings.includes(m));
+        const rulesHold = coreFn('Škoda', ' ') !== coreFn('Koda', ' ') && coreFn('日本電産', ' ') !== '';
+        if (missing.length === 0 && corpus.cases.length >= 10 && rulesHold) {
+          pass(`company-key corpus still carries its teeth (${corpus.cases.length} cases incl. the collision pair, rules hold) (#2666)`);
+        } else if (!rulesHold) {
+          fail('the company-key rules regressed: Škoda now collides with Koda and/or CJK keys to empty — this is the #2666 data-loss bug returning');
+        } else {
+          fail(`the company-key corpus lost its teeth: ${missing.length ? `missing ${missing.join(', ')}` : `only ${corpus.cases.length} cases left`} — the parity check above would pass without exercising the failure it exists for`);
+        }
+      }
+    } catch (err) {
+      fail(`company-key parity check could not run (${err.message}) — treat as unverified, not as passing (#2666)`);
+    }
+  }
+
+  // 55.8 Where the key comes from, per surface (#2666, structural half).
+  //
+  // Shapes are NOT interchangeable: the server can reach the user's live core
+  // (dynamic import via careerOpsRoot) and must derive from it; a "use client"
+  // component physically cannot, so it imports the shared mirror. What none of
+  // them may do is define a normalizer of its own — that is how three divergent
+  // company keys shipped in the first place.
+  //
+  // The ASCII-class check is scoped to THESE THREE FILES on purpose. A repo-wide
+  // grep for [^a-z0-9] measured 71% false positives (domain slugs, filename
+  // slugs, a regex boundary class — all legitimate), and a check that shouts at
+  // correct code gets silenced. Here the same expression would be the bug.
+  const keySurfaces = [
+    { file: join(ROOT, 'web', 'src', 'app', 'api', 'whats-new', 'route.ts'), needs: 'getNormalizeTextKey', how: 'derive from the live core' },
+    { file: join(ROOT, 'web', 'src', 'components', 'explore', 'explorer-view.tsx'), needs: 'normalize-text-key', how: 'import the shared mirror (client cannot reach the core)' },
+    { file: join(ROOT, 'web', 'src', 'app', 'actions', 'registry.ts'), needs: 'normalize-text-key', how: 'import the shared mirror' },
+  ];
+  if (existsSync(join(ROOT, 'web', 'src'))) {
+    for (const { file, needs, how } of keySurfaces) {
+      const name = file.slice(ROOT.length + 1);
+      if (!existsSync(file)) { fail(`${name} is missing — the #2666 key-source freeze cannot verify (moved?)`); continue; }
+      const src = readFileSync(file, 'utf-8');
+      if (!src.includes(needs)) {
+        fail(`${name} no longer references ${needs} — it must ${how}, never key company names on its own (#2666)`);
+      } else if (src.split('\n')
+        // Comment lines are stripped first: the honest fix for this bug ships a
+        // comment WARNING against the pattern ("never [^a-z0-9]"), and flagging
+        // that would punish the file for documenting its own trap. Measured:
+        // this exact false positive fired on explorer-view.tsx the first time
+        // this check ran. Line-level is proportionate here — the scope is three
+        // known files, and a full JS parse to catch a block comment would be
+        // more machinery than the risk deserves.
+        .filter((l) => { const t = l.trimStart(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
+        .some((l) => /\[\^a-z0-9\]/i.test(l))) {
+        fail(`${name} contains an ASCII-only character class — that is the exact key that made "Škoda" collide with "Koda" and emptied CJK names (#2666)`);
+      } else {
+        pass(`${name} takes its matching key from the right place (#2666)`);
+      }
+    }
+  }
+
 } catch (e) {
   fail(`core↔web contract freeze section crashed: ${e.message}`);
 }
@@ -13452,7 +14561,7 @@ console.log('\n69. Jurisdiction-prohibited content signal (#2018)');
   // sentence, the new sections must not contain employer-lawbreaking language.
   const signal9 = ofertaMode.slice(
     ofertaMode.indexOf('**12. Jurisdiction-Prohibited Content**'),
-    ofertaMode.indexOf('### Output format:')
+    ofertaMode.indexOf('**13. Pay-Transparency Range-Width Check**')
   );
   const step5c = applyMode.slice(
     applyMode.indexOf('## Step 5c — Jurisdiction-prohibited content check'),
@@ -13553,6 +14662,95 @@ try {
   }
 } catch (e) {
   fail(`table-freshness wiring check: ${e.message}`);
+}
+
+// ── REJECTION LATENCY (#2013) ───────────────────────────────────
+// rejection-latency.mjs's own --self-test (invoked above via the CLI-check
+// table) covers latency math, role-aware matching, and the suggestion-row
+// format. This section pins the mode-doc wiring and the suggestion-only
+// guarantees. (The signal ships a single courtesy-days threshold; a
+// jurisdiction-backed statutory tier was removed — see PR #2014 review.)
+
+console.log('\n71. Rejection-latency signal wired into followup mode (#2013)');
+
+try {
+  const followupModeDoc = readFile('modes/followup.md');
+  const rejectionLatencySrc = readFile('rejection-latency.mjs');
+
+  if (followupModeDoc.includes('rejection-latency.mjs')) {
+    pass('followup mode runs rejection-latency.mjs and surfaces flags as reminders');
+  } else {
+    fail('followup mode missing the rejection-latency.mjs check step');
+  }
+
+  if (/Never write to `data\/blacklist\.md`/.test(followupModeDoc)) {
+    pass('followup mode restates the suggestion-only blacklist guarantee (#1742)');
+  } else {
+    fail('followup mode missing the never-write blacklist guarantee for latency flags');
+  }
+
+  if (followupModeDoc.includes('[Render in {language.output}')) {
+    pass('followup latency reminders use the {language.output} localization pattern');
+  } else {
+    fail('followup latency reminders missing the {language.output} localization pattern');
+  }
+
+  if (!/STATUTORY_THRESHOLDS|resolveJurisdiction|--jurisdiction/.test(rejectionLatencySrc)) {
+    pass('rejection-latency.mjs carries no statutory tier (courtesy-only, CodeRabbit PR #2014 review)');
+  } else {
+    fail('rejection-latency.mjs still references the removed statutory tier / jurisdiction resolution');
+  }
+
+  if (rejectionLatencySrc.includes('not legal advice')) {
+    pass('rejection-latency.mjs carries the not-legal-advice disclaimer');
+  } else {
+    fail('rejection-latency.mjs missing the not-legal-advice disclaimer');
+  }
+
+  // Read-only-ness, enforced structurally at the import boundary rather than
+  // by pattern-matching call sites: every `fs` import must be a named import
+  // from a whitelist of read-only APIs (no default/namespace import that
+  // would smuggle in fs.writeFileSync/fs.promises), no require(), and no
+  // dynamic import of fs — so no mutation API is reachable at all.
+  const READ_ONLY_FS = new Set(['readFileSync', 'existsSync']);
+  const fsImports = [...rejectionLatencySrc.matchAll(/import\s*(.*?)\s*from\s*['"]((?:node:)?fs(?:\/promises)?)['"]/g)];
+  const fsImportViolations = [];
+  for (const [, clause, module] of fsImports) {
+    if (module.endsWith('/promises')) {
+      // fs/promises is rejected wholesale: even its "read-only" surface sits
+      // next to open(), which returns writable FileHandles that bypass any
+      // mutation-name blacklist. The script has no async fs needs.
+      fsImportViolations.push(module);
+      continue;
+    }
+    const named = clause.match(/^\{([^}]*)\}$/);
+    if (!named) {
+      fsImportViolations.push(clause); // default or namespace import — full fs surface
+      continue;
+    }
+    for (const name of named[1].split(',').map(s => s.trim()).filter(Boolean)) {
+      if (!READ_ONLY_FS.has(name.replace(/\s+as\s+.*$/, ''))) fsImportViolations.push(name);
+    }
+  }
+  if (fsImports.length > 0 && fsImportViolations.length === 0) {
+    pass('rejection-latency.mjs fs imports are restricted to read-only APIs (readFileSync/existsSync)');
+  } else {
+    fail(`rejection-latency.mjs fs import surface is not read-only: ${fsImportViolations.join(', ') || 'no fs import found'}`);
+  }
+
+  if (!/\brequire\s*\(/.test(rejectionLatencySrc) && !/import\s*\(\s*['"](?:node:)?fs/.test(rejectionLatencySrc)) {
+    pass('rejection-latency.mjs has no require() or dynamic fs import escape hatch');
+  } else {
+    fail('rejection-latency.mjs uses require() or a dynamic fs import — read-only guarantee not verifiable');
+  }
+
+  if (!/\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|openSync|writeSync|unlinkSync|rmSync|rmdirSync|mkdirSync|renameSync|truncateSync|copyFileSync)\b/.test(rejectionLatencySrc)) {
+    pass('rejection-latency.mjs references no filesystem mutation APIs (suggestion-only by construction)');
+  } else {
+    fail('rejection-latency.mjs contains file-write APIs; it must never write user data');
+  }
+} catch (e) {
+  fail(`rejection-latency wiring check: ${e.message}`);
 }
 
 await runDiscovered();

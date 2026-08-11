@@ -1,0 +1,21 @@
+{
+  "_why": "Shared corpus for the company/role matching key (#2666). The core's normalizeTextKey (tracker-parse.mjs) is the source of truth; web/src/lib/core/normalize-text-key.mjs is a declared copy that exists because the browser cannot reach the user's checkout. This file is the single list both sides are checked against — two lists would drift, which is the whole failure this corpus guards.",
+  "_separator": " ",
+  "_note": "Expected values are NOT hand-written: the assertion derives them from the core and compares the mirror against that. The strings below are the cases; the core decides the answers.",
+  "cases": [
+    { "input": "Nestlé", "why": "accented Latin — the plain case the ASCII-only key destroyed (nestl)" },
+    { "input": "Nestlé", "why": "same name in NFD (macOS stores filenames decomposed) — must key identically to the NFC form" },
+    { "input": "Zürich Re", "why": "umlaut plus a second word" },
+    { "input": "Škoda", "why": "the collision that started this: the old key made it 'koda', matching a different company called Koda and hiding a real opening" },
+    { "input": "Ação", "why": "Portuguese cedilla and tilde" },
+    { "input": "日本電産", "why": "CJK — the old key emptied it, so it never matched and duplicated forever" },
+    { "input": "Koda", "why": "the counterpart of the collision: must stay DISTINCT from Škoda" },
+    { "input": "ＡＣＭＥ", "why": "fullwidth Latin, routine in Japanese-sourced data — NFKC folds it to acme" },
+    { "input": "ﬁnance", "why": "fi ligature — NFKC decomposes it" },
+    { "input": "İstanbul Tekstil", "why": "Turkish dotted capital I. toLowerCase yields i + U+0307 and the combining mark survives, so this does NOT match 'Istanbul Tekstil'. That is the CURRENT INTENDED behaviour (consistent with keeping accents: Škoda != Skoda), pinned here on purpose. A targeted fix exists and is verified — stripping U+0307 after lowercasing matches İstanbul/Istanbul while leaving Škoda, Nestlé and Zürich untouched — but it is not applied: this key is a frozen contract surface the web derives from. If you are changing this case, you are changing a decision, not fixing an oversight." },
+    { "input": "Acme Corp", "why": "plain ASCII control — must be unaffected by any of the above" },
+    { "input": null, "why": "nullish must key to empty string, not the literal 'null' (which made null and undefined match each other)" },
+    { "input": "", "why": "empty stays empty" },
+    { "input": "  Acme  ,  Inc.  ", "why": "runs of separators and surrounding whitespace collapse and trim" }
+  ]
+}

@@ -266,6 +266,23 @@
 # skip_tiers: [intern, entry]  # optional: skip listings by seniority tier (note: unrecognized/plain titles fall back to 'mid')
 
 title_filter:
+  # A `positive` entry is matched case-insensitively as a substring — except a
+  # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
+  # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # Either way an entry expresses the exact spelling you write, and nothing
+  # else: real titles vary in separator and word order, and every variant your
+  # list does not literally contain is dropped in silence.
+  #
+  # Use " + " (with spaces) to require SEVERAL terms in any order:
+  #
+  #   - "director + engineering"   matches "Director of Engineering",
+  #                                "Director - Software Engineering",
+  #                                "Senior Director, Platform Engineering",
+  #                                "Director Engineering (Mobile Platform)"
+  #
+  # One entry replaces the whole {level} x {separator} x {domain word} matrix.
+  # An entry with no " + " behaves exactly as before, and a literal "+" without
+  # surrounding spaces is left alone — "C++" stays the keyword C++.
   positive:
     # [CUSTOMIZE] Add keywords matching YOUR target roles
     # -- AI/ML roles --
@@ -632,10 +649,17 @@ search_queries:
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
-#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
+#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
-#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
+#                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
+#                   same provider; just use whichever host the employer's careers link actually points at.)
+#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
+#                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
+#                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
 #   gem             jobs.gem.com/<boardId>
+#   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
+#   icims           careers-<tenant>.icims.com / *.icims.com
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -698,6 +722,10 @@ search_queries:
 #   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
 #   enabled: true
 #
+# - name: Example Workable Co
+#   careers_url: https://apply.workable.com/exampleco   # any apply.workable.com/<slug> host
+#   enabled: true
+#
 # - name: Example Workday Co
 #   careers_url: https://exampleco.wd5.myworkdayjobs.com/en-US/exampleco-careers  # any <tenant>.wd<N>.myworkdayjobs.com
 #   max_pages: 100         # optional page cap (20 jobs/page, default 100, max 1500) —
@@ -707,7 +735,8 @@ search_queries:
 #
 # - name: Example Oracle Recruiting Cloud Co
 #   # Oracle Recruiting Cloud / Fusion Candidate Experience. Auto-detects any
-#   # <tenant>.fa[.<region>][.ocs].oraclecloud.com host and derives siteNumber
+#   # <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com host (the numbered apex,
+#   # e.g. oraclecloud26.com, is what newer tenants get) and derives siteNumber
 #   # from the /sites/<siteNumber>/ path segment (default CX_1).
 #   careers_url: https://exampleco.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs
 #   max_pages: 25          # optional page cap (200 jobs/page, default 25 ≈ 5000 jobs, max 25)
@@ -723,12 +752,31 @@ search_queries:
 #   max_pages: 25
 #   enabled: true
 #
+# - name: Example Eightfold Co
+#   # Eightfold AI talent-acquisition board. Auto-detects any *.eightfold.ai
+#   # tenant host. A branded CNAME (careers.exampleco.com) is NOT matched — the
+#   # API is host-pinned, so point careers_url (or api:) at the eightfold.ai form.
+#   careers_url: https://exampleco.eightfold.ai/careers
+#   # domain: exampleco.com  # optional — the server infers it from the tenant
+#                            # host; set it only for multi-brand tenants that
+#                            # scope their board by domain.
+#   max_pages: 200         # optional page cap. The API caps a page at 10 rows
+#                          # no matter what, so 200 pages ≈ 2000 postings
+#                          # (default 200, max 1000). Raise it for a huge board.
+#   enabled: true
+#
 # - name: Example Avature Co
 #   # Avature career site. Auto-detects any *.avature.net host; for a branded
 #   # host that proxies Avature, set provider: avature + api: the SearchJobs URL.
 #   careers_url: https://exampleco.avature.net/careers/SearchJobs
 #   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
 #                          # limit — so ~300 postings by default, max 200 pages)
+#   enabled: true
+#
+# - name: Example iCIMS Co
+#   # iCIMS hosted-portal board. Auto-detects any *.icims.com host from
+#   # careers_url/api.
+#   careers_url: https://careers-exampleco.icims.com/jobs/search?ss=1
 #   enabled: true
 #
 # - name: Example SuccessFactors Co
@@ -746,6 +794,16 @@ search_queries:
 #   # division path is required; one of:
 #   # it, engineering, marketing, sales, hr, logistics, finances, other
 #   careers_url: https://solid.jobs/public-api/offers/engineering
+#   enabled: true
+#
+# - name: Example join.com Co
+#   # join.com career page. Auto-detects any join.com/companies/<slug> URL and
+#   # parses the __NEXT_DATA__ JSON embedded in the server-rendered HTML — no
+#   # separate API.
+#   careers_url: https://join.com/companies/exampleco
+#   max_pages: 50           # optional page cap (default 50, max 200) — raise it
+#                            # for a tenant with 50+ pages of postings (a warning
+#                            # is logged if the cap truncates real results)
 #   enabled: true
 #
 # -- Job boards / aggregators (no careers_url; set provider: explicitly) --
@@ -1456,6 +1514,13 @@ tracked_companies:
   - name: Forto
     careers_url: https://jobs.lever.co/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
+    enabled: true
+
+  # -- DACH IT services / digital transformation consulting --
+
+  - name: Nortal
+    careers_url: https://careers-en-nortal.icims.com/jobs/search?ss=1  # any *.icims.com host
+    notes: "Tallinn HQ, German offices. Digital transformation consulting."
     enabled: true
 
   # -- Switzerland / Austria AI --

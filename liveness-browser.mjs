@@ -6,6 +6,7 @@
  */
 
 import { classifyLiveness } from './liveness-core.mjs';
+import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;
@@ -16,8 +17,7 @@ const HYDRATION_WAIT_MS = 2_000;
 // headlessly (the scan parser scripts/parsers/pracuj-jobs.mjs relies on the same
 // trick), so the common case never needs the slower headed-browser fallback.
 export const LIVENESS_CONTEXT_OPTIONS = {
-  userAgent:
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  userAgent: BROWSER_LIKE_USER_AGENT,
   locale: 'en-US',
 };
 
