@@ -1001,7 +1001,10 @@ export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
 // (genuinely offline), with detail carrying error.code or the first
 // error-message line, mirroring curlGet()'s convention, so offline
 // payloads stay diagnosable on the git side as well.
-function gitRemoteVersion() {
+// Exported for tests; repoUrl exists solely for fixture injection (a
+// deterministic failing remote) — the production caller in check() always
+// uses the CANONICAL_REPO default.
+export function gitRemoteVersion(repoUrl = CANONICAL_REPO) {
   try {
     // Direct execFileSync rather than gitQuiet: this probe runs on every
     // session start, so it shares the check's tight latency budget (see
@@ -1011,7 +1014,7 @@ function gitRemoteVersion() {
     // cover — `-c credential.helper=` disables helpers entirely (safe: this
     // is an anonymous read of a public repo) and GCM_INTERACTIVE=never is a
     // belt-and-braces for gitconfigs that force GCM some other way.
-    const out = execFileSync('git', ['-c', 'credential.helper=', 'ls-remote', '--tags', CANONICAL_REPO], {
+    const out = execFileSync('git', ['-c', 'credential.helper=', 'ls-remote', '--tags', repoUrl], {
       cwd: ROOT,
       encoding: 'utf-8',
       timeout: CHECK_GIT_PROBE_TIMEOUT_MS,
@@ -1025,8 +1028,19 @@ function gitRemoteVersion() {
     // curl-blocked machines this fallback serves.
     return { ok: true, version: highestSemverTag(out, 'career-ops-v') };
   } catch (error) {
-    // Unreachable over git too — genuinely offline. Keep the reason.
-    return { ok: false, detail: error.code || String(error.message || error).split('\n')[0] };
+    // Unreachable over git too — genuinely offline. Keep the REASON, in
+    // priority order:
+    //   1. First stderr line — when git runs and exits non-zero (DNS, proxy,
+    //      TLS: the common real cases), execFileSync puts the exit code in
+    //      error.status and leaves error.code undefined, so the old
+    //      error.code || error.message fallback printed the tautological
+    //      "Command failed: git …" while the actual diagnosis ("fatal:
+    //      unable to access …: Could not resolve host: …") sat in stderr.
+    //   2. error.code — spawn-level failures where stderr is empty: ENOENT
+    //      (no git on PATH) and ETIMEDOUT (probe budget kill).
+    //   3. First message line — last resort so detail is never empty.
+    const stderrLine = String(error.stderr || '').trim().split('\n')[0].replace(/\r$/, '');
+    return { ok: false, detail: stderrLine || error.code || String(error.message || error).split('\n')[0] };
   }
 }
 

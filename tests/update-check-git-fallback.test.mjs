@@ -21,7 +21,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
-import { highestSemverTag, SEMVER_RE, curlGet } from '../update-system.mjs';
+import { highestSemverTag, SEMVER_RE, curlGet, gitRemoteVersion } from '../update-system.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -155,10 +155,14 @@ console.log('\n🧪 Testing update-check git fallback...');
     fail('the git fallback is no longer gated on bothNetworkFailed — it must not run on the no-remote-version path');
   }
 
-  if (/ls-remote', '--tags', CANONICAL_REPO/.test(src) && /highestSemverTag\(out, 'career-ops-v'\)/.test(src)) {
-    pass('gitRemoteVersion() queries CANONICAL_REPO over git and filters to the career-ops-v tag prefix');
+  // repoUrl is a test-injection param; its DEFAULT binds the production
+  // probe to CANONICAL_REPO — both halves are load-bearing here.
+  if (/gitRemoteVersion\(repoUrl = CANONICAL_REPO\)/.test(src)
+    && /ls-remote', '--tags', repoUrl/.test(src)
+    && /highestSemverTag\(out, 'career-ops-v'\)/.test(src)) {
+    pass('gitRemoteVersion() defaults to CANONICAL_REPO and filters to the career-ops-v tag prefix');
   } else {
-    fail('gitRemoteVersion() lost the CANONICAL_REPO query or the career-ops-v prefix filter (monorepo tag pollution)');
+    fail('gitRemoteVersion() lost the CANONICAL_REPO default or the career-ops-v prefix filter (monorepo tag pollution)');
   }
 
   if (/GIT_TERMINAL_PROMPT: '0'/.test(src)) {
@@ -173,10 +177,13 @@ console.log('\n🧪 Testing update-check git fallback...');
     fail('detail field no longer distinguishes git transport failure from a tagless remote');
   }
 
-  if (/git ls-remote also failed: \$\{gitProbe\.detail\}/.test(src) && /detail: error\.code \|\| String\(error\.message \|\| error\)\.split\('\\n'\)\[0\]/.test(src)) {
-    pass('the git failure reason (error.code or first message line) is preserved into payload.detail');
+  // Wiring only: this proves gitProbe.detail is interpolated into
+  // payload.detail — the QUALITY of that detail (real git reason, not a
+  // "Command failed: …" tautology) is asserted behaviorally below.
+  if (/git ls-remote also failed: \$\{gitProbe\.detail\}/.test(src)) {
+    pass('the git-side detail is wired into payload.detail (quality of the detail is asserted behaviorally below)');
   } else {
-    fail('git failure detail is discarded again — offline payloads lose the git-side diagnosis');
+    fail('gitProbe.detail is no longer interpolated into payload.detail — offline payloads lose the git-side diagnosis');
   }
 
   if (/console\.log\(JSON\.stringify\(payload\)\);\s*return;/.test(src)) {
@@ -267,4 +274,25 @@ console.log('\n🧪 Testing update-check git fallback...');
   }
   rmSync(emptyDir, { recursive: true, force: true });
   rmSync(brokenDir, { recursive: true, force: true });
+}
+
+// ── gitRemoteVersion() failing-git detail quality (BEHAVIORAL) ────────────
+// When git RUNS and exits non-zero (DNS/proxy/TLS — the common real
+// failures), execFileSync puts the exit code in error.status, not
+// error.code — so an error.code || error.message fallback yields the
+// tautology "Command failed: git …" (what ran) instead of git's own reason
+// (which sits in error.stderr). This invokes the real git against an
+// RFC 2606 `.invalid` host — DNS for that TLD fails locally and
+// deterministically, no network needed — and asserts the detail carries a
+// real reason. Git's wording is locale-dependent, so the assertion is the
+// tautology's ABSENCE, not any English phrase.
+{
+  const res = gitRemoteVersion('https://this-host-does-not-exist.invalid/repo.git');
+  if (res && res.ok === false && res.detail && !/^Command failed/.test(String(res.detail))) {
+    pass(`gitRemoteVersion() surfaces git's own failure reason, not the command-line tautology (detail: ${JSON.stringify(String(res.detail).slice(0, 60))})`);
+  } else if (res && res.ok === false) {
+    fail(`gitRemoteVersion() failing-git detail is a tautology or empty: ${JSON.stringify(res.detail)}`);
+  } else {
+    fail(`gitRemoteVersion() against a .invalid host returned unexpectedly: ${JSON.stringify(res)}`);
+  }
 }
