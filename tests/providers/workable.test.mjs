@@ -14,8 +14,8 @@ try {
   if (workable.id === 'workable') pass('workable.id is "workable"');
   else fail(`workable.id is ${JSON.stringify(workable.id)}`);
 
-  const hit = workable.detect({ name: 'TestCo', careers_url: 'https://apply.workable.com/optimile' });
-  if (hit && hit.url === 'https://apply.workable.com/api/v1/widget/accounts/optimile?details=true') {
+  const hit = workable.detect({ name: 'TestCo', careers_url: 'https://apply.workable.com/acme-widgets' });
+  if (hit && hit.url === 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true') {
     pass('workable.detect() resolves apply.workable.com/<slug> → widget API');
   } else {
     fail(`workable.detect() returned ${JSON.stringify(hit)}`);
@@ -27,25 +27,25 @@ try {
 
   // parse() — markdown table
   const sampleMd = [
-    '# Optimile — All Open Positions',
+    '# AcmeWidgets — All Open Positions',
     '',
     '| Title | Department | Location | Type | Salary | Posted | Details |',
     '|---|---|---|---|---|---|---|',
-    '| Senior AI PM | Product | Ghent, Belgium | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/optimile/jobs/view/ABC123.md) |',
-    '| Tech Lead | Engineering | Remote | Full-time | — | 2026-03-25 | [View](https://apply.workable.com/optimile/jobs/view/DEF456.md) |',
+    '| Senior AI PM | Product | Ghent, Belgium | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/acme-widgets/jobs/view/ABC123.md) |',
+    '| Tech Lead | Engineering | Remote | Full-time | — | 2026-03-25 | [View](https://apply.workable.com/acme-widgets/jobs/view/DEF456.md) |',
   ].join('\n');
 
-  const jobs = parseWorkableMarkdown(sampleMd, 'Optimile');
+  const jobs = parseWorkableMarkdown(sampleMd, 'AcmeWidgets');
   if (jobs.length === 2) pass('parseWorkableMarkdown extracts 2 jobs from 2-row table');
   else fail(`parseWorkableMarkdown returned ${jobs.length} jobs, expected 2`);
 
-  if (jobs[0]?.title === 'Senior AI PM' && jobs[0]?.location === 'Ghent, Belgium' && jobs[0]?.company === 'Optimile') {
+  if (jobs[0]?.title === 'Senior AI PM' && jobs[0]?.location === 'Ghent, Belgium' && jobs[0]?.company === 'AcmeWidgets') {
     pass('parseWorkableMarkdown extracts title, location, company correctly');
   } else {
     fail(`parseWorkableMarkdown row 0 = ${JSON.stringify(jobs[0])}`);
   }
 
-  if (jobs[0]?.url === 'https://apply.workable.com/optimile/jobs/view/ABC123') {
+  if (jobs[0]?.url === 'https://apply.workable.com/acme-widgets/jobs/view/ABC123') {
     pass('parseWorkableMarkdown strips .md suffix from job URL');
   } else {
     fail(`parseWorkableMarkdown should strip .md; got url=${JSON.stringify(jobs[0]?.url)}`);
@@ -60,7 +60,7 @@ try {
 
   // -- widget API (primary path) ------------------------------------------
   const widgetPayload = {
-    name: 'Optimile',
+    name: 'AcmeWidgets',
     jobs: [
       {
         title: 'Senior AI PM',
@@ -82,7 +82,7 @@ try {
       { title: '   ', shortlink: 'https://apply.workable.com/j/NOPE' },
     ],
   };
-  const widgetJobs = parseWorkableWidget(widgetPayload, 'Optimile');
+  const widgetJobs = parseWorkableWidget(widgetPayload, 'AcmeWidgets');
   if (widgetJobs.length === 2) pass('parseWorkableWidget keeps only valid, on-domain, titled jobs');
   else fail(`parseWorkableWidget returned ${widgetJobs.length} jobs, expected 2: ${JSON.stringify(widgetJobs.map(j => j.title))}`);
 
@@ -109,14 +109,18 @@ try {
   }
 
   // fetch() prefers the widget API and never touches the markdown feed when it works.
+  let apiCallHeaders = null;
   const apiJobs = await workable.fetch(
-    { name: 'Smoke', careers_url: 'https://apply.workable.com/optimile' },
+    { name: 'Smoke', careers_url: 'https://apply.workable.com/acme-widgets' },
     {
       transport: 'http',
-      fetchJson: async (url) => {
-        if (url !== 'https://apply.workable.com/api/v1/widget/accounts/optimile?details=true') {
+      sleep: async () => {},
+      fetchJson: async (url, opts) => {
+        if (url !== 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true') {
           throw new Error(`fetchJson called with unexpected URL: ${url}`);
         }
+        apiCallHeaders = opts?.headers;
+        if (opts?.redirect !== 'error') throw new Error(`expected redirect:'error', got ${JSON.stringify(opts?.redirect)}`);
         return widgetPayload;
       },
       fetchText: async () => { throw new Error('markdown feed should not be used when the API succeeds'); },
@@ -125,29 +129,119 @@ try {
   if (apiJobs.length === 2) pass('workable.fetch() uses the widget API as the primary path');
   else fail(`workable.fetch() via API returned ${apiJobs.length} jobs, expected 2`);
 
-  // fetch() falls back to the markdown feed when the API fails.
+  if (apiCallHeaders?.['user-agent'] && apiCallHeaders.referer === 'https://apply.workable.com/acme-widgets/') {
+    pass('workable.fetch() sends browser-like UA and matching referer on the widget API request');
+  } else {
+    fail(`unexpected headers on widget API call: ${JSON.stringify(apiCallHeaders)}`);
+  }
+
+  // fetch() falls back to the markdown feed when the API fails with a non-retryable error.
+  let feedCallHeaders = null;
   const fallbackJobs = await workable.fetch(
-    { name: 'Smoke', careers_url: 'https://apply.workable.com/optimile' },
+    { name: 'Smoke', careers_url: 'https://apply.workable.com/acme-widgets' },
     {
       transport: 'http',
-      fetchJson: async () => { throw new Error('HTTP 503'); },
-      fetchText: async (url) => {
-        if (url !== 'https://apply.workable.com/optimile/jobs.md') {
+      sleep: async () => {},
+      fetchJson: async () => { const err = new Error('HTTP 404'); err.status = 404; throw err; },
+      fetchText: async (url, opts) => {
+        if (url !== 'https://apply.workable.com/acme-widgets/jobs.md') {
           throw new Error(`fetchText called with unexpected URL: ${url}`);
         }
+        feedCallHeaders = opts?.headers;
+        if (opts?.redirect !== 'error') throw new Error(`expected redirect:'error', got ${JSON.stringify(opts?.redirect)}`);
         return [
           '| Title | Department | Location | Type | Salary | Posted | Details |',
           '|---|---|---|---|---|---|---|',
-          '| Fallback Role | Product | Remote | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/optimile/jobs/view/ZZZ.md) |',
+          '| Fallback Role | Product | Remote | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/acme-widgets/jobs/view/ZZZ.md) |',
         ].join('\n');
       },
     },
   );
   if (fallbackJobs.length === 1 && fallbackJobs[0].title === 'Fallback Role') {
-    pass('workable.fetch() falls back to the markdown feed when the widget API fails');
+    pass('workable.fetch() falls back to the markdown feed on a non-retryable API error');
   } else {
     fail(`fallback returned ${JSON.stringify(fallbackJobs)}`);
   }
+  if (feedCallHeaders?.referer === 'https://apply.workable.com/acme-widgets/') {
+    pass('workable.fetch() sends matching referer on the markdown fallback request too');
+  } else {
+    fail(`markdown fallback headers: ${JSON.stringify(feedCallHeaders)}`);
+  }
+
+  // fetch() retries a transient 429 on the widget API and recovers without falling back.
+  let apiAttempts = 0;
+  const recoveredJobs = await workable.fetch(
+    { name: 'Smoke', careers_url: 'https://apply.workable.com/acme-widgets' },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson: async () => {
+        apiAttempts++;
+        if (apiAttempts === 1) {
+          const err = new Error('HTTP 429');
+          err.status = 429;
+          err.retryAfter = '1'; // 1s — short enough to retry, not give up
+          throw err;
+        }
+        return widgetPayload;
+      },
+      fetchText: async () => { throw new Error('markdown feed should not be used once the API recovers'); },
+    },
+  );
+  if (apiAttempts === 2 && recoveredJobs.length === 2) {
+    pass('workable.fetch() retries a transient 429 on the widget API and recovers');
+  } else {
+    fail(`retry-and-recover: attempts=${apiAttempts}, jobs=${recoveredJobs.length}`);
+  }
+
+  // fetch() gives up immediately (no wasted retries) on an hours-long Retry-After.
+  let giveUpAttempts = 0;
+  const giveUpJobs = await workable.fetch(
+    { name: 'Smoke', careers_url: 'https://apply.workable.com/acme-widgets' },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson: async () => {
+        giveUpAttempts++;
+        const err = new Error('HTTP 429');
+        err.status = 429;
+        err.retryAfter = String(21 * 3600); // ~21h — well past the give-up threshold
+        throw err;
+      },
+      fetchText: async () => [
+        '| Title | Department | Location | Type | Salary | Posted | Details |',
+        '|---|---|---|---|---|---|---|',
+        '| Feed Role | Product | Remote | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/acme-widgets/jobs/view/YYY.md) |',
+      ].join('\n'),
+    },
+  );
+  if (giveUpAttempts === 1 && giveUpJobs.length === 1 && giveUpJobs[0].title === 'Feed Role') {
+    pass('workable.fetch() gives up immediately on an hours-long Retry-After and falls back to the markdown feed');
+  } else {
+    fail(`give-up-early: attempts=${giveUpAttempts}, jobs=${JSON.stringify(giveUpJobs)}`);
+  }
+
+  // Serialization: two concurrent fetch() calls never overlap in-flight.
+  let inFlight = 0;
+  let overlapped = false;
+  const makeSlowCtx = () => ({
+    transport: 'http',
+    sleep: async () => {},
+    fetchJson: async () => {
+      inFlight++;
+      if (inFlight > 1) overlapped = true;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight--;
+      return widgetPayload;
+    },
+    fetchText: async () => { throw new Error('should not reach markdown feed'); },
+  });
+  await Promise.all([
+    workable.fetch({ name: 'A', careers_url: 'https://apply.workable.com/acme-widgets' }, makeSlowCtx()),
+    workable.fetch({ name: 'B', careers_url: 'https://apply.workable.com/acme-widgets' }, makeSlowCtx()),
+  ]);
+  if (!overlapped) pass('workable.fetch() serializes concurrent requests process-wide');
+  else fail('two concurrent workable.fetch() calls overlapped in-flight');
 
   // fetch() rejects an unresolvable careers_url (no apply.workable.com match in URL).
   let rejected = false;

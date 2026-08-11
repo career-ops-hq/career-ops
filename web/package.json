@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"tests/**/*.test.mjs\" test-stream-parse.mjs test-act-envelope.mjs"
+    "test": "node --test \"tests/**/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.78",

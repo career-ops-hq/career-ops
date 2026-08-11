@@ -13,7 +13,7 @@
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
 } from './tracker-utils.mjs';
@@ -44,7 +44,11 @@ function normalizeStatus(raw) {
   if (/^descartado$/i.test(s)) return { status: 'Discarded' };
 
   // Rechazada / Rechazado → Rejected
-  if (/^rechazada?$/i.test(s)) return { status: 'Rejected' };
+  // `rechazada?` reads as "rechazad" + an OPTIONAL trailing "a", so it accepted
+  // "rechazada" and the bare stem "rechazad" but never "rechazado" — the masculine
+  // form this comment claims to handle, that states.yml lists as an alias, and that
+  // the header of this file names. A bare "Rechazado" fell through to unknown.
+  if (/^rechazad[oa]$/i.test(s)) return { status: 'Rejected' };
   if (/^rechazado\s+\d{4}/i.test(s)) return { status: 'Rejected' };
 
   // Aplicado with date → Applied (strip date)
@@ -88,6 +92,16 @@ function normalizeStatus(raw) {
   return { status: null, unknown: true };
 }
 
+export { normalizeStatus };
+
+// Everything below is the CLI. It is guarded because importing this module used to
+// run it: the import alone opened a tracker transaction and rewrote applications.md.
+// That is why tests could only scrape this file's source with regexes instead of
+// calling the function, and why the rechazado gap went unnoticed.
+const IS_CLI = process.argv[1]
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (IS_CLI) {
 // Read applications.md
 if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
@@ -187,3 +201,4 @@ if (!DRY_RUN && changes > 0) {
 } finally {
   trackerTransaction?.close();
 }
+} // end IS_CLI

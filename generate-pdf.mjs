@@ -364,7 +364,12 @@ export function injectPrintPageCss(html, format = 'a4') {
   const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: var(--page-margin, ${PDF_PAGE_MARGIN}); }\n</style>`;
 
   if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+    // Replacer function, matching the <html> branch just below. `pageStyle`
+    // interpolates only internal constants today, so this is hardening rather
+    // than a live bug — but the two branches sat in one function disagreeing
+    // about it, and the safe spelling is the one that stays correct if a
+    // configurable value is ever interpolated here (#2596).
+    return html.replace(/<\/head>/i, () => `${pageStyle}\n</head>`);
   }
 
   if (/<html\b[^>]*>/i.test(html)) {

@@ -524,8 +524,23 @@ function printSummary(stats) {
   console.log('');
 }
 
+// ── CLI flags + help ────────────────────────────────────────────────
+
+const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+
+const USAGE = `Usage:
+  node stats.mjs             # full JSON stats to stdout
+  node stats.mjs --summary   # human-readable table
+  node stats.mjs --help|-h   # print this usage block and exit`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const stats = computeAllStats();
-  if (process.argv.includes('--summary')) printSummary(stats);
-  else console.log(JSON.stringify(stats, null, 2));
+  const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+  } else {
+    const stats = computeAllStats();
+    if (args.includes('--summary')) printSummary(stats);
+    else console.log(JSON.stringify(stats, null, 2));
+  }
 }

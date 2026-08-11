@@ -104,16 +104,59 @@ export function compileKeyword(kw) {
   return (lower) => lower.includes(kw);
 }
 
+// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
+// must appear in the title, in any order. `title_filter.positive` is otherwise
+// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
+// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
+// cannot hit inside another word. Either way an entry expresses one exact
+// spelling and nothing else, and real titles vary in separator and word order:
+//
+//   "Director of Engineering" misses  Director - Software Engineering
+//                                     Director Engineering (Mobile Platform)
+//                                     Senior Director, Platform Engineering
+//
+// The combinations are {level} x {, - of none} x {optional domain word}: no
+// hand-maintained list of literal spellings converges, and every miss is
+// silent — the summary reports one "filtered by title" count that cannot tell
+// a well-tuned filter from a leaking one (#2544).
+//
+// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
+// would turn the perfectly ordinary keyword "C++" into "c", which matches
+// almost every title — trading a silent drop for a silent flood.
+const AND_SEPARATOR = /\s+\+\s+/;
+
+/**
+ * Compile one `positive` entry into a matcher.
+ *
+ * Entries without " + " keep their exact previous behaviour, so existing
+ * configs are unaffected.
+ *
+ * @param {string} keyword - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compilePositiveKeyword(keyword) {
+  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
+  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return compileKeyword(keyword);
+  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
+  // still matched on a word boundary and cannot hit "vp" inside another word.
+  const matchers = terms.map(compileKeyword);
+  return (lower) => matchers.every(m => m(lower));
+}
+
 export function buildTitleFilter(titleFilter) {
   // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0)
-    .map(compileKeyword);
-  const positive = normalize(titleFilter?.positive);
-  const negative = normalize(titleFilter?.negative);
+    .map(compile);
+  // AND-groups are a POSITIVE-side feature only. On the negative side an entry
+  // is a veto, and " + " there would read as "reject when both appear", which
+  // is a different and much easier thing to write as two entries.
+  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
+  const negative = normalize(titleFilter?.negative, compileKeyword);
 
   return (title) => {
     const lower = (title || '').toLowerCase();
@@ -133,7 +176,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compileKeyword(k.trim().toLowerCase()) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(k.trim().toLowerCase()) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }
@@ -1058,38 +1101,43 @@ export function normalizeUrlForDedup(url) {
   return parsed.toString();
 }
 
-export function loadSeenUrls(policy = {}) {
+/**
+ * Build the seen-URL set from already-read source texts. An absent file is
+ * passed as '' (the readIfExists convention shared with
+ * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
+ */
+export function collectSeenUrls(sources = {}, policy = {}) {
+  const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
-  if (existsSync(SCAN_HISTORY_PATH)) {
-    const lines = readFileSync(SCAN_HISTORY_PATH, 'utf-8').split('\n');
-    for (const line of lines.slice(1)) { // skip header
-      const [url, firstSeen, , , , status = 'added'] = line.split('\t');
-      if (!url) continue;
-      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-      else recheckEligible++;
-    }
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, firstSeen, , , , status = 'added'] = line.split('\t');
+    if (!url) continue;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
+    else recheckEligible++;
   }
 
   // pipeline.md — extract URLs from checkbox lines
-  if (existsSync(PIPELINE_PATH)) {
-    const text = readFileSync(PIPELINE_PATH, 'utf-8');
-    for (const match of text.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(normalizeUrlForDedup(match[1]));
-    }
+  for (const match of pipelineText.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
+    seen.add(normalizeUrlForDedup(match[1]));
   }
 
   // applications.md — extract URLs from report links and any inline URLs
-  if (existsSync(APPLICATIONS_PATH)) {
-    const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
-    for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(normalizeUrlForDedup(match[0]));
-    }
+  for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
+    seen.add(normalizeUrlForDedup(match[0]));
   }
 
   return { seen, recheckEligible };
+}
+
+export function loadSeenUrls(policy = {}) {
+  return collectSeenUrls({
+    scanHistoryText: readIfExists(SCAN_HISTORY_PATH),
+    pipelineText: readIfExists(PIPELINE_PATH),
+    applicationsText: readIfExists(APPLICATIONS_PATH),
+  }, policy);
 }
 
 /**
@@ -1630,16 +1678,16 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
 }
 
 /**
- * Read scan-history.tsv rows that carry a fingerprint, for the cross-listing
- * check. Older rows without the 8th column simply never match.
+ * Parse scan-history.tsv rows that carry a fingerprint, for the cross-listing
+ * check. Older rows without the 8th column simply never match. Takes the file
+ * text ('' for an absent file), like its `collect*` siblings.
  *
- * @param {string} [historyPath] - Override for tests.
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
  * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
  */
-export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
-  if (!existsSync(historyPath)) return [];
+export function collectFingerprintHistory(scanHistoryText = '') {
   const rows = [];
-  for (const line of readFileSync(historyPath, 'utf-8').split('\n')) {
+  for (const line of scanHistoryText.split('\n')) {
     const cols = line.split('\t');
     // Skip the header row. Older 7-col headers fall out of the `cols.length < 8`
     // guard below on their own, but the 12-col header names col 7 `fingerprint`
@@ -1656,6 +1704,44 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
     });
   }
   return rows;
+}
+
+/**
+ * Filesystem wrapper over {@link collectFingerprintHistory}.
+ *
+ * @param {string} [historyPath] - Override for tests.
+ */
+export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
+  return collectFingerprintHistory(readIfExists(historyPath));
+}
+
+/**
+ * Read the three dedup sources once and derive every per-run dedup structure
+ * from that single read (#2382). A scan run used to parse scan-history.tsv
+ * three times and pipeline.md/applications.md twice each — at 50k history rows
+ * that is ~600 ms of redundant parsing per run.
+ *
+ * The snapshot is deliberately per-run: callers hold the returned object in
+ * run-scoped locals and nothing is cached at module level, so a later run
+ * always re-reads the files. Dedup state is therefore frozen at run start;
+ * rows appended by a concurrent process mid-run are picked up by the next run
+ * (the previous re-read at the cross-listing step could not safely observe
+ * them anyway — scan-history appends are not locked).
+ *
+ * @param {{recheckAfterDays?: number|null, today?: string}} [policy] -
+ *   Scan-history recheck policy, shared by the URL and company+role sets.
+ * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
+ *   Company canonicalizer for the role keys.
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ */
+export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer) {
+  const scanHistoryText = readIfExists(SCAN_HISTORY_PATH);
+  const pipelineText = readIfExists(PIPELINE_PATH);
+  const applicationsText = readIfExists(APPLICATIONS_PATH);
+  const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize);
+  const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
+  return { seen, recheckEligible, seenCompanyRoles, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2204,12 +2290,12 @@ async function main() {
   // empty Map = the filter below never fires.
   const blacklist = loadBlacklist();
 
-  // 4. Load dedup sets
+  // 4. Load dedup sets — one read per source file for the whole run (#2382).
   const historyPolicy = scanHistoryPolicy(config);
-  const seenUrlState = loadSeenUrls(historyPolicy);
-  const seenUrls = seenUrlState.seen;
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany, { policy: historyPolicy });
+  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
+  const seenUrls = dedupSnapshot.seen;
+  const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
   const date = new Date().toISOString().slice(0, 10);
@@ -2413,7 +2499,10 @@ async function main() {
   for (const offer of verifiedOffers) {
     offer.fingerprint = fingerprintText(offer.description);
   }
-  const crossListings = findCrossListings(verifiedOffers, loadFingerprintHistory());
+  // History rows come from the run-start snapshot: nothing has appended to
+  // scan-history.tsv yet at this point in the run (all writes happen below),
+  // so this sees the same bytes a re-read would — minus the third full parse.
+  const crossListings = findCrossListings(verifiedOffers, dedupSnapshot.fingerprintHistory);
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
@@ -2522,7 +2611,7 @@ async function main() {
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
   }
   if (historyPolicy.recheckAfterDays != null) {
-    console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);
+    console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
   }
   if (verify) {
     console.log(`Expired (verified):    ${expiredOffers.length} dropped`);
