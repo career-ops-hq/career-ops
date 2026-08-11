@@ -153,6 +153,7 @@ const SYSTEM_PATHS = [
   'lib/golden-budget-analysis.mjs',
   'img-to-pdf.mjs',
   'archive-posting.mjs',
+  'jd-capture.mjs',
   'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
