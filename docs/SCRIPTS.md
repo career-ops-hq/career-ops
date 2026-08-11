@@ -456,6 +456,22 @@ node check-table-freshness.mjs --self-test
 
 ---
 
+## rejection-latency
+
+Post-interview response-latency signal. Cross-references `data/active-interviews.md` (latest interview date per application — company + role, fuzzy role match via `role-matcher.mjs`) with `data/applications.md` (rows still in `Interview` state — i.e. no `Responded`/`Offer`/`Rejected` transition recorded since) and flags applications whose silence exceeds a soft **courtesy** threshold (30-day default, no legal claim attached) from `rejection_latency.courtesy_days` or `--courtesy-days`. (An earlier revision also shipped a jurisdiction-backed statutory tier; it was removed — the underlying legal threshold could change and the script has no way to re-verify it.) Each flag carries a ready-to-copy `data/blacklist.md` row (same suggestion-only bridge as `modes/interview-redflag.md`, #1854/#1856) — the script never writes to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` (#1742 opt-in guarantee). Surfaced by the `followup` mode.
+
+```bash
+node rejection-latency.mjs             # JSON
+node rejection-latency.mjs --summary   # human-readable table + suggested blacklist rows
+node rejection-latency.mjs --courtesy-days 21
+node rejection-latency.mjs --today 2026-07-17   # deterministic runs/tests
+node rejection-latency.mjs --self-test
+```
+
+**Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
 ## update:check
 
 Checks whether a newer version of career-ops is available upstream. Outputs JSON to stdout:

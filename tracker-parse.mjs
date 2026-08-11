@@ -377,9 +377,25 @@ export function normalizeVia(name) {
  * This is the one key every grouping consumer should share, so company/role
  * identity cannot drift between scripts the way Via identity did.
  *
+ * `separator` exists because not every consumer wants a solid key: scan.mjs
+ * keys role titles as space-separated words so "engineer (senior)" and
+ * "engineer, senior" collapse without "data engineer" and "dataengineer"
+ * merging. Passing ' ' keeps that shape while sharing this exact rule, so a
+ * second private [a-z0-9] strip never has to exist to get it.
+ *
  * @param {string} value - Raw cell value (company, role, agency, slug, …).
+ * @param {string} [separator=''] - Replacement for each run of stripped chars.
+ *   Passed straight to String.replace, so `$` is special ('$&' would re-insert
+ *   the stripped run). Callers should pass a literal such as '' or ' '.
  * @returns {string} Case-folded, punctuation-free, script-preserving key.
  */
-export function normalizeTextKey(value) {
-  return String(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+export function normalizeTextKey(value, separator = '') {
+  // `value ?? ''` rather than String(value): a null/undefined cell must key to
+  // '' like any other empty field, not to the literal strings "null"/"undefined"
+  // — which would compare equal to each other and form a bogus group.
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
+    .trim();
 }

@@ -68,8 +68,22 @@ export default {
     assertPersonioUrl(feedUrl);
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertPersonioUrl above it guarantees the final hostname stays in-domain.
-    const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
-    return parsePersonioXml(text, entry.name, host);
+    try {
+      const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
+      return parsePersonioXml(text, entry.name, host);
+    } catch (err) {
+      if (err?.status !== 404) throw err;
+      // Some tenants disable the public XML feed. The careers page itself is
+      // still server-rendered with the full job list in the initial HTML, so
+      // fall back to scraping it directly instead of giving up.
+      // ?language=en forces English titles — unlike the XML feed (which has
+      // no language param and always renders in the tenant's default
+      // language), the HTML page respects it.
+      const pageUrl = `https://${host}/?language=en`;
+      assertPersonioUrl(pageUrl);
+      const html = await ctx.fetchText(pageUrl, { redirect: 'error' });
+      return parsePersonioHtml(html, entry.name, host);
+    }
   },
 };
 
@@ -100,6 +114,20 @@ function extractText(inner) {
   const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
   if (cdata) return cdata[1].trim();
   return decodeXmlEntities(inner).trim();
+}
+
+// Looped to a fixed point rather than a single pass: a single global replace
+// only removes non-overlapping matches in one left-to-right sweep, which
+// CodeQL flags as an incomplete sanitizer (js/incomplete-sanitization) since
+// adversarial nesting can leave a `<`-fragment behind. Repeating until the
+// string stops changing removes any tag that pass N reveals.
+function stripTags(s) {
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/<[^>]*>/g, '');
+  } while (s !== prev);
+  return s;
 }
 
 // Extract the text of the first <tag>…</tag> in a block. Returns '' when absent.
@@ -163,6 +191,65 @@ export function parsePersonioXml(xml, companyName, host) {
       location: offices.join(', '),
       company: companyName,
       postedAt: toEpochMs(tagText(scalar, 'createdAt')),
+    });
+  }
+  return jobs;
+}
+
+/**
+ * Fallback for tenants whose /xml feed is disabled (404 there, 200 on the
+ * page). The careers page is server-rendered by the same Personio frontend
+ * build across tenants, so the job list is already present in the initial
+ * HTML — no headless browser needed. Each job is an `<a href="/job/{id}">`
+ * carrying the shared (non-hashed) marker class `job-box`, wrapping an
+ * `<h3>` title and a `<span>` with the first location line. Class names use
+ * hashed CSS module suffixes (e.g. `page_jobTitle__K0ilk`) that are build-
+ * specific, not tenant-specific, so matching only on the stable `job-box` /
+ * `jobMetaText` substrings keeps the regex independent of that hash.
+ *
+ * No creation date is exposed on the listing page, so postedAt is always
+ * omitted (unlike parsePersonioXml's createdAt).
+ *
+ * @param {string} html — careers page HTML body
+ * @param {string} companyName — value written into job.company
+ * @param {string} host — validated tenant host, e.g. `acme.jobs.personio.de`
+ * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ */
+export function parsePersonioHtml(html, companyName, host) {
+  if (typeof html !== 'string') return [];
+  const jobs = [];
+  const seen = new Set();
+  // href may carry a trailing query string, e.g. "/job/2560093?language=en"
+  // when the page itself was fetched with ?language=en — the numeric id is
+  // still what we need, so the query part (if any) is matched and discarded.
+  // class and href aren't guaranteed to appear in a fixed order on the
+  // anchor, so the opening tag's attributes are captured as one blob and
+  // checked independently rather than anchored on attribute order.
+  const anchorRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/g;
+  let m;
+  while ((m = anchorRe.exec(html))) {
+    const attrs = m[1];
+    if (!/\bclass="[^"]*\bjob-box\b[^"]*"/.test(attrs)) continue;
+    const hrefMatch = attrs.match(/\bhref="\/job\/(\d+)(?:\?[^"]*)?"/);
+    if (!hrefMatch) continue;
+    const id = hrefMatch[1];
+    if (seen.has(id)) continue;
+    const block = m[2];
+
+    const titleMatch = block.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/);
+    if (!titleMatch) continue;
+    const title = decodeXmlEntities(stripTags(titleMatch[1])).trim();
+    if (!title) continue;
+
+    const locMatch = block.match(/<span\b[^>]*class="[^"]*jobMetaText[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+    const location = locMatch ? decodeXmlEntities(stripTags(locMatch[1])).trim() : '';
+
+    seen.add(id);
+    jobs.push({
+      title,
+      url: `https://${host}/job/${id}`,
+      location,
+      company: companyName,
     });
   }
   return jobs;

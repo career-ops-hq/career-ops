@@ -543,6 +543,62 @@
       'Noto Sans SC', 'Source Han Sans SC', sans-serif;
   }
 
+  /* === Korean typography ===
+     modes/ko/ ships as a supported locale, but no rule matched html[lang="ko"],
+     so a Korean CV fell back to the Latin-only stack and Hangul rendered via
+     whatever the PDF engine happened to substitute. Same shape as the ja and
+     zh blocks above: Latin-capable faces first for stable ATS extraction, then
+     platform-native and open-source Korean faces for Hangul glyphs. */
+  html[lang="ko"] body,
+  html[lang="ko"] body {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+      'Malgun Gothic', 'Noto Sans CJK KR',
+      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  html[lang="ko"] .header h1,
+  html[lang="ko"] .section-title,
+  html[lang="ko"] .job-company,
+  html[lang="ko"] .project-title,
+  html[lang="ko"] .contact-row,
+  html[lang="ko"] .competency-tag,
+  html[lang="ko"] .skill-category,
+  html[lang="ko"] .skill-category {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+      'Malgun Gothic', 'Noto Sans CJK KR',
+      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+  }
+
+  /* === Traditional Chinese typography ===
+     modes/zh-TW/ ships as a supported locale. html[lang="zh"] does not match
+     lang="zh-TW", so it needs its own rule — and it must use TC faces, not the
+     Simplified stack above, which substitutes the wrong glyph forms. */
+  html[lang="zh-TW"] body,
+  html[lang="zh-TW"] body {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang TC',
+      'Microsoft JhengHei', 'Noto Sans CJK TC',
+      'Noto Sans TC', 'Source Han Sans TC', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .section-title,
+  html[lang="zh-TW"] .job-company,
+  html[lang="zh-TW"] .project-title,
+  html[lang="zh-TW"] .contact-row,
+  html[lang="zh-TW"] .competency-tag,
+  html[lang="zh-TW"] .skill-category,
+  html[lang="zh-TW"] .skill-category {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang TC',
+      'Microsoft JhengHei', 'Noto Sans CJK TC',
+      'Noto Sans TC', 'Source Han Sans TC', sans-serif;
+  }
+
   html[lang="zh-CN"] .summary-text,
   html[lang="zh"] .summary-text,
   html[lang="zh-CN"] .job li,
@@ -626,6 +682,8 @@
     <div class="section-title">{{SECTION_SKILLS}}</div>
     {{SKILLS}}
   </div>
+
+  <!-- END -->
 
 </div>
 </body>

@@ -106,6 +106,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `detect-reposts.mjs` | Flags roles re-listed 2+ times in 90 days from `scan-history.tsv` (JSON or `--summary`) |
 | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables — flags `expired` rows (past `next_effective` without re-verification, exit 1) and `review-due` rows (`as_of` older than 12 months, soft); discovers any `templates/*.yml` with `as_of` rows automatically (JSON or `--summary` table output) |
 | `process-quality.mjs` | Per-company recruiting-friction rate from `[process-friction]` tags in `data/active-interviews.md` Notes (JSON or `--summary`) |
+| `rejection-latency.mjs` | Post-interview response-latency signal — flags companies still in `Interview` state whose silence since the last `data/active-interviews.md` round exceeds a courtesy (30d default, configurable) threshold, with a ready-to-copy `data/blacklist.md` suggestion row; suggestion-only, never writes (JSON or `--summary` table output) |
 | `salary-gap.mjs` | Desired/advertised/actual comp gap analyzer — folds report `advertised_comp` + `data/salary-observations.tsv` (JSON or `--summary`) |
 | `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill classifier vs `cv.md`: existing / supportedByResume / gap; never auto-adds claims to `cv.md` (JSON or `--summary`) |

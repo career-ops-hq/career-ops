@@ -42,7 +42,7 @@ import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -104,16 +104,59 @@ export function compileKeyword(kw) {
   return (lower) => lower.includes(kw);
 }
 
+// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
+// must appear in the title, in any order. `title_filter.positive` is otherwise
+// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
+// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
+// cannot hit inside another word. Either way an entry expresses one exact
+// spelling and nothing else, and real titles vary in separator and word order:
+//
+//   "Director of Engineering" misses  Director - Software Engineering
+//                                     Director Engineering (Mobile Platform)
+//                                     Senior Director, Platform Engineering
+//
+// The combinations are {level} x {, - of none} x {optional domain word}: no
+// hand-maintained list of literal spellings converges, and every miss is
+// silent — the summary reports one "filtered by title" count that cannot tell
+// a well-tuned filter from a leaking one (#2544).
+//
+// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
+// would turn the perfectly ordinary keyword "C++" into "c", which matches
+// almost every title — trading a silent drop for a silent flood.
+const AND_SEPARATOR = /\s+\+\s+/;
+
+/**
+ * Compile one `positive` entry into a matcher.
+ *
+ * Entries without " + " keep their exact previous behaviour, so existing
+ * configs are unaffected.
+ *
+ * @param {string} keyword - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compilePositiveKeyword(keyword) {
+  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
+  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return compileKeyword(keyword);
+  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
+  // still matched on a word boundary and cannot hit "vp" inside another word.
+  const matchers = terms.map(compileKeyword);
+  return (lower) => matchers.every(m => m(lower));
+}
+
 export function buildTitleFilter(titleFilter) {
   // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0)
-    .map(compileKeyword);
-  const positive = normalize(titleFilter?.positive);
-  const negative = normalize(titleFilter?.negative);
+    .map(compile);
+  // AND-groups are a POSITIVE-side feature only. On the negative side an entry
+  // is a veto, and " + " there would read as "reject when both appear", which
+  // is a different and much easier thing to write as two entries.
+  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
+  const negative = normalize(titleFilter?.negative, compileKeyword);
 
   return (title) => {
     const lower = (title || '').toLowerCase();
@@ -133,7 +176,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compileKeyword(k.trim().toLowerCase()) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(k.trim().toLowerCase()) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }
@@ -721,19 +764,51 @@ export function buildSalaryFilter(salaryFilter) {
 }
 
 export function companyMatch(jobCompany, windowCompany) {
-  const cleanNoSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const c1NoSpaces = cleanNoSpaces(jobCompany);
-  const c2NoSpaces = cleanNoSpaces(windowCompany);
-  if (c1NoSpaces === c2NoSpaces) return true;
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry erased
+  // non-Latin scripts outright, so 株式会社アカネ and 合同会社ゾロ both cleaned
+  // to '' and the equality check below reported two unrelated companies as the
+  // same one. The empty guard is part of the fix, not decoration — "no usable
+  // signal on either side" must never read as "identical".
+  const c1NoSpaces = normalizeTextKey(jobCompany);
+  const c2NoSpaces = normalizeTextKey(windowCompany);
+  if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const cleanWithSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const c1WithSpaces = cleanWithSpaces(jobCompany);
-  const c2WithSpaces = cleanWithSpaces(windowCompany);
+  const c1WithSpaces = normalizeTextKey(jobCompany, ' ');
+  const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
-  const regex1 = new RegExp('\\b' + c2WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  const regex2 = new RegExp('\\b' + c1WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  return regex1.test(c1WithSpaces) || regex2.test(c2WithSpaces);
+  // Containment: a short window name should still match a longer official one
+  // ("Acme" vs "Acme Corp"), bounded so "Acme" does not match "Acmetric".
+  //
+  // The anchors are lookarounds, not \b: JS defines \b against ASCII \w even
+  // under the u flag. Keeping the accent (rather than stripping it to a space,
+  // as the [a-z0-9] filter did before) means '\bnestlé\b' can never hold —
+  // neither side of the trailing anchor is a word character — so Nestlé
+  // Deutschland vs Nestlé would silently stop matching. Same for Ørsted, Zoë
+  // and every other name whose first or last letter is non-ASCII.
+  //
+  // The anchor class is the one normalizeTextKey keeps, deliberately. An anchor
+  // class without \p{M} would treat a Devanagari matra as a boundary and split
+  // कंपनी mid-word — the key and its boundaries have to agree on what a letter
+  // is, or they drift the way #2397 and #2445 fixed elsewhere.
+  //
+  // Non-Latin containment does not fire here (株式会社メルカリ vs メルカリ): the
+  // lookbehind sees 社, a letter, so there is no boundary to assert, and
+  // Japanese is not space-delimited so no anchor rule recovers it. Note this
+  // pair DID match before this change, but only via the '' === '' collision
+  // that erased both names — not through this path. Making it match on purpose
+  // needs corporate-form normalisation, tracked separately in #2570.
+  //
+  // compileLocationKeyword() above reached for lookarounds too, for a related
+  // reason ("\b behaves surprisingly at a punctuation edge"); its escape set is
+  // reused here because '\-' is an invalid identity escape under u. Both
+  // operands are already normalizeTextKey output — letters, marks, digits and
+  // spaces only — so the escape is defensive, not load-bearing.
+  const bounded = (name) => new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{M}\\p{N}])`,
+    'u',
+  );
+  return bounded(c2WithSpaces).test(c1WithSpaces) || bounded(c1WithSpaces).test(c2WithSpaces);
 }
 
 export function addDays(dateStr, days) {
@@ -1289,13 +1364,27 @@ function isRoleLocationSuffix(tag) {
  * @returns {string} Normalized role key.
  */
 export function normalizeRoleForDedup(role) {
-  let title = String(role ?? '').toLowerCase();
+  // NFKC up front so full-width brackets fold to their ASCII forms while the
+  // suffix loop can still see them: "Engineer （Remote）" now strips the same
+  // way "Engineer (Remote)" always did.
+  //
+  // This does NOT make the loop understand non-Latin suffixes — the tag itself
+  // is still matched against the English-only ROLE_LOCATION_SUFFIXES set via
+  // normalizeRoleSuffixTag(), which carries its own [a-z0-9] strip. So
+  // "エンジニア（東京）" and "エンジニア（大阪）" remain two keys. Teaching the
+  // suffix vocabulary other scripts is a separate change (new vocabulary, not
+  // a key fix) and is deliberately out of scope here.
+  let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
     const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
     if (!match || !isRoleLocationSuffix(match[1])) break;
     title = title.slice(0, match.index).trimEnd();
   }
-  return title.replace(/[^a-z0-9]+/g, ' ').trim();
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
+  // every non-Latin title to '', so バックエンドエンジニア and フロントエンド
+  // エンジニア at one company shared a dedupe key and the scan dropped the
+  // second as already-seen. Space separator keeps the word-collapsing shape.
+  return normalizeTextKey(title, ' ');
 }
 
 /**

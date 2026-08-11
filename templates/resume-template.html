@@ -489,6 +489,54 @@
     overflow-wrap: break-word;
   }
 
+  /* === Korean typography === modes/ko/ ships as a locale but nothing matched
+     html[lang="ko"], so Hangul fell back to the Latin-only stack. */
+  html[lang="ko"] body,
+  html[lang="ko"] .contact-row,
+  html[lang="ko"] .competency-tag {
+    font-family: 'DM Sans', 'Apple SD Gothic Neo', 'Malgun Gothic',
+      'Noto Sans CJK KR', 'Noto Sans KR',
+      'Nanum Gothic', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* === Traditional Chinese typography === html[lang="zh"] does not match
+     zh-TW, and TC needs TC faces, not the Simplified stack above. */
+  html[lang="zh-TW"] body,
+  html[lang="zh-TW"] .contact-row,
+  html[lang="zh-TW"] .competency-tag {
+    font-family: 'DM Sans', 'PingFang TC', 'Microsoft JhengHei',
+      'Noto Sans CJK TC', 'Noto Sans TC',
+      'Source Han Sans TC', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* .header h1/.section-title/.job-company/.project-title set their own
+     font-family (Space Grotesk, see lines ~104/165/221/267), so the body
+     rule above can't reach them — same gap CodeRabbit flagged on #2616,
+     fixed the same way as the ja/zh-CN blocks below. */
+  html[lang="ko"] .header h1,
+  html[lang="ko"] .section-title,
+  html[lang="ko"] .job-company,
+  html[lang="ko"] .project-title {
+    font-family: 'Space Grotesk', 'Apple SD Gothic Neo', 'Malgun Gothic',
+      'Noto Sans CJK KR', 'Noto Sans KR',
+      'Nanum Gothic', sans-serif;
+  }
+
+  html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .section-title,
+  html[lang="zh-TW"] .job-company,
+  html[lang="zh-TW"] .project-title {
+    font-family: 'Space Grotesk', 'PingFang TC', 'Microsoft JhengHei',
+      'Noto Sans CJK TC', 'Noto Sans TC',
+      'Source Han Sans TC', sans-serif;
+  }
+
   html[lang="zh-CN"] .header h1,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
@@ -504,13 +552,19 @@
 
   html[lang="zh-CN"] .summary-text,
   html[lang="zh"] .summary-text,
+  html[lang="ko"] .summary-text,
+  html[lang="zh-TW"] .summary-text,
   html[lang="zh-CN"] .job li,
-  html[lang="zh"] .job li {
+  html[lang="zh"] .job li,
+  html[lang="ko"] .job li,
+  html[lang="zh-TW"] .job li {
     line-height: 1.7;
   }
 
   html[lang="zh-CN"] .section-title,
-  html[lang="zh"] .section-title {
+  html[lang="zh"] .section-title,
+  html[lang="ko"] .section-title,
+  html[lang="zh-TW"] .section-title {
     letter-spacing: 0.03em;
   }
 </style>
@@ -579,6 +633,8 @@
     <div class="section-title">{{SECTION_SKILLS}}</div>
     {{SKILLS}}
   </div>
+
+  <!-- END -->
 
 </div>
 </body>

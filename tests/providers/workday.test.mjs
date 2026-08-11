@@ -394,7 +394,7 @@ try {
   // fetch() retry — a non-retryable 4xx (e.g. malformed request) breaks
   // immediately, without wasting retry attempts.
   let non429Attempts = 0;
-  const { result: non429Jobs } = await captureConsoleErrors(() =>
+  const { result: non429Jobs, errors: non429Warnings } = await captureConsoleErrors(() =>
     workday.fetch(entry, mkWorkdayCtx(async (_url, opts) => {
       non429Attempts++;
       const body = JSON.parse(opts.body);
@@ -405,6 +405,15 @@ try {
     pass('workday.fetch() does not retry a non-retryable 4xx error');
   } else {
     fail(`workday non-retryable 4xx: attempts=${non429Attempts}, jobs=${non429Jobs.length} (expected 2/20)`);
+  }
+  // The truncation warning must report the REAL attempt count (1 — the error
+  // isn't retryable, so fetchJsonWithRetry gives up immediately), not the
+  // RETRY_POLICY-derived upper bound (4) that only applies when retries are
+  // actually exhausted.
+  if (non429Warnings.some(w => /truncated at 2 of \d+ pages after 1 attempts/.test(w))) {
+    pass('workday.fetch() truncation warning reports the real attempt count for a non-retryable failure (1, not the retry-cap upper bound)');
+  } else {
+    fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
   }
 
   // fetch() early-stop — once a page's postings are all clearly past
