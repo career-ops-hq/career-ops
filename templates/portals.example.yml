@@ -699,6 +699,10 @@ search_queries:
 #   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
 #   enabled: true
 #
+# - name: Example Workable Co
+#   careers_url: https://apply.workable.com/exampleco   # any apply.workable.com/<slug> host
+#   enabled: true
+#
 # - name: Example Workday Co
 #   careers_url: https://exampleco.wd5.myworkdayjobs.com/en-US/exampleco-careers  # any <tenant>.wd<N>.myworkdayjobs.com
 #   max_pages: 100         # optional page cap (20 jobs/page, default 100, max 1500) —
