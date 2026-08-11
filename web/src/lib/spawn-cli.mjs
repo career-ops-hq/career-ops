@@ -17,8 +17,10 @@ import { spawn } from "node:child_process";
  *
  * It also replaces the `stdio: ["ignore", ...]` the apply planners used to spell
  * for the same reason — one mechanism means one place for this to be right.
- * `stdin` is still optional-chained so passing that option stays safe: it makes
- * `child.stdin` null, where a hard `.end()` would throw.
+ * The options type omits `stdio` on purpose: stdout/stderr must stay pipes for
+ * every caller's stream handlers, and TypeScript keeps `child.stdout` non-null
+ * only under that contract. `stdin` is still optional-chained so an untyped
+ * caller passing `stdio` anyway degrades safely (null stdin) instead of throwing.
  *
  * @param {string} binPath
  * @param {string[]} args

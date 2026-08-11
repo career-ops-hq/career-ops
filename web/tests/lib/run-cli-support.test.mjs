@@ -19,13 +19,60 @@ import {
   parseClaudeEvent,
   parseCodexEvent,
 } from "../../src/lib/run-cli-support.mjs";
+import { createCvEnvelopeFilter } from "../../src/lib/cv-envelope.mjs";
 
-test("Codex agent message becomes dashboard text", () => {
+test("Codex agent message becomes dashboard text, newline-terminated", () => {
+  // Given: Codex sends complete messages with NO trailing newline ("hello", not
+  // "hello\n"), so without termination consecutive messages glue mid-line —
+  // which runs narration together in the log and breaks the line-anchored
+  // <<cv-html>> markers in pdf mode.
   const event = parseCodexEvent(JSON.stringify({
     type: "item.completed",
     item: { type: "agent_message", text: "VERDICT: 4.2/5 — strong fit" },
   }));
-  assert.deepEqual(event, { text: "VERDICT: 4.2/5 — strong fit" });
+  assert.deepEqual(event, { text: "VERDICT: 4.2/5 — strong fit\n" });
+});
+
+test("an already newline-terminated Codex message gains no second newline", () => {
+  const event = parseCodexEvent(JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "done\n" },
+  }));
+  assert.deepEqual(event, { text: "done\n" });
+});
+
+test("a cv envelope in its own Codex message survives preceding narration", () => {
+  // Given: the real pdf-mode failure — narration in one agent_message (no
+  // trailing newline), the envelope in the next. Unterminated, the opener lands
+  // mid-line and the fail-closed parser reports "no envelope" for a run whose
+  // CV was fully emitted.
+  const narration = parseCodexEvent(JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "Tailoring done, emitting the envelope." },
+  }));
+  const envelope = parseCodexEvent(JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: '<<cv-html format="a4">>\n<!DOCTYPE html><html><body>CV</body></html>\n<</cv-html>>' },
+  }));
+
+  // When: both flow through the same filter the route feeds via sendAgentText.
+  const filter = createCvEnvelopeFilter();
+  filter.push(narration.text);
+  filter.push(envelope.text);
+  filter.flush();
+
+  // Then: the envelope parses — the run's CV is recovered, not refused.
+  const result = filter.result();
+  assert.equal(result.ok, true);
+  assert.equal(result.format, "a4");
+  assert.match(result.html, /<\/html>/);
+});
+
+test("Codex turn.started maps to a kind-agnostic working status", () => {
+  // Given: the parser serves every run kind (evaluate, pdf, research), so the
+  // status must not claim one of them — "Evaluating the role" showed on CV PDF runs.
+  const event = parseCodexEvent(JSON.stringify({ type: "turn.started" }));
+  assert.deepEqual(event, { status: "Agent working" });
 });
 
 test("Codex usage becomes a token count", () => {
@@ -131,6 +178,13 @@ test("an auth failure stays fatal even when it mentions retrying", () => {
   // apply to it.
   assert.equal(isFatalCodexStderr("unauthorized — please log in and retry"), true);
   assert.equal(isFatalClaudeStderr("Invalid API key · Please run /login and retry"), true);
+});
+
+test("terminal retry wording does not trigger the transient carve-out", () => {
+  // Given: only a retry the CLI announces as IN PROGRESS is transient — wording
+  // that says retrying is over or pointless is a real failure.
+  assert.equal(isFatalCodexStderr("quota exceeded — do not retry"), true);
+  assert.equal(isFatalCodexStderr("rate limit: retry limit exhausted"), true);
 });
 
 test("a benign Claude stderr line mentioning an error is not fatal", () => {

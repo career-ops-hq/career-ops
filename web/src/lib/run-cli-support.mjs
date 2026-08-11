@@ -30,7 +30,10 @@ const FATAL_AUTH_STDERR_RE =
  * remove (sawError fails the honesty gate even on exit 0 with a written
  * report). Auth gets no such carve-out: it never heals by retrying. */
 const FATAL_QUOTA_STDERR_RE = /quota|rate limit/i;
-const RETRYING_STDERR_RE = /retry/i;
+// Only a retry the CLI ANNOUNCES AS IN PROGRESS ("retrying", "retry in 5s",
+// "will retry") — a bare /retry/ would also match terminal wording like
+// "do not retry" or "retry limit exhausted" and silence a genuine failure.
+const RETRYING_STDERR_RE = /retrying|retry\s+in\b|will\s+retry/i;
 const isFatalQuotaStderr = (line) => FATAL_QUOTA_STDERR_RE.test(line) && !RETRYING_STDERR_RE.test(line);
 
 /** Claude Code's own wording for the same class of failure. */
@@ -100,7 +103,9 @@ export function parseCodexEvent(line) {
   }
 
   if (event.type === "thread.started") return { status: STATUS_READY };
-  if (event.type === "turn.started") return { status: "Evaluating the role" };
+  // Kind-agnostic on purpose: this parser serves every run kind (evaluate, pdf,
+  // research, fix-portal), so the status must not claim one of them.
+  if (event.type === "turn.started") return { status: "Agent working" };
 
   if (event.type === "item.started") {
     const type = event.item?.type;
@@ -110,7 +115,16 @@ export function parseCodexEvent(line) {
   }
 
   if (event.type === "item.completed" && event.item?.type === "agent_message") {
-    return typeof event.item.text === "string" ? { text: event.item.text } : null;
+    if (typeof event.item.text !== "string") return null;
+    // Newline-terminate each message: Codex sends complete messages with NO
+    // trailing newline ("hello", not "hello\n"), so consecutive messages would
+    // otherwise concatenate mid-line downstream. That glued narration into one
+    // run-on log line AND broke pdf mode outright — the <<cv-html>> markers are
+    // line-anchored by design (cv-envelope.mjs, fail-closed), so an envelope
+    // message following unterminated narration parsed as "no envelope" and the
+    // honesty gate failed a run whose CV was fully emitted.
+    const text = event.item.text;
+    return { text: text.endsWith("\n") ? text : text + "\n" };
   }
 
   if (event.type === "turn.completed") {
@@ -119,6 +133,11 @@ export function parseCodexEvent(line) {
     // of clobbering a correct running total from an earlier turn.
     if (!event.usage) return null;
     const usage = event.usage;
+    // input + output only, deliberately asymmetric with parseClaudeEvent:
+    // Codex's `cached_input_tokens` is a SUBSET of `input_tokens` (a real turn
+    // reports e.g. input 13956 / cached 11008), so adding it would double-count;
+    // Claude's `cache_creation_input_tokens` is NOT included in its
+    // `input_tokens`, which is why the Claude formula adds it.
     return {
       tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
     };
