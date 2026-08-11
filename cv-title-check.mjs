@@ -34,7 +34,10 @@
  * the user can judge intentional framing vs. unintended drift. Entries that
  * cannot be paired (a JD-only role, a cv.md entry never carried into this
  * particular tailored CV, or a date phrasing that doesn't literally line up)
- * are reported separately as unmatched — never a mismatch.
+ * are reported separately as unmatched — never a mismatch. A {company, dates}
+ * key that resolves to more than one entry on either side is reported as
+ * ambiguous instead of comparing anything: silently keeping "the first" entry
+ * would hide the rest of the group and risk pairing the wrong role.
  *
  * Warn-only, matching this project's human-in-the-loop philosophy: never
  * blocks, never edits cv.md or the tailored CV, never exits non-zero for a
@@ -162,33 +165,64 @@ function matchKey(company, dates) {
   return `${normalizeCompany(company)}||${normalizeDates(dates)}`;
 }
 
+function groupByKey(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const key = matchKey(entry.company, entry.dates);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  return groups;
+}
+
 /**
  * Compare a tailored-CV payload's experience entries against cv.md's.
  *
+ * A {company, dates} key is only ever compared when it is unique on BOTH
+ * sides — cv.md never legitimately carries two different jobs at the same
+ * company over the exact same date range, but a malformed cv.md or a
+ * tailored CV that merged two roles could produce that shape, and silently
+ * picking one entry (first-entry-wins) would hide the rest of the group and
+ * risk comparing the wrong role. A key with more than one entry on either
+ * side is reported as `ambiguous` instead — never silently resolved into a
+ * clean match/mismatch, and never dropped.
+ *
  * @param {Array<{company,title,dates}>} cvEntries
  * @param {Array<{company,title,dates}>} tailoredEntries
- * @returns {{matched: Array, mismatches: Array, unmatchedTailored: Array, unmatchedCv: Array}}
+ * @returns {{matched: Array, mismatches: Array, ambiguous: Array, unmatchedTailored: Array, unmatchedCv: Array}}
  */
 export function checkTitles(cvEntries, tailoredEntries) {
-  const cvByKey = new Map();
-  for (const entry of cvEntries) {
-    const key = matchKey(entry.company, entry.dates);
-    if (!cvByKey.has(key)) cvByKey.set(key, entry); // first entry wins on a duplicate key
-  }
+  const cvGroups = groupByKey(cvEntries);
+  const tailoredGroups = groupByKey(tailoredEntries);
 
   const matched = [];
   const mismatches = [];
+  const ambiguous = [];
   const unmatchedTailored = [];
+  const unmatchedCv = [];
   const seenKeys = new Set();
 
-  for (const t of tailoredEntries) {
-    const key = matchKey(t.company, t.dates);
-    const cvEntry = cvByKey.get(key);
-    if (!cvEntry) {
-      unmatchedTailored.push(t);
+  for (const [key, tailoredGroup] of tailoredGroups) {
+    seenKeys.add(key);
+    const cvGroup = cvGroups.get(key);
+
+    if (!cvGroup) {
+      unmatchedTailored.push(...tailoredGroup);
       continue;
     }
-    seenKeys.add(key);
+
+    if (cvGroup.length > 1 || tailoredGroup.length > 1) {
+      ambiguous.push({
+        company: cvGroup[0].company,
+        dates: cvGroup[0].dates,
+        cvTitles: cvGroup.map(e => e.title),
+        tailoredTitles: tailoredGroup.map(e => e.title),
+      });
+      continue;
+    }
+
+    const cvEntry = cvGroup[0];
+    const t = tailoredGroup[0];
     const pair = {
       company: cvEntry.company,
       dates: cvEntry.dates,
@@ -202,9 +236,11 @@ export function checkTitles(cvEntries, tailoredEntries) {
     }
   }
 
-  const unmatchedCv = cvEntries.filter(e => !seenKeys.has(matchKey(e.company, e.dates)));
+  for (const [key, cvGroup] of cvGroups) {
+    if (!seenKeys.has(key)) unmatchedCv.push(...cvGroup);
+  }
 
-  return { matched, mismatches, unmatchedTailored, unmatchedCv };
+  return { matched, mismatches, ambiguous, unmatchedTailored, unmatchedCv };
 }
 
 // ── Self-test ────────────────────────────────────────────────────────
@@ -283,6 +319,52 @@ function runSelfTest() {
   const caseOnlyResult = checkTitles(cvEntries, parseTailoredExperience(caseOnlyPayload));
   eq('case/whitespace-only title differences are not a mismatch', caseOnlyResult.mismatches.length, 0);
 
+  // Duplicate {company, dates} key IN cv.md (two different jobs, same range —
+  // malformed but possible): must be reported as ambiguous, never resolved by
+  // silently picking one cv.md entry and hiding the other.
+  const dupCvText = `
+# CV -- Jane Doe
+
+## Work Experience
+
+### Acme Corp -- Remote
+
+**Senior Software Engineer**
+2020-2024
+
+- Did things
+
+### Acme Corp -- Remote
+
+**Contractor**
+2020-2024
+
+- Did other things
+`;
+  const dupCvEntries = parseCvExperience(dupCvText);
+  eq('parses both duplicate-key cv.md entries (neither is dropped)', dupCvEntries.length, 2);
+  const dupCvPayload = { experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2020-2024' }] };
+  const dupCvResult = checkTitles(dupCvEntries, parseTailoredExperience(dupCvPayload));
+  eq('a cv.md-side duplicate key is reported as ambiguous', dupCvResult.ambiguous.length, 1);
+  eq('an ambiguous cv.md-side key is not silently matched', dupCvResult.matched.length, 0);
+  eq('an ambiguous cv.md-side key is not silently reported as a mismatch either', dupCvResult.mismatches.length, 0);
+  eq('the ambiguous group carries both cv.md titles', dupCvResult.ambiguous[0]?.cvTitles.sort(), ['Contractor', 'Senior Software Engineer']);
+
+  // Duplicate {company, dates} key on the TAILORED-CV side (e.g. the payload
+  // accidentally lists the same job twice, or two distinct roles collapsed
+  // onto the same dates): also ambiguous, never resolved by picking one.
+  const dupTailoredPayload = {
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2020-2024' },
+      { company: 'Acme Corp', role: 'Engineering Lead', dates: '2020-2024' },
+    ],
+  };
+  const dupTailoredResult = checkTitles(cvEntries, parseTailoredExperience(dupTailoredPayload));
+  eq('a tailored-CV-side duplicate key is reported as ambiguous', dupTailoredResult.ambiguous.length, 1);
+  eq('an ambiguous tailored-CV-side key is not silently matched', dupTailoredResult.matched.length, 0);
+  eq('an ambiguous tailored-CV-side key is not silently reported as a mismatch either', dupTailoredResult.mismatches.length, 0);
+  eq('the ambiguous group carries both tailored titles', dupTailoredResult.ambiguous[0]?.tailoredTitles.sort(), ['Engineering Lead', 'Senior Software Engineer']);
+
   console.log(`\ncv-title-check self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }
@@ -332,6 +414,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           console.log(`\n  ${m.company} (${m.dates})`);
           console.log(`    cv.md:        "${m.cvTitle}"`);
           console.log(`    tailored CV:  "${m.tailoredTitle}"`);
+        }
+      }
+      if (result.ambiguous.length > 0) {
+        console.log(`\n⚠️  ${result.ambiguous.length} ambiguous {company, dates} key(s) — multiple entries on one or both sides, not auto-resolved:`);
+        for (const a of result.ambiguous) {
+          console.log(`\n  ${a.company} (${a.dates})`);
+          console.log(`    cv.md titles:        ${a.cvTitles.map(t => `"${t}"`).join(', ')}`);
+          console.log(`    tailored CV titles:  ${a.tailoredTitles.map(t => `"${t}"`).join(', ')}`);
         }
       }
       if (result.unmatchedTailored.length > 0) {
