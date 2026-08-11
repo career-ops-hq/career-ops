@@ -18,8 +18,23 @@ import path from "node:path";
 // has already committed — turning a ledger problem into a failed status change
 // would be strictly worse than losing one history row.
 
+// Not every value has a string form: a null-prototype object has no toString,
+// so String() on it throws rather than returning something to inspect. Both
+// checks below run before the try, so an unguarded conversion would leave the
+// helper by exception. Treat "cannot be converted" as "not writable".
+const asText = (v) => {
+  try {
+    return String(v);
+  } catch {
+    return null;
+  }
+};
+
 /** A field is safe when it cannot shift the columns of a TSV row. */
-const isSafeField = (v) => !/[\t\r\n]/.test(String(v));
+const isSafeField = (v) => {
+  const text = asText(v);
+  return text !== null && !/[\t\r\n]/.test(text);
+};
 
 // True only when YYYY-MM-DD names a day that exists. A shape check alone admits
 // "2026-02-30" and "2026-13-40", and every reader of the ledger treats whatever
@@ -30,9 +45,11 @@ const isSafeField = (v) => !/[\t\r\n]/.test(String(v));
 // A twin of isRealCalendarDate() in followup-cadence.mjs, not an import of it:
 // Turbopack's root is pinned to web/ (next.config.mjs) and refuses modules
 // outside it, so a repo-root module cannot be imported at build time here. That
-// is the same constraint tracker-table.mjs documents.
+// is the same constraint tracker-table.mjs documents. The one difference is the
+// typeof test, which stands in for the original's String() so that a value with
+// no string form is rejected rather than throwing.
 const isRealCalendarDate = (iso) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ""))) return false;
+  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
   const [y, mo, d] = iso.split("-").map(Number);
   if (mo < 1 || mo > 12 || d < 1) return false;
   // setUTCFullYear rather than Date.UTC: Date.UTC maps years 0-99 onto

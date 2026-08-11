@@ -172,6 +172,29 @@ test("appendStatusTransition: an impossible or malformed date is rejected, not w
   }
 });
 
+test("appendStatusTransition: a value with no primitive form is rejected, not thrown", () => {
+  // Given a value that cannot be converted to a string at all: a null-prototype
+  // object has no toString, so String() on it throws. Both the date check and
+  // the column check run before the try, so an unguarded conversion escapes the
+  // helper entirely, which is the one thing it promises not to do.
+  for (const field of ["date", "num", "from", "source"]) {
+    const tracker = fixture();
+
+    // When one is submitted in any of the inspected columns
+    const res = appendStatusTransition({
+      trackerFile: tracker,
+      num: 1,
+      from: "Evaluated",
+      to: "Applied",
+      [field]: Object.create(null),
+    });
+
+    // Then it comes back reported, like every other rejected input
+    assert.deepEqual(res, { logged: false, reason: "invalid-field" }, `field: ${field}`);
+    assert.equal(fs.existsSync(ledgerFor(tracker)), false);
+  }
+});
+
 test("appendStatusTransition: values containing a tab or newline are rejected, not written", () => {
   // Given a status that would break the TSV row apart
   const tracker = fixture();
