@@ -4,6 +4,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { appendStatusTransition } from "@/lib/core/status-log.mjs";
 
 // Writeback: UPDATE the status cell of an EXISTING tracker row only. Never adds
 // rows — per the core data contract, new rows go through the TSV + merge flow.
@@ -52,12 +53,14 @@ export async function POST(req: Request) {
   }
 
   let changed = false;
+  let prevStatus = "";
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim().startsWith("|")) continue;
     const parts = lines[i].split("|");
     if (parts.length < 8) continue;
     if (parts[1].trim() !== String(n)) continue;
     if (statusIdx >= parts.length - 1) continue; // guard malformed row
+    prevStatus = parts[statusIdx].trim(); // captured before the overwrite, for the ledger
     parts[statusIdx] = ` ${canon} `;
     lines[i] = parts.join("|");
     changed = true;
@@ -70,5 +73,20 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, status: canon });
+
+  // Record the transition in the ledger set-status.mjs already writes, so the
+  // history is the same whether a row was moved from the CLI or from here.
+  // Canonicalize the previous value first: an aliased cell ("aplicado", "sent")
+  // must not read as a transition when it already means the new status.
+  // Observation-only — the tracker write above has committed, so a ledger
+  // failure is reported alongside the successful change, never as a failure.
+  const { logged } = appendStatusTransition({
+    trackerFile: file,
+    num: n,
+    from: canonicalizeStatus(prevStatus) ?? prevStatus,
+    to: canon,
+    source: "web",
+  });
+
+  return NextResponse.json({ ok: true, status: canon, statusLogged: logged });
 }
