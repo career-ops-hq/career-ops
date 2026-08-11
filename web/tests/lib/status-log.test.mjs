@@ -119,24 +119,22 @@ test("appendStatusTransition: defaults the date to today when none is given", ()
   assert.equal(date, new Date().toISOString().slice(0, 10));
 });
 
-test("appendStatusTransition: an unwritable ledger never throws", () => {
-  // Given a tracker whose directory cannot be written to
-  const tracker = fixture();
-  const dir = path.dirname(tracker);
-  fs.chmodSync(dir, 0o500);
+test("appendStatusTransition: a ledger that cannot be written never throws", () => {
+  // Given a tracker path inside a directory that does not exist, so the append
+  // cannot succeed. (Permissions are not used to provoke this: chmod does not
+  // restrict directory writes on Windows, so a mode-based fixture passes on
+  // POSIX and fails on CI.)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "status-log-"));
+  const tracker = path.join(dir, "no-such-dir", "applications.md");
 
-  try {
-    // When the append fails
-    const res = appendStatusTransition({ trackerFile: tracker, num: 2, from: "Evaluated", to: "Applied" });
+  // When the append fails
+  const res = appendStatusTransition({ trackerFile: tracker, num: 2, from: "Evaluated", to: "Applied" });
 
-    // Then it reports the failure instead of raising — the status write has
-    // already committed, and a ledger problem must never surface as a failed
-    // status change
-    assert.equal(res.logged, false);
-    assert.match(res.reason, /^error:/);
-  } finally {
-    fs.chmodSync(dir, 0o700);
-  }
+  // Then it reports the failure instead of raising — the status write has
+  // already committed, and a ledger problem must never surface as a failed
+  // status change
+  assert.equal(res.logged, false);
+  assert.match(res.reason, /^error:/);
 });
 
 test("appendStatusTransition: values containing a tab or newline are rejected, not written", () => {
