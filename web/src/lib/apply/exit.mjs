@@ -37,3 +37,19 @@ export function resolveReturnPath(from) {
   if (pathname === "/apply") return DEFAULT_RETURN_PATH;
   return path;
 }
+
+/**
+ * What to do with an apply-session result that arrived after the user left.
+ *
+ * Leaving mid-open is now reachable (Back works while the form is still
+ * opening), and the request in flight cannot be recalled. A stale result must
+ * not repopulate the page the user walked away from, and if it opened a session
+ * anyway that session has to be closed here: nothing else holds its id, so the
+ * headless browser behind it would keep running.
+ *
+ * @returns {"apply"|"close"|"discard"}
+ */
+export function resolveLateSession({ stale, sessionId } = {}) {
+  if (!stale) return "apply";
+  return sessionId ? "close" : "discard";
+}

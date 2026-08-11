@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { needsLeaveConfirmation, resolveReturnPath, DEFAULT_RETURN_PATH } from "../../src/lib/apply/exit.mjs";
+import { needsLeaveConfirmation, resolveReturnPath, resolveLateSession, DEFAULT_RETURN_PATH } from "../../src/lib/apply/exit.mjs";
 
 test("needsLeaveConfirmation: no confirm when the form was only glanced at", () => {
   // Given a form that was read but never answered, with nothing running
@@ -129,6 +129,35 @@ test("resolveReturnPath: refuses to send Apply back to itself", () => {
 
     // Then back is a real exit, not a no-op reload
     assert.equal(target, DEFAULT_RETURN_PATH, `expected ${from} to be refused`);
+  }
+});
+
+test("resolveLateSession: a result for the session still on screen is applied", () => {
+  // Given a session response that came back before the user went anywhere
+  const action = resolveLateSession({ stale: false, sessionId: "sess-1" });
+
+  // Then it populates the page as normal
+  assert.equal(action, "apply");
+});
+
+test("resolveLateSession: a session that opened after the user left is closed", () => {
+  // Given the user pressed Back while the form was still opening, and the
+  // session came back afterwards carrying a live headless browser
+  const action = resolveLateSession({ stale: true, sessionId: "sess-1" });
+
+  // Then it is closed. Dropping the result is not enough: nothing else knows
+  // this session exists, so the browser it opened would run until the machine
+  // is rebooted.
+  assert.equal(action, "close");
+});
+
+test("resolveLateSession: a late failure with no session opens nothing to close", () => {
+  // Given the user left and the request came back without a session id
+  for (const sessionId of [undefined, null, ""]) {
+    const action = resolveLateSession({ stale: true, sessionId });
+
+    // Then there is nothing to close, and nothing to apply
+    assert.equal(action, "discard", `expected discard for ${JSON.stringify(sessionId)}`);
   }
 });
 

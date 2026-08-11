@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
+import { resolveLateSession } from "@/lib/apply/exit.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
 type Meta = { needsConfirmation?: boolean };
@@ -41,6 +42,12 @@ export function useApply(): ApplyCtx {
   return c;
 }
 
+/** Release the headless browser behind a session id. Fire-and-forget: the page
+ *  is usually navigating away as this goes out, hence keepalive. */
+function closeSession(id: string) {
+  void fetch("/api/apply/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }), keepalive: true }).catch(() => {});
+}
+
 const CONFIG_KEY = "career-ops:config";
 function cliId(): string | null {
   try {
@@ -72,6 +79,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   fieldsRef.current = fields;
   const answersRef = useRef<Record<string, string>>({});
   answersRef.current = answers;
+  // Bumped every time a session is abandoned or replaced. Leaving the page is
+  // reachable while a request or stream is still in flight, and none of them can
+  // be recalled, so each one carries the generation it started in and drops its
+  // results if that generation is no longer current.
+  const generation = useRef(0);
   // When a session opens with {prefill:true}, auto-fire prefill once fields are
   // ready — driven by an effect (not a fragile setTimeout) so it can't race the
   // session response or a navigation.
@@ -80,9 +92,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // Stream the agentic drive (the AI reaching the form live) and finalize the
   // session when it succeeds → fields ready → auto-prefill fires.
   const drive = useCallback(async (id: string) => {
+    const gen = generation.current;
     setDriveSteps([]);
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
+      if (generation.current !== gen) return; // left mid-drive
       if (!r.body) {
         setError("The agent couldn't start.");
         setStatus("error");
@@ -95,6 +109,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-drive
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -132,6 +147,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => {
+    const gen = ++generation.current;
     setStatus("opening");
     setError("");
     setFields([]);
@@ -150,6 +166,14 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
       const d = await r.json();
+      // The user can leave while this is in flight, and the request can't be
+      // recalled — a session that lands after they left is closed here or its
+      // headless browser runs forever, unreferenced.
+      const late = resolveLateSession({ stale: generation.current !== gen, sessionId: d.id });
+      if (late !== "apply") {
+        if (late === "close") closeSession(d.id);
+        return;
+      }
       if (d.error) {
         setError(d.error);
         setStatus("error");
@@ -176,6 +200,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const prefill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     if (!cliId()) {
       setError("Configure a CLI in Config first, then pre-fill from your CV.");
       return;
@@ -208,6 +233,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-prefill
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -301,6 +327,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // escalation when deterministic fill fails, or on demand.
   const agentFill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     const fs = fieldsRef.current;
     const a = answersRef.current;
     const ans = fs.filter((f) => f.type !== "file" && (a[f.id] || "").trim()).map((f) => ({ label: f.label || f.id, value: a[f.id] }));
@@ -320,6 +347,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-fill
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -351,10 +379,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   agentFillRef.current = agentFill;
 
   const reset = useCallback(() => {
-    if (sessionId.current) {
-      const id = sessionId.current;
-      void fetch("/api/apply/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }), keepalive: true }).catch(() => {});
-    }
+    // Invalidate anything still in flight before clearing state, so a response
+    // that lands after this can't repopulate the page the user just left.
+    generation.current += 1;
+    if (sessionId.current) closeSession(sessionId.current);
     sessionId.current = null;
     companyRef.current = "";
     pendingPrefill.current = false;
