@@ -1,5 +1,5 @@
 // tests/providers/themuse.test.mjs — moved verbatim from test-all.mjs (#1440).
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -121,6 +121,8 @@ try {
         if (page === 0) return { results: [sampleResults[0]], page: 0, page_count: 2 };
         return { results: [page1Result], page: 1, page_count: 2 };
       },
+      // no-op so the inter-page delay doesn't slow the test suite down
+      sleep: async () => {},
     },
   );
   if (paginationCalls.length === 2 &&
@@ -137,7 +139,11 @@ try {
   let cappedCalls = 0;
   await themuse.fetch(
     { name: 'X', provider: 'themuse' },
-    { fetchJson: async () => { cappedCalls++; return { results: [], page: 0, page_count: 99999 }; } },
+    {
+      fetchJson: async () => { cappedCalls++; return { results: [], page: 0, page_count: 99999 }; },
+      // no-op so 99 inter-page delays don't slow the test suite down
+      sleep: async () => {},
+    },
   );
   if (cappedCalls === 100) pass('themuse.fetch() clamps page_count to 100 (prevents unbounded requests)');
   else fail(`themuse.fetch() made ${cappedCalls} requests for page_count=99999 (expected 100)`);
@@ -162,6 +168,93 @@ try {
   }
   if (badResponseThrew) pass('themuse.fetch() throws on unexpected API response shape');
   else fail('themuse.fetch() should throw when results array is absent');
+
+  // fetch() retry — a 429 that succeeds on a later attempt is transparent to
+  // the caller (no jobs lost, no error surfaced) and respects Retry-After.
+  {
+    let attempts = 0;
+    const sleepCalls = [];
+    const jobs = await themuse.fetch(
+      { name: 'The Muse Board', provider: 'themuse' },
+      {
+        fetchJson: async () => {
+          attempts++;
+          if (attempts === 1) { const err = new Error('HTTP 429'); err.status = 429; err.retryAfter = '1'; throw err; }
+          return { results: [sampleResults[0]], page: 0, page_count: 1 };
+        },
+        sleep: async (ms) => { sleepCalls.push(ms); },
+      },
+    );
+    if (attempts === 2 && jobs.length === 1 && jobs[0].title === 'Staff AI Engineer') {
+      pass('themuse.fetch() retries a 429 and recovers transparently');
+    } else {
+      fail(`themuse 429 retry: attempts=${attempts}, jobs=${JSON.stringify(jobs)}`);
+    }
+    if (sleepCalls[0] === 1000) {
+      pass('themuse.fetch() honors Retry-After header for backoff delay');
+    } else {
+      fail(`themuse retry-after: expected first backoff delay 1000ms, got ${JSON.stringify(sleepCalls)}`);
+    }
+  }
+
+  // fetch() retry exhaustion — a page that fails every retry attempt must
+  // NOT discard jobs already gathered from earlier pages, and must warn
+  // rather than throw.
+  {
+    let calls = 0;
+    const { result: jobs, errors } = await captureConsoleErrors(() =>
+      themuse.fetch(
+        { name: 'The Muse Board', provider: 'themuse' },
+        {
+          fetchJson: async (url) => {
+            calls++;
+            const page = parseInt(new URL(url).searchParams.get('page') ?? '0', 10);
+            if (page === 0) return { results: [sampleResults[0]], page: 0, page_count: 3 };
+            const err = new Error('HTTP 503'); err.status = 503; throw err; // every page 1+ call fails
+          },
+          sleep: async () => {},
+        },
+      ),
+    );
+    // page 0 (1 call) + page 1 retried MAX_RETRIES+1=4 times, then truncates before page 2
+    if (calls === 5) pass('themuse.fetch() stops retrying a page after exhausting attempts');
+    else fail(`themuse retry exhaustion: expected 5 fetchJson calls, got ${calls}`);
+    if (jobs.length === 1 && jobs[0].title === 'Staff AI Engineer') {
+      pass('themuse.fetch() preserves jobs already gathered when a later page exhausts retries');
+    } else {
+      fail(`themuse retry exhaustion: expected 1 preserved job, got ${JSON.stringify(jobs.map(j => j.title))}`);
+    }
+    if (errors.some(e => /truncated at page 1 of 3/.test(e) && /1 jobs gathered so far/.test(e))) {
+      pass('themuse.fetch() warns (does not throw) when a page exhausts retries');
+    } else {
+      fail(`themuse retry exhaustion: expected a truncation warning, got ${JSON.stringify(errors)}`);
+    }
+  }
+
+  // fetch() retry — a non-retryable error (e.g. 404) breaks immediately
+  // without wasting retry attempts, but still preserves earlier pages.
+  {
+    let calls = 0;
+    const { result: jobs } = await captureConsoleErrors(() =>
+      themuse.fetch(
+        { name: 'The Muse Board', provider: 'themuse' },
+        {
+          fetchJson: async (url) => {
+            calls++;
+            const page = parseInt(new URL(url).searchParams.get('page') ?? '0', 10);
+            if (page === 0) return { results: [sampleResults[0]], page: 0, page_count: 2 };
+            const err = new Error('HTTP 404'); err.status = 404; throw err;
+          },
+          sleep: async () => {},
+        },
+      ),
+    );
+    if (calls === 2 && jobs.length === 1) {
+      pass('themuse.fetch() does not retry a non-retryable error, but preserves earlier pages');
+    } else {
+      fail(`themuse non-retryable: calls=${calls}, jobs=${JSON.stringify(jobs.map(j => j.title))}`);
+    }
+  }
 
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
