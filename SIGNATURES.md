@@ -117,3 +117,4 @@ public commit with a stated reason.
 - @raghavrallan | Raghav Rallan | 2026-08-08 | id:168067295 | src:https://github.com/santifer/career-ops/discussions/2622 | n:69
 - @iyousif | Yousif Anwar | 2026-08-09 | "Makes the world a better place. One update at a time!" | id:18438102 | src:https://github.com/santifer/career-ops/discussions/2638 | n:70
 - @Honeypanchi | 2026-08-10 | "Garv Sajnani" | id:146434822 | src:https://github.com/santifer/career-ops/discussions/2660 | n:71
+- more than a job search: one local tool that runs the whole pipeline — and a search you can audit is one you can actually win
