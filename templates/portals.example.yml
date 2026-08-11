@@ -635,6 +635,9 @@ search_queries:
 #   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
+#                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
+#                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #
@@ -722,6 +725,19 @@ search_queries:
 #   siteNumber: CX_1002    # the site number after /sites/ (JPMC's external site)
 #   # locationId: 300000000123456   # optional — some tenants (BNY, Amex) need it to scope results
 #   max_pages: 25
+#   enabled: true
+#
+# - name: Example Eightfold Co
+#   # Eightfold AI talent-acquisition board. Auto-detects any *.eightfold.ai
+#   # tenant host. A branded CNAME (careers.exampleco.com) is NOT matched — the
+#   # API is host-pinned, so point careers_url (or api:) at the eightfold.ai form.
+#   careers_url: https://exampleco.eightfold.ai/careers
+#   # domain: exampleco.com  # optional — the server infers it from the tenant
+#                            # host; set it only for multi-brand tenants that
+#                            # scope their board by domain.
+#   max_pages: 200         # optional page cap. The API caps a page at 10 rows
+#                          # no matter what, so 200 pages ≈ 2000 postings
+#                          # (default 200, max 1000). Raise it for a huge board.
 #   enabled: true
 #
 # - name: Example Avature Co
