@@ -168,7 +168,12 @@ async function cmdRun(args) {
 
   if (hook === 'export') {
     const snapshot = buildSnapshot();
-    const results = await runHook('export', snapshot, { root: ROOT, dryRun });
+    // Export upserts one-by-one over the network (query + create/update per
+    // row), so the default 15s hook timeout only covers a handful of rows.
+    // Scale with tracker size so a growing applications.md doesn't age out.
+    const rowCount = snapshot.applications.length + snapshot.pipeline.length;
+    const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
+    const results = await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs });
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
       else console.log(`${r.id} export: failed — ${r.error}`);
