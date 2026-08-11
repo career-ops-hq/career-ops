@@ -21,6 +21,28 @@ import path from "node:path";
 /** A field is safe when it cannot shift the columns of a TSV row. */
 const isSafeField = (v) => !/[\t\r\n]/.test(String(v));
 
+// True only when YYYY-MM-DD names a day that exists. A shape check alone admits
+// "2026-02-30" and "2026-13-40", and every reader of the ledger treats whatever
+// is in the date column as a real date. Round-tripping through a UTC Date and
+// comparing the parts back catches out-of-range months as well as month-length
+// and leap-year violations, which a range check misses.
+//
+// A twin of isRealCalendarDate() in followup-cadence.mjs, not an import of it:
+// Turbopack's root is pinned to web/ (next.config.mjs) and refuses modules
+// outside it, so a repo-root module cannot be imported at build time here. That
+// is the same constraint tracker-table.mjs documents.
+const isRealCalendarDate = (iso) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ""))) return false;
+  const [y, mo, d] = iso.split("-").map(Number);
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  // setUTCFullYear rather than Date.UTC: Date.UTC maps years 0-99 onto
+  // 1900-1999, which would reject a literal ISO year below 0100.
+  const dt = new Date(0);
+  dt.setUTCFullYear(y, mo - 1, d);
+  dt.setUTCHours(0, 0, 0, 0);
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+};
+
 /**
  * Append one transition to the ledger beside `trackerFile`.
  *
@@ -30,13 +52,25 @@ const isSafeField = (v) => !/[\t\r\n]/.test(String(v));
  * @param {string}  args.from         Previous status (canonicalized by the caller).
  * @param {string}  args.to           New status (canonicalized by the caller).
  * @param {string} [args.source]      What performed the change. Defaults to "web".
- * @param {string} [args.date]        Event date YYYY-MM-DD. Defaults to today.
+ * @param {string} [args.date]        Event date YYYY-MM-DD, a real calendar day. Defaults to today.
  * @returns {{logged: boolean, reason?: string}} Never throws.
  */
-export function appendStatusTransition({ trackerFile, num, from, to, source = "web", date }) {
+export function appendStatusTransition({ trackerFile, num, from, to, source = "web", date } = {}) {
   const eventDate = date ?? new Date().toISOString().slice(0, 10);
 
-  for (const field of [num, from, to, source, eventDate]) {
+  // Without this, a missing path throws out of path.dirname() below — outside
+  // the try, so no caller sees a result. "Never throws" has to hold for a
+  // caller's own mistake too, because by then the status write has committed.
+  if (typeof trackerFile !== "string" || !trackerFile) {
+    return { logged: false, reason: "invalid-field" };
+  }
+
+  // The date is held to its documented format rather than the generic check:
+  // it is the only column with one, and a date that cannot be parsed back is
+  // worse than an absent row because funnel-velocity.mjs still counts it.
+  if (!isRealCalendarDate(eventDate)) return { logged: false, reason: "invalid-field" };
+
+  for (const field of [num, from, to, source]) {
     if (!isSafeField(field)) return { logged: false, reason: "invalid-field" };
   }
 

@@ -137,6 +137,41 @@ test("appendStatusTransition: a ledger that cannot be written never throws", () 
   assert.match(res.reason, /^error:/);
 });
 
+test("appendStatusTransition: a call with missing arguments reports instead of throwing", () => {
+  // Given a caller that omits the arguments entirely, and one that omits only
+  // the tracker path
+
+  // When each is invoked
+  // Then both report the failure. "Never throws" has to hold for a caller bug
+  // too: the API route destructures the result after its tracker write has
+  // already committed, so an exception here would surface a completed status
+  // change as a 500.
+  assert.deepEqual(appendStatusTransition(), { logged: false, reason: "invalid-field" });
+  assert.deepEqual(appendStatusTransition({ num: 1, from: "Evaluated", to: "Applied" }), {
+    logged: false,
+    reason: "invalid-field",
+  });
+});
+
+test("appendStatusTransition: an impossible or malformed date is rejected, not written", () => {
+  // Given dates that pass a tab/newline check but do not name a real day —
+  // a rolled-over day, an out-of-range month, free text, and an empty string
+  for (const date of ["2026-02-30", "2026-13-40", "not-a-date", ""]) {
+    const tracker = fixture();
+
+    // When one is submitted
+    const res = appendStatusTransition({ trackerFile: tracker, num: 6, from: "Evaluated", to: "Applied", date });
+
+    // Then nothing is written. The ledger is the only record of WHEN a
+    // transition happened, and funnel-velocity.mjs measures elapsed time from
+    // this column — a date that cannot be parsed back is worse than a missing
+    // row, because it is counted as real.
+    assert.equal(res.logged, false, `expected ${JSON.stringify(date)} to be rejected`);
+    assert.equal(res.reason, "invalid-field");
+    assert.equal(fs.existsSync(ledgerFor(tracker)), false);
+  }
+});
+
 test("appendStatusTransition: values containing a tab or newline are rejected, not written", () => {
   // Given a status that would break the TSV row apart
   const tracker = fixture();
