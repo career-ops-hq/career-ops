@@ -660,11 +660,18 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
-#   phenom          *.phenompeople.com  (branded hosts like careers.allianz.com need provider: phenom explicitly)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
 # bypass detect(). The `provider:` field wins over auto-detection.
+#
+# phenom has no detect() at all — every tenant runs on its own branded
+# domain, and every legacy <tenant>.phenompeople.com host we've found
+# permanently redirects to that branded domain (which this provider's
+# fetch() can't follow), so there's no URL pattern worth auto-claiming.
+# Always set `provider: phenom` + `careers_url` pointed at the branded
+# origin (the /widgets endpoint lives on that same origin, so no separate
+# `api:` is needed).
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
@@ -768,9 +775,9 @@ search_queries:
 #
 # - name: Example Phenom Co
 #   # Phenom People "CareerConnect" career site — the branded per-company
-#   # domain many large enterprises run. Branded hosts carry no "phenom"
-#   # token, so provider: phenom must be set explicitly; only literal
-#   # *.phenompeople.com hosts auto-detect.
+#   # domain many large enterprises run. No auto-detection (no reliable
+#   # URL pattern to key on), so provider: phenom must always be set
+#   # explicitly.
 #   careers_url: https://careers.exampleco.com
 #   provider: phenom
 #   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 300) —

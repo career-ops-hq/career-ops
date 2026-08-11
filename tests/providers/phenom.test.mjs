@@ -25,18 +25,12 @@ try {
   if (phDefault && phDefault.lang === 'en_global' && phDefault.country === 'global' && phDefault.urlPrefix === 'global/en') pass('phenom.resolveConfig() applies en_global/global/urlPrefix defaults');
   else fail(`phenom.resolveConfig() defaults wrong: ${JSON.stringify(phDefault)}`);
 
-  // detect — hostname-anchored (not a raw-string regex): only literal
-  // *.phenompeople.com; branded tenants wire explicitly. A URL that merely
-  // contains "phenompeople.com" in its path/query on a different host must
-  // NOT match.
-  if (phenom.detect({ api: 'https://x.phenompeople.com/y' })) pass('phenom.detect() matches *.phenompeople.com');
-  else fail('phenom.detect() should match phenompeople.com');
-  if (phenom.detect({ careers_url: 'https://careers.exampleco.com' }) === null) pass('phenom.detect() returns null for branded hosts (wire explicitly)');
-  else fail('phenom.detect() should not auto-claim a branded host');
-  if (phenom.detect({ careers_url: 'https://evil.com/x?y=phenompeople.com' }) === null) pass('phenom.detect() rejects a host that merely contains "phenompeople.com" in path/query');
-  else fail('phenom.detect() should check the hostname, not the raw URL string');
-  if (phenom.detect({ careers_url: 'https://phenompeople.com.evil.com/x' }) === null) pass('phenom.detect() rejects suffix-spoofed host');
-  else fail('phenom.detect() should reject suffix-spoofed host');
+  // No detect(): every known phenompeople.com tenant host permanently
+  // redirects to its own branded domain, which this provider's fetch()
+  // can't follow (redirect: 'error') — so there is no URL pattern worth
+  // auto-claiming. A tenant is always wired with an explicit `provider: phenom`.
+  if (typeof phenom.detect !== 'function') pass('phenom has no detect() — always selected via explicit provider: phenom');
+  else fail('phenom should not define detect()');
 
   // slugify — strips umlauts and specials, collapses to hyphens.
   if (slugify('Sr Economic & Financial Analyst') === 'Sr-Economic-Financial-Analyst') pass('phenom.slugify() collapses specials to hyphens');

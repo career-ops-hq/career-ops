@@ -33,9 +33,15 @@ import { fetchJsonWithRetry } from './_http.mjs';
 //     urlPrefix: global/en   # public job-page path prefix (default global/en)
 //     selectedFields: { country: ["Germany"] }   # optional facet filter
 //
-// Detection: branded hosts carry no "phenom" token, so detect() only auto-claims
-// literal *.phenompeople.com URLs; branded tenants are wired with an explicit
-// `provider: phenom` (which bypasses detect()).
+// No auto-detection: every tenant we've found (Marsh McLennan, Baker Hughes,
+// Omnicable, KCE, ...) permanently 301-redirects its legacy
+// <tenant>.phenompeople.com host to its own branded domain, and this
+// provider's fetch() uses `redirect: 'error'` (never follows a redirect), so
+// even matching that legacy host would still fail to fetch. There is no
+// known live tenant reachable via a phenompeople.com URL. Always wire a
+// tenant with an explicit `provider: phenom` + `careers_url` pointed at its
+// branded origin (the /widgets endpoint lives on that same origin, so no
+// separate `api:` is needed).
 
 const PAGE_SIZE = 100; // max the widget serves per page (verified)
 
@@ -146,19 +152,6 @@ export function resolveMaxPages(entry) {
 /** @type {Provider} */
 export default {
   id: 'phenom',
-
-  detect(entry) {
-    const url = entry.api || entry.careers_url || '';
-    if (typeof url !== 'string') return null;
-    let host;
-    try {
-      host = new URL(url).hostname.toLowerCase();
-    } catch {
-      return null;
-    }
-    if (host === 'phenompeople.com' || host.endsWith('.phenompeople.com')) return { url };
-    return null;
-  },
 
   async fetch(entry, ctx) {
     const cfg = resolveConfig(entry);
