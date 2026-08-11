@@ -20,6 +20,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
+import { buildTailoringHintBlock } from './role-tailoring-hints.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -121,10 +122,12 @@ const companySlug = match ? match[1] : 'unknown-company';
 // Extract role from report header (e.g., "# Evaluation: Company - Role Title")
 let roleSlug = 'role';
 const roleMatch = reportText.match(/^#\s+Evaluation:\s+[^-]+\s+-\s+(.+?)$/m);
+const roleTitle = roleMatch && roleMatch[1] ? roleMatch[1].trim() : '';
 if (roleMatch && roleMatch[1]) {
   roleSlug = roleMatch[1]
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
+const roleTailoringHints = buildTailoringHintBlock({ roleTitle, jdText, reportText });
 
 // ---------------------------------------------------------------------------
 // Endpoint + security guard.
@@ -221,6 +224,7 @@ ${profileContent}
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS SESSION
 ═══════════════════════════════════════════════════════
+${roleTailoringHints ? `${roleTailoringHints}\n` : ''}
 1. NEVER invent skills, metrics, or experience the candidate does not have.
 2. Inject keywords naturally by reformulating the real experience using JD vocabulary.
 3. Apply the 6-second clarity gate: strongest matching evidence first.

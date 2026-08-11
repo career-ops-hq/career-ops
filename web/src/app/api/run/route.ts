@@ -28,6 +28,12 @@ Target: ${input}`;
     return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
+   If the report/JD indicates an HR, People, Employee Success, Talent, Total Rewards, Compensation, Benefits, Workforce Planning, or People Analytics role, you MUST apply this override:
+   - default to the HR-adjacent / business-partner narrative rather than the generic strategy/ops narrative
+   - prioritize workforce analytics, executive advisory, org support, talent-cycle support, stakeholder coaching, compensation/benefits context, and leadership decision support when truthfully supported
+   - suppress unrelated technical or project sections unless the JD makes them central
+   - exclude unrelated AI/agentic/homelab/project material by default
+   - apply a hard negative filter: exclude plausible but distracting content that does not improve fit for a People-function reader
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to /tmp/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
 4. Render the PDF: \`node generate-pdf.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
 5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
