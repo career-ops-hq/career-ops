@@ -24,6 +24,7 @@ output/*
 batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
+batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep

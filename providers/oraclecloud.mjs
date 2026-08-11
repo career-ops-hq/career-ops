@@ -10,6 +10,14 @@
 //   <tenant>.fa.oraclecloud.com
 //   <tenant>.fa.<region>.oraclecloud.com   (e.g. us2)
 //   <tenant>.fa.ocs.oraclecloud.com
+//   ...and the same three shapes on the numbered apex `oraclecloud<NN>.com`
+//   that Oracle issues to newer tenants (observed live: a Fusion board on
+//   `<tenant>.fa.ocs.oraclecloud26.com` whose unnumbered `oraclecloud.com`
+//   sibling host does not resolve at all).
+//
+// The numeric suffix is BOUNDED (1-99), not open-ended: this regex exists to
+// PIN the host before every fetch, so it enumerates a finite apex family and
+// never degrades into `oraclecloud<anything>.com`.
 //
 // Career page URL:
 //   https://<host>/hcmUI/CandidateExperience/<lang>/sites/<siteNumber>/jobs
@@ -36,7 +44,10 @@
 import { decodeEntities } from './_html-entities.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 
-const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud\.com$/i;
+// `oraclecloud(?:[1-9][0-9]?)?` = oraclecloud.com plus oraclecloud1.com …
+// oraclecloud99.com. No leading zero, at most two digits — a bounded family,
+// so this stays a host pin and never becomes a wildcard apex match.
+const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com$/i;
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 25;             // safety cap (~5000 jobs); hard ceiling like workday
@@ -58,7 +69,7 @@ function assertOracleUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`oraclecloud: URL must use HTTPS: ${url}`);
   if (!ORACLE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud.com`);
+    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com`);
   }
   return url;
 }

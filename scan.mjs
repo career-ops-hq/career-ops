@@ -104,16 +104,59 @@ export function compileKeyword(kw) {
   return (lower) => lower.includes(kw);
 }
 
+// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
+// must appear in the title, in any order. `title_filter.positive` is otherwise
+// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
+// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
+// cannot hit inside another word. Either way an entry expresses one exact
+// spelling and nothing else, and real titles vary in separator and word order:
+//
+//   "Director of Engineering" misses  Director - Software Engineering
+//                                     Director Engineering (Mobile Platform)
+//                                     Senior Director, Platform Engineering
+//
+// The combinations are {level} x {, - of none} x {optional domain word}: no
+// hand-maintained list of literal spellings converges, and every miss is
+// silent — the summary reports one "filtered by title" count that cannot tell
+// a well-tuned filter from a leaking one (#2544).
+//
+// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
+// would turn the perfectly ordinary keyword "C++" into "c", which matches
+// almost every title — trading a silent drop for a silent flood.
+const AND_SEPARATOR = /\s+\+\s+/;
+
+/**
+ * Compile one `positive` entry into a matcher.
+ *
+ * Entries without " + " keep their exact previous behaviour, so existing
+ * configs are unaffected.
+ *
+ * @param {string} keyword - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compilePositiveKeyword(keyword) {
+  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
+  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return compileKeyword(keyword);
+  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
+  // still matched on a word boundary and cannot hit "vp" inside another word.
+  const matchers = terms.map(compileKeyword);
+  return (lower) => matchers.every(m => m(lower));
+}
+
 export function buildTitleFilter(titleFilter) {
   // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0)
-    .map(compileKeyword);
-  const positive = normalize(titleFilter?.positive);
-  const negative = normalize(titleFilter?.negative);
+    .map(compile);
+  // AND-groups are a POSITIVE-side feature only. On the negative side an entry
+  // is a veto, and " + " there would read as "reject when both appear", which
+  // is a different and much easier thing to write as two entries.
+  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
+  const negative = normalize(titleFilter?.negative, compileKeyword);
 
   return (title) => {
     const lower = (title || '').toLowerCase();
@@ -133,7 +176,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compileKeyword(k.trim().toLowerCase()) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(k.trim().toLowerCase()) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }

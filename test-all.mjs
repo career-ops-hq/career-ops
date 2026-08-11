@@ -1216,9 +1216,18 @@ for (const f of userFiles) {
 }
 
 const batchRunnerSource = readFile('batch/batch-runner.sh');
-const minScoreSkipIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "skipped"');
-const minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
-const completedStateIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "completed"', minScoreSkipIndex);
+// Match any update_state entrypoint (bare, _retrying, _unlocked) so this asserts
+// the gate's ordering rather than one spelling of the call.
+const SKIPPED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "skipped"/;
+const COMPLETED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "completed"/;
+const minScoreSkipIndex = batchRunnerSource.search(SKIPPED_STATE_WRITE);
+let minScoreReturnIndex = -1;
+let completedStateIndex = -1;
+if (minScoreSkipIndex !== -1) {
+  minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
+  const completedOffset = batchRunnerSource.slice(minScoreSkipIndex).search(COMPLETED_STATE_WRITE);
+  completedStateIndex = completedOffset === -1 ? -1 : minScoreSkipIndex + completedOffset;
+}
 if (
   minScoreSkipIndex !== -1 &&
   minScoreReturnIndex !== -1 &&
@@ -6469,7 +6478,7 @@ try {
 // ── 11b. TITLE FILTER — acronym word boundaries ──────────────────
 console.log('\n11b. Title filter — acronym word boundaries');
 try {
-  const { buildTitleFilter, compileKeyword } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { buildTitleFilter, compileKeyword, matchedTitleKeywords } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // Short all-letter acronyms match on WORD BOUNDARIES, not as substrings.
   const cooFilter = buildTitleFilter({ positive: ['coo'] });
@@ -6495,6 +6504,74 @@ try {
     pass('compileKeyword("cfo") is word-boundary anchored');
   } else {
     fail('compileKeyword("cfo") boundary behavior wrong');
+  }
+
+  // ── AND-groups (#2544) ───────────────────────────────────────────
+  // A positive entry containing " + " requires EVERY term, in any order. The
+  // substring-only list could only express exact spellings, so every variant
+  // it did not literally contain was dropped with no warning.
+  const andFilter = buildTitleFilter({ positive: ['director + engineering', 'vp + engineering'] });
+  const shouldMatch = [
+    'Director - Software Engineering',        // hyphen, not comma
+    'Director Engineering (Mobile Platform)', // no separator at all
+    'Senior Director, Platform Engineering',  // domain word in between
+    'Director of Engineering',                // the literal spelling still works
+    'VP, Software Engineering',
+  ];
+  const missed = shouldMatch.filter((t) => andFilter(t) !== true);
+  if (missed.length === 0) pass('an AND-group matches every separator and word-order variant (#2544)');
+  else fail(`AND-group missed: ${JSON.stringify(missed)}`);
+  if (andFilter('Director of Sales') === false && andFilter('Software Engineer') === false) {
+    pass('an AND-group still requires ALL its terms — one term alone is not enough');
+  } else {
+    fail('AND-group matched a title carrying only one of its terms');
+  }
+
+  // The separator needs surrounding whitespace. A bare split on "+" would turn
+  // the ordinary keyword "C++" into "c", which matches nearly every title —
+  // trading a silent drop for a silent flood.
+  const plusFilter = buildTitleFilter({ positive: ['c++'] });
+  if (plusFilter('C++ Developer') === true && plusFilter('Marketing Manager') === false) {
+    pass('"C++" stays a literal keyword — " + " is the group separator, not "+"');
+  } else {
+    fail('"C++" must not be split into an AND-group');
+  }
+
+  // Short terms inside a group keep compileKeyword's word-boundary rule.
+  const vpGroup = buildTitleFilter({ positive: ['vp + engineering'] });
+  if (vpGroup('VP, Engineering') === true && vpGroup('Revamp Engineering Process') === false) {
+    pass('a short term inside a group is still word-boundary anchored');
+  } else {
+    fail('short term inside an AND-group lost its word boundary');
+  }
+
+  // Existing configs are untouched: no " + " means the old behaviour exactly.
+  const legacy = buildTitleFilter({ positive: ['engineering manager'], negative: ['intern'] });
+  if (legacy('Engineering Manager, Payments') === true
+      && legacy('Engineering Manager Intern') === false
+      && legacy('Manager, Engineering') === false) {
+    pass('an entry without " + " keeps exact substring behaviour (backward compatible)');
+  } else {
+    fail('a plain keyword changed behaviour — the change is not backward compatible');
+  }
+
+  // matchedTitleKeywords reports the group as written, so content_filter
+  // by_title_keyword overrides keep working against the same config strings.
+  const kw = matchedTitleKeywords('Senior Director, Platform Engineering', { positive: ['director + engineering'] });
+  if (JSON.stringify(kw) === JSON.stringify(['director + engineering'])) {
+    pass('matchedTitleKeywords reports an AND-group by its raw config string');
+  } else {
+    fail(`matchedTitleKeywords returned ${JSON.stringify(kw)}`);
+  }
+
+  // Groups are positive-side only: on the negative side an entry is a veto, and
+  // " + " must stay literal there rather than silently becoming "reject when
+  // both appear" — which would veto far more than the user wrote.
+  const negGroup = buildTitleFilter({ positive: [], negative: ['foo + bar'] });
+  if (negGroup('Foo Bar Engineer') === true && negGroup('Widget foo + bar Lead') === false) {
+    pass('" + " in a negative entry stays a literal keyword, not an AND-group');
+  } else {
+    fail('a negative entry containing " + " was parsed as a group');
   }
 
   // A malformed title_filter (null / numeric / empty entries) must not crash.
@@ -7228,6 +7305,89 @@ try {
     const got = cadence.resolveNextOverride(...args);
     if (got === expected) pass(`resolveNextOverride: ${label}`);
     else fail(`resolveNextOverride ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // A pin may carry a trailing `— note` explaining why the date moved. Hand
+  // written pins nearly always do. Anchoring the pattern right after `(set …)`
+  // made those pins silently unparseable, which is the dangerous direction:
+  // the deferral disappears and the row reports overdue again.
+  // All three dash characters the pattern accepts are covered: em dash (what
+  // this project's own docs and logs use), ASCII hyphen (what a plain-text
+  // editor produces), and en dash (what macOS substitution silently turns a
+  // hyphen into). The en-dash case is the one most likely to appear without
+  // the author intending it, so an untested branch there is the easiest
+  // regression to ship.
+  const annotatedPins = cadence.parseNextOverrides([
+    '- next #50 2026-08-11 (set 2026-08-04) — messaged 2026-08-04, give it a week',
+    '- next #51 2026-08-11 (set 2026-08-04) - ascii hyphen note',
+    '- next #52 2026-08-11 — note with no set-date',
+    '- next #53 2026-08-11 (set 2026-08-04) – en-dash note',
+  ].join('\n'));
+  if (annotatedPins.get(50)?.date === '2026-08-11' && annotatedPins.get(50)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: em-dash annotated pin still parses');
+  } else {
+    fail(`annotated pin dropped: ${JSON.stringify(annotatedPins.get(50))}`);
+  }
+  if (annotatedPins.get(51)?.date === '2026-08-11' && annotatedPins.get(52)?.setDate === '2026-08-11') {
+    pass('parseNextOverrides: hyphen notes and annotated set-less pins parse');
+  } else {
+    fail(`annotated pin variants wrong: ${JSON.stringify([annotatedPins.get(51), annotatedPins.get(52)])}`);
+  }
+  if (annotatedPins.get(53)?.date === '2026-08-11' && annotatedPins.get(53)?.setDate === '2026-08-04') {
+    pass('parseNextOverrides: en-dash annotated pin parses');
+  } else {
+    fail(`en-dash annotated pin dropped: ${JSON.stringify(annotatedPins.get(53))}`);
+  }
+
+  // Retire directives: `- cleared #N YYYY-MM-DD — reason` drops one
+  // application out of the cadence without closing the application.
+  const clearedContent = [
+    '| 1 | 60 | 2026-07-20 | Acme | Lead | Email |  | ping |',
+    '- cleared #60 2026-08-04 — no contact on file',
+    '- cleared #61 2026-08-01',
+    '- cleared #61 2026-08-04 — last directive wins',
+    '- cleared #62 2026-13-45 — impossible date',
+  ].join('\n');
+  const clearedMap = cadence.parseClearedDirectives(clearedContent);
+  if (clearedMap.get(60)?.setDate === '2026-08-04' && clearedMap.get(61)?.setDate === '2026-08-04' && !clearedMap.has(62)) {
+    pass('parseClearedDirectives: last directive wins; impossible dates ignored');
+  } else {
+    fail(`cleared parsed wrong: ${JSON.stringify([...clearedMap])}`);
+  }
+  if (cadence.parseFollowupsContent(clearedContent).length === 1) {
+    pass('cleared lines are NOT counted as follow-ups');
+  } else {
+    fail('cleared lines leaked into parseFollowupsContent');
+  }
+  const cleared60 = clearedMap.get(60);
+  const retireCases = [
+    [[cleared60, null], true, 'retired with no follow-ups logged'],
+    [[cleared60, '2026-08-01'], true, 'stays retired when the last touch predates it'],
+    [[cleared60, '2026-08-04'], true, 'same-day tie favors the retirement'],
+    [[cleared60, '2026-08-05'], false, 'a follow-up logged after it revives the cadence'],
+    [[undefined, '2026-08-05'], false, 'no directive → not retired'],
+  ];
+  for (const [args, expected, label] of retireCases) {
+    const got = cadence.isRetired(...args);
+    if (got === expected) pass(`isRetired: ${label}`);
+    else fail(`isRetired ${label}: expected ${expected}, got ${got}`);
+  }
+
+  // End to end: a retired row leaves `entries` and stops counting as
+  // actionable, but is still counted so the retirement stays visible.
+  const retireTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 70 | 2026-06-01 | Acme | Lead | 4.0/5 | Applied | ✅ | [70](reports/70.md) | Applied 2026-06-01 |',
+    '| 71 | 2026-06-01 | Beta | Lead | 4.0/5 | Applied | ✅ | [71](reports/71.md) | Applied 2026-06-01 |',
+  ].join('\n');
+  const before = cadence.analyzeFromContent(retireTracker, '');
+  const after = cadence.analyzeFromContent(retireTracker, '- cleared #70 2026-08-04 — no channel');
+  if (before.metadata.actionable === 2 && after.metadata.actionable === 1 &&
+      after.metadata.retired === 1 && !after.entries.some(e => e.num === 70)) {
+    pass('analyzeFromContent: retired application leaves entries and actionable count');
+  } else {
+    fail(`retire integration wrong: ${JSON.stringify([before.metadata, after.metadata])}`);
   }
 } catch (e) {
   fail(`follow-up cadence module crashed: ${e.message}`);
@@ -10496,6 +10656,157 @@ try {
   fail(`Batch rate-limit pause test crashed: ${e.message}`);
 }
 
+// ── 13b. RECOVERY-RECORD RECONCILE MUST NOT ROLL BACK TERMINAL ROWS ──
+
+console.log('\n13b. Recovery-record reconcile vs terminal state');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // The offer already reached a terminal state, with a score and a
+  // completion timestamp worth protecting.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+  ].join('\n') + '\n');
+
+  // A recovery record written EARLIER, while the lock was jammed, carrying
+  // the pre-success rate_limited transition. Merging it blindly would drop
+  // the score and re-queue the offer (rate_limited is not terminal).
+  writeFileSync(join(recoveryDir, 'rec-stale1'),
+    '42\thttps://example.com/forty-two\trate_limited\t2026-08-07T00:00:00Z\t\t900\t-\trate limited\t1\n');
+
+  // check_prerequisites() aborts main() with "claude CLI not found" before
+  // reconcile_recovery_records() runs when `claude` is absent from PATH, which
+  // is the case on CI runners. Stub it (offer 42 is terminal, so no worker ever
+  // invokes it) so the reconcile path is actually exercised, matching test 13.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('42\t')) || '').split('\t');
+  const [, , rowStatus, , rowCompleted, , rowScore] = row;
+
+  if (rowStatus === 'completed' && rowScore === '8.5' && rowCompleted === '2026-08-07T00:05:00Z') {
+    pass('reconcile leaves a terminal row intact when the recovery record is older');
+  } else {
+    fail(`reconcile rolled back a terminal row: status=${rowStatus} score=${rowScore} completed=${rowCompleted}`);
+  }
+
+  if (!existsSync(join(recoveryDir, 'rec-stale1'))) {
+    pass('reconcile discards the superseded recovery record instead of retrying it every run');
+  } else {
+    fail('superseded recovery record was left in place — it would retry the rollback on every subsequent run');
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record reconcile test crashed: ${e.message}`);
+}
+
+// ── 13c. RECOVERY-RECORD RECONCILE MUST NOT SHIFT FIELDS ON EMPTY COLUMNS ──
+
+console.log('\n13c. Recovery-record reconcile field alignment (empty interior columns)');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-batch-recon2-'));
+  const batchDir = join(tmp, 'batch');
+  const recoveryDir = join(batchDir, 'batch-state-recovery.d');
+  const fakeBin = join(tmp, 'bin');
+  mkdirSync(recoveryDir, { recursive: true });
+  mkdirSync(join(tmp, 'reports'), { recursive: true });
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  }
+  writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
+  writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
+  // Same claude stub as test 13/13b: check_prerequisites() aborts before
+  // reconcile runs when claude is absent (CI has no claude). Offer 42 is
+  // terminal, so no worker invokes it.
+  writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
+  if (process.platform === 'win32') {
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+  } else {
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  }
+  // Only a terminal offer is in the input, so main() processes nothing and the
+  // merged row below is written solely by reconcile_recovery_records().
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '42\thttps://example.com/forty-two\tfixture\t-',
+  ].join('\n') + '\n');
+
+  // Offer 99 is NON-terminal (failed), so its recovery record takes the merge
+  // path (not the superseded path). The record has an empty completed_at
+  // (column 5) and an empty score (column 7) — exactly the interior columns a
+  // tab-collapsing `IFS=$'\t' read` would drop, shifting every later field left.
+  writeFileSync(join(batchDir, 'batch-state.tsv'), [
+    'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
+    '42\thttps://example.com/forty-two\tcompleted\t2026-08-07T00:00:00Z\t2026-08-07T00:05:00Z\t900\t8.5\t\t1',
+    '99\thttps://example.com/99\tfailed\t2026-08-06T00:00:00Z\t\t800\t\tolderr\t1',
+  ].join('\n') + '\n');
+  writeFileSync(join(recoveryDir, 'rec-shift1'),
+    '99\thttps://example.com/99\tfailed\t2026-08-07T09:00:00Z\t\t901\t\trate limited\t2\n');
+
+  run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--rate-limit-sleep', '0'], {
+    cwd: tmp,
+    env: { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const stateLines = readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8').trim().split('\n');
+  const row = (stateLines.find(l => l.startsWith('99\t')) || '').split('\t');
+  const [, , status99, , completed99, report99, score99, error99, retries99] = row;
+
+  if (status99 === 'failed' && completed99 === '' && report99 === '901' && score99 === '' && error99 === 'rate limited' && retries99 === '2') {
+    pass('reconcile merges a record with empty interior columns without shifting fields');
+  } else {
+    fail(`reconcile shifted fields on empty columns: status=${status99} completed_at=${completed99} report=${report99} score=${score99} error=${error99} retries=${retries99}`);
+  }
+
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) {
+  fail(`Recovery-record field-alignment test crashed: ${e.message}`);
+}
+
 // ── 14. BATCH SPEND TIER MODEL ROUTING ───────────────────────────
 
 console.log('\n14. Batch spend_tier model routing');
@@ -12681,36 +12992,52 @@ try {
     }
   }
 
-  // 55.3c the web's hand-copied cadence baseline must match the core's defaults.
-  // web/src/lib/followups.ts keeps CADENCE_DEFAULTS "kept IDENTICAL to
-  // DEFAULT_CADENCE" by comment alone — the same wish that let states.ts's
-  // FALLBACK drift (#2282). Web keys carry a `_days` suffix (except
-  // applied_max_followups); compare values under that mapping. Until #2369
-  // replaces the copy with the --json cadenceConfig, CI is the invariant.
+  // 55.3c the cadence copy is GONE — the web now derives its baseline from the
+  // core (#2369). Two halves: the core must still EMIT the pure defaults that
+  // the web's /api/followups/cadence reads, and the web must not quietly
+  // reintroduce a local table (a fallback copy drifts exactly like the original
+  // did — states.ts FALLBACK, #2282).
   {
-    const coreCad = readFileSync(join(ROOT, 'followup-cadence.mjs'), 'utf-8')
-      .match(/export const DEFAULT_CADENCE = \{([\s\S]*?)\};/)?.[1] ?? '';
-    const webCadPath = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
-    if (coreCad && existsSync(webCadPath)) {
-      const webCad = readFileSync(webCadPath, 'utf-8')
-        .match(/CADENCE_DEFAULTS[^=]*=\s*\{([\s\S]*?)\};/)?.[1] ?? '';
-      const pairs = (block) => Object.fromEntries(
-        [...block.matchAll(/([a-z_]+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
-      const core = pairs(coreCad);
-      const web = pairs(webCad);
-      const cadDrift = [];
-      for (const [k, v] of Object.entries(core)) {
-        const webKey = k === 'applied_max_followups' ? k : `${k}_days`;
-        if (!(webKey in web)) cadDrift.push(`${webKey} missing in web`);
-        else if (web[webKey] !== v) cadDrift.push(`${webKey}=${web[webKey]} vs core ${k}=${v}`);
-      }
-      if (Object.keys(web).length !== Object.keys(core).length) {
-        cadDrift.push(`key count ${Object.keys(web).length} vs core ${Object.keys(core).length}`);
-      }
-      if (cadDrift.length === 0) {
-        pass('web CADENCE_DEFAULTS matches core DEFAULT_CADENCE under the _days mapping (#2369)');
+    // Assert the EMITTED payload, not just the source text: a regex over the
+    // source proves the literal is present, not that the contract the web
+    // parses is intact. analyzeFromContent() is the same code path --json
+    // prints, driven from strings so it needs no tracker on disk.
+    const { analyzeFromContent, DEFAULT_CADENCE } = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+    const emitted = analyzeFromContent(
+      '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-06-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | [1](../reports/001-acme.md) | t |\n',
+      '',
+    );
+    const defaults = emitted?.cadenceDefaults;
+    const cadKeys = Object.keys(DEFAULT_CADENCE);
+    const schemaOk = defaults && typeof defaults === 'object'
+      && cadKeys.length > 0
+      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && Object.keys(defaults).length === cadKeys.length;
+    if (schemaOk) {
+      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+    } else {
+      fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
+    }
+    // Every key the web maps must exist under the core's un-suffixed spelling.
+    const webKeys = ['applied_first_days', 'applied_subsequent_days', 'applied_max_followups', 'responded_initial_days', 'responded_subsequent_days', 'interview_thankyou_days'];
+    const mapped = webKeys.every((k) => {
+      const coreKey = k === 'applied_max_followups' ? k : k.replace(/_days$/, '');
+      return Number.isInteger(defaults?.[coreKey]);
+    });
+    if (mapped) {
+      pass('every web PROFILE_CADENCE_KEY maps onto a core cadenceDefaults key (#2369)');
+    } else {
+      fail('the web _days key mapping no longer lines up with the core cadenceDefaults keys (#2369)');
+    }
+    const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
+    if (existsSync(webFollowups)) {
+      const webSrc = readFileSync(webFollowups, 'utf-8');
+      if (!/export const CADENCE_DEFAULTS/.test(webSrc)) {
+        pass('web/src/lib/followups.ts keeps no hand-copied cadence table (#2369)');
       } else {
-        fail(`web cadence baseline drifted from followup-cadence.mjs (#2369): ${cadDrift.join(' | ')}`);
+        fail('CADENCE_DEFAULTS was reintroduced in web/src/lib/followups.ts — derive from the core instead (#2369)');
       }
     }
   }
@@ -12969,6 +13296,120 @@ try {
       }
     }
   }
+
+  // 55.7 The company/role matching key: core vs the web's declared mirror (#2666).
+  //
+  // The browser cannot reach the user's checkout, so web/src/lib/core/
+  // normalize-text-key.mjs is a COPY by necessity, declared as such. A conscious
+  // copy without an assertion is exactly the failure this repo has now hit five
+  // times (states.ts, CADENCE_DEFAULTS, doctor prereqs, the #2590 cache, and the
+  // three divergent company norms of #2666 itself).
+  //
+  // Compare CORE vs MIRROR, not core vs the derived path: the derived path
+  // imports the core, so it CANNOT diverge — asserting on it would guard the one
+  // thing that cannot break while ignoring the one that can. The mirror is also
+  // the path nobody exercises in normal operation (it only runs on a partial
+  // checkout), which is precisely why it needs a test rather than usage.
+  //
+  // Expected values are DERIVED from the core, never hand-written: a hand-written
+  // expectation would freeze today's answer and stop tracking the source.
+  const corpusPath = join(ROOT, 'tests', 'fixtures', 'company-key-corpus.json');
+  const mirrorPath = join(ROOT, 'web', 'src', 'lib', 'core', 'normalize-text-key.mjs');
+  if (!existsSync(join(ROOT, 'web', 'src'))) {
+    warn('web/ not present in this checkout — skipping the company-key parity freeze (#2666)');
+  } else if (!existsSync(corpusPath) || !existsSync(mirrorPath)) {
+    // web/ IS here, so a missing file is a move, not an absence. Failing rather
+    // than skipping: a skip is how this freeze would quietly stop guarding.
+    fail(`web/ exists but ${!existsSync(corpusPath) ? 'tests/fixtures/company-key-corpus.json' : 'web/src/lib/core/normalize-text-key.mjs'} is missing — the #2666 key parity cannot verify (moved?)`);
+  } else {
+    try {
+      const corpus = JSON.parse(readFileSync(corpusPath, 'utf-8'));
+      const core = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+      const mirror = await import(pathToFileURL(mirrorPath).href);
+      const coreFn = core.normalizeTextKey, mirrorFn = mirror.normalizeTextKey;
+      if (typeof coreFn !== 'function' || typeof mirrorFn !== 'function') {
+        fail('normalizeTextKey is not exported by the core and/or the web mirror — the #2666 parity cannot verify');
+      } else {
+        // undefined cannot be written in JSON but is a real input (a missing
+        // cell), and it is half of the null/undefined bug — so it is appended here.
+        const inputs = [...corpus.cases.map((c) => c.input), undefined];
+        const drift = [];
+        for (const sep of ['', ' ']) {
+          for (const input of inputs) {
+            const a = coreFn(input, sep), b = mirrorFn(input, sep);
+            if (a !== b) drift.push(`${JSON.stringify(input)} sep=${JSON.stringify(sep)}: core=${JSON.stringify(a)} mirror=${JSON.stringify(b)}`);
+          }
+        }
+        if (drift.length === 0) {
+          pass(`web company-key mirror matches the core on all ${inputs.length} corpus cases x2 separators (#2666)`);
+        } else {
+          fail(`web company-key mirror DRIFTED from the core — ${drift.length} case(s): ${drift.slice(0, 3).join(' | ')}`);
+        }
+        // Guard of the guard, in TWO directions, because each covers a hole the
+        // other cannot see:
+        //  (a) the RULES could regress in the core itself, and
+        //  (b) the CORPUS could be thinned until the comparison above passes
+        //      vacuously — "matches on all 0 cases" is a green that proves nothing.
+        // (b) was found by mutation: deleting Škoda and 日本電産 from the corpus
+        // left every check green, because (a) queries the core directly.
+        const inputStrings = corpus.cases.map((c) => String(c.input));
+        const mustCarry = ['Škoda', 'Koda', '日本電産', 'Nestlé'];
+        const missing = mustCarry.filter((m) => !inputStrings.includes(m));
+        const rulesHold = coreFn('Škoda', ' ') !== coreFn('Koda', ' ') && coreFn('日本電産', ' ') !== '';
+        if (missing.length === 0 && corpus.cases.length >= 10 && rulesHold) {
+          pass(`company-key corpus still carries its teeth (${corpus.cases.length} cases incl. the collision pair, rules hold) (#2666)`);
+        } else if (!rulesHold) {
+          fail('the company-key rules regressed: Škoda now collides with Koda and/or CJK keys to empty — this is the #2666 data-loss bug returning');
+        } else {
+          fail(`the company-key corpus lost its teeth: ${missing.length ? `missing ${missing.join(', ')}` : `only ${corpus.cases.length} cases left`} — the parity check above would pass without exercising the failure it exists for`);
+        }
+      }
+    } catch (err) {
+      fail(`company-key parity check could not run (${err.message}) — treat as unverified, not as passing (#2666)`);
+    }
+  }
+
+  // 55.8 Where the key comes from, per surface (#2666, structural half).
+  //
+  // Shapes are NOT interchangeable: the server can reach the user's live core
+  // (dynamic import via careerOpsRoot) and must derive from it; a "use client"
+  // component physically cannot, so it imports the shared mirror. What none of
+  // them may do is define a normalizer of its own — that is how three divergent
+  // company keys shipped in the first place.
+  //
+  // The ASCII-class check is scoped to THESE THREE FILES on purpose. A repo-wide
+  // grep for [^a-z0-9] measured 71% false positives (domain slugs, filename
+  // slugs, a regex boundary class — all legitimate), and a check that shouts at
+  // correct code gets silenced. Here the same expression would be the bug.
+  const keySurfaces = [
+    { file: join(ROOT, 'web', 'src', 'app', 'api', 'whats-new', 'route.ts'), needs: 'getNormalizeTextKey', how: 'derive from the live core' },
+    { file: join(ROOT, 'web', 'src', 'components', 'explore', 'explorer-view.tsx'), needs: 'normalize-text-key', how: 'import the shared mirror (client cannot reach the core)' },
+    { file: join(ROOT, 'web', 'src', 'app', 'actions', 'registry.ts'), needs: 'normalize-text-key', how: 'import the shared mirror' },
+  ];
+  if (existsSync(join(ROOT, 'web', 'src'))) {
+    for (const { file, needs, how } of keySurfaces) {
+      const name = file.slice(ROOT.length + 1);
+      if (!existsSync(file)) { fail(`${name} is missing — the #2666 key-source freeze cannot verify (moved?)`); continue; }
+      const src = readFileSync(file, 'utf-8');
+      if (!src.includes(needs)) {
+        fail(`${name} no longer references ${needs} — it must ${how}, never key company names on its own (#2666)`);
+      } else if (src.split('\n')
+        // Comment lines are stripped first: the honest fix for this bug ships a
+        // comment WARNING against the pattern ("never [^a-z0-9]"), and flagging
+        // that would punish the file for documenting its own trap. Measured:
+        // this exact false positive fired on explorer-view.tsx the first time
+        // this check ran. Line-level is proportionate here — the scope is three
+        // known files, and a full JS parse to catch a block comment would be
+        // more machinery than the risk deserves.
+        .filter((l) => { const t = l.trimStart(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
+        .some((l) => /\[\^a-z0-9\]/i.test(l))) {
+        fail(`${name} contains an ASCII-only character class — that is the exact key that made "Škoda" collide with "Koda" and emptied CJK names (#2666)`);
+      } else {
+        pass(`${name} takes its matching key from the right place (#2666)`);
+      }
+    }
+  }
+
 } catch (e) {
   fail(`core↔web contract freeze section crashed: ${e.message}`);
 }

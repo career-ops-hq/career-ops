@@ -70,14 +70,24 @@ function writeGitConfig(work, mirror) {
  *  the target and the leg would go spuriously RED. */
 function pickOracle(mirror, oldTag, targetSha, systemPaths) {
   const changed = git(mirror, 'diff', '--name-only', `${oldTag}..${targetSha}`).split('\n').filter(Boolean);
-  if (changed.includes('update-system.mjs')) return 'update-system.mjs';
+  if (changed.includes('update-system.mjs')) return { oracle: 'update-system.mjs', changed };
   const managed = (f) => systemPaths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
   const candidate = changed.find((f) => {
     if (!managed(f)) return false;
     try { git(mirror, 'cat-file', '-e', `${targetSha}:${f}`); return true; } catch { return false; }
   });
-  if (!candidate) throw new Error(`No changed system file between ${oldTag} and target — nothing to upgrade, leg would be vacuous`);
-  return candidate;
+  // No managed file changed. That is NOT a failure by itself: a web-only PR
+  // (web/ is deliberately outside SYSTEM_PATHS) legitimately changes nothing
+  // `apply` manages, so there is nothing to qualify. Returning null lets the
+  // caller SKIP. Throwing here made the gate red for every web-only PR, which
+  // on 11-ago blocked three at once — including the fix for a HIGH severity
+  // advisory. "I cannot test this" and "this is broken" must not share an exit.
+  //
+  // The caller still fails loudly when ROOT files changed and none is managed:
+  // that shape means the SYSTEM_PATHS read is probably wrong, which is exactly
+  // what this oracle exists to catch.
+  if (!candidate) return { oracle: null, changed };
+  return { oracle: candidate, changed };
 }
 
 function isAncestor(cwd, tag, sha) {
@@ -102,7 +112,15 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     if (!sysMatch) throw new Error(`Could not locate SYSTEM_PATHS in the target's update-system.mjs (constant renamed?) — refusing to run a leg with no managed-path set`);
     const targetSystemPaths = Array.from(sysMatch[1].matchAll(/['"]([^'"]+)['"]/g), (m) => m[1]);
 
-    const oracle = pickOracle(mirror, oldTag, targetSha, targetSystemPaths);
+    const { oracle, changed } = pickOracle(mirror, oldTag, targetSha, targetSystemPaths);
+    if (!oracle) {
+      const rootChanged = changed.filter((f) => !f.includes('/'));
+      if (rootChanged.length > 0) {
+        throw new Error(`Root files changed (${rootChanged.join(', ')}) but none is in SYSTEM_PATHS — refusing to skip: the managed-path set may be wrong`);
+      }
+      console.log(`  SKIP [${label}] no SYSTEM_PATHS file changed between ${oldTag} and target (${changed.length} file(s) changed, all outside the managed set) — nothing to qualify`);
+      return { failures: [], skipped: true };
+    }
     const oracleBlob = git(mirror, 'rev-parse', `${targetSha}:${oracle}`);
 
     const install = join(work, 'install');
@@ -200,8 +218,11 @@ function prGate() {
   const newestOld = newestAncestorTag(targetSha);
   if (!newestOld) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
   console.log(`PR gate: ${newestOld} -> ${targetSha.slice(0, 8)}`);
-  const { failures } = runLeg({ oldTag: newestOld, targetSha });
-  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  const { failures, skipped } = runLeg({ oldTag: newestOld, targetSha });
+  // THREE states, never two: a skipped leg qualified nothing, so calling it
+  // GREEN would report a pass that never ran.
+  console.log(skipped ? 'SKIPPED: nothing in the managed set changed — this leg qualified nothing'
+    : failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
   process.exit(failures.length ? 1 : 0);
 }
 

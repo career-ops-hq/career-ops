@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { CADENCE_DEFAULTS, PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
+import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 
 // Follow-up cadence knobs → config/profile.yml (followup_cadence). Server-
@@ -36,8 +36,14 @@ export function CadenceSettings() {
         return r.json();
       })
       .then((d) => {
-        const eff = { ...CADENCE_DEFAULTS, ...(d?.effective ?? {}) };
-        setValues(Object.fromEntries(PROFILE_CADENCE_KEYS.map((k) => [k, String(eff[k])])) as Record<ProfileCadenceKey, string>);
+        // `effective` is already defaults+overrides, computed server-side from
+        // the CORE's cadenceDefaults (#2369) — no local defaults table to merge
+        // in. A key the core didn't supply renders empty rather than as an
+        // invented number.
+        const eff = (d?.effective ?? {}) as Partial<Record<ProfileCadenceKey, number>>;
+        setValues(Object.fromEntries(
+          PROFILE_CADENCE_KEYS.map((k) => [k, eff[k] === undefined ? "" : String(eff[k])]),
+        ) as Record<ProfileCadenceKey, string>);
       })
       .catch(() => setLoadError(true));
   }, []);

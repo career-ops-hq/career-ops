@@ -143,6 +143,14 @@ node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
 `tests/providers/{name}.test.mjs` — it's auto-discovered (`tests/**/*.test.mjs`),
 no registration needed. Do not add a section to `test-all.mjs` for this.
 
+**Adding a test for the web app:** web suites live under `web/tests/`, mirroring
+the tested module's path below `web/src/` (`src/lib/clean-chips.mjs` →
+`tests/lib/clean-chips.test.mjs`), named `{module}.test.mjs`. `web/`'s own
+`npm test` glob-discovers them, so no registration is needed there either — but
+keep them out of `web/src/` (Next.js scans that tree) and write them as `.mjs`,
+since there is no TypeScript loader for `node --test`. `web/README.md` has the
+detail; `tests/web-test-layout.test.mjs` enforces it on every PR.
+
 **`--only` is a dev convenience, not a PR gate:** it runs *only* the discovered
 `tests/` files matching the given substring and skips every inline core
 section (syntax, scripts, dashboard, data contract, personal data, paths,

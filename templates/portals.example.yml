@@ -266,6 +266,23 @@
 # skip_tiers: [intern, entry]  # optional: skip listings by seniority tier (note: unrecognized/plain titles fall back to 'mid')
 
 title_filter:
+  # A `positive` entry is matched case-insensitively as a substring — except a
+  # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
+  # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # Either way an entry expresses the exact spelling you write, and nothing
+  # else: real titles vary in separator and word order, and every variant your
+  # list does not literally contain is dropped in silence.
+  #
+  # Use " + " (with spaces) to require SEVERAL terms in any order:
+  #
+  #   - "director + engineering"   matches "Director of Engineering",
+  #                                "Director - Software Engineering",
+  #                                "Senior Director, Platform Engineering",
+  #                                "Director Engineering (Mobile Platform)"
+  #
+  # One entry replaces the whole {level} x {separator} x {domain word} matrix.
+  # An entry with no " + " behaves exactly as before, and a literal "+" without
+  # surrounding spaces is left alone — "C++" stays the keyword C++.
   positive:
     # [CUSTOMIZE] Add keywords matching YOUR target roles
     # -- AI/ML roles --
@@ -632,9 +649,11 @@ search_queries:
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
-#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
+#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
-#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
+#                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
+#                   same provider; just use whichever host the employer's careers link actually points at.)
 #   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
 #                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
 #                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
@@ -711,7 +730,8 @@ search_queries:
 #
 # - name: Example Oracle Recruiting Cloud Co
 #   # Oracle Recruiting Cloud / Fusion Candidate Experience. Auto-detects any
-#   # <tenant>.fa[.<region>][.ocs].oraclecloud.com host and derives siteNumber
+#   # <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com host (the numbered apex,
+#   # e.g. oraclecloud26.com, is what newer tenants get) and derives siteNumber
 #   # from the /sites/<siteNumber>/ path segment (default CX_1).
 #   careers_url: https://exampleco.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs
 #   max_pages: 25          # optional page cap (200 jobs/page, default 25 ≈ 5000 jobs, max 25)
