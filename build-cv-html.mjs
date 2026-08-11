@@ -209,21 +209,35 @@ function parsePartial(source) {
   // can remove them verbatim from the entry zone in step 3, without needing any
   // broad HTML-comment regex (which would trigger CodeQL).
   const definitionStrings = [];
+  // Collect every definition first. The _EMPTY fallbacks are resolved in a
+  // second pass because a fallback may be defined before the block it belongs
+  // to, and pairing needs to know which block names exist.
+  const definitions = new Map();
   let m;
   while ((m = blockRe.exec(entryZone)) !== null) {
     const name = m[1];
     const content = m[2];
     if (name === 'ENTRY') continue; // skip the sentinel itself
     definitionStrings.push(m[0]); // full match, e.g. <!--FOO-->bar<!--/FOO-->
-    // EMPTY variants are the absent-field fallback (e.g. <!--ORG_EMPTY-->).
-    if (name.endsWith('_EMPTY')) {
-      const base = name.slice(0, -6);
-      const existing = blocks.get(base) || { present: '', absent: '' };
-      blocks.set(base, { ...existing, absent: content });
-    } else {
-      const existing = blocks.get(name) || { present: '', absent: '' };
-      blocks.set(name, { ...existing, present: content });
-    }
+    definitions.set(name, content);
+  }
+
+  const EMPTY_SUFFIX = '_EMPTY';
+  for (const [name, content] of definitions) {
+    if (name.endsWith(EMPTY_SUFFIX)) continue;
+    const existing = blocks.get(name) || { present: '', absent: '' };
+    blocks.set(name, { ...existing, present: content });
+  }
+  // An EMPTY variant is the absent-field fallback for a sibling block, and the
+  // renderer looks it up under the block's own name. Both spellings pair to the
+  // same block: <!--ORG_EMPTY--> and <!--ORG_BLOCK_EMPTY--> attach to ORG_BLOCK.
+  // Falling back to the bare stem keeps a FOO_EMPTY/FOO pair working.
+  for (const [name, content] of definitions) {
+    if (!name.endsWith(EMPTY_SUFFIX)) continue;
+    const stem = name.slice(0, -EMPTY_SUFFIX.length);
+    const base = definitions.has(`${stem}_BLOCK`) ? `${stem}_BLOCK` : stem;
+    const existing = blocks.get(base) || { present: '', absent: '' };
+    blocks.set(base, { ...existing, absent: content });
   }
 
   // Step 3: build the entry template by removing the captured block *definitions*
@@ -247,20 +261,26 @@ function parsePartial(source) {
 function fillEntry(entryTemplate, blocks, fields, blockValues) {
   let out = entryTemplate;
 
+  // Every replacement below passes a FUNCTION rather than the value directly.
+  // A string replacement argument is scanned by JS for $-patterns, so candidate
+  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
+  // would splice part of the template into the CV instead of being inserted
+  // literally. A replacer function's return value is never interpreted.
+
   // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
   // present/absent markup depending on whether the field has a value.
   if (blockValues) {
     for (const [name, { value, present }] of blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
-      const markup = present ? block.present.replace(`{{${name}}}`, value) : block.absent;
-      out = out.replace(`{{${name}}}`, markup);
+      const markup = present ? block.present.replace(`{{${name}}}`, () => value) : block.absent;
+      out = out.replace(`{{${name}}}`, () => markup);
     }
   }
 
   // Fill remaining scalar placeholders.
   for (const [key, value] of Object.entries(fields)) {
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }
 
   return out;
@@ -445,8 +465,8 @@ function buildCertifications(entries, partial) {
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
     const blockValues = new Map([
-      // Certifications use EMPTY variants so that absent fields still emit an
-      // empty <span> for table-cell alignment — not a bare removal.
+      // An absent field resolves to the partial's _EMPTY fallback, emitting an
+      // empty <span> for table-cell alignment rather than being removed.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
     ]);
@@ -479,8 +499,8 @@ function buildAwards(entries, partial) {
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
     const blockValues = new Map([
-      // As with certifications, absent fields still emit an empty <span> so the
-      // table cells stay aligned across rows.
+      // As with certifications, an absent field resolves to the partial's
+      // _EMPTY fallback so the table cells stay aligned across rows.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
     ]);

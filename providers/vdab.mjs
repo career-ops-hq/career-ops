@@ -58,7 +58,8 @@ const DETAIL_BASE = 'https://www.vdab.be/vindeenjob/vacatures/';
 const KEY_RE = /vej-key-monitor","([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i;
 const BUNDLE_RE = /https:\/\/www\.vdab\.be\/webapps\/vindeenjob\/main-[\w-]+\.js/;
 // Batch detail calls so a large detailLimit can't fire dozens of concurrent
-// requests at once (mirrors arbeitsagentur.mjs's VERIFY_BATCH).
+// requests at once. (arbeitsagentur.mjs had the same guard until its detail
+// endpoint stopped answering and the lookups went away entirely — #2494.)
 const DETAIL_BATCH = 5;
 // Real-scan safety cap (mirrors workday.mjs's DEFAULT_MAX_PAGES pattern):
 // fetchKeyword() otherwise only stops on a short page, trusting VDAB's

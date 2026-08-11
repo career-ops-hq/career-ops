@@ -636,6 +636,7 @@ search_queries:
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
 #   gem             jobs.gem.com/<boardId>
+#   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -748,6 +749,16 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# - name: Example join.com Co
+#   # join.com career page. Auto-detects any join.com/companies/<slug> URL and
+#   # parses the __NEXT_DATA__ JSON embedded in the server-rendered HTML — no
+#   # separate API.
+#   careers_url: https://join.com/companies/exampleco
+#   max_pages: 50           # optional page cap (default 50, max 200) — raise it
+#                            # for a tenant with 50+ pages of postings (a warning
+#                            # is logged if the cap truncates real results)
+#   enabled: true
+#
 # -- Job boards / aggregators (no careers_url; set provider: explicitly) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
@@ -766,7 +777,11 @@ search_queries:
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
-#   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67)
+#   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
+#   thehub:
+#     countryCode: EU        # optional; any value the API accepts. Default: EU
+#     includeRemote: false   # optional; also runs a separate isRemote=true pass, merged in. Default: false
+#   enabled: true
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
@@ -1930,6 +1945,50 @@ job_boards:
   #   cat_id: 68
   #   enabled: true
 
+  # ── Getro — VC portfolio "talent network" boards ───────────────────
+  # One board aggregates jobs across a fund's portfolio companies (each job
+  # belongs to the portfolio company, not the fund). Set `getro_collection` to
+  # the board's numeric network id (the `network.id` in the board page's
+  # __NEXT_DATA__). `careers_url` is reference-only. Optional knobs:
+  # `getro_max_pages` (default 40), `getro_max_age_days` (default 90, a
+  # pagination bound — newest-first, stops once postings cross the age).
+
+  - name: b2venture (portfolio)
+    careers_url: https://jobs.b2venture.vc
+    provider: getro
+    getro_collection: 4283
+    enabled: false
+    notes: "Swiss VC portfolio board (Getro)"
+
+  - name: Cherry Ventures (portfolio)
+    careers_url: https://jobs.cherry.vc
+    provider: getro
+    getro_collection: 44081
+    enabled: false
+    notes: "VC portfolio board (Getro)"
+
+  # ── Consider (getconsider.com) — VC portfolio boards ───────────────
+  # JS board backed by a same-origin JSON API. Set `consider_board` to the
+  # board id — NOT the host (Founderful's board id is "wingman"). `careers_url`
+  # supplies the board origin. Optional: `consider_size` (default 500).
+
+  - name: Founderful (portfolio)
+    careers_url: https://jobs.founderful.com/jobs
+    provider: consider
+    consider_board: wingman
+    enabled: false
+    notes: "Swiss VC portfolio board (Consider)"
+
+  # ── Swiss startup job boards ───────────────────────────────────────
+  # Aggregators of Swiss startup roles. No extra config — auto-detected from
+  # the careers_url host.
+
+
+  - name: joinup.ch
+    careers_url: https://joinup.ch/browse/jobs
+    provider: joinup
+    enabled: false
+    notes: "Swiss startup job platform (newest SSR page)"
   # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
   # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
   # listings. The feed URL is hardcoded in the provider — no careers_url

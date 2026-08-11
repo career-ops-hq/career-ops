@@ -14,7 +14,7 @@ import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+  openTrackerTransaction, rebuildRow, resolveTrackerPath, normalizeCompany,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 
@@ -60,25 +60,6 @@ const STATUS_RANK = {
   'contratado': 7,
   'contratada': 7,
 };
-
-/**
- * Normalize a company name into the grouping key used by deduplication.
- *
- * The tracker may contain punctuation, parenthetical branding, or spacing
- * differences for the same employer. This function removes those presentation
- * differences while keeping the alphanumeric company identity that determines
- * which rows are safe to compare for duplicate roles.
- *
- * @param {string} name - Company name from an applications.md row.
- * @returns {string} Lowercase company key used for same-company grouping.
- */
-function normalizeCompany(name) {
-  return name.toLowerCase()
-    .replace(/[()]/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[^a-z0-9 ]/g, '')
-    .trim();
-}
 
 /**
  * Normalize tracker status text before ranking or comparing it.
@@ -312,15 +293,24 @@ console.log(`📊 ${entries.length} entries loaded`);
 // normalize to the same empty key, so they group by their Via channel instead:
 // the same agency re-blasting one listing IS a duplicate, while the same role
 // via two different agencies is two real submissions and must never merge.
-// The channel key is Unicode-aware (#1603/#2393): normalizeCompany() strips
-// everything outside [a-z0-9], so distinct non-Latin agency names (リクルート,
-// パーソル, …) all collapsed to the same empty key and one of two genuinely
-// separate submissions was DELETED. normalizeVia() is the same key that
+// The channel key is Unicode-aware (#1603/#2393): this file's own
+// normalizeCompany() used to strip everything outside [a-z0-9], so distinct
+// non-Latin agency names (リクルート, パーソル, …) all collapsed to the same empty
+// key and one of two genuinely separate submissions was DELETED. Both keys are
+// now Unicode-aware — normalizeCompany comes from tracker-utils.mjs (#2429), so
+// the ordinary company path cannot regress the way this channel path did.
+// normalizeVia() is the same key that
 // merge-tracker.mjs uses for its cross-channel guard, so the two scripts
 // cannot drift on agency identity. An absent Via (empty or `—`) still keys to
 // '' and groups with other via-less blind rows, matching merge-tracker, whose
 // guard does not reject a pair whose Via cells are both blank.
-const BLIND_KEY = ' blind-via:';
+// The NUL prefix makes this key uncollidable with any real company name.
+// It is written as the ESCAPE, never as a raw NUL byte in the source: a raw
+// one makes grep classify this file as binary and report NO MATCH for any
+// pattern in it, silently, with the same exit code as a genuine absence.
+// Identical value at runtime, and the file stays greppable.
+// Pinned by tests/source-no-nul-bytes.test.mjs.
+const BLIND_KEY = '\u0000blind-via:';
 const groups = new Map();
 for (const entry of entries) {
   const key = String(entry.company).trim() === '?'

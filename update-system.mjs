@@ -58,6 +58,12 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
+  // .gitattributes governs how every other path below is written to disk, and
+  // `apply` checks paths out one at a time in this order: if it landed later,
+  // everything before it would be written under the old core.autocrlf setting
+  // on an existing install, silently (once text=auto is live, git status stays
+  // clean and only a second update would repair it).
+  '.gitattributes',
   'modes/README.md',
   'modes/_shared.md',
   'modes/_writing.md',
@@ -184,6 +190,7 @@ const SYSTEM_PATHS = [
   'providers/',
   'seeds/',
   'tests/',
+  'user-agent.mjs',
   'doctor.mjs',
   // doctor.mjs imports this one: an install that receives the new doctor
   // without it would crash on startup.
@@ -206,6 +213,7 @@ const SYSTEM_PATHS = [
   'process-quality.test.mjs',
   'company-history.mjs',
   'company-history.test.mjs',
+  'rejection-latency.mjs',
   'salary-gap.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
@@ -376,7 +384,14 @@ const BOOTSTRAP_PATHS = [
 ];
 
 // User layer paths — NEVER touch these (safety check)
-const USER_PATHS = [
+/**
+ * Files and directories the updater must never touch — the USER layer of the
+ * data contract (DATA_CONTRACT.md). Exported so other tooling can derive the
+ * same boundary instead of re-listing it: a hardcoded second copy is how a
+ * fourth user file eventually gets policed by something that has no business
+ * having an opinion about it (#2480).
+ */
+export const USER_PATHS = [
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',

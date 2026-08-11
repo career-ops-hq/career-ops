@@ -21,15 +21,14 @@ export function slugify(s) {
 
 /**
  * @typedef {Object} PdfPaths
- * @property {string} html - Backend-dictated path the agent must write the tailored HTML to.
- * @property {string} meta - Backend-dictated path the agent must write the {"format": ...} sidecar to.
+ * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
  */
 
 /**
- * Precompute the scratch (HTML + format sidecar) and final PDF paths for a
+ * Precompute the scratch HTML and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
- * naming, and later, rendering. Resolves the report (for the company slug)
+ * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
  * and config/profile.yml (for the candidate slug) — same naming convention
  * modes/pdf.md documents, so web and CLI output stay byte-identical.
  *
@@ -37,7 +36,7 @@ export function slugify(s) {
  * the caller (a Next.js route today) decides how to surface `ok: false`.
  *
  * Side effect: creates `.career-ops-web/pdf-tmp/` under `root` if it doesn't
- * exist yet (the agent needs it to exist before it can write there) — this is
+ * exist yet (the backend writes the parsed envelope there, #2185) — this is
  * NOT a pure path computation, despite the name.
  *
  * @param {string} input - The report number (e.g. "018").
@@ -83,7 +82,6 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     ok: true,
     paths: {
       html: path.join(scratchDir, `cv-web-${input}.html`),
-      meta: path.join(scratchDir, `cv-web-${input}.meta.json`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },
   };

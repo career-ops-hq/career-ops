@@ -1,21 +1,56 @@
 // Shared optional-section stripping for the CV builders (build-cv-html.mjs,
 // build-cv-latex.mjs).
 //
-// Projects, education, certifications, and awards are the genuinely optional
-// CV sections: a candidate's projects are often already covered under Work
-// Experience, not every candidate has a degree, not every application carries a
-// certification worth listing, and most candidates have no award to name. The
-// templates wrap all four unconditionally, so a payload with no entries renders
-// a bare section header with nothing under it. The builders'
-// buildProjects()/buildEducation()/buildCertifications()/buildAwards()
-// correctly return '' — nothing removes the surrounding wrapper, which is what
-// this module does.
+// Core competencies, projects, education, certifications, awards, and skills
+// are the genuinely optional CV sections: a competency tag row is often
+// redundant with the summary and experience bullets that prove the same
+// claims, a candidate's projects are often already covered under Work
+// Experience, not every candidate has a degree, not every application carries
+// a certification worth listing, most candidates have no award to name, and
+// plenty of candidates list no skills section at all. The templates wrap all
+// six unconditionally, so a payload with no entries renders a bare section
+// header with nothing under it. The builders' buildCompetencies()/
+// buildProjects()/buildEducation()/buildCertifications()/buildAwards()/
+// buildSkills() correctly return '' — nothing removes the surrounding
+// wrapper, which is what this module does.
 //
 // Certifications has no marker in the LaTeX template (cv-template.tex has no
 // Certifications section at all), so PATTERNS.tex has no `certifications` key
 // — stripEmptySections skips a section silently when the active format has no
 // pattern for it, rather than trying to match against `undefined`. Awards, by
 // contrast, is defined for both formats.
+//
+// ── The Skills sentinel: part of the template contract ───────────────────────
+//
+// Skills is the LAST section in every shipped template, which makes it the one
+// optional section with no following section marker to stop at. Given the
+// shared `…|$` boundary the others use, stripping an empty Skills section
+// falls through to true end-of-file and takes the closing
+// `</div></body></html>` (`\end{document}` in LaTeX) with it — a truncated,
+// unopenable document, which is far worse than the bare header this module
+// exists to remove.
+//
+// So the Skills patterns below deliberately do NOT use the shared boundary.
+// They match only up to an explicit `<!-- END -->` (`%%%% END %%%%` in LaTeX)
+// sentinel, with no end-of-input alternative. Two consequences, both
+// intentional:
+//
+//   1. **The sentinel is part of the template contract.** A template that
+//      renders a Skills section must place `<!-- END -->` / `%%%% END %%%%`
+//      immediately after it. All four shipped templates do; do not remove it
+//      when editing a template's tail. This is documented for custom-template
+//      authors in templates/README.md.
+//   2. **A template without the sentinel FAILS SAFE.** The pattern simply
+//      does not match, `String.replace` is a no-op, and the template comes
+//      out untouched — the Skills section renders as a bare header. That is
+//      the original cosmetic bug, and it is the deliberate choice: a bare
+//      header beats a truncated CV by a wide margin, and the person it lands
+//      on (a third-party template pack with no sentinel and no skills listed)
+//      did nothing wrong. cv-templates.mjs validates custom templates against
+//      `required: ['NAME', 'EXPERIENCE', 'EDUCATION']` and does not — and
+//      need not — require the sentinel, precisely because its absence is
+//      survivable. Never "fix" this by giving the Skills patterns an `|$`
+//      fallback; that trades a cosmetic bug for a destructive one.
 //
 // The section body is delimited by markers rather than parsed, so the boundary
 // pattern carries the whole correctness burden and is easy to get subtly wrong:
@@ -24,7 +59,8 @@
 //     comment inside a section body, truncating the strip and leaving markup
 //     behind. Markers are therefore matched as all-caps only.
 //   - Omitting the end-of-input branch would silently keep a section that
-//     happens to be last in the template.
+//     happens to be last in the template. (Skills is the deliberate exception
+//     above — for it, keeping the section is the desired fail-safe.)
 //   - Naming the expected successor ("projects is followed by education")
 //     couples the two strips to each other and to template ordering: once an
 //     empty education block is removed, a named lookahead for it stops matching
@@ -38,21 +74,30 @@
 const HTML_BOUNDARY = String.raw`(?=<!--\s+[A-Z][A-Z ]*-->|$)`;
 const TEX_BOUNDARY = String.raw`(?=%{4,}\s|$)`;
 
+// Sentinel-only boundaries for Skills — no end-of-input alternative, so a
+// template lacking the sentinel is left untouched rather than truncated. See
+// "The Skills sentinel" above before changing these.
+const HTML_END_SENTINEL = String.raw`(?=<!--\s+END\s+-->)`;
+const TEX_END_SENTINEL = String.raw`(?=%{4,}\s+END\s+%{4,})`;
+
 const PATTERNS = {
   html: {
+    competencies: new RegExp(String.raw`<!--\s+CORE COMPETENCIES\s+-->[\s\S]*?` + HTML_BOUNDARY),
     projects: new RegExp(String.raw`<!--\s+PROJECTS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     education: new RegExp(String.raw`<!--\s+EDUCATION\s+-->[\s\S]*?` + HTML_BOUNDARY),
     certifications: new RegExp(String.raw`<!--\s+CERTIFICATIONS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     awards: new RegExp(String.raw`<!--\s+AWARDS\s+-->[\s\S]*?` + HTML_BOUNDARY),
+    skills: new RegExp(String.raw`<!--\s+SKILLS\s+-->[\s\S]*?` + HTML_END_SENTINEL),
   },
   tex: {
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     education: new RegExp(String.raw`%{4,}\s+Education\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     awards: new RegExp(String.raw`%{4,}\s+AWARDS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
+    skills: new RegExp(String.raw`%{4,}\s+Technical Skills\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL),
   },
 };
 
-export const OPTIONAL_SECTIONS = ['projects', 'education', 'certifications', 'awards'];
+export const OPTIONAL_SECTIONS = ['competencies', 'projects', 'education', 'certifications', 'awards', 'skills'];
 
 export function isEmptySection(payload, section) {
   const entries = payload?.[section];
@@ -70,6 +115,9 @@ export function stripEmptySections(template, payload, format) {
     const pattern = patterns[section];
     if (!pattern) continue; // this format's template has no marker for this section
     if (isEmptySection(payload, section)) {
+      // A non-matching pattern is a no-op here by design — see the Skills
+      // sentinel note above: no sentinel means no strip, never a fallback to
+      // a looser boundary.
       out = out.replace(pattern, '');
     }
   }

@@ -456,6 +456,22 @@ node check-table-freshness.mjs --self-test
 
 ---
 
+## rejection-latency
+
+Post-interview response-latency signal. Cross-references `data/active-interviews.md` (latest interview date per application — company + role, fuzzy role match via `role-matcher.mjs`) with `data/applications.md` (rows still in `Interview` state — i.e. no `Responded`/`Offer`/`Rejected` transition recorded since) and flags applications whose silence exceeds a soft **courtesy** threshold (30-day default, no legal claim attached) from `rejection_latency.courtesy_days` or `--courtesy-days`. (An earlier revision also shipped a jurisdiction-backed statutory tier; it was removed — the underlying legal threshold could change and the script has no way to re-verify it.) Each flag carries a ready-to-copy `data/blacklist.md` row (same suggestion-only bridge as `modes/interview-redflag.md`, #1854/#1856) — the script never writes to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` (#1742 opt-in guarantee). Surfaced by the `followup` mode.
+
+```bash
+node rejection-latency.mjs             # JSON
+node rejection-latency.mjs --summary   # human-readable table + suggested blacklist rows
+node rejection-latency.mjs --courtesy-days 21
+node rejection-latency.mjs --today 2026-07-17   # deterministic runs/tests
+node rejection-latency.mjs --self-test
+```
+
+**Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
 ## update:check
 
 Checks whether a newer version of career-ops is available upstream. Outputs JSON to stdout:
@@ -548,6 +564,26 @@ When the ATS provider's list API returns a description, each new offer is finger
 npm run scan
 node scan.mjs --include-blacklisted   # audit: let blacklisted companies through, annotated
 ```
+
+**Parallel search lanes (#2271):** all four of `scan.mjs`'s files are overridable by environment variable, so a second search with different targeting (a bridge/income track, a career-change track, or a partner sharing the checkout) can be fully self-contained in one clone:
+
+| Variable | Default |
+|---|---|
+| `CAREER_OPS_PORTALS` | `portals.yml` |
+| `CAREER_OPS_PROFILE` | `config/profile.yml` |
+| `CAREER_OPS_PIPELINE` | `data/pipeline.md` |
+| `CAREER_OPS_SCAN_HISTORY` | `data/scan-history.tsv` |
+
+```bash
+CAREER_OPS_PORTALS=portals.bridge.yml \
+CAREER_OPS_PIPELINE=data/pipeline.bridge.md \
+CAREER_OPS_SCAN_HISTORY=data/scan-history.bridge.tsv \
+  node scan.mjs
+```
+
+Give a lane its own `CAREER_OPS_SCAN_HISTORY`, not just its own pipeline. That file is the dedup source, so lanes sharing it silently suppress each other: a posting surfaced in one lane counts as a duplicate in the other and never appears there, with only the `Duplicates: skipped` counter to show for it.
+
+Defaults are unchanged, so a single-lane setup needs none of this. Note that the remaining outputs (`data/scan-runs.tsv`, `data/portal-health.tsv`, `data/applications.md`) are still shared across lanes, so `stats.mjs` and the other analytics scripts pool lanes together.
 
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
 

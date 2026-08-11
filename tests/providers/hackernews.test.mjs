@@ -138,9 +138,14 @@ try {
 
   let searchFetched = false;
   let itemFetched = false;
+  let searchParams = null;
   const mockCtx = {
     async fetchJson(url, _opts) {
-      if (url.includes('search_by_date')) { searchFetched = true; return fakeSearchResp; }
+      if (url.includes('search_by_date')) {
+        searchFetched = true;
+        searchParams = new URL(url).searchParams;
+        return fakeSearchResp;
+      }
       if (url.includes(`/items/${FAKE_THREAD_ID}`)) { itemFetched = true; return fakeItemResp; }
       throw new Error(`hackernews mock: unexpected fetch ${url}`);
     },
@@ -152,6 +157,17 @@ try {
     pass('hackernews.fetch() calls search API then items API');
   } else {
     fail(`hackernews.fetch() API calls: search=${searchFetched} item=${itemFetched}`);
+  }
+
+  if (
+    searchParams !== null &&
+    searchParams.get('tags') === 'story,author_whoishiring' &&
+    searchParams.get('hitsPerPage') === '5' &&
+    !searchParams.has('query')
+  ) {
+    pass('hackernews.fetch() searches by the whoishiring account tag, not free text');
+  } else {
+    fail(`hackernews.fetch() search params: tags=${searchParams?.get('tags')} hitsPerPage=${searchParams?.get('hitsPerPage')} query=${searchParams?.get('query')}`);
   }
 
   if (jobs.length === 2) {
