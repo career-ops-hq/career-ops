@@ -5245,6 +5245,34 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
 console.log('\n12c. Materialized skill index mode');
 
+/**
+ * Build a git environment nothing ambient can reach into.
+ *
+ * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
+ * close the RUNTIME layer: GIT_CONFIG_COUNT with its KEY_n / VALUE_n pairs is
+ * applied AFTER every config file, so an ambient `core.excludesFile` injected
+ * that way overrides even the one a fixture sets for itself, and the isolation
+ * silently stops holding - the exact leak this pinning exists to close,
+ * arriving through the one door left open (#2567).
+ *
+ * COUNT is set to 0 rather than deleting the variables: it is a single
+ * authoritative value, and git reads KEY_n / VALUE_n only up to COUNT, so any
+ * stragglers are inert without having to enumerate them.
+ *
+ * `base` exists so the regression case below can hand in a parent environment
+ * carrying the injection. Both callers share this one construction on purpose:
+ * a test that hand-rolled its own env would keep passing if the pin were
+ * dropped here, which is how the gap got in.
+ */
+function hermeticGitEnv(gitConfigPath, base = process.env) {
+  return {
+    ...base,
+    GIT_CONFIG_COUNT: '0',
+    GIT_CONFIG_GLOBAL: gitConfigPath,
+    GIT_CONFIG_SYSTEM: gitConfigPath,
+  };
+}
+
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
   // The fixture stages the very paths career-ops legitimately tracks - .agents/,
@@ -5271,7 +5299,7 @@ console.log('\n12c. Materialized skill index mode');
   // both platforms tested but are not worth depending on.
   const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
   writeFileSync(emptyExcludes, '');
-  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigPath, GIT_CONFIG_SYSTEM: gitConfigPath };
+  const gitEnv = hermeticGitEnv(gitConfigPath);
   const gitRun = (args, opts = {}) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
@@ -5368,6 +5396,69 @@ console.log('\n12c. Materialized skill index mode');
     // The staging-precondition branch already reported all three assertions
     // individually; re-reporting here would double-count and re-bury the cause.
     if (!e?.alreadyReported) fail(`skill entrypoint index-mode test crashed: ${e.message}`);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(gitConfigRoot, { recursive: true, force: true });
+  }
+}
+
+// The block above pins the file layers and the runtime layer, but it can only
+// prove the pin holds against whatever the machine running it happens to carry.
+// On a clean machine an injected-config leak stays invisible, and the pin could
+// be removed with every assertion still green - which is how this one got in.
+// So inject the leak on purpose and assert the pin absorbs it (CodeRabbit,
+// reviewing #2567).
+{
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-'));
+  const gitConfigRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-cfg-'));
+  try {
+    const gitConfigPath = join(gitConfigRoot, 'gitconfig');
+    writeFileSync(gitConfigPath, '');
+    const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
+    writeFileSync(emptyExcludes, '');
+    // The ignore rule an agent-tool user plausibly carries machine-wide, in the
+    // one layer GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM do not cover.
+    const ambientExcludes = join(gitConfigRoot, 'ambient-ignore');
+    writeFileSync(ambientExcludes, '.agents/\n');
+    // Through hermeticGitEnv, not around it: this asserts the production
+    // construction absorbs the injection, so dropping the pin there turns this
+    // red rather than leaving it green on a clean machine.
+    const gitEnv = hermeticGitEnv(gitConfigPath, {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.excludesFile',
+      GIT_CONFIG_VALUE_0: ambientExcludes,
+    });
+    const gitRun = (args) => execFileSync('git', args, {
+      cwd: fixtureRoot,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: gitEnv,
+    }).trim();
+
+    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
+    mkdirSync(canonicalDir, { recursive: true });
+    gitRun(['init']);
+    const excludePath = join(fixtureRoot, '.git', 'info', 'exclude');
+    mkdirSync(dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, '');
+    gitRun(['config', 'core.excludesFile', emptyExcludes]);
+    writeFileSync(join(canonicalDir, 'SKILL.md'), '---\nname: career-ops\n---\n');
+
+    let staged = '';
+    try {
+      gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+      staged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
+    } catch {
+      // Left empty: the assertion below is the report.
+    }
+    if (staged) {
+      pass('injected GIT_CONFIG_* core.excludesFile cannot reach the skill fixture (#2567)');
+    } else {
+      fail('injected GIT_CONFIG_* core.excludesFile reached the fixture - the runtime config layer is unpinned (#2567)');
+    }
+  } catch (e) {
+    fail(`injected git-config isolation test crashed: ${e.message}`);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
     rmSync(gitConfigRoot, { recursive: true, force: true });
