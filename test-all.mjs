@@ -5301,7 +5301,16 @@ console.log('\n12c. Materialized skill index mode');
     // core.excludesFile is only the GLOBAL layer. `git init` also seeds
     // .git/info/exclude from a template, which GIT_TEMPLATE_DIR can still point
     // at an ambient one, so empty that layer too rather than assume it is inert.
-    writeFileSync(join(fixtureRoot, '.git', 'info', 'exclude'), '');
+    //
+    // mkdirSync first, because the same GIT_TEMPLATE_DIR that makes this write
+    // necessary is what can make its parent absent: pointed at an empty or a
+    // non-existent directory, `git init` still succeeds but seeds no .git/info,
+    // and the bare write threw ENOENT before the fixture ran a single assertion
+    // (santifer, reviewing #2567). Assuming the default template here would be
+    // the same ambient-environment dependency this block exists to remove.
+    const excludePath = join(fixtureRoot, '.git', 'info', 'exclude');
+    mkdirSync(dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, '');
     gitRun(['config', 'core.symlinks', 'false']);
     gitRun(['config', 'core.excludesFile', emptyExcludes]);
     gitRun(['config', 'user.email', 'test@example.com']);
