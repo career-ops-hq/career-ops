@@ -48,7 +48,7 @@ const CV_PATH = 'cv.md';
 // JD could yield zero skills - which reads identically to "no gaps found" and
 // is the more dangerous of the two failure modes this file warns about.
 const REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,4}\\s*(?:' + [
+  '^#{0,6}\\s*(?:' + [
     'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
     "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
@@ -57,7 +57,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'your\\s+(?:background|experience|profile)',
     'you\\s+(?:may|might|could)\\s+be\\s+a\\s+good\\s+fit',
     // Ashby's default template ships a bare "YOU HAVE:" heading (no markdown
-    // hashes - already allowed by the ^#{0,4} prefix). Without this the whole
+    // hashes - already allowed by the ^#{0,6} prefix). Without this the whole
     // requirements block is invisible even though the bullets under it are
     // perfectly well formed.
     "you(?:(?:'|’)ll|\\s+will)?\\s+have",
@@ -76,12 +76,12 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // the benefits list into "required skills" - turning perks like "401k",
 // "Equity" and "Carrot" into reported skill gaps.
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,4}\\s*(?:' + [
+  '^#{0,6}\\s*(?:' + [
     // Responsibilities. The negative lookahead keeps "You will have" on the
     // requirements side — this list is tested BEFORE REQUIREMENT_HEADER_RE in
     // scanJd(), so without it a "You will have:" heading would close a block
     // instead of opening one. Bare "YOU WILL" must close: the fallback that
-    // ends a block on a new heading only fires for markdown headings (#{1,4}),
+    // ends a block on a new heading only fires for markdown headings (#{1,6}),
     // so an unhashed responsibilities heading left the block open and scored
     // its duties as required skills.
     'you\\s+will(?!\\s+have)',
@@ -172,7 +172,7 @@ function scanJd(jdText) {
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,4}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
+    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
       inRequirementsBlock = false;
     }
 
@@ -278,8 +278,8 @@ function skillMentionedInText(skill, text) {
 // section at all or matches a literal "Z" character later in the text.
 // Scanning line-by-line for the next heading avoids the anchor entirely.
 
-const SKILLS_HEADING_RE = /^#{1,4}\s*Skills\s*$/i;
-const ANY_HEADING_RE = /^#{1,4}\s/;
+const SKILLS_HEADING_RE = /^#{1,6}\s*Skills\s*$/i;
+const ANY_HEADING_RE = /^#{1,6}\s/;
 
 /**
  * Split cv.md into its named "Skills" section (if any) and the remaining
@@ -466,7 +466,7 @@ Python, Docker, Zookeeper
   // The assertion above only proves YOU WILL cannot OPEN a block. Closing is
   // the case that actually bites: postings routinely list requirements first
   // and duties second, and the block-ending fallback in scanJd() fires only on
-  // markdown headings (#{1,4}) — so a bare responsibilities heading left the
+  // markdown headings (#{1,6}) — so a bare responsibilities heading left the
   // block open and reported every duty as a missing skill.
   const dutiesAfterRequirementsJd = [
     '# Role', '', 'YOU HAVE:', '- Experience with Python', '',
@@ -484,6 +484,21 @@ Python, Docker, Zookeeper
     extractJdSkills('# Role\n\nYou Will Have:\n- Experience with Kubernetes\n').includes('Kubernetes'),
     true
   );
+
+  // Markdown defines six heading levels, and the block-ending fallback only
+  // recognized four (CodeRabbit, reviewing #2176). A posting pasted out of a
+  // deeply nested doc - or converted from HTML, where an ATS wraps sections in
+  // h5/h6 - kept the requirements block open across its own next heading, so
+  // everything below it scored as a required skill.
+  const deepHeadingJd = [
+    '##### Requirements', '- Experience with Python', '',
+    '##### Benefits', '- Equity and a Carrot subscription', '',
+    '###### About Us', '- We use Kubernetes internally for our own platform',
+  ].join('\n');
+  const deepSkills = extractJdSkills(deepHeadingJd);
+  eq('an h5 requirements heading is recognized', deepSkills.includes('Python'), true);
+  eq('an h5 heading closes the block (Equity)', deepSkills.includes('Equity'), false);
+  eq('an h6 heading stays closed (Kubernetes)', deepSkills.includes('Kubernetes'), false);
 
   // Regression: generic JD boilerplate must not be misreported as a skill gap.
   const boilerplateJd = `
