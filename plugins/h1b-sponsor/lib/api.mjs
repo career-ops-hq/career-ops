@@ -37,7 +37,13 @@ function sleep(ms) {
 // maxRedirects: same-host redirects re-issue the request with the SAME method
 // and body, which is what a GET wants and what a mint POST must never do
 // (each re-POST could spend mint budget again). The mint passes 0.
-export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS } = {}) {
+//
+// consume runs INSIDE the abort-timer window: a server that sends headers and
+// then stalls the body would otherwise hang the caller forever, because the
+// timer is cleared before the caller could parse. Callers that read the body
+// must pass consume; the no-consume form returns the raw Response and is only
+// safe when the body is never read.
+export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS } = {}, consume) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   const baseHost = new URL(BASE).host;
@@ -50,12 +56,14 @@ export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_
     let requestUrl = url;
     for (let hop = 0; ; hop++) {
       const res = await fetch(requestUrl, { method, headers, body, signal: controller.signal, redirect: 'manual' });
-      if (res.status < 300 || res.status > 399) return res;
+      if (res.status < 300 || res.status > 399) {
+        return consume ? await consume(res) : res;
+      }
 
       const loc = res.headers.get('location');
       // A 3xx without a Location header is not actionable (e.g. 304) — hand it
       // back to the caller unchanged.
-      if (!loc) return res;
+      if (!loc) return consume ? await consume(res) : res;
 
       const next = new URL(loc, requestUrl);
       // Host AND scheme must match: an http:// downgrade on the same host
@@ -82,55 +90,68 @@ async function requestJson(url, opts, { allow404 } = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
   const headers = buildHeaders(token);
 
-  let res;
-  try {
-    res = await fetchWithTimeout(url, { headers, timeoutMs });
-  } catch (err) {
-    if (err && err.name === 'AbortError') {
-      const e = new Error(`H-1B API timeout after ${timeoutMs}ms: ${url}`);
-      e.code = 'TIMEOUT';
-      throw e;
+  // Every body read happens inside the fetch timer via consume, so a server
+  // that sends headers and then stalls the body times out instead of hanging.
+  // What comes back is a plain outcome object, never a live Response.
+  const attempt = () => fetchWithTimeout(url, { headers, timeoutMs }, async res => {
+    if (res.status === 429) return { kind: 'rate', waitMs: parseRetryAfter(res) };
+    if (allow404 && res.status === 404) return { kind: 'missing' };
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { kind: 'http', status: res.status, statusText: res.statusText, text };
     }
+    try {
+      return { kind: 'json', body: await res.json() };
+    } catch {
+      return { kind: 'badjson' };
+    }
+  });
+
+  const timeoutError = (label) => {
+    const e = new Error(`H-1B API timeout${label} after ${timeoutMs}ms: ${url}`);
+    e.code = 'TIMEOUT';
+    return e;
+  };
+
+  let out;
+  try {
+    out = await attempt();
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw timeoutError('');
     throw err;
   }
 
-  if (res.status === 429) {
-    const waitMs = Math.min(parseRetryAfter(res), MAX_RETRY_WAIT_MS);
-    await sleep(waitMs);
+  if (out.kind === 'rate') {
+    await sleep(Math.min(out.waitMs, MAX_RETRY_WAIT_MS));
     try {
-      res = await fetchWithTimeout(url, { headers, timeoutMs });
+      out = await attempt();
     } catch (err) {
-      if (err && err.name === 'AbortError') {
-        const e = new Error(`H-1B API timeout on retry after ${timeoutMs}ms: ${url}`);
-        e.code = 'TIMEOUT';
-        throw e;
-      }
+      if (err && err.name === 'AbortError') throw timeoutError(' on retry');
       throw err;
     }
-    if (res.status === 429) {
+    if (out.kind === 'rate') {
       const e = new Error(`H-1B API rate limited: ${url}`);
       e.code = 'RATE_LIMIT';
       throw e;
     }
   }
 
-  if (allow404 && res.status === 404) return null;
+  if (out.kind === 'missing') return null;
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    const e = new Error(`H-1B API ${res.status} ${res.statusText}: ${url}${body ? ` -- ${body.slice(0, 200)}` : ''}`);
+  if (out.kind === 'http') {
+    const e = new Error(`H-1B API ${out.status} ${out.statusText}: ${url}${out.text ? ` -- ${out.text.slice(0, 200)}` : ''}`);
     e.code = 'HTTP_ERROR';
-    e.status = res.status;
+    e.status = out.status;
     throw e;
   }
 
-  try {
-    return await res.json();
-  } catch (err) {
+  if (out.kind === 'badjson') {
     const e = new Error(`H-1B API returned non-JSON body: ${url}`);
     e.code = 'BAD_JSON';
     throw e;
   }
+
+  return out.body;
 }
 
 function normalize(str) {

@@ -52,7 +52,7 @@ node plugins/h1b-sponsor/check.mjs "Acme Corp" --summary
 # strong: Acme Corp - 412 LCAs, 5 PWDs, 37 PERMs, active 2020-2024
 ```
 
-List every matching entity instead of checking one. A large employer files under many distinct FEINs, so a broad name returns all of them; check a specific one by passing its exact name:
+List matching entities instead of checking one. A large employer files under many distinct FEINs, and the API serves one page of matches at a time, so a broad name shows the first page and the full count. Narrow the query to reach entities past the page cap, then check a specific one by passing its exact name:
 
 ```bash
 node plugins/h1b-sponsor/check.mjs "Amazon" --search

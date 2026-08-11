@@ -19,6 +19,16 @@ const USAGE = 'Usage: node plugins/h1b-sponsor/token.mjs request';
 // H1B_API_TOKEN= line: a value carrying shell metacharacters would run when the
 // user sources their .env.
 const TOKEN_RE = /^h1b_[0-9a-f]+$/;
+// Server-controlled text printed to the terminal gets the same control-char
+// strip check.mjs applies: C0, DEL, and C1, then whitespace collapse.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+function displayClean(s) {
+  // Whitespace collapse first: newlines are control chars too, and stripping
+  // them before the collapse would glue words together instead of separating
+  // them. What survives (ESC, BEL, DEL, C1) is not whitespace and is stripped.
+  return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
+}
 
 // "about 12 hours" is something a person can act on; the raw 43200 reads like
 // an error code.
@@ -31,47 +41,72 @@ function humanSpan(seconds) {
   return span(Math.round(s / 86_400), 'day');
 }
 
-function retryAfterSpan(res) {
-  const raw = res.headers.get('retry-after');
-  if (!raw) return null;
-  const secs = Number(raw);
-  return Number.isFinite(secs) ? humanSpan(secs) : null;
-}
+// A mint reply is a small JSON object; anything bigger is not a key service
+// answering. The body is already buffered by res.text() when the cap runs, so
+// this bounds what gets parsed and trusted, not peak memory.
+const MAX_BODY_BYTES = 64 * 1024;
 
 // The mint POST goes through the read path's egress guard (redirect handled
 // manually, off-host or scheme-downgraded targets rejected) so a hijacked
 // redirect cannot hand back an attacker-issued token. maxRedirects is 0: the
 // key service never redirects this endpoint, and following one would re-issue
-// the POST, which could spend the mint budget more than once. Any 3xx with a
-// Location is refused after the single original request.
+// the POST, which could spend the mint budget more than once. The body is read
+// inside the same abort-timer window (via consume) so a server that sends
+// headers and then stalls the body times out instead of hanging, and the read
+// is size-capped. What comes back is a plain envelope, never a live Response:
+// { status, retryAfterSeconds, body | bodyError }.
 function guardedMintFetch() {
   return fetchWithTimeout(`${BASE}/keys/request`, {
     method: 'POST',
     headers: { 'Accept': 'application/json', 'User-Agent': USER_AGENT },
     timeoutMs: TIMEOUT_MS,
     maxRedirects: 0,
+  }, async res => {
+    const rawRetry = res.headers.get('retry-after');
+    const retrySecs = Number(rawRetry);
+    const envelope = {
+      status: res.status,
+      retryAfterSeconds: (rawRetry !== null && Number.isFinite(retrySecs)) ? retrySecs : null,
+    };
+    let text;
+    try {
+      text = await res.text();
+    } catch {
+      envelope.bodyError = 'unreadable';
+      return envelope;
+    }
+    if (text.length > MAX_BODY_BYTES) {
+      envelope.bodyError = 'oversized';
+      return envelope;
+    }
+    try {
+      envelope.body = JSON.parse(text);
+    } catch {
+      envelope.bodyError = 'notjson';
+    }
+    return envelope;
   });
 }
 
 /**
  * Request one key. Returns a plain result so the outcome is testable without a
  * live mint: `{ ok: true, token, note }` on success, else
- * `{ ok: false, exitCode, message }`. `fetchImpl` is injectable for tests;
- * production uses the guarded fetch above.
+ * `{ ok: false, exitCode, message }`. `fetchImpl` is injectable for tests and
+ * must resolve to the envelope shape guardedMintFetch produces.
  */
 export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
-  let res;
+  let env;
   try {
-    res = await fetchImpl();
+    env = await fetchImpl();
   } catch (err) {
     const reason = (err && err.name === 'AbortError')
       ? `no response within ${TIMEOUT_MS / 1000}s`
-      : String((err && err.message) ? err.message : err).replace(/\s+/g, ' ').trim();
+      : displayClean((err && err.message) ? err.message : err);
     return { ok: false, exitCode: 1, message: `could not reach the key service (${reason})` };
   }
 
-  if (res.status === 429) {
-    const span = retryAfterSpan(res);
+  if (env.status === 429) {
+    const span = (env.retryAfterSeconds !== null) ? humanSpan(env.retryAfterSeconds) : null;
     return {
       ok: false,
       exitCode: 1,
@@ -79,24 +114,20 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
     };
   }
 
+  if (env.status !== 201) {
+    return { ok: false, exitCode: 1, message: `could not issue a key (HTTP ${env.status})` };
+  }
+
   // A 201 means the server may already have spent this address's budget, so a
   // failure to read the token past that point is worth saying out loud.
-  const spentNote = res.status === 201
-    ? ' A key may have been issued and the mint budget spent; wait for the cool-off before retrying.'
-    : '';
+  const spentNote = ' A key may have been issued and the mint budget spent; wait for the cool-off before retrying.';
 
-  if (res.status !== 201) {
-    return { ok: false, exitCode: 1, message: `could not issue a key (HTTP ${res.status})` };
+  if (env.bodyError || !env.body) {
+    return { ok: false, exitCode: 1, message: `could not issue a key (the response was not readable JSON).${spentNote}` };
   }
 
-  let body;
-  try {
-    body = await res.json();
-  } catch {
-    return { ok: false, exitCode: 1, message: `could not issue a key (the response was not JSON).${spentNote}` };
-  }
-
-  const token = (body && typeof body.token === 'string') ? body.token.trim() : '';
+  const body = env.body;
+  const token = (typeof body.token === 'string') ? body.token.trim() : '';
   if (!token) {
     return { ok: false, exitCode: 1, message: `could not issue a key (the response carried no token).${spentNote}` };
   }
@@ -106,9 +137,7 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
 
   // Server-controlled text; collapse whitespace so it stays one line and cannot
   // smuggle extra instructions into output the agent may relay.
-  const note = (typeof body.note === 'string')
-    ? body.note.replace(/\s+/g, ' ').trim()
-    : '';
+  const note = (typeof body.note === 'string') ? displayClean(body.note) : '';
 
   return { ok: true, token, note };
 }
@@ -152,7 +181,7 @@ async function main() {
 // test files in-process, so that turned the whole suite red).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => {
-    const message = String((err && err.message) ? err.message : err).replace(/\s+/g, ' ').trim();
+    const message = displayClean((err && err.message) ? err.message : err);
     process.stderr.write(`could not issue a key (${message})\n`);
     process.exitCode = 1;
   });

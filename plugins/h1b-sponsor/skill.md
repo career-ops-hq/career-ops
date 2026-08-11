@@ -32,7 +32,7 @@ If `friendlinessTier` is `unknown` (including the discard above), the JD name ma
 node plugins/h1b-sponsor/check.mjs "<company>" --search
 ```
 
-That lists every matching filing entity with its id. If one entity clearly corresponds to the JD company (same brand, the division the JD describes), re-run the check with that entity's exact name and use its result; large employers file under many entities, so prefer the one matching the JD's own wording. If nothing on the list clearly corresponds, the result stays `unknown`. Never pick an entity on stem similarity alone, and never blend numbers across entities.
+That lists matching filing entities with their ids. The API serves one page at a time and the header says when the total exceeds what is shown, so a broad query can hide the right entity past the page cap; narrow the query (add a distinctive word from the JD name) and search again before concluding nothing matches. If one entity clearly corresponds to the JD company (same brand, the division the JD describes), re-run the check with that entity's exact name and use its result; large employers file under many entities, so prefer the one matching the JD's own wording. If nothing clearly corresponds after a narrowed search, the result stays `unknown`. Never pick an entity on stem similarity alone, and never blend numbers across entities.
 
 ## Getting a token
 

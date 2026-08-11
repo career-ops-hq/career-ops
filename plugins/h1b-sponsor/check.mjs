@@ -18,6 +18,19 @@ function sourceUrl(employerId) {
   return employerId ? `${BASE}/employers/${encodeURIComponent(employerId)}` : BASE + '/employers';
 }
 
+// API-controlled text goes through this before any non-JSON output: collapse
+// whitespace so a line stays a line, then strip C0, DEL, and C1 control
+// characters so a crafted name cannot smuggle terminal escapes or forged
+// rows into the text output. JSON output keeps the raw fields. The collapse
+// runs first because newlines and tabs are control chars too, and stripping
+// them before the collapse would glue words together instead of separating
+// them; what survives the collapse (ESC, BEL, DEL, C1) is not whitespace.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+function displayClean(s) {
+  return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
+}
+
 // The cache is an optimization: a failed write (read-only FS, full disk, a
 // --cache-dir typo) must never discard a lookup that already succeeded and
 // already spent rate-limit budget.
@@ -25,7 +38,7 @@ async function writeCacheSafe(name, data, opts) {
   try {
     await writeCache(name, data, opts);
   } catch (err) {
-    const msg = String((err && err.message) ? err.message : err).replace(/\s+/g, ' ').trim();
+    const msg = displayClean((err && err.message) ? err.message : err);
     process.stderr.write(`h1b-sponsor: cache write failed (${msg}); continuing without cache\n`);
   }
 }
@@ -52,10 +65,9 @@ function parseArgs(argv) {
   return args;
 }
 
+
 function formatSummary(result) {
-  // displayName is API-controlled text; collapse whitespace so the summary
-  // stays a single line no matter what the API returns.
-  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const clean = displayClean;
   if (!result.found) return `unknown: ${clean(result.displayName) || 'unknown company'}`;
   const t = result.totals || {};
   const range = (t.first_year && t.last_year)
@@ -117,7 +129,7 @@ function emit(format, obj) {
 // may need to pick the exact one. Each listed name is checkable on its own: an
 // exact name resolves straight to that entity.
 function emitSearch(format, query, total, results) {
-  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const clean = displayClean;
   if (format === 'json') {
     process.stdout.write(JSON.stringify({ query, total, shown: results.length, results }, null, 2) + '\n');
     return;
@@ -129,7 +141,7 @@ function emitSearch(format, query, total, results) {
   const header = total > results.length
     ? `${results.length} of ${total} matches for "${clean(query)}" (narrow the query to see the rest):`
     : `${results.length} match${results.length === 1 ? '' : 'es'} for "${clean(query)}":`;
-  const rows = results.map(r => `  ${r.id}  ${clean(r.name)}`);
+  const rows = results.map(r => `  ${clean(r.id)}  ${clean(r.name)}`);
   process.stdout.write([header, ...rows].join('\n') + '\n');
 }
 
@@ -198,7 +210,7 @@ async function main() {
 main().catch(err => {
   // The message can embed up to 200 chars of API-controlled response body, and
   // the summary contract is one line — collapse all whitespace before printing.
-  const message = String((err && err.message) ? err.message : err).replace(/\s+/g, ' ').trim();
+  const message = displayClean((err && err.message) ? err.message : err);
   const argv = process.argv.slice(2);
   const format = argv.includes('--json') ? 'json' : 'summary';
   // Emit the full documented envelope even on error so consumers reading

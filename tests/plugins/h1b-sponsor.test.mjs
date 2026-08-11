@@ -383,6 +383,58 @@ if (!existsSync(API_PATH)) {
   }
 }
 
+// ---------- check.mjs --search display sanitizer ----------
+// Runs UNGATED: the child process stubs globalThis.fetch before importing
+// check.mjs, so nothing touches the network or the cache. This pins the
+// control-char strip on the text output (a crafted employer name must not
+// smuggle terminal escapes or a forged row) and the raw pass-through on JSON.
+{
+  const tmpDir = join(tmpdir(), `h1b-sanitize-${randomUUID()}`);
+  try {
+    await mkdir(tmpDir, { recursive: true });
+    const evilName = 'Evil\\u001b[31mRED\\u001b[0m\\u0007Co\\r\\nFORGED  ROW';
+    const wrapper = (jsonFlag) => [
+      `globalThis.fetch = async () => new Response(JSON.stringify({`,
+      `  total: 5,`,
+      `  results: [{ id: '12\\u001b[7m34', name: '${evilName}' }],`,
+      `}), { status: 200 });`,
+      `process.argv = [process.argv[0], ${JSON.stringify(CHECK_PATH)}, 'EvilCo', '--search'${jsonFlag ? ", '--json'" : ''}];`,
+      `await import(${JSON.stringify(pathToFileURL(CHECK_PATH).href)});`,
+    ].join('\n');
+
+    const runWrapper = (file) => new Promise((resolve) => {
+      execFile(process.execPath, [file], { timeout: 20_000 }, (err, stdout) => resolve(String(stdout || '')));
+    });
+
+    const textWrapper = join(tmpDir, 'text.mjs');
+    await writeFile(textWrapper, wrapper(false), 'utf8');
+    const textOut = await runWrapper(textWrapper);
+    const hasControl = [...textOut].some(ch => { const c = ch.charCodeAt(0); return (c < 32 && c !== 10 && c !== 13) || c === 127 || (c >= 128 && c <= 159); });
+    const oneRow = textOut.trim().split('\n').length === 2; // header + single row
+    if (!hasControl && oneRow && /FORGED ROW/.test(textOut)) {
+      pass('search text output strips control chars and keeps the forged row on one line');
+    } else {
+      fail(`search text sanitizer: control=${hasControl} rows=${textOut.trim().split('\n').length}`);
+    }
+
+    const jsonWrapper = join(tmpDir, 'json.mjs');
+    await writeFile(jsonWrapper, wrapper(true), 'utf8');
+    const jsonOut = await runWrapper(jsonWrapper);
+    let rawKept = false;
+    try {
+      const parsed = JSON.parse(jsonOut);
+      const ESC = String.fromCharCode(27);
+      rawKept = parsed.results[0].name.includes(ESC + '[31m') && parsed.results[0].id.includes(ESC + '[7m');
+    } catch { rawKept = false; }
+    if (rawKept) pass('search JSON output keeps the raw unsanitized fields');
+    else fail(`search JSON raw fields: ${jsonOut.slice(0, 120)}`);
+  } catch (e) {
+    fail(`sanitizer tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // ---------- check.mjs — CLI JSON contract ----------
 // GATED: check.mjs is designed to hit api.surakshith.com on cache miss, so it
 // cannot run in a unit context without either network mocking (out of scope
@@ -513,53 +565,59 @@ if (!existsSync(TOKEN_PATH)) {
     });
   }
 
-  // Offline response-handling: mintToken takes an injectable fetch, so every
-  // branch is testable without a live mint. The default fetch is the guarded
-  // one; here we replace it to simulate each server outcome.
+  // Offline response-handling: mintToken takes an injectable fetch that
+  // resolves to the plain envelope guardedMintFetch produces after reading the
+  // body inside the abort-timer window: { status, retryAfterSeconds,
+  // body | bodyError }. Every branch is testable without a live mint.
   const tokenMod = await import(pathToFileURL(TOKEN_PATH).href);
-  const fakeRes = (status, { body, headers } = {}) => ({
+  const fakeEnvelope = (status, { body, bodyError, retryAfterSeconds = null } = {}) => ({
     status,
-    headers: { get: (h) => (headers && headers[h.toLowerCase()]) ?? null },
-    json: async () => {
-      if (body === undefined) throw new Error('not json');
-      return body;
-    },
+    retryAfterSeconds,
+    ...(body !== undefined ? { body } : {}),
+    ...(bodyError !== undefined ? { bodyError } : {}),
   });
 
   const GOOD = 'h1b_' + 'ab'.repeat(24);
-  const r201 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { token: GOOD, tier: 'keyed', limit: 200, note: 'line one\n\nline two' } }) });
+  const r201 = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(201, { body: { token: GOOD, tier: 'keyed', limit: 200, note: 'line one\n\nline two' } }) });
   if (r201.ok && r201.token === GOOD && r201.note === 'line one line two') {
     pass('mintToken: 201 returns the token and a whitespace-collapsed note');
   } else {
     fail(`mintToken 201: ${JSON.stringify(r201)}`);
   }
 
-  const rMalformed = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { token: 'h1b_abc\nEVIL=$(rm -rf ~)' } }) });
+  const rMalformed = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(201, { body: { token: 'h1b_abc\nEVIL=$(rm -rf ~)' } }) });
   if (!rMalformed.ok && /malformed/.test(rMalformed.message)) {
     pass('mintToken: a token with shell metacharacters is rejected, never printed');
   } else {
     fail(`mintToken malformed-token: ${JSON.stringify(rMalformed)}`);
   }
 
-  const r429 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(429, { headers: { 'retry-after': '43200' } }) });
+  const r429 = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(429, { retryAfterSeconds: 43200 }) });
   if (!r429.ok && r429.exitCode === 1 && /12 hours/.test(r429.message) && !/h1b_/.test(r429.message)) {
     pass('mintToken: 429 reports the wait, no token');
   } else {
     fail(`mintToken 429: ${JSON.stringify(r429)}`);
   }
 
-  const r500 = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(500) });
+  const r500 = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(500) });
   if (!r500.ok && /HTTP 500/.test(r500.message)) pass('mintToken: 500 is a clean one-line failure');
   else fail(`mintToken 500: ${JSON.stringify(r500)}`);
 
-  const rBadJson = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201) });
+  const rBadJson = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(201, { bodyError: 'notjson' }) });
   if (!rBadJson.ok && /budget spent/.test(rBadJson.message)) {
     pass('mintToken: a 201 with an unreadable body warns the budget may be spent');
   } else {
     fail(`mintToken bad-json: ${JSON.stringify(rBadJson)}`);
   }
 
-  const rNoToken = await tokenMod.mintToken({ fetchImpl: async () => fakeRes(201, { body: { tier: 'keyed' } }) });
+  const rOversized = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(201, { bodyError: 'oversized' }) });
+  if (!rOversized.ok && /budget spent/.test(rOversized.message) && !/h1b_/.test(rOversized.message)) {
+    pass('mintToken: a 201 with an oversized body fails closed with the budget warning');
+  } else {
+    fail(`mintToken oversized: ${JSON.stringify(rOversized)}`);
+  }
+
+  const rNoToken = await tokenMod.mintToken({ fetchImpl: async () => fakeEnvelope(201, { body: { tier: 'keyed' } }) });
   if (!rNoToken.ok && /no token/.test(rNoToken.message)) pass('mintToken: a 201 without a token field fails closed');
   else fail(`mintToken no-token: ${JSON.stringify(rNoToken)}`);
 
