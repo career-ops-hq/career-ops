@@ -1263,6 +1263,43 @@ const badSpanOut = execFileSync('node', [scriptPath, '--min-span', 'abc'], {
 });
 eq('--min-span abc falls back to 1', JSON.parse(badSpanOut).metadata.minSpanDays, 1);
 
+// Anything that is not a plain non-negative integer falls back rather than
+// being half-read. The negative case is the dangerous one: it silently DISABLES
+// the guard --min-span exists to set, so concurrent openings would be reported
+// as reposts again with nothing to indicate the value was rejected. "7abc" is
+// the same class — parseInt() reads it as 7 and runs with a number nobody typed.
+const flagFallbackCases = [
+  ['--min-span', '-5', 'minSpanDays', 1, 'negative --min-span falls back (never disables the floor)'],
+  ['--min-span', '7abc', 'minSpanDays', 1, 'partially numeric --min-span falls back (not read as 7)'],
+  ['--min-span', '1.5', 'minSpanDays', 1, 'non-integer --min-span falls back'],
+  ['--window', '-1', 'windowDays', 90, 'negative --window falls back (never rejects every cluster)'],
+  ['--window', '60abc', 'windowDays', 90, 'partially numeric --window falls back'],
+];
+for (const [flag, value, field, expected, label] of flagFallbackCases) {
+  const out = execFileSync('node', [scriptPath, flag, value], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  eq(label, JSON.parse(out).metadata[field], expected);
+}
+
+// `--min-span=` supplies an EMPTY value, which must fall back too. Number('')
+// is 0, so a validator written with Number()/Number.isInteger() would read this
+// as a deliberate zero and quietly disable the floor.
+const emptySpanOut = execFileSync('node', [scriptPath, '--min-span='], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span= (empty value) falls back to 1, not 0', JSON.parse(emptySpanOut).metadata.minSpanDays, 1);
+
+// 0 remains a legitimate explicit value on both flags — the fallback rules must
+// not swallow it, or the floor could never be switched off on purpose.
+const zeroSpanOut = execFileSync('node', [scriptPath, '--min-span', '0'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span 0 is honoured as an explicit zero', JSON.parse(zeroSpanOut).metadata.minSpanDays, 0);
+
 // Test -h flag
 const hOut = execFileSync('node', [scriptPath, '-h'], {
   encoding: 'utf-8', timeout: 10000,

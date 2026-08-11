@@ -84,13 +84,25 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 // Both numeric flags read through flagValue, so `--min-span=7` behaves exactly
 // like `--min-span 7` — the defect lib/cli-flags.mjs exists to keep the next
-// script from rediscovering. An absent or unparseable value falls back to the
-// default, which is the behaviour --window already had.
+// script from rediscovering. Anything that is not a plain non-negative integer
+// falls back to the default, which is the behaviour --window already had for an
+// unparseable value.
+//
+// The whole string must match, and it must not be negative. parseInt() alone
+// satisfies neither: it reads "7abc" as 7, and it reads "-5" as -5 — and a
+// negative floor silently disables the very guard --min-span exists to set,
+// reporting concurrent openings as reposts again with no indication that the
+// value was rejected. A negative --window likewise rejects every cluster.
+//
+// Tested against Number()/Number.isInteger() as well: Number('') is 0, so an
+// empty value (`--min-span=`) would read as a deliberate zero and disable the
+// floor. A total regex has no such hole.
 const intFlag = (flag, fallback) => {
   const raw = flagValue(args, flag);
   if (raw === undefined) return fallback;
-  const parsed = parseInt(raw, 10);
-  return Number.isNaN(parsed) ? fallback : parsed;
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return fallback;
+  return Number(text);
 };
 const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
