@@ -50,7 +50,14 @@ function isRetryableError(err) {
   return status === undefined; // network error / timeout / abort — no status set
 }
 
-/** Fetches a single page, retrying transient failures with backoff. */
+/**
+ * Fetches a single page, retrying transient failures with backoff. The
+ * thrown error (whether retries were exhausted or the error was
+ * non-retryable) carries `attempts` — the actual number of fetchJson calls
+ * made — so a caller reporting failure doesn't have to assume the fixed
+ * MAX_RETRIES+1 ceiling, which would misreport a non-retryable error (one
+ * attempt, no retries) as having exhausted the full retry budget.
+ */
 async function fetchPageWithRetry(ctx, url, opts) {
   let lastErr;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -58,7 +65,8 @@ async function fetchPageWithRetry(ctx, url, opts) {
       return await ctx.fetchJson(url, opts);
     } catch (err) {
       lastErr = err;
-      if (attempt === MAX_RETRIES || !isRetryableError(err)) throw err;
+      lastErr.attempts = attempt + 1;
+      if (attempt === MAX_RETRIES || !isRetryableError(err)) throw lastErr;
       const backoff = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
       // A server-supplied Retry-After is honored, but still clamped — an
       // unbounded value would otherwise stall this board's fetch for as long
@@ -140,7 +148,8 @@ export default {
         // failure on page 0 still surfaces as zero jobs, which scan.mjs's own
         // empty-board reporting already covers; this only changes the
         // behavior for page 1+.
-        console.error(`⚠️  themuse: truncated at page ${page} of ${pageCount === 1 ? 'unknown' : pageCount} after ${MAX_RETRIES + 1} attempts (${allResults.length} jobs gathered so far): ${err.message}`);
+        const attempts = Number.isInteger(err?.attempts) ? err.attempts : 1;
+        console.error(`⚠️  themuse: truncated at page ${page} of ${pageCount === 1 ? 'unknown' : pageCount} after ${attempts} attempt${attempts === 1 ? '' : 's'} (${allResults.length} jobs gathered so far): ${err.message}`);
         break;
       }
       if (!json || !Array.isArray(json.results)) {

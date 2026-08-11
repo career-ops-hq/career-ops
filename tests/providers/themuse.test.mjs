@@ -224,18 +224,20 @@ try {
     } else {
       fail(`themuse retry exhaustion: expected 1 preserved job, got ${JSON.stringify(jobs.map(j => j.title))}`);
     }
-    if (errors.some(e => /truncated at page 1 of 3/.test(e) && /1 jobs gathered so far/.test(e))) {
-      pass('themuse.fetch() warns (does not throw) when a page exhausts retries');
+    if (errors.some(e => /truncated at page 1 of 3/.test(e) && /after 4 attempts/.test(e) && /1 jobs gathered so far/.test(e))) {
+      pass('themuse.fetch() warns (does not throw) with the real exhausted attempt count (4) when a page exhausts retries');
     } else {
       fail(`themuse retry exhaustion: expected a truncation warning, got ${JSON.stringify(errors)}`);
     }
   }
 
   // fetch() retry — a non-retryable error (e.g. 404) breaks immediately
-  // without wasting retry attempts, but still preserves earlier pages.
+  // without wasting retry attempts, but still preserves earlier pages. The
+  // truncation warning must report the real attempt count (1), not the
+  // fixed MAX_RETRIES+1 ceiling that only applies to exhausted retries.
   {
     let calls = 0;
-    const { result: jobs } = await captureConsoleErrors(() =>
+    const { result: jobs, errors } = await captureConsoleErrors(() =>
       themuse.fetch(
         { name: 'The Muse Board', provider: 'themuse' },
         {
@@ -253,6 +255,11 @@ try {
       pass('themuse.fetch() does not retry a non-retryable error, but preserves earlier pages');
     } else {
       fail(`themuse non-retryable: calls=${calls}, jobs=${JSON.stringify(jobs.map(j => j.title))}`);
+    }
+    if (errors.some(e => /after 1 attempt /.test(e) && !/attempts/.test(e))) {
+      pass('themuse.fetch() reports the real attempt count (1) for a non-retryable error, not the retry ceiling');
+    } else {
+      fail(`themuse non-retryable attempt count: expected "after 1 attempt", got ${JSON.stringify(errors)}`);
     }
   }
 
