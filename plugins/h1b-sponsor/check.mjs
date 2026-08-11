@@ -3,6 +3,7 @@
 // Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]
 //   --search lists every matching employer entity instead of checking one.
 // Env: H1B_API_TOKEN (optional; anon requests are throttled 30/hr per IP+ASN).
+//      H1B_API_BASE  (optional; defaults to the maintained endpoint).
 //
 // Output format (JSON):
 //   { found, employerId, displayName, hasSponsorshipHistory,
@@ -10,12 +11,21 @@
 //     redFlags: { staffing_shop: {...} | null },
 //     friendlinessTier, source, fetchedAt }
 
-import { resolveEmployer, searchEmployers, getEmployerProfile, BASE } from './lib/api.mjs';
+import { resolveEmployer, searchEmployers, getEmployerProfile, apiBase } from './lib/api.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
 
 function sourceUrl(employerId) {
-  return employerId ? `${BASE}/employers/${encodeURIComponent(employerId)}` : BASE + '/employers';
+  // A misconfigured base must not throw out of the error handler that exists
+  // to report it, so an unresolvable endpoint reports no source rather than
+  // naming one the user did not choose.
+  let base;
+  try {
+    base = apiBase();
+  } catch {
+    return null;
+  }
+  return employerId ? `${base}/employers/${encodeURIComponent(employerId)}` : base + '/employers';
 }
 
 // API-controlled text goes through this before any non-JSON output: collapse
@@ -167,7 +177,7 @@ async function main() {
   if (!refresh) {
     const cached = await readCache(name, cacheOpts);
     if (cached) {
-      if (cached.negative) {
+      if (cached.negative && cached.data && cached.data.base === apiBase()) {
         const out = notFoundResult(name);
         // Keep source a URL (the documented contract); the stale fetchedAt is
         // what signals this answer came from cache.
@@ -175,8 +185,12 @@ async function main() {
         emit(format, out);
         return;
       }
-      const { displayName, employerId, profile } = cached.data || {};
-      if (displayName && employerId && profile) {
+      const { displayName, employerId, profile, base } = cached.data || {};
+      // An answer from one instance is not an answer from another, and the
+      // source field is rebuilt from the CURRENT endpoint, so serving a stale
+      // entry across a switch would label one instance's data as the other's.
+      // Treat a different endpoint as a miss and re-fetch.
+      if (displayName && employerId && profile && base === apiBase()) {
         const out = buildResult(displayName, employerId, profile, sourceUrl(employerId), cached.fetchedAt);
         emit(format, out);
         return;
@@ -186,7 +200,7 @@ async function main() {
 
   const match = await resolveEmployer(name, apiOpts);
   if (!match) {
-    await writeCacheSafe(name, { name }, { ...cacheOpts, negative: true });
+    await writeCacheSafe(name, { name, base: apiBase() }, { ...cacheOpts, negative: true });
     const out = notFoundResult(name);
     emit(format, out);
     return;
@@ -201,6 +215,7 @@ async function main() {
       displayName: match.displayName,
       employerId: match.id,
       profile,
+      base: apiBase(),
     }, cacheOpts);
   }
   const out = buildResult(match.displayName, match.id, profile, sourceUrl(match.id), now);

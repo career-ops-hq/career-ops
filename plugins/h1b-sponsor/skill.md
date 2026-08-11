@@ -64,7 +64,7 @@ Minting is metered per address: 2 keys are available at once, then one more ever
 When the CLI returns a real tier (`strong`, `moderate`, `staffing-shop`, `weak`, or `none`), append this bullet verbatim to Block G Signal #3 "Company Hiring Signals" in the `oferta` report, with placeholders filled in from the `--json` output. The agent reads `friendlinessTier`, `totals.n_lca`, `totals.n_pwd`, `totals.n_perm`, `totals.first_year`, `totals.last_year`, and `redFlags.staffing_shop.share` (a 0-1 fraction; see the `{share}` placeholder rule below for the cases that print `0`).
 
 ```markdown
-- H-1B sponsorship history (DOL public data, {first_year}-{last_year}): tier `{friendlinessTier}`. LCAs certified: {n_lca}. PWDs: {n_pwd}. PERM approvals: {n_perm}. Secondary-entity share: {share}. Source: plugins/h1b-sponsor via api.surakshith.com; see plugin README for tier definitions.
+- H-1B sponsorship history (DOL public data, {first_year}-{last_year}): tier `{friendlinessTier}`. LCAs certified: {n_lca}. PWDs: {n_pwd}. PERM approvals: {n_perm}. Secondary-entity share: {share}. Source: plugins/h1b-sponsor via {source}; see plugin README for tier definitions.
 ```
 
 Placeholder rules:
@@ -75,6 +75,7 @@ Placeholder rules:
 - `{n_perm}`: PERM approval count, integer from `totals.n_perm`.
 - `{first_year}` / `{last_year}`: window years from `totals`. A `none` result has no filings, so either year can be null; write `not reported` for a null year. Never print `null`.
 - `{share}`: secondary-entity share from `redFlags.staffing_shop.share`. Use `0` when `redFlags.staffing_shop` is null, or when its `share` property is null or not a number. Otherwise print the 0-1 fraction as-is (e.g. `0.87`). Never print `null`.
+- `{source}`: the `source` field from the same `--json` output, minus the `/employers/...` path, so the bullet names the endpoint that actually answered. The endpoint is configurable, so do not write a host from memory. If `source` is null the configuration is broken and the check is inconclusive, so skip the bullet.
 
 When to skip the bullet: `friendlinessTier == "unknown"`, or the CLI exited non-zero. In that case, do not add the bullet at all.
 

@@ -88,10 +88,12 @@ That prints the how-to the agent reads before running a check during an `oferta`
 
 ## Auth and rate limits
 
-The API is `https://api.surakshith.com/immigration/v1`.
+The default API is `https://api.surakshith.com/immigration/v1`. Set `H1B_API_BASE` to send lookups somewhere else instead (see "Running your own endpoint" below).
 
-- Anonymous: 30 requests per hour per (IP, ASN) pair. Enough for interactive evaluation.
+- Anonymous: 30 requests per hour per (IP, ASN) pair.
 - Keyed: 200 requests per hour per key. Suitable for batch runs.
+
+A check costs at most two requests, one to resolve the name and one to read the profile. A name that does not resolve costs one, and a cached answer costs none, so 30 per hour covers rather more than fifteen companies in practice.
 
 Request a key yourself:
 
@@ -112,7 +114,7 @@ A new key takes up to about 60 seconds to be recognized on every server, so a 40
 The same endpoint with curl, if you prefer:
 
 ```bash
-curl -X POST https://api.surakshith.com/immigration/v1/keys/request
+curl -X POST "${H1B_API_BASE:-https://api.surakshith.com/immigration/v1}/keys/request"
 ```
 
 Minting is metered per address with a token bucket: 2 keys are available at once, then one more every 12 hours. If you are throttled or the endpoint is unreachable, email `sms@surakshith.com` with the repo URL you plan to use it from.
@@ -122,6 +124,28 @@ Minting is metered per address with a token bucket: 2 keys are available at once
 The API at `api.surakshith.com` is operated by the plugin author (msampath). The worker is open source at https://github.com/msampath/h1b-sponsor-data, and it is built over the public US DOL disclosure files at https://www.dol.gov/agencies/eta/foreign-labor/performance.
 
 If the API goes away or starts returning errors, the plugin fails closed: results come back `unknown`, the skill skips the Block G bullet, and nothing is fabricated. Cached results keep serving until their TTL runs out.
+
+## Running your own endpoint
+
+The default instance is a convenience, not a requirement. Point the plugin anywhere with `H1B_API_BASE`:
+
+```bash
+export H1B_API_BASE=https://h1b.example.org/immigration/v1
+```
+
+Two reasons you might. The queries are sensitive: which companies you check says that you need a visa and names the employers you are considering, and career-ops is local-first about that kind of thing. And a default that only one person can operate is a single point of failure for everyone else.
+
+The data is public DOL disclosure files and the worker that serves them is open source at https://github.com/msampath/h1b-sponsor-data, so a private instance answers the same questions from the same source.
+
+Notes:
+
+- The URL must be https. Loopback (`http://localhost:8787/...`) is allowed so you can develop against a local worker.
+- The redirect guard follows whatever you configure: a response that redirects off your configured host is refused, so a private endpoint does not widen where requests can go.
+- `manifest.json` lists `allowedHosts`, but that field is advisory: the engine applies it only to plugins that call through its own fetch, and these CLIs call `fetch` directly, so editing it changes nothing about where requests go. Leave it alone. Editing a bundled plugin's manifest also trips the engine's tamper check and makes it ask for consent again.
+- A bad value fails the command that needed it rather than quietly falling back to the default, because silently sending these queries somewhere the user did not choose is the outcome worth avoiding. Setting the variable to an empty string counts as a bad value, since that is what a typo'd shell expansion or a blank `.env` line produces.
+- The endpoint is read from the environment only. career-ops has per-plugin settings in `config/plugins.yml`, but these CLIs run standalone and do not read them, so a `base` key there would be ignored.
+- A key is issued by one instance and means nothing to another. Unset `H1B_API_TOKEN` when you switch, and mint a new one against the endpoint you moved to.
+- Cached answers record the endpoint that produced them, so switching does not serve you another instance's data.
 
 ## Tiers
 

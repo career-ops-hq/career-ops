@@ -1,9 +1,78 @@
-// Thin client for api.surakshith.com/immigration/v1.
+// Thin client for the H-1B sponsorship API.
 // Uses global fetch + AbortController. Handles the 429/Retry-After retry-once
 // policy specified in the plugin contract. Self-contained — no imports from
 // career-ops core (so this plugin can later ship as its own npm package).
 
-export const BASE = 'https://api.surakshith.com/immigration/v1';
+const DEFAULT_BASE = 'https://api.surakshith.com/immigration/v1';
+
+/**
+ * Where the plugin sends lookups. Defaults to the maintained instance and is
+ * overridable with H1B_API_BASE, so a bundled plugin is never a hard
+ * dependency on one host: the dataset is public DOL disclosure data and the
+ * worker that serves it is open source, so anyone can run their own. Which
+ * companies a person checks says both that they need a visa and who they are
+ * applying to, and that is theirs to route.
+ *
+ * Resolved on first use rather than at import. An invalid value must fail the
+ * command that needed it, not the act of loading the module: this file is
+ * imported by the repo's own test runner, and a throw at import time took the
+ * whole suite down with a stack trace instead of one red test.
+ *
+ * Everything downstream follows this, including the redirect guard in
+ * fetchWithTimeout, so pointing at a private instance narrows egress rather
+ * than widening it.
+ */
+let resolvedBase;
+
+export function apiBase() {
+  // Only a successful resolve is memoized; a bad value keeps throwing so the
+  // failure cannot be masked by an earlier call that happened to succeed.
+  if (resolvedBase === undefined) resolvedBase = resolveBase();
+  return resolvedBase;
+}
+
+function resolveBase() {
+  const raw = process.env.H1B_API_BASE;
+  // Absent means "use the default". Present but blank is a misconfiguration
+  // (an unset shell variable, an empty .env line, a CI secret that did not
+  // populate), and silently falling back would send someone's shortlist and
+  // their token to a host they believed they had replaced.
+  if (raw === undefined) return DEFAULT_BASE;
+  const trimmed = String(raw).trim();
+  if (!trimmed) {
+    throw new Error('H1B_API_BASE is set but empty. Unset it to use the default endpoint.');
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`H1B_API_BASE is not a valid URL: ${trimmed}`);
+  }
+  if (parsed.username || parsed.password) {
+    // Undici refuses a credentialed Request anyway, and the value reaches
+    // stdout through the source field, so this would print a password.
+    throw new Error('H1B_API_BASE must not embed credentials.');
+  }
+  if (parsed.search || parsed.hash) {
+    // Paths are appended, so a query or fragment swallows them: the request
+    // would go to the base itself and answer about a company never asked for.
+    throw new Error('H1B_API_BASE must not contain a query string or a fragment.');
+  }
+  // Plain http would put an Authorization header on the wire in the clear.
+  // Loopback is exempt so a self-hoster can develop against a local worker —
+  // but only for http. Exempting every scheme on a loopback host let
+  // ftp://localhost and ws://localhost past validation, and those die later
+  // inside fetch as a bare "fetch failed", which is the opaque failure this
+  // check exists to replace with a named configuration error.
+  const loopback = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i.test(parsed.hostname);
+  const allowedScheme = parsed.protocol === 'https:' || (parsed.protocol === 'http:' && loopback);
+  if (!allowedScheme) {
+    throw new Error(`H1B_API_BASE must use https, or http on loopback: ${trimmed}`);
+  }
+  // Appended as `${base}/employers/...`, so a trailing slash would double up.
+  return trimmed.replace(/\/+$/, '');
+}
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_WAIT_MS = 10_000;
@@ -50,8 +119,9 @@ function sleep(ms) {
 export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS } = {}, consume) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
-  const baseHost = new URL(BASE).host;
-  const baseProtocol = new URL(BASE).protocol;
+  const configured = new URL(apiBase());
+  const baseHost = configured.host;
+  const baseProtocol = configured.protocol;
   try {
     // Egress guard: redirects are followed manually so an off-host target is
     // rejected BEFORE the request (and its query string) is issued to it.
@@ -327,7 +397,7 @@ export async function resolveEmployer(name, opts = {}) {
   const q = String(name || '').trim();
   if (q.length < 2) return null;
 
-  const url = `${BASE}/employers/search?q=${encodeURIComponent(q)}`;
+  const url = `${apiBase()}/employers/search?q=${encodeURIComponent(q)}`;
   const body = await requestJson(url, opts, { allow404: true });
   if (!body) return null;
 
@@ -348,7 +418,7 @@ export async function searchEmployers(name, opts = {}) {
   const q = String(name || '').trim();
   if (q.length < 2) return { total: 0, results: [] };
 
-  const url = `${BASE}/employers/search?q=${encodeURIComponent(q)}`;
+  const url = `${apiBase()}/employers/search?q=${encodeURIComponent(q)}`;
   const body = await requestJson(url, opts, { allow404: true });
   if (!body || !Array.isArray(body.results)) return { total: 0, results: [] };
 
@@ -429,7 +499,7 @@ function normalizeProfile(raw) {
 export async function getEmployerProfile(id, opts = {}) {
   const sanitized = String(id || '').trim();
   if (!sanitized) throw new Error('getEmployerProfile: id is required');
-  const url = `${BASE}/employers/${encodeURIComponent(sanitized)}`;
+  const url = `${apiBase()}/employers/${encodeURIComponent(sanitized)}`;
   const raw = await requestJson(url, opts, { allow404: false });
   return normalizeProfile(raw);
 }

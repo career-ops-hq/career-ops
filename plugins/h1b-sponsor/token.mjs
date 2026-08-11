@@ -10,7 +10,7 @@
 // than an outage.
 
 import { pathToFileURL } from 'node:url';
-import { BASE, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
+import { apiBase, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const TIMEOUT_MS = 10_000;
@@ -59,7 +59,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 // envelope, never a live Response: { status, retryAfterSeconds, body |
 // bodyError }.
 function guardedMintFetch() {
-  return fetchWithTimeout(`${BASE}/keys/request`, {
+  return fetchWithTimeout(`${apiBase()}/keys/request`, {
     method: 'POST',
     headers: { 'Accept': 'application/json', 'User-Agent': USER_AGENT },
     timeoutMs: TIMEOUT_MS,

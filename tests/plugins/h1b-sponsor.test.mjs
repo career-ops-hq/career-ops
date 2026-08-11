@@ -390,6 +390,155 @@ if (!existsSync(API_PATH)) {
   }
 }
 
+// ---------- lib/api.mjs BASE is configurable ----------
+// A bundled plugin must not hard-depend on one contributor's host: these
+// queries reveal that someone needs a visa and which employers they are
+// considering, so the destination has to be the user's choice. BASE resolves
+// once at module load, so each case runs in its own process.
+{
+  // A key set to undefined is REMOVED rather than passed as an empty string:
+  // the two mean different things now, and empty is itself an error case.
+  const childEnv = (over) => {
+    const e = { ...process.env, ...over };
+    for (const [k, v] of Object.entries(over)) if (v === undefined) delete e[k];
+    return e;
+  };
+  const readBase = (env) => new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ['-e', "import(process.argv[1]).then(m => process.stdout.write(m.apiBase())).catch(e => { process.stderr.write(String(e && e.message)); process.exitCode = 1; })", pathToFileURL(API_PATH).href],
+      { env: childEnv(env), timeout: 20_000 },
+      (err, stdout, stderr) => resolve({ code: err && typeof err.code === 'number' ? err.code : 0,
+                                         out: String(stdout || '').trim(),
+                                         err: String(stderr || '') }),
+    );
+  });
+
+  const dflt = await readBase({ H1B_API_BASE: undefined });
+  if (dflt.out === 'https://api.surakshith.com/immigration/v1') {
+    pass('BASE defaults to the maintained endpoint when H1B_API_BASE is unset');
+  } else {
+    fail(`BASE default: ${JSON.stringify(dflt)}`);
+  }
+
+  const custom = await readBase({ H1B_API_BASE: 'https://h1b.example.org/v1' });
+  if (custom.out === 'https://h1b.example.org/v1') pass('H1B_API_BASE overrides the endpoint');
+  else fail(`BASE override: ${JSON.stringify(custom)}`);
+
+  const slashed = await readBase({ H1B_API_BASE: 'https://h1b.example.org/v1//' });
+  if (slashed.out === 'https://h1b.example.org/v1') pass('a trailing slash is trimmed so paths do not double up');
+  else fail(`BASE trailing slash: ${JSON.stringify(slashed)}`);
+
+  const local = await readBase({ H1B_API_BASE: 'http://localhost:8787/immigration/v1' });
+  if (local.out === 'http://localhost:8787/immigration/v1') pass('loopback http is allowed for local development');
+  else fail(`BASE loopback: ${JSON.stringify(local)}`);
+
+  // Failing loudly matters more than being lenient: quietly falling back would
+  // send these queries to a host the user did not choose.
+  const insecure = await readBase({ H1B_API_BASE: 'http://h1b.example.org/v1' });
+  if (insecure.code !== 0 && /must use https/.test(insecure.err)) {
+    pass('a non-loopback http base is refused rather than silently defaulted');
+  } else {
+    fail(`BASE http: ${JSON.stringify(insecure)}`);
+  }
+
+  // The loopback exemption is for http specifically. Exempting every scheme on
+  // a loopback host waved ftp://localhost and ws://localhost past validation,
+  // and those surface later as a bare "fetch failed" instead of the named
+  // configuration error this validator exists to give.
+  for (const [label, value] of [['ftp', 'ftp://localhost/v1'], ['ws', 'ws://localhost:8787/v1']]) {
+    const scheme = await readBase({ H1B_API_BASE: value });
+    if (scheme.code !== 0 && /must use https/.test(scheme.err)) {
+      pass(`a loopback ${label}:// base is refused at config time, not later inside fetch`);
+    } else {
+      fail(`BASE loopback ${label}: ${JSON.stringify(scheme)}`);
+    }
+  }
+
+  const junk = await readBase({ H1B_API_BASE: 'not a url' });
+  if (junk.code !== 0 && /not a valid URL/.test(junk.err)) pass('an unparseable base is refused');
+  else fail(`BASE junk: ${JSON.stringify(junk)}`);
+
+  // A blank value is what a typo'd shell expansion or an empty .env line
+  // produces. Treating it as "unset" would route someone's shortlist and their
+  // token to the default host while they believed they had replaced it.
+  for (const [label, value] of [['empty', ''], ['whitespace', '   ']]) {
+    const blank = await readBase({ H1B_API_BASE: value });
+    if (blank.code !== 0 && /set but empty/.test(blank.err)) {
+      pass(`a ${label} base is refused instead of silently using the default`);
+    } else {
+      fail(`BASE ${label}: ${JSON.stringify(blank)}`);
+    }
+  }
+
+  // Undici refuses a credentialed Request, and the value reaches stdout via
+  // the source field, so accepting one would print the user's password.
+  const creds = await readBase({ H1B_API_BASE: 'https://alice:hunter2@h1b.example.org/v1' });
+  if (creds.code !== 0 && /credentials/.test(creds.err) && !/hunter2/.test(creds.err)) {
+    pass('a base embedding credentials is refused, and the password is not echoed');
+  } else {
+    fail(`BASE credentials: ${JSON.stringify(creds)}`);
+  }
+
+  // Paths are appended, so a query or fragment swallows them and the request
+  // would answer about a company that was never asked for.
+  for (const [label, value] of [['query', 'https://h1b.example.org/v1?k=1'],
+                                ['fragment', 'https://h1b.example.org/v1#f']]) {
+    const bad = await readBase({ H1B_API_BASE: value });
+    if (bad.code !== 0 && /query string or a fragment/.test(bad.err)) {
+      pass(`a base carrying a ${label} is refused`);
+    } else {
+      fail(`BASE ${label}: ${JSON.stringify(bad)}`);
+    }
+  }
+
+  // Resolution is lazy: importing the module with a broken value must not
+  // throw, or one bad variable takes down the repo's whole test run.
+  const importOnly = await new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ['-e', "import(process.argv[1]).then(() => process.stdout.write('IMPORT_OK'))", pathToFileURL(API_PATH).href],
+      { env: { ...process.env, H1B_API_BASE: 'not a url' }, timeout: 20_000 },
+      (err, stdout) => resolve({ code: err && typeof err.code === 'number' ? err.code : 0, out: String(stdout || '').trim() }),
+    );
+  });
+  if (importOnly.code === 0 && importOnly.out === 'IMPORT_OK') {
+    pass('importing the client with a broken base does not throw at load');
+  } else {
+    fail(`lazy import: ${JSON.stringify(importOnly)}`);
+  }
+}
+
+// ---------- the egress guard follows the CONFIGURED base ----------
+// Pointing at a private instance must not widen where requests may go, so a
+// redirect toward the DEFAULT host is off-host once a custom base is set.
+{
+  const script = [
+    "const api = await import(process.argv[1]);",
+    "globalThis.fetch = async () => ({",
+    "  status: 302,",
+    "  headers: { get: (h) => (h.toLowerCase() === 'location'",
+    "    ? 'https://api.surakshith.com/immigration/v1/employers/search?q=acme' : null) },",
+    "});",
+    "try { await api.resolveEmployer('Acme', { timeoutMs: 1000 }); process.stdout.write('NO_THROW'); }",
+    "catch (e) { process.stdout.write(String(e && e.code)); }",
+  ].join('\n');
+
+  const out = await new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ['--input-type=module', '-e', script, pathToFileURL(API_PATH).href],
+      { env: { ...process.env, H1B_API_BASE: 'https://h1b.example.org/immigration/v1' }, timeout: 20_000 },
+      (_err, stdout) => resolve(String(stdout || '').trim()),
+    );
+  });
+  if (out === 'REDIRECT_OFF_HOST') {
+    pass('a redirect to the default host is refused when a custom base is configured');
+  } else {
+    fail(`configured-base egress guard: got ${out}`);
+  }
+}
+
 // ---------- lib/api.mjs readBoundedText — streaming byte ceiling ----------
 // Ungated and offline. res.text()/res.json() buffer a whole body before any
 // size check can run, so the reader streams and cancels mid-body instead. These
@@ -648,6 +797,165 @@ if (!existsSync(API_PATH)) {
   }
 }
 
+// ---------- check.mjs — a broken base still emits the documented envelope ----------
+// The base resolves lazily and is reported back through `source`, so the error
+// handler that exists to report a bad value calls apiBase() itself. Letting
+// that throw replaces the documented JSON envelope with a raw stack trace on
+// stderr. Ungated and offline: apiBase() throws before any URL is built, so
+// nothing reaches the network, and --cache-dir keeps the repo cache untouched.
+{
+  const tmpDir = join(tmpdir(), `h1b-badbase-${randomUUID()}`);
+  await new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [CHECK_PATH, 'Acme', '--json', '--cache-dir', tmpDir],
+      { env: { ...process.env, H1B_API_BASE: 'not a url' }, timeout: 20_000 },
+      (err, stdout, stderr) => {
+        const code = (err && typeof err.code === 'number') ? err.code : 0;
+        let parsed = null;
+        try { parsed = JSON.parse(String(stdout || '')); } catch { /* not JSON — asserted below */ }
+        const shaped = Boolean(parsed)
+          && parsed.found === false
+          && parsed.source === null
+          && parsed.friendlinessTier === 'unknown'
+          && Boolean(parsed.totals)
+          && Boolean(parsed.redFlags)
+          && /H1B_API_BASE/.test(String(parsed.error || ''));
+        // An unhandled throw prints the failing line and a stack; the handled
+        // path writes nothing to stderr at all.
+        const crashed = /at resolveBase/.test(String(stderr || ''));
+        if (code === 1 && shaped && !crashed) {
+          pass('check.mjs: a broken base emits the documented envelope (source null, error set), not a stack trace');
+        } else {
+          fail(`check.mjs broken base: exit ${code}, stdout=${String(stdout || '').slice(0, 160)}, stderr=${String(stderr || '').slice(0, 160)}`);
+        }
+        resolve();
+      },
+    );
+  });
+  await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+}
+
+// ---------- check.mjs — the cache is endpoint-aware ----------
+// A cached answer belongs to the instance that produced it, and `source` is
+// rebuilt from the CURRENT base, so serving an entry another endpoint wrote
+// would label one instance's data as the other's. Entries written before the
+// endpoint was configurable carry no `base` at all, so the first run after an
+// upgrade has to re-fetch rather than serve them blind — for negative entries
+// too, where a stale "unknown" is the answer that quietly ends a search.
+//
+// Ungated and offline: the child stubs globalThis.fetch (and counts calls)
+// before importing check.mjs, and every run uses a scratch cache dir. The base
+// values are fictional so the assertion never depends on which endpoint the
+// machine running the suite is configured for.
+if (!existsSync(CHECK_PATH) || !existsSync(CACHE_PATH)) {
+  fail('check.mjs or lib/cache.mjs missing — the plugin ships them');
+} else {
+  const { cacheKey } = await import(pathToFileURL(CACHE_PATH).href);
+  const tmpDir = join(tmpdir(), `h1b-endpoint-cache-${randomUUID()}`);
+  const CURRENT = 'https://cache-probe.example/v1';
+  const OTHER = 'https://other-probe.example/v1';
+  const NAME = 'CachedProbeCo';
+  const PROFILE = {
+    n_lca: 500, n_pwd: 10, n_perm: 5, does_gc: true,
+    first_year: 2019, last_year: new Date().getUTCFullYear(),
+    red_flags: { staffing_shop: null },
+  };
+
+  // Seed one cache entry, run check.mjs against it with a stubbed fetch, and
+  // report { calls, result }. calls === 0 means the entry was served.
+  const runAgainst = async (entry) => {
+    await mkdir(tmpDir, { recursive: true });
+    await writeFile(
+      join(tmpDir, `${cacheKey(NAME)}.json`),
+      JSON.stringify({ ...entry, fetchedAt: new Date().toISOString() }, null, 2),
+      'utf8',
+    );
+    const wrapperFile = join(tmpDir, `run-${randomUUID()}.mjs`);
+    await writeFile(wrapperFile, [
+      'let calls = 0;',
+      'globalThis.fetch = async (url) => {',
+      '  calls++;',
+      "  const body = String(url).includes('/employers/search')",
+      `    ? { results: [{ id: 'refetched', name: ${JSON.stringify(NAME)} }] }`,
+      `    : { employer: { name: ${JSON.stringify(NAME)}, id: 'refetched' }, filings: { certified: 777 }, green_card: { pwd: 1, perm: 1 } };`,
+      '  return new Response(JSON.stringify(body), { status: 200 });',
+      '};',
+      `process.argv = [process.argv[0], ${JSON.stringify(CHECK_PATH)}, ${JSON.stringify(NAME)}, '--json', '--cache-dir', ${JSON.stringify(tmpDir)}];`,
+      'const chunks = [];',
+      'const write = process.stdout.write.bind(process.stdout);',
+      'process.stdout.write = (s) => { chunks.push(String(s)); return true; };',
+      // check.mjs calls main() without awaiting it, so the import resolves
+      // before the answer is written. Poll rather than sleep a fixed span.
+      `await import(${JSON.stringify(pathToFileURL(CHECK_PATH).href)});`,
+      'for (let i = 0; i < 200 && chunks.length === 0; i++) await new Promise(r => setTimeout(r, 25));',
+      'process.stdout.write = write;',
+      "write(JSON.stringify({ calls, out: chunks.join('') }));",
+    ].join('\n'), 'utf8');
+
+    return new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        [wrapperFile],
+        { env: { ...process.env, H1B_API_BASE: CURRENT }, timeout: 30_000 },
+        (_err, stdout) => {
+          let outer = null;
+          try { outer = JSON.parse(String(stdout || '')); } catch { /* reported by the caller */ }
+          let result = null;
+          try { result = JSON.parse(String((outer && outer.out) || '')); } catch { /* ditto */ }
+          resolve({ calls: outer && outer.calls, result, raw: String(stdout || '').slice(0, 200) });
+        },
+      );
+    });
+  };
+
+  const cases = [
+    {
+      label: 'an entry from the CURRENT endpoint is served without a request',
+      entry: { data: { displayName: 'Cached Same', employerId: 'same-1', profile: PROFILE, base: CURRENT } },
+      ok: (r) => r.calls === 0 && r.result && r.result.employerId === 'same-1',
+    },
+    {
+      label: 'an entry from ANOTHER endpoint is a miss, not another instance’s answer',
+      entry: { data: { displayName: 'Cached Other', employerId: 'other-1', profile: PROFILE, base: OTHER } },
+      ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
+    },
+    {
+      label: 'a pre-upgrade entry with no base re-fetches instead of serving blind',
+      entry: { data: { displayName: 'Cached Legacy', employerId: 'legacy-1', profile: PROFILE } },
+      ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
+    },
+    {
+      label: 'a NEGATIVE entry from the current endpoint still short-circuits',
+      entry: { negative: true, data: { name: NAME, base: CURRENT } },
+      ok: (r) => r.calls === 0 && r.result && r.result.found === false,
+    },
+    {
+      label: 'a pre-upgrade NEGATIVE entry re-fetches rather than repeating a stale unknown',
+      entry: { negative: true, data: { name: NAME } },
+      ok: (r) => r.calls === 2 && r.result && r.result.found === true,
+    },
+    {
+      label: 'a malformed entry payload is a miss, not a crash',
+      entry: { negative: true, data: null },
+      ok: (r) => r.calls === 2 && r.result && r.result.found === true,
+    },
+  ];
+
+  for (const c of cases) {
+    let got;
+    try {
+      got = await runAgainst(c.entry);
+    } catch (e) {
+      fail(`endpoint cache: "${c.label}" crashed: ${e.message}`);
+      continue;
+    }
+    if (c.ok(got)) pass(`endpoint cache: ${c.label}`);
+    else fail(`endpoint cache: ${c.label} — calls=${got.calls} result=${JSON.stringify(got.result)} raw=${got.raw}`);
+  }
+  await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+}
+
 // ---------- check.mjs — CLI JSON contract ----------
 // GATED: check.mjs is designed to hit api.surakshith.com on cache miss, so it
 // cannot run in a unit context without either network mocking (out of scope
@@ -659,6 +967,10 @@ if (process.env.H1B_API_TEST !== '1') {
 } else if (!existsSync(CHECK_PATH)) {
   fail('check.mjs missing — the plugin ships it');
 } else {
+  // The endpoint is configurable, so the expected source prefix comes from the
+  // client rather than a literal host.
+  const { apiBase: liveBase } = await import(pathToFileURL(API_PATH).href);
+  const expectedBase = liveBase();
   // --cache-dir keeps the run's 30-day negative entry out of the repo's real
   // cache tree; the tmp dir is removed once the callback has resolved.
   const cliCacheDir = join(tmpdir(), `h1b-cli-cache-${randomUUID()}`);
@@ -692,10 +1004,13 @@ if (process.env.H1B_API_TEST !== '1') {
           }
           if (parsed.source === undefined || parsed.source === null) {
             pass('check.mjs --json: source absent (acceptable when found === false)');
-          } else if (typeof parsed.source === 'string' && parsed.source.startsWith('https://api.surakshith.com/immigration/v1/')) {
-            pass(`check.mjs --json: source starts with the expected API prefix (${parsed.source})`);
+          } else if (typeof parsed.source === 'string' && parsed.source.startsWith(`${expectedBase}/`)) {
+            // Compared against the CONFIGURED endpoint, not a literal host: a
+            // self-hoster running this gated block would otherwise fail on a
+            // correct result.
+            pass(`check.mjs --json: source starts with the configured API base (${parsed.source})`);
           } else {
-            fail(`check.mjs --json: source = ${JSON.stringify(parsed.source)} (expected undefined or https://api.surakshith.com/immigration/v1/…)`);
+            fail(`check.mjs --json: source = ${JSON.stringify(parsed.source)} (expected undefined or ${expectedBase}/…)`);
           }
         } else {
           // Summary path — strict regex: `<tier>:` prefix on the first non-blank line.
