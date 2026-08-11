@@ -50,8 +50,11 @@
  *   node cv-title-check.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
 
 const CV_PATH = 'cv.md';
@@ -364,6 +367,87 @@ function runSelfTest() {
   eq('an ambiguous tailored-CV-side key is not silently matched', dupTailoredResult.matched.length, 0);
   eq('an ambiguous tailored-CV-side key is not silently reported as a mismatch either', dupTailoredResult.mismatches.length, 0);
   eq('the ambiguous group carries both tailored titles', dupTailoredResult.ambiguous[0]?.tailoredTitles.sort(), ['Engineering Lead', 'Senior Software Engineer']);
+
+  // CLI exit-code contract (modes/pdf.md Step 17a relies on this distinction):
+  // a genuine input failure (missing/malformed cv.md or payload) must exit
+  // non-zero so the pipeline stops and repairs the input, while a completed
+  // comparison — even one that FOUND mismatches or ambiguous groups — is
+  // warn-only and always exits 0. Drives the real CLI as a subprocess against
+  // fixture files, the only honest way to test process.exit() codes.
+  const scriptPath = fileURLToPath(import.meta.url);
+  const cliTmp = mkdtempSync(join(tmpdir(), 'cv-title-check-cli-'));
+  try {
+    const validCv = `
+# CV -- Jane Doe
+
+## Work Experience
+
+### Acme Corp -- Remote
+
+**Senior Software Engineer**
+2020-2024
+
+- Did things
+`;
+    writeFileSync(join(cliTmp, 'cv.md'), validCv);
+
+    const runCli = (args, cwd = cliTmp) => spawnSync(process.execPath, [scriptPath, ...args], { cwd, encoding: 'utf-8' });
+
+    // Missing payload argument entirely -> usage error, exit 1.
+    eq('CLI exits 1 with no payload argument', runCli([]).status, 1);
+
+    // Payload path that does not exist -> exit 1, never treated as "no mismatches".
+    eq('CLI exits 1 when the payload file does not exist', runCli(['does-not-exist.json']).status, 1);
+
+    // cv.md missing entirely -> exit 1 (this is the workspace-not-set-up case,
+    // distinct from the check having run and found no mismatches).
+    const noCvDir = mkdtempSync(join(tmpdir(), 'cv-title-check-nocv-'));
+    try {
+      writeFileSync(join(noCvDir, 'payload.json'), JSON.stringify({ experience: [] }));
+      eq('CLI exits 1 when cv.md does not exist', runCli(['payload.json'], noCvDir).status, 1);
+    } finally {
+      rmSync(noCvDir, { recursive: true, force: true });
+    }
+
+    // Malformed JSON payload -> exit 1, not silently treated as zero entries.
+    writeFileSync(join(cliTmp, 'malformed.json'), '{ this is not valid json');
+    eq('CLI exits 1 on a malformed JSON payload', runCli(['malformed.json']).status, 1);
+
+    // A completed comparison that FINDS a title mismatch is still warn-only:
+    // exit 0, distinguishing "the check ran and found something to warn
+    // about" from "the check could not run at all".
+    writeFileSync(join(cliTmp, 'mismatch.json'), JSON.stringify({
+      experience: [{ company: 'Acme Corp', role: 'Engineering Lead', dates: '2020-2024' }],
+    }));
+    const mismatchRun = runCli(['mismatch.json', '--summary']);
+    eq('CLI exits 0 for a completed comparison that finds a title mismatch (warn-only)', mismatchRun.status, 0);
+    eq('the exit-0 mismatch run still prints the warning', /title mismatch/i.test(mismatchRun.stdout), true);
+
+    // A completed comparison that finds an ambiguous {company, dates} group
+    // is likewise warn-only, not a failure.
+    const ambiguousCv = validCv + `
+### Acme Corp -- Remote
+
+**Contractor**
+2020-2024
+
+- Did other things
+`;
+    const ambiguousDir = mkdtempSync(join(tmpdir(), 'cv-title-check-ambiguous-'));
+    try {
+      writeFileSync(join(ambiguousDir, 'cv.md'), ambiguousCv);
+      writeFileSync(join(ambiguousDir, 'mismatch.json'), JSON.stringify({
+        experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2020-2024' }],
+      }));
+      const ambiguousRun = runCli(['mismatch.json', '--summary'], ambiguousDir);
+      eq('CLI exits 0 for a completed comparison that finds an ambiguous group (warn-only)', ambiguousRun.status, 0);
+      eq('the exit-0 ambiguous run still prints the warning', /ambiguous/i.test(ambiguousRun.stdout), true);
+    } finally {
+      rmSync(ambiguousDir, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(cliTmp, { recursive: true, force: true });
+  }
 
   console.log(`\ncv-title-check self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
