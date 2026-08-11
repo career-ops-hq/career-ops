@@ -224,9 +224,11 @@ try {
   // Discovery path: slug only → board page, then feed.
   {
     const seen = [];
+    const opts = [];
     const ctx = {
-      fetchText: async (u) => {
+      fetchText: async (u, o) => {
         seen.push(u);
+        opts.push(o);
         // Compare the parsed hostname, not a substring of the URL. `u.includes(
         // 'jobs.jobvite.com')` also matches https://evil.example.com/jobs.jobvite.com
         // — CodeQL flags that shape (js/incomplete-url-substring-sanitization)
@@ -239,10 +241,22 @@ try {
     };
     const out = await jobvite.fetch({ name: 'Tyler', careers_url: 'https://jobs.jobvite.com/tylertech' }, ctx);
     eq('fetch() with only a slug makes two requests (board, then feed)', seen.length, 2);
-    eq('fetch() discovery hits the board first', seen[0], 'https://jobs.jobvite.com/tylertech');
+    // #2623 review: the board carries fr=true&nl=1 so branded tenants render
+    // the listing inline instead of 302ing to their own domain, which would
+    // take the companyEId out of reach before discovery could start.
+    eq('fetch() discovery hits the board with the un-redirect params',
+      seen[0], 'https://jobs.jobvite.com/tylertech?fr=true&nl=1');
     eq('fetch() discovery then hits the feed with the scraped eId',
       seen[1], 'https://app.jobvite.com/CompanyJobs/Xml.aspx?c=q6NaVfwI');
     eq('fetch() discovery returns parsed jobs', out.length, 3);
+
+    // #2623 review: pin the redirect mode on both requests. Three separate
+    // behaviours ride on these two values — a retired slug must fail loudly
+    // (board, 'error'), an empty board must read as [] rather than an error
+    // (feed, 'manual'), and neither may ever follow a redirect off-host. A test
+    // that only asserts the URLs lets any of that regress silently.
+    eq("fetch() board request pins redirect:'error'", opts[0]?.redirect, 'error');
+    eq("fetch() feed request pins redirect:'manual'", opts[1]?.redirect, 'manual');
   }
 
   // Discovery failure must name the fix rather than silently returning [].
@@ -254,6 +268,125 @@ try {
     } catch (e) { msg = e.message; }
     eq('fetch() throws a fix-naming error when the eId cannot be discovered',
       msg.includes('company_eid'), true);
+  }
+
+  // ── #2623 review: rate limiting ────────────────────────────────
+  // app.jobvite.com answers 429 Retry-After: 30 from the second request onward,
+  // which a scan covering two Jobvite tenants back-to-back already trips. Live
+  // sequence observed: 200, then an immediate 429, then 200 again once the 30s
+  // was honoured — so the retry is not merely polite, it is what makes a
+  // multi-tenant scan return anything at all.
+  {
+    let calls = 0;
+    const slept = [];
+    const ctx = {
+      fetchText: async () => {
+        calls++;
+        if (calls === 1) {
+          const err = new Error('HTTP 429 Too Many Requests');
+          err.status = 429;
+          err.retryAfter = '30';
+          throw err;
+        }
+        return XML;
+      },
+      fetchJson: async () => ({}),
+      sleep: async (ms) => { slept.push(ms); },   // test clock — never wall-clock waits
+    };
+    const out = await jobvite.fetch({ name: 'Tyler Technologies', company_eid: 'q6NaVfwI' }, ctx);
+    eq('fetch() retries the feed after a 429', calls, 2);
+    eq('fetch() returns the jobs the retry recovered', out.length, 3);
+    // Honoured as advertised, not replaced by the exponential backoff. The
+    // shared clamp is maxDelayMs * 4 = 60s under this provider's policy, so a
+    // 30s header passes through intact rather than being truncated into another
+    // guaranteed 429.
+    eq('fetch() honours Retry-After exactly', slept[0], 30_000);
+  }
+
+  // A 4xx that is not 429 is the server rejecting the request itself; retrying
+  // it just burns wall-clock on every scan.
+  {
+    let calls = 0;
+    const ctx = {
+      fetchText: async () => {
+        calls++;
+        const err = new Error('HTTP 404 Not Found');
+        err.status = 404;
+        throw err;
+      },
+      fetchJson: async () => ({}),
+      sleep: async () => {},
+    };
+    let threw = false;
+    try {
+      await jobvite.fetch({ name: 'Tyler', company_eid: 'q6NaVfwI' }, ctx);
+    } catch { threw = true; }
+    eq('fetch() does not retry a non-retryable 4xx', calls, 1);
+    eq('fetch() propagates a non-retryable 4xx', threw, true);
+  }
+
+  // ── #2623 review: empty board vs retired tenant ────────────────
+  // A tenant with no open positions does not get an empty <result/>; the feed
+  // 302s to NoJobs.htm. Zero vacancies is an answer, not a failure. Observed
+  // live on leovegas, whose board renders "There are currently no open jobs."
+  // and whose feed returns Location: NoJobs.htm — relative, hence resolved
+  // against the request URL rather than string-compared.
+  {
+    const ctx = {
+      fetchText: async () => {
+        const err = new Error('HTTP 302 Found');
+        err.status = 302;
+        err.location = 'NoJobs.htm';   // exactly as the server writes it
+        throw err;
+      },
+      fetchJson: async () => ({}),
+      sleep: async () => {},
+    };
+    const out = await jobvite.fetch({ name: 'LeoVegas', company_eid: 'q1TaVfwJ' }, ctx);
+    eq('fetch() reads a NoJobs.htm feed redirect as an empty board', Array.isArray(out) && out.length === 0, true);
+  }
+
+  // The inverse, and the reason the check above is scoped to one filename on one
+  // host: a slug that is no longer a Jobvite tenant also answers with a 3xx, and
+  // it means the opposite thing. Laundering it into "0 jobs today" would hide a
+  // dead portal entry behind a plausible-looking empty result — the exact silent
+  // failure this whole PR exists to remove.
+  {
+    const ctx = {
+      fetchText: async () => {
+        const err = new Error('HTTP 302 Found');
+        err.status = 302;
+        err.location = 'http://search.jobvite.com?invalid=1';
+        throw err;
+      },
+      fetchJson: async () => ({}),
+      sleep: async () => {},
+    };
+    let threw = false;
+    try {
+      await jobvite.fetch({ name: 'Zoom', company_eid: 'deadbeef' }, ctx);
+    } catch { threw = true; }
+    eq('fetch() still fails loudly for a retired tenant redirect', threw, true);
+  }
+
+  // A redirect to NoJobs.htm on some OTHER host is not Jobvite saying the board
+  // is empty, and must not be read as one.
+  {
+    const ctx = {
+      fetchText: async () => {
+        const err = new Error('HTTP 302 Found');
+        err.status = 302;
+        err.location = 'https://evil.example.com/CompanyJobs/NoJobs.htm';
+        throw err;
+      },
+      fetchJson: async () => ({}),
+      sleep: async () => {},
+    };
+    let threw = false;
+    try {
+      await jobvite.fetch({ name: 'Evil', company_eid: 'abc' }, ctx);
+    } catch { threw = true; }
+    eq('fetch() does not accept NoJobs.htm from a foreign host', threw, true);
   }
 } catch (e) {
   fail(`jobvite provider tests crashed: ${e.message}`);

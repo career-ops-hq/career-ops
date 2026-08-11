@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { fetchTextWithRetry } from './_http.mjs';
+
 // Jobvite provider — per-tenant public jobs feed.
 // Used by ~3,000 companies across a wide range of industries.
 //
@@ -11,11 +13,18 @@
 //
 //   GET https://jobs.jobvite.com/api/company/{slug}/jobs
 //
-// That endpoint is retired. It now answers 302 to
-// `http://search.jobvite.com?invalid=1` for every tenant, so the provider
-// returned zero jobs for everyone rather than failing loudly. Verified
-// 2026-08-08 against six tenants — zoom, starbucks, servicenow, twilio,
-// blueorigin and tylertech — all identical.
+// That endpoint is retired: it answers 302 to `http://search.jobvite.com?invalid=1`,
+// so the provider returned zero jobs rather than failing loudly.
+//
+// The tenant that proves it is tylertech — still a live Jobvite customer
+// (companyEId q6NaVfwI, 236 jobs on the XML feed), yet dead on the JSON API.
+// That is the case this fix restores. Five other slugs checked alongside it
+// (zoom, starbucks, servicenow, twilio, blueorigin) 302 the same way, but they
+// are NOT evidence for the same claim: re-verified 2026-08-11, those companies
+// have migrated off Jobvite entirely, and their slugs answer identically on
+// every Jobvite endpoint including the XML feed. A retired tenant and a retired
+// API look alike from the outside; only a tenant that is live on one endpoint
+// and dead on the other separates them.
 //
 // The working public feed is XML, on a DIFFERENT host:
 //
@@ -45,12 +54,17 @@
 // URL still works.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// SSRF stance: both hosts are pinned by assertJobviteHost() before every
-// fetch, and every request uses redirect:'error' so a server-side redirect
-// cannot move the final hostname. The eId is used only as a query-param value,
-// never as a path segment. Per-job apply/detail URLs are display-only (written
-// to pipeline/history, never fetched here) and are accepted from any https:
-// origin, since Jobvite tenants commonly brand them onto their own domain.
+// SSRF stance: both hosts are pinned by assertJobviteHost() before every fetch,
+// and no redirect is ever followed. The board uses redirect:'error'; the feed
+// uses redirect:'manual', which is the same guarantee by a different route —
+// undici hands back the 3xx as a response instead of chasing it, so the final
+// hostname still cannot move. 'manual' buys the ability to READ the Location
+// header without acting on it, which is what separates an empty board from a
+// retired tenant (see isEmptyBoardRedirect). The eId is used only as a
+// query-param value, never as a path segment. Per-job apply/detail URLs are
+// display-only (written to pipeline/history, never fetched here) and are
+// accepted from any https: origin, since Jobvite tenants commonly brand them
+// onto their own domain.
 //
 // Wire in via a `tracked_companies:` entry, cheapest form first:
 //   careers_url: https://jobs.jobvite.com/{slug}
@@ -166,9 +180,97 @@ function buildFeedUrl(eid) {
   return u.href;
 }
 
-/** @param {string} slug */
+/**
+ * The tenant's public board URL, as a human would type it.
+ *
+ * Display-only: detect() reports it in logs, where the transport params below
+ * are noise. Never fetched — see buildBoardFetchUrl.
+ *
+ * @param {string} slug
+ */
 function buildBoardUrl(slug) {
   return `https://${BOARD_HOST}/${encodeURIComponent(slug)}`;
+}
+
+/**
+ * The board URL actually requested during eId discovery.
+ *
+ * `fr=true&nl=1` is what the branded-careers-page iframe requests, and it is
+ * load-bearing for a whole class of tenant. Many Jobvite customers point their
+ * public careers page at their own domain, and a bare `jobs.jobvite.com/{slug}`
+ * 302s straight there — to `www.fieldcore.com/careers/jobs/`, say — so the
+ * board HTML carrying `companyEId` is never served and discovery cannot start.
+ * With these two params the listing renders inline instead of redirecting.
+ *
+ * Verified 2026-08-11 against live boards: fieldcore, imprivata and opentrons
+ * all 302 away bare and answer 200 with an eId once the params are present. It
+ * is a no-op where it is not needed — egnyte returns the same eId either way —
+ * so it goes on every board request rather than being conditional on having
+ * already failed.
+ *
+ * NOT applied to the feed. The redirect is a property of the branded board, not
+ * of the tenant: the same three tenants' feeds answer 200 bare (fieldcore 126
+ * jobs, imprivata 53). Adding undeclared params to the XML endpoint would be
+ * cargo-culting a fix onto a request that never had the problem.
+ *
+ * @param {string} slug
+ */
+function buildBoardFetchUrl(slug) {
+  const u = new URL(buildBoardUrl(slug));
+  u.searchParams.set('fr', 'true');
+  u.searchParams.set('nl', '1');
+  return u.href;
+}
+
+/**
+ * Retry policy for both Jobvite requests.
+ *
+ * `app.jobvite.com` rate-limits hard and early: it answers `429 Retry-After: 30`
+ * from the second request onward, so a scan covering two Jobvite tenants
+ * back-to-back already trips it — this is the normal path, not an edge case.
+ * Confirmed live: a 200 (945 KB, 40 jobs) followed immediately by a 429, then a
+ * 200 again once the 30s was honoured. So the wait genuinely clears it and
+ * retrying is worth the wall-clock.
+ *
+ * maxDelayMs is raised from the shared 8s default purely to widen the
+ * Retry-After clamp — `fetchTextWithRetry` honours the header up to
+ * maxDelayMs * 4, and the shared default puts that at 32s, uncomfortably close
+ * to Jobvite's advertised 30 for a value we do not control. 15s moves the
+ * ceiling to 60s, leaving room for Jobvite to raise its window without the
+ * clamp silently truncating the wait into another guaranteed 429.
+ */
+const RETRY_POLICY = { retries: 2, baseDelayMs: 1_000, maxDelayMs: 15_000 };
+
+/**
+ * Whether a thrown redirect is the feed saying "this board is empty".
+ *
+ * A tenant with no open positions does not get an empty `<result/>`; the feed
+ * 302s to `NoJobs.htm` instead. Zero vacancies is a legitimate answer, not a
+ * failure, so it must not surface as a broken tenant.
+ *
+ * Scoped deliberately tight — to a 3xx, on the feed host, whose target is that
+ * one page. The board's own redirect (`search.jobvite.com?invalid=1`) means the
+ * opposite thing, a slug that is no longer a Jobvite tenant at all, and has to
+ * keep failing loudly rather than being laundered into "0 jobs today". Blanket
+ * "treat any redirect as empty" would erase exactly that signal.
+ *
+ * The Location header is relative in practice (literally `NoJobs.htm`), so it
+ * is resolved against the request URL before anything is compared.
+ *
+ * @param {any} err - Error from a redirect:'manual' fetch.
+ * @param {string} requestUrl - The URL that produced it.
+ */
+function isEmptyBoardRedirect(err, requestUrl) {
+  const status = err?.status;
+  if (typeof status !== 'number' || status < 300 || status > 399) return false;
+  if (!err.location) return false;
+  let target;
+  try {
+    target = new URL(err.location, requestUrl);
+  } catch {
+    return false;
+  }
+  return target.hostname === FEED_HOST && target.pathname.toLowerCase().endsWith('/nojobs.htm');
 }
 
 /** @type {Provider} */
@@ -190,9 +292,12 @@ export default {
     if (!eid) {
       const slug = resolveSlug(entry);
       if (!slug) throw new Error(`jobvite: cannot derive a company id for ${entry.name} — set company_eid: or an api: URL with ?c=`);
-      const boardUrl = buildBoardUrl(slug);
+      const boardUrl = buildBoardFetchUrl(slug);
       assertJobviteHost(boardUrl);
-      const html = await ctx.fetchText(boardUrl, { redirect: 'error' });
+      // redirect:'error' here, not 'manual'. A board that still redirects once
+      // fr=true&nl=1 is present is a retired slug answering
+      // search.jobvite.com?invalid=1, and that must fail loudly.
+      const html = await fetchTextWithRetry(ctx, boardUrl, { redirect: 'error' }, RETRY_POLICY);
       eid = extractEidFromBoard(html);
       if (!eid) {
         throw new Error(
@@ -204,8 +309,20 @@ export default {
 
     const feedUrl = buildFeedUrl(eid);
     assertJobviteHost(feedUrl);
-    const xml = await ctx.fetchText(feedUrl, { redirect: 'error', timeoutMs: FEED_TIMEOUT_MS });
-    return parseJobviteXml(xml, entry.name);
+    try {
+      const xml = await fetchTextWithRetry(
+        ctx,
+        feedUrl,
+        { redirect: 'manual', timeoutMs: FEED_TIMEOUT_MS },
+        RETRY_POLICY,
+      );
+      return parseJobviteXml(xml, entry.name);
+    } catch (err) {
+      // An empty board is reported as a redirect to NoJobs.htm rather than as
+      // an empty feed — see isEmptyBoardRedirect. Anything else propagates.
+      if (isEmptyBoardRedirect(err, feedUrl)) return [];
+      throw err;
+    }
   },
 };
 

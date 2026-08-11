@@ -624,6 +624,7 @@ search_queries:
 #   pinpoint        <slug>.pinpointhq.com
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
+#   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
@@ -675,6 +676,19 @@ search_queries:
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Jobvite Co
+#   careers_url: https://jobs.jobvite.com/exampleco       # any jobs.jobvite.com/<slug> board
+#   company_eid: q6NaVfwI   # optional but recommended. The XML feed keys on this opaque
+#                           # id, NOT the vanity slug, so without it every scan spends an
+#                           # extra request scraping it off the board page. Find it in the
+#                           # board page source as companyEId: '…'.
+#   enabled: true
+#
+# - name: Example Jobvite Co (explicit feed URL)
+#   provider: jobvite
+#   api: https://app.jobvite.com/CompanyJobs/Xml.aspx?c=q6NaVfwI   # eId read from ?c=
 #   enabled: true
 #
 # - name: 腾讯 (Tencent)
