@@ -14,56 +14,93 @@
 // while that conversion sat in review — which is exactly why the rule needs a
 // guard rather than a one-time sweep.
 //
-// Scoped to source: node_modules is third-party and free to import however it
-// likes, and a string LITERAL containing the pattern (test-all.mjs uses one as an
-// import-parser fixture) is not an import.
+// Scoped to TRACKED source, enumerated with `git ls-files`. A recursive walk with
+// a skip-list cannot work here: it also reads whatever untracked scratch the tree
+// happens to be carrying — a killed test-all.mjs run leaves a `.tmp-script-test-*`
+// copy of the whole repo behind, and every pre-conversion file in it reports as an
+// offender. Those paths are gitignored and ship to nobody, so the rule does not
+// apply to them. `git ls-files` is exactly the set that ships; it needs no
+// skip-list to maintain, never descends a symlinked directory, and cannot wander
+// outside the repo.
+//
+// A string LITERAL containing the pattern (test-all.mjs uses one as an
+// import-parser fixture) is not an import and must not match.
 
 import { pass, fail, ROOT } from './helpers.mjs';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join, relative } from 'path';
 
 console.log('\njs-yaml must never be imported via its (nonexistent) default export');
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'coverage', 'out']);
 const EXTS = ['.mjs', '.js', '.ts', '.tsx'];
 
-/** @returns {string[]} every source file under `dir`, recursively. */
-function walk(dir) {
-  const found = [];
-  for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry)) continue;
-    const full = join(dir, entry);
-    let st;
-    try { st = statSync(full); } catch { continue; }
-    if (st.isDirectory()) found.push(...walk(full));
-    else if (EXTS.some((e) => entry.endsWith(e))) found.push(full);
-  }
-  return found;
+/** @returns {string[]} every tracked source file in the repo. */
+function sourceFiles() {
+  // -z: NUL-separated, so a path containing a newline or quote cannot split a
+  // record and silently drop a file from the sweep.
+  const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z'], {
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return out
+    .split('\0')
+    .filter((p) => p && EXTS.some((e) => p.endsWith(e)))
+    .map((p) => join(ROOT, p));
 }
 
+// Every way to bind js-yaml's nonexistent default export:
+//   import yaml from 'js-yaml'                    — the plain form
+//   import yaml, { load } from 'js-yaml'          — default plus a named clause
+//   import yaml, * as ns from 'js-yaml'           — default plus a namespace
+//   import { default as yaml } from 'js-yaml'     — the same binding, written long
+// All four fail to link on 5.x identically. `import * as yaml` and a bare named
+// import (`{ load, dump }`) are the legal forms and must NOT match.
+//
 // Anchored at a statement start (allowing indentation) so the fixture STRING in
 // test-all.mjs — `"import yaml from 'js-yaml';"`, quoted mid-line — does not match.
-const STATIC_DEFAULT = /^\s*import\s+[A-Za-z_$][\w$]*\s*(?:,|from)\s*['"]js-yaml['"]/m;
+const DEFAULT_BINDING = String.raw`[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?\s+from`;
+const NAMED_DEFAULT = String.raw`\{[^}]*\bdefault\b[^}]*\}\s*from`;
+const STATIC_DEFAULT = new RegExp(
+  String.raw`^\s*import\s+(?:${DEFAULT_BINDING}|${NAMED_DEFAULT})\s*['"]js-yaml['"]`,
+  'm',
+);
 const DYNAMIC_DEFAULT = /import\(\s*['"]js-yaml['"]\s*\)\s*\)?\s*\.default/;
 
 const offenders = [];
+// A file that cannot be read is not a file that passes. Anything unreadable is
+// reported as its own failure rather than skipped, so the sweep cannot go green
+// while silently covering less of the tree than it claims.
+const unreadable = [];
 // This file is exempt from its own sweep: it necessarily CONTAINS both offending
 // forms, as the literals the detector self-check below is built from. Exempting
 // it by exact path (not by a name pattern) keeps the exemption from widening to
 // any other file that happens to look similar.
 const SELF = join(ROOT, 'tests', 'js-yaml-import-form.test.mjs');
 
-for (const file of walk(ROOT)) {
+const scanned = sourceFiles();
+for (const file of scanned) {
   if (file === SELF) continue;
   let text;
-  try { text = readFileSync(file, 'utf-8'); } catch { continue; }
+  try {
+    text = readFileSync(file, 'utf-8');
+  } catch (err) {
+    unreadable.push(`${relative(ROOT, file)} (${err.code || err.message})`);
+    continue;
+  }
   if (!text.includes('js-yaml')) continue;
   if (STATIC_DEFAULT.test(text)) offenders.push(`${relative(ROOT, file)} (static default import)`);
   else if (DYNAMIC_DEFAULT.test(text)) offenders.push(`${relative(ROOT, file)} (dynamic .default)`);
 }
 
-if (offenders.length === 0) {
-  pass('every js-yaml import uses the namespace form, which works on 4.x and 5.x');
+// An empty file list means `git ls-files` returned nothing usable — a clean sweep
+// over zero files is the failure mode this whole test exists to prevent.
+if (scanned.length === 0) {
+  fail('git ls-files produced no source files — the js-yaml sweep scanned nothing');
+} else if (unreadable.length > 0) {
+  fail(`could not read ${unreadable.length} tracked source file(s), so the js-yaml sweep is incomplete: ${unreadable.join(', ')}`);
+} else if (offenders.length === 0) {
+  pass(`every js-yaml import in ${scanned.length} tracked source files uses the namespace form, which works on 4.x and 5.x`);
 } else {
   fail(`js-yaml default import(s) — these break on js-yaml 5, use \`import * as yaml\`: ${offenders.join(', ')}`);
 }
@@ -73,10 +110,18 @@ if (offenders.length === 0) {
 // stays exempt.
 const fires = STATIC_DEFAULT.test("import yaml from 'js-yaml';")
   && STATIC_DEFAULT.test('  import yaml from "js-yaml";')
+  && STATIC_DEFAULT.test("import yaml, { load } from 'js-yaml';")
+  && STATIC_DEFAULT.test("import yaml, * as ns from 'js-yaml';")
+  && STATIC_DEFAULT.test("import { default as yaml } from 'js-yaml';")
+  && STATIC_DEFAULT.test('import { default as yaml, load } from "js-yaml";')
   && DYNAMIC_DEFAULT.test("const yaml = (await import('js-yaml')).default;");
-const exempt = !STATIC_DEFAULT.test(`      "import yaml from 'js-yaml';",`);
+// The namespace form and a plain named import are the two legal shapes; if either
+// started matching, the sweep would fail on a correctly-written file.
+const exempt = !STATIC_DEFAULT.test(`      "import yaml from 'js-yaml';",`)
+  && !STATIC_DEFAULT.test("import * as yaml from 'js-yaml';")
+  && !STATIC_DEFAULT.test("import { load, dump } from 'js-yaml';");
 if (fires && exempt) {
-  pass('the detector still matches both offending forms and ignores a quoted fixture');
+  pass('the detector matches every default-import form and ignores the namespace, named, and quoted-fixture forms');
 } else {
   fail(`detector broken: fires=${fires} exempt=${exempt} — it would report a clean sweep regardless of the tree`);
 }
