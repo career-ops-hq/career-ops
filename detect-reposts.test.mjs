@@ -17,8 +17,7 @@
  * Run: node detect-reposts.test.mjs
  */
 
-import { detectReposts, parseScanHistory, companyKey } from './detect-reposts.mjs';
-import { roleFuzzyMatch } from './role-matcher.mjs';
+import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from './detect-reposts.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -380,11 +379,22 @@ eq('91 days -> NOT flagged', detectReposts([
   row({ url: 'https://x.com/2', date: d('2026-04-02'), dateStr: '2026-04-02' }),
 ], 90).length, 0);
 
-// Window = 0: same-day only
-eq('window=0, same day, different URL -> flagged', detectReposts([
+// Window = 0 admits same-day clusters only, which the default 1-day span floor
+// then rejects — the two bounds have no overlap, so --window 0 can no longer
+// return anything. Asserted so the degenerate combination is a documented
+// outcome rather than a surprise.
+eq('window=0 with the default span floor -> nothing can be flagged', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
   row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
-], 0).length, 1);
+], 0).length, 0);
+
+// The same rows with the floor lowered: this keeps coverage of the window=0
+// path itself, and proves the assertion above is the FLOOR talking rather than
+// the window silently dropping same-day rows for some other reason.
+eq('window=0, same day, different URL, span floor 0 -> flagged', detectReposts([
+  row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+  row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+], 0, 0).length, 1);
 
 eq('window=0, 1 day apart -> NOT flagged', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
@@ -482,10 +492,22 @@ eq('unsorted input dates -> still works (sorted internally)', unsortedResult.len
 eq('unsorted: firstSeen = 2026-01-01', unsortedResult[0]?.firstSeen, '2026-01-01');
 eq('unsorted: lastSeen = 2026-03-01', unsortedResult[0]?.lastSeen, '2026-03-01');
 
-// Same date, different URLs
-eq('same date, different URLs -> flagged', detectReposts([
+// Same date, different URLs — two openings listed side by side in one sweep,
+// not one opening re-listed. `first_seen` is a SCANNER observation date, so a
+// zero-day span means both URLs were already live when the scanner arrived and
+// carries no evidence about re-listing at all. This was the defect behind three
+// companies reading as `reposts-detected` on 2026-08-11.
+eq('same date, different URLs -> NOT flagged (concurrent, not reposted)', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
   row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+], 90).length, 0);
+
+// One day apart is the smallest real signal and must survive, so the rule above
+// reads as "a zero span is not evidence" rather than "close sightings are
+// suspicious".
+eq('one day apart, different URLs -> flagged', detectReposts([
+  row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+  row({ url: 'https://x.com/2', date: d('2026-01-02'), dateStr: '2026-01-02' }),
 ], 90).length, 1);
 
 // ============================================================================
@@ -846,18 +868,25 @@ eq('SW: distinct roles not grouped', detectReposts([
 // ============================================================================
 console.log('\n--- 10.6 grouping equivalence (#2383) ---');
 
-// #2383 replaced the nested title loop in detectRepostsInGroup with a
-// bucket-by-lowercased-title Map plus an inverted token index. That was a pure
-// speed change, so the only thing worth testing is that it is in fact pure:
-// the clusters coming out must be byte-identical to what the old loop produced,
-// including their order and the order of appearances inside them.
+// A second, independently written implementation of the whole detector. The
+// clusters coming out of detect-reposts.mjs must be byte-identical to what this
+// one produces, including their order and the order of appearances inside them.
 //
-// The reference below is the pre-#2383 file, copied verbatim. It is frozen on
-// purpose. If detect-reposts.mjs ever changes what it computes (window rules,
-// cluster shape, dedup policy) rather than how fast it computes it, this copy
-// must be updated in the same commit. A silent divergence failing here is the
-// intended behaviour, not a nuisance.
-function legacyBuildRepostCluster(clusterRows, windowDays) {
+// Its history: it began as the pre-#2383 file copied verbatim, guarding a pure
+// speed change (a nested title loop became a bucket Map plus an inverted token
+// index). It is no longer a frozen copy of anything — the phantom-repost fix
+// changed what the detector COMPUTES, so this reference was updated in the same
+// commit, exactly as the note here has always required. What it still buys is a
+// second opinion on the parts most easily broken by accident: grouping order,
+// same-date input order, URL dedup, and the two date bounds. It is deliberately
+// written in the straightforward nested-loop style rather than mirroring the
+// real file's structure, so a shared bug has to be reasoned into both.
+//
+// If detect-reposts.mjs ever changes what it computes (window rules, span
+// rules, cluster shape, dedup policy, title identity) rather than how fast it
+// computes it, this copy must be updated in the same commit. A silent
+// divergence failing here is the intended behaviour, not a nuisance.
+function legacyBuildRepostCluster(clusterRows, windowDays, minSpan) {
   const byUrl = new Map();
   for (const r of clusterRows) {
     if (!byUrl.has(r.url) || r.date < byUrl.get(r.url).date) byUrl.set(r.url, r);
@@ -869,6 +898,7 @@ function legacyBuildRepostCluster(clusterRows, windowDays) {
   const last = sorted[sorted.length - 1];
   const span = daysBetween(first.date, last.date);
   if (span > windowDays) return null;
+  if (span < minSpan) return null;
   return {
     company: clusterRows[0].company,
     role: last.title,
@@ -880,9 +910,10 @@ function legacyBuildRepostCluster(clusterRows, windowDays) {
   };
 }
 
-function legacyDetectRepostsInGroup(rows, windowDays) {
-  // The quadratic loop this change removed: every row is compared against every
-  // other row with a fresh toLowerCase() and a fresh roleFuzzyMatch().
+function legacyDetectRepostsInGroup(rows, windowDays, minSpan) {
+  // Grouping by title identity, written as the naive quadratic scan: every row
+  // is compared against every other with a freshly recomputed key. The real
+  // file does this with a single-pass Map; agreeing here is the point.
   const titleGroups = [];
   const used = new Set();
   for (const r of rows) {
@@ -891,7 +922,7 @@ function legacyDetectRepostsInGroup(rows, windowDays) {
     used.add(r);
     for (const other of rows) {
       if (used.has(other)) continue;
-      if (r.title.toLowerCase() === other.title.toLowerCase() || roleFuzzyMatch(r.title, other.title)) {
+      if (titleIdentityKey(r.title) === titleIdentityKey(other.title)) {
         group.push(other);
         used.add(other);
       }
@@ -911,7 +942,7 @@ function legacyDetectRepostsInGroup(rows, windowDays) {
         cluster.push(r);
       } else {
         if (cluster.length >= 2) {
-          const built = legacyBuildRepostCluster(cluster, windowDays);
+          const built = legacyBuildRepostCluster(cluster, windowDays, minSpan);
           if (built) results.push(built);
         }
         cluster = cluster.filter(cr => daysBetween(cr.date, r.date) <= windowDays);
@@ -919,14 +950,14 @@ function legacyDetectRepostsInGroup(rows, windowDays) {
       }
     }
     if (cluster.length >= 2) {
-      const built = legacyBuildRepostCluster(cluster, windowDays);
+      const built = legacyBuildRepostCluster(cluster, windowDays, minSpan);
       if (built) results.push(built);
     }
   }
   return results;
 }
 
-function legacyDetectReposts(rows, windowDays = 90) {
+function legacyDetectReposts(rows, windowDays = 90, minSpan = 1) {
   if (!Array.isArray(rows)) return [];
   const valid = rows
     .filter(r =>
@@ -949,7 +980,7 @@ function legacyDetectReposts(rows, windowDays = 90) {
   const clusters = [];
   for (const [, groupRows] of byCompany) {
     if (groupRows.length < 2) continue;
-    clusters.push(...legacyDetectRepostsInGroup(groupRows, windowDays));
+    clusters.push(...legacyDetectRepostsInGroup(groupRows, windowDays, minSpan));
   }
   return clusters.sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
 }
@@ -957,8 +988,8 @@ function legacyDetectReposts(rows, windowDays = 90) {
 // Compares full cluster output, not just cluster counts: eq() stringifies, so
 // this catches a changed cluster order, a changed appearance order inside a
 // cluster, or a different `role`/`company` representative being picked.
-function sameAsLegacy(label, rows, windowDays = 90) {
-  eq(label, detectReposts(rows, windowDays), legacyDetectReposts(rows, windowDays));
+function sameAsLegacy(label, rows, windowDays = 90, minSpan = 1) {
+  eq(label, detectReposts(rows, windowDays, minSpan), legacyDetectReposts(rows, windowDays, minSpan));
 }
 
 // Compact row builder for the corpora below.
@@ -1075,7 +1106,12 @@ const mixedCorpus = Array.from({ length: 300 }, (_, i) => {
 });
 sameAsLegacy('equivalence: 300-row mixed corpus (seeded)', mixedCorpus);
 sameAsLegacy('equivalence: same mixed corpus at window=30', mixedCorpus, 30);
-sameAsLegacy('equivalence: same mixed corpus at window=0', mixedCorpus, 0);
+// window=0 needs the span floor lowered to 0 as well, or both sides return an
+// empty list and the comparison confirms nothing.
+sameAsLegacy('equivalence: same mixed corpus at window=0, span floor 0', mixedCorpus, 0, 0);
+// The span floor itself, compared against the reference on the full corpus.
+sameAsLegacy('equivalence: same mixed corpus at span floor 0', mixedCorpus, 90, 0);
+sameAsLegacy('equivalence: same mixed corpus at span floor 30', mixedCorpus, 90, 30);
 
 // The mixed corpus is only meaningful if it actually produces clusters — an
 // all-empty comparison would pass no matter what the grouping did.
@@ -1203,8 +1239,29 @@ const helpOut = execFileSync('node', [scriptPath, '--help'], {
 ok('--help prints usage', helpOut.includes('Usage:'));
 ok('--help documents --summary', helpOut.includes('--summary'));
 ok('--help documents --window', helpOut.includes('--window'));
+ok('--help documents --min-span', helpOut.includes('--min-span'));
 ok('--help documents --self-test', helpOut.includes('--self-test'));
 ok('--help documents --help', helpOut.includes('--help'));
+
+// --min-span in both accepted forms, since it reads through flagValue. The
+// `=` form is the one a hand-rolled indexOf() lookup drops silently.
+const spanEqOut = execFileSync('node', [scriptPath, '--min-span=30'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span=30 is honoured (not silently dropped)', JSON.parse(spanEqOut).metadata.minSpanDays, 30);
+
+const spanSpaceOut = execFileSync('node', [scriptPath, '--min-span', '30'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span 30 is honoured', JSON.parse(spanSpaceOut).metadata.minSpanDays, 30);
+
+const badSpanOut = execFileSync('node', [scriptPath, '--min-span', 'abc'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span abc falls back to 1', JSON.parse(badSpanOut).metadata.minSpanDays, 1);
 
 // Test -h flag
 const hOut = execFileSync('node', [scriptPath, '-h'], {

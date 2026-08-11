@@ -12,6 +12,11 @@
  *     response — it is an answer, not silence.
  *   - postingChurn: does this company repost the same role repeatedly
  *     (evergreen requisition / re-opened search), per detect-reposts.mjs?
+ *     "The same role, later" is the whole claim: a company running several
+ *     openings side by side — one per city, country, language or segment — is
+ *     not reposting, and detect-reposts.mjs enforces that with a minimum span
+ *     and a title-identity rule. Before it did, this axis reported
+ *     `reposts-detected` for companies that had never reposted anything.
  *
  * This script deliberately reports FACTS, not verdicts. It never uses the
  * words "ghost"/"ghosted" or "risk" — high-volume inboxes, evergreen
