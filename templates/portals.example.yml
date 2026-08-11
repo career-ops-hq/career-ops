@@ -632,9 +632,11 @@ search_queries:
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
-#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
+#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
-#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
+#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
+#                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
+#                   same provider; just use whichever host the employer's careers link actually points at.)
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #
@@ -708,7 +710,8 @@ search_queries:
 #
 # - name: Example Oracle Recruiting Cloud Co
 #   # Oracle Recruiting Cloud / Fusion Candidate Experience. Auto-detects any
-#   # <tenant>.fa[.<region>][.ocs].oraclecloud.com host and derives siteNumber
+#   # <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com host (the numbered apex,
+#   # e.g. oraclecloud26.com, is what newer tenants get) and derives siteNumber
 #   # from the /sites/<siteNumber>/ path segment (default CX_1).
 #   careers_url: https://exampleco.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs
 #   max_pages: 25          # optional page cap (200 jobs/page, default 25 ≈ 5000 jobs, max 25)
