@@ -224,7 +224,8 @@ export type ReportData = { content: string; file: string };
  *  to the filename scan (reports/{n}-{slug}-{date}.md, possibly zero-padded)
  *  for rows without a parseable link.
  *
- *  The fallback scan skips `{n}-RESERVED.md` placeholder files.
+ *  Both the linked lookup and the fallback scan skip `{n}-RESERVED.md`
+ *  placeholder files.
  *  `reserve-report-num.mjs` writes an empty `NNN-RESERVED.md` sentinel to
  *  claim a report number before a worker has actually written the report;
  *  it's normally deleted once the real report lands (or GC'd after 4h if
@@ -235,6 +236,12 @@ export type ReportData = { content: string; file: string };
  *  through the orchestrator that owns cleanup — `.find()` could return the
  *  empty sentinel instead of the real report, making the report body and the
  *  Apply/PDF-ready checks disappear. */
+/** True for a `{n}-RESERVED.md` placeholder sentinel — never a real report,
+ *  whichever branch below found it. */
+function isReservedReportFile(file: string): boolean {
+  return /^\d+-RESERVED\.md$/.test(path.basename(file));
+}
+
 export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
@@ -244,7 +251,7 @@ export function findReportFile(n: string): string | null {
   if (linked) {
     const p = path.resolve(root, "data", linked);
     // Containment: a hand-edited link must not resolve outside the project.
-    if (p.endsWith(".md") && containedRealpath(p, root)) return p;
+    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
   let files: string[];
   try {
@@ -253,7 +260,7 @@ export function findReportFile(n: string): string | null {
     return null;
   }
   const match = files.find(
-    (f) => f.endsWith(".md") && !/^\d+-RESERVED\.md$/.test(f) && parseInt(f, 10) === target,
+    (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
   );
   if (!match) return null;
   const p = path.join(root, "reports", match);
