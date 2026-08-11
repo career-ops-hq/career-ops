@@ -1058,6 +1058,146 @@ try {
   fail(`Liveness classification tests crashed: ${e.message}`);
 }
 
+// ── 3b. ARCHIVE-POSTING EGRESS GUARD (#1956) ────────────────────
+//
+// archive-posting.mjs drives Playwright at a URL the user pastes in (or that
+// arrives via data/pipeline.md), and used to navigate with zero egress
+// safeguards — so a hostile posting link could render an internal service or a
+// cloud metadata endpoint straight into a PDF. It now wires up the *same*
+// two-layer guard liveness-browser.mjs exports rather than carrying a second
+// implementation, so these tests pin the wiring, not a copy of the guard logic.
+try {
+  const { archiveUrl, installEgressGuard } = await import(
+    pathToFileURL(join(ROOT, 'archive-posting.mjs')).href
+  );
+  const { setHostResolver } = await import(
+    pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
+  );
+
+  // Stop each run the moment navigation starts: everything after goto() is PDF
+  // rendering and a writeFile into jds/, which these assertions don't need and
+  // must not perform.
+  const STOP = 'archive-guard-test-stop';
+
+  // Records what the guard did, and never lets the flow reach page.pdf().
+  function makeMockBrowser({ landedUrl = 'https://example.com/job/1' } = {}) {
+    const state = { routeCallback: null, contextCreated: false, closed: false };
+    const context = {
+      async route(pattern, callback) {
+        state.pattern = pattern;
+        state.routeCallback = callback;
+      },
+      async newPage() {
+        return {
+          async goto() {
+            if (state.stopAtGoto) throw new Error(STOP);
+            return { status: () => 200 };
+          },
+          url: () => landedUrl,
+          async waitForTimeout() { throw new Error(STOP); },
+          async title() { return ''; },
+          async $eval() { return ''; },
+        };
+      },
+      async close() { state.closed = true; },
+    };
+    const browser = {
+      async newContext() {
+        state.contextCreated = true;
+        return context;
+      },
+    };
+    return { browser, state };
+  }
+
+  // Drives a registered route handler and reports the verdict it reached.
+  async function runGuard(requestUrl) {
+    const { browser, state } = makeMockBrowser();
+    state.stopAtGoto = true;
+    await archiveUrl(browser, 'https://example.com/job/1').catch(() => {});
+    if (!state.routeCallback) return { registered: false };
+    let verdict = null;
+    await state.routeCallback({
+      request: () => ({ url: () => requestUrl }),
+      abort: async (code) => { verdict = { action: 'abort', code }; },
+      continue: async () => { verdict = { action: 'continue' }; },
+    });
+    return { registered: true, verdict, pattern: state.pattern };
+  }
+
+  // 1. Pre-navigation refusal — an obviously-internal target must not reach
+  //    Playwright at all, so no context is ever created.
+  const { browser: preBrowser, state: preState } = makeMockBrowser();
+  let preError = null;
+  await archiveUrl(preBrowser, 'http://169.254.169.254/latest/meta-data/')
+    .catch((err) => { preError = err; });
+  if (preError && /restricted destination/.test(preError.message) && !preState.contextCreated) {
+    pass('archive-posting refuses a private-IP target before opening a browser context');
+  } else {
+    fail(`archive-posting pre-navigation guard failed: error=${preError?.message ?? 'none'}, contextCreated=${preState.contextCreated}`);
+  }
+
+  // 2. The guard is registered on the context for every request, not just the
+  //    page's first hop — a page-scoped route wouldn't cover the whole flow.
+  const registration = await runGuard('https://example.com/assets/logo.png');
+  if (registration.registered && registration.pattern === '**/*') {
+    pass('archive-posting registers the egress guard on the context for all requests');
+  } else {
+    fail(`archive-posting did not register a context-wide route: ${JSON.stringify(registration)}`);
+  }
+
+  // 3. Legitimate subresources still go through — a guard that blocks
+  //    everything would pass a naive block-only test while breaking archiving.
+  if (registration.verdict?.action === 'continue') {
+    pass('archive-posting egress guard allows legitimate public requests');
+  } else {
+    fail(`archive-posting egress guard blocked a legitimate request: ${JSON.stringify(registration.verdict)}`);
+  }
+
+  // 4. Redirect hop straight to a literal private address.
+  const literalHop = await runGuard('http://10.0.0.5/internal');
+  if (literalHop.verdict?.action === 'abort' && literalHop.verdict.code === 'blockedbyclient') {
+    pass('archive-posting egress guard blocks a redirect hop to a literal private IP');
+  } else {
+    fail(`archive-posting egress guard let a private-IP hop through: ${JSON.stringify(literalHop.verdict)}`);
+  }
+
+  // 5. The case the literal-host check cannot see: a public-looking hostname
+  //    that resolves into loopback. Without the DNS layer this hop is allowed,
+  //    which is the whole reason validateUrlSecurity is reused here.
+  const restoreArchiveResolver = setHostResolver(async (hostname) => (
+    hostname === 'ssrf-blocked-host.local' ? ['127.0.0.1'] : ['93.184.216.34']
+  ));
+  try {
+    const dnsHop = await runGuard('http://ssrf-blocked-host.local/sensitive-internal');
+    if (dnsHop.verdict?.action === 'abort' && dnsHop.verdict.code === 'blockedbyclient') {
+      pass('archive-posting egress guard blocks a hostname that resolves to loopback');
+    } else {
+      fail(`archive-posting egress guard missed a DNS-resolved private target: ${JSON.stringify(dnsHop.verdict)}`);
+    }
+  } finally {
+    restoreArchiveResolver();
+  }
+
+  // 6. Landed-URL re-check after navigation. A first-hop-only check is the
+  //    classic miss, so the settled URL is asserted too.
+  const { browser: landedBrowser } = makeMockBrowser({ landedUrl: 'http://169.254.169.254/latest/meta-data/' });
+  let landedError = null;
+  await archiveUrl(landedBrowser, 'https://example.com/job/1')
+    .catch((err) => { landedError = err; });
+  if (landedError && /after redirect/.test(landedError.message)) {
+    pass('archive-posting refuses to render a page that landed on a private address');
+  } else {
+    fail(`archive-posting landed-URL guard failed: ${landedError?.message ?? 'no error'}`);
+  }
+
+  if (typeof installEgressGuard !== 'function') {
+    fail('archive-posting does not export installEgressGuard');
+  }
+} catch (e) {
+  fail(`archive-posting egress guard tests crashed: ${e.message}`);
+}
+
 // ── 4. DASHBOARD BUILD ──────────────────────────────────────────
 
 if (!QUICK) {
