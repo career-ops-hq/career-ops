@@ -82,6 +82,17 @@ Examples of legitimate reformulation:
 
 **NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary.**
 
+## Role-family hard filters
+
+For HR, People, Employee Success, Talent, Total Rewards, Compensation, Benefits, Workforce Planning, or People Analytics roles:
+
+- Default to the HR-adjacent / business-partner narrative rather than the generic strategy/ops narrative.
+- Prefer language around workforce analytics, executive advisory, org support, talent-cycle support, stakeholder coaching, compensation/benefits context, and leadership decision support when those claims are truthfully supported by `cv.md`.
+- Use the title semantics first: `HRBP`, `Employee Success`, `talent cycles`, `succession`, `workforce planning`, `compensation reviews`, `executive coaching`, `org planning`.
+- Apply a hard negative filter: exclude plausible but distracting content that does not improve fit for a People-function reader.
+- Suppress unrelated technical or project sections unless the JD explicitly makes them central to the role.
+- Treat unrelated AI / agentic / homelab / project material as excluded by default for these role families.
+
 ## Template HTML
 
 **Before generating: read `modes/_custom.md` (if it exists) and apply its formatting/content house rules to every CV in this session — including every item of a batch.** Rules recorded there (date formats, section-order preferences, content to always/never include) are persistent user instructions, not suggestions; if the user corrects the same thing twice in conversation, write it into `modes/_custom.md` so it stops drifting.
