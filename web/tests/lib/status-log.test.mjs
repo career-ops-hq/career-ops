@@ -177,7 +177,7 @@ test("appendStatusTransition: a value with no primitive form is rejected, not th
   // object has no toString, so String() on it throws. Both the date check and
   // the column check run before the try, so an unguarded conversion escapes the
   // helper entirely, which is the one thing it promises not to do.
-  for (const field of ["date", "num", "from", "source"]) {
+  for (const field of ["date", "num", "from", "to", "source"]) {
     const tracker = fixture();
 
     // When one is submitted in any of the inspected columns
