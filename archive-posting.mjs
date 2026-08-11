@@ -104,10 +104,14 @@ for (let i = 0; i < args.length; i++) {
     overrideRole = args[++i].trim();
   } else if (arg.startsWith('--report=')) {
     reportNum = arg.slice('--report='.length).trim();
-  } else if (arg === '--report' && args[i + 1]) {
+  } else if (arg === '--report') {
     // Consume the value explicitly. Left unconsumed it would fall through to the
-    // bare-argument branch below and be mistaken for the URL.
-    reportNum = args[++i].trim();
+    // bare-argument branch below and be mistaken for the URL. Consume it even
+    // when absent: a trailing `--report` used to be dropped silently, archiving
+    // the posting with no report prefix — unfindable, which is the failure this
+    // flag exists to prevent. The empty string reaches the validator below and
+    // exits non-zero instead.
+    reportNum = args[++i]?.trim() ?? '';
   } else if (!arg.startsWith('--') && !targetUrl) {
     targetUrl = arg;
   }

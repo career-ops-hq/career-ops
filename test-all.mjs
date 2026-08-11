@@ -5431,6 +5431,21 @@ run(NODE, ['archive-posting.mjs']) !== null
   ? pass('no-args: exits 0 (shows help)')
   : fail('no-args: should exit 0 and print help');
 
+// argument validation: a trailing --report must not be dropped. It used to fall
+// through the parser and archive the posting with no report prefix — silently
+// unfindable, the exact failure --report exists to prevent.
+run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123', '--report']) === null
+  ? pass('trailing --report: exits non-zero instead of archiving unkeyed')
+  : fail('trailing --report: should exit non-zero, not archive without a report prefix');
+
+// argument validation: both --report forms still key the capture
+for (const argv of [['--report', '4'], ['--report=4']]) {
+  const keyed = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123', ...argv]);
+  keyed?.includes('jds/004-')
+    ? pass(`${argv.join(' ')}: capture is keyed to the report`)
+    : fail(`${argv.join(' ')}: capture missing the 004- report prefix`);
+}
+
 // argument validation: flag without URL → exits non-zero
 run(NODE, ['archive-posting.mjs', '--dry-run']) === null
   ? pass('flag-without-url: exits non-zero (URL required)')

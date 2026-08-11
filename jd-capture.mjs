@@ -24,6 +24,32 @@ export function reportPrefix(num) {
 }
 
 /**
+ * Does `filename` name a capture belonging to `slug`'s company?
+ *
+ * Both grammars written here put the company first, after the report prefix and
+ * an optional capture date:
+ *
+ *   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   archive-posting.mjs
+ *   {NNN}-{company}-{role}.{ext}              hand-named and plugin captures
+ *
+ * So the slug is anchored to that position and must end on a field boundary.
+ * Testing `includes()` over the whole name let a role word ("marketing", "vp")
+ * answer for a company — the same mistake as matching the number alone, one
+ * field further in.
+ */
+function companyMatches(filename, slug) {
+  if (slug === '') return false; // supplied but unusable: attribute nothing
+  const rest = filename
+    .replace(/^\d+-/, '')                      // report prefix
+    .replace(/^\d{4}-\d{2}-\d{2}[_-]/, '')     // capture date, when present
+    .toLowerCase();
+  const s = slug.toLowerCase();
+  if (!rest.startsWith(s)) return false;
+  const next = rest.charAt(s.length);
+  return next === '' || next === '-' || next === '_' || next === '.';
+}
+
+/**
  * Find the archived capture for a report number.
  *
  * @param {string} jdsDir            Directory holding captures (usually jds/).
@@ -77,8 +103,8 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
   // real one. Report nothing found instead. The cost of being wrong the other
   // way is only a re-archive from the live URL.
   let chosen = byRecency[0];
-  if (companySlug) {
-    chosen = byRecency.find(e => e.name.toLowerCase().includes(String(companySlug).toLowerCase()));
+  if (companySlug !== undefined && companySlug !== null) {
+    chosen = byRecency.find(e => companyMatches(e.name, String(companySlug)));
     if (!chosen) return null;
   }
 

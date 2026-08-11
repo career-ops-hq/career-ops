@@ -98,6 +98,31 @@ try {
   check('companySlug matching no candidate returns null rather than another company\'s capture',
     findCaptureForReport(jds, 4, { companySlug: 'weave' }) === null);
 
+  // ── the slug must identify the company, not merely occur in the name ───────
+  // Both grammars this repo writes put the company first, after the report
+  // prefix and an optional capture date:
+  //   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   (archive-posting.mjs)
+  //   {NNN}-{company}-{role}.{ext}              (hand-named / plugin captures)
+  // Substring matching let a role word stand in for a company, which is the
+  // same mistake as matching on the number alone.
+  writeCapture('004-2026-08-11_weave_chief-marketing-officer.pdf');
+  check('company field matches in the dated underscore grammar',
+    findCaptureForReport(jds, 4, { companySlug: 'weave' })?.filename === '004-2026-08-11_weave_chief-marketing-officer.pdf');
+  check('company field matches in the hand-named hyphen grammar',
+    findCaptureForReport(jds, 4, { companySlug: 'mission-preborn' })?.filename === '04-mission-preborn-vp-marketing.txt');
+  check('a role word does not stand in for the company',
+    findCaptureForReport(jds, 4, { companySlug: 'marketing' }) === null);
+  check('a role abbreviation does not stand in for the company',
+    findCaptureForReport(jds, 4, { companySlug: 'vp' }) === null);
+  check('a mid-name role word does not stand in for the company',
+    findCaptureForReport(jds, 4, { companySlug: 'chief' }) === null);
+
+  // An empty slug is a supplied-but-unusable company, not an absent hint. A
+  // caller that could not determine the company must not silently receive the
+  // most recent capture as though it had been attributed.
+  check('empty companySlug is treated as supplied and matches nothing',
+    findCaptureForReport(jds, 4, { companySlug: '' }) === null);
+
   // ── robustness ─────────────────────────────────────────────────────────────
   check('missing jds dir returns null instead of throwing', findCaptureForReport(join(testDir, 'nope'), 64) === null);
   check('non-numeric report returns null', findCaptureForReport(jds, 'abc') === null);
