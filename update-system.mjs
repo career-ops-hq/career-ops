@@ -894,19 +894,86 @@ export function removeAdditionsNotInHead(pathspec, protectedPaths = new Set(), c
  */
 export function isTracked(path, ctx = {}) {
   const runGit = ctx.git || git;
-  try {
-    return runGit('ls-files', '--', path).trim().length > 0;
-  } catch {
-    return false;
-  }
+  // Deliberately uncaught. `ls-files` exits 0 with empty output for a path it
+  // does not know, so the untracked case never throws — which means a throw
+  // here is a real failure (unreadable repo, timeout, launch error), and
+  // reporting it as "untracked" would silently drop a genuine deletion from the
+  // update commit. --literal-pathspecs so a name containing pathspec syntax
+  // cannot answer this question about some other file.
+  return runGit('--literal-pathspecs', 'ls-files', '--', path).trim().length > 0;
 }
 
 /**
- * Stage the update's own system-layer paths.
+ * Resolve staging pathspecs to the concrete files the target tree ships.
  *
- * `-f` is required, not defensive. Every path here is one the updater owns and
- * just checked out from FETCH_HEAD, but `git add` refuses an explicitly-named
- * ignored path and exits 1 — and because .gitignore is intentionally not in
+ * The staging list is the update manifest, and 53 of its 283 entries are
+ * DIRECTORIES (`modes/de/`, `docs/`, `tests/`, …). That distinction decides
+ * whether the force-add below is safe: `git add -f -- docs/` stages every
+ * ignored file underneath it, so a user's `career-dashboard` binary, `.DS_Store`
+ * or `.env` lands in the update commit. Plain `git add -- docs/` skips them.
+ *
+ * Expanding here removes the hazard at the source rather than guarding it
+ * downstream — a `-f` on an explicit filename cannot sweep a sibling. It also
+ * cannot reach a user file at all, because every name comes out of the TARGET
+ * TREE: by construction each one is a file upstream ships. That is the property
+ * that matters, and it is why the expansion asks FETCH_HEAD rather than the
+ * user's index — `ls-files`/`status` read the user's checkout to decide what to
+ * force into a commit, which is the same class of mistake in the other
+ * direction. A status-based guard cannot even see the problem: `git status`
+ * does not list ignored files.
+ *
+ * Non-directory entries pass through untouched: manifest file entries, pruned
+ * deletions (already absent from the target tree, so nothing to expand), and
+ * materialized skill entrypoints, which may have just been `git rm --cached`ed
+ * and can only be restaged by name.
+ *
+ * @param {string[]} paths - Staging pathspecs; directory entries end in '/'.
+ * @param {string} [ref] - Tree to resolve against.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string[]} De-duplicated file paths, never a directory.
+ */
+export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  const seen = new Set();
+  const files = [];
+  const take = (p) => { if (p && !seen.has(p)) { seen.add(p); files.push(p); } };
+
+  for (const path of paths) {
+    if (!path.endsWith('/')) { take(path); continue; }
+    // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
+    // absent/` exits 0 with empty output, so a stale manifest entry needs no
+    // handling here. A throw is therefore a real failure — an unreadable ref,
+    // a timeout, a corrupt object store — and swallowing it would report "this
+    // directory ships nothing" and drop every file under it from staging.
+    //
+    // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
+    // per core.quotePath, and a quoted name is not a usable pathspec.
+    // --literal-pathspecs: a directory prefix still resolves, but no name is
+    // ever reinterpreted as a glob.
+    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
+    for (const file of listed.split('\0')) take(file);
+  }
+  return files;
+}
+
+/**
+ * Cap on the argv bytes handed to one `git add`.
+ *
+ * Expanding directories multiplies the pathspec count (283 manifest entries →
+ * 817 files, ~22 KB of argv today), and Windows caps a whole command line at
+ * 32,767 characters. Left as one call, this fix would carry the updater to
+ * roughly two-thirds of that ceiling on the day it lands and grow with every
+ * release — failing, eventually, inside the one tool a user cannot easily
+ * repair by hand. Batching is a consequence of the expansion, not a flourish.
+ */
+const ADD_ARGV_BUDGET = 8000;
+
+/**
+ * Stage the update's own system-layer files.
+ *
+ * `-f` is required, not defensive. Every path here is one the updater just
+ * wrote from the target tree, but `git add` refuses an explicitly-named ignored
+ * path and exits 1 — and because .gitignore is intentionally not in
  * SYSTEM_PATHS, a user's own rule can shadow a system file at any time.
  *
  * The trigger is specifically a DIRECTORY-level rule. git skips ignore rules for
@@ -918,17 +985,28 @@ export function isTracked(path, ctx = {}) {
  * The failure is quiet in the worst way: git stages the paths it accepted and
  * still exits non-zero, so apply() aborts before committing and leaves the
  * update on disk, staged, uncommitted — and repeats it on every later release.
- * Forcing the add keeps the updater able to commit files it owns whatever the
- * local ignore rules say; it can never reach a user path, because the caller
- * builds this list from the system manifest.
  *
- * @param {string[]} paths - Repo-relative paths to stage.
+ * Callers must pass files, not directory pathspecs — see expandToShippedFiles.
+ *
+ * @param {string[]} paths - Repo-relative FILE paths to stage.
  * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
  */
 export function addPaths(paths, ctx = {}) {
   if (paths.length === 0) return;
   const runGit = ctx.git || git;
-  runGit('add', '-f', '--', ...paths);
+  let batch = [];
+  let budget = 0;
+  // --literal-pathspecs: these are filenames, and a name like `docs/[x].env`
+  // read as a glob would force-add an ignored sibling `docs/x.env`. `--` ends
+  // option parsing but does not stop pathspec interpretation.
+  const flush = () => { if (batch.length > 0) runGit('--literal-pathspecs', 'add', '-f', '--', ...batch); batch = []; budget = 0; };
+  for (const path of paths) {
+    // A single path wider than the budget still goes out on its own.
+    if (batch.length > 0 && budget + path.length + 1 > ADD_ARGV_BUDGET) flush();
+    batch.push(path);
+    budget += path.length + 1;
+  }
+  flush();
 }
 
 function dashboardGoSourcesChanged() {
@@ -1409,7 +1487,18 @@ async function apply() {
 
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
-      addPaths(pathsToStage);
+      // Stage per filename, never per directory. pathsToStage is the manifest,
+      // so it carries directory entries, and `-f` on one of those sweeps every
+      // ignored file underneath into the commit.
+      //
+      // The commit below still takes the unexpanded list, which is PRE-EXISTING
+      // behaviour and is NOT equivalent to staging. `git commit -- docs/`
+      // records the current contents of every known file matching the pathspec
+      // and ignores the prepared index, so it can still commit a user's
+      // unstaged edit to a tracked file under a system directory, or an ignored
+      // file that an earlier buggy run stranded in the index. Closing that is a
+      // separate change to the commit call; this one only closes the add.
+      addPaths(expandToShippedFiles(pathsToStage));
       // Scope the commit to only the staged update paths (#915 bug 2).
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the

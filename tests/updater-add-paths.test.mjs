@@ -26,7 +26,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, addPaths, isTracked } from '../update-system.mjs';
+import { gitIn, addPaths, isTracked, expandToShippedFiles } from '../update-system.mjs';
 
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-addpaths-'));
@@ -51,8 +51,11 @@ function makeRepo() {
   return { dir, g, ctx: { git: g } };
 }
 
+// -z for the same reason the expansion uses it: under core.quotePath (the
+// default) git renders a non-ASCII name as "modes/\346\227\245...", so a
+// newline-split assertion silently misses a path that staged perfectly well.
 const stagedPaths = g =>
-  new Set(g('diff', '--cached', '--name-only', 'HEAD').split('\n').filter(Boolean));
+  new Set(g('diff', '--cached', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean));
 
 console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked paths)...');
 
@@ -266,6 +269,268 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
     pass('the same batch stages once the untracked marker is filtered out');
   } else {
     fail(`filtering the marker did not restore staging: ${recoveryThrew?.message.split('\n')[0] ?? 'not staged'}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 6. -f over a DIRECTORY pathspec commits the user's ignored files ──
+//    The reason the staging list is expanded to filenames before it is forced.
+//    53 of the 283 manifest entries are directories, so this is the production
+//    shape, not a contrived one: `dashboard/` ships a compiled binary that
+//    apply() rebuilds immediately before staging, and an unanchored rule like
+//    `.DS_Store` or `*.env` matches at any depth under all 53.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'shipped by upstream');
+  writeFileSync(join(dir, '.gitignore'), 'career-dashboard\n*.env\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  // What a user's checkout looks like: ignored, never tracked, none of it ours.
+  writeFileSync(join(dir, 'docs/career-dashboard'), 'compiled binary');
+  writeFileSync(join(dir, 'docs/prod.env'), 'SECRET=hunter2');
+  writeFileSync(join(dir, 'docs/README.md'), 'updated by v-next');
+
+  // Oracle: the unexpanded force-add is what sweeps them in. If this ever stops
+  // being true the expansion is dead weight and the assertion below is vacuous.
+  let sweptThrew = null;
+  try {
+    addPaths(['docs/'], ctx);
+  } catch (err) {
+    sweptThrew = err;
+  }
+  const swept = stagedPaths(g);
+  if (!sweptThrew && swept.has('docs/prod.env') && swept.has('docs/career-dashboard')) {
+    pass('-f over a directory pathspec does stage ignored files (oracle holds)');
+  } else {
+    fail(`oracle broken — a bare -f no longer sweeps: ${[...swept].join(', ') || '(nothing)'}`);
+  }
+
+  g('reset', '-q');
+
+  // And the fix: same input, resolved through the target tree first.
+  const expanded = expandToShippedFiles(['docs/'], 'HEAD', ctx);
+  let fixedThrew = null;
+  try {
+    addPaths(expanded, ctx);
+  } catch (err) {
+    fixedThrew = err;
+  }
+  const staged = stagedPaths(g);
+  if (!fixedThrew && staged.has('docs/README.md') && !staged.has('docs/prod.env') && !staged.has('docs/career-dashboard')) {
+    pass('expanding to shipped files stages the update and leaves ignored files alone');
+  } else {
+    fail(`expansion did not contain the sweep: ${[...staged].join(', ') || '(nothing)'}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 7. the expansion returns files only, and passes non-directories through ──
+//    Pruned deletions and materialized entrypoints arrive as plain filenames and
+//    must survive untouched — a deletion is absent from the target tree, so
+//    anything that tried to resolve it against FETCH_HEAD would drop it.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'modes'));
+  writeFileSync(join(dir, 'modes/a.md'), 'a');
+  writeFileSync(join(dir, 'modes/b.md'), 'b');
+  writeFileSync(join(dir, 'AGENTS.md'), 'x');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  const out = expandToShippedFiles(['modes/', 'AGENTS.md', 'tests/pruned-away.mjs'], 'HEAD', ctx);
+
+  if (!out.some(p => p.endsWith('/'))) {
+    pass('expansion never yields a directory pathspec');
+  } else {
+    fail(`expansion returned a directory: ${out.filter(p => p.endsWith('/')).join(', ')}`);
+  }
+  if (out.includes('modes/a.md') && out.includes('modes/b.md')) {
+    pass('a directory entry resolves to the files the target tree ships');
+  } else {
+    fail(`directory did not expand: ${out.join(', ')}`);
+  }
+  if (out.includes('AGENTS.md') && out.includes('tests/pruned-away.mjs')) {
+    pass('file entries pass through, including one absent from the tree (a prune)');
+  } else {
+    fail(`file entries were dropped: ${out.join(', ')}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 8. a manifest directory absent upstream is skipped, not fatal ──
+//    Stale manifest entries are expected (#1998); the checkout above already
+//    skips them, and the expansion must agree rather than abort the update.
+//    The mechanism matters now that the expansion has no catch: `ls-tree --
+//    absent/` exits 0 with EMPTY OUTPUT rather than failing, which is what
+//    makes an uncaught call safe here. If that ever changes, this goes red
+//    instead of the failure being silently absorbed.
+{
+  const { dir, g, ctx } = makeRepo();
+  writeFileSync(join(dir, 'AGENTS.md'), 'x');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  let threw = null;
+  let out = null;
+  try {
+    out = expandToShippedFiles(['.gemini/commands/', 'AGENTS.md'], 'HEAD', ctx);
+  } catch (err) {
+    threw = err;
+  }
+  if (!threw && out.length === 1 && out[0] === 'AGENTS.md') {
+    pass('a directory absent from the target tree is skipped silently');
+  } else {
+    fail(`stale manifest entry was not skipped: ${threw?.message.split('\n')[0] ?? out?.join(', ')}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 9. non-ASCII paths survive the expansion ──
+//    ls-tree quotes them per core.quotePath, and a quoted name is not a usable
+//    pathspec — the staging call would fail on a repo that ships modes/ja/ and
+//    modes/ar/. -z is what keeps the names raw.
+{
+  const { dir, g, ctx } = makeRepo();
+  g('config', 'core.quotePath', 'true');
+  mkdirSync(join(dir, 'modes'));
+  writeFileSync(join(dir, 'modes/日本語.md'), 'ja');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  const out = expandToShippedFiles(['modes/'], 'HEAD', ctx);
+  if (out.includes('modes/日本語.md')) {
+    pass('a non-ASCII path expands to a raw, usable pathspec');
+  } else {
+    fail(`path came back quoted or mangled: ${JSON.stringify(out)}`);
+  }
+
+  writeFileSync(join(dir, 'modes/日本語.md'), 'ja v2');
+  let threw = null;
+  try {
+    addPaths(out, ctx);
+  } catch (err) {
+    threw = err;
+  }
+  if (!threw && stagedPaths(g).has('modes/日本語.md')) {
+    pass('and it stages');
+  } else {
+    fail(`staging a non-ASCII path failed: ${threw?.message.split('\n')[0] ?? 'not staged'}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 10. the add is batched, because expanding multiplies the pathspec count ──
+//    283 manifest entries expand to 817 files (~22 KB of argv) against a 32,767
+//    character Windows command line. One call would sit at two-thirds of the
+//    ceiling on day one and grow every release.
+{
+  const { dir, g } = makeRepo();
+  mkdirSync(join(dir, 'bulk'));
+  const names = [];
+  for (let i = 0; i < 200; i++) {
+    const name = `bulk/${String(i).padStart(3, '0')}-a-deliberately-long-fixture-filename.md`;
+    writeFileSync(join(dir, name), 'v1');
+    names.push(name);
+  }
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  for (const name of names) writeFileSync(join(dir, name), 'v2');
+
+  const argvChars = names.join(' ').length;
+  let addCalls = 0;
+  // Find the subcommand rather than assuming argv[0] — the call carries leading
+  // top-level flags (--literal-pathspecs), so a positional check silently
+  // counts zero and the batching assertion passes for the wrong reason.
+  const subcommand = args => args.find(a => !a.startsWith('-'));
+  const counting = (...args) => { if (subcommand(args) === 'add') addCalls++; return g(...args); };
+
+  let threw = null;
+  try {
+    addPaths(names, { git: counting });
+  } catch (err) {
+    threw = err;
+  }
+
+  if (argvChars > 8000 && addCalls > 1) {
+    pass(`a ${argvChars}-char pathspec list is split across ${addCalls} add calls`);
+  } else {
+    fail(`expected batching for ${argvChars} chars; got ${addCalls} call(s)`);
+  }
+  const staged = stagedPaths(g);
+  if (!threw && names.every(n => staged.has(n))) {
+    pass('every path still reaches the index across the batches');
+  } else {
+    fail(`batching lost paths: staged ${staged.size} of ${names.length}${threw ? ` — ${threw.message.split('\n')[0]}` : ''}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 11. a shipped filename is a NAME, not a pattern ──
+//    `--` ends option parsing but does not stop pathspec interpretation, so a
+//    tracked file called `docs/[x].md` read as a glob matches an ignored
+//    sibling `docs/x.md` and -f stages it. Expanding to filenames does not
+//    close the sweep on its own — the names have to be taken literally too.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/[x].md'), 'shipped upstream');
+  writeFileSync(join(dir, '.gitignore'), 'x.md\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  writeFileSync(join(dir, 'docs/x.md'), 'the user\'s ignored file');
+  writeFileSync(join(dir, 'docs/[x].md'), 'updated by v-next');
+
+  // Oracle: without literal pathspecs the bracket name captures the sibling.
+  g('add', '-f', '--', 'docs/[x].md');
+  if (stagedPaths(g).has('docs/x.md')) {
+    pass('a bracket filename does glob onto an ignored sibling (oracle holds)');
+  } else {
+    fail('oracle broken — git no longer globs an explicit pathspec');
+  }
+  g('reset', '-q');
+
+  const expanded = expandToShippedFiles(['docs/'], 'HEAD', ctx);
+  let threw = null;
+  try {
+    addPaths(expanded, ctx);
+  } catch (err) {
+    threw = err;
+  }
+  const staged = stagedPaths(g);
+  if (!threw && staged.has('docs/[x].md') && !staged.has('docs/x.md')) {
+    pass('literal pathspecs keep a bracket filename from capturing its sibling');
+  } else {
+    fail(`sibling still swept: ${[...staged].join(', ') || '(nothing)'}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 12. a real ls-tree failure aborts instead of yielding "nothing shipped" ──
+//    The absent-directory case exits 0 (test 8), so any throw is genuine. If it
+//    were swallowed, an unreadable ref would drop every file under the
+//    directory from staging while apply() carried on toward its success path.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  console.log('     ↓ the following git "Not a valid object name" line is expected');
+  let threw = null;
+  let out = null;
+  try {
+    out = expandToShippedFiles(['docs/'], 'NO-SUCH-REF', ctx);
+  } catch (err) {
+    threw = err;
+  }
+  if (threw) {
+    pass('an unreadable ref propagates instead of silently expanding to nothing');
+  } else {
+    fail(`a bad ref was absorbed and returned ${JSON.stringify(out)} — staging would go quietly incomplete`);
   }
   rmSync(dir, { recursive: true, force: true });
 }
