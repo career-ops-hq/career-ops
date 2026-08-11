@@ -77,6 +77,14 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // "Equity" and "Carrot" into reported skill gaps.
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,4}\\s*(?:' + [
+    // Responsibilities. The negative lookahead keeps "You will have" on the
+    // requirements side — this list is tested BEFORE REQUIREMENT_HEADER_RE in
+    // scanJd(), so without it a "You will have:" heading would close a block
+    // instead of opening one. Bare "YOU WILL" must close: the fallback that
+    // ends a block on a new heading only fires for markdown headings (#{1,4}),
+    // so an unhashed responsibilities heading left the block open and scored
+    // its duties as required skills.
+    'you\\s+will(?!\\s+have)',
     'benefits?', 'perks?', 'benefits\\s+and\\s+perks', 'compensation', 'salary', 'pay\\s+range',
     'what\\s+we\\s+offer', 'why\\s+(?:join|work|this\\s+role)',
     'about\\s+(?:us|the\\s+company|the\\s+team|the\\s+role)',
@@ -432,7 +440,9 @@ Python, Docker, Zookeeper
   const headerVariants = [
     ['bare uppercase "YOU HAVE:" (Ashby default template)', 'YOU HAVE:'],
     ['"You\'ll have"', "You'll have:"],
+    ['"You will have"', 'You Will Have:'],
     ['"You might be a good fit if you:"', 'You Might Be a Good Fit If You:'],
+    ['"You could be a good fit if you:"', 'You Could Be a Good Fit If You:'],
     ['"It\'s Important To Us That You Have"', "## It's Important To Us That You Have"],
     ['"It Would Be Great if You Had"', '## It Would Be Great if You Had'],
   ];
@@ -451,6 +461,28 @@ Python, Docker, Zookeeper
     '"YOU WILL" (responsibilities) does not open a requirements block',
     extractJdSkills(responsibilitiesJd).includes('Kubernetes'),
     false
+  );
+
+  // The assertion above only proves YOU WILL cannot OPEN a block. Closing is
+  // the case that actually bites: postings routinely list requirements first
+  // and duties second, and the block-ending fallback in scanJd() fires only on
+  // markdown headings (#{1,4}) — so a bare responsibilities heading left the
+  // block open and reported every duty as a missing skill.
+  const dutiesAfterRequirementsJd = [
+    '# Role', '', 'YOU HAVE:', '- Experience with Python', '',
+    'YOU WILL', '- Ship Kubernetes manifests', '- Operate Terraform modules', '',
+  ].join('\n');
+  const dutiesSkills = extractJdSkills(dutiesAfterRequirementsJd);
+  eq('requirements before a bare YOU WILL are still extracted', dutiesSkills.includes('Python'), true);
+  eq('bare "YOU WILL" closes an open requirements block (Kubernetes)', dutiesSkills.includes('Kubernetes'), false);
+  eq('bare "YOU WILL" closes an open requirements block (Terraform)', dutiesSkills.includes('Terraform'), false);
+
+  // Guard the lookahead: "You will have" must still reach REQUIREMENT_HEADER_RE
+  // even though NON_REQUIREMENT_HEADER_RE is tested first in scanJd().
+  eq(
+    '"You will have" opens a block despite the YOU WILL exclusion',
+    extractJdSkills('# Role\n\nYou Will Have:\n- Experience with Kubernetes\n').includes('Kubernetes'),
+    true
   );
 
   // Regression: generic JD boilerplate must not be misreported as a skill gap.
