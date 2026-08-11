@@ -10,7 +10,7 @@
 // than an outage.
 
 import { pathToFileURL } from 'node:url';
-import { BASE, fetchWithTimeout } from './lib/api.mjs';
+import { BASE, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const TIMEOUT_MS = 10_000;
@@ -42,8 +42,9 @@ function humanSpan(seconds) {
 }
 
 // A mint reply is a small JSON object; anything bigger is not a key service
-// answering. The body is already buffered by res.text() when the cap runs, so
-// this bounds what gets parsed and trusted, not peak memory.
+// answering. readBoundedText counts bytes as they stream in and cancels once
+// the total would pass this, so the cap bounds the read itself and peak memory,
+// not just what gets parsed.
 const MAX_BODY_BYTES = 64 * 1024;
 
 // The mint POST goes through the read path's egress guard (redirect handled
@@ -52,9 +53,11 @@ const MAX_BODY_BYTES = 64 * 1024;
 // key service never redirects this endpoint, and following one would re-issue
 // the POST, which could spend the mint budget more than once. The body is read
 // inside the same abort-timer window (via consume) so a server that sends
-// headers and then stalls the body times out instead of hanging, and the read
-// is size-capped. What comes back is a plain envelope, never a live Response:
-// { status, retryAfterSeconds, body | bodyError }.
+// headers and then stalls the body cannot hang the CLI. Such a stall is
+// reported against the status that already arrived rather than as a timeout
+// (see consume below). The read is size-capped. What comes back is a plain
+// envelope, never a live Response: { status, retryAfterSeconds, body |
+// bodyError }.
 function guardedMintFetch() {
   return fetchWithTimeout(`${BASE}/keys/request`, {
     method: 'POST',
@@ -68,19 +71,27 @@ function guardedMintFetch() {
       status: res.status,
       retryAfterSeconds: (rawRetry !== null && Number.isFinite(retrySecs)) ? retrySecs : null,
     };
-    let text;
+    let read;
     try {
-      text = await res.text();
+      read = await readBoundedText(res, MAX_BODY_BYTES);
     } catch {
+      // Headers are already in hand: consume only runs once fetch has resolved,
+      // so the status is known and true even when the body never arrives. Keep
+      // it rather than reporting a bare timeout, which reads as "nothing
+      // happened". That matters most on a 201, where it would invite a retry
+      // that spends another of the day's two mints, but it is equally wrong on
+      // a 429 (the wait is already known from the headers) or a 500. A real
+      // timeout before any headers still surfaces as one, because consume never
+      // runs for it.
       envelope.bodyError = 'unreadable';
       return envelope;
     }
-    if (text.length > MAX_BODY_BYTES) {
+    if (read.oversized) {
       envelope.bodyError = 'oversized';
       return envelope;
     }
     try {
-      envelope.body = JSON.parse(text);
+      envelope.body = JSON.parse(read.text);
     } catch {
       envelope.bodyError = 'notjson';
     }

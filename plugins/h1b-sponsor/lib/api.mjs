@@ -8,6 +8,10 @@ const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_WAIT_MS = 10_000;
 const MAX_REDIRECTS = 3;
+// The largest real employer profile this API serves is about 13 KB and a search
+// page is about 4 KB, so a megabyte is ~80x headroom for future growth while
+// still refusing to buffer a runaway or hostile body.
+const MAX_READ_BYTES = 1024 * 1024;
 
 function buildHeaders(token) {
   const h = { 'Accept': 'application/json', 'User-Agent': USER_AGENT };
@@ -85,6 +89,81 @@ export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_
   }
 }
 
+/**
+ * Read a response body with a hard byte ceiling.
+ *
+ * `res.text()` and `res.json()` buffer the whole body first, so a size check
+ * after the fact rejects an oversized value but never bounds what was already
+ * allocated. This streams instead: it counts bytes as they arrive and cancels
+ * the moment the total would exceed `maxBytes`, so peak memory stays bounded no
+ * matter what the server sends. A Content-Length that already exceeds the cap
+ * short-circuits the read, but the streaming count still runs because that
+ * header can be absent or wrong.
+ *
+ * `maxBytes` is required and inclusive: a body of exactly `maxBytes` comes
+ * back, one byte more does not. Returns `{ text }` when the body was read
+ * whole, else `{ oversized: true }` — which marks a refused body, covering both
+ * one past the ceiling and a chunk that cannot report a usable size, since
+ * neither yields text a caller may trust. Read failures (including an
+ * AbortError from the caller's timeout) propagate to the caller.
+ */
+export async function readBoundedText(res, maxBytes) {
+  const declared = Number(res.headers?.get?.('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    // Nothing here will be read, so release the body instead of leaving the
+    // connection pinned until garbage collection.
+    try { await res.body?.cancel?.(); } catch { /* nothing to release */ }
+    return { oversized: true };
+  }
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    // Nothing to stream: a 204, or a response shim without a body. Measure the
+    // buffered text in BYTES rather than UTF-16 units, because a length check
+    // in code units lets a multibyte body past a byte ceiling, which is the
+    // defect this function exists to close.
+    const text = typeof res.text === 'function' ? await res.text() : '';
+    const bytes = new TextEncoder().encode(text).byteLength;
+    return bytes > maxBytes ? { oversized: true } : { text };
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const size = Number(value.byteLength);
+      // A chunk that cannot report its own size would make the running total
+      // NaN, and NaN never trips the ceiling below, so the read would run to
+      // completion and hand back a truncated body as if it were whole. Refuse
+      // it instead.
+      if (!Number.isFinite(size)) {
+        await reader.cancel().catch(() => {});
+        return { oversized: true };
+      }
+      total += size;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { oversized: true };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released by cancel */ }
+  }
+
+  // Decode once over the joined bytes. Decoding per chunk would corrupt any
+  // multibyte character split across a chunk boundary.
+  const joined = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    joined.set(c, at);
+    at += c.byteLength;
+  }
+  return { text: new TextDecoder('utf-8').decode(joined) };
+}
+
 async function requestJson(url, opts, { allow404 } = {}) {
   const token = opts.token;
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
@@ -97,11 +176,32 @@ async function requestJson(url, opts, { allow404 } = {}) {
     if (res.status === 429) return { kind: 'rate', waitMs: parseRetryAfter(res) };
     if (allow404 && res.status === 404) return { kind: 'missing' };
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
+      // An oversized error body is not worth reporting verbatim; the status
+      // still tells the caller what happened, so drop the excerpt and continue.
+      let text = '';
+      try {
+        const read = await readBoundedText(res, MAX_READ_BYTES);
+        if (!read.oversized) text = read.text;
+      } catch (err) {
+        if (err && err.name === 'AbortError') throw err;
+      }
       return { kind: 'http', status: res.status, statusText: res.statusText, text };
     }
+    let read;
     try {
-      return { kind: 'json', body: await res.json() };
+      read = await readBoundedText(res, MAX_READ_BYTES);
+    } catch (err) {
+      // A stalled body aborts on the shared timer and has to surface as the
+      // timeout it is. Every other stream failure leaves an unusable body: a
+      // reset or truncated response arrives as TypeError: terminated, and the
+      // buffered res.json() this replaced reported exactly that case as
+      // unparseable rather than letting a raw transport error escape.
+      if (err && err.name === 'AbortError') throw err;
+      return { kind: 'badjson' };
+    }
+    if (read.oversized) return { kind: 'toobig' };
+    try {
+      return { kind: 'json', body: JSON.parse(read.text) };
     } catch {
       return { kind: 'badjson' };
     }
@@ -137,6 +237,12 @@ async function requestJson(url, opts, { allow404 } = {}) {
   }
 
   if (out.kind === 'missing') return null;
+
+  if (out.kind === 'toobig') {
+    const e = new Error(`H-1B API response exceeded ${MAX_READ_BYTES} bytes: ${url}`);
+    e.code = 'BODY_TOO_LARGE';
+    throw e;
+  }
 
   if (out.kind === 'http') {
     const e = new Error(`H-1B API ${out.status} ${out.statusText}: ${url}${out.text ? ` -- ${out.text.slice(0, 200)}` : ''}`);

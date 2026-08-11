@@ -299,14 +299,27 @@ if (!existsSync(API_PATH)) {
   try {
     const api = await import(pathToFileURL(API_PATH).href);
 
-    // Minimal Response surface used by lib/api.mjs: status/ok/headers/json.
-    const stubOneResult = (candidateName) => async () => ({
-      status: 200,
-      ok: true,
-      headers: { get: () => null },
-      json: async () => ({ results: [{ id: 'stub-1', name: candidateName }] }),
-      text: async () => '',
-    });
+    // Response-like with a real streaming body, matching what fetch actually
+    // hands back: lib/api.mjs reads bodies through readBoundedText, so a mock
+    // that only implements json() would not exercise the code under test.
+    const jsonStream = (payload) => {
+      const bytes = new TextEncoder().encode(JSON.stringify(payload));
+      let sent = false;
+      return {
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        body: {
+          getReader: () => ({
+            read: async () => (sent ? { done: true } : ((sent = true), { done: false, value: bytes })),
+            cancel: async () => {},
+            releaseLock: () => {},
+          }),
+        },
+      };
+    };
+    const stubOneResult = (candidateName) => async () =>
+      jsonStream({ results: [{ id: 'stub-1', name: candidateName }] });
 
     const matchCases = [
       // Legal-suffix canonicalization, both directions: neither pair is an
@@ -350,19 +363,13 @@ if (!existsSync(API_PATH)) {
 
     // searchEmployers surfaces every version, not just the best pick, and
     // reports the API's full total when it exceeds the returned page.
-    globalThis.fetch = async () => ({
-      status: 200,
-      ok: true,
-      headers: { get: () => null },
-      json: async () => ({
-        total: 96,
-        results: [
-          { id: '820544687', name: 'Amazon.com Services LLC' },
-          { id: '204938068', name: 'Amazon Web Services, Inc.' },
-          { id: '', name: 'dropped: no id' },
-        ],
-      }),
-      text: async () => '',
+    globalThis.fetch = async () => jsonStream({
+      total: 96,
+      results: [
+        { id: '820544687', name: 'Amazon.com Services LLC' },
+        { id: '204938068', name: 'Amazon Web Services, Inc.' },
+        { id: '', name: 'dropped: no id' },
+      ],
     });
     const search = await api.searchEmployers('Amazon', { timeoutMs: 1_000 });
     if (search.total === 96 && search.results.length === 2 && search.results[0].id === '820544687') {
@@ -378,6 +385,212 @@ if (!existsSync(API_PATH)) {
     }
   } catch (e) {
     fail(`matcher tests crashed: ${e.message}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+// ---------- lib/api.mjs readBoundedText — streaming byte ceiling ----------
+// Ungated and offline. res.text()/res.json() buffer a whole body before any
+// size check can run, so the reader streams and cancels mid-body instead. These
+// drive the REAL reader (the mintToken envelope tests use a fake envelope and
+// never reach it).
+if (!existsSync(API_PATH)) {
+  fail('lib/api.mjs missing — the plugin ships it');
+} else {
+  const { readBoundedText } = await import(pathToFileURL(API_PATH).href);
+
+  // A Response-like whose body streams the given chunks and records cancel().
+  const streamRes = (chunks, headers = {}) => {
+    const state = { cancelled: false, bodyCancelled: false, delivered: 0 };
+    let i = 0;
+    const res = {
+      headers: { get: (h) => headers[String(h).toLowerCase()] ?? null },
+      body: {
+        // A real ReadableStream has cancel(); the Content-Length short-circuit
+        // calls it to release a body it will never read.
+        cancel: async () => { state.bodyCancelled = true; },
+        getReader: () => ({
+          read: async () => {
+            if (i >= chunks.length) return { done: true, value: undefined };
+            const value = chunks[i++];
+            state.delivered += value.byteLength;
+            return { done: false, value };
+          },
+          cancel: async () => { state.cancelled = true; },
+          releaseLock: () => {},
+        }),
+      },
+    };
+    return { res, state };
+  };
+
+  const enc = new TextEncoder();
+
+  // Multibyte characters split across a chunk boundary must survive. Splitting
+  // at a single hand-picked index is not enough: an index that happens to land
+  // between characters leaves both halves independently valid, so the case
+  // would pass even if each chunk were decoded separately. Walk every internal
+  // byte boundary instead, which includes the ones inside a character.
+  const full = 'Nestl\u00e9 S.A. \u65e5\u672c \ud83d\ude80 Corp';
+  const allBytes = enc.encode(full);
+  let splitFailures = 0;
+  for (let cut = 1; cut < allBytes.length; cut++) {
+    const split = streamRes([allBytes.slice(0, cut), allBytes.slice(cut)]);
+    const out = await readBoundedText(split.res, 1024);
+    if (out.text !== full) splitFailures++;
+  }
+  if (splitFailures === 0) {
+    pass(`readBoundedText: rejoins multibyte characters at all ${allBytes.length - 1} chunk boundaries`);
+  } else {
+    fail(`readBoundedText multibyte: ${splitFailures} of ${allBytes.length - 1} boundaries corrupted`);
+  }
+
+  // A chunk that cannot report its size must fail closed, not sail past the
+  // ceiling on a NaN total and hand back a truncated body as complete.
+  const nanChunk = streamRes([{ byteLength: undefined }]);
+  const nanOut = await readBoundedText(nanChunk.res, 1024);
+  if (nanOut.oversized === true) pass('readBoundedText: a chunk with no usable byteLength is refused');
+  else fail(`readBoundedText NaN chunk: ${JSON.stringify(nanOut)}`);
+
+  // Over the ceiling: cancels the reader, reports oversized, and stops pulling.
+  const big = streamRes([enc.encode('x'.repeat(600)), enc.encode('y'.repeat(600)), enc.encode('z'.repeat(600))]);
+  const over = await readBoundedText(big.res, 1000);
+  if (over.oversized === true && big.state.cancelled === true && big.state.delivered <= 1200) {
+    pass('readBoundedText: cancels mid-body once the byte ceiling is passed');
+  } else {
+    fail(`readBoundedText oversized: ${JSON.stringify(over)} cancelled=${big.state.cancelled} delivered=${big.state.delivered}`);
+  }
+
+  // A Content-Length past the ceiling short-circuits before any read, and
+  // cancels the body it is walking away from — returning without cancelling
+  // would leave the connection pinned until garbage collection.
+  const declared = streamRes([enc.encode('small')], { 'content-length': String(5 * 1024 * 1024) });
+  const declaredOut = await readBoundedText(declared.res, 1024);
+  if (declaredOut.oversized === true && declared.state.delivered === 0 && declared.state.bodyCancelled === true) {
+    pass('readBoundedText: an oversized Content-Length short-circuits the read and releases the body');
+  } else {
+    fail(`readBoundedText content-length: ${JSON.stringify(declaredOut)} delivered=${declared.state.delivered} bodyCancelled=${declared.state.bodyCancelled}`);
+  }
+
+  // A lying Content-Length does not get to bypass the streaming count.
+  const lying = streamRes([enc.encode('a'.repeat(4000))], { 'content-length': '10' });
+  const lyingOut = await readBoundedText(lying.res, 1000);
+  if (lyingOut.oversized === true) pass('readBoundedText: streaming enforces the cap when Content-Length lies');
+  else fail(`readBoundedText lying content-length: ${JSON.stringify(lyingOut)}`);
+
+  // No body at all (204-style) reads as empty rather than throwing.
+  const empty = await readBoundedText({ headers: { get: () => null }, text: async () => '' }, 1024);
+  if (empty.text === '') pass('readBoundedText: a body-less response reads as empty');
+  else fail(`readBoundedText empty: ${JSON.stringify(empty)}`);
+
+  // The body-less fallback has no stream to count, so it measures the buffered
+  // text in BYTES. Measuring UTF-16 code units instead — what String.length
+  // reports — waves a multibyte body straight past a byte ceiling: these 400
+  // CJK characters are 400 units but 1200 bytes.
+  const wide = '日'.repeat(400);
+  const wideOut = await readBoundedText({ headers: { get: () => null }, text: async () => wide }, 1000);
+  if (wideOut.oversized === true) {
+    pass('readBoundedText: the body-less fallback counts bytes, not UTF-16 units');
+  } else {
+    fail(`readBoundedText body-less multibyte: oversized=${wideOut.oversized} len=${(wideOut.text || '').length}`);
+  }
+
+  // A stream that dies mid-read (undici reports a reset or truncated response
+  // as TypeError: terminated) must land on the same unparseable-body outcome
+  // the buffered read used to give, not escape as a raw transport error.
+  {
+    const originalFetch = globalThis.fetch;
+    try {
+      const api = await import(pathToFileURL(API_PATH).href);
+      globalThis.fetch = async () => ({
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        body: {
+          getReader: () => ({
+            read: async () => { throw new TypeError('terminated'); },
+            cancel: async () => {},
+            releaseLock: () => {},
+          }),
+        },
+      });
+      let code = null;
+      let raw = null;
+      try {
+        await api.searchEmployers('Acme', { timeoutMs: 1_000 });
+      } catch (err) {
+        code = err && err.code;
+        raw = err && err.constructor && err.constructor.name;
+      }
+      if (code === 'BAD_JSON') pass('read path: a mid-stream transport failure becomes BAD_JSON');
+      else fail(`read path stream error: code=${code} type=${raw}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // The other half of that distinction: an AbortError is the shared fetch timer
+  // firing, not an unusable body, so it has to stay a TIMEOUT. Both body reads
+  // re-throw it for that reason — the 2xx read and the error-status read that
+  // only collects an excerpt — and a catch that swallowed it would report a
+  // timed-out request as BAD_JSON or as the bare HTTP status, hiding the cause
+  // and pointing the user at the wrong fix.
+  {
+    const originalFetch = globalThis.fetch;
+    const abortingBody = (status) => ({
+      status,
+      ok: status < 400,
+      statusText: 'Server Error',
+      headers: { get: () => null },
+      body: {
+        cancel: async () => {},
+        getReader: () => ({
+          read: async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    });
+    try {
+      const api = await import(pathToFileURL(API_PATH).href);
+      for (const [status, label] of [[200, '2xx'], [500, 'error-status']]) {
+        globalThis.fetch = async () => abortingBody(status);
+        let code = null;
+        try {
+          await api.searchEmployers('Acme', { timeoutMs: 1_000 });
+        } catch (err) {
+          code = err && err.code;
+        }
+        if (code === 'TIMEOUT') pass(`read path: a stalled ${label} body surfaces as TIMEOUT`);
+        else fail(`read path stalled ${label} body: code=${code} (expected TIMEOUT)`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // End to end on the read path: an oversized streamed body surfaces as
+  // BODY_TOO_LARGE rather than being parsed or silently truncated.
+  const originalFetch = globalThis.fetch;
+  try {
+    const api = await import(pathToFileURL(API_PATH).href);
+    globalThis.fetch = async () => {
+      const { res } = streamRes([enc.encode('{"results":['), enc.encode('0'.repeat(2 * 1024 * 1024))]);
+      res.status = 200;
+      res.ok = true;
+      return res;
+    };
+    let code = null;
+    try {
+      await api.searchEmployers('Acme', { timeoutMs: 1_000 });
+    } catch (e) {
+      code = e && e.code;
+    }
+    if (code === 'BODY_TOO_LARGE') pass('read path: an oversized response throws BODY_TOO_LARGE');
+    else fail(`read path oversized: code=${code}`);
+  } catch (e) {
+    fail(`read path oversized crashed: ${e.message}`);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -664,6 +877,55 @@ if (!existsSync(TOKEN_PATH)) {
         pass('mintToken: a same-host redirect is refused after exactly one request (no re-POST)');
       } else {
         fail(`mintToken same-host redirect: calls=${mintCalls}, ${JSON.stringify(rSameHost)}`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // A 201 whose body then stalls means the server probably issued a key and
+  // charged the budget. That has to keep the budget warning: reporting a bare
+  // timeout would read as "nothing happened" and invite a retry that spends
+  // another of the day's two mints. A non-201 abort has no budget cost, so it
+  // stays a timeout.
+  {
+    const originalFetch = globalThis.fetch;
+    const abortingBody = (status, headers = {}) => ({
+      status,
+      headers: { get: (h) => headers[String(h).toLowerCase()] ?? null },
+      body: {
+        getReader: () => ({
+          read: async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    });
+    try {
+      globalThis.fetch = async () => abortingBody(201);
+      const stalled201 = await tokenMod.mintToken();
+      if (!stalled201.ok && /budget spent/.test(stalled201.message) && !/h1b_/.test(stalled201.message)) {
+        pass('mintToken: a 201 with a stalled body keeps the budget warning');
+      } else {
+        fail(`mintToken stalled 201: ${JSON.stringify(stalled201)}`);
+      }
+
+      // A stalled body never throws away a status that already arrived. The
+      // wait on a 429 comes from the headers, so it survives the stall.
+      globalThis.fetch = async () => abortingBody(429, { 'retry-after': '43200' });
+      const stalled429 = await tokenMod.mintToken();
+      if (!stalled429.ok && /rate limited/.test(stalled429.message) && /12 hours/.test(stalled429.message)) {
+        pass('mintToken: a stalled body on a 429 still reports the rate-limit wait');
+      } else {
+        fail(`mintToken stalled 429: ${JSON.stringify(stalled429)}`);
+      }
+
+      globalThis.fetch = async () => abortingBody(500);
+      const stalled500 = await tokenMod.mintToken();
+      if (!stalled500.ok && /HTTP 500/.test(stalled500.message)) {
+        pass('mintToken: a stalled body on a 500 still reports the status');
+      } else {
+        fail(`mintToken stalled 500: ${JSON.stringify(stalled500)}`);
       }
     } finally {
       globalThis.fetch = originalFetch;
