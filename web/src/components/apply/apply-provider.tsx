@@ -13,6 +13,10 @@ type ApplyCtx = {
   url: string;
   title: string;
   company: string;
+  /** Tracker row this session was opened for, "" when opened from a pasted URL. */
+  n: string;
+  /** Path the session was opened from, so the page has somewhere to go back to. */
+  from: string;
   fields: ApplyField[];
   answers: Record<string, string>;
   meta: Record<string, Meta>;
@@ -22,7 +26,7 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
-  open: (url: string, opts?: { prefill?: boolean; company?: string }) => Promise<void>;
+  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
   fill: () => Promise<void>;
@@ -51,6 +55,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
+  const [n, setN] = useState("");
+  const [from, setFrom] = useState("");
   const [fields, setFields] = useState<ApplyField[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [meta, setMeta] = useState<Record<string, Meta>>({});
@@ -125,7 +131,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string }) => {
+  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => {
     setStatus("opening");
     setError("");
     setFields([]);
@@ -138,6 +144,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl(u);
     setCompany(opts?.company ?? "");
     companyRef.current = opts?.company ?? "";
+    setN(opts?.n ?? "");
+    setFrom(opts?.from ?? "");
     pendingPrefill.current = false;
     try {
       const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
@@ -354,6 +362,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl("");
     setTitle("");
     setCompany("");
+    setN("");
+    setFrom("");
     setFields([]);
     setAnswers({});
     setMeta({});
@@ -366,8 +376,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
-    [status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
+    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
+    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
