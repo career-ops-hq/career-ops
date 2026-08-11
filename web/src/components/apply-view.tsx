@@ -66,6 +66,9 @@ export function ApplyView() {
             </div>
           </div>
         )}
+        {/* A session that failed still has a row and an origin behind it, so the
+            way back and the way to record it must survive the failure. */}
+        {a.status === "error" && <ApplyExitBar />}
       </div>
     );
   }

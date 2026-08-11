@@ -122,8 +122,9 @@ test("resolveReturnPath: refuses to navigate off the app", () => {
 });
 
 test("resolveReturnPath: refuses to send Apply back to itself", () => {
-  // Given an origin that is the Apply page (a reopened session)
-  for (const from of ["/apply", "/apply?from=/jobs/4"]) {
+  // Given an origin that is the Apply page (a reopened session), in the spellings
+  // that reach the same route
+  for (const from of ["/apply", "/apply?from=/jobs/4", "/apply/", "/apply/#top"]) {
     // When resolving where back goes
     const target = resolveReturnPath(from);
 

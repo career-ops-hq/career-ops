@@ -33,7 +33,8 @@ export function resolveReturnPath(from) {
   if (!path.startsWith("/")) return DEFAULT_RETURN_PATH;
   // "//host" and "/\host" are protocol-relative in browsers, not local paths.
   if (path.startsWith("//") || path.startsWith("/\\")) return DEFAULT_RETURN_PATH;
-  const pathname = path.split(/[?#]/, 1)[0];
+  // A trailing slash reaches the same route, so it has to be refused too.
+  const pathname = path.split(/[?#]/, 1)[0].replace(/\/+$/, "");
   if (pathname === "/apply") return DEFAULT_RETURN_PATH;
   return path;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Send, Lock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { useApply } from "@/components/apply/apply-provider";
@@ -11,7 +11,6 @@ import { useApply } from "@/components/apply/apply-provider";
 // (where the user reviews and submits it themselves — never auto-submit).
 export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: string; company: string; pdfReady: boolean }) {
   const router = useRouter();
-  const pathname = usePathname();
   const { jobs } = useJobs();
   const apply = useApply();
 
@@ -36,8 +35,11 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
       type="button"
       onClick={() => {
         // n + from ride along so the Apply page can mark this row Applied and
-        // return the user to the page they left.
-        apply.open(url!, { prefill: true, company, n, from: pathname });
+        // return the user to the page they left. Read straight off the handler's
+        // own location: usePathname() drops the query and hash, which is where
+        // the list filter and the row anchor live.
+        const { pathname, search, hash } = window.location;
+        apply.open(url!, { prefill: true, company, n, from: `${pathname}${search}${hash}` });
         router.push("/apply");
       }}
       className="inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"

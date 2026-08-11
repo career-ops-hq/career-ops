@@ -148,6 +148,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => {
     const gen = ++generation.current;
+    // Opening a second form abandons the first one's browser exactly the way
+    // leaving the page does, so it is released here too.
+    if (sessionId.current) closeSession(sessionId.current);
+    sessionId.current = null;
     setStatus("opening");
     setError("");
     setFields([]);
