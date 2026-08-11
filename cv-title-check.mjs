@@ -148,10 +148,14 @@ export function parseCvExperience(cvText) {
  * parse at all — throws so the CLI can exit non-zero and name exactly which
  * entry/field needs fixing, instead of quietly narrowing the comparison set.
  *
- * @throws {Error} if any experience entry is missing company/role/dates.
+ * @throws {Error} if `experience` is absent/non-array, or if any entry is
+ *   missing company/role/dates.
  */
 export function parseTailoredExperience(payload) {
-  const experience = Array.isArray(payload?.experience) ? payload.experience : [];
+  const experience = payload?.experience;
+  if (!Array.isArray(experience)) {
+    throw new Error('tailored CV payload must contain an experience array');
+  }
   const parsed = [];
   const incomplete = [];
 
@@ -396,6 +400,15 @@ function runSelfTest() {
     eq('incomplete-entry error names the missing field', err.message.includes('dates'), true);
     eq('incomplete-entry error names the entry index', err.message.includes('experience[0]'), true);
   }
+
+  // A missing or non-array `experience` must throw, not silently become an
+  // empty comparison set — {"experience": {}} must not exit 0 having checked
+  // nothing.
+  throwsFor('a payload with no experience key throws instead of defaulting to []', {});
+  throwsFor('a non-array experience value (object) throws', { experience: {} });
+  throwsFor('a non-array experience value (string) throws', { experience: 'none' });
+  eq('an explicit empty experience array is still valid (no experience entries)',
+    parseTailoredExperience({ experience: [] }).length, 0);
 
   // Duplicate {company, dates} key IN cv.md (two different jobs, same range —
   // malformed but possible): must be reported as ambiguous, never resolved by
