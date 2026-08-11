@@ -153,24 +153,26 @@ export default {
       ? Math.min(first.page_count, MAX_PAGES)
       : 1;
 
-    // Pages 1+ stay tolerant: a page that exhausts retries truncates with a
-    // warning and returns whatever was already gathered, instead of
-    // discarding it.
+    // Pages 1+ stay tolerant: a page that exhausts retries, OR comes back
+    // with an unexpected shape (a successful fetch, no retry involved --
+    // caught here so it lands in the same truncation path instead of
+    // escaping uncaught and discarding allResults), truncates with a warning
+    // and returns whatever was already gathered instead of discarding it.
     for (let page = 1; page < pageCount; page++) {
       await sleep(INTER_PAGE_DELAY_MS, ctx);
       const url = `${FEED_BASE}?page=${page}`;
       let json;
       try {
         json = await fetchPageWithRetry(ctx, url, { redirect: 'error' });
+        if (!json || !Array.isArray(json.results)) {
+          throw new Error(
+            `themuse: unexpected API response on page ${page} — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          );
+        }
       } catch (err) {
         const attempts = Number.isInteger(err?.attempts) ? err.attempts : 1;
         console.error(`⚠️  themuse: truncated at page ${page} of ${pageCount} after ${attempts} attempt${attempts === 1 ? '' : 's'} (${allResults.length} jobs gathered so far): ${err.message}`);
         break;
-      }
-      if (!json || !Array.isArray(json.results)) {
-        throw new Error(
-          `themuse: unexpected API response on page ${page} — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
-        );
       }
       allResults.push(...json.results);
     }

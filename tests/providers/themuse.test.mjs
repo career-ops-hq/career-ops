@@ -298,6 +298,41 @@ try {
     else fail(`themuse page-0 failure: expected 4 fetchJson calls, got ${calls}`);
   }
 
+  // fetch() malformed shape on a later page — a successful (200 OK) response
+  // whose `results` field isn't an array must land in the same tolerant
+  // truncation path as a retry-exhausted page, not escape as an uncaught
+  // throw that discards jobs already gathered from earlier pages.
+  {
+    let calls = 0;
+    const { result: jobs, errors } = await captureConsoleErrors(() =>
+      themuse.fetch(
+        { name: 'The Muse Board', provider: 'themuse' },
+        {
+          fetchJson: async (url) => {
+            calls++;
+            const page = parseInt(new URL(url).searchParams.get('page') ?? '0', 10);
+            if (page === 0) return { results: [sampleResults[0]], page: 0, page_count: 3 };
+            return { page, notResults: 'this response has no results array' }; // malformed but a successful 200
+          },
+          sleep: async () => {},
+        },
+      ),
+    );
+    // page 0 (1 call) + page 1 (1 call, malformed shape, no retry triggered — it's a successful fetch)
+    if (calls === 2) pass('themuse.fetch() does not retry a malformed-but-successful response');
+    else fail(`themuse malformed later page: expected 2 fetchJson calls, got ${calls}`);
+    if (jobs.length === 1 && jobs[0].title === 'Staff AI Engineer') {
+      pass('themuse.fetch() preserves jobs already gathered when a later page has a malformed shape');
+    } else {
+      fail(`themuse malformed later page: expected 1 preserved job, got ${JSON.stringify(jobs.map(j => j.title))}`);
+    }
+    if (errors.some(e => /truncated at page 1 of 3/.test(e) && /unexpected API response on page 1/.test(e))) {
+      pass('themuse.fetch() warns (does not throw) when a later page has a malformed shape');
+    } else {
+      fail(`themuse malformed later page: expected a truncation warning, got ${JSON.stringify(errors)}`);
+    }
+  }
+
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }
