@@ -12,12 +12,14 @@
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
+ *   7. Concurrent `add` calls all survive — the queue is appended to, never
+ *      rewritten, so simultaneous writers cannot clobber each other.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -121,6 +123,39 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
   const gi = readFileSync(join(repo, '.gitignore'), 'utf8');
   const ruleCount = gi.split('\n').filter((l) => l.trim() === 'data/agent-inbox.md').length;
   check('.gitignore gains exactly one data/agent-inbox.md rule', ruleCount === 1, `count=${ruleCount}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('7. concurrent adds do not lose items (append, not rewrite)');
+{
+  // The queue's whole point is that anything — a dashboard, a script, cron —
+  // can drop a request in without a session running, so simultaneous adds are
+  // the expected case, not an exotic one. A read-whole-file/write-whole-file
+  // cycle silently dropped every item that landed between the read and the
+  // write: 30 concurrent adds kept 15.
+  const dir = tmp('inbox-concurrent-');
+  const inbox = join(dir, 'agent-inbox.md');
+  const N = 30;
+  // spawn(), not spawnSync() — a synchronous loop would serialize the adds and
+  // pass even against the buggy rewrite, proving nothing.
+  const exits = await Promise.all(
+    Array.from({ length: N }, (_, i) => new Promise((res) => {
+      const p = spawn(NODE, [CLI, 'add', `item-${i}`], {
+        cwd: dir, env: { ...process.env, CAREER_OPS_INBOX: inbox }, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      p.on('exit', (code) => res(code));
+    })),
+  );
+  const failedSpawn = exits.filter((c) => c !== 0).length;
+  check('every concurrent add exited cleanly', failedSpawn === 0, `${failedSpawn} non-zero exits`);
+  const body = readFileSync(inbox, 'utf8');
+  const pending = body.split('\n').filter((l) => l.startsWith('- [ ]'));
+  const kept = pending.length;
+  check(`all ${N} concurrently queued items survive`, kept === N, `kept=${kept} of ${N}`);
+  const actual = new Set(pending.map((l) => l.slice(l.indexOf('— ') + 2)));
+  const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
+  const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
+  check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

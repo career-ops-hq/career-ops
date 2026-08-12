@@ -208,8 +208,25 @@ async function updateTrackerStatuses(updates) {
   }
 }
 
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = 'Usage: node reply-watch.mjs [path/to/candidates.json]';
+
 async function main() {
-  const candidatesPath = process.argv[2] || DEFAULT_CANDIDATES_PATH;
+  const args = process.argv.slice(2);
+
+  const positional = args.filter(a => !a.startsWith('-'));
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length > 0) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  const candidatesPath = positional[0] || DEFAULT_CANDIDATES_PATH;
   ensureCandidatesFile(candidatesPath);
 
   if (!fs.existsSync(candidatesPath)) {

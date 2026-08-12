@@ -256,8 +256,14 @@ if (staleSentinels === 0) ok('No stale reservation sentinels');
 // Warning-level, not error: duplicates can be legitimate (re-evaluation
 // after a JD change).
 const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
-// Shares normalizeTextKey with Check 2 so a report pair and a tracker pair
-// can never disagree about whether two roles are the same (#2393).
+// Shares normalizeTextKey with Check 2 so the two checks fold text the same
+// way (#2393). That is where the guarantee ends: this check keys off the
+// FILENAME slug, already ASCII by the time a report is written, while Check 2
+// keys off the tracker's Company column with the original spelling intact. So
+// the two can and do disagree — `İstanbul Tekstil` vs `Istanbul Tekstil` is
+// flagged here and not there, because the dotted I survives in one input and
+// not the other. Sharing a normalizer is not sharing a contract when the
+// callers feed it different things. Pinned in test-all.mjs.
 const normalizeKey = normalizeTextKey;
 
 // Role comes from the report body: the Machine Summary YAML fence when

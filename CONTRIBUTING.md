@@ -13,7 +13,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
 - **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
 
-New to all this? That's the point. Claim an issue with a comment, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
+New to all this? That's the point. Claim a good-first-issue by commenting `/assign` on it, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
 
 ## Before Submitting a PR
 
@@ -55,6 +55,14 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Dashboard TUI features (in `dashboard/`)
 - New skill modes (in `modes/`)
 - Script improvements (`.mjs` utilities)
+
+### Claiming a good first issue
+
+Comment `/assign` on any [`good first issue`](https://github.com/santifer/career-ops/contribute) and it's yours: no waiting for a maintainer. How it stays fair:
+
+- **Claims free up on their own.** After 7 quiet days (with a friendly ping at day 3) the issue goes back to the window, so nothing stays stuck. `/extend` restarts the clock, no questions asked; `/unassign` lets go cleanly. An open PR always pauses the clock.
+- **Reserved for newcomers.** Good-first-issues are for contributors with fewer than 3 merged PRs here (`first-timers-only` means exactly that: your very first), one at a time, so a first-time contributor always has a way in. Past that stage? [`help wanted`](https://github.com/santifer/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) is your board.
+- **No claim needed to contribute.** A PR straight onto any unassigned issue is always welcome.
 
 ## The contribution ladder
 

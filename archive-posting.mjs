@@ -9,11 +9,17 @@
  * Usage:
  *   node archive-posting.mjs <url>
  *   node archive-posting.mjs <url> --company=Anthropic --role=senior-ai-engineer
+ *   node archive-posting.mjs <url> --report=042    Key the capture to report #42
  *   node archive-posting.mjs --pipeline          Archive pending URLs in data/pipeline.md
  *   node archive-posting.mjs --dry-run <url>     Preview filename without saving
  *
  * Output:    jds/YYYY-MM-DD_company-slug_role-slug.pdf
- * Reference: local:jds/YYYY-MM-DD_company-slug_role-slug.pdf  (paste into pipeline.md)
+ *            jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf   (with --report)
+ * Reference: local:jds/{filename}  (paste into pipeline.md)
+ *
+ * Prefer --report. Without it the capture can only be found again by rebuilding
+ * its filename from today's date and the scraped company and role, so it stops
+ * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
 import { chromium } from 'playwright';
@@ -21,6 +27,7 @@ import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { reportPrefix } from './jd-capture.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const JDS_DIR = join(ROOT, 'jds');
@@ -47,19 +54,27 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   OPTIONS
     --company <name>   Override auto-detected company name
     --role <title>     Override auto-detected role title
+    --report <num>     Key the capture to a report/tracker number (recommended)
     --pipeline         Archive all pending (- [ ]) entries in data/pipeline.md
     --dry-run          Preview filename without saving
     --help             Show this help
 
   OUTPUT
     jds/YYYY-MM-DD_company-slug_role-slug.pdf
+    jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf     with --report
+
+  WHY --report
+    Without it, a capture is only findable by rebuilding its filename from
+    today's date and the scraped company and role, so it stops resolving the
+    next day. outcome.mjs looks captures up by report number.
 
   PIPELINE REFERENCE (paste into pipeline.md or reports/)
-    local:jds/YYYY-MM-DD_company-slug_role-slug.pdf
+    local:jds/{filename}
 
   EXAMPLES
     node archive-posting.mjs "https://jobs.ashbyhq.com/anthropic/abc123"
     node archive-posting.mjs "https://boards.greenhouse.io/openai/jobs/456" --company=OpenAI
+    node archive-posting.mjs "https://jobs.lever.co/acme/xyz" --report=42
     node archive-posting.mjs --pipeline
     npm run archive -- "https://jobs.lever.co/elevenlabs/abc"
 `);
@@ -71,6 +86,7 @@ let overrideCompany = null;
 let overrideRole = null;
 let pipelineMode = false;
 let dryRun = false;
+let reportNum = null;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -86,8 +102,29 @@ for (let i = 0; i < args.length; i++) {
     overrideRole = arg.slice('--role='.length).trim();
   } else if (arg === '--role' && args[i + 1]) {
     overrideRole = args[++i].trim();
+  } else if (arg.startsWith('--report=')) {
+    reportNum = arg.slice('--report='.length).trim();
+  } else if (arg === '--report') {
+    // Consume the value explicitly. Left unconsumed it would fall through to the
+    // bare-argument branch below and be mistaken for the URL. Consume it even
+    // when absent: a trailing `--report` used to be dropped silently, archiving
+    // the posting with no report prefix — unfindable, which is the failure this
+    // flag exists to prevent. The empty string reaches the validator below and
+    // exits non-zero instead.
+    reportNum = args[++i]?.trim() ?? '';
   } else if (!arg.startsWith('--') && !targetUrl) {
     targetUrl = arg;
+  }
+}
+
+if (reportNum !== null) {
+  if (!/^\d+$/.test(reportNum) || Number(reportNum) <= 0) {
+    console.error(`Invalid --report value: "${reportNum}". Expected a positive report number.`);
+    process.exit(1);
+  }
+  if (pipelineMode) {
+    console.error('--report applies to a single posting; it cannot be combined with --pipeline.');
+    process.exit(1);
   }
 }
 
@@ -109,6 +146,16 @@ function slugify(text) {
 
 function today() {
   return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Build the capture filename. With --report the name leads with the zero-padded
+ * report number, which is what makes the capture findable later: the date and
+ * the scraped company/role all change between runs, the report number does not.
+ */
+function captureFilename(company, role) {
+  const base = `${today()}_${slugify(company)}_${slugify(role)}.pdf`;
+  return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
 /**
@@ -234,7 +281,7 @@ async function archiveUrl(browser, url, { company: companyHint, role: roleHint }
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
 
-    const filename = `${today()}_${slugify(company)}_${slugify(role)}.pdf`;
+    const filename = captureFilename(company, role);
     const outputPath = join(JDS_DIR, filename);
     const reference = `local:jds/${filename}`;
 
@@ -291,7 +338,7 @@ async function main() {
       const urlCompany = extractCompanyFromUrl(url);
       const resolvedCompany = overrideCompany || company || urlCompany || 'unknown';
       const resolvedRole = overrideRole || role || 'job';
-      const filename = `${today()}_${slugify(resolvedCompany)}_${slugify(resolvedRole)}.pdf`;
+      const filename = captureFilename(resolvedCompany, resolvedRole);
       const reference = `local:jds/${filename}`;
       console.log(`\n🔗  ${url}`);
       console.log(`   Company: ${resolvedCompany}`);

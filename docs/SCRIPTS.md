@@ -43,6 +43,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify:portals` | `verify-portals.mjs` | Probe ATS endpoints to confirm portals.yml slugs resolve (network) |
 | `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
+| `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
 | `npm run ollama:eval` | `ollama-eval.mjs` | Evaluate a JD with a local Ollama model |
 | `npm run openai:eval` | `openai-eval.mjs` | Evaluate a JD via any OpenAI-compatible endpoint |
@@ -812,6 +813,47 @@ node detect-reposts.mjs --summary
 
 ---
 
+## rank-pipeline
+
+Opt-in LLM relevance re-ranker for `data/pipeline.md`. **Off by default and not
+part of any scan** — `scan.mjs` stays 100% zero-token, and this costs nothing
+unless you run it yourself.
+
+It **annotates, it does not filter**: eligible pending rows can gain a labeled
+`rank: {score}/5 — {reason}` segment, riding after `posted:`/`trust:`/`note:`
+like any other labeled segment. No row is removed, reordered, or hidden — the
+reason is there so you can disagree with the score. An entry the model scores
+but cannot explain is left un-annotated rather than reduced to a bare number,
+and a whole batch is left un-annotated if the CLI call fails or returns
+unusable JSON.
+
+Cost is bounded and reported. Only pending (`- [ ]`) rows that are not already
+annotated are eligible, `--limit` caps each run (default 20, hard ceiling 200
+that the flag cannot raise), and a summary prints the entries ranked, the number
+of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
+row is skipped, so you can work through a large pipeline in bounded passes.
+
+The ranking is done by whichever agent CLI you already have installed (the
+Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
+`copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
+dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
+first ~2000 chars) and the selected postings through that CLI's own auth and
+provider handling — review your chosen CLI's data-retention/provider settings
+before running this on sensitive CV content.
+
+```bash
+node rank-pipeline.mjs                  # rank up to 20 pending entries
+node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --cli codex      # override auto-detection
+node rank-pipeline.mjs --dry-run        # print annotations, write nothing
+```
+
+Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
+`scan-ats-full.mjs` use, and the file is re-read inside the lock — so a
+concurrent scan cannot lose rows to this script.
+
+---
+
 ## gemini:eval / ollama:eval / openai:eval
 
 Standalone evaluators — run the same evaluation logic
@@ -906,6 +948,20 @@ These have no `npm run` binding — modes and agents call them with
 | `node plugin-install.mjs` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA) |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+
+---
+
+## process-quality.mjs
+
+Aggregates candidate-authored `[process-friction]` tags from the Notes column
+of `data/active-interviews.md` into a per-company friction signal. The tag
+stays free-text on purpose — there's no enforced taxonomy — but here are a
+few example friction patterns worth tagging, illustrative and non-exhaustive:
+
+- `[process-friction: call scheduled for a rejection with no info beyond what email would convey]`
+- `[process-friction: prescreen repeated info already given in a prior round]`
+- `[process-friction: interview rescheduled 2+ times same week]`
+- `[process-friction: no confirmation after stated timeline passed]`
 
 ---
 

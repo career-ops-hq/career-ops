@@ -129,7 +129,14 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   if (botChallenge) {
     return { result: 'uncertain', code: 'bot_challenge', reason: `anti-bot challenge: ${botChallenge.source}` };
   }
-  if (status === 403 || status === 503) {
+  // 429 belongs with 403/503: rate limiting is the board throttling US, never
+  // evidence the posting is gone. Its body is a short "Too Many Requests", well
+  // under MIN_CONTENT_CHARS, so without this it fell through to
+  // insufficient_content and read as `expired` — and an expired result is
+  // written to scan-history as skipped_expired, whose URL every later scan
+  // dedup-skips (indefinitely, unless scan_history.recheck_after_days is set).
+  // Scanning harder is exactly what earns a 429, so this compounds.
+  if (status === 403 || status === 429 || status === 503) {
     return { result: 'uncertain', code: 'access_blocked', reason: `HTTP ${status} (access blocked, likely anti-bot)` };
   }
   // Any other 5xx is a transient origin error (502/504 gateway hiccups, 500s

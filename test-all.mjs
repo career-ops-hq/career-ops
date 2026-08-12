@@ -30,7 +30,7 @@ import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
@@ -250,6 +250,7 @@ const scripts = [
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
+  { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
@@ -374,6 +375,74 @@ try {
       // failure arrives as a bare `<name> crashed`: no stack, no assertion
       // text, no exit code, and nothing a reader can act on.
       fail(`${name} crashed${formatRunFailure()}`);
+    }
+  }
+
+  // reply-watch.mjs CLI flag validation (#2743). main() used to read
+  // process.argv[2] purely positionally with no flag checking: `--help` or
+  // any typo'd flag silently became the "candidates path" argument, and
+  // since that "path" doesn't exist, ensureCandidatesFile() created a real
+  // file named e.g. `--help` on disk. Mirrors the scan-ats-full.mjs
+  // KNOWN_FLAGS precedent (#1633/#1635): --help/-h print usage and exit 0,
+  // any other flag-looking arg is rejected with exit 1 — neither path
+  // should ever touch the filesystem.
+  {
+    const replyWatchCli = (...argv) => spawnSync(NODE, [join(scriptTmp, 'reply-watch.mjs'), ...argv], {
+      cwd: scriptTmp,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const helpR = replyWatchCli('--help');
+    const hR = replyWatchCli('-h');
+    const bogusR = replyWatchCli('--bogus');
+
+    const helpOk = helpR.status === 0 && /Usage:/.test(helpR.stdout)
+      && !existsSync(join(scriptTmp, '--help'));
+    const hOk = hR.status === 0 && /Usage:/.test(hR.stdout)
+      && !existsSync(join(scriptTmp, '-h'));
+    const bogusOk = bogusR.status === 1 && /unrecognized flag/.test(bogusR.stderr)
+      && bogusR.stderr.includes('--bogus') && !existsSync(join(scriptTmp, '--bogus'));
+
+    if (helpOk && hOk && bogusOk) {
+      pass('reply-watch.mjs rejects --help/-h/unrecognized flags without creating a stray candidates file (#2743)');
+    } else {
+      fail(`reply-watch.mjs flag validation broken: help=${JSON.stringify({ status: helpR.status, stdout: helpR.stdout, exists: existsSync(join(scriptTmp, '--help')) })} h=${JSON.stringify({ status: hR.status, stdout: hR.stdout, exists: existsSync(join(scriptTmp, '-h')) })} bogus=${JSON.stringify({ status: bogusR.status, stderr: bogusR.stderr, exists: existsSync(join(scriptTmp, '--bogus')) })}`);
+    }
+
+    // CodeRabbit (#2745): --help paired with an unrecognized flag must still
+    // reject — unknown-flag validation has to run before --help short-circuits,
+    // otherwise `reply-watch.mjs --help --bogus` would exit 0 instead of erroring.
+    const mixedR = replyWatchCli('--help', '--bogus');
+    const mixedOk = mixedR.status === 1 && /unrecognized flag/.test(mixedR.stderr)
+      && mixedR.stderr.includes('--bogus') && !/Usage:/.test(mixedR.stdout)
+      && !existsSync(join(scriptTmp, '--help')) && !existsSync(join(scriptTmp, '--bogus'));
+    if (mixedOk) {
+      pass('reply-watch.mjs rejects an unrecognized flag even when --help is also present (#2745)');
+    } else {
+      fail(`reply-watch.mjs --help+--bogus should still error, not exit clean: ${JSON.stringify({ status: mixedR.status, stdout: mixedR.stdout, stderr: mixedR.stderr })}`);
+    }
+
+    // Regression: the existing no-args-uses-default and explicit-path
+    // behaviors must be unchanged by the new flag-parsing gate. Both run to
+    // completion here — the copied scriptTmp tracker has zero rows, so no
+    // candidates ever match an application, no update-recommendation prompt
+    // fires, and the process exits on its own without touching stdin.
+    const defaultCandidatesFile = join(scriptTmp, 'data', 'reply-candidates.json');
+    const noArgsR = replyWatchCli();
+    const noArgsOk = noArgsR.status === 0 && existsSync(defaultCandidatesFile)
+      && /application updates need review/.test(noArgsR.stdout);
+
+    const explicitPath = join(scriptTmp, 'my-candidates.json');
+    const explicitR = replyWatchCli(explicitPath);
+    const explicitOk = explicitR.status === 0 && existsSync(explicitPath)
+      && /application updates need review/.test(explicitR.stdout);
+
+    if (noArgsOk && explicitOk) {
+      pass('reply-watch.mjs no-args-uses-default and explicit-path behaviors unchanged (#2743 regression)');
+    } else {
+      fail(`reply-watch.mjs regression broken: noArgs=${JSON.stringify({ status: noArgsR.status, exists: existsSync(defaultCandidatesFile) })} explicit=${JSON.stringify({ status: explicitR.status, exists: existsSync(explicitPath) })}`);
     }
   }
 } finally {
@@ -702,6 +771,22 @@ try {
     const cvWdLive = await checkLivenessViaApi(wdUrl);
     globalThis.fetch = async () => ({ status: 404 });
     const cvWdGone = await checkLivenessViaApi(wdUrl);
+    // Lever: unlike Greenhouse/Workday, a 404 on the public postings API is NOT
+    // authoritative proof of removal. Lever's Confidential/Internal Postings
+    // feature explicitly excludes some live postings from the public API while
+    // the direct jobs.lever.co page keeps serving them (real-world repro:
+    // Simbe Robotics and Enable postings, 2026-08-09 — api.lever.co 404s, the
+    // live page renders the real title with a working Apply control). So a
+    // Lever 404/410 must fall through to Playwright (null), not conclude
+    // expired outright, the same "let the browser decide" treatment other
+    // ambiguous cases already get.
+    const lvUrl = 'https://jobs.lever.co/acme/abc-123-def';
+    globalThis.fetch = async () => ({ status: 200 });
+    const cvLvLive = await checkLivenessViaApi(lvUrl);
+    globalThis.fetch = async () => ({ status: 404 });
+    const cvLvGone = await checkLivenessViaApi(lvUrl);
+    globalThis.fetch = async () => ({ status: 410 });
+    const cvLvGone410 = await checkLivenessViaApi(lvUrl);
     if (cvAshbyLive?.result === 'active' && cvAshbyLive?.code === 'ashby_api_ok'
         && cvAshbyGone?.result === 'expired' && cvAshbyGone?.code === 'ashby_api_unlisted'
         && cvAshbyMalformed === null
@@ -713,6 +798,13 @@ try {
       pass('checkLivenessViaApi: 200→interpret (Ashby), malformed→null, greenhouse/workday 200→active, 404→expired, fetch error→null');
     } else {
       fail(`checkLivenessViaApi wrong: ashbyLive=${JSON.stringify(cvAshbyLive)} ashbyGone=${JSON.stringify(cvAshbyGone)} malformed=${JSON.stringify(cvAshbyMalformed)} ghLive=${JSON.stringify(cvGhLive)} gone=${JSON.stringify(cvGone)} err=${JSON.stringify(cvErr)} wdLive=${JSON.stringify(cvWdLive)} wdGone=${JSON.stringify(cvWdGone)}`);
+    }
+    if (cvLvLive?.result === 'active' && cvLvLive?.code === 'lever_api_ok'
+        && cvLvGone === null
+        && cvLvGone410 === null) {
+      pass('checkLivenessViaApi: Lever 200→active, 404/410→null (inconclusive, unlike Greenhouse/Workday — Confidential Postings can 404 on the public API while still live)');
+    } else {
+      fail(`checkLivenessViaApi (Lever) wrong: live=${JSON.stringify(cvLvLive)} gone404=${JSON.stringify(cvLvGone)} gone410=${JSON.stringify(cvLvGone410)}`);
     }
   } finally {
     globalThis.fetch = origFetch;
@@ -5301,7 +5393,16 @@ console.log('\n12c. Materialized skill index mode');
     // core.excludesFile is only the GLOBAL layer. `git init` also seeds
     // .git/info/exclude from a template, which GIT_TEMPLATE_DIR can still point
     // at an ambient one, so empty that layer too rather than assume it is inert.
-    writeFileSync(join(fixtureRoot, '.git', 'info', 'exclude'), '');
+    //
+    // mkdirSync first, because the same GIT_TEMPLATE_DIR that makes this write
+    // necessary is what can make its parent absent: pointed at an empty or a
+    // non-existent directory, `git init` still succeeds but seeds no .git/info,
+    // and the bare write threw ENOENT before the fixture ran a single assertion
+    // (santifer, reviewing #2567). Assuming the default template here would be
+    // the same ambient-environment dependency this block exists to remove.
+    const excludePath = join(fixtureRoot, '.git', 'info', 'exclude');
+    mkdirSync(dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, '');
     gitRun(['config', 'core.symlinks', 'false']);
     gitRun(['config', 'core.excludesFile', emptyExcludes]);
     gitRun(['config', 'user.email', 'test@example.com']);
@@ -5431,6 +5532,21 @@ run(NODE, ['archive-posting.mjs']) !== null
   ? pass('no-args: exits 0 (shows help)')
   : fail('no-args: should exit 0 and print help');
 
+// argument validation: a trailing --report must not be dropped. It used to fall
+// through the parser and archive the posting with no report prefix — silently
+// unfindable, the exact failure --report exists to prevent.
+run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123', '--report']) === null
+  ? pass('trailing --report: exits non-zero instead of archiving unkeyed')
+  : fail('trailing --report: should exit non-zero, not archive without a report prefix');
+
+// argument validation: both --report forms still key the capture
+for (const argv of [['--report', '4'], ['--report=4']]) {
+  const keyed = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123', ...argv]);
+  keyed?.includes('jds/004-')
+    ? pass(`${argv.join(' ')}: capture is keyed to the report`)
+    : fail(`${argv.join(' ')}: capture missing the 004- report prefix`);
+}
+
 // argument validation: flag without URL → exits non-zero
 run(NODE, ['archive-posting.mjs', '--dry-run']) === null
   ? pass('flag-without-url: exits non-zero (URL required)')
@@ -5440,6 +5556,33 @@ run(NODE, ['archive-posting.mjs', '--dry-run']) === null
 run(NODE, ['archive-posting.mjs', '--company=Acme']) === null
   ? pass('--company without URL: exits non-zero')
   : fail('--company without URL: should exit non-zero');
+
+// --report: keys the capture to a report number so it resolves on a later day (#134)
+const reportEqOut = run(NODE, ['archive-posting.mjs', '--dry-run', '--report=42', 'https://boards.greenhouse.io/openai/jobs/123']);
+reportEqOut?.includes('jds/042-')
+  ? pass('--report=N: filename carries the zero-padded report number')
+  : fail('--report=N: report prefix missing from filename');
+
+// The space-separated form must consume its value; otherwise the bare-argument
+// branch takes it as the URL and the real URL is silently dropped.
+const reportSpaceOut = run(NODE, ['archive-posting.mjs', '--dry-run', '--report', '42', 'https://boards.greenhouse.io/openai/jobs/123']);
+reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('openai')
+  ? pass('--report N: value consumed, URL still parsed')
+  : fail('--report N: swallowed the URL or dropped the report number');
+
+// omitting --report leaves the historical filename shape untouched
+const noReportOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+noReportOut?.includes(`jds/${todayStr}_`)
+  ? pass('no --report: filename shape unchanged')
+  : fail('no --report: filename shape regressed');
+
+run(NODE, ['archive-posting.mjs', '--dry-run', '--report=abc', 'https://boards.greenhouse.io/openai/jobs/123']) === null
+  ? pass('--report with non-numeric value: exits non-zero')
+  : fail('--report with non-numeric value: should be rejected, not ignored');
+
+run(NODE, ['archive-posting.mjs', '--pipeline', '--report=42']) === null
+  ? pass('--report with --pipeline: rejected (report keys one posting)')
+  : fail('--report with --pipeline: should exit non-zero');
 
 // live render: gated behind Playwright executable availability
 let hasBrowser = false;
@@ -8038,6 +8181,95 @@ try {
   fail(`verify-pipeline report checks crashed: ${e.message}`);
 }
 
+// ── VERIFY-PIPELINE, THE ALPHABET THE FIXTURE ABOVE DOES NOT COVER ──────
+// The fixture above proves the duplicate MECHANISM works. Every string in it
+// is ASCII, so it cannot tell "the detector works" apart from "the detector
+// works for Latin names" — and the difference is not academic. `İ`.toLowerCase()
+// yields `i` + U+0307 (a combining dot that survives normalization), so
+// `İstanbul Tekstil` and `Istanbul Tekstil` key differently and the duplicate
+// goes UNDETECTED. That is the opposite failure to the one fixed in #2393,
+// where every non-Latin name collapsed to '' and everything collided: that was
+// loud and got fixed. This one is silent, and it is the integrity checker
+// itself that returns the green.
+//
+// THIS TEST PINS TODAY'S BEHAVIOR ON PURPOSE. It is not an endorsement: the
+// targeted fix (strip U+0307 after lowercasing) is measured and does NOT touch
+// Škoda/Nestlé/Zürich, but normalizeTextKey is a frozen contract surface with
+// eight production consumers plus the web mirror, so applying it is a
+// coordinated decision, not a drive-by. If you are here because this assertion
+// failed, you did not break anything: you changed that decision. Invert the
+// expectation, update tests/fixtures/company-key-corpus.json, and land it in
+// lockstep with the web.
+console.log('\n🧪 Testing verify-pipeline duplicate detection across alphabets...');
+try {
+  const tkTmp = mkdtempSync(join(tmpdir(), 'career-ops-verify-turkish-'));
+  try {
+    const tkReports = join(tkTmp, 'reports');
+    mkdirSync(tkReports, { recursive: true });
+    const tkTracker = join(tkTmp, 'applications.md');
+    const tkEnv = { ...process.env, CAREER_OPS_TRACKER: tkTracker, CAREER_OPS_REPORTS: tkReports };
+    const tkReport = (company, role) =>
+      `# Evaluación: ${company} — ${role}\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${company}"\nrole: "${role}"\nscore: 4.0\n\`\`\`\n`;
+
+    // Same employer, same role, two spellings a Turkish user types interchangeably.
+    writeFileSync(join(tkReports, '001-istanbul-2026-02-01.md'), tkReport('İstanbul Tekstil', 'Yazılım Mühendisi'));
+    writeFileSync(join(tkReports, '002-istanbul-2026-02-02.md'), tkReport('Istanbul Tekstil', 'Yazılım Mühendisi'));
+    writeFileSync(tkTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-02-01 | İstanbul Tekstil | Yazılım Mühendisi | 4.0/5 | Evaluated | ❌ | [1](reports/001-istanbul-2026-02-01.md) | ok |\n' +
+      '| 2 | 2026-02-02 | Istanbul Tekstil | Yazılım Mühendisi | 4.0/5 | Evaluated | ❌ | [2](reports/002-istanbul-2026-02-02.md) | ok |\n');
+
+    const tkOut = run(NODE, ['verify-pipeline.mjs'], { env: tkEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (tkOut === null) {
+      fail('verify-pipeline crashed on the Turkish dotted-I fixture');
+    } else {
+      // Check 2 reads the tracker's own Company column, where the two spellings
+      // survive intact, so this is the one the dotted I blinds.
+      // Decision changed 12-ago (Santiago): the targeted fix landed, so the
+      // tracker check now folds the dotted I and DOES catch the duplicate.
+      // Left pinned in the opposite direction so a revert is loud.
+      if (/Possible duplicates/.test(tkOut)) {
+        pass('tracker dup check (Check 2) now folds the dotted I and catches the duplicate');
+      } else {
+        fail('dotted-I tracker duplicate no longer detected: the targeted fix regressed (see company-key-corpus.json)');
+      }
+      // …while Check 9 groups reports by the FILENAME slug, which is already
+      // ASCII by the time a report is written, so it flags the very same pair.
+      // The comment above `const normalizeKey = normalizeTextKey` promises the
+      // two checks "can never disagree about whether two roles are the same".
+      // They can, and here they do: sharing the function is not sharing the
+      // INPUT. Pinned so the contradiction is visible in CI instead of living
+      // only in a maintainer's notes.
+      if (/Duplicate reports[^\n]*001-istanbul/.test(tkOut)) {
+        pass('report dup check (Check 9) DOES flag the same pair — the two checks disagree, contrary to the guarantee written at its definition');
+      } else {
+        fail('Check 9 no longer flags the pair: the two checks now agree, so update the note at `const normalizeKey = normalizeTextKey`');
+      }
+    }
+    // The control that makes the assertions above mean something: within one
+    // spelling the tracker check must still fire, or "not detected" would prove
+    // nothing about the alphabet and everything about a broken fixture.
+    writeFileSync(tkTracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-02-01 | İstanbul Tekstil | Yazılım Mühendisi | 4.0/5 | Evaluated | ❌ | [1](reports/001-istanbul-2026-02-01.md) | ok |\n' +
+      '| 2 | 2026-02-02 | İstanbul Tekstil | Yazılım Mühendisi | 4.0/5 | Evaluated | ❌ | [2](reports/002-istanbul-2026-02-02.md) | ok |\n');
+    const tkCtl = run(NODE, ['verify-pipeline.mjs'], { env: tkEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (tkCtl !== null && /Possible duplicates/.test(tkCtl)) {
+      pass('same-spelling Turkish duplicate IS caught by Check 2 (control: the fixture exercises the real path)');
+    } else {
+      fail('control failed: two identical Turkish rows were not flagged, so the fixture proves nothing');
+    }
+  } finally {
+    rmSync(tkTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`verify-pipeline alphabet checks crashed: ${e.message}`);
+}
+
 // ── VERIFY-PIPELINE ORPHAN REFERENCE RESOLUTION (#1425 follow-up) ────────────
 // Check 10 resolves "is this report referenced?" three ways. Two of them were
 // wrong:
@@ -8587,6 +8819,114 @@ try {
   }
 } catch (e) {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
+}
+
+// ── DEDUP FLAG VALIDATION (#2744) ─────────────────────────────────────────
+// Any argv token dedup-tracker.mjs didn't recognize used to fall straight
+// through: DRY_RUN stayed false and the script ran its real, destructive
+// merge-and-write pass. `--check` (a plausible-sounding typo for --dry-run)
+// happened for real. Same shape as scan-ats-full.mjs (#1633/#1635).
+console.log('\n🧪 Testing dedup-tracker flag validation (#2744)...');
+try {
+  const flagTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-flags-'));
+  try {
+    mkdirSync(join(flagTmp, 'data'));
+    const tracker = join(flagTmp, 'data', 'applications.md');
+    const seedTracker =
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-08 | FlagCo | Engineer | 3.9/5 | Evaluated | ❌ | [1](../reports/001-flagco.md) | first row |\n' +
+      '| 1 | 2026-01-09 | FlagCo | Engineer | 4.2/5 | Evaluated | ❌ | [2](../reports/002-flagco.md) | exact duplicate |\n';
+    const env = { ...process.env, CAREER_OPS_TRACKER: tracker };
+
+    // --help / -h: print usage, exit 0, do not touch the tracker.
+    writeFileSync(tracker, seedTracker);
+    const helpResult = run(NODE, ['dedup-tracker.mjs', '--help'], { env });
+    if (helpResult !== null && /Usage:.*dedup-tracker\.mjs/.test(helpResult)) {
+      pass('dedup-tracker --help prints usage and exits 0');
+    } else {
+      fail(`dedup-tracker --help should print usage and exit 0, got: ${JSON.stringify(helpResult)}`);
+    }
+    if (readFileSync(tracker, 'utf-8') === seedTracker) {
+      pass('dedup-tracker --help does not run the dedup/write pass');
+    } else {
+      fail('dedup-tracker --help mutated the tracker — it must exit before any write path');
+    }
+
+    const hResult = run(NODE, ['dedup-tracker.mjs', '-h'], { env });
+    if (hResult !== null && /Usage:.*dedup-tracker\.mjs/.test(hResult)) {
+      pass('dedup-tracker -h prints usage and exits 0');
+    } else {
+      fail(`dedup-tracker -h should print usage and exit 0, got: ${JSON.stringify(hResult)}`);
+    }
+
+    // Unrecognized flag (the #2744 repro: --check, a plausible typo for
+    // --dry-run): must error, exit 1, and — critically — never reach the
+    // write path.
+    writeFileSync(tracker, seedTracker);
+    const checkResult = run(NODE, ['dedup-tracker.mjs', '--check'], { env });
+    const checkFailure = lastRunFailure();
+    if (checkResult === null && checkFailure?.status === 1 && /unrecognized flag/i.test(checkFailure.stderr)) {
+      pass('dedup-tracker --check (unrecognized flag) errors and exits 1 (#2744 repro)');
+    } else {
+      fail(`dedup-tracker --check should error and exit 1 with an "unrecognized flag" message: ${formatRunFailure()}`);
+    }
+    if (readFileSync(tracker, 'utf-8') === seedTracker) {
+      pass('dedup-tracker --check does NOT run the live write path — tracker untouched (#2744)');
+    } else {
+      fail('dedup-tracker --check mutated the tracker — the #2744 bug is still live');
+    }
+
+    // CodeRabbit (#2746): --help combined with an unrecognized flag must
+    // still reject — unknown-flag validation has to run before --help
+    // short-circuits, otherwise `dedup-tracker.mjs --help --check` would
+    // exit 0 instead of erroring.
+    writeFileSync(tracker, seedTracker);
+    const mixedResult = run(NODE, ['dedup-tracker.mjs', '--help', '--check'], { env });
+    const mixedFailure = lastRunFailure();
+    if (mixedResult === null && mixedFailure?.status === 1 && /unrecognized flag/i.test(mixedFailure.stderr)
+        && !/Usage:/.test(mixedFailure.stdout || '')) {
+      pass('dedup-tracker --help --check still rejects the unrecognized flag (#2746)');
+    } else {
+      fail(`dedup-tracker --help+--check should still error, not exit clean: ${formatRunFailure()}`);
+    }
+    if (readFileSync(tracker, 'utf-8') === seedTracker) {
+      pass('dedup-tracker --help --check does NOT run the live write path — tracker untouched (#2746)');
+    } else {
+      fail('dedup-tracker --help --check mutated the tracker — the #2746 ordering bug is still live');
+    }
+
+    // Regression: --dry-run must still work exactly as before (previews,
+    // does not write).
+    writeFileSync(tracker, seedTracker);
+    const dryRunResult = run(NODE, ['dedup-tracker.mjs', '--dry-run'], { env });
+    if (dryRunResult === null) {
+      fail('dedup-tracker.mjs --dry-run crashed after the flag-validation fix');
+    } else if (readFileSync(tracker, 'utf-8') === seedTracker) {
+      pass('dedup-tracker --dry-run still previews without writing (regression)');
+    } else {
+      fail('dedup-tracker --dry-run wrote to the tracker — regression');
+    }
+
+    // Regression: no-flags (real run) must still merge the exact duplicate.
+    writeFileSync(tracker, seedTracker);
+    const liveResult = run(NODE, ['dedup-tracker.mjs'], { env });
+    if (liveResult === null) {
+      fail('dedup-tracker.mjs (no flags) crashed after the flag-validation fix');
+    } else {
+      const engineerRows = readFileSync(tracker, 'utf-8').split('\n').filter(l => l.includes('| Engineer |'));
+      if (engineerRows.length === 1 && engineerRows[0].includes('4.2/5')) {
+        pass('dedup-tracker (no flags) still merges an exact duplicate live (regression)');
+      } else {
+        fail(`dedup-tracker (no flags) live-run regression: ${engineerRows.length} Engineer rows`);
+      }
+    }
+  } finally {
+    rmSync(flagTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`dedup-tracker flag validation tests crashed: ${e.message}`);
 }
 
 // ── DEDUP BLIND-VIA CHANNEL KEY: NON-LATIN AGENCIES (#2393) ──────────────
@@ -9623,6 +9963,61 @@ try {
   } else {
     fail('merge-tracker left a newly merged row at ❌ despite a matching pdf-index.tsv entry');
   }
+
+  // A re-evaluation REPLACES the row's report link, and the PDF flag describes
+  // that report. Inheriting the old flag across the change carried the
+  // superseded report's ✅ onto a report with no PDF: the row then claimed a
+  // tailored CV exists, and the only PDF on disk belonged to the evaluation
+  // that had just been superseded (#2594).
+  const reevalRow = '| 3 | 2026-01-04 | Acme | Backend Engineer, Payments | 4.5/5 | Evaluated | ✅ | [1](../reports/001-acme-2026-01-04.md) | first |';
+  const reevalTsv = (n) => ({
+    name: `00${n}-acme.tsv`,
+    content: `${n}\t2026-02-01\tAcme\tBackend Engineer, Payments\tEvaluated\t3.9/5\t❌\t[${n}](reports/00${n}-acme-2026-02-01.md)\tre-eval\n`,
+  });
+
+  const staleFlag = runPdfSyncFixture(
+    'reeval-stale',
+    reevalRow,
+    '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n',
+    [reevalTsv(2)],
+  );
+  const staleRow = staleFlag.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
+  if (staleFlag.result !== null && /\[2\]/.test(staleRow) && staleRow.split('|')[7].trim() === '❌') {
+    pass('a re-eval that changes the report clears a ✅ the new report has no PDF for (#2594)');
+  } else {
+    fail(`stale PDF flag survived a report change: ${staleRow.trim()}`);
+  }
+
+  // The `—`-to-`[2]` variant. extractReportNum returns null for `—`, so a guard
+  // demanding BOTH sides be truthy fell straight back to duplicate.pdf and
+  // inherited the stale ✅ exactly as before the fix. A `—` row carrying a ✅ is
+  // ordinary — it is a tracker entry added before its evaluation (#2594 review).
+  const dashRow = '| 4 | 2026-01-04 | Acme | Backend Engineer, Payments | 4.5/5 | Evaluated | ✅ | — | backfilled |';
+  const dashFlag = runPdfSyncFixture(
+    'reeval-dash',
+    dashRow,
+    '# report\tpdf\thtml\tformat\tdate\n',
+    [reevalTsv(2)],
+  );
+  const dashResult = dashFlag.merged.split('\n').find((l) => l.startsWith('| 4 ')) || '';
+  if (dashFlag.result !== null && /\[2\]/.test(dashResult) && dashResult.split('|')[7].trim() === '❌') {
+    pass('a re-eval from a report-less (—) row clears the inherited ✅ too (#2594)');
+  } else {
+    fail(`stale PDF flag survived a —-to-[2] report change: ${dashResult.trim()}`);
+  }
+
+  const keptFlag = runPdfSyncFixture(
+    'reeval-kept',
+    reevalRow,
+    '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
+    [reevalTsv(2)],
+  );
+  const keptRow = keptFlag.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
+  if (keptFlag.result !== null && /\[2\]/.test(keptRow) && keptRow.split('|')[7].trim() === '✅') {
+    pass('a re-eval keeps ✅ when the NEW report does have a generated PDF (#2594)');
+  } else {
+    fail(`re-eval wrongly cleared a valid PDF flag: ${keptRow.trim()}`);
+  }
 } catch (e) {
   fail(`merge-tracker PDF flag sync test crashed: ${e.message}`);
 }
@@ -10433,10 +10828,20 @@ try {
     fail('doctor Playwright MCP guidance is still Claude-specific or lost config detection');
   }
 
+  // doctor also accepts a Playwright MCP server provided by an installed Claude
+  // Code plugin, which lives in the user's config dir rather than the --target
+  // project (#2752). Pin CLAUDE_CONFIG_DIR at an empty dir so these assertions
+  // describe the fixture and not whichever plugins the developer happens to
+  // have enabled; without it "no MCP config" is false on a real machine and the
+  // warning assertion below fails. Same reasoning as the GIT_CONFIG_* pinning
+  // in section 12c.
+  const emptyClaudeCfg = mkdtempSync(join(tmpdir(), 'co-emptycfg-'));
+  const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg } };
+
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
   // letting SPA job boards fail silently.
   const noMcp = mkdtempSync(join(tmpdir(), 'co-nomcp-'));
-  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp]) || '{}');
+  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp], doctorEnv) || '{}');
   if (Array.isArray(a.warnings) && a.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('No Playwright MCP config → warning surfaced');
   } else {
@@ -10451,7 +10856,7 @@ try {
     join(withMcp, '.claude', 'settings.json'),
     JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless'] } } }),
   );
-  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp]) || '{}');
+  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp], doctorEnv) || '{}');
   if (Array.isArray(b.warnings) && !b.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured → no warning');
   } else {
@@ -10466,13 +10871,14 @@ try {
     join(withLocalMcp, '.claude', 'settings.local.json'),
     JSON.stringify({ mcpServers: { browser: { command: 'npx', args: ['@playwright/mcp'] } } }),
   );
-  const c = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withLocalMcp]) || '{}');
+  const c = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withLocalMcp], doctorEnv) || '{}');
   if (Array.isArray(c.warnings) && !c.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured via .claude/settings.local.json → no warning');
   } else {
     fail(`Did not expect a Playwright MCP warning for settings.local.json, got: ${JSON.stringify(c.warnings)}`);
   }
   rmSync(withLocalMcp, { recursive: true, force: true });
+  rmSync(emptyClaudeCfg, { recursive: true, force: true });
 } catch (e) {
   fail(`Playwright MCP detection test crashed: ${e.message}`);
 }
@@ -13344,6 +13750,41 @@ try {
           pass(`web company-key mirror matches the core on all ${inputs.length} corpus cases x2 separators (#2666)`);
         } else {
           fail(`web company-key mirror DRIFTED from the core — ${drift.length} case(s): ${drift.slice(0, 3).join(' | ')}`);
+        }
+
+        // 55.7b PAIR SEMANTICS — what parity alone cannot see.
+        // The comparison above proves core and mirror AGREE. It says nothing
+        // about whether they agree on the RIGHT answer: two identical wrong
+        // implementations pass it silently. That is not hypothetical — on
+        // 12-ago the Turkish dotted-I fix shipped as NFD → strip U+0307 → NFC,
+        // which also decomposed the PRECOMPOSED dots of ż, ė and ġ and
+        // collapsed Żubr/Zubr, Ėmė/Eme and Ġenerali/Generali. Both sides were
+        // equally wrong, so parity stayed green and the corpus (which had no
+        // dotted-letter case) could not fail either. Polish, Lithuanian and
+        // Maltese employers silently became one key with their ASCII spelling.
+        // These assertions fix the OUTCOME, not the implementation.
+        const pairs = [
+          // [a, b, mustMatch, why]
+          ['İstanbul Tekstil', 'Istanbul Tekstil', true, 'Turkish dotted capital: the dot is an artifact of toLowerCase, not typed'],
+          ['Türk İlaç', 'Türk Ilaç', true, 'same artifact mid-word'],
+          ['Żubr', 'Zubr', false, 'Polish ż: the dot is a letter the user typed'],
+          ['Ėmė', 'Eme', false, 'Lithuanian ė: same class as ż'],
+          ['Ġenerali', 'Generali', false, 'Maltese ġ, and Generali is a different real company'],
+          ['Škoda', 'Skoda', false, 'the original collision this key exists to prevent'],
+          ['Nestlé', 'Nestle', false, 'accent typed by the user'],
+          ['İŞ BANKASI', 'Is Bankasi', false, 'Ş is a different letter, not a casing artifact'],
+        ];
+        const wrong = [];
+        for (const [a, b, mustMatch, why] of pairs) {
+          const matched = coreFn(a, '') === coreFn(b, '');
+          if (matched !== mustMatch) {
+            wrong.push(`${JSON.stringify(a)} vs ${JSON.stringify(b)}: ${matched ? 'match' : 'differ'}, expected ${mustMatch ? 'match' : 'differ'} (${why})`);
+          }
+        }
+        if (wrong.length === 0) {
+          pass(`company-key pair semantics hold on all ${pairs.length} pairs (casing artifacts fold, typed marks do not)`);
+        } else {
+          fail(`company-key pair semantics BROKEN — ${wrong.length}: ${wrong.slice(0, 3).join(' | ')}`);
         }
         // Guard of the guard, in TWO directions, because each covers a hole the
         // other cannot see:
