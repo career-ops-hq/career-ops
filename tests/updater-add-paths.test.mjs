@@ -48,7 +48,10 @@ function makeRepo() {
   g('config', 'commit.gpgsign', 'false');
   g('config', 'core.excludesFile', emptyExcludes);
   g('config', 'core.hooksPath', emptyHooks);
-  return { dir, g, ctx: { git: g } };
+  // `root` is the second half of the seam: addPaths resolves paths against it
+  // to decide what is a directory, and without it the check would lstat the
+  // real repository instead of this fixture.
+  return { dir, g, ctx: { git: g, root: dir } };
 }
 
 // -z for the same reason the expansion uses it: under core.quotePath (the
@@ -580,6 +583,153 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
     pass('rollback restores the backup and stages no ignored user file');
   } else {
     fail(`rollback still swept: ${[...staged].join(', ') || threw?.message.split('\n')[0]}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 12b. the refusal is about directories, not about trailing slashes ──
+//    `git add -f -- docs` sweeps exactly as `docs/` does, and rollback() builds
+//    its `removed` list in precisely that slash-stripped form a few lines from a
+//    call site. A guard that matched the spelling would protect SYSTEM_PATHS'
+//    convention and miss the actual hazard the moment anyone normalised a path.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'shipped upstream');
+  writeFileSync(join(dir, '.gitignore'), 'career-dashboard\n*.env\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  writeFileSync(join(dir, 'docs/career-dashboard'), 'compiled binary');
+  writeFileSync(join(dir, 'docs/prod.env'), 'SECRET=hunter2');
+
+  let refused = null;
+  try {
+    addPaths(['docs'], ctx);            // no trailing slash
+  } catch (err) {
+    refused = err;
+  }
+  const staged = stagedPaths(g);
+  if (refused && refused.message.includes('docs') && staged.size === 0) {
+    pass('a slash-free directory is refused without staging anything');
+  } else if (refused && staged.size > 0) {
+    fail(`threw but staged first: ${[...staged].join(', ')}`);
+  } else {
+    fail(`a slash-free directory was accepted: ${[...staged].join(', ') || '(nothing staged)'}`);
+  }
+  g('reset', '-q');
+
+  // The converse has to hold too, or the guard would reject ordinary work: a
+  // tracked file, a staged deletion, and a brand-new file (the materialized-
+  // entrypoint shape) must all pass through.
+  writeFileSync(join(dir, 'docs/README.md'), 'updated');
+  writeFileSync(join(dir, 'NEWFILE.md'), 'never tracked before');
+  let wrongly = null;
+  try {
+    addPaths(['docs/README.md', 'NEWFILE.md'], ctx);
+  } catch (err) {
+    wrongly = err;
+  }
+  const ok = stagedPaths(g);
+  if (!wrongly && ok.has('docs/README.md') && ok.has('NEWFILE.md')) {
+    pass('tracked files and brand-new files still stage');
+  } else {
+    fail(`guard rejected legitimate paths: ${wrongly?.message.split('\n')[0] ?? [...ok].join(', ')}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 12c. the shapes an index-based check gets wrong ──
+//    Each of these is a directory that a "does the index hold entries beneath
+//    it" test misreads, or a file that such a test wrongly rejects. Asking the
+//    filesystem answers all four; they are pinned so a future "optimisation"
+//    back to an index probe fails here instead of in someone's repository.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  writeFileSync(join(dir, '.gitignore'), '*.env\nnode_modules/\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  const refuses = (p) => {
+    let threw = null;
+    try { addPaths([p], ctx); } catch (err) { threw = err; }
+    const staged = stagedPaths(g);
+    g('reset', '-q');
+    return Boolean(threw) && staged.size === 0;
+  };
+
+  // (a) An UNTRACKED directory has no index entries at all, yet -f sweeps it.
+  mkdirSync(join(dir, 'node_modules'));
+  writeFileSync(join(dir, 'node_modules/dep.js'), 'vendored');
+  if (refuses('node_modules')) {
+    pass('an untracked directory is refused (no index entries to infer from)');
+  } else {
+    fail('an untracked directory was accepted — -f would sweep its contents');
+  }
+
+  // (b) Non-canonical spellings address the same directory. ls-files answers
+  //     canonically, so a prefix comparison never matches these.
+  if (refuses('./docs') && refuses('docs/.')) {
+    pass('non-canonical directory spellings are refused too');
+  } else {
+    fail('a non-canonical directory spelling slipped through');
+  }
+
+  // (c) A directory replaced by a regular FILE of the same name. Stale index
+  //     entries still sit beneath it, so an index test reads it as a directory
+  //     and rejects legitimate work.
+  mkdirSync(join(dir, 'legacy'));
+  writeFileSync(join(dir, 'legacy/child.txt'), 'old layout');
+  g('add', '-A');
+  g('commit', '-qm', 'directory layout');
+  rmSync(join(dir, 'legacy'), { recursive: true, force: true });
+  writeFileSync(join(dir, 'legacy'), 'upstream replaced the dir with a file');
+  let dfThrew = null;
+  try { addPaths(['legacy'], ctx); } catch (err) { dfThrew = err; }
+  if (!dfThrew && stagedPaths(g).has('legacy')) {
+    pass('a directory replaced by a file still stages (index entries are stale)');
+  } else {
+    fail(`directory-to-file replacement was refused: ${dfThrew?.message.split('\n')[0] ?? 'not staged'}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 12d. a directory in a LATE batch stages nothing at all ──
+//    Validating inside the batch loop caught it only after earlier batches were
+//    already added, so the refusal reported a problem it had partly committed
+//    to. The whole list is checked before any add now.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'bulk'));
+  mkdirSync(join(dir, 'late'));
+  const names = [];
+  for (let i = 0; i < 200; i++) {
+    const name = `bulk/${String(i).padStart(3, '0')}-a-deliberately-long-fixture-filename.md`;
+    writeFileSync(join(dir, name), 'v1');
+    names.push(name);
+  }
+  writeFileSync(join(dir, 'late/keep.md'), 'tracked');
+  writeFileSync(join(dir, '.gitignore'), '*.env\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  for (const n of names) writeFileSync(join(dir, n), 'v2');
+  writeFileSync(join(dir, 'late/secret.env'), 'SECRET=1');
+
+  // The directory sits past the 8000-char budget, so it lands in a later batch.
+  let threw = null;
+  try {
+    addPaths([...names, 'late'], ctx);
+  } catch (err) {
+    threw = err;
+  }
+  const staged = stagedPaths(g);
+  if (threw && staged.size === 0) {
+    pass('a directory in a late batch leaves the index completely untouched');
+  } else if (threw) {
+    fail(`earlier batches were staged before the refusal: ${staged.size} path(s)`);
+  } else {
+    fail('a late directory was accepted entirely');
   }
   rmSync(dir, { recursive: true, force: true });
 }

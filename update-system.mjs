@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -998,26 +998,23 @@ export function addPaths(paths, ctx = {}) {
   // the kind of precondition that holds until someone adds a third caller — and
   // the failure is a user's ignored files committed silently, which nothing
   // downstream reports. A comment could not have caught rollback(); this does.
-  //
-  // Detection is by trailing slash, which matches how SYSTEM_PATHS spells a
-  // directory and therefore both callers. It is NOT a general directory test:
-  // `git add -f -- docs` sweeps exactly as `docs/` does, and rollback()'s
-  // `removed` list holds precisely that slash-stripped form. That list only
-  // ever reaches `git commit` today; routing it here would pass this guard.
-  const dirs = paths.filter(p => p.endsWith('/'));
-  if (dirs.length > 0) {
-    throw new Error(
-      `addPaths received directory pathspec(s), which -f would sweep ignored files from: ` +
-      `${dirs.join(', ')}. Resolve them with expandToShippedFiles() first.`
-    );
-  }
+  // Validate the WHOLE list before staging any of it. Checking inside the batch
+  // loop meant a directory in a late batch was caught only after earlier batches
+  // had already been added — the refusal would report a problem it had partly
+  // committed to.
+  rejectDirectories(paths, ctx.root || ROOT);
   const runGit = ctx.git || git;
   let batch = [];
   let budget = 0;
   // --literal-pathspecs: these are filenames, and a name like `docs/[x].env`
   // read as a glob would force-add an ignored sibling `docs/x.env`. `--` ends
   // option parsing but does not stop pathspec interpretation.
-  const flush = () => { if (batch.length > 0) runGit('--literal-pathspecs', 'add', '-f', '--', ...batch); batch = []; budget = 0; };
+  const flush = () => {
+    if (batch.length === 0) return;
+    runGit('--literal-pathspecs', 'add', '-f', '--', ...batch);
+    batch = [];
+    budget = 0;
+  };
   for (const path of paths) {
     // A single path wider than the budget still goes out on its own.
     if (batch.length > 0 && budget + path.length + 1 > ADD_ARGV_BUDGET) flush();
@@ -1025,6 +1022,49 @@ export function addPaths(paths, ctx = {}) {
     budget += path.length + 1;
   }
   flush();
+}
+
+/**
+ * Refuse anything that would make `git add -f` recurse.
+ *
+ * A trailing slash is the shape SYSTEM_PATHS uses, but it is not the hazard —
+ * `git add -f -- docs` sweeps exactly as `docs/` does, and rollback() builds a
+ * `removed` list in precisely that slash-stripped form a few lines from a call
+ * site. Checking the string alone would guard the spelling and miss the bug.
+ *
+ * The question reduces to one `lstat`, because a path that is NOT on disk
+ * cannot sweep anything: `git add -f` on an absent path can only stage
+ * deletions of entries already in the index, and an ignored file cannot be one.
+ * So the whole hazard is "does this name resolve to a directory right now".
+ *
+ * Asking the filesystem rather than the index also settles three cases an
+ * index-descendant test gets wrong: a directory replaced by a regular file of
+ * the same name (stale index entries below it would read as a directory), a
+ * non-canonical spelling like `./docs` or `docs/.` (whose ls-files output is
+ * canonical and never prefix-matches), and an untracked directory such as
+ * `node_modules` (no index entries at all, yet fully sweepable).
+ *
+ * @param {string[]} paths - Repo-relative paths about to be force-added.
+ * @param {string} root - Repository root; injectable so the test seam resolves
+ *   against its fixture instead of the module-level ROOT.
+ */
+function rejectDirectories(paths, root) {
+  const dirs = paths.filter(p => {
+    if (p.endsWith('/')) return true;
+    try {
+      return lstatSync(join(root, p)).isDirectory();
+    } catch {
+      // Absent from the worktree: a staged deletion, or a file this run is
+      // about to create. Neither can recurse.
+      return false;
+    }
+  });
+  if (dirs.length > 0) {
+    throw new Error(
+      `addPaths received directory pathspec(s), which -f would sweep ignored files from: ` +
+      `${dirs.join(', ')}. Resolve them with expandToShippedFiles() first.`
+    );
+  }
 }
 
 function dashboardGoSourcesChanged() {
@@ -1493,14 +1533,24 @@ async function apply() {
     const pathsToStage = [...updated, ...preserveSpecs];
     const dismissFile = join(ROOT, '.update-dismissed');
     if (existsSync(dismissFile)) {
-      unlinkSync(dismissFile);
-      // Only stage the marker when it was actually tracked. It is gitignored by
-      // default, so for most users it was never in the index — and `git add` on
-      // a deleted, never-tracked path is a fatal "pathspec did not match any
+      // Only stage the marker when git actually tracks it. It is gitignored by
+      // default, so on a stock checkout it is not in the index — and `git add`
+      // on a deleted, never-tracked path is a fatal "pathspec did not match any
       // files" (exit 128) that `-f` does not rescue. Staging it unconditionally
       // meant that dismissing an update and then applying one broke the commit
       // in a stock checkout, with no local customization involved.
-      if (isTracked('.update-dismissed')) pathsToStage.push('.update-dismissed');
+      //
+      // Probe BEFORE unlinking. isTracked reads the index, which a worktree
+      // deletion does not touch, so the answer is the same either way — but it
+      // deliberately does not catch, so an abnormal git failure throws here.
+      // Probing first leaves the marker on disk when that happens, and a retry
+      // re-enters this block and re-probes. Unlinking first would delete it,
+      // fail, and then find `existsSync` false on the retry — skipping a
+      // deletion the commit still owed, and leaving the worktree dirty after an
+      // update that printed success. (Ported from #2591, @calebwhite-io #1996.)
+      const dismissMarkerTracked = isTracked('.update-dismissed');
+      unlinkSync(dismissFile);
+      if (dismissMarkerTracked) pathsToStage.push('.update-dismissed');
     }
 
     try {
