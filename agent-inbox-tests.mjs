@@ -7,13 +7,19 @@
  *   1. A first `add` seeds the header + agent protocol and one pending item.
  *   2. `add` is append-only and multiline text collapses to a single bullet.
  *   3. `list` shows pending only; `list --all` shows resolved items too.
- *   4. `resolve N` ticks the N-th *pending* item and appends a one-line result,
- *      so `list` then `resolve N` line up.
+ *   4. `resolve N` ticks the N-th item and appends a one-line result.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
+ *   8. Item numbers are stable file positions: a batch of resolves read off ONE
+ *      `list` all land on the item they named. (Numbering against the pending
+ *      view instead shifted every higher number down per resolve, silently
+ *      stamping results onto the wrong items.)
+ *   9. Re-resolving an already-done item fails loudly instead of re-stamping.
+ *  10. `--expect` aborts when the target doesn't contain the substring, and a
+ *      valueless `--expect` fails rather than silently disabling the guard.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
@@ -49,6 +55,16 @@ function run(inbox, args, opts = {}) {
     stdio: ['pipe', 'pipe', 'pipe'],
     ...opts,
   });
+}
+
+// Run a command expected to fail; returns { status, stderr }.
+function runFail(inbox, args) {
+  try {
+    run(inbox, args);
+    return { status: 0, stderr: '' };
+  } catch (e) {
+    return { status: e.status, stderr: String(e.stderr || '') };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +172,69 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
   const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
   check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('8. numbers are stable: a batch of resolves off ONE list stays correct');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  ['alpha', 'bravo', 'charlie', 'delta', 'echo'].forEach((t) => run(inbox, ['add', t]));
+
+  // Snapshot the numbering once, exactly as an agent draining the queue would.
+  const listed = run(inbox, ['list']);
+  const numberOf = (text) => {
+    const m = new RegExp(`^\\s*(\\d+)\\. \\[ \\] .*${text}`, 'm').exec(listed);
+    return m ? Number(m[1]) : -1;
+  };
+  check('list numbers items 1..5 in file order',
+    [1, 2, 3, 4, 5].every((n, i) => numberOf(['alpha', 'bravo', 'charlie', 'delta', 'echo'][i]) === n), listed.trim());
+
+  // Fire the whole batch against that one snapshot — no re-listing between.
+  run(inbox, ['resolve', String(numberOf('bravo')), '--result', 'R-bravo']);
+  run(inbox, ['resolve', String(numberOf('charlie')), '--result', 'R-charlie']);
+  run(inbox, ['resolve', String(numberOf('delta')), '--result', 'R-delta']);
+  run(inbox, ['resolve', String(numberOf('echo')), '--result', 'R-echo']);
+
+  const md = readFileSync(inbox, 'utf8');
+  ['bravo', 'charlie', 'delta', 'echo'].forEach((t) => {
+    check(`${t} carries its own result`, new RegExp(`^- \\[x\\] .*${t} → result: R-${t}$`, 'm').test(md), md);
+  });
+  check('alpha untouched and still pending', /^- \[ \] .*alpha$/m.test(md), md);
+
+  const after = run(inbox, ['list']);
+  check('surviving item keeps its original number (1)', /^\s*1\. \[ \] .*alpha/m.test(after), after.trim());
+  check('list explains the hidden/resolved items', /resolved item\(s\) hidden/.test(after), after.trim());
+}
+// ---------------------------------------------------------------------------
+console.log('9. re-resolving a done item fails loudly instead of re-stamping');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  run(inbox, ['add', 'foxtrot']);
+  run(inbox, ['resolve', '1', '--result', 'first']);
+  const { status, stderr } = runFail(inbox, ['resolve', '1', '--result', 'second']);
+  check('non-zero exit on already-resolved item', status === 1, `exit=${status}`);
+  check('error says why', /already resolved/.test(stderr), stderr.trim());
+  const md = readFileSync(inbox, 'utf8');
+  check('original result preserved', md.includes('→ result: first') && !md.includes('second'), md);
+}
+// ---------------------------------------------------------------------------
+console.log('10. --expect guards the target');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  run(inbox, ['add', 'inquire at Dana-Farber']);
+  run(inbox, ['add', 'apply at Change.org']);
+
+  const wrong = runFail(inbox, ['resolve', '2', '--expect', 'Dana-Farber', '--result', 'oops']);
+  check('mismatched --expect exits 1', wrong.status === 1, `exit=${wrong.status}`);
+  check('error shows the actual item', /Change\.org/.test(wrong.stderr), wrong.stderr.trim());
+  check('nothing written on mismatch', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  const bare = runFail(inbox, ['resolve', '2', '--expect', '--result', 'oops']);
+  check('valueless --expect exits 1 (guard never silently disabled)', bare.status === 1, `exit=${bare.status}`);
+  check('still nothing written', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  run(inbox, ['resolve', '2', '--expect', 'change.org', '--result', 'ok']);
+  check('matching --expect (case-insensitive) resolves', /^- \[x\] .*Change\.org → result: ok$/m.test(readFileSync(inbox, 'utf8')));
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
