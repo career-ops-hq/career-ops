@@ -23,7 +23,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
@@ -34,6 +34,17 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   : join(CAREER_OPS, 'applications.md');
 const CV_FILE = join(CAREER_OPS, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. The
+// join() at the call site already collapses '..', so a crafted link like
+// reports/../../etc/passwd resolves to a repo-relative path that no longer
+// starts with reports/ — reject it before any read (path-traversal guard,
+// identical to the guard in analyze-patterns.mjs so both sites behave the same).
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  return repoRelative.startsWith('reports/') && !repoRelative.includes('..');
+}
 
 // Read a file, returning null when it does not exist. A pre-flight existsSync
 // costs a full stat per report and races with the read (#2385); attempting the
@@ -229,6 +240,7 @@ function analyze(minReports) {
     const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
     let content = null;
     for (const p of candidates) {
+      if (!withinReports(p)) continue;
       content = readTextIfExists(p);
       if (content !== null) break;
     }
@@ -423,6 +435,18 @@ soft_gaps:
     if (!/compactText\(targetText\)/.test(selfSrc)) {
       failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
     }
+  }
+
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before any read. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
   }
 
   if (failures.length > 0) {

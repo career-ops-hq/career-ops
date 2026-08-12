@@ -400,6 +400,18 @@ risk_summary:
     failures.push('classifyRemote geo-restricted precedence regressed');
   }
 
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before parseReport. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
   if (failures.length > 0) {
     console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -421,6 +433,17 @@ function parseTracker() {
     if (row) entries.push(row);
   }
   return entries;
+}
+
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. The
+// join() at the call site already collapses '..', so a crafted link like
+// reports/../../etc/passwd resolves to a repo-relative path that no longer
+// starts with reports/ — reject it before any read (path-traversal guard,
+// identical to the guard in upskill.mjs so both sites behave the same).
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  return repoRelative.startsWith('reports/') && !repoRelative.includes('..');
 }
 
 // Read a file, returning null when it does not exist. A pre-flight existsSync
@@ -673,8 +696,7 @@ function analyze() {
         join(CAREER_OPS, reportMatch[1]),
       ]);
       for (const candidate of candidates) {
-        const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-        if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) continue;
+        if (!withinReports(candidate)) continue;
         reportData = parseReport(candidate);
         if (reportData) break;
       }
