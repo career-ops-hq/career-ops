@@ -105,6 +105,28 @@ function classifyOutcome(status) {
   return 'pending'; // evaluated
 }
 
+// --- Rate denominators ---
+//
+// A frequency is only meaningful against the population that could have
+// produced it. Both counters below exist because `enriched.length` — EVERY
+// tracker row — was standing in for two much smaller populations, silently
+// deflating every derived percentage and the thresholds computed from them.
+//
+// Entries eligible to carry a discard/skip reason. A 'pending' (Evaluated,
+// never acted on) or 'positive' row has no reason to state, so counting it in
+// the base only dilutes the share. Must stay in lockstep with the filter that
+// guards the discard-reason harvest loop.
+function discardableBase(enriched) {
+  return enriched.filter(e => e.outcome === 'self_filtered' || e.outcome === 'negative').length;
+}
+
+// Entries that actually carry gaps, i.e. the ones a blocker can be extracted
+// from. Entries whose report has no gaps (or no report at all) can never
+// contribute a blocker and must not pad the denominator.
+function gapBearingBase(enriched) {
+  return enriched.filter(e => e.report?.gaps?.length > 0).length;
+}
+
 // Statuses that count as a submitted application for channel-yield analysis
 // (drop 'evaluated' = never applied, 'skip' = self-filtered). 'hired' counts —
 // a landed job was, by definition, submitted. Module-scoped so the self-test
@@ -388,6 +410,39 @@ risk_summary:
   // Case/punctuation variants collapse to one canonical bucket.
   if (extractTechMentions('nodejs, Node.js, NODEJS').some(t => t !== 'Node.js')) {
     failures.push('node.js case variants failed to canonicalize');
+  }
+
+  // Rate denominators (regression): both bases used to be `enriched.length`,
+  // so pending rows that can never carry a reason — or a gap — padded the
+  // denominator. The fixture below is the shape that made it visible: 10
+  // entries, only 2 discardable and only 3 gap-bearing.
+  const baseFixture = [
+    { outcome: 'self_filtered', report: { gaps: [{ description: 'US-only' }] } },
+    { outcome: 'negative', report: { gaps: [{ description: 'Go required' }] } },
+    { outcome: 'positive', report: { gaps: [{ description: 'minor' }] } },
+    { outcome: 'pending', report: { gaps: [] } },
+    { outcome: 'pending', report: null },
+    { outcome: 'pending' },
+    { outcome: 'pending', report: { gaps: [] } },
+    { outcome: 'pending', report: { gaps: [] } },
+    { outcome: 'pending', report: { gaps: [] } },
+    { outcome: 'pending', report: { gaps: [] } },
+  ];
+  if (discardableBase(baseFixture) !== 2) {
+    failures.push(`discardableBase counted ${discardableBase(baseFixture)}, expected 2 (self_filtered + negative only)`);
+  }
+  if (gapBearingBase(baseFixture) !== 3) {
+    failures.push(`gapBearingBase counted ${gapBearingBase(baseFixture)}, expected 3 (entries with a non-empty gaps array)`);
+  }
+  // The bug in numbers: a reason on both discardable rows is 100% of what
+  // could carry one, but read as 20% against the full tracker — and the
+  // recommendation threshold moved with it, from 1 to 2.
+  if (Math.max(3, Math.ceil(discardableBase(baseFixture) * 0.15)) > baseFixture.length) {
+    failures.push('discard-reason threshold exceeded the population it is drawn from');
+  }
+  // Empty populations must yield 0%, never NaN.
+  if (discardableBase([]) !== 0 || gapBearingBase([]) !== 0) {
+    failures.push('rate denominators did not return 0 for an empty tracker');
   }
 
   // Remote classifier (regression): the "70+" signal ends in "+", so a
@@ -851,7 +906,7 @@ function analyze() {
 
   // --- Blocker analysis ---
   const blockerCounts = new Map();
-  const totalWithGaps = enriched.filter(e => e.report?.gaps?.length > 0);
+  const blockerBase = gapBearingBase(enriched);
   for (const e of enriched) {
     if (!e.report?.gaps) continue;
     for (const gap of e.report.gaps) {
@@ -864,7 +919,7 @@ function analyze() {
     .map(([blocker, frequency]) => ({
       blocker,
       frequency,
-      percentage: Math.round((frequency / enriched.length) * 100),
+      percentage: blockerBase ? Math.round((frequency / blockerBase) * 100) : 0,
     }))
     .sort((a, b) => b.frequency - a.frequency);
 
@@ -995,20 +1050,26 @@ function analyze() {
       }
     }
   }
+  const discardReasonBase = discardableBase(enriched);
   const discardReasonStats = [...discardReasonCounts.entries()]
     .map(([reason, frequency]) => ({
       reason,
       frequency,
-      percentage: Math.round((frequency / enriched.length) * 100),
+      percentage: discardReasonBase ? Math.round((frequency / discardReasonBase) * 100) : 0,
     }))
     .sort((a, b) => b.frequency - a.frequency);
 
-  // Recommend updating _custom.md when a single reason dominates
+  // Recommend updating _custom.md when a single reason dominates.
+  // The threshold is a share of the DISCARDABLE rows, not of the whole
+  // tracker: with the old base, a tracker of 263 entries where only 60 could
+  // carry a reason demanded 40 occurrences — 67% of the eligible rows — so no
+  // honest reason ever reached it, while a single blanket label applied across
+  // the subset cleared it trivially.
   const topDiscardReason = discardReasonStats[0];
-  if (topDiscardReason && topDiscardReason.frequency >= Math.max(3, Math.ceil(enriched.length * 0.15))) {
+  if (topDiscardReason && topDiscardReason.frequency >= Math.max(3, Math.ceil(discardReasonBase * 0.15))) {
     recommendations.push({
       action: `Add "${topDiscardReason.reason}" filter to modes/_custom.md to avoid wasting evaluation effort`,
-      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of all applications).`,
+      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of the ${discardReasonBase} discarded/skipped roles).`,
       impact: 'high',
     });
   }
@@ -1145,6 +1206,11 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    // Populations the percentages above are shares of. Exported because a
+    // consumer cannot sanity-check a rate whose denominator is invisible —
+    // that opacity is precisely what let the wrong base survive unnoticed.
+    discardReasonBase,
+    blockerBase,
     recommendations,
   };
 }
@@ -1184,10 +1250,10 @@ function printSummary(result) {
 
   // Blockers
   if (blockerAnalysis.length > 0) {
-    console.log('\nTOP BLOCKERS');
+    console.log(`\nTOP BLOCKERS (of ${result.blockerBase} entries carrying gaps)`);
     console.log('-'.repeat(40));
     for (const b of blockerAnalysis) {
-      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}% of all)`);
+      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}%)`);
     }
   }
 
@@ -1209,7 +1275,7 @@ function printSummary(result) {
 
   // Discard reasons
   if (discardReasonStats && discardReasonStats.length > 0) {
-    console.log('\nTOP DISCARD / SKIP REASONS');
+    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} discarded/skipped)`);
     console.log('-'.repeat(40));
     for (const d of discardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
