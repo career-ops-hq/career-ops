@@ -150,20 +150,39 @@ export function readApplications(): Application[] {
   return parseApplications(md, careerOpsRoot());
 }
 
+/** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
+ *  Digits-only, full-string match — parseInt alone would let "12abc" resolve to
+ *  report 12, matching the wrong index row. Returns null for anything malformed
+ *  or with no indexed PDF, so callers never have to re-validate. */
+function pdfIndexTarget(n: string): string | null {
+  const trimmed = n.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  return String(Number.parseInt(trimmed, 10)).padStart(3, "0");
+}
+
 export function pdfReadyForReport(n: string): boolean {
-  const reportNum = parseInt(n, 10);
-  if (Number.isNaN(reportNum)) return false;
-  const target = String(reportNum).padStart(3, "0");
+  return pdfPathForReport(n) !== null;
+}
+
+/** The exact PDF path indexed for this report number, or null if none exists
+ *  (malformed id, no index row, or the indexed file is missing on disk). Lets
+ *  the viewer route serve the SPECIFIC report's PDF instead of guessing the
+ *  newest file for the company — two applications at the same company have
+ *  two different tailored CVs. */
+export function pdfPathForReport(n: string): string | null {
+  const target = pdfIndexTarget(n);
+  if (!target) return null;
   const tsv = read("data/pdf-index.tsv");
-  if (!tsv) return false;
+  if (!tsv) return null;
 
   for (const line of tsv.split("\n")) {
     if (!line.trim()) continue;
     const [report, pdfRel] = line.split("\t");
     if (report?.trim() !== target || !pdfRel?.trim()) continue;
-    if (fs.existsSync(path.join(careerOpsRoot(), pdfRel.trim()))) return true;
+    const abs = path.join(careerOpsRoot(), pdfRel.trim());
+    if (fs.existsSync(abs)) return abs;
   }
-  return false;
+  return null;
 }
 
 /**
