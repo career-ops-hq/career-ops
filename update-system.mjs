@@ -220,6 +220,7 @@ const SYSTEM_PATHS = [
   'browser-extract.mjs',
   'analyze-patterns.mjs',
   'upskill.mjs',
+  'reports-index.mjs',
   'skill-extract.mjs',
   'intake.mjs',
   'stats.mjs',
