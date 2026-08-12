@@ -48,7 +48,7 @@ node intake.mjs            # JSON: per-source status + preview
 - Sources with `status: "ingested"` are already merged — **do not
   re-propose them.** Only `new` and `changed` sources carry new material.
 
-## Step 2 — Read the full text of each new source
+## Step 2 — Read the full text of each new or changed source
 
 ```bash
 node intake.mjs --text <path-relative-to-documents/>
@@ -100,11 +100,13 @@ Show one consolidated proposal table: target file → field → proposed value
 
 ```bash
 node intake.mjs --commit <path> [<path> …]   # the confirmed sources
-node intake.mjs --commit                     # only if ALL were merged
+node intake.mjs --commit --all               # only if ALL were merged
 ```
 
    Never blanket-commit after a partial confirmation — a declined source
-   must stay `new` so it is re-proposed next time.
+   must stay `new` so it is re-proposed next time. A bare `--commit` with no
+   paths records nothing and exits nonzero: recording everything has to be
+   asked for explicitly.
 
 3. Verify: `node doctor.mjs` should report the profile prerequisites
    satisfied.

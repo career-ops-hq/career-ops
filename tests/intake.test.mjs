@@ -5,7 +5,7 @@
 // scan/--commit round-trip on an isolated temp documents/ dir, and the
 // three-place registration contract (DATA_CONTRACT / .gitignore /
 // update-system manifest — same cross-check pattern as offer-prep).
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -88,7 +88,25 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
     if (docx && docx.status === 'skipped') pass('scan: .docx source is skipped with a reason, not an error');
     else fail(`scan: unexpected docx entry ${JSON.stringify(docx)}`);
 
-    run(NODE, ['intake.mjs', '--commit'], { env });
+    // A bare `--commit` must not mean "record everything": main() filters flags
+    // out of the path list, so `--commit --summary` reached commitState() with an
+    // empty `only` and fell through to the blanket branch, burying sources the
+    // user never confirmed (#1843 review follow-up).
+    //
+    // Asserting the state file is untouched, not just the exit code: the fix has
+    // to refuse *before* writing, and an exit-code-only check would pass against
+    // code that committed and then errored.
+    const refused = run(NODE, ['intake.mjs', '--commit', '--summary'], { env });
+    const refusedErr = (lastRunFailure() || {}).stderr || '';
+    const afterRefusal = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const stillNew = afterRefusal && afterRefusal.sources.find((s) => s.path === 'cv/master.md');
+    if (refused === null && refusedErr.includes('--all') && stillNew && stillNew.status === 'new') {
+      pass('--commit with no confirmed paths refuses instead of blanket-committing');
+    } else {
+      fail(`--commit with only flags should refuse: exit=${JSON.stringify(refused)}, status=${stillNew && stillNew.status}, stderr=${JSON.stringify(refusedErr.slice(0, 200))}`);
+    }
+
+    run(NODE, ['intake.mjs', '--commit', '--all'], { env });
     const scan2 = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
     const md2 = scan2 && scan2.sources.find((s) => s.path === 'cv/master.md');
     if (md2 && md2.status === 'ingested') pass('--commit makes the re-run report the source as ingested (idempotent)');
@@ -226,6 +244,54 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
   }
 }
 
+// ── unreadable directory in the real-dir pre-pass ────────────────────────
+// realpathSync in claimRealDirs() is guarded, but its readdirSync was not, so
+// one unreadable directory under documents/ — easily reached through the
+// symlink-into-a-shared-tree setup the mode documents — aborted the whole scan
+// instead of skipping that directory (#1843 review follow-up).
+if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+  const tmp = mkdtempSync(join(tmpdir(), 'intake-unreadable-'));
+  const docsDir = join(tmp, 'documents');
+  const locked = join(docsDir, 'diplomas', 'locked');
+  mkdirSync(join(docsDir, 'cv'), { recursive: true });
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(docsDir, 'cv', 'master.md'), '# CV\n');
+  const env = {
+    ...process.env,
+    CAREER_OPS_DOCUMENTS_DIR: docsDir,
+    CAREER_OPS_INTAKE_STATE: join(tmp, 'intake-state.json'),
+  };
+
+  try {
+    chmodSync(locked, 0o000);
+    const scan = JSON.parse(run(NODE, ['intake.mjs'], { env }) || 'null');
+    const md = scan && scan.sources.find((s) => s.path === 'cv/master.md');
+    if (md && md.status === 'new') {
+      pass('an unreadable directory under documents/ is skipped, the rest of the scan still reports');
+    } else {
+      fail(`unreadable directory aborted the scan: ${JSON.stringify((lastRunFailure() || {}).stderr || '').slice(0, 200)}`);
+    }
+  } finally {
+    try { chmodSync(locked, 0o755); } catch {}
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ── mode instructions cover the whole delta ──────────────────────────────
+// Step 1 says `new` and `changed` both carry new material; Step 2's heading
+// said "each new source", so an agent following the heading never read an
+// edited document (#1843 review follow-up).
+{
+  const modeDoc = readFileSync(join(ROOT, 'modes', 'intake.md'), 'utf-8');
+  const step2 = modeDoc.split(/\r?\n/).find((l) => l.startsWith('## Step 2'));
+  if (step2 && /changed/.test(step2)) pass('modes/intake.md Step 2 tells the agent to read changed sources too');
+  else fail(`Step 2 heading skips changed sources: ${JSON.stringify(step2)}`);
+
+  const commitBlock = modeDoc.includes('--commit --all');
+  if (commitBlock) pass('modes/intake.md documents the explicit --commit --all form');
+  else fail('modes/intake.md still shows a bare `--commit` as the record-everything form');
+}
+
 // ── three-place registration contract (offer-prep pattern) ───────────────
 {
   const dataContractDoc = readFileSync(join(ROOT, 'DATA_CONTRACT.md'), 'utf-8');
@@ -247,5 +313,16 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
     pass('intake registered in data contract, gitignore, updater manifest, and AGENTS.md routing');
   } else {
     fail('intake missing from data contract / gitignore / update-system paths / AGENTS.md');
+  }
+
+  // documents/ holds the master CV, diplomas and reference letters — the
+  // highest-PII folder in the product. tests/user-layer-gitignored.test.mjs
+  // derives its git check-ignore guard from exactly this line, so being absent
+  // from it means no behavioural guard at all (#1843 review follow-up).
+  const userLayerLine = agentsDoc.split(/\r?\n/).find((l) => l.includes('**User Layer'));
+  if (userLayerLine && userLayerLine.includes('`documents/*`')) {
+    pass('documents/ is declared on the AGENTS.md User Layer line (feeds the gitignore guard)');
+  } else {
+    fail('AGENTS.md User Layer line omits `documents/*` — the gitignore regression guard skips it');
   }
 }

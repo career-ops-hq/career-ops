@@ -26,11 +26,11 @@
 //   node intake.mjs                 # scan + extract, JSON to stdout
 //   node intake.mjs --summary       # human-readable table instead of JSON
 //   node intake.mjs --text <path>   # full extracted text of one source
-//   node intake.mjs --commit [path …]
-//                                   # record sources as ingested — pass the
-//                                   # confirmed paths when the user approved
-//                                   # only some of them; no paths = all
+//   node intake.mjs --commit <path …>
+//                                   # record the confirmed sources as ingested
 //                                   # (run only after the user confirmed)
+//   node intake.mjs --commit --all  # record every source with new material —
+//                                   # only when the user merged all of them
 //   node intake.mjs --self-test     # pure-function self-test, no filesystem
 
 import { createHash } from 'crypto';
@@ -137,8 +137,22 @@ function loadState() {
 }
 
 function listSourceFiles() {
-  if (!existsSync(DOCS_DIR)) return [];
+  if (!existsSync(DOCS_DIR)) return { files: [], unreadable: [] };
   const out = [];
+  // Directories that could not be listed (permissions, a dead mount behind a
+  // link). They are skipped rather than fatal — one locked folder must not
+  // abort the scan of everything else — but they are reported, because a
+  // directory that silently vanishes is a source the user dropped in and never
+  // hears about again.
+  const unreadable = new Set();
+  const readDir = (dir) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true });
+    } catch {
+      unreadable.add(dir);
+      return [];
+    }
+  };
   // Directories already walked, by real path. Symlinks are followed (see
   // below), so without this a link back up the tree — documents/cv/loop ->
   // documents/ — re-enters it until the path length gives out, reporting
@@ -163,7 +177,7 @@ function listSourceFiles() {
     try { real = realpathSync(dir); } catch { return; }
     if (realDirs.has(real)) return;
     realDirs.add(real);
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of readDir(dir)) {
       if (entry.name.startsWith('.')) continue;
       if (entry.isDirectory()) claimRealDirs(join(dir, entry.name));
     }
@@ -176,7 +190,7 @@ function listSourceFiles() {
     if (walked.has(real)) return;
     walked.add(real);
     // Sorted so the traversal itself doesn't vary with readdirSync order.
-    const entries = readdirSync(dir, { withFileTypes: true })
+    const entries = readDir(dir)
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name === 'README.md' && dir === DOCS_DIR) continue;
@@ -209,17 +223,23 @@ function listSourceFiles() {
     }
   };
   walk(DOCS_DIR);
-  return out.sort();
+  return { files: out.sort(), unreadable: [...unreadable].sort() };
+}
+
+/** documents/-relative path with forward slashes — the key used everywhere. */
+function toRelPath(abs) {
+  return relative(DOCS_DIR, abs).split(sep).join('/');
 }
 
 function extractAll() {
   const extractor = detectPdfExtractor();
-  const sources = listSourceFiles().map((abs) => {
+  const { files, unreadable } = listSourceFiles();
+  const sources = files.map((abs) => {
     // Normalise to forward slashes: this path is the key in intake-state.json
     // and is echoed back to `--text`, so it must not vary by platform. On
     // Windows relative() yields `cv\master.md`, which would both break the
     // folder split below and make a state file unportable across machines.
-    const path = relative(DOCS_DIR, abs).split(sep).join('/');
+    const path = toRelPath(abs);
     const cls = classifySource(path);
     const base = { path, folder: path.includes('/') ? path.split('/')[0] : '(root)' };
     if (cls.kind === 'unsupported') {
@@ -247,6 +267,15 @@ function extractAll() {
       return { ...base, status: 'error', reason: String(err.message || err).split('\n')[0] };
     }
   });
+  for (const dir of unreadable) {
+    const path = dir === DOCS_DIR ? '(root)' : `${toRelPath(dir)}/`;
+    sources.push({
+      path,
+      folder: path.includes('/') ? path.split('/')[0] : '(root)',
+      status: 'skipped',
+      reason: 'directory could not be listed (permissions?) — nothing under it was scanned',
+    });
+  }
   return {
     documentsDir: DOCS_DIR,
     pdfExtractor: extractor ? extractor.name : null,
@@ -259,18 +288,26 @@ function ensureScaffold() {
   for (const folder of INTAKE_FOLDERS) mkdirSync(join(DOCS_DIR, folder), { recursive: true });
 }
 
-// Record sources as ingested. `only` restricts the commit to the sources the
-// user actually confirmed for merge — a blanket commit after a per-item
-// confirmation would mark declined sources as ingested and silently bury
-// them on every future run.
+// Sentinel for `--commit --all`. The safe case ("record what the user
+// confirmed") and the destructive one ("record everything") must not be
+// spelled the same way: `only.length &&` made an empty list mean "all", so
+// `--commit --summary` — main() filters flags out of the path list — recorded
+// sources the user never saw and buried them forever (#1843 review).
+const COMMIT_ALL = Symbol('commit-all');
+
+// Record sources as ingested. `only` is the list of paths the user actually
+// confirmed for merge, or COMMIT_ALL. A blanket commit after a per-item
+// confirmation would mark declined sources as ingested and silently bury them
+// on every future run, so an empty list records nothing.
 function commitState(result, only = []) {
+  const all = only === COMMIT_ALL;
   const state = loadState();
   state.ingested = state.ingested || {};
   const now = new Date().toISOString();
   let count = 0;
   for (const s of result.sources) {
     if (!s.hash || s.status === 'ingested') continue;
-    if (only.length && !only.includes(s.path)) continue;
+    if (!all && !only.includes(s.path)) continue;
     state.ingested[s.path] = { hash: s.hash, ingestedAt: now };
     count += 1;
   }
@@ -387,7 +424,17 @@ function main() {
   const commitIdx = args.indexOf('--commit');
   if (commitIdx !== -1) {
     const only = args.slice(commitIdx + 1).filter((a) => !a.startsWith('--'));
-    const count = commitState(result, only);
+    const all = args.includes('--all');
+    // Refuse before writing: no paths and no --all is a mistake, not consent.
+    if (!all && only.length === 0) {
+      console.error(
+        'Nothing to commit. Pass the confirmed sources — node intake.mjs --commit <path> [<path> …] — '
+        + 'or node intake.mjs --commit --all when every source with new material was merged. '
+        + 'Nothing was recorded.',
+      );
+      process.exit(1);
+    }
+    const count = commitState(result, all ? COMMIT_ALL : only);
     console.log(`Recorded ${count} source(s) as ingested → ${STATE_FILE}`);
     return;
   }
