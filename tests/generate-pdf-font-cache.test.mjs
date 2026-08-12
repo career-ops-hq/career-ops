@@ -7,7 +7,7 @@
  * second call still inlines it (served from the cache) and returns byte-identical
  * output — proving both the re-read is skipped and determinism is preserved.
  */
-import { writeFileSync, rmSync } from 'fs';
+import { writeFileSync, rmSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { inlineLocalFonts } from '../generate-pdf.mjs';
@@ -18,6 +18,11 @@ const fontPath = join(fontsDir, fontName);
 const bytes = Buffer.from('CACHE_PROBE_FONT_BYTES');
 const expectedB64 = bytes.toString('base64');
 const html = `<style>@font-face{font-family:probe;src:url('./fonts/${fontName}')}</style>`;
+
+// A checkout may not carry a fonts/ dir; writeFileSync below needs it to exist.
+// Track whether we created it so cleanup never deletes a real repo fonts/ dir.
+const fontsDirCreated = !existsSync(fontsDir);
+if (fontsDirCreated) mkdirSync(fontsDir, { recursive: true });
 
 try {
   writeFileSync(fontPath, bytes);
@@ -41,4 +46,6 @@ try {
   }
 } finally {
   rmSync(fontPath, { force: true });
+  // Remove fonts/ only if this test created it; leave a pre-existing repo dir.
+  if (fontsDirCreated) rmSync(fontsDir, { recursive: true, force: true });
 }

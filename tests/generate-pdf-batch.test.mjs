@@ -46,7 +46,13 @@ writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
 writeFileSync(join(playwrightStub, 'index.js'), `
 import { readFile, appendFile } from 'fs/promises';
 
-const twoPagePdf = Buffer.from(\`%PDF-1.7
+// A valid two-page PDF whose body embeds the rendered HTML, so per-document
+// output reflects per-document input instead of being a constant blob. Chromium
+// really does vary the PDF bytes by page content; a constant stub would let a
+// single-vs-batch comparison pass even if the two paths rendered different HTML.
+function twoPagePdf(markerText) {
+  const marker = Buffer.from(markerText, 'utf-8').toString('base64');
+  return Buffer.from(\`%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
@@ -54,33 +60,52 @@ endobj
 << /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R >>
+<< /Type /Page /Parent 2 0 R /Marker (\${marker}) >>
 endobj
 4 0 obj
 << /Type /Page /Parent 2 0 R >>
 endobj
 %%EOF\`, 'latin1');
+}
+
+function makePage() {
+  let failing = false;
+  let renderedHtml = '';
+  return {
+    async goto(url) {
+      const html = await readFile(new URL(url), 'utf-8');
+      renderedHtml = html;
+      failing = html.includes('BATCH_FAIL');
+    },
+    async evaluate() {},
+    async pdf() {
+      if (failing) throw new Error('stub render failure');
+      // Reflect the captured HTML in the returned bytes so different documents
+      // produce different PDFs (and identical HTML stays byte-identical).
+      return twoPagePdf(renderedHtml);
+    },
+    async close() {},
+  };
+}
 
 export const chromium = {
   async launch() {
+    // Simulate an unrecoverable shared-browser launch failure on demand so the
+    // batch path's launch-failure handling (complete failed manifest + exit 1)
+    // can be exercised without a constant blob masking it.
+    if (process.env.BATCH_LAUNCH_FAIL) throw new Error('stub launch failure');
     // One byte per launch: the test asserts a batch of N launches Chromium once.
     await appendFile('.launches', 'L');
     return {
-      async newPage() {
-        let failing = false;
+      // renderInPage prefers newContext({javaScriptEnabled:false}); support it so
+      // the test exercises the real context path, with newPage() as the fallback.
+      async newContext() {
         return {
-          async goto(url) {
-            const html = await readFile(new URL(url), 'utf-8');
-            failing = html.includes('BATCH_FAIL');
-          },
-          async evaluate() {},
-          async pdf() {
-            if (failing) throw new Error('stub render failure');
-            return twoPagePdf;
-          },
+          async newPage() { return makePage(); },
           async close() {},
         };
       },
+      async newPage() { return makePage(); },
       async close() {},
     };
   },
@@ -96,11 +121,12 @@ writeFileSync(join(sandbox, 'b.html'), htmlDoc('Bravo CV BATCH_FAIL'), 'utf-8');
 writeFileSync(join(sandbox, 'c.html'), htmlDoc('Charlie CV'), 'utf-8');
 writeFileSync(join(sandbox, 'single.html'), htmlDoc('Solo CV'), 'utf-8');
 
-function run(args) {
+function run(args, { env, cwd } = {}) {
   const result = spawnSync(NODE, [script, ...args], {
-    cwd: sandbox,
+    cwd: cwd || sandbox,
     encoding: 'utf-8',
     timeout: 30_000,
+    env: env ? { ...process.env, ...env } : process.env,
   });
   return { ...result, output: `${result.stdout || ''}${result.stderr || ''}` };
 }
@@ -130,7 +156,7 @@ try {
   try { results = JSON.parse(readFileSync(resultsPath, 'utf-8')); } catch { /* asserted below */ }
 
   if (
-    batch.status !== 0 &&
+    batch.status === 1 &&
     existsSync(aPdf) && !existsSync(bPdf) && existsSync(cPdf) &&
     launches === 1 &&
     Array.isArray(results) && results.length === 3 &&
@@ -179,6 +205,75 @@ try {
     pass('generate-pdf --batch exits 0 when every document renders');
   } else {
     fail(`all-success batch did not exit clean: status=${okBatch.status}\n${okBatch.output.trim()}`);
+  }
+
+  // --- Test 4: a shared-browser launch failure yields a complete failed
+  // manifest and exit 1, never an uncaught throw that skips the manifest ---
+  const failManifest = join(sandbox, 'launchfail.json');
+  writeFileSync(failManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/lf-a.pdf' },
+    { input: 'c.html', output: 'out/lf-c.pdf' },
+  ]), 'utf-8');
+  const launchFail = run([`--batch=${failManifest}`], { env: { BATCH_LAUNCH_FAIL: '1' } });
+  let lfResults = null;
+  try { lfResults = JSON.parse(readFileSync(`${failManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    launchFail.status === 1 &&
+    Array.isArray(lfResults) && lfResults.length === 2 &&
+    lfResults.every((r) => r && r.ok === false && /launch failed/i.test(r.error || '')) &&
+    !existsSync(join(sandbox, 'out', 'lf-a.pdf')) &&
+    !existsSync(join(sandbox, 'out', 'lf-c.pdf')) &&
+    launchFail.output.includes('0 ok, 2 failed')
+  ) {
+    pass('generate-pdf --batch records every entry failed on browser launch failure (exit 1)');
+  } else {
+    fail(`launch-failure batch mishandled: status=${launchFail.status} results=${JSON.stringify(lfResults)}\n${launchFail.output.trim()}`);
+  }
+
+  // --- Test 5: input/output paths escaping the project are rejected per-entry,
+  // while a valid sibling entry still renders ---
+  const escapeManifest = join(sandbox, 'escape.json');
+  writeFileSync(escapeManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/esc-ok.pdf' },
+    { input: '../a.html', output: 'out/esc-badin.pdf' },
+    { input: 'a.html', output: '../esc-badout.pdf' },
+  ]), 'utf-8');
+  const escape = run([`--batch=${escapeManifest}`]);
+  let escResults = null;
+  try { escResults = JSON.parse(readFileSync(`${escapeManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    escape.status === 1 &&
+    Array.isArray(escResults) && escResults.length === 3 &&
+    escResults[0].ok === true &&
+    escResults[1].ok === false && /input escapes/i.test(escResults[1].error || '') &&
+    escResults[2].ok === false && /output escapes/i.test(escResults[2].error || '') &&
+    existsSync(join(sandbox, 'out', 'esc-ok.pdf'))
+  ) {
+    pass('generate-pdf --batch rejects input/output paths that escape the project directory');
+  } else {
+    fail(`containment guard regressed: status=${escape.status} results=${JSON.stringify(escResults)}\n${escape.output.trim()}`);
+  }
+
+  // --- Test 6: manifest-supplied paths resolve relative to the manifest's own
+  // directory, not process.cwd() ---
+  const subDir = join(sandbox, 'sub');
+  mkdirSync(subDir, { recursive: true });
+  const relManifest = join(subDir, 'rel.json');
+  writeFileSync(relManifest, JSON.stringify([
+    { input: '../a.html', output: '../out/rel.pdf' },
+  ]), 'utf-8');
+  // cwd (sandbox) differs from the manifest dir (sandbox/sub): if paths resolved
+  // against cwd, ../a.html would escape and fail; resolved against the manifest
+  // dir it lands on sandbox/a.html and renders cleanly.
+  const relRun = run([`--batch=${relManifest}`]);
+  if (
+    relRun.status === 0 &&
+    existsSync(join(sandbox, 'out', 'rel.pdf')) &&
+    relRun.output.includes('1 ok, 0 failed')
+  ) {
+    pass('generate-pdf --batch resolves manifest paths relative to the manifest directory');
+  } else {
+    fail(`manifest-relative path resolution regressed: status=${relRun.status}\n${relRun.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
