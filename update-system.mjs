@@ -226,6 +226,7 @@ const SYSTEM_PATHS = [
   'contacts.mjs',
   'contacts.test.mjs',
   'weekly-digest.mjs',
+  'tracker-sync-check.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',

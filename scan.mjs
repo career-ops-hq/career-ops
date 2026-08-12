@@ -1887,11 +1887,36 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 
 // One row of run counters per non-dry scan — today these numbers are printed
 // once in the summary and lost when the terminal scrolls. Full ISO timestamp
-// (two scans in one day must not collapse). `status` is reserved: always
-// 'completed' in v1; a follow-up wires failure-path writes so trend stats can
-// exclude survivorship bias. Consumers MUST parse by header name, never by
-// position — columns may be appended in later versions.
+// (two scans in one day must not collapse). `status` is 'completed' for a
+// finished run; a run that dies after the sweep starts records 'failed' via
+// writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
+// Consumers MUST parse by header name, never by position — columns may be
+// appended in later versions.
 export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+
+// Failure-path writes (#2643). main() registers a snapshot closure once the
+// sweep's counters exist (never on --dry-run, never before the sweep starts —
+// a config error is not a run). The fatal catch and the SIGINT handler both
+// call writeRunFailureRow; the snapshot is consumed on first use so the two
+// signals can never double-write. Best-effort by design: a failure to record
+// the failure must not mask the original error, so everything is swallowed.
+let runFailureSnapshot = null;
+
+export function registerRunFailureSnapshot(fn) {
+  runFailureSnapshot = typeof fn === 'function' ? fn : null;
+}
+
+export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH) {
+  const snapshot = runFailureSnapshot;
+  runFailureSnapshot = null;
+  if (!snapshot) return false;
+  try {
+    appendScanRunSummary({ ...snapshot(), status }, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -2330,6 +2355,32 @@ async function main() {
   const newOffers = [];
   const errors = [...resolveErrors];
   const emptyTargets = [];
+
+  // Arm the failure-path row (#2643) now that the sweep is about to start and
+  // every counter it reads is in scope. new_added is hardcoded 0 on a failed
+  // run even if the sweep added postings before dying (the count isn't settled
+  // mid-sweep). Excluded from trend averages so it can't skew them, but a
+  // raw-TSV reader should treat that 0 as a sentinel, not a true count.
+  if (!dryRun) {
+    registerRunFailureSnapshot(() => ({
+      timestamp: new Date().toISOString(),
+      companies: targets.filter(t => !t._isBoard).length,
+      boards: targets.filter(t => t._isBoard).length,
+      found: totalFound, filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
+      filteredLocation: totalFilteredLocation, filteredPostingAge: totalFilteredPostingAge,
+      filteredSalary: totalFilteredSalary, filteredContent: totalFilteredContent,
+      filteredCooldown: totalFilteredCooldown, dupes: totalDupes, newAdded: 0,
+      errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
+    }));
+    // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
+    // with the conventional SIGINT code.
+    process.once('SIGINT', () => {
+      writeRunFailureRow('failed');
+      process.exit(130);
+    });
+  }
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
@@ -2770,6 +2821,8 @@ async function main() {
       filteredCountryEligibility: totalFilteredCountryEligibility,
     });
   }
+  // The run completed (or was a dry run) — disarm the failure row.
+  registerRunFailureSnapshot(null);
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
@@ -2797,6 +2850,7 @@ async function main() {
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main().catch(err => {
     console.error('Fatal:', err.message);
+    writeRunFailureRow('failed');
     process.exit(1);
   });
 }
