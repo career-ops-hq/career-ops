@@ -34,15 +34,58 @@
  */
 
 import { chromium } from 'playwright';
-import { resolve, dirname, relative, sep, isAbsolute } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PDF_PAGE_MARGIN = '0.6in';
+
+// Canonical project root: realpath so a symlinked repo ancestor (e.g. macOS
+// /var -> /private/var, or a symlinked checkout) is compared like-for-like by
+// assertInsideProject below.
+const __projectRoot = realpathSync(__dirname);
+
+/**
+ * Assert that an already-resolved absolute path stays inside the project,
+ * resolving symlinks first.
+ *
+ * A lexical relative(__dirname, p) check accepts a path that stays lexically
+ * inside the repo but whose ancestor is a symlink escaping it. This canonicalizes
+ * p through realpath — the path itself when it exists, otherwise its nearest
+ * existing ancestor with the not-yet-created tail re-appended (the output PDF and
+ * its directory may not exist yet) — then checks containment against the
+ * realpathed project root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
+ *
+ * @param {string} absPath - Already-resolved absolute candidate path.
+ * @param {string} label - 'input' | 'output', used in the thrown message.
+ * @returns {string} absPath unchanged when contained.
+ * @throws {Error} when the canonical path escapes the project directory.
+ */
+function assertInsideProject(absPath, label) {
+  let probe = absPath;
+  const tail = [];
+  while (!existsSync(probe)) {
+    tail.unshift(basename(probe));
+    const parent = dirname(probe);
+    if (parent === probe) break; // reached the filesystem root
+    probe = parent;
+  }
+  let canonical = absPath;
+  try {
+    canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
+  } catch {
+    canonical = absPath; // realpath raced away; fall back to the lexical form
+  }
+  const rel = relative(__projectRoot, canonical);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`${label} escapes the project directory: ${absPath}`);
+  }
+  return absPath;
+}
 
 // Ensure output directory exists (fresh setup)
 mkdirSync(resolve(__dirname, 'output'), { recursive: true });
@@ -472,6 +515,14 @@ async function generatePDF() {
   // all entries; each entry supplies its own input/output and may override
   // format/reportNum. Takes no positional input/output.
   if (batchManifestPath) {
+    // --report keys a single PDF to one tracker row; a batch renders N distinct
+    // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
+    // in the manifest is the correct channel — reject the global flag here rather
+    // than silently ignore it (fails before the batch path returns).
+    if (reportNum) {
+      console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
+      process.exit(1);
+    }
     return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
   }
 
@@ -499,14 +550,15 @@ async function generatePDF() {
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
 
-  // Path-traversal guard: keep the PDF write inside the project directory so a
-  // crafted output argument (e.g. "../../etc/cron.d/x") can't escape the repo.
-  // Anchored to the repo root (__dirname), not process.cwd(): running the script
-  // from outside the repo used to falsely refuse in-repo outputs — and, worse,
-  // would have allowed writes anywhere under an arbitrary cwd.
-  const relOut = relative(__dirname, outputPath);
-  if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
-    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+  // Path-containment guard (realpath-based): keep both the HTML read and the PDF
+  // write inside the project even when an ancestor is a symlink — a lexical
+  // relative() check alone would accept a symlinked ancestor that escapes the
+  // repo. Anchored to the realpathed repo root (__projectRoot), not process.cwd().
+  try {
+    assertInsideProject(inputPath, 'input');
+    assertInsideProject(outputPath, 'output');
+  } catch (err) {
+    console.error(`Refusing to render outside the project directory: ${err.message}`);
     process.exit(1);
   }
 
@@ -631,20 +683,15 @@ async function runBatchFromManifest(manifestPath, globals) {
       const entryInput = resolve(manifestDir, spec.input);
       const entryOutput = resolve(manifestDir, spec.output);
 
-      // Path-traversal guards: keep both the read and the write inside the repo.
-      // The output guard blocks a crafted path from writing outside the project.
-      // The input guard mirrors it: batch manifests are machine-generated by the
-      // pdf/batch flow and only ever reference repo-internal HTML, so an input
-      // that escapes the project marks a malformed/tampered manifest — rejected
-      // per-entry (recorded as a failure) rather than read.
-      const relIn = relative(__dirname, entryInput);
-      if (relIn === '' || relIn.startsWith('..') || isAbsolute(relIn)) {
-        throw new Error(`input escapes the project directory: ${entryInput}`);
-      }
-      const relOut = relative(__dirname, entryOutput);
-      if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
-        throw new Error(`output escapes the project directory: ${entryOutput}`);
-      }
+      // Path-containment guards (realpath-based): keep both the read and the
+      // write inside the repo even through a symlinked ancestor. The output guard
+      // blocks a crafted path from writing outside the project. The input guard
+      // mirrors it: batch manifests are machine-generated by the pdf/batch flow
+      // and only ever reference repo-internal HTML, so an input that escapes the
+      // project marks a malformed/tampered manifest — rejected per-entry (recorded
+      // as a failure) rather than read.
+      assertInsideProject(entryInput, 'input');
+      assertInsideProject(entryOutput, 'output');
 
       let html = await readFile(entryInput, 'utf-8');
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
@@ -663,7 +710,11 @@ async function runBatchFromManifest(manifestPath, globals) {
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
-      results[i] = { outputPath: spec?.output ?? null, ok: false, error: err.message };
+      // Record outputPath with the same manifest-dir-resolved absolute convention
+      // successful entries use, so consumers see one path shape across ok/failed
+      // results; null stays null when the entry named no output.
+      const failedOutput = spec && typeof spec.output === 'string' ? resolve(manifestDir, spec.output) : null;
+      results[i] = { outputPath: failedOutput, ok: false, error: err.message };
     }
   }
 
@@ -685,7 +736,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   }
 
   console.log(`📦 Batch complete: ${ok} ok, ${failed} failed`);
-  if (failed > 0) process.exit(1);
+  // Signal failure via exitCode, not process.exit(1): the latter can truncate
+  // buffered stdout (the summary + results-path logs above) before it flushes.
+  // Returning normally lets in-process callers read the full breakdown and the
+  // process still exits non-zero once the event loop drains.
+  if (failed > 0) process.exitCode = 1;
   return { ok, failed, results };
 }
 

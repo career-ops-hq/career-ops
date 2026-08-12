@@ -30,6 +30,8 @@ mkdirSync(outputRoot, { recursive: true });
 const sandbox = mkdtempSync(join(outputRoot, 'batch-test-'));
 const script = join(sandbox, 'generate-pdf.mjs');
 const launchesFile = join(sandbox, '.launches');
+const pageClosesFile = join(sandbox, '.pagecloses');
+const contextClosesFile = join(sandbox, '.contextcloses');
 mkdirSync(join(sandbox, 'data'), { recursive: true });
 writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
@@ -84,7 +86,9 @@ function makePage() {
       // produce different PDFs (and identical HTML stays byte-identical).
       return twoPagePdf(renderedHtml);
     },
-    async close() {},
+    // Record every page close so the test can assert renderInPage tears down
+    // exactly one page per document (no leak into the shared browser).
+    async close() { await appendFile('.pagecloses', 'P'); },
   };
 }
 
@@ -102,7 +106,9 @@ export const chromium = {
       async newContext() {
         return {
           async newPage() { return makePage(); },
-          async close() {},
+          // Record every context close so the test can assert renderInPage tears
+          // down exactly one JS-disabled context per document.
+          async close() { await appendFile('.contextcloses', 'C'); },
         };
       },
       async newPage() { return makePage(); },
@@ -152,6 +158,11 @@ try {
   const cPdf = join(sandbox, 'out', 'c.pdf');
   const resultsPath = `${manifest}.results.json`;
   const launches = existsSync(launchesFile) ? readFileSync(launchesFile, 'utf-8').length : 0;
+  // Per-document cleanup: renderInPage opens one JS-disabled context + one page
+  // per entry and closes both in a finally, even for the entry that throws in
+  // pdf(). A 3-entry batch must therefore close exactly 3 pages and 3 contexts.
+  const pageCloses = existsSync(pageClosesFile) ? readFileSync(pageClosesFile, 'utf-8').length : 0;
+  const contextCloses = existsSync(contextClosesFile) ? readFileSync(contextClosesFile, 'utf-8').length : 0;
   let results = null;
   try { results = JSON.parse(readFileSync(resultsPath, 'utf-8')); } catch { /* asserted below */ }
 
@@ -159,13 +170,14 @@ try {
     batch.status === 1 &&
     existsSync(aPdf) && !existsSync(bPdf) && existsSync(cPdf) &&
     launches === 1 &&
+    pageCloses === 3 && contextCloses === 3 &&
     Array.isArray(results) && results.length === 3 &&
     results[0].ok === true && results[1].ok === false && results[2].ok === true &&
     batch.output.includes('2 ok, 1 failed')
   ) {
-    pass('generate-pdf --batch renders survivors, isolates the failure, reuses one Chromium');
+    pass('generate-pdf --batch renders survivors, isolates the failure, reuses one Chromium, closes every page + context');
   } else {
-    fail(`generate-pdf --batch regressed: status=${batch.status} launches=${launches} results=${JSON.stringify(results)}\n${batch.output.trim()}`);
+    fail(`generate-pdf --batch regressed: status=${batch.status} launches=${launches} pageCloses=${pageCloses} contextCloses=${contextCloses} results=${JSON.stringify(results)}\n${batch.output.trim()}`);
   }
 
   // --- Test 2: single-CV render is byte-identical to the batch render ---
