@@ -45,7 +45,9 @@ export function resolveConfig(entry) {
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // HTTPS only: the bootstrap Set-Cookie values are replayed on the search
+  // request, so an http: entry would put session cookies on the wire in clear.
+  if (u.protocol !== 'https:') return null;
   const host = u.host.toLowerCase();
   if (host !== 'csod.com' && !host.endsWith('.csod.com')) return null;
   const m = u.pathname.match(/\/ux\/ats\/careersite\/(\d+)\//i) || u.pathname.match(/\/ux\/ats\/careersite\/(\d+)$/i);
@@ -182,15 +184,17 @@ export default {
     //
     // cfg.homeUrl and cfg.searchApi are both built from the same parsed
     // origin, so replaying these cookies cannot reach a third-party host.
+    // redirect:'error' on the bootstrap keeps that true: origin validation
+    // covers the URL we ask for, not wherever a 3xx would send us.
     let html;
     let cookie = '';
     if (typeof ctx.fetchResponse === 'function') {
-      const res = await ctx.fetchResponse(cfg.homeUrl, { headers: { accept: 'text/html' } });
+      const res = await ctx.fetchResponse(cfg.homeUrl, { redirect: 'error', headers: { accept: 'text/html' } });
       const setCookies = typeof res?.headers?.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
       cookie = cookieHeaderFrom(setCookies);
       html = await res.text();
     } else {
-      html = await ctx.fetchText(cfg.homeUrl, { headers: { accept: 'text/html' } });
+      html = await ctx.fetchText(cfg.homeUrl, { redirect: 'error', headers: { accept: 'text/html' } });
     }
     const token = extractToken(html);
     if (!token) throw new Error(`csod: no anonymous token on ${cfg.homeUrl}`);
