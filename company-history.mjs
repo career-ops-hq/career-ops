@@ -350,7 +350,7 @@ export function computeResponsiveness(rows, followupCountsByAppNum, opts = {}) {
         // response date in the status ledger — the file funnel-velocity.mjs
         // reads dates back from. A date buried in --note free text is parsed
         // by nothing.
-        clearInstruction: `if they actually responded, node set-status.mjs ${row.num} <state> --on <response-date> clears this`,
+        clearInstruction: `if they actually responded, node set-status.mjs --row ${row.num} <state> --on <response-date> clears this`,
       });
     } else if (RESPONDED_STATUSES.has(normalized)) {
       // row.date is the EVALUATION date, not the date the company replied. Use
@@ -532,7 +532,7 @@ export function renderSummary(result) {
 
   const aged = result.hygiene?.agedApplied || [];
   if (aged.length > 0) {
-    lines.push(`  ${aged.length} aged-Applied row(s) look silent — confirm real or update (node set-status.mjs <num> <state> --on <response-date>).`);
+    lines.push(`  ${aged.length} aged-Applied row(s) look silent — confirm real or update (node set-status.mjs --row <num> <state> --on <response-date>).`);
     lines.push('');
   }
 
@@ -820,7 +820,9 @@ async function runSelfTest() {
     const fact = result.facts[0];
     check(!!fact.appliedDate, 'silent fact carries an appliedDate');
     check(typeof fact.clearInstruction === 'string' && fact.clearInstruction.includes('set-status'), 'silent fact clearInstruction references set-status.mjs');
-    check(fact.clearInstruction.includes('--on'), 'silent fact clearInstruction records the response date via --on (the ledger this module reads), not --note free text');
+    check(fact.clearInstruction.includes('--row'), 'silent fact clearInstruction selects the tracker row explicitly via --row');
+    check(fact.clearInstruction.includes('--on'), 'silent fact clearInstruction records the response date via --on, not --note free text');
+    check(!fact.clearInstruction.includes('--note'), 'silent fact clearInstruction does not smuggle the response date into --note free text');
   }
 
   console.log(`\n  company-history self-test: ${pass} passed, ${fail} failed\n`);
