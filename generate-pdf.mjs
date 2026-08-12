@@ -74,11 +74,14 @@ function assertInsideProject(absPath, label) {
     if (parent === probe) break; // reached the filesystem root
     probe = parent;
   }
-  let canonical = absPath;
+  let canonical;
   try {
     canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
   } catch {
-    canonical = absPath; // realpath raced away; fall back to the lexical form
+    // Canonicalization failed (realpath raced away, permission error): containment
+    // is unprovable, so fail closed rather than fall back to a lexical form that a
+    // symlinked ancestor could slip past.
+    throw new Error(`${label} escapes the project directory: ${absPath}`);
   }
   const rel = relative(__projectRoot, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
@@ -625,6 +628,17 @@ async function runBatchFromManifest(manifestPath, globals) {
   const resolvedManifest = resolve(manifestPath);
   const manifestDir = dirname(resolvedManifest);
 
+  // Contain the manifest itself before any filesystem access: batch manifests are
+  // machine-generated repo-internal artifacts, so a --batch path pointing outside
+  // the project marks a malformed/tampered invocation. Reject before reading the
+  // manifest or writing its <manifest>.results.json sibling below.
+  try {
+    assertInsideProject(resolvedManifest, 'batch manifest');
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
+
   let raw;
   try {
     raw = await readFile(resolvedManifest, 'utf-8');
@@ -729,6 +743,9 @@ async function runBatchFromManifest(manifestPath, globals) {
 
   const resultsPath = `${resolvedManifest}.results.json`;
   try {
+    // resolvedManifest is already contained, so this sibling is too; assert
+    // explicitly so the write can never land outside the project.
+    assertInsideProject(resultsPath, 'batch results');
     writeFileSync(resultsPath, JSON.stringify(results, null, 2) + '\n');
     console.log(`🔗 Batch results: ${resultsPath}`);
   } catch (err) {

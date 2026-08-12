@@ -23,6 +23,7 @@ import {
   writeFileSync,
 } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
@@ -286,6 +287,33 @@ try {
     pass('generate-pdf --batch resolves manifest paths relative to the manifest directory');
   } else {
     fail(`manifest-relative path resolution regressed: status=${relRun.status}\n${relRun.output.trim()}`);
+  }
+
+  // --- Test 7: a --batch manifest that lives OUTSIDE the project is rejected
+  // before any filesystem access — the manifest is never read (error is the
+  // containment error, not a parse/read error) and no .results.json is written
+  // next to it (the write is gated too) ---
+  const externalDir = mkdtempSync(join(tmpdir(), 'batch-ext-'));
+  try {
+    const externalManifest = join(externalDir, 'external.json');
+    // Valid JSON pointing at a valid entry: if containment did NOT gate first,
+    // the code would read this and proceed, producing a results file. It must not.
+    writeFileSync(externalManifest, JSON.stringify([
+      { input: 'a.html', output: 'out/ext.pdf' },
+    ]), 'utf-8');
+    const ext = run([`--batch=${externalManifest}`]);
+    const extResults = `${externalManifest}.results.json`;
+    if (
+      ext.status === 1 &&
+      /batch manifest escapes the project directory/i.test(ext.output) &&
+      !existsSync(extResults)
+    ) {
+      pass('generate-pdf --batch rejects an external manifest path before any filesystem access');
+    } else {
+      fail(`external manifest containment regressed: status=${ext.status} resultsExist=${existsSync(`${externalManifest}.results.json`)}\n${ext.output.trim()}`);
+    }
+  } finally {
+    rmSync(externalDir, { recursive: true, force: true });
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
