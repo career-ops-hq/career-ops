@@ -83,3 +83,5 @@ jobs:
         run: node upgrade-tests.mjs --pr-gate
       - name: Canary (harness must be able to fail)
         run: node upgrade-tests.mjs --canary
+      - name: Local-paths declaration survives a real apply (#2421)
+        run: node upgrade-tests.mjs --local-paths

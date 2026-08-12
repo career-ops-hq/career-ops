@@ -281,6 +281,7 @@ const SYSTEM_PATHS = [
   'fonts/',
   'examples/',
   'config/profile.example.yml',
+  'config/local-paths.example.txt',
   '.env.example',
   '.editorconfig',
   '.agents/',
@@ -426,6 +427,113 @@ export const USER_PATHS = [
   '.claude/settings.json',
   '.claude/hooks/',
 ];
+
+// Local user layer — a fork's own files, declared OUTSIDE the system layer.
+//
+// USER_PATHS lives in this file, which `apply` overwrites and which git
+// re-merges on every sync, so "this file is mine" was previously a statement
+// you could only make inside the thing that keeps overwriting it (#2421). The
+// declaration file is gitignored and read at runtime instead: one repo-relative
+// path per line, `#` comments, trailing `/` for a directory prefix — the same
+// shape as the arrays above. Absent file means no extra paths, which is the
+// behaviour every existing install already has.
+export const LOCAL_PATHS_FILE = 'config/local-paths.txt';
+
+/**
+ * Parse a declaration file's contents into a de-duplicated path list.
+ * Pure and tolerant of CRLF: Windows forks are the population this exists
+ * for, and a stray \r would make every entry miss its match.
+ * @param {string} text - Raw file contents.
+ * @returns {string[]} Declared paths, in file order, without duplicates.
+ */
+export function parseLocalPaths(text) {
+  const seen = new Set();
+  for (const rawLine of String(text).split('\n')) {
+    const line = rawLine.replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    seen.add(line);
+  }
+  return [...seen];
+}
+
+/**
+ * Read + validate the local declaration file.
+ *
+ * Refuses rather than honours anything ambiguous: a path the system layer
+ * already ships would silently stop updating, and a path that escapes the
+ * checkout would widen the "never touch" set over files the updater does not
+ * own. Both throw, naming the offending entry.
+ *
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Extra user-layer paths. Empty when the file is absent.
+ */
+export function localUserPaths(root = ROOT) {
+  const file = join(root, LOCAL_PATHS_FILE);
+  if (!existsSync(file)) return [];
+
+  const declared = parseLocalPaths(readFileSync(file, 'utf-8'));
+  const reject = (path, why) => {
+    throw new Error(`${LOCAL_PATHS_FILE}: refusing "${path}" — ${why}`);
+  };
+
+  for (const path of declared) {
+    if (path === LOCAL_PATHS_FILE) {
+      reject(path, 'the declaration file cannot list itself (it is gitignored, so nothing updates it)');
+    }
+    if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\')) {
+      reject(path, 'paths must be repo-relative, not absolute');
+    }
+    if (path.split(/[\\/]/).includes('..')) {
+      reject(path, 'paths must stay inside the repo');
+    }
+    const collision = SYSTEM_PATHS.find((sys) =>
+      sys.endsWith('/') ? path.startsWith(sys) : path === sys,
+    );
+    if (collision) {
+      reject(
+        path,
+        `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
+        + 'Declaring it would stop updates to it with no other signal',
+      );
+    }
+  }
+  return declared;
+}
+
+/**
+ * USER_PATHS plus whatever the local declaration file adds. This is what the
+ * safety check compares against — the built-in list alone would report a
+ * fork's own files as violations.
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Every path the updater must never touch.
+ */
+export function effectiveUserPaths(root = ROOT) {
+  return [...USER_PATHS, ...localUserPaths(root)];
+}
+
+/**
+ * Which of the files an update touched belong to the user layer.
+ *
+ * Pure so the rule can be pinned without driving apply(), which is ROOT-bound
+ * and full of side effects.
+ *
+ * @param {string[]} changedFiles - Paths the update modified.
+ * @param {string[]} updatePaths - Paths this update was allowed to write.
+ *   An explicit entry here wins over a user-layer prefix match, e.g.
+ *   writing-samples/README.md is a system-owned doc inside a user directory.
+ * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ * @returns {string[]} Violating files, each listed once.
+ */
+export function userLayerViolations(changedFiles, updatePaths, userPaths) {
+  const violations = [];
+  for (const file of changedFiles) {
+    if (updatePaths.includes(file)) continue;
+    if (userPaths.some((userPath) => file.startsWith(userPath))) {
+      violations.push(file);
+    }
+  }
+  return violations;
+}
 
 function parseVersionFile(raw) {
   // VERSION may carry a release-please marker, e.g. "1.6.0 # x-release-please-version".
@@ -1369,18 +1477,16 @@ async function apply() {
     // can exclude them from the revert and log what was preserved.
     const violatedUserPaths = new Set();
     try {
-      for (const entry of gitStatusEntries()) {
-        const file = entry.path;
-        if (initialStatusPaths.has(file)) continue;
-        // Explicit SYSTEM_PATHS entries override USER_PATHS prefix matches.
-        // (e.g. writing-samples/README.md is system-owned doc inside a user dir.)
-        if (updatePaths.includes(file)) continue;
-        for (const userPath of USER_PATHS) {
-          if (file.startsWith(userPath)) {
-            console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
-            violatedUserPaths.add(file);
-          }
-        }
+      // effectiveUserPaths(), not USER_PATHS: a fork's own files are declared
+      // in the gitignored local file (#2421) and are just as untouchable as
+      // cv.md. Explicit SYSTEM_PATHS entries still override a prefix match
+      // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
+      const changed = gitStatusEntries()
+        .map((entry) => entry.path)
+        .filter((file) => !initialStatusPaths.has(file));
+      for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
+        console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
+        violatedUserPaths.add(file);
       }
     } catch (err) {
       // Fail closed: if we can't validate the safety invariant we must
