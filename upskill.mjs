@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { parseMachineSummary, loadReportsIndex } from './reports-index.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -245,22 +246,9 @@ export function readOptionalText(filePath) {
   }
 }
 
-// --- Machine Summary + Gap table parsing ---
-// Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
-function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
-  if (!fenceMatch) return null;
-  const raw = fenceMatch[1].trim();
-  if (!raw) return null;
-  try {
-    const parsed = yamlLoad(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
+// --- Gap table parsing ---
+// The canonical Machine-Summary parser now lives in reports-index.mjs (imported
+// above) — one parser shared across analyze-patterns/upskill/salary-gap.
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
   if (value === null || value === undefined || value === '') return [];
@@ -386,7 +374,7 @@ export function computeTargetedGaps(jdText, knownText) {
 }
 
 // --- Main ---
-function analyze(minReports) {
+function analyze(minReports, options = {}) {
   if (!existsSync(APPS_FILE)) {
     return { error: 'No applications tracker found. Run some evaluations first.' };
   }
@@ -394,6 +382,12 @@ function analyze(minReports) {
   const lines = readFileSync(APPS_FILE, 'utf-8').split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
+
+  // Shared, stat-validated Machine-Summary cache over reports/. The summary
+  // supplies score + hard_stops/soft_gaps without re-parsing YAML; we only read
+  // the report body as a FALLBACK (the Gap table and `| Global |` score row)
+  // when the summary can't supply the score or the gap keys — see #2385.
+  const index = loadReportsIndex({ noCache: options.noCache });
 
   let reportsLinked = 0;
   let reportsRead = 0;
@@ -410,20 +404,49 @@ function analyze(minReports) {
     // which costs a full stat per report and races with the read (#2385).
     const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
     let content = null;
+    let reportPath = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
       content = readTextIfExists(p);
-      if (content !== null) break;
+      if (content !== null) { reportPath = p; break; }
     }
     if (content === null) continue;
     reportsRead += 1;
-    const { score, gapText, hasMachineSummary } = parseReportGaps(content);
+
+    // Machine Summary comes from the shared, stat-validated index (no re-parse);
+    // the already-read body is the fallback for score/gaps the summary can't supply.
+    const summary = index.get(reportPath)?.summary ?? null;
+    let score = null;
+    let hasMachineSummary = false;
+    let haveSummaryGaps = false;
+    const gapDescriptions = [];
+    if (summary) {
+      hasMachineSummary = true;
+      if (typeof summary.score === 'number' && Number.isFinite(summary.score)) score = summary.score;
+      if ('hard_stops' in summary || 'soft_gaps' in summary) {
+        haveSummaryGaps = true;
+        gapDescriptions.push(...normalizeList(summary.hard_stops), ...normalizeList(summary.soft_gaps));
+      }
+    }
+    // Fallback: parse the body only when the summary can't supply the score or
+    // the gap descriptions (legacy reports, or a Machine Summary missing keys).
+    // Reuse the body already read under the containment guard — no second read.
+    if (score === null || !haveSummaryGaps) {
+      const fb = parseReportGaps(content);
+      if (fb.hasMachineSummary) hasMachineSummary = true;
+      if (score === null && Number.isFinite(fb.score)) score = fb.score;
+      // parseReportGaps re-adds the summary's hard_stops/soft_gaps; only take
+      // its text when we haven't already sourced gaps from the cached summary,
+      // so a report with summary gaps isn't double-counted.
+      if (!haveSummaryGaps && fb.gapText) gapDescriptions.push(fb.gapText);
+    }
+
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
     parsedReports.push({
       num: row.num,
       score: Number.isFinite(trackerScore) ? trackerScore : score,
-      gapText,
+      gapText: gapDescriptions.join('\n'),
     });
   }
 
@@ -871,6 +894,7 @@ if (isMain) {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (args.includes('--self-test')) runSelfTest();
+  const noCache = args.includes('--no-cache');
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
   const urlTextIdx = args.indexOf('--url-text');
@@ -1008,7 +1032,7 @@ if (isMain) {
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 
-    const result = analyze(MIN_REPORTS);
+    const result = analyze(MIN_REPORTS, { noCache });
     if (args.includes('--summary')) {
       printSummary(result);
     } else {

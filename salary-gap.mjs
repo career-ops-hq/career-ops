@@ -27,18 +27,19 @@
  *      node salary-gap.mjs --self-test
  */
 
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
+import { parseMachineSummary, splitEntry, loadReportsIndex, REPORT_FILE_RE } from './reports-index.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const noCache = args.includes('--no-cache');
 const statedForFlagIdx = args.indexOf('--stated-for');
 const statedForNum = statedForFlagIdx !== -1 ? args[statedForFlagIdx + 1] : null;
 
@@ -115,42 +116,40 @@ export function getStatedObservations(observations, num) {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-// Like analyze-patterns.mjs:110 but WITHOUT `json`: analyze-patterns feeds the fence
-// body to a real YAML parser (JSON is a YAML subset, so json fences parse fine there),
-// while yamlStr below only extracts `key: value` lines — a json fence would "match"
-// and silently yield null company/role/advertised_comp. Rejecting it outright means
-// the report falls back to the legacy no-Machine-Summary path instead.
-const FENCE_RE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
-const yamlStr = (body, key) => {
-  const m = body.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
-  if (!m) return null;
-  const v = m[1].trim().replace(/^["']|["']$/g, '');
-  return v === 'null' || v === '' ? null : v;
-};
-
 // --- Report-derived advertised observations ---
-// Extracts advertised_comp + company + role from one report's Machine Summary.
-// num/date come from the filename ({###}-{slug}-{YYYY-MM-DD}.md).
-export function reportToObservation(content, num, date) {
-  const fence = String(content || '').match(FENCE_RE);
-  if (!fence) return null;
-  const body = fence[1];
-  const company = yamlStr(body, 'company');
-  const role = yamlStr(body, 'role');
-  const adv = yamlStr(body, 'advertised_comp');
+// Shape an advertised observation from already-parsed Machine Summary fields.
+// Shared by reportToObservation (parses raw content) and collectSources (reads
+// the stat-validated reports index). company/role/advertised_comp are normalized
+// so an empty string folds to null exactly as the old hand-rolled yamlStr did.
+const advNorm = (v) => (v === null || v === undefined || v === '' ? null : String(v));
+
+function shapeAdvertisedObservation(company, role, advRaw, num, date) {
+  const adv = advNorm(advRaw);
   // Currency = first standalone UPPERCASE 3-letter token, case-SENSITIVE on
   // purpose: lowercase 3-letter English words in sloppy values ("per", "and")
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
   // UNKNOWN (excluded from gap math, surfaced in currencyMismatches) — acceptable;
   // a corrective TSV observation with an explicit currency overrides it.
-  const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
+  const currencyGuess = adv !== null ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
   return {
-    company, role,
+    company: advNorm(company),
+    role: advNorm(role),
     observation: adv === null ? null : {
       num, date, type: 'advertised', amount: adv, currency: currencyGuess,
       source: 'jd', note: 'from report Machine Summary', parsed: parseAmount(adv),
     },
   };
+}
+
+// Extracts advertised_comp + company + role from one report's Machine Summary
+// using the shared canonical parser (#2385). num/date come from the filename
+// ({###}-{slug}-{YYYY-MM-DD}.md). Unlike the old hand-rolled matcher, a JSON
+// fence now parses (JSON is a YAML subset) instead of being rejected.
+export function reportToObservation(content, num, date) {
+  const parsed = parseMachineSummary(content);
+  if (!parsed) return null;
+  const { summary, extras } = splitEntry(parsed);
+  return shapeAdvertisedObservation(summary.company, summary.role, extras.salaryGap.advertised_comp, num, date);
 }
 
 const pctDelta = (from, to) => ((to - from) / from) * 100;
@@ -417,7 +416,12 @@ function selfTest() {
   assert(reportToObservation(REPORT_FIXTURE_003, '003', '2026-06-26').observation === null, 'null advertised_comp -> no obs');
   assert(reportToObservation('no machine summary', '009', '2026-06-01') === null, 'no fence -> null');
   const jsonReport = '# Eval: JsonCo — Eng\n\n## Machine Summary\n\n```json\n{"company": "JsonCo", "role": "Eng", "advertised_comp": "100k EUR"}\n```\n';
-  assert(reportToObservation(jsonReport, '010', '2026-06-30') === null, 'json fence rejected (yamlStr cannot extract from JSON — see FENCE_RE comment)');
+  // #2385: the shared canonical parser accepts JSON fences (JSON ⊂ YAML), where
+  // the old hand-rolled yamlStr rejected them. A json fence now yields a proper
+  // advertised observation.
+  const rJson = reportToObservation(jsonReport, '010', '2026-06-30');
+  assert(rJson?.company === 'JsonCo' && rJson?.role === 'Eng', 'json fence company/role extracted via shared parser');
+  assert(rJson?.observation?.currency === 'EUR' && rJson?.observation?.parsed?.mid === 100000, 'json fence advertised_comp parsed');
   // generic ISO detection: any uppercase 3-letter token, not a hardcoded allowlist
   const plnReport = '# Eval: PlnCo — Eng\n\n## Machine Summary\n\n```yaml\ncompany: "PlnCo"\nrole: "Eng"\nadvertised_comp: "450-500k PLN"\n```\n';
   const rPln = reportToObservation(plnReport, '011', '2026-07-01');
@@ -537,29 +541,29 @@ function selfTest() {
 }
 
 // --- Real sources ---
-const REPORT_FILE_RE = /^(\d{3})-.*-(\d{4}-\d{2}-\d{2})\.md$/;
-
-function collectSources() {
+function collectSources(options = {}) {
   const apps = {};
   const observations = [];
 
-  if (existsSync(REPORTS_DIR)) {
-    for (const file of readdirSync(REPORTS_DIR)) {
-      const m = file.match(REPORT_FILE_RE);
-      if (!m) continue;
-      const [, num, date] = m;
-      let content;
-      try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
-      const r = reportToObservation(content, num, date);
-      if (r) {
-        apps[num] = { company: r.company, role: r.role };
-        if (r.observation) observations.push(r.observation);
-      } else {
-        // report exists but has no Machine Summary (legacy) — still a valid
-        // tracker row, so log observations against it are NOT orphans
-        apps[num] = { company: null, role: null };
-      }
+  // Reports feed advertised observations through the shared, stat-validated
+  // index (#2385): the Machine Summary is parsed once and cached across runs and
+  // across analyze-patterns/upskill/salary-gap. --no-cache skips read+write.
+  const index = loadReportsIndex({ noCache: options.noCache });
+  for (const [file, entry] of index) {
+    const m = file.match(REPORT_FILE_RE);
+    if (!m) continue;
+    const [, num, date] = m;
+    if (!entry.summary) {
+      // report exists but has no Machine Summary (legacy) — still a valid
+      // tracker row, so log observations against it are NOT orphans
+      apps[num] = { company: null, role: null };
+      continue;
     }
+    const r = shapeAdvertisedObservation(
+      entry.summary.company, entry.summary.role, entry.extras.salaryGap.advertised_comp, num, date,
+    );
+    apps[num] = { company: r.company, role: r.role };
+    if (r.observation) observations.push(r.observation);
   }
 
   if (existsSync(OBS_PATH)) {
@@ -673,13 +677,13 @@ function main() {
       console.error('Usage: node salary-gap.mjs --stated-for <tracker#>');
       process.exit(1);
     }
-    const { observations } = collectSources();
+    const { observations } = collectSources({ noCache });
     const stated = getStatedObservations(observations, statedForNum);
     console.log(JSON.stringify({ num: statedForNum, stated }, null, 2));
     return;
   }
 
-  const { apps, observations } = collectSources();
+  const { apps, observations } = collectSources({ noCache });
   const result = fold(observations, apps, loadProfileDesired());
 
   if (summaryMode) {

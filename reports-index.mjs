@@ -74,6 +74,9 @@ export const CORE_SUMMARY_FIELDS = new Set([
   // Work-authorization / visa-sponsorship tier from Block A (report + Machine
   // Summary only). Allowlisted so it round-trips; no consumer logic yet.
   'work_auth',
+  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
+  // Allowlisted so it round-trips; no consumer logic yet.
+  'reports_to',
 ]);
 
 // Report filename shape — same as salary-gap.mjs's REPORT_FILE_RE, so sentinels
