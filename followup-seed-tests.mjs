@@ -41,8 +41,15 @@ let failed = 0;
 function pass(m) { console.log(`PASS ${m}`); passed++; }
 function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
+// Mirror of followup-seed.mjs's todayStr(): the LOCAL date, not the UTC one.
+// This helper used toISOString() too, so tests 1 and 4 asserted the seed's
+// today against UTC's today. They agree only while the host is west of nothing
+// — every US evening after 20:00 Eastern the two dates differ and both
+// assertions would have gone red. The bug and its test were the same mistake.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 // --- sandbox helpers --------------------------------------------------------
@@ -488,6 +495,45 @@ function cleanup(sandbox) {
   if (res.code === 0) pass('17. ownerless lock older than the grace period is still recovered');
   else fail(`17. ownerless lock older than the grace period is still recovered — got ${res.code}\n${res.stdout}${res.stderr}`);
   cleanup(sb);
+}
+
+// ── Test 18: the pin's (set …) stamp is the LOCAL date, not UTC ──────────────
+{
+  // Two zones 26 hours apart, so their wall-clock dates can never both equal
+  // the UTC date: at any instant UTC+14 and UTC-12 are on different days.
+  // A UTC stamp is identical in both, so "the two differ" is a complete test
+  // that cannot pass by accident of when it runs. Asserting against the host's
+  // own today would go green trivially in CI, where TZ is UTC — which is
+  // exactly how this bug survived: two existing assertions did just that.
+  const setDates = ['Etc/GMT-14', 'Etc/GMT+12'].map((TZ) => { // POSIX sign: UTC+14, UTC-12
+    const sb = makeSandbox();
+    writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+    // --date pins the applied date, so nextDate is fixed and only the (set …)
+    // stamp — the thing under test — can vary between the two runs.
+    const res = run(['1', '--date', '2026-06-20'], sb, { TZ });
+    const override = res.code === 0
+      ? parseNextOverrides(readFileSync(sb.followups, 'utf-8')).get(1)
+      : null;
+    cleanup(sb);
+    return override?.setDate ?? null;
+  });
+
+  if (setDates.every(Boolean)) pass('18. both zone runs seeded a pin');
+  else fail(`18. both zone runs seeded a pin — got ${JSON.stringify(setDates)}`);
+
+  if (setDates[0] && setDates[1] && setDates[0] !== setDates[1]) {
+    pass(`18. (set …) differs between UTC+14 and UTC-12, i.e. it is local (${setDates[0]} vs ${setDates[1]})`);
+  } else {
+    fail(`18. (set …) is the same in UTC+14 and UTC-12 — still stamping UTC (${setDates[0]} vs ${setDates[1]})`);
+  }
+
+  // …and each is genuinely that zone's calendar day, not merely different.
+  ['Etc/GMT-14', 'Etc/GMT+12'].forEach((TZ, i) => {
+    if (!setDates[i]) return;
+    const expected = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+    if (setDates[i] === expected) pass(`18. (set …) matches the ${TZ} calendar day`);
+    else fail(`18. (set …) for ${TZ} — expected ${expected}, got ${setDates[i]}`);
+  });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

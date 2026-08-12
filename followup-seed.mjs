@@ -91,7 +91,21 @@ export class SeedError extends Error {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  // LOCAL date, never UTC. `toISOString()` returns the UTC day, so anywhere
+  // west of Greenwich an evening run answers "today" with tomorrow: at 20:00
+  // US Eastern this returned the next calendar day. That lands in two places
+  // that both matter — the fallback applied date when a row carries no
+  // "Applied YYYY-MM-DD" note, and the `(set …)` stamp on the pin — so an
+  // application seeded on a US evening got a follow-up schedule built off a
+  // day that had not happened yet.
+  //
+  // Only "what day is it here" changes. Date ARITHMETIC elsewhere in this file
+  // and in followup-cadence.mjs stays on UTC-midnight parsing, which is
+  // internally consistent and unaffected: `parseDate('2026-06-20')` and
+  // `isValidCalendarDate()` round-trip through UTC on purpose.
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /**
