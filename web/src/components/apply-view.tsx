@@ -270,10 +270,17 @@ function ApplyExitBar() {
   // reset() also closes the headless form session on the user's machine —
   // navigating away without it strands the browser this page opened. The
   // destination is read before reset() clears the origin it comes from.
+  //
+  // The staleness check comes FIRST, before reset(). By the time a late status
+  // response gets here the user may have started a different application, and
+  // reset() is not addressed to a particular session: it would close whichever
+  // one is open now, taking a form the user is in the middle of with it.
+  // Leaving that session alone is the same outcome as navigating away from the
+  // page by any other route.
   function leave() {
+    if (!onPage.current) return;
     const target = resolveReturnPath(a.from);
     a.reset();
-    if (!onPage.current) return;
     router.push(target);
     router.refresh();
   }
@@ -296,8 +303,11 @@ function ApplyExitBar() {
       }
       leave();
     } catch {
-      if (!onPage.current) return; // moved on already; the row is unchanged
-      setError("Couldn't reach the tracker — the row is unchanged.");
+      if (!onPage.current) return; // moved on already
+      // The route writes the tracker before it answers, so a connection that
+      // drops on the way back leaves the write's fate genuinely unknown —
+      // claiming the row is untouched here would be a guess.
+      setError("Couldn't confirm the update — check the row in your tracker before relying on it.");
       setMarking(false);
     }
   }
