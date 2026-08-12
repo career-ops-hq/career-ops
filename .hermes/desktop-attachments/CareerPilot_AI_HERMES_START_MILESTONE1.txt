@@ -1,0 +1,76 @@
+# CAREERPILOT AI — HERMES STARTPROMPT
+# START ONLY MILESTONE 1
+
+Use this project specification as the governing requirement:
+CareerPilot_AI_MASTER_PROMPT_SAFE.txt
+
+Project target:
+ /Volumes/LaCie/AI/CareerPilot AI
+
+Original project:
+Career-Ops
+
+IMPORTANT:
+Do not delete, overwrite, move, or rename anything yet.
+
+Perform these actions in order:
+
+1. Verify that /Volumes/LaCie is mounted and writable.
+2. Find the actual existing Career-Ops or CareerPilot AI repository.
+3. Show the exact project path.
+4. Read the README, package files, build configuration, application configuration, database configuration, and Git configuration.
+5. Record:
+   - current Git branch,
+   - git status,
+   - current commit,
+   - untracked files,
+   - modified files,
+   - project technology stack,
+   - start command,
+   - test command,
+   - build command.
+6. Create a verified, timestamped backup without removing the original.
+7. Create the branch:
+   feature/cv-intelligence-studio
+8. Create:
+   docs/phase-2-baseline-report.md
+9. Analyze the existing CV functionality.
+10. Prepare a file-by-file implementation plan for:
+    - Career Master Profile,
+    - secure CV import,
+    - CV version management.
+11. Implement only Milestone 1.
+12. Run:
+    - lint,
+    - type checking,
+    - unit tests,
+    - integration tests where available,
+    - build,
+    - smoke test.
+13. Verify actual file modifications using git diff and git status.
+14. Deliver a final report containing:
+    - exact project path,
+    - backup path,
+    - branch name,
+    - changed files,
+    - created files,
+    - test results,
+    - build result,
+    - working functions,
+    - remaining problems,
+    - risks,
+    - next recommended action.
+
+STOP and ask for approval before:
+- deleting files,
+- moving or renaming the original project,
+- overwriting user data,
+- changing database format without a migration,
+- installing heavy dependencies,
+- requesting administrator rights,
+- connecting external accounts,
+- using paid APIs,
+- sending email,
+- publishing or deploying the application.
+
+Do not provide only instructions. Execute using available tools, verify the result, and report only what actually happened.

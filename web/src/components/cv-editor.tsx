@@ -36,6 +36,7 @@ export function CvEditor() {
         setDirty(false);
         setExists(true);
         setSaved(true);
+        window.dispatchEvent(new Event("career:cv-updated"));
         setTimeout(() => setSaved(false), 2000);
       }
     } finally {

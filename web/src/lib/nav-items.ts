@@ -9,7 +9,10 @@ import {
   Settings,
   WandSparkles,
   Activity,
+  BellRing,
   CircleHelp,
+  Brain,
+  Mail,
 } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import { NAVIGATION_SECTIONS, searchNavigation } from "@/lib/navigation-model.mjs";
@@ -33,9 +36,12 @@ export type NavSection = {
 const ICONS: Record<string, NavItem["icon"]> = {
   dashboard: LayoutDashboard,
   explore: Compass,
+  intelligence: Brain,
+  watch: BellRing,
   pipeline: ListChecks,
   followups: Send,
   apply: WandSparkles,
+  mail: Mail,
   portals: Radar,
   analytics: BarChart3,
   cv: FileText,

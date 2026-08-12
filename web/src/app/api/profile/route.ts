@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { readCareerMasterProfile, saveCareerMasterProfile } from "@/lib/career-profile-store.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
 export const runtime = "nodejs";
@@ -55,6 +56,39 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
   return out;
 }
 
+export async function GET() {
+  try {
+    const root = careerOpsRoot();
+    const profile = await readCareerMasterProfile(root);
+    return Response.json({ profile });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "profile read failed" },
+      { status: 409 },
+    );
+  }
+}
+
+export async function PUT(req: Request) {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "bad json" }, { status: 400 });
+  }
+  if (!isObj(body)) return Response.json({ error: "profile object required" }, { status: 400 });
+
+  try {
+    const result = await saveCareerMasterProfile(careerOpsRoot(), body);
+    return Response.json({ ok: true, profile: result });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "profile write failed" },
+      { status: 409 },
+    );
+  }
+}
+
 export async function POST(req: Request) {
   let patch: ProfilePatch;
   try {
@@ -94,6 +128,12 @@ export async function POST(req: Request) {
     // Back up the prior profile before the first normalized write (yaml.dump
     // reformats — comments are not preserved; the .bak is the safety net).
     atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {
+      // Some removable filesystems do not support POSIX modes; atomic writing
+      // and backup protection still apply there.
+    }
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }

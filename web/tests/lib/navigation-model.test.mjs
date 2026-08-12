@@ -9,12 +9,17 @@ import {
 const EXPECTED_ROUTES = [
   "/",
   "/explore",
+  "/jobs/intelligence",
+  "/watch",
   "/pipeline",
   "/followups",
   "/apply",
+  "/application-studio",
+  "/email-hub",
   "/portals",
   "/analytics",
   "/cv",
+  "/cv/tailor",
   "/jobs",
   "/config",
   "/guide",
@@ -39,6 +44,8 @@ test("every destination has Swedish guidance and searchable keywords", () => {
 
 test("smart search matches labels, descriptions and synonyms", () => {
   assert.equal(searchNavigation("cv")[0].href, "/cv");
+  assert.equal(searchNavigation("bevakning")[0].href, "/watch");
+  assert.equal(searchNavigation("distansjobb")[0].href, "/watch");
   assert.equal(searchNavigation("ansökan")[0].href, "/apply");
   assert.equal(searchNavigation("statistik")[0].href, "/analytics");
   assert.equal(searchNavigation("automatisering")[0].href, "/jobs");

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry";
 import { scoreNum } from "@/lib/format";
 import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
+import { selectAssistantCli } from "@/lib/assistant-cli-selection.mjs";
 import { cn } from "@/lib/cn";
 
 // ── message model: messages are PART arrays so a live worker card can render
@@ -172,6 +173,21 @@ export function AssistantConsole() {
     read();
     window.addEventListener("storage", read);
     return () => window.removeEventListener("storage", read);
+  }, []);
+
+  // A fresh WKWebView has no saved CLI selection. Fall back to an installed
+  // CLI so the assistant works immediately in the native app.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/clis")
+      .then((response) => response.json())
+      .then((data: { clis?: Array<{ id: string; installed: boolean }> }) => {
+        if (!cancelled) setCliId((current) => selectAssistantCli(current, data.clis ?? []));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // restore + persist conversation

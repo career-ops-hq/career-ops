@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import { createOmniRouteClient } from "@/lib/omniroute-client.mjs";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -121,6 +122,8 @@ export async function POST(req: Request) {
     start(controller) {
       let buf = "";
       let emitted = false;
+      let finishing = false;
+      let cliFailure = "";
       killer = setTimeout(() => {
         try {
           child.kill("SIGTERM");
@@ -171,6 +174,8 @@ export async function POST(req: Request) {
             if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
               const text = obj.event.delta?.text;
               if (typeof text === "string") emit(text);
+            } else if (obj.type === "result" && obj.is_error) {
+              cliFailure = String(obj.result || "CLI authentication failed");
             }
           } catch {
             /* partial / non-json line — skip */
@@ -180,19 +185,31 @@ export async function POST(req: Request) {
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
         if (/error|not found|denied|fatal/i.test(s)) {
-          safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
+          cliFailure = s.trim();
         }
       });
-      child.on("error", (e) => {
-        safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
-        safeClose();
-      });
-      child.on("close", () => {
+
+      const finish = async () => {
+        if (finishing || closed) return;
+        finishing = true;
         if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
+          const fallback = await createOmniRouteClient({ timeoutMs: 60_000 }).chat(prompt);
+          if (fallback.ok) {
+            emit(fallback.content);
+          } else {
+            const cliDetail = cliFailure || `${spec.name} gav inget svar`;
+            safeEnqueue(
+              `_(${cliDetail}. OmniRoute-fallback misslyckades: ${fallback.error || "okänt fel"})_`,
+            );
+          }
         }
         safeClose();
+      };
+      child.on("error", (e) => {
+        cliFailure = `error launching ${spec.name}: ${e.message}`;
+        void finish();
       });
+      child.on("close", () => void finish());
     },
     cancel() {
       closed = true;

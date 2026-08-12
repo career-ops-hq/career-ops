@@ -1,0 +1,1598 @@
+# CAREERPILOT AI — MASTER DEVELOPMENT SPECIFICATION
+# SAFE EXECUTION CONTROL — PRESERVE EVERYTHING
+
+## ABSOLUTE RULES
+
+1. Do not delete any existing file, feature, integration, configuration, user data, database, Git history, documentation, or working code.
+2. Do not overwrite the original project.
+3. Do not move or rename the original project folder until:
+   - a verified backup exists,
+   - Git status is recorded,
+   - the application has been built and tested,
+   - the user has explicitly approved the move or rename.
+4. Treat the existing project as the source of truth. Inspect the real repository before making assumptions.
+5. Make all development changes in a new Git branch.
+6. Use additive development, migrations, adapters, feature flags, and compatibility layers instead of destructive replacement.
+7. Before changing a file, record why it must change.
+8. After changing a file, verify that the file was actually modified and that the application still builds.
+9. Never report a feature as completed unless it is:
+   - implemented,
+   - connected to the UI,
+   - tested,
+   - documented,
+   - verified in a working build.
+10. Stop and ask for approval before any destructive, irreversible, paid, publishing, account-connection, credential, database-format, or administrator-level action.
+
+## PROJECT IDENTITY
+
+Original project:
+Career-Ops
+
+Development name:
+CareerPilot AI
+
+Planned development location:
+ /Volumes/LaCie/AI/CareerPilot AI
+
+The original Career-Ops project must remain recoverable. Renaming must preserve Git history, imports, dependencies, configuration, and user data.
+
+## EXECUTION METHOD
+
+Work milestone by milestone.
+
+For every milestone:
+
+1. Inspect the current implementation.
+2. Create or verify a backup.
+3. Record Git status.
+4. Create or use the correct feature branch.
+5. Write an implementation plan.
+6. Implement only the current milestone.
+7. Run lint, type checking, tests, build, and smoke test.
+8. List every changed file.
+9. Document working and non-working parts.
+10. Create a Git commit only after verification.
+11. Do not continue to the next milestone until the current milestone is stable.
+
+## FIRST EXECUTION ONLY
+
+Begin with Milestone 1 only.
+
+Do not attempt App Store packaging, Windows packaging, monetization, social-media integration, email sending, mass automation, or external account connections during Milestone 1.
+
+The long-term requirements below remain valid and must not be deleted. They are the complete product specification.
+
+---
+
+# PROJECT RENAME
+
+Rename the project without changing any existing functionality.
+
+Current name:
+Career-Ops
+
+New name:
+CareerPilot AI
+
+Rename:
+
+- Project title
+- App title
+- Window title
+- Repository title (only references)
+- Package name
+- Branding
+- Icons
+- Documentation
+- README
+- Configuration references
+- Internal display names
+
+Rename project folder to:
+
+CareerPilot AI
+
+Location:
+
+/Volumes/LaCie/AI/CareerPilot AI
+
+Keep Git history.
+
+Do NOT break imports or dependencies.
+
+------------------------------------------------
+
+# PROJECT GOAL
+
+CareerPilot AI shall become a complete AI-powered career operating system.
+
+The application must remain simple enough for non-technical users while offering enterprise-grade capabilities.
+
+Everything must feel native on macOS.
+
+Future support:
+
+• Windows
+• Linux
+• iPhone
+• Android
+• iPad
+• Web
+
+Architecture must therefore be cross-platform from the beginning.
+
+------------------------------------------------
+
+# USER EXPERIENCE
+
+The interface should feel like:
+
+Notion
+Linear
+Raycast
+Apple
+LinkedIn Jobs
+
+Fast.
+
+Minimal.
+
+Professional.
+
+Dark Mode.
+
+No clutter.
+
+Animations should be smooth.
+
+------------------------------------------------
+
+# WINDOW SYSTEM
+
+Improve window behaviour.
+
+Requirements:
+
+✔ Entire window draggable by holding left mouse button anywhere on empty background.
+
+✔ Remember last size.
+
+✔ Remember last position.
+
+✔ Remember sidebar width.
+
+✔ Remember opened pages.
+
+✔ Support multiple monitors.
+
+✔ Snap to screen edges.
+
+✔ macOS fullscreen.
+
+✔ Floating Assistant window.
+
+------------------------------------------------
+
+# JOB SEARCH
+
+Redesign job search completely.
+
+Inspired by LinkedIn.
+
+Layout:
+
+LEFT
+
+Saved Searches
+
+Filters
+
+Countries
+
+Keywords
+
+Companies
+
+Salary
+
+Remote
+
+Hybrid
+
+On-site
+
+Experience
+
+Employment type
+
+Industries
+
+Language
+
+Smart AI Filters
+
+CENTER
+
+Scrollable job results
+
+Infinite loading
+
+Grouped by relevance
+
+AI Match Score
+
+Company Rating
+
+Salary estimate
+
+Benefits
+
+Application difficulty
+
+RIGHT
+
+Job details
+
+AI Summary
+
+Match explanation
+
+Missing skills
+
+Tailored CV
+
+Tailored Cover Letter
+
+Required certifications
+
+Similar jobs
+
+Company information
+
+Recruiter
+
+People working there
+
+Latest company news
+
+------------------------------------------------
+
+# JOB SOURCES
+
+Keep all current sources.
+
+Expand with connectors.
+
+LinkedIn
+
+Indeed
+
+Glassdoor
+
+Monster
+
+StepStone
+
+Arbetsförmedlingen
+
+EURES
+
+Greenhouse
+
+Lever
+
+Ashby
+
+Workday
+
+SmartRecruiters
+
+Jobylon
+
+Teamtailor
+
+Workable
+
+Personio
+
+Recruitee
+
+Google Jobs
+
+Company career pages
+
+Country-specific portals
+
+Architecture must support plugins.
+
+------------------------------------------------
+
+# ACCOUNT CONNECTIONS
+
+Allow secure login.
+
+Supported:
+
+LinkedIn
+
+Google
+
+Microsoft
+
+Apple
+
+GitHub
+
+Facebook
+
+X
+
+Discord
+
+Slack
+
+Only use official OAuth.
+
+Never ask for passwords.
+
+Store tokens securely.
+
+------------------------------------------------
+
+# EMAIL HUB
+
+Connect:
+
+Gmail
+
+Outlook
+
+Microsoft 365
+
+IMAP
+
+Capabilities:
+
+Search job emails
+
+Interview invitations
+
+Rejections
+
+Offers
+
+Unread messages
+
+AI categorization
+
+Draft replies
+
+Generate responses
+
+Reminder system
+
+Calendar sync
+
+------------------------------------------------
+
+# CALENDAR
+
+Google Calendar
+
+Outlook Calendar
+
+Apple Calendar
+
+Interview reminders
+
+Travel planning
+
+Meeting preparation
+
+Automatic follow-up reminders
+
+------------------------------------------------
+
+# CV STUDIO
+
+AI Resume Studio
+
+Import:
+
+PDF
+
+Word
+
+LinkedIn
+
+Europass
+
+Generate ATS optimized CV.
+
+Generate company optimized CV.
+
+Generate recruiter optimized CV.
+
+Generate country specific CV.
+
+Keep multiple versions.
+
+Version history.
+
+Difference comparison.
+
+------------------------------------------------
+
+# COVER LETTER STUDIO
+
+Generate personalized letters.
+
+Understand company.
+
+Understand role.
+
+Use previous applications.
+
+Tone selector.
+
+Length selector.
+
+Language selector.
+
+------------------------------------------------
+
+# AI MATCH ENGINE
+
+Read:
+
+CV
+
+Job Description
+
+LinkedIn profile
+
+Portfolio
+
+GitHub
+
+Certificates
+
+Generate:
+
+Match %
+
+Missing skills
+
+Strengths
+
+Weaknesses
+
+Improvement plan
+
+------------------------------------------------
+
+# AUTO IMPROVEMENT
+
+AI may suggest:
+
+Better wording
+
+ATS improvements
+
+Keyword optimization
+
+Formatting improvements
+
+Achievement rewriting
+
+Skill recommendations
+
+------------------------------------------------
+
+# COUNTRY SUPPORT
+
+Detect country automatically.
+
+Examples:
+
+Sweden
+
+Norway
+
+Denmark
+
+Germany
+
+UK
+
+USA
+
+Canada
+
+Australia
+
+Each country shall use:
+
+Language
+
+Currency
+
+Employment laws
+
+CV format
+
+Recruitment practices
+
+Local job boards
+
+------------------------------------------------
+
+# AUTOMATION
+
+Allow:
+
+Saved searches
+
+Daily search
+
+Hourly search
+
+Auto notifications
+
+Auto apply preparation
+
+Interview reminders
+
+Deadline reminders
+
+CV updates
+
+------------------------------------------------
+
+# MONETIZATION
+
+Prepare architecture.
+
+Free
+
+Premium
+
+Professional
+
+Enterprise
+
+Features:
+
+Subscription
+
+Stripe
+
+Apple
+
+Google Play
+
+Licensing
+
+Referral program
+
+Affiliate integrations
+
+Analytics
+
+------------------------------------------------
+
+# SECURITY
+
+Use encrypted storage.
+
+macOS Keychain
+
+Windows Credential Manager
+
+Linux Secret Service
+
+Never expose tokens.
+
+------------------------------------------------
+
+# PERFORMANCE
+
+Intel Mac
+
+8GB RAM compatible.
+
+Lazy loading.
+
+Background indexing.
+
+Virtualized lists.
+
+Caching.
+
+------------------------------------------------
+
+# FUTURE
+
+Package for:
+
+macOS
+
+Windows
+
+Linux
+
+App Store
+
+Microsoft Store
+
+Snap
+
+Flatpak
+
+Future mobile support.
+
+------------------------------------------------
+
+Deliver development in phases.
+
+Never break existing functionality.
+
+Every completed phase must compile successfully before continuing.
+
+```text
+# CAREERPILOT AI — PHASE 2
+# CV INTELLIGENCE, ATS MATCHING AND JOB APPLICATION STUDIO
+
+Du arbetar vidare med projektet CareerPilot AI.
+
+Projektets huvudsakliga arbetsmapp ska vara:
+
+/Volumes/LaCie/AI/CareerPilot AI/
+
+VIKTIGT:
+Sök först efter den befintliga projektmappen och kontrollera den verkliga strukturen.
+Skapa inte ett nytt tomt projekt om CareerPilot AI redan finns.
+Behåll Git-historik, befintliga funktioner, användardata och fungerande integrationer.
+
+Arbeta som:
+
+- Senior Software Architect
+- Senior Full-Stack Developer
+- AI Engineer
+- ATS and Recruitment Systems Specialist
+- UX/UI Designer
+- QA and Security Engineer
+
+Målet är att utveckla ett professionellt men enkelt system som hjälper användaren att:
+
+1. importera sitt befintliga CV
+2. analysera en jobbannons
+3. jämföra CV och jobbannons
+4. identifiera saknade eller svaga delar
+5. skapa en anpassad CV-version
+6. förbättra ATS-kompatibiliteten
+7. skapa personligt brev och ansökningssvar
+8. spara alla versioner och ändringar
+9. exportera till PDF och DOCX
+10. behålla full kontroll innan något skickas
+
+==================================================
+A. SÄKER START OCH PROJEKTKONTROLL
+==================================================
+
+Innan någon kod ändras:
+
+1. Kontrollera att /Volumes/LaCie är monterad och skrivbar.
+2. Leta upp den nuvarande Career-Ops/CareerPilot AI-koden.
+3. Kontrollera Git-status.
+4. Identifiera teknikstack, startkommandon och build-kommandon.
+5. Kör befintliga tester.
+6. Skapa en fullständig säkerhetskopia.
+7. Skapa en ny Git-branch:
+
+feature/cv-intelligence-studio
+
+8. Skapa en rapport:
+
+docs/phase-2-baseline-report.md
+
+Rapporten ska innehålla:
+
+- nuvarande projektstruktur
+- teknikstack
+- fungerande funktioner
+- kända fel
+- saknade funktioner
+- risker
+- rekommenderad implementation
+- filer som planeras att ändras
+
+Radera eller flytta inte fungerande kod innan säkerhetskopian är verifierad.
+
+==================================================
+B. CV MASTER PROFILE
+==================================================
+
+Bygg en central och strukturerad profil som heter:
+
+Career Master Profile
+
+Den ska vara användarens faktabank och innehålla:
+
+- namn och kontaktinformation
+- professionell sammanfattning
+- yrkesroller
+- arbetslivserfarenhet
+- arbetsgivare
+- anställningsperioder
+- arbetsuppgifter
+- dokumenterade resultat
+- tekniska färdigheter
+- mjuka färdigheter
+- utbildningar
+- certifieringar
+- språk
+- projekt
+- branscher
+- ledarskapserfarenhet
+- geografiska preferenser
+- arbetsform: distans, hybrid eller på plats
+- lönepreferenser
+- behörigheter och körkort
+- rätt att arbeta i olika länder
+- referenser, endast när användaren väljer det
+
+Master Profile ska vara den enda verifierade faktakällan när AI:n skapar nya CV-versioner.
+
+AI:n får:
+
+- formulera om
+- förkorta
+- strukturera
+- prioritera
+- översätta
+- tydliggöra
+- anpassa ordval
+- lyfta relevanta erfarenheter
+
+AI:n får aldrig:
+
+- hitta på arbetsgivare
+- hitta på anställningar
+- ändra anställningsdatum utan godkännande
+- skapa falska certifikat
+- skapa falska utbildningar
+- lägga till tekniska kunskaper utan stöd
+- hitta på ekonomiska resultat eller procentsatser
+- påstå att användaren har erfarenhet som inte finns i Master Profile
+
+Om information saknas ska systemet visa:
+
+"Behöver verifieras av användaren"
+
+Användaren ska kunna godkänna, ändra eller avvisa informationen.
+
+==================================================
+C. IMPORT AV CV
+==================================================
+
+Bygg en professionell importfunktion för:
+
+- PDF
+- DOCX
+- TXT
+- Markdown
+- manuellt inklistrad text
+- strukturerad profilimport
+- LinkedIn-exportfil när användaren själv tillhandahåller den
+
+Vid import ska systemet:
+
+1. läsa dokumentets innehåll
+2. identifiera sektioner
+3. extrahera arbetslivserfarenhet
+4. identifiera datum, roller och företag
+5. identifiera kompetenser
+6. identifiera utbildningar och certifieringar
+7. hitta möjliga dubbletter
+8. markera oklar eller motsägelsefull information
+9. visa en förhandsgranskning
+10. kräva användarens godkännande innan Master Profile uppdateras
+
+Originalfilen får aldrig skrivas över.
+
+Spara den i:
+
+storage/original-cv/
+
+Skapa versionshantering:
+
+storage/cv-versions/
+
+==================================================
+D. JOBBANNONSIMPORT
+==================================================
+
+Användaren ska kunna lägga in en jobbannons genom:
+
+- URL
+- inklistrad text
+- PDF
+- skärmdump
+- sparat jobb från CareerPilot AI
+- e-postmeddelande
+- importerad jobbannons från en tillåten integration
+
+Jobbannonsen ska analyseras och struktureras i:
+
+- jobbtitel
+- företag
+- plats
+- land
+- distans/hybrid/på plats
+- anställningstyp
+- senioritetsnivå
+- obligatoriska krav
+- meriterande krav
+- tekniska kompetenser
+- mjuka kompetenser
+- språk
+- utbildningskrav
+- certifieringar
+- branscherfarenhet
+- ledarskapskrav
+- resor
+- körkort
+- säkerhetsklassning
+- nyckelord
+- ansvar
+- önskade resultat
+- ansökningsdatum
+- kontaktperson
+- lön, när den anges
+
+Systemet ska skilja på:
+
+- Required
+- Preferred
+- Optional
+- Unclear
+
+==================================================
+E. CV- OCH JOBBMATCHNING
+==================================================
+
+Bygg en transparent matchningsmotor.
+
+Beräkna separata poäng för:
+
+- yrkesroll
+- relevant erfarenhet
+- tekniska färdigheter
+- branschkunskap
+- utbildning
+- certifieringar
+- språk
+- ledarskap
+- projektledning
+- senioritetsnivå
+- plats och mobilitet
+- arbetsform
+- arbetsrätt
+- nyckelord
+- CV-struktur
+- ATS-kompatibilitet
+
+Visa:
+
+- Total Match
+- Verified Match
+- Potential Match
+- Missing Requirements
+- Transferable Skills
+- Risk Factors
+- Recommended Actions
+
+Matchningen får inte baseras endast på antal nyckelord.
+
+Den ska förstå att relaterade erfarenheter kan vara överförbara.
+
+Exempel:
+
+- service delivery kan relatera till operations management
+- EV-support kan relatera till automotive technical support
+- datacenterdrift kan relatera till critical infrastructure
+- teamledning kan relatera till people management
+- commissioning kan relatera till implementation och deployment
+
+Varje poäng ska kunna öppnas så att användaren ser varför den gavs.
+
+Visa inte falsk exakthet.
+
+Använd nivåerna:
+
+- Excellent Match
+- Strong Match
+- Partial Match
+- Weak Match
+- Missing Evidence
+
+==================================================
+F. ATS ANALYZER
+==================================================
+
+Bygg en ATS Analyzer som kontrollerar CV:t mot vanliga rekryteringssystem.
+
+Systemet ska kontrollera:
+
+- om texten kan läsas korrekt
+- om rubriker är tydliga
+- om kolumner riskerar felaktig läsordning
+- om tabeller stör parsningen
+- om ikoner ersätter viktig text
+- om kontaktuppgifter kan identifieras
+- om datumformat är konsekventa
+- om jobbtitlar är tydliga
+- om dokumentet innehåller bilder med viktig information
+- om typsnitt är inbäddade eller kompatibla
+- om sidhuvud och sidfot innehåller kritisk information
+- om filnamnet är professionellt
+- om PDF-texten är markerbar
+- om kompetenser speglar jobbannonsen
+- om stavning och språk är konsekventa
+- om onödiga grafiska objekt påverkar läsbarheten
+
+Stöd analys för vanliga ATS-miljöer såsom:
+
+- Workday
+- Greenhouse
+- Lever
+- Teamtailor
+- SmartRecruiters
+- SuccessFactors
+- Oracle Recruiting
+- iCIMS
+- Workable
+- Personio
+- Recruitee
+- Ashby
+
+Systemet ska inte påstå att det garanterat kan kringgå eller manipulera ett ATS.
+
+Målet är att skapa:
+
+- tydlig struktur
+- korrekt relevans
+- hög läsbarhet
+- legitim nyckelordsanpassning
+- korrekt dokumentformat
+
+Visa en ATS Check Report med:
+
+- Passed
+- Warning
+- Critical
+- Recommended Fix
+
+==================================================
+G. AI CV TAILORING
+==================================================
+
+Lägg till en huvudknapp:
+
+"Anpassa CV till jobbet"
+
+När den används ska systemet skapa en ny CV-version och aldrig ändra originalet.
+
+Arbetsflöde:
+
+1. analysera jobbannonsen
+2. analysera Master Profile
+3. jämför krav och verifierade erfarenheter
+4. prioritera relevant erfarenhet
+5. skriv om professionell sammanfattning
+6. föreslå relevant jobbtitel eller profilrubrik
+7. förbättra erfarenhetspunkter
+8. flytta relevanta kompetenser högre
+9. minska mindre relevant innehåll
+10. kontrollera ATS-format
+11. visa alla ändringar
+12. kräva användarens godkännande
+13. exportera först efter godkännande
+
+Skapa tre anpassningsnivåer:
+
+1. Light
+   - små språkförbättringar
+   - oförändrad struktur
+   - relevanta nyckelord
+
+2. Professional
+   - förbättrad sammanfattning
+   - omprioriterade erfarenheter
+   - förbättrade resultatpunkter
+   - ATS-optimering
+
+3. Targeted
+   - stark anpassning för en specifik tjänst
+   - endast verifierad information
+   - rollspecifik profil
+   - tydligt relevansfokus
+   - full ändringsgranskning
+
+==================================================
+H. CHANGE REVIEW — FÖRE OCH EFTER
+==================================================
+
+Bygg en jämförelsevy med:
+
+Vänster:
+Originalversion
+
+Höger:
+Föreslagen version
+
+Markera:
+
+- tillagd text
+- borttagen text
+- omformulerad text
+- omplacerad text
+- nyckelord
+- information som måste verifieras
+
+Användaren ska kunna:
+
+- godkänna allt
+- godkänna en ändring
+- avvisa en ändring
+- redigera manuellt
+- återställa
+- spara som ny version
+
+Spara en ändringslogg med:
+
+- datum
+- jobbannons
+- använd modell
+- ändrade avsnitt
+- användarens godkännande
+- exporterad fil
+
+==================================================
+I. SMART EXPERIENCE WRITER
+==================================================
+
+Bygg en AI-funktion som förbättrar erfarenhetsbeskrivningar.
+
+Den ska kunna omvandla svaga formuleringar som:
+
+"Ansvarade för teknisk support"
+
+till tydligare formuleringar, exempelvis:
+
+"Levererade teknisk felsökning och eskaleringsstöd för komplexa fordons- och laddningsrelaterade problem i nordiska kundmiljöer."
+
+Men den får inte lägga till siffror, resultat eller ansvar som inte är verifierade.
+
+Funktionen ska föreslå:
+
+- handling
+- tekniskt sammanhang
+- omfattning
+- verksamhetsvärde
+- resultat, när det finns verifierat underlag
+
+Markera osäkra påståenden och begär godkännande.
+
+==================================================
+J. CV SCORECARD
+==================================================
+
+Visa en tydlig CV Scorecard:
+
+- Job Match
+- ATS Readability
+- Relevant Experience
+- Skills Coverage
+- Keyword Coverage
+- Evidence Strength
+- Clarity
+- Impact
+- Language Quality
+- Formatting
+- Length
+- Contact Information
+- Overall Readiness
+
+Varje område ska ha:
+
+- poäng
+- förklaring
+- konkreta åtgärder
+- knapp för att korrigera
+
+Lägg till:
+
+"Förbättra alla säkra punkter"
+
+Den får bara automatiskt korrigera språk, struktur och format.
+Faktauppgifter ska kräva användarens godkännande.
+
+==================================================
+K. GAP ANALYSIS
+==================================================
+
+Skapa en Gap Analysis som delar upp resultatet i:
+
+1. Verifierade krav som användaren uppfyller
+2. Relaterade överförbara erfarenheter
+3. Krav där bevis saknas i CV:t
+4. Krav som användaren sannolikt inte uppfyller
+5. Frågor som CareerPilot AI behöver ställa
+
+Exempel på frågor:
+
+- Har du arbetat med ISO 9001 i praktiken?
+- Har du lett budgetansvar?
+- Vilken storlek hade teamet?
+- Har du erfarenhet av OCPP eller ISO 15118?
+- Kan denna erfarenhet styrkas genom ett projekt eller en anställning?
+
+Svaren ska kunna läggas till i Master Profile efter användarens godkännande.
+
+==================================================
+L. PERSONLIGT BREV OCH ANSÖKNINGSSVAR
+==================================================
+
+Generera:
+
+- personligt brev
+- kort motivation
+- svar på "Why are you a good fit?"
+- rekryterarmeddelande
+- LinkedIn-meddelande
+- uppföljningsmeddelande
+- e-postansökan
+- intervjubekräftelse
+- tackmeddelande efter intervju
+
+Texterna ska använda:
+
+- jobbannonsens krav
+- Master Profile
+- den anpassade CV-versionen
+- rätt språk
+- lokal professionell ton
+- önskad längd
+
+Användaren ska kunna välja:
+
+- kort
+- standard
+- utförlig
+- formell
+- mänsklig
+- teknisk
+- ledarskapsinriktad
+- säljande
+
+Inget meddelande får skickas automatiskt utan uttryckligt godkännande.
+
+==================================================
+M. LANDSANPASSNING
+==================================================
+
+CareerPilot AI ska använda användarens valda hemland och jobbland.
+
+Landet ska inte enbart bestämmas av IP-adress.
+
+Vid första start:
+
+1. föreslå land
+2. låt användaren bekräfta
+3. spara valet
+4. låt användaren ändra när som helst
+
+Anpassa:
+
+- språk
+- valuta
+- datumformat
+- CV-standard
+- personligt brev
+- benämningar
+- jobbkällor
+- lönevisning
+- avstånd
+- lokala orter
+- vanliga rekryteringsrutiner
+
+Stöd först:
+
+- Sverige
+- Danmark
+- Norge
+- Finland
+- Tyskland
+- Nederländerna
+- Storbritannien
+- Irland
+- övriga EU
+- USA
+
+För användare i Sverige ska systemet bland annat stödja:
+
+- svenska och engelska CV-versioner
+- SEK per månad och år
+- Malmö, Lund, Göteborg, Stockholm och andra orter
+- distans, hybrid och på plats
+- Arbetsförmedlingen och relevanta svenska jobbkällor
+
+==================================================
+N. CV DESIGNER
+==================================================
+
+Skapa minst tre professionella CV-mallar:
+
+1. ATS Standard
+   - en kolumn
+   - maximal maskinläsbarhet
+   - inga kritiska uppgifter i sidhuvud/sidfot
+
+2. Professional
+   - modern men enkel
+   - diskret visuell hierarki
+   - ATS-kompatibel
+
+3. Executive
+   - för seniora ledar- och specialistroller
+   - tydlig sammanfattning
+   - resultatfokus
+   - professionell design
+
+Lägg senare till fler mallar men prioritera funktion före mängd.
+
+Visa en riktig förhandsgranskning före export.
+
+==================================================
+O. EXPORT OCH FILNAMN
+==================================================
+
+Stöd export till:
+
+- PDF
+- DOCX
+- TXT
+- Markdown
+
+Generera professionella filnamn:
+
+FirstName_LastName_Role_Company_CV.pdf
+FirstName_LastName_Role_Company_CoverLetter.pdf
+
+Exporten ska kontrolleras automatiskt:
+
+- filen går att öppna
+- texten är markerbar
+- inga delar kapas
+- inga tomma sidor
+- rätt sidstorlek
+- rätt språk
+- korrekt filnamn
+- ATS-analyserad
+
+==================================================
+P. JOB SEARCH WORKSPACE
+==================================================
+
+Utveckla jobbsökningsvyn så att den är professionell och enkel.
+
+Layout:
+
+VÄNSTER:
+- sökresultat
+- filter
+- sparade sökningar
+- bevakningar
+
+MITTEN:
+- vald jobbannons
+- företag
+- krav
+- arbetsuppgifter
+- ansökningsknapp
+
+HÖGER:
+- CV Match
+- ATS Match
+- saknade krav
+- föreslagna förbättringar
+- CV-version
+- personligt brev
+- pipeline-status
+- anteckningar
+
+Lägg till filter för:
+
+- sökord
+- jobbtitel
+- företag
+- ort
+- land
+- radie
+- distans
+- hybrid
+- på plats
+- senioritet
+- anställningstyp
+- publiceringsdatum
+- lön
+- språk
+- bransch
+- Easy Apply
+- ansökan på företagets webbplats
+- matchningsnivå
+- källa
+
+Kopiera inte LinkedIns design eller varumärkesidentitet.
+Skapa ett eget professionellt gränssnitt med liknande användbarhet.
+
+==================================================
+Q. INTEGRATIONER OCH BEGRÄNSNINGAR
+==================================================
+
+Behåll befintliga jobbkällor.
+
+Bygg integrationer genom:
+
+- officiella API:er
+- OAuth
+- användarimport
+- tillåtna RSS-flöden
+- tillåtna offentliga jobbkällor
+- användarens egen e-post
+- direkta företagskarriärsidor när användningen är tillåten
+
+Använd inte osäkra lösningar som:
+
+- hårdkodade inloggningsuppgifter
+- dold webbläsarautomation som kringgår säkerhetskontroller
+- CAPTCHA-kringgående
+- automatisk massansökan
+- aggressiv scraping
+- lagring av lösenord i klartext
+
+För LinkedIn:
+
+- bygg kontoanslutning endast där officiell och tillåten integration finns
+- tillåt att användaren öppnar jobb i LinkedIn
+- tillåt import genom URL eller användarens egen exporterade information
+- skapa inte falsk OAuth-funktion om officiell åtkomst saknas
+- visa tydligt vilka funktioner som är tillgängliga
+
+==================================================
+R. E-POSTINTEGRATION
+==================================================
+
+Bygg en separat modul för:
+
+- Gmail
+- Outlook/Microsoft 365
+- IMAP senare, om det kan göras säkert
+
+Använd OAuth.
+
+Systemet ska kunna identifiera:
+
+- jobbaviseringar
+- rekryterarmeddelanden
+- intervjubokningar
+- tester
+- kompletteringsfrågor
+- avslag
+- jobberbjudanden
+- uppföljningsbehov
+
+Skapa utkast till svar.
+
+Kräv användarens godkännande före sändning.
+
+Lägg till:
+
+- "Skapa svar"
+- "Spara som utkast"
+- "Öppna i e-post"
+- "Skicka efter godkännande"
+
+==================================================
+S. DATA, INTEGRITET OCH SÄKERHET
+==================================================
+
+CV, kontaktuppgifter, meddelanden och ansökningsdata är känsliga.
+
+Implementera:
+
+- krypterad lokal databas
+- macOS Keychain för tokens och hemligheter
+- inga hemligheter i Git
+- maskerade API-nycklar
+- möjlighet att koppla bort konto
+- möjlighet att radera importerade data
+- export av användardata
+- tydlig logg över AI-ändringar
+- säkerhetskopiering
+- automatisk återställningspunkt
+
+Lägg till .gitignore för:
+
+- .env
+- tokens
+- lokala databaser
+- personliga CV-filer
+- exporterade ansökningar
+- användarens e-postdata
+- loggar med känslig information
+
+==================================================
+T. UI-KRAV
+==================================================
+
+Användaren ska kunna flytta appfönstret genom att:
+
+- hålla vänster musknapp i appens topbar
+- dra fönstret
+- släppa det på önskad plats
+
+Implementera även:
+
+- vanliga macOS-fönsterknappar
+- minimera
+- maximera
+- återställ
+- fullscreen
+- dubbelklick på topbar
+- sparad fönsterposition
+- sparad fönsterstorlek
+- stöd för flera skärmar
+
+Markera endast ett tydligt topbar-område som draggable.
+Knappar, sökfält och andra interaktiva komponenter får inte bli blockerade av drag-funktionen.
+
+==================================================
+U. KVALITET OCH TESTNING
+==================================================
+
+Skapa tester för:
+
+- CV-import
+- jobbannonsanalys
+- matchningsmotor
+- ATS-analys
+- AI-omskrivning
+- faktakontroll
+- versionshantering
+- PDF-export
+- DOCX-export
+- landinställningar
+- fönsterdragning
+- kontoanslutning
+- säker tokenlagring
+- återställning efter fel
+
+Kör:
+
+- lint
+- type checking
+- unit tests
+- integration tests
+- build
+- smoke test
+
+Kontrollera att appen fungerar på:
+
+- Intel Mac x86_64
+- 8 GB RAM
+- aktuell installerad macOS-version
+
+Gör ingen falsk rapportering.
+
+En funktion får endast markeras som färdig när:
+
+1. den är implementerad
+2. den är ansluten till UI
+3. den har testats
+4. testresultatet dokumenterats
+5. inga kritiska fel återstår
+
+==================================================
+V. IMPLEMENTATIONSORDNING
+==================================================
+
+Arbeta i denna ordning:
+
+MILESTONE 1
+- projektrevision
+- säkerhetskopia
+- Git-branch
+- Master Profile
+- CV-import
+- versionshantering
+
+MILESTONE 2
+- jobbannonsimport
+- strukturerad kravanalys
+- CV-jobbmatchning
+- Gap Analysis
+
+MILESTONE 3
+- AI CV Tailoring
+- före/efter-jämförelse
+- användargodkännande
+- faktakontroll
+
+MILESTONE 4
+- ATS Analyzer
+- CV Scorecard
+- ATS Standard-mall
+- PDF- och DOCX-export
+
+MILESTONE 5
+- personligt brev
+- ansökningssvar
+- meddelandeutkast
+- e-postintegrationens grund
+
+MILESTONE 6
+- förbättrad jobbsökningsvy
+- filter
+- jobbpipeline
+- landanpassning
+
+Bygg endast en milestone åt gången.
+
+Efter varje milestone:
+
+1. kör alla relevanta tester
+2. visa vilka filer som ändrades
+3. dokumentera vad som fungerar
+4. dokumentera vad som inte fungerar
+5. skapa Git-commit
+6. invänta nästa instruktion innan en riskfylld eller omfattande ändring görs
+
+==================================================
+W. STARTA NU
+==================================================
+
+Börja endast med MILESTONE 1.
+
+Gör följande nu:
+
+1. verifiera LaCie-disken
+2. hitta projektets riktiga mapp
+3. kontrollera Git-status
+4. skapa säkerhetskopia
+5. skapa feature/cv-intelligence-studio
+6. analysera befintlig CV-funktion
+7. skapa implementationplan
+8. implementera Master Profile
+9. implementera säker CV-import
+10. implementera versionshantering
+11. kör tester
+12. lämna en tydlig slutrapport
+
+Stoppa och fråga användaren innan du:
+
+- skriver över befintlig användardata
+- flyttar originalprojektet
+- raderar filer
+- ändrar databasformat utan migration
+- installerar tunga beroenden
+- behöver administratörslösenord
+- skickar e-post
+- publicerar något
+- använder betalt API
+- gör externa kontoanslutningar
+
+Ge inte bara instruktioner eller exempel.
+Utför ändringarna med tillgängliga verktyg, verifiera filerna efteråt och rapportera verkligt resultat.
