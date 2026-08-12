@@ -685,9 +685,18 @@ async function runBatchFromManifest(manifestPath, globals) {
  *
  * Missing font files keep their original reference and log a warning.
  *
+ * Encoded font data: URLs are memoized across calls (keyed by resolved absolute
+ * path, not name — two fonts can share a display name but not a path) so a
+ * batch render does not re-read and re-base64 the same font once per document.
+ * The cache holds only successful encodings; a missing font is re-checked each
+ * call so a font added mid-run is picked up. The bytes are deterministic, so a
+ * cache hit returns the exact same data: URL — output stays byte-identical.
+ *
  * @param {string} html - HTML that may reference url('./fonts/<file>').
  * @returns {Promise<string>} HTML with local font references inlined.
  */
+const _fontDataUrlCache = new Map();
+
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
@@ -703,10 +712,16 @@ export async function inlineLocalFonts(html) {
       console.warn(`⚠️  Font reference escapes fonts/, keeping original reference: ${name}`);
       continue;
     }
+    if (_fontDataUrlCache.has(fontPath)) {
+      dataUrls.set(name, _fontDataUrlCache.get(fontPath));
+      continue;
+    }
     try {
       const buf = await readFile(fontPath);
       const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
-      dataUrls.set(name, `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`);
+      const dataUrl = `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`;
+      _fontDataUrlCache.set(fontPath, dataUrl);
+      dataUrls.set(name, dataUrl);
     } catch (err) {
       if (err?.code !== 'ENOENT') throw err;
       console.warn(`⚠️  Font file not found, keeping original reference: fonts/${name}`);
