@@ -414,35 +414,58 @@ risk_summary:
 
   // Rate denominators (regression): both bases used to be `enriched.length`,
   // so pending rows that can never carry a reason — or a gap — padded the
-  // denominator. The fixture below is the shape that made it visible: 10
-  // entries, only 2 discardable and only 3 gap-bearing.
-  const baseFixture = [
-    { outcome: 'self_filtered', report: { gaps: [{ description: 'US-only' }] } },
-    { outcome: 'negative', report: { gaps: [{ description: 'Go required' }] } },
-    { outcome: 'positive', report: { gaps: [{ description: 'minor' }] } },
-    { outcome: 'pending', report: { gaps: [] } },
-    { outcome: 'pending', report: null },
-    { outcome: 'pending' },
-    { outcome: 'pending', report: { gaps: [] } },
-    { outcome: 'pending', report: { gaps: [] } },
-    { outcome: 'pending', report: { gaps: [] } },
-    { outcome: 'pending', report: { gaps: [] } },
-  ];
-  if (discardableBase(baseFixture) !== 2) {
-    failures.push(`discardableBase counted ${discardableBase(baseFixture)}, expected 2 (self_filtered + negative only)`);
+  // denominator. The fixture distinguishes the two formulas: 20 discardable
+  // rows in a 30-entry tracker yield threshold 3 (new) vs 5 (old).
+  const baseFixture = [];
+  for (let i = 0; i < 20; i++) {
+    baseFixture.push({ outcome: 'self_filtered', report: { gaps: [] } });
   }
-  if (gapBearingBase(baseFixture) !== 3) {
-    failures.push(`gapBearingBase counted ${gapBearingBase(baseFixture)}, expected 3 (entries with a non-empty gaps array)`);
+  for (let i = 0; i < 10; i++) {
+    baseFixture.push({ outcome: 'pending', report: null });
   }
-  // The bug in numbers: a reason on both discardable rows is 100% of what
-  // could carry one, but read as 20% against the full tracker — and the
-  // recommendation threshold moved with it, from 1 to 2.
-  if (Math.max(3, Math.ceil(discardableBase(baseFixture) * 0.15)) > baseFixture.length) {
-    failures.push('discard-reason threshold exceeded the population it is drawn from');
+  if (discardableBase(baseFixture) !== 20) {
+    failures.push(`discardableBase counted ${discardableBase(baseFixture)}, expected 20`);
+  }
+  if (gapBearingBase(baseFixture) !== 0) {
+    failures.push(`gapBearingBase counted ${gapBearingBase(baseFixture)}, expected 0 (no gaps in fixture)`);
+  }
+  // New formula: max(3, ceil(20 * 0.15)) = 3. Old would be max(3, ceil(30 * 0.15)) = 5.
+  const newThreshold = Math.max(3, Math.ceil(discardableBase(baseFixture) * 0.15));
+  if (newThreshold !== 3) {
+    failures.push(`discard-reason threshold is ${newThreshold}, expected 3 (distinguishes new formula from old)`);
+  }
+  const oldThreshold = Math.max(3, Math.ceil(baseFixture.length * 0.15));
+  if (oldThreshold !== 5) {
+    failures.push(`bugcheck: old formula would yield ${oldThreshold}, expected 5 (confirm divergence for regression)`);
   }
   // Empty populations must yield 0%, never NaN.
   if (discardableBase([]) !== 0 || gapBearingBase([]) !== 0) {
     failures.push('rate denominators did not return 0 for an empty tracker');
+  }
+
+  // Deduplication (regression): duplicate tags in one Notes field must not
+  // be double-counted. If a row has "SKIP: geo-block; SKIP: geo-block", the
+  // entry should contribute 1 to geo-block's frequency, not 2.
+  const dupTagFixture = [
+    { outcome: 'self_filtered', notes: 'SKIP: geo-block; SKIP: geo-block' },
+    { outcome: 'self_filtered', notes: 'SKIP: geo-block' },
+  ];
+  const dupReasons = new Map();
+  for (const e of dupTagFixture) {
+    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
+    if (notesMatch) {
+      const entryReasons = new Set();
+      for (const m of notesMatch) {
+        const key = m.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
+        if (key) entryReasons.add(key);
+      }
+      for (const key of entryReasons) {
+        dupReasons.set(key, (dupReasons.get(key) || 0) + 1);
+      }
+    }
+  }
+  if (dupReasons.get('geo-block') !== 2) {
+    failures.push(`duplicate tag deduplication failed: geo-block counted ${dupReasons.get('geo-block')}, expected 2`);
   }
 
   // Remote classifier (regression): the "70+" signal ends in "+", so a
@@ -1038,15 +1061,21 @@ function analyze() {
   // --- Discard reason analysis (Issue 1380) ---
 
   // Aggregates user-committed `DISCARD: <reason>` or `SKIP: <reason>` tags in the Notes column.
+  // Each entry contributes at most once per distinct reason (deduped per entry).
   const discardReasonCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
     // From tracker Notes column: "DISCARD: <reason>" or "SKIP: <reason>"
     const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
     if (notesMatch) {
+      // Collect unique reasons from this entry in a Set, then increment each once.
+      const entryReasons = new Set();
       for (const m of notesMatch) {
         const key = m.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-        if (key) discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
+        if (key) entryReasons.add(key);
+      }
+      for (const key of entryReasons) {
+        discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
       }
     }
   }
@@ -1075,14 +1104,20 @@ function analyze() {
   }
 
   // --- Tech stack gaps (from negative + self_filtered outcomes) ---
+  // Each entry contributes at most once per distinct tech mention (deduped per entry).
   const stackGapCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
     if (!e.report?.gaps) continue;
+    // Collect unique tech mentions from all gaps in this entry, then increment each once.
+    const entryTechs = new Set();
     for (const gap of e.report.gaps) {
       for (const tech of extractTechMentions(gap.description)) {
-        stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
+        entryTechs.add(tech);
       }
+    }
+    for (const tech of entryTechs) {
+      stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
     }
   }
   const techStackGaps = [...stackGapCounts.entries()]
