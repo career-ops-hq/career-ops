@@ -391,6 +391,13 @@ export function computeRunStats(content) {
   // status a future scan.mjs writes is excluded from trend averages until
   // this aggregator learns what it means. Rows from pre-status files default
   // to 'completed' above, so old data keeps counting.
+  //
+  // No-op on today's data: scan.mjs only ever writes 'completed' or 'failed',
+  // and both predicates ('!== failed' vs '=== completed') agree on those two.
+  // The switch is a guard for a future third status (e.g. 'aborted'), not a
+  // behavior change now. One edge is reachable only by hand-editing the TSV:
+  // an explicitly empty status flips from counted to failedRuns, since
+  // appendScanRunSummary always writes a non-empty status.
   const completed = rows.filter((r) => r.status === 'completed');
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {

@@ -2357,8 +2357,10 @@ async function main() {
   const emptyTargets = [];
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
-  // every counter it reads is in scope. new_added stays 0 on a failed run:
-  // the sweep hadn't reached the point where that count is final.
+  // every counter it reads is in scope. new_added is hardcoded 0 on a failed
+  // run even if the sweep added postings before dying (the count isn't settled
+  // mid-sweep). Excluded from trend averages so it can't skew them, but a
+  // raw-TSV reader should treat that 0 as a sentinel, not a true count.
   if (!dryRun) {
     registerRunFailureSnapshot(() => ({
       timestamp: new Date().toISOString(),
