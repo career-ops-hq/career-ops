@@ -59,12 +59,29 @@ function sourceFiles() {
 //
 // Anchored at a statement start (allowing indentation) so the fixture STRING in
 // test-all.mjs — `"import yaml from 'js-yaml';"`, quoted mid-line — does not match.
-const DEFAULT_BINDING = String.raw`[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?\s+from`;
+// Token separator: whitespace, or a block comment, or both. `import /* c */ yaml
+// from 'js-yaml'` is a legal default import, and a plain `\s+` would step over it
+// and report the file clean — the one failure direction that is silent.
+const SEP = String.raw`(?:\s|/\*[\s\S]*?\*/)+`;
+const IDENT = String.raw`[A-Za-z_$][\w$]*`;
+const DEFAULT_BINDING = String.raw`${IDENT}(?:\s*,\s*(?:\{[^}]*\}|\*${SEP}as${SEP}${IDENT}))?${SEP}from`;
 const NAMED_DEFAULT = String.raw`\{[^}]*\bdefault\b[^}]*\}\s*from`;
 const STATIC_DEFAULT = new RegExp(
-  String.raw`^\s*import\s+(?:${DEFAULT_BINDING}|${NAMED_DEFAULT})\s*['"]js-yaml['"]`,
+  String.raw`^[^\S\n]*import${SEP}(?:${DEFAULT_BINDING}|${NAMED_DEFAULT})\s*['"]js-yaml['"]`,
   'm',
 );
+
+// KNOWN LIMIT — this is a text scan, not a parse. A line inside a template
+// literal or a block comment that happens to *look* like a default import is
+// reported as an offender (test-all.mjs's quoted single-line fixture is already
+// handled; a multi-line one would not be). That direction is loud and
+// self-correcting: CI goes red, a human reads the path, and the fixture gets an
+// exemption. The dangerous direction is the silent one — a real import the sweep
+// walks past — and that is what SEP above and the fail-closed branches below
+// exist to prevent. Making this syntax-aware would mean parsing 138 .ts/.tsx
+// files, so a TypeScript parser as a root dependency for one guard; every other
+// source scan in test-all.mjs is text-based too. Not worth it unless a real
+// fixture actually trips it.
 const DYNAMIC_DEFAULT = /import\(\s*['"]js-yaml['"]\s*\)\s*\)?\s*\.default/;
 
 const offenders = [];
@@ -114,6 +131,8 @@ const fires = STATIC_DEFAULT.test("import yaml from 'js-yaml';")
   && STATIC_DEFAULT.test("import yaml, * as ns from 'js-yaml';")
   && STATIC_DEFAULT.test("import { default as yaml } from 'js-yaml';")
   && STATIC_DEFAULT.test('import { default as yaml, load } from "js-yaml";')
+  && STATIC_DEFAULT.test("import /* keep 4.x */ yaml from 'js-yaml';")
+  && STATIC_DEFAULT.test("import yaml /* the default */ from 'js-yaml';")
   && DYNAMIC_DEFAULT.test("const yaml = (await import('js-yaml')).default;");
 // The namespace form and a plain named import are the two legal shapes; if either
 // started matching, the sweep would fail on a correctly-written file.
