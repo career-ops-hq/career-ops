@@ -40,18 +40,31 @@ console.log('\njs-yaml must never be declared with a range admitting a known-vul
 const JS_YAML_FLOOR = [4, 3, 1];
 const FLOOR_TEXT = JS_YAML_FLOOR.join('.');
 
-/** @returns {string[]} every tracked package.json in the repo. */
+/**
+ * @returns {{files: string[], error: string|null}} every tracked package.json.
+ * The error is returned rather than thrown: an uncaught throw here kills the
+ * process before the reporting below runs, so a missing git or a ROOT that is
+ * not a work tree would surface as a crash instead of a counted failure. Every
+ * other way this sweep can cover nothing is reported through fail(); this one
+ * has to be too, or the fail-closed guarantee has a hole exactly where the
+ * discovery step is.
+ */
 function manifests() {
-  // -z: NUL-separated, so a path containing a newline or quote cannot split a
-  // record and silently drop a manifest from the sweep.
-  const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', '*package.json'], {
-    encoding: 'utf-8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return out
-    .split('\0')
-    .filter((p) => p && basename(p) === 'package.json')
-    .map((p) => join(ROOT, p));
+  try {
+    // -z: NUL-separated, so a path containing a newline or quote cannot split a
+    // record and silently drop a manifest from the sweep.
+    const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', '*package.json'], {
+      encoding: 'utf-8',
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    const files = out
+      .split('\0')
+      .filter((p) => p && basename(p) === 'package.json')
+      .map((p) => join(ROOT, p));
+    return { files, error: null };
+  } catch (err) {
+    return { files: [], error: err.message.split('\n')[0] };
+  }
 }
 
 // Lowest version a range can resolve to, for the range shapes this repo uses.
@@ -99,7 +112,7 @@ const unparseable = [];
 const unreadable = [];
 let declaring = 0;
 
-const found = manifests();
+const { files: found, error: discoveryError } = manifests();
 for (const file of found) {
   let pkg;
   try {
@@ -123,7 +136,9 @@ for (const file of found) {
 
 // Zero manifests, or manifests but none declaring js-yaml, both mean the sweep
 // proved nothing — the exact shape of silent pass this test exists to prevent.
-if (found.length === 0) {
+if (discoveryError !== null) {
+  fail(`could not list tracked manifests, so the js-yaml floor sweep ran against nothing: ${discoveryError}`);
+} else if (found.length === 0) {
   fail('git ls-files produced no package.json — the js-yaml floor sweep scanned nothing');
 } else if (unreadable.length > 0) {
   fail(`could not parse ${unreadable.length} manifest(s), so the js-yaml floor sweep is incomplete: ${unreadable.join(', ')}`);
