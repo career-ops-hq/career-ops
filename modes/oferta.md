@@ -94,6 +94,17 @@ On a ⛔ determination, add exactly one flag line at the top of Block B in the r
 
 The flag is additive only; ✅ / ➖ / ⚠️ emit no flag line.
 
+### PcD-quota check (Brazil-market)
+
+Opt-in, gated on the candidate's own profile — most evaluations skip this entirely. Run it only when **both** are true: `config/profile.yml` → `disability.br_pcd_quota_eligible` is `true`, **and** the role's own posting location is Brazil (not just the candidate's home country — the international/USD track never triggers this check).
+
+When gated in, scan the JD body (case-insensitive) for quota/affirmative-hiring language: "PcD", "pessoa com deficiência", "vaga afirmativa", "vaga exclusiva", "cotas para pessoas com deficiência", "Lei de Cotas", "Lei 8.213".
+
+- **Match found** → add exactly one flag line at the top of Block A, quoting the evidence **verbatim**: `🟢 **PcD-Quota:** posting mentions quota-designated hiring — "{verbatim JD line}"`. This is a positive opportunity signal (legally mandated quota under Lei 8.213/91, typically a smaller applicant pool) — treat it as a positive contributor to the Cultural signals dimension (see `_shared.md` § Scoring System), never a penalty in its absence.
+- **No match, or check not gated in** → emit no flag line at all. Silence is absence of signal, not a negative — same "don't penalize missing data" discipline as `location_filter`.
+
+**Hard rule:** this check NEVER discloses, implies, or references the candidate's diagnosis in any generated content — not the CV, not the cover letter, not a draft form answer. It only notices language the employer already put in the JD. If an application form later asks a disability/self-identification question, that goes through `modes/apply.md`'s existing `needs_candidate_confirmation` flow — always a per-application, candidate-confirmed decision, never auto-filled from this check.
+
 ## Block B — Match with CV
 
 Read `cv.md`. Create a table with each JD requirement mapped to exact lines in the CV.
