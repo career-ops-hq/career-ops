@@ -5,6 +5,13 @@
  *
  * Usage:
  *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *
+ * --batch renders every document in a JSON manifest (an array of
+ * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
+ * relaunching per document. One failing document is isolated and recorded; the
+ * rest still render. Results are written to <manifest>.results.json and the
+ * process exits non-zero if any document failed (#2384).
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -432,13 +439,15 @@ async function generatePDF() {
 
   // Parse arguments
   let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false;
+  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.split('=')[1].trim();
+    } else if (arg.startsWith('--batch=')) {
+      batchManifestPath = arg.slice('--batch='.length);
     } else if (arg.startsWith('--max-pages=')) {
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
@@ -453,8 +462,26 @@ async function generatePDF() {
     }
   }
 
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
+    process.exit(1);
+  }
+
+  // Batch mode (#2384): render every document in the manifest through one
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
+  // all entries; each entry supplies its own input/output and may override
+  // format/reportNum. Takes no positional input/output.
+  if (batchManifestPath) {
+    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+  }
+
   if (!inputPath || !outputPath) {
     console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('');
+    console.error('Batch mode renders every document in the JSON manifest (an array of');
+    console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
+    console.error('<manifest>.results.json; it exits non-zero if any document fails.');
     console.error('');
     console.error('This script only converts an already-built HTML file to PDF.');
     console.error('The input HTML is produced by the pdf mode: the agent fills cv-template.html');
@@ -466,11 +493,6 @@ async function generatePDF() {
 
   if (reportNum && !/^\d+$/.test(reportNum)) {
     console.error(`Invalid --report "${reportNum}". Use the numeric tracker/report number, e.g. --report=018`);
-    process.exit(1);
-  }
-
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
     process.exit(1);
   }
 
@@ -526,6 +548,131 @@ async function generatePDF() {
     maxPages,
     strictPages,
   });
+}
+
+/**
+ * Drive batch mode (#2384) from a JSON manifest.
+ *
+ * The manifest is a JSON array of {input, output, format?, reportNum?}. Each
+ * entry is validated and its HTML read + ATS-normalized independently: a bad
+ * entry (missing file, bad format, escaping output path, scrambled section
+ * order) is recorded as a failure and skipped so it can never sink the rest of
+ * the batch. Surviving entries render through one shared Chromium (renderBatch).
+ *
+ * A results manifest is always written next to the input manifest as
+ * `<manifest>.results.json` — an ordered array mirroring the input, each item
+ * `{outputPath, ok, ...}`. The process exits non-zero if ANY entry failed (or
+ * the browser died), so cron/batch-tailor callers never mistake a partial run
+ * for success; it exits zero only when every document rendered.
+ *
+ * @param {string} manifestPath - Path to the JSON manifest.
+ * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @returns {Promise<{ok: number, failed: number, results: Array}>}
+ */
+async function runBatchFromManifest(manifestPath, globals) {
+  const resolvedManifest = resolve(manifestPath);
+
+  let raw;
+  try {
+    raw = await readFile(resolvedManifest, 'utf-8');
+  } catch (err) {
+    console.error(`❌ Cannot read batch manifest: ${resolvedManifest} (${err.message})`);
+    process.exit(1);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch (err) {
+    console.error(`❌ Batch manifest is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+
+  if (!Array.isArray(manifest) || manifest.length === 0) {
+    console.error('❌ Batch manifest must be a non-empty JSON array of {input, output, format?, reportNum?}.');
+    process.exit(1);
+  }
+
+  const validFormats = ['a4', 'letter'];
+  const results = new Array(manifest.length).fill(null);
+  const entries = [];
+
+  // Prepare each entry. Preserve input order in the results by carrying the
+  // manifest index through renderBatch; prep failures land at their own index.
+  let cvMarkdown = '';
+  try {
+    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+
+  for (let i = 0; i < manifest.length; i++) {
+    const spec = manifest[i];
+    try {
+      if (!spec || typeof spec.input !== 'string' || typeof spec.output !== 'string') {
+        throw new Error('each entry needs a string "input" and "output"');
+      }
+
+      const entryFormat = (spec.format || globals.format).toLowerCase();
+      if (!validFormats.includes(entryFormat)) {
+        throw new Error(`invalid format "${entryFormat}" (use: ${validFormats.join(', ')})`);
+      }
+
+      const entryReport = (spec.reportNum ?? '').toString().trim();
+      if (entryReport && !/^\d+$/.test(entryReport)) {
+        throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
+      }
+
+      const entryInput = resolve(spec.input);
+      const entryOutput = resolve(spec.output);
+
+      // Same path-traversal guard as the single path: keep writes in the repo.
+      const relOut = relative(__dirname, entryOutput);
+      if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
+        throw new Error(`output escapes the project directory: ${entryOutput}`);
+      }
+
+      let html = await readFile(entryInput, 'utf-8');
+      validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      html = normalizeTextForATS(html).html;
+
+      entries.push({
+        _idx: i,
+        html,
+        outputPath: entryOutput,
+        format: entryFormat,
+        baseDir: dirname(entryInput),
+        reportNum: entryReport,
+        inputPath: entryInput,
+        maxPages: globals.maxPages,
+        strictPages: globals.strictPages,
+      });
+    } catch (err) {
+      console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
+      results[i] = { outputPath: spec?.output ?? null, ok: false, error: err.message };
+    }
+  }
+
+  if (entries.length > 0) {
+    console.log(`📦 Batch: rendering ${entries.length} document(s) in one Chromium…`);
+    const rendered = await renderBatch(entries);
+    rendered.forEach((r, k) => { results[entries[k]._idx] = r; });
+  }
+
+  const ok = results.filter((r) => r && r.ok).length;
+  const failed = results.length - ok;
+
+  const resultsPath = `${resolvedManifest}.results.json`;
+  try {
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2) + '\n');
+    console.log(`🔗 Batch results: ${resultsPath}`);
+  } catch (err) {
+    console.error(`⚠️  Could not write batch results manifest: ${err.message}`);
+  }
+
+  console.log(`📦 Batch complete: ${ok} ok, ${failed} failed`);
+  if (failed > 0) process.exit(1);
+  return { ok, failed, results };
 }
 
 /**
@@ -593,6 +740,47 @@ export async function inlineLocalFonts(html) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
+  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  let browser = null;
+  try {
+    browser = await launchBrowser({ headless: true });
+    return await renderInPage(browser, html, outputPath, opts);
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
+  }
+}
+
+/**
+ * Render one already-normalized HTML document to a PDF on an already-launched
+ * browser. This is the page-level half of the render — it owns the per-document
+ * work (theme/print/font injection, temp file, page, PDF, page-budget, manifest)
+ * but NOT the browser lifecycle. Both the single-CV path (renderHtmlToPdf) and
+ * the batch path (renderBatch) call this exact function, which is what keeps a
+ * single-CV render byte-identical whether it runs alone or inside a batch (#2384).
+ *
+ * The page and the temp HTML file are always cleaned up in a finally, so a
+ * throw here (e.g. a strict page-budget overflow) never leaks a page into the
+ * shared browser — the caller's remaining documents keep their own fresh pages.
+ *
+ * @param {import('playwright').Browser} browser - An open browser to render on.
+ * @param {string} html - Full HTML document to render.
+ * @param {string} outputPath - Absolute path to write the PDF to.
+ * @param {{
+ *   format?: 'a4'|'letter',
+ *   baseDir?: string,
+ *   reportNum?: string,
+ *   inputPath?: string,
+ *   maxPages?: number,
+ *   strictPages?: boolean,
+ *   styleTokens?: object
+ * }} [opts]
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ */
+async function renderInPage(browser, html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
   const baseDir = opts.baseDir || process.cwd();
   const reportNum = opts.reportNum || '';
@@ -616,10 +804,9 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const { writeFile, unlink } = await import('fs/promises');
   await writeFile(tmpHtmlPath, html, 'utf-8');
 
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
-  let browser = null;
+  let page = null;
+  let context = null;
   try {
-    browser = await launchBrowser({ headless: true });
     // A CV is static markup, so the renderer needs neither scripts nor the network.
     // Both are denied because this HTML is not fully trusted: it is built from
     // cv.md, the job posting and the evaluation report, and postings are untrusted
@@ -628,12 +815,14 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
     // out. file:/data: subresources still load, which is all a template needs.
     //
     // newContext(), not newPage(): javaScriptEnabled is a Playwright context
-    // option with no per-page equivalent. Guarded so an injected test double that
-    // only implements newPage() still works.
-    const context = browser.newContext
+    // option with no per-page equivalent, and a fresh context per document also
+    // keeps each render isolated from its siblings within one shared browser
+    // (#2384). Guarded so an injected test double that only implements newPage()
+    // still works.
+    context = browser.newContext
       ? await browser.newContext({ javaScriptEnabled: false })
       : null;
-    const page = context ? await context.newPage() : await browser.newPage();
+    page = context ? await context.newPage() : await browser.newPage();
     if (page.route) {
       await page.route('**/*', (route) => {
         const url = route.request().url();
@@ -690,9 +879,19 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     return { outputPath, pageCount, size: pdfBuffer.length };
   } finally {
-    if (browser) {
-      await browser.close().catch((err) => {
-        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+    // Close the page so a batch does not accumulate pages into the shared
+    // browser (leak → OOM). Optional-chained: the single path's browser.close()
+    // already reclaims the page, and minimal test doubles may omit close().
+    if (page && typeof page.close === 'function') {
+      await page.close().catch((err) => {
+        console.warn(`⚠️  Page cleanup failed: ${err.message}`);
+      });
+    }
+    // Close the per-document context too, so the JS-disabled context created
+    // above does not accumulate in the shared browser across a batch (#2384).
+    if (context && typeof context.close === 'function') {
+      await context.close().catch((err) => {
+        console.warn(`⚠️  Context cleanup failed: ${err.message}`);
       });
     }
     // Clean up temp file
@@ -701,6 +900,53 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
         console.warn(`⚠️  Temporary HTML cleanup failed: ${err.message}`);
       }
     });
+  }
+}
+
+/**
+ * Render many already-normalized HTML documents through ONE shared Chromium.
+ *
+ * Maintainer conditions (#2384): the browser is launched once via the same
+ * opts.launchBrowser seam the single path uses, and closed in a finally at the
+ * batch boundary — it never outlives the batch and is torn down even if a
+ * document throws. Each entry renders on its own page (renderInPage), and a
+ * failing entry is captured as `{ok:false, error}` without stopping the rest.
+ *
+ * The browser is owned here: renderBatch closes whatever launchBrowser returns.
+ * launchBrowser is a launch *factory*, not a caller-owned handle, so this does
+ * not break test injection — the stub returns a fresh browser to be closed.
+ *
+ * Rendering is intentionally serial: a shared module-level font cache and one
+ * long-lived browser make parallel rendering a determinism/memory hazard that
+ * this change does not take on.
+ *
+ * @param {Array<{html: string, outputPath: string, format?: string, baseDir?: string,
+ *   reportNum?: string, inputPath?: string, maxPages?: number, strictPages?: boolean}>} entries
+ * @param {{launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>}} [opts]
+ * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
+ */
+export async function renderBatch(entries, opts = {}) {
+  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  const results = [];
+  let browser = null;
+  try {
+    browser = await launchBrowser({ headless: true });
+    for (const entry of entries) {
+      try {
+        const r = await renderInPage(browser, entry.html, entry.outputPath, entry);
+        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size });
+      } catch (err) {
+        console.error(`❌ Batch entry failed (${entry.outputPath}): ${err.message}`);
+        results.push({ outputPath: entry.outputPath, ok: false, error: err.message });
+      }
+    }
+    return results;
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
   }
 }
 
