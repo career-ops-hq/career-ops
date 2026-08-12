@@ -92,7 +92,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.1",
     "playwright": "1.62.1"
   }
 }
