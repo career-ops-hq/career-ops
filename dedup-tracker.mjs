@@ -23,6 +23,27 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
+// ── CLI args ────────────────────────────────────────────────────────
+// Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
+// (#2743): an unrecognized flag must fail fast, never silently fall through
+// to the live-run default and write to the real tracker (#2744).
+const KNOWN_FLAGS = ['--dry-run', '--help', '-h'];
+const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
+
+const cliArgs = process.argv.slice(2);
+
+const unknownFlags = cliArgs.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+if (unknownFlags.length) {
+  console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+  process.exit(1);
+}
+
+if (cliArgs.includes('--help') || cliArgs.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.

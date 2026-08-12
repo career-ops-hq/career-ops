@@ -13,7 +13,7 @@
  *      node analyze-patterns.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
@@ -400,6 +400,65 @@ risk_summary:
     failures.push('classifyRemote geo-restricted precedence regressed');
   }
 
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before parseReport. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`analyze-patterns self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -423,10 +482,55 @@ function parseTracker() {
   return entries;
 }
 
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// upskill.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // --- Parse a single report file ---
 function parseReport(reportPath) {
-  if (!existsSync(reportPath)) return null;
-  const content = readFileSync(reportPath, 'utf-8');
+  const content = readTextIfExists(reportPath);
+  if (content === null) return null;
   const report = {
     company: null,
     role: null,
@@ -652,18 +756,21 @@ function analyze() {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
     // Tracker links are relative to the tracker file's own directory (see
     // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links.
-    let reportPath = null;
+    // legacy root-relative links. Each candidate is guarded to reports/
+    // before the read is attempted; parseReport returns null for a missing
+    // file, so no pre-flight existsSync is needed (#2385).
+    let reportData = null;
     if (reportMatch) {
-      const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
-      const candidate = existsSync(fromTracker) ? fromTracker : join(CAREER_OPS, reportMatch[1]);
-      
-      const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-      if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
-        reportPath = existsSync(candidate) ? candidate : null;
+      const candidates = new Set([
+        join(dirname(APPS_FILE), reportMatch[1]),
+        join(CAREER_OPS, reportMatch[1]),
+      ]);
+      for (const candidate of candidates) {
+        if (!withinReports(candidate)) continue;
+        reportData = parseReport(candidate);
+        if (reportData) break;
       }
     }
-    const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);
     const score = Number.isFinite(trackerScore)

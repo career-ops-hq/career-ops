@@ -18,7 +18,7 @@
  * Pure + dependency-light (js-yaml only) so it's unit-testable without Playwright.
  */
 import { readFileSync, existsSync } from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 // Recognized style tokens → the CSS custom property each maps to. Anything not
 // listed here is ignored, so a typo or an unrelated `style:` key is inert.

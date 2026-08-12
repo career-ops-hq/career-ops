@@ -119,3 +119,5 @@ public commit with a stated reason.
 - @Honeypanchi | 2026-08-10 | "Garv Sajnani" | id:146434822 | src:https://github.com/santifer/career-ops/discussions/2660 | n:71
 - @abankar1 | Akshay Bankar | 2026-08-11 | "career-ops is more than a job-search helper - it runs the whole pipeline locally, and a search you can audit is a search you can win." | id:47008224 | src:https://github.com/santifer/career-ops/discussions/2712 | n:72
 - @anshulgeorge | 2026-08-11 | "If companies and recruiters forgo using machine learning to screen candidates, then I will forgo using CareerOps" | id:60569434 | src:https://github.com/santifer/career-ops/discussions/2716 | n:73
+- @ShiosOS | Julius Walton | 2026-08-12 | id:31512984 | src:https://github.com/santifer/career-ops/discussions/2742 | n:74
+- @lambda125 | 2026-08-12 | "CareerOps is a must have for everyone who wants to take control over their data, their career and the way they present themselves. I wholeheartedly agree with this and commit to building on top of…" | id:927405 | src:https://github.com/santifer/career-ops/discussions/2761 | n:75

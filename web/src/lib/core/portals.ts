@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 

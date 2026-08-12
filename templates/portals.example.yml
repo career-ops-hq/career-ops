@@ -641,6 +641,7 @@ search_queries:
 #   pinpoint        <slug>.pinpointhq.com
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
+#   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
@@ -664,6 +665,14 @@ search_queries:
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
 # bypass detect(). The `provider:` field wins over auto-detection.
+#
+# phenom has no detect() at all — every tenant runs on its own branded
+# domain, and every legacy <tenant>.phenompeople.com host we've found
+# permanently redirects to that branded domain (which this provider's
+# fetch() can't follow), so there's no URL pattern worth auto-claiming.
+# Always set `provider: phenom` + `careers_url` pointed at the branded
+# origin (the /widgets endpoint lives on that same origin, so no separate
+# `api:` is needed).
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
@@ -699,6 +708,19 @@ search_queries:
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Jobvite Co
+#   careers_url: https://jobs.jobvite.com/exampleco       # any jobs.jobvite.com/<slug> board
+#   company_eid: q6NaVfwI   # optional but recommended. The XML feed keys on this opaque
+#                           # id, NOT the vanity slug, so without it every scan spends an
+#                           # extra request scraping it off the board page. Find it in the
+#                           # board page source as companyEId: '…'.
+#   enabled: true
+#
+# - name: Example Jobvite Co (explicit feed URL)
+#   provider: jobvite
+#   api: https://app.jobvite.com/CompanyJobs/Xml.aspx?c=q6NaVfwI   # eId read from ?c=
 #   enabled: true
 #
 # - name: 腾讯 (Tencent)
@@ -763,6 +785,23 @@ search_queries:
 #   max_pages: 200         # optional page cap. The API caps a page at 10 rows
 #                          # no matter what, so 200 pages ≈ 2000 postings
 #                          # (default 200, max 1000). Raise it for a huge board.
+#   enabled: true
+#
+# - name: Example Phenom Co
+#   # Phenom People "CareerConnect" career site — the branded per-company
+#   # domain many large enterprises run. No auto-detection (no reliable
+#   # URL pattern to key on), so provider: phenom must always be set
+#   # explicitly.
+#   careers_url: https://careers.exampleco.com
+#   provider: phenom
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 300) —
+#                          # raise it for a tenant with 2000+ open postings (a warning
+#                          # is logged if the cap truncates real results)
+#   phenom:                # optional widget config block
+#     lang: en_global        # widget locale (default en_global)
+#     country: global        # widget country scope (default global)
+#     urlPrefix: global/en   # public job-page path prefix (default global/en)
+#     selectedFields: { country: ["Germany"] }   # optional facet filter
 #   enabled: true
 #
 # - name: Example Avature Co
@@ -1482,6 +1521,12 @@ tracked_companies:
     careers_url: https://job-boards.greenhouse.io/hellofresh
     api: https://boards-api.greenhouse.io/v1/boards/hellofresh/jobs
     notes: "Berlin. Meal kit unicorn, large data/ML org."
+    enabled: true
+
+  - name: Allianz
+    careers_url: https://careers.allianz.com
+    provider: phenom
+    notes: "Munich. Insurance group."
     enabled: true
 
   # -- DACH fintech --

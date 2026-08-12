@@ -28,6 +28,15 @@ export function normalizeTextKey(value, separator = "") {
   return String(value ?? "")
     .normalize("NFKC")
     .toLowerCase()
+    // Mirrors the core exactly, including this step: lowercasing a Turkish
+    // dotted capital leaves a combining dot behind (`'İ'.toLowerCase()` is
+    // `i` + U+0307), so the key drifts from the visually identical plain `i`.
+    // NO `NFD`: NFKC leaves ż/ė/ġ as single precomposed code points the strip
+    // cannot reach, while `i` + U+0307 has no precomposed form. Decomposing
+    // first would collapse Żubr/Zubr and Ėmė/Eme.
+    // Kept byte-for-byte in step with tracker-parse.mjs — test-all §55.7
+    // compares the two and fails on any divergence.
+    .replace(/̇/gu, "")
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
     .trim();
 }
