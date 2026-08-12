@@ -112,6 +112,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 		app.ScoreRaw = at("score")
 		if sm := reScoreValue.FindStringSubmatch(at("score")); sm != nil {
 			app.Score, _ = strconv.ParseFloat(sm[1], 64)
+			app.HasScore = true
 		}
 
 		// Parse report link. Tracker links are written relative to the
