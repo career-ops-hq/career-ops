@@ -168,7 +168,7 @@ export default {
    * as providers/glints.mjs's firewall).
    *
    * @param {{ name?: string, api?: string, careers_url?: string, max_pages?: number }} entry
-   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any>, sinceMs?: number, maxPages?: number }} ctx
+   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any>, sinceMs?: number, maxPages?: number, syntheticEntries?: boolean }} ctx
    * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt?: number}>>}
    */
   async fetch(entry, ctx) {
@@ -283,15 +283,22 @@ export default {
     // portal entry to point at, and no fixed cap can guarantee full coverage of
     // an unbounded company directory anyway; nothing else to suggest there.
     //
-    // The branch below keys on `sinceMs === null` as a proxy for that
-    // distinction. Since #2418 the proxy is no longer exact: `scan.mjs --since`
-    // also sets ctx.sinceMs, so those runs take the else branch and get the
-    // terser message even though they DO have a portals.yml entry to raise.
-    // Harmless (the cap is still surfaced, just without the suggestion) but
-    // worth knowing before trusting the proxy — see #2495.
+    // The branch below used to key on `sinceMs === null` as a proxy for that
+    // distinction, which held only because scan-ats-full.mjs was the sole
+    // caller setting it. #2418 broke the proxy — `scan.mjs --since` sets
+    // ctx.sinceMs too, so a tracked entry lost the actionable half of the
+    // message on every --since run (#2495). Provenance is now stated by the
+    // caller instead of inferred from an unrelated flag, so a future caller
+    // that starts setting sinceMs cannot re-couple the two concerns.
+    //
+    // Absence means "tracked": scan-ats-full.mjs is the only caller that
+    // synthesizes entries AND can reach the cap (discover-ats.mjs and
+    // verify-portals.mjs both probe with ctx.maxPages: 1, which never sets
+    // stopReason to 'cap'), so it is the one place that opts out.
+    const syntheticEntries = ctx?.syntheticEntries === true;
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
-      if (sinceMs === null) {
+      if (!syntheticEntries) {
         console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
       } else {
         // Workday's CXS backend can report `total` as exactly

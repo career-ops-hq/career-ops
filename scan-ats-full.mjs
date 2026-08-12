@@ -641,7 +641,14 @@ async function main() {
   // sinceMs once postings are confidently past the --since window, and
   // includeUndated (when false) for a tenant that exposes no postedOn at
   // all, since its postings would all be dropped as undated below anyway.
-  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
+  //
+  // syntheticEntries states what this scanner's entries ARE: built from the
+  // external ATS dataset, not read from portals.yml tracked_companies.
+  // workday.mjs picks its cap-hit warning from it — there is no portal entry
+  // here for the user to edit, so "raise max_pages on this entry" would be
+  // inactionable. It used to infer that from sinceMs being set, which stopped
+  // being true once #2418 taught scan.mjs --since to set it too (#2495).
+  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
   const date = new Date().toISOString().slice(0, 10);
 
   // Same defensive default as completedSources/counters below: a version-1
