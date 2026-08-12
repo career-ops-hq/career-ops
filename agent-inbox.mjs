@@ -45,7 +45,17 @@ const HEADER = [
 ].join('\n');
 
 function stamp() {
-  return new Date().toISOString().slice(0, 16).replace('T', ' ');
+  // LOCAL time, never UTC. `new Date().toISOString()` stamps the UTC date, so
+  // anywhere west of Greenwich an evening `add` is filed under tomorrow: after
+  // 20:00 US Eastern, an item queued Tuesday night reads "Wednesday". The queue
+  // is a provenance log — when something was asked for is part of the record,
+  // and every artifact derived from it inherits the wrong day.
+  // Built from the local getters rather than a locale trick so the format is
+  // fixed regardless of the host's ICU data. Same reasoning as the local dates
+  // in work-search-log.mjs.
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function ensureGitignored() {

@@ -123,5 +123,36 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
   check('.gitignore gains exactly one data/agent-inbox.md rule', ruleCount === 1, `count=${ruleCount}`);
 }
 
+// ---------------------------------------------------------------------------
+console.log('7. items are stamped in LOCAL time, not UTC');
+{
+  // Two zones 26 hours apart, so their wall clocks NEVER agree — not on the
+  // hour, and on most instants not even on the date. A UTC stamp is identical
+  // in both, so "the two differ" is a complete test that cannot go green by
+  // accident of when it runs (a naive assertion against the host's own zone
+  // passes trivially in CI, where TZ is usually UTC).
+  const ZONES = ['Etc/GMT-14', 'Etc/GMT+12']; // POSIX sign: UTC+14 and UTC-12.
+  const stamps = ZONES.map((TZ) => {
+    const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+    run(inbox, ['add', `tz probe ${TZ}`], { env: { ...process.env, CAREER_OPS_INBOX: inbox, TZ } });
+    const m = /^- \[ \] (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) —/m.exec(readFileSync(inbox, 'utf8'));
+    return m && m[1];
+  });
+
+  check('both runs produced a well-formed stamp', stamps.every(Boolean), JSON.stringify(stamps));
+  check('stamps differ between UTC+14 and UTC-12 (i.e. they are local, not UTC)',
+    stamps[0] !== stamps[1], `${stamps[0]} vs ${stamps[1]}`);
+
+  // And each stamp is actually that zone's wall clock, not merely "different".
+  ZONES.forEach((TZ, i) => {
+    if (!stamps[i]) return;
+    // sv-SE renders as YYYY-MM-DD HH:MM:SS, so slicing to 16 matches stamp().
+    const expected = new Date().toLocaleString('sv-SE', { timeZone: TZ }).slice(0, 16);
+    // One minute of slack: the child may have run either side of a rollover.
+    const near = Math.abs(new Date(`${stamps[i]}Z`) - new Date(`${expected}Z`)) <= 60_000;
+    check(`stamp matches ${TZ} wall clock`, near, `got ${stamps[i]}, expected ~${expected}`);
+  });
+}
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
