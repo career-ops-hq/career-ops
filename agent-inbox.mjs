@@ -20,10 +20,16 @@
  * this CLI, and any tool (a dashboard, a script, cron) can append to it. The
  * protocol an agent follows is documented in modes/agent-inbox.md.
  *
+ * Item numbers are *file positions*, not positions in the pending list: `add`
+ * only ever appends, so a number never changes meaning once printed. `list`
+ * therefore shows gaps as items get resolved (2, 4, 5) — the gaps are the
+ * receipt that something was already handled, and a whole batch of resolves can
+ * be read off a single `list` without drifting.
+ *
  * Usage:
  *   node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"
  *   node agent-inbox.mjs list [--all]                 # pending only, or every item
- *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
+ *   node agent-inbox.mjs resolve 1 [--expect "Acme"] [--result "scored 4.3 — report 012"]
  */
 
 import {
@@ -103,13 +109,15 @@ function needsLeadingNewline(path) {
   }
 }
 
-// Parse the checklist into items, in file order.
+// Parse the checklist into items, in file order. `num` is the stable 1-based
+// item number used by `list` and `resolve` — it is the position in the FULL
+// list, so resolving an item never renumbers the others.
 function parseItems() {
   if (!existsSync(PATH)) return [];
   const items = [];
   readFileSync(PATH, 'utf8').split('\n').forEach((line, i) => {
     const m = /^- \[([ xX])\]\s*(.*)$/.exec(line.trim());
-    if (m) items.push({ line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
+    if (m) items.push({ num: items.length + 1, line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
   });
   return items;
 }
@@ -119,6 +127,10 @@ function opt(name, def = '') {
   if (i < 0) return def;
   const v = process.argv[i + 1];
   return v && !v.startsWith('--') ? v : def;
+}
+
+function hasOpt(name) {
+  return process.argv.includes('--' + name);
 }
 
 function add() {
@@ -142,20 +154,46 @@ function add() {
 
 function list() {
   const all = process.argv.includes('--all');
-  const items = parseItems().filter((it) => all || !it.done);
+  const parsed = parseItems();
+  const items = parsed.filter((it) => all || !it.done);
   if (!items.length) return process.stdout.write(all ? 'Inbox is empty.\n' : 'No pending items.\n');
-  items.forEach((it, n) => {
-    process.stdout.write(`${String(n + 1).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
+  items.forEach((it) => {
+    process.stdout.write(`${String(it.num).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
   });
+  // Explain the gaps rather than let them read as a display bug.
+  if (items.length < parsed.length) {
+    process.stdout.write(
+      `\n(${parsed.length - items.length} resolved item(s) hidden — numbers are stable file positions, so gaps are expected. \`list --all\` shows everything.)\n`,
+    );
+  }
 }
 
 function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
-  // Number against the pending view, so `list` then `resolve N` line up.
-  const pending = parseItems().filter((it) => !it.done);
-  const target = pending[n - 1];
-  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
+  // Number against the FULL item list, not the pending subset. `add` only ever
+  // appends, so an item's position is stable for the life of the file and a
+  // batch of resolves read off one `list` stays correct. Numbering against the
+  // pending view instead made each resolve shift every higher number down by
+  // one — silently stamping later results onto the wrong items.
+  const items = parseItems();
+  const target = items[n - 1];
+  if (!target) {
+    const pending = items.filter((it) => !it.done).length;
+    fail(`no item #${n} — inbox has ${items.length} item(s), ${pending} pending. Run \`list --all\`.`);
+  }
+  // Already-resolved is an error, not a silent re-stamp: it is what a stale
+  // number from an older `list` most often lands on.
+  if (target.done) fail(`item #${n} is already resolved — refusing to overwrite it:\n  #${n}: ${target.text}`);
+  // Optional caller-side guard: abort unless the target says what the caller
+  // thinks it says. Catches "right command, wrong target" generally.
+  if (hasOpt('expect')) {
+    const expect = opt('expect');
+    if (!expect) fail('--expect needs a substring, e.g. --expect "Dana-Farber"');
+    if (!target.text.toLowerCase().includes(expect.toLowerCase())) {
+      fail(`item #${n} does not contain --expect ${JSON.stringify(expect)} — refusing to resolve:\n  #${n}: ${target.text}`);
+    }
+  }
   const result = oneLine(opt('result'));
   const lines = readFileSync(PATH, 'utf8').split('\n');
   let updated = lines[target.line].replace('[ ]', '[x]');
@@ -179,6 +217,10 @@ else {
     'Usage:\n' +
     '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
     '  node agent-inbox.mjs list [--all]\n' +
-    '  node agent-inbox.mjs resolve <n> [--result "..."]\n',
+    '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
+    '\n' +
+    'Numbers are stable file positions: `list` shows gaps once items are\n' +
+    'resolved, and a batch of resolves read off one `list` stays correct.\n' +
+    '--expect aborts unless the target item contains that substring.\n',
   );
 }
