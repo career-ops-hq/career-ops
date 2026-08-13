@@ -295,6 +295,19 @@ try {
   } else {
     fail(`getro.fetch() pacing: expected 2 sleep calls ≥ 250 ms, got ${JSON.stringify(getroSleepDelays)}`);
   }
+
+  // sleep must NOT be called before the first page (page 0). The `if (page > 0)`
+  // guard is what keeps a single-page board free of unnecessary latency.
+  const getroNoSleepBeforeFirstPage = [];
+  await getro.fetch({ ...okEntry, getro_max_pages: 1 }, {
+    sleep: async (ms) => { getroNoSleepBeforeFirstPage.push(ms); },
+    fetchJson: async () => ({ results: { count: 1, jobs: [{ title: 'Only', url: 'https://jobs.examplevc.example/only', organization: { name: 'Acme' } }] } }),
+  });
+  if (getroNoSleepBeforeFirstPage.length === 0) {
+    pass('getro.fetch() does not sleep before the first page (single-page board has zero added latency)');
+  } else {
+    fail(`getro.fetch() unexpectedly slept before page 0: ${JSON.stringify(getroNoSleepBeforeFirstPage)}`);
+  }
 } catch (e) {
   fail(`getro provider tests crashed: ${e.message}`);
 }
