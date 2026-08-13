@@ -174,6 +174,18 @@ if (
   fail('curl is missing --proto or --proto-redir — a request could follow a non-http protocol to an internal target');
 }
 
+// The destination guard must be present — blocks loopback, link-local, and private-network IPs
+// before curl connects (--proto/--proto-redir restrict schemes, not destination addresses).
+if (
+  /169.254/.test(curlPrefetchBlock) &&
+  /127./.test(curlPrefetchBlock) &&
+  /_url_safe/.test(curlPrefetchBlock)
+) {
+  pass('SSRF destination guard is present (loopback and cloud-metadata IPs blocked before curl)');
+} else {
+  fail('SSRF destination guard is missing — a malicious offer URL could reach 169.254.169.254 or 127.x through curl');
+}
+
 // curl must cap response size so a huge payload cannot fill disk or stall a batch worker.
 if (/--max-filesize\s+\d+/.test(curlPrefetchBlock)) {
   pass('curl uses --max-filesize (oversized responses are aborted, not buffered to disk)');
@@ -600,6 +612,40 @@ if (!wordCountMatch) {
         pass('curl absent from PATH: file stays empty → WebFetch fallback fires');
       } else {
         fail(`curl absent: exit=${exit6} stderr=${JSON.stringify(stderr6)} size=${size6}`);
+      }
+
+      // Cases 9-10: SSRF guard blocks loopback and cloud-metadata URLs before curl fires.
+      // The production curlPrefetchBlock is used directly. curl is stubbed as a bash
+      // function that sets curl_was_called=1 — if the guard fires correctly, curl is
+      // never reached and the variable stays 0.
+      const ssrfCases = [
+        { label: 'loopback',       url: 'http://127.0.0.1/job'                   },
+        { label: 'cloud-metadata', url: 'http://169.254.169.254/latest/meta-data' },
+      ];
+      for (const { label, url: badUrl } of ssrfCases) {
+        const jdSsrfPath = join(work, `jd-ssrf-${label}.html`);
+        const scriptSsrfSource = [
+          '#!/usr/bin/env bash',
+          `jd_file=${JSON.stringify(jdSsrfPath)}`,
+          `> "$jd_file"`,
+          `prefetch_min_words=80`,
+          `jd_prefetch_words=0`,
+          `curl_was_called=0`,
+          `curl() { curl_was_called=1; }`,
+          `url=${JSON.stringify(badUrl)}`,
+          curlPrefetchBlock,
+          `printf '%s|%s\\n' "$jd_prefetch_words" "$curl_was_called"`,
+        ].join('\n');
+        const scriptSsrf = join(work, `case-ssrf-${label}.sh`);
+        writeFileSync(scriptSsrf, scriptSsrfSource);
+        const resultSsrf = execFileSync(bash, [scriptSsrf], { encoding: 'utf-8', timeout: 30000 }).trim();
+        const lastLineSsrf = resultSsrf.split('\n').at(-1);
+        const [wordsSsrf, curlCalled] = lastLineSsrf.split('|').map(Number);
+        if (wordsSsrf === 0 && curlCalled === 0) {
+          pass(`SSRF guard (${label}): curl not called, jd_prefetch_words=0 → WebFetch fallback fires`);
+        } else {
+          fail(`SSRF guard (${label}): expected blocked — words=${wordsSsrf} curl_called=${curlCalled}`);
+        }
       }
     }
   } finally {
