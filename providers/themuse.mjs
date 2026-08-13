@@ -6,7 +6,14 @@
 // Response shape: { results: [...], page: n, page_count: N }
 // All pages are fetched sequentially and aggregated before normalizing.
 //
+// Each page fetch is retried on a transient failure (429/5xx/timeout-abort)
+// via fetchJsonWithRetry (#2681). A later-page failure after retries truncates
+// gracefully — keeping what was already collected — so a single blip mid-sweep
+// doesn't silently discard every listing gathered up to that point.
+//
 // Wire in via a `job_boards:` entry with `provider: themuse`.
+
+import { fetchJsonWithRetry } from './_http.mjs';
 
 const FEED_BASE = 'https://www.themuse.com/api/public/jobs';
 const TRUSTED_HOST = 'www.themuse.com';
@@ -68,8 +75,23 @@ export default {
     let pageCount = 1;
     for (let page = 0; page < pageCount; page++) {
       const url = `${FEED_BASE}?page=${page}`;
-      // redirect:'error' prevents SSRF via server-side redirects
-      const json = await ctx.fetchJson(url, { redirect: 'error' });
+      let json;
+      try {
+        // Retried on transient failures (429/5xx/timeout-abort) so one blip
+        // mid-sweep doesn't discard every listing already collected (#2681).
+        // redirect:'error' prevents SSRF via server-side redirects.
+        json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' });
+      } catch (err) {
+        const cause = err instanceof Error ? err.message : String(err);
+        if (page === 0) {
+          // First page failing after retries means the feed itself is down —
+          // re-throw so the caller can distinguish "dead feed" from "0 jobs".
+          throw err instanceof Error ? err : new Error(cause);
+        }
+        // A later page failing after retries: keep what was fetched so far.
+        console.error(`⚠️  themuse: truncated at page ${page} after retries (${allResults.length} results): ${cause}`);
+        break;
+      }
       if (!json || !Array.isArray(json.results)) {
         throw new Error(
           `themuse: unexpected API response on page ${page} — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
