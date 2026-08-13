@@ -108,10 +108,13 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
 		}
 
-		// Parse score from the Score column.
+		// Parse score from the Score column. HasScore distinguishes a genuine
+		// numeric score from a sentinel (—, N/A, -) so the renderer and sorter
+		// can treat unevaluated rows correctly (#2758).
 		app.ScoreRaw = at("score")
 		if sm := reScoreValue.FindStringSubmatch(at("score")); sm != nil {
 			app.Score, _ = strconv.ParseFloat(sm[1], 64)
+			app.HasScore = true
 		}
 
 		// Parse report link. Tracker links are written relative to the
