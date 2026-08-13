@@ -7692,8 +7692,10 @@ try {
       fail(`add-entry CLI help handling => ${JSON.stringify({ help: { status: helpOut.status, stdout: helpOut.stdout, stderr: helpOut.stderr }, h: { status: hOut.status, stdout: hOut.stdout, stderr: hOut.stderr } })}`);
     }
 
-    const badFlag = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--sumary'], { env, encoding: 'utf-8' });
+    const missingPayloadPath = join(cliTmp, 'missing-payload.json');
+    const badFlag = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), missingPayloadPath, '--sumary'], { env, encoding: 'utf-8' });
     if (badFlag.status === 1 && badFlag.stderr.includes('--sumary') && badFlag.stderr.includes('Usage:') &&
+        !badFlag.stderr.includes('could not parse payload') &&
         !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
       pass('add-entry CLI rejects an unrecognized flag before reading or writing payload data');
     } else {

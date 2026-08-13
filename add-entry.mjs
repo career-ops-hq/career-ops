@@ -52,7 +52,7 @@ const KNOWN_FLAGS = ['--dry-run', '--stdin', '--help', '-h'];
 const USAGE = `Usage:
   node add-entry.mjs <payload.json> [--dry-run]
   node add-entry.mjs --stdin [--dry-run]
-  node add-entry.mjs --help                    # print this usage block and exit`;
+  node add-entry.mjs --help                    # print this usage block and exit (-h is an alias)`;
 
 // Normalize a title/heading for duplicate detection: lowercase, collapse to
 // alphanumerics only. "FraudShield", "Fraud-Shield", "fraud shield" all match.
