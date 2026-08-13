@@ -31,6 +31,13 @@ console.log('\nbatch-runner.sh — JD pre-fetch (issue #2492)');
 
 // ── presence checks ─────────────────────────────────────────────────────────
 
+// The comment must reference #2492 for git-blame traceability.
+if (/#2492/.test(SRC)) {
+  pass('batch-runner.sh references issue #2492 in the prefetch comment');
+} else {
+  fail('issue reference #2492 is missing — hard to trace the reason for this block later');
+}
+
 // The mktemp line must still be present (security: prevents predictable paths).
 if (/mktemp.*batch-jd/.test(SRC)) {
   pass('mktemp with per-offer prefix is present (symlink-attack guard intact)');
@@ -51,6 +58,14 @@ if (/local prefetch_min_words=80/.test(SRC)) {
   pass('word-count threshold is in named variable prefetch_min_words=80');
 } else {
   fail('could not find local prefetch_min_words=80 in batch-runner.sh');
+}
+
+// Both prefetch variables must be declared with `local` to avoid leaking into
+// callers when process_offer() is invoked by the parallel fan-out dispatcher.
+if (/local jd_prefetch_words=0/.test(SRC)) {
+  pass('jd_prefetch_words is declared local (no global state leak between offers)');
+} else {
+  fail('jd_prefetch_words must be declared with `local` to prevent parallel-run interference');
 }
 
 // The prefetch block must be guarded by `command -v curl` so it is skipped when
@@ -104,9 +119,39 @@ if (/--header.*Accept.*text\/html/.test(SRC) || /--header.*text\/html/.test(SRC)
   fail('curl is missing Accept header — some boards may serve JSON or redirect to a mobile view');
 }
 
+// max-time must be in a sensible range (5–120 seconds). Extract early so it
+// can be referenced by the connect-timeout ordering check below.
+const maxTimeMatch = SRC.match(/--max-time\s+(\d+)/);
+if (maxTimeMatch) {
+  const maxTime = Number(maxTimeMatch[1]);
+  if (maxTime >= 5 && maxTime <= 120) {
+    pass(`curl --max-time is ${maxTime}s (within the 5-120s reasonable range)`);
+  } else {
+    fail(`curl --max-time is ${maxTime}s — too short (<5s) or too long (>120s) for a prefetch`);
+  }
+} else {
+  fail('curl is missing --max-time — unbounded requests could hang a batch worker indefinitely');
+}
+
+// curl must use a browser-like user-agent so job boards don't block the prefetch.
+if (/--user-agent\s+"Mozilla/.test(SRC)) {
+  pass('curl uses a Mozilla/... user-agent (bot-blockers and rate-limiters are less likely to block)');
+} else {
+  fail('curl user-agent is missing or does not start with Mozilla — some boards block non-browser UAs');
+}
+
 // curl must have a separate connect timeout (TCP stall should not eat the full budget).
-if (/--connect-timeout\s+\d+/.test(SRC)) {
+const connectTimeoutMatch = SRC.match(/--connect-timeout\s+(\d+)/);
+if (connectTimeoutMatch) {
   pass('curl uses --connect-timeout (TCP stalls fail fast, not consuming the full max-time)');
+  // connect-timeout must be strictly less than max-time; otherwise it is redundant.
+  const connectTimeout = Number(connectTimeoutMatch[1]);
+  const maxTimeValue = maxTimeMatch ? Number(maxTimeMatch[1]) : Infinity;
+  if (connectTimeout < maxTimeValue) {
+    pass(`connect-timeout (${connectTimeout}s) < max-time (${maxTimeValue}s) — connect guard is meaningful`);
+  } else {
+    fail(`connect-timeout (${connectTimeout}s) >= max-time (${maxTimeValue}s) — connect-timeout is redundant`);
+  }
 } else {
   fail('curl is missing --connect-timeout — unreachable servers stall for the full max-time');
 }
@@ -139,6 +184,18 @@ if (/rm -f "\$resolved_prompt" "\$jd_file"/.test(SRC) || /rm -f "\$jd_file"/.tes
   pass('$jd_file is removed during cleanup (no temp file leak)');
 } else {
   fail('$jd_file is not cleaned up — temp files accumulate in /tmp');
+}
+
+// The prefetch block must occur BEFORE the "--- Processing offer" log line so
+// the operator sees the prefetch outcome before the worker launch message.
+const mktemPos = SRC.indexOf('jd_file="$(mktemp');
+const prefetchPos = SRC.indexOf('if command -v curl');
+const processingPos = SRC.indexOf('echo "--- Processing offer');
+if (mktemPos >= 0 && prefetchPos >= 0 && processingPos >= 0 &&
+    mktemPos < prefetchPos && prefetchPos < processingPos) {
+  pass('prefetch block is ordered correctly: mktemp → prefetch → "--- Processing offer" echo');
+} else {
+  fail('prefetch block ordering is wrong — expected mktemp → prefetch → echo Processing');
 }
 
 // Log messages must be present for both the thin-content and rich-content paths.
@@ -283,6 +340,36 @@ if (!wordCountMatch) {
     } else {
       fail(`79-word boundary miscounted as ${below79Count} (expected < 80)`);
     }
+
+    // Whitespace-only content (blank page, minimal HTML with no text) must count 0.
+    const whitespaceOnly = '   \n\t  \r\n   ';
+    const wsCount = runWordCount(whitespaceOnly);
+    if (wsCount === 0) {
+      pass('whitespace-only content counts 0 words');
+    } else {
+      fail(`whitespace-only content counted ${wsCount} words instead of 0`);
+    }
+
+    // A binary file (e.g. accidentally fetching a PDF URL) should count 0 safe words.
+    // Node reads it as UTF-8, gets garbled text, and the visible-word count stays low.
+    // We simulate this with a short run of non-text bytes as a string.
+    const binaryContent = '\x00\x01\x02\x03\xff\xfe\xfd binary payload \x04\x05';
+    const binaryCount = runWordCount(binaryContent);
+    if (binaryCount < 80) {
+      pass(`binary content (${binaryCount} words): file would be truncated → WebFetch fallback`);
+    } else {
+      fail(`binary content: counted ${binaryCount} words — too high, worker would receive garbage`);
+    }
+
+    // HTML entities in visible text should be counted as words (they are readable).
+    // `&amp;`, `&lt;`, `&#8203;` etc. remain as-is after tag-stripping and count.
+    const entityHtml = '<p>' + 'word&amp;word '.repeat(10).trim() + '</p>';
+    const entityCount = runWordCount(entityHtml);
+    if (entityCount > 0) {
+      pass(`HTML entities in visible text are counted as words (${entityCount} words)`);
+    } else {
+      fail('HTML entities in visible text counted as 0 — they should still count');
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -305,18 +392,19 @@ if (!wordCountMatch) {
     } else {
       pass('prefetch block is extractable for e2e simulation');
 
-      // Helper: write a script that mocks curl and runs the prefetch logic.
+      // Extract the real node word-count snippet from SRC so this e2e test
+      // always uses the same logic as batch-runner.sh — no drift possible.
+      const realWordCountSnippet = (wordCountMatch && wordCountMatch[1]) || '';
+
+      // Helper: write a script that mocks curl and runs the real prefetch logic.
       const buildScript = (curlOutput, curlExit = 0) => {
         const jdFilePath = join(work, 'jd.html');
-        // Use a fake curl that writes predetermined content
-        const fakeCurlBody = curlExit === 0
-          ? `printf '%s' ${JSON.stringify(curlOutput)} > "$4"`  // $4 is the --output arg value
-          : `exit 1`;
 
         return [
           '#!/usr/bin/env bash',
           `jd_file=${JSON.stringify(jdFilePath)}`,
-          `# Stub curl with a function`,
+          `> "$jd_file"`,  // mktemp creates empty file
+          `# Stub curl: writes predetermined content or fails`,
           `curl() {`,
           `  local output_arg=""`,
           `  while [[ $# -gt 0 ]]; do`,
@@ -327,23 +415,19 @@ if (!wordCountMatch) {
             ? `  [[ -n "$output_arg" ]] && printf '%s' ${JSON.stringify(curlOutput)} > "$output_arg" || true`
             : `  return 1`,
           `}`,
+          `prefetch_min_words=80`,
           `jd_prefetch_words=0`,
           `if command -v curl >/dev/null 2>&1; then`,
-          `  curl --silent --location --max-time 20 \\`,
+          `  curl --silent --location --max-time 20 --connect-timeout 5 \\`,
+          `    --fail --max-redirs 10 --compressed \\`,
           `    --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \\`,
+          `    --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \\`,
           `    --output "$jd_file" \\`,
           `    -- "https://example.com/job" 2>/dev/null || true`,
-          `  jd_prefetch_words=$(node -e "`,
-          `    const fs = require('fs');`,
-          `    try {`,
-          `      const text = fs.readFileSync(process.argv[1], 'utf-8')`,
-          `        .replace(/<[^>]+>/g, ' ')`,
-          `        .replace(/\\\\s+/g, ' ')`,
-          `        .trim();`,
-          `      console.log(text.split(' ').filter(Boolean).length);`,
-          `    } catch (e) { console.log(0); }`,
-          `  " "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
-          `  if [[ "\${jd_prefetch_words:-0}" -lt 80 ]]; then`,
+          `  jd_prefetch_words=$(node -e "${realWordCountSnippet.replace(/"/g, '\\"')}" "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
+          `  jd_prefetch_words="\${jd_prefetch_words//[^0-9]/}"`,
+          `  jd_prefetch_words="\${jd_prefetch_words:-0}"`,
+          `  if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then`,
           `    : > "$jd_file"`,
           `  fi`,
           `fi`,
@@ -412,6 +496,29 @@ if (!wordCountMatch) {
         pass(`80-word HTML in bash: file kept (words=${words5}, size=${size5}) — threshold is strict <`);
       } else {
         fail(`80-word HTML in bash: expected kept file, got words=${words5} size=${size5}`);
+      }
+
+      // Case 7: page with large inline JS bundle → script stripped → file truncated.
+      // Without <script> stripping, the JS token count would exceed the threshold
+      // and send JS code to the worker. This verifies the fix in bash context.
+      const inlineBundle = [
+        '<html><head></head><body><div id="root"></div>',
+        '<script>',
+        // 150+ JS tokens that would pass a naive word-count
+        Array.from({ length: 20 }, (_, i) =>
+          `const route${i} = { path: '/job/${i}', component: 'Job${i}', exact: true };`
+        ).join(' '),
+        '</script>',
+        '</body></html>',
+      ].join('');
+      const script7 = join(work, 'case7.sh');
+      writeFileSync(script7, buildScript(inlineBundle));
+      const result7 = execFileSync(bash, [script7], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [words7, size7] = result7.split('|').map(Number);
+      if (size7 === 0) {
+        pass(`inline JS bundle (${words7} visible words after stripping): file truncated → WebFetch fires`);
+      } else {
+        fail(`inline JS bundle: expected truncated file (JS stripped), got words=${words7} size=${size7}`);
       }
 
       // Case 6: curl not in PATH → file stays empty → WebFetch fallback fires.
