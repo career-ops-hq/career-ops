@@ -31,7 +31,8 @@ const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/
 // not unrelated SRC matches that happen to share flag names.
 const curlPrefetchBlock = (() => {
   const m = SRC.match(/if command -v curl >\/dev\/null 2>&1; then[\s\S]*?\n  fi\n/);
-  return m ? m[0] : '';
+  if (!m) throw new Error('Missing curl prefetch block');
+  return m[0];
 })();
 
 console.log('\nbatch-runner.sh — JD pre-fetch (issue #2492)');
@@ -163,11 +164,14 @@ if (connectTimeoutMatch) {
   fail('curl is missing --connect-timeout — unreachable servers stall for the full max-time');
 }
 
-// curl must restrict redirects to http/https (prevents protocol-smuggling redirects to internal targets).
-if (/--proto-redir\s+'https,http'/.test(curlPrefetchBlock) || /--proto-redir\s+https,http/.test(curlPrefetchBlock)) {
-  pass('curl uses --proto-redir https,http (redirects limited to http/https — no protocol smuggling)');
+// curl must restrict initial requests and redirects to http/https (prevents protocol-smuggling to internal targets).
+if (
+  (/--proto\s+'?=http,https'?/.test(curlPrefetchBlock) || /--proto\s+'?=https,http'?/.test(curlPrefetchBlock)) &&
+  (/--proto-redir\s+'https,http'/.test(curlPrefetchBlock) || /--proto-redir\s+https,http/.test(curlPrefetchBlock))
+) {
+  pass('curl uses --proto and --proto-redir (requests and redirects limited to http/https — no protocol smuggling)');
 } else {
-  fail('curl is missing --proto-redir — a redirect could follow a non-http protocol to an internal target');
+  fail('curl is missing --proto or --proto-redir — a request could follow a non-http protocol to an internal target');
 }
 
 // curl must cap response size so a huge payload cannot fill disk or stall a batch worker.
@@ -448,20 +452,11 @@ if (!wordCountMatch) {
           `}`,
           `prefetch_min_words=80`,
           `jd_prefetch_words=0`,
-          `if command -v curl >/dev/null 2>&1; then`,
           `url="https://example.com/job"`,
-          // Production curl invocation extracted from SRC — never drifts from batch-runner.sh.
-          ...(curlLines ?? [`curl --output "$jd_file" -- "$url" 2>/dev/null || true`]),
-          `  jd_prefetch_words=$(node -e "${realWordCountSnippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
-          `  jd_prefetch_words="\${jd_prefetch_words//[^0-9]/}"`,
-          `  jd_prefetch_words="\${jd_prefetch_words:-0}"`,
-          `  if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then`,
-          `    : > "$jd_file"`,
-          `  fi`,
-          `fi`,
+          curlPrefetchBlock,
           // Report results: file size and word count
           `file_size=$(wc -c < "$jd_file" 2>/dev/null || echo 0)`,
-          `printf '%s|%s\\n' "$jd_prefetch_words" "$file_size"`,
+          `printf 'RESULT:%s|%s\\n' "$jd_prefetch_words" "$file_size"`,
         ].join('\n');
       };
 
@@ -472,7 +467,7 @@ if (!wordCountMatch) {
       const script1 = join(work, 'case1.sh');
       writeFileSync(script1, buildScript(richHtml));
       const result1 = execFileSync(bash, [script1], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words1, size1] = result1.split('|').map(Number);
+      const [words1, size1] = result1.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (words1 >= 80 && size1 > 0) {
         pass(`rich HTML (${words1} words): file kept (${size1} bytes) — worker reads real JD`);
       } else {
@@ -502,7 +497,7 @@ if (!wordCountMatch) {
       const script3 = join(work, 'case3.sh');
       writeFileSync(script3, buildScript('', 1));
       const result3 = execFileSync(bash, [script3], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [, size3] = result3.split('|').map(Number);
+      const [, size3] = result3.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size3 === 0) {
         pass('curl failure: file stays empty → WebFetch fallback fires');
       } else {
@@ -514,7 +509,7 @@ if (!wordCountMatch) {
       const script4 = join(work, 'case4.sh');
       writeFileSync(script4, buildScript(html79));
       const result4 = execFileSync(bash, [script4], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words4, size4] = result4.split('|').map(Number);
+      const [words4, size4] = result4.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size4 === 0) {
         pass(`79-word HTML in bash: file truncated (words=${words4}) → WebFetch fallback fires`);
       } else {
@@ -526,7 +521,7 @@ if (!wordCountMatch) {
       const script5 = join(work, 'case5.sh');
       writeFileSync(script5, buildScript(html80));
       const result5 = execFileSync(bash, [script5], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words5, size5] = result5.split('|').map(Number);
+      const [words5, size5] = result5.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size5 > 0) {
         pass(`80-word HTML in bash: file kept (words=${words5}, size=${size5}) — threshold is strict <`);
       } else {
@@ -538,6 +533,18 @@ if (!wordCountMatch) {
         pass('case 5: file contains stripped visible text (boundary — tags removed)');
       } else {
         fail(`case 5: raw HTML or empty file at boundary; snippet=${JSON.stringify(content5.slice(0, 80))}`);
+      }
+
+      // Case 8: exactly 80 words separated by NBSP entities → file kept
+      const html80nbsp = '<p>' + Array.from({length: 80}, () => 'word').join('&nbsp;&#160;&#xA0;') + '</p>';
+      const script8 = join(work, 'case8.sh');
+      writeFileSync(script8, buildScript(html80nbsp));
+      const result8 = execFileSync(bash, [script8], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [words8, size8] = result8.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
+      if (size8 > 0 && words8 === 80) {
+        pass(`80 words separated by NBSP entities: file kept (words=${words8}, size=${size8})`);
+      } else {
+        fail(`80 words separated by NBSP entities: expected kept file with 80 words, got words=${words8} size=${size8}`);
       }
 
       // Case 7: page with large inline JS bundle → script stripped → file truncated.
@@ -556,7 +563,7 @@ if (!wordCountMatch) {
       const script7 = join(work, 'case7.sh');
       writeFileSync(script7, buildScript(inlineBundle));
       const result7 = execFileSync(bash, [script7], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words7, size7] = result7.split('|').map(Number);
+      const [words7, size7] = result7.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size7 === 0) {
         pass(`inline JS bundle (${words7} visible words after stripping): file truncated → WebFetch fires`);
       } else {
@@ -574,9 +581,10 @@ if (!wordCountMatch) {
         '#!/usr/bin/env bash',
         `jd_file=${JSON.stringify(jd6Path)}`,
         `> "$jd_file"`,
-        `if command -v curl >/dev/null 2>&1; then`,
-        `  echo 'ERROR: curl was found — PATH filtering did not remove it' >&2`,
-        `fi`,
+        `prefetch_min_words=80`,
+        `jd_prefetch_words=0`,
+        `url="https://example.com/job"`,
+        curlPrefetchBlock,
       ].join('\n');
       const script6 = join(work, 'case6.sh');
       writeFileSync(script6, script6Source);

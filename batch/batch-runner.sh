@@ -761,7 +761,7 @@ process_offer() {
   if command -v curl >/dev/null 2>&1; then
     curl --silent --location --max-time 20 --connect-timeout 5 \
       --fail --max-redirs 10 --compressed \
-      --proto-redir 'https,http' --max-filesize 5000000 \
+      --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
       --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
       --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
       --output "$jd_file" \
@@ -775,6 +775,7 @@ process_offer() {
           .replace(/<script[\s\S]*?<\/script>/gi, ' ')
           .replace(/<style[\s\S]*?<\/style>/gi, ' ')
           .replace(/<[^>]+>/g, ' ')
+          .replace(/&(nbsp|#160|#xa0);/gi, ' ')
           .replace(/\s+/g, ' ')
           .trim();
         fs.writeFileSync(process.argv[1], text);
