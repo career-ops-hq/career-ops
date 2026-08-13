@@ -3767,6 +3767,29 @@ if (
   }
 }
 
+// ── #2395: guardrail markers must be present in every localized _shared.md ──
+// The authorship RULE and the no-fabrication RULE were missing from 16 of 18
+// localized _shared.md files. A stable machine-readable marker lets the test
+// survive translation — the translator must carry the comment across.
+{
+  const langSharedFiles = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => ({ lang: e.name, path: `modes/${e.name}/_shared.md` }))
+    .filter(({ path }) => existsSync(join(ROOT, path)));
+  const missingAuthorship = langSharedFiles.filter(({ path }) => !readFile(path).includes('<!-- guardrail:authorship -->'));
+  const missingNoFab = langSharedFiles.filter(({ path }) => !readFile(path).includes('<!-- guardrail:no-fabrication -->'));
+  if (missingAuthorship.length === 0) {
+    pass(`all ${langSharedFiles.length} localized _shared.md files carry the authorship guardrail marker (#2395)`);
+  } else {
+    fail(`localized _shared.md missing authorship guardrail marker: ${missingAuthorship.map(({ lang }) => lang).join(', ')}`);
+  }
+  if (missingNoFab.length === 0) {
+    pass(`all ${langSharedFiles.length} localized _shared.md files carry the no-fabrication guardrail marker (#2395)`);
+  } else {
+    fail(`localized _shared.md missing no-fabrication guardrail marker: ${missingNoFab.map(({ lang }) => lang).join(', ')}`);
+  }
+}
+
 if (readFile('DATA_CONTRACT.md').includes('data/blacklist.md')) {
   pass('DATA_CONTRACT.md registers data/blacklist.md as user layer (#1742)');
 } else {
