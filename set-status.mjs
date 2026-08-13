@@ -70,7 +70,7 @@
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
@@ -221,6 +221,49 @@ if (!existsSync(APPS_FILE)) {
 }
 
 /**
+ * Reduce a selector's candidate list to exactly one row, or exit.
+ *
+ * Every selector path shares one shape: match, optionally narrow by --role,
+ * refuse to guess between survivors, return the unique row. Only the predicate
+ * and the two messages differ.
+ *
+ * Centralising it matters more than the duplication it removes. **Failing
+ * closed on 2+ candidates is the #1704 fix** — a stale tracker # reused across
+ * two rows makes "the first match" a silent coin flip on which company gets
+ * edited. While that behaviour lived in three copies, a future change that
+ * reintroduced first-match-wins in one branch would have been invisible in the
+ * other two. There is now one place to get it wrong, and one place to test.
+ *
+ * Note --role only ever *narrows* here; it never validates a lone match. That
+ * is deliberate and load-bearing: the #2009 check downstream compares the
+ * resolved row against --role precisely because a selector matching exactly
+ * one row never reaches the narrowing branch. Do not "fix" that by validating
+ * here — the two checks answer different questions.
+ *
+ * @param {object[]} matches - Rows matching the selector, before --role narrowing.
+ * @param {object} messages - Selector-specific failure text.
+ * @param {string} messages.notFound - Message when nothing matched.
+ * @param {(count: number, listing: string) => string} messages.ambiguous - Message when 2+ survive.
+ * @returns {object} The single matched row. Exits the process on 0 or 2+ matches.
+ */
+function resolveCandidates(matches, { notFound, ambiguous }) {
+  if (matches.length === 0) {
+    failWith(EXIT_NOT_FOUND, 'not-found', notFound);
+  }
+  if (matches.length > 1 && flags.role) {
+    const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
+    if (narrowed.length === 1) return narrowed[0];
+    // Fall through with the original list so the candidates stay visible.
+  }
+  if (matches.length > 1) {
+    const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
+    const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
+    failWith(EXIT_AMBIGUOUS, 'ambiguous', ambiguous(matches.length, listing), { candidates });
+  }
+  return matches[0];
+}
+
+/**
  * Find the tracker row matching the CLI selector.
  *
  * @param {object[]} rows - Parsed data rows (parseTrackerRow output + lineIdx).
@@ -231,74 +274,45 @@ function resolveRow(rows) {
   // caller reading a report filename actually has in hand.
   if (flags.report !== null) {
     const num = parseInt(flags.report, 10);
-    const matches = rows.filter(r => extractTrackerReportNumbers(r.report).includes(num));
-    if (matches.length === 0) {
-      failWith(EXIT_NOT_FOUND, 'not-found',
-        `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
-        'use --row N to select by tracker #.)');
-    }
-    if (matches.length > 1 && flags.role) {
-      const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
-      if (narrowed.length === 1) return narrowed[0];
-    }
-    if (matches.length > 1) {
-      const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
-      const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
-      failWith(EXIT_AMBIGUOUS, 'ambiguous',
-        `Report #${num} is linked by ${matches.length} tracker rows — pass --role to disambiguate:\n${listing}`,
-        { candidates });
-    }
-    return matches[0];
+    return resolveCandidates(
+      rows.filter(r => extractTrackerReportNumbers(r.report).includes(num)),
+      {
+        notFound: `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
+          'use --row N to select by tracker #.)',
+        ambiguous: (count, listing) =>
+          `Report #${num} is linked by ${count} tracker rows — pass --role to disambiguate:\n${listing}`,
+      },
+    );
   }
 
   // --row N and a bare numeric selector both match the # column; they differ
   // only in whether the mismatch guard below treats the number as ambiguous.
   if (flags.row !== null || isBareNumericSelector) {
     const num = parseInt(flags.row !== null ? flags.row : selector, 10);
-    let matches = rows.filter(r => r.num === num);
-    if (matches.length === 0) {
-      failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with #${num}`);
-    }
-    if (matches.length > 1 && flags.role) {
-      const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
-      if (narrowed.length === 1) return narrowed[0];
-      // Fall through with the original list so the candidates stay visible.
-    }
-    if (matches.length > 1) {
-      // A bare report number should never match more than one row — this is
-      // exactly the failure mode from #1704: a stale tracker # reused across
-      // 2+ rows means "the first match" is a silent coin flip on which
-      // company gets edited. Refuse to guess; require --role or the company
-      // selector instead.
-      const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
-      const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
-      failWith(EXIT_AMBIGUOUS, 'ambiguous',
-        `#${num} is a duplicate tracker number shared by ${matches.length} rows (see #1704) — pass --role to disambiguate, or use the company name instead:\n${listing}`,
-        { candidates });
-    }
-    return matches[0];
+    return resolveCandidates(
+      rows.filter(r => r.num === num),
+      {
+        notFound: `No tracker row with #${num}`,
+        // #1704: a stale tracker # reused across 2+ rows means "the first
+        // match" is a silent coin flip on which company gets edited. Refuse to
+        // guess; require --role or the company selector instead.
+        ambiguous: (count, listing) =>
+          `#${num} is a duplicate tracker number shared by ${count} rows (see #1704) — ` +
+          `pass --role to disambiguate, or use the company name instead:\n${listing}`,
+      },
+    );
   }
 
   const key = normalizeCompany(selector);
   if (!key) failUsage(`Selector "${selector}" is empty after normalization`);
-  let matches = rows.filter(r => normalizeCompany(r.company) === key);
-
-  if (matches.length === 0) {
-    failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with company matching "${selector}"`);
-  }
-  if (matches.length > 1 && flags.role) {
-    const narrowed = matches.filter(r => roleFuzzyMatch(r.role, flags.role));
-    if (narrowed.length === 1) return narrowed[0];
-    // Fall through with the original list so the candidates stay visible.
-  }
-  if (matches.length > 1) {
-    const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
-    const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
-    failWith(EXIT_AMBIGUOUS, 'ambiguous',
-      `Company "${selector}" matches ${matches.length} rows — pass the # or narrow with --role:\n${listing}`,
-      { candidates });
-  }
-  return matches[0];
+  return resolveCandidates(
+    rows.filter(r => normalizeCompany(r.company) === key),
+    {
+      notFound: `No tracker row with company matching "${selector}"`,
+      ambiguous: (count, listing) =>
+        `Company "${selector}" matches ${count} rows — pass the # or narrow with --role:\n${listing}`,
+    },
+  );
 }
 
 // ── locked read-modify-write ─────────────────────────────────────
@@ -394,15 +408,29 @@ if (isBareNumericSelector && !flags.force) {
 // entirely baseline vocabulary (["platform","engineer"]) so that same-titled
 // sibling reqs never auto-merge. That makes it unusable on its own here — it
 // would reject --role "Platform Engineer" against a row that IS exactly that.
-const normalizeRoleText = s => String(s ?? '')
-  .toLowerCase()
-  // Preserve symbols that distinguish real titles before collapsing generic
-  // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
-  // "c engineer" and the exact-equality path treats them as the same row.
-  .replace(/\+\+/g, ' plusplus ')
-  .replace(/#/g, ' sharp ')
-  .replace(/[^a-z0-9]+/g, ' ')
-  .trim();
+// The collapse must drop PUNCTUATION, never letters. `[^a-z0-9]` dropped every
+// letter outside the Latin range, so any title written entirely in Japanese,
+// Arabic or Cyrillic keyed to '' — two different titles then compared equal
+// ('' === '') and the guard wrote the status to a row it had never actually
+// matched (#2670). normalizeTextKey is the Unicode-aware normalizer company
+// matching already used; it also folds NFKC, so a decomposed title still
+// matches its composed row.
+const normalizeRoleText = s => normalizeTextKey(
+  String(s ?? '')
+    // NFKC first: normalizeTextKey folds it too, but only AFTER this pre-map, so
+    // a fullwidth ＃/＋＋ would reach the collapse unrecognized and be stripped as
+    // punctuation — "C＃ Engineer" and "C＋＋ Engineer" both keying to
+    // "c engineer". Fullwidth forms are ordinary Japanese typography, so this is
+    // the same shipped-market surface as the rest of #2670. Folding here also
+    // makes the ASCII and fullwidth spellings of one title match each other.
+    .normalize('NFKC')
+    // Preserve symbols that distinguish real titles before collapsing generic
+    // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
+    // "c engineer" and the exact-equality path treats them as the same row.
+    .replace(/\+\+/g, ' plusplus ')
+    .replace(/#/g, ' sharp '),
+  ' ',
+);
 const roleMatchesTarget = normalizeRoleText(target.role) === normalizeRoleText(flags.role)
   || roleFuzzyMatch(target.role, flags.role);
 

@@ -55,6 +55,7 @@ const DEFAULT_SECTION_TITLES = {
   projects: 'Projects',
   education: 'Education',
   certifications: 'Certifications',
+  awards: 'Awards & Honors',
   skills: 'Skills',
 };
 
@@ -208,21 +209,35 @@ function parsePartial(source) {
   // can remove them verbatim from the entry zone in step 3, without needing any
   // broad HTML-comment regex (which would trigger CodeQL).
   const definitionStrings = [];
+  // Collect every definition first. The _EMPTY fallbacks are resolved in a
+  // second pass because a fallback may be defined before the block it belongs
+  // to, and pairing needs to know which block names exist.
+  const definitions = new Map();
   let m;
   while ((m = blockRe.exec(entryZone)) !== null) {
     const name = m[1];
     const content = m[2];
     if (name === 'ENTRY') continue; // skip the sentinel itself
     definitionStrings.push(m[0]); // full match, e.g. <!--FOO-->bar<!--/FOO-->
-    // EMPTY variants are the absent-field fallback (e.g. <!--ORG_EMPTY-->).
-    if (name.endsWith('_EMPTY')) {
-      const base = name.slice(0, -6);
-      const existing = blocks.get(base) || { present: '', absent: '' };
-      blocks.set(base, { ...existing, absent: content });
-    } else {
-      const existing = blocks.get(name) || { present: '', absent: '' };
-      blocks.set(name, { ...existing, present: content });
-    }
+    definitions.set(name, content);
+  }
+
+  const EMPTY_SUFFIX = '_EMPTY';
+  for (const [name, content] of definitions) {
+    if (name.endsWith(EMPTY_SUFFIX)) continue;
+    const existing = blocks.get(name) || { present: '', absent: '' };
+    blocks.set(name, { ...existing, present: content });
+  }
+  // An EMPTY variant is the absent-field fallback for a sibling block, and the
+  // renderer looks it up under the block's own name. Both spellings pair to the
+  // same block: <!--ORG_EMPTY--> and <!--ORG_BLOCK_EMPTY--> attach to ORG_BLOCK.
+  // Falling back to the bare stem keeps a FOO_EMPTY/FOO pair working.
+  for (const [name, content] of definitions) {
+    if (!name.endsWith(EMPTY_SUFFIX)) continue;
+    const stem = name.slice(0, -EMPTY_SUFFIX.length);
+    const base = definitions.has(`${stem}_BLOCK`) ? `${stem}_BLOCK` : stem;
+    const existing = blocks.get(base) || { present: '', absent: '' };
+    blocks.set(base, { ...existing, absent: content });
   }
 
   // Step 3: build the entry template by removing the captured block *definitions*
@@ -246,20 +261,26 @@ function parsePartial(source) {
 function fillEntry(entryTemplate, blocks, fields, blockValues) {
   let out = entryTemplate;
 
+  // Every replacement below passes a FUNCTION rather than the value directly.
+  // A string replacement argument is scanned by JS for $-patterns, so candidate
+  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
+  // would splice part of the template into the CV instead of being inserted
+  // literally. A replacer function's return value is never interpreted.
+
   // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
   // present/absent markup depending on whether the field has a value.
   if (blockValues) {
     for (const [name, { value, present }] of blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
-      const markup = present ? block.present.replace(`{{${name}}}`, value) : block.absent;
-      out = out.replace(`{{${name}}}`, markup);
+      const markup = present ? block.present.replace(`{{${name}}}`, () => value) : block.absent;
+      out = out.replace(`{{${name}}}`, () => markup);
     }
   }
 
   // Fill remaining scalar placeholders.
   for (const [key, value] of Object.entries(fields)) {
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }
 
   return out;
@@ -275,7 +296,7 @@ function loadSectionPartials(templatePath) {
   if (!existsSync(sectionsDir)) return partials;
 
   const sectionNames = [
-    'competencies', 'experience', 'projects', 'education', 'certifications', 'skills',
+    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
   ];
   for (const name of sectionNames) {
     const partialPath = join(sectionsDir, `${name}.html`);
@@ -444,8 +465,42 @@ function buildCertifications(entries, partial) {
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
     const blockValues = new Map([
-      // Certifications use EMPTY variants so that absent fields still emit an
-      // empty <span> for table-cell alignment — not a bare removal.
+      // An absent field resolves to the partial's _EMPTY fallback, emitting an
+      // empty <span> for table-cell alignment rather than being removed.
+      ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
+      ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      TITLE: escapeHtml(e.title || ''),
+      ORG:   escapeHtml(e.org || ''),
+      YEAR:  escapeHtml(e.year || ''),
+    }, blockValues);
+  }).join('\n    ');
+}
+
+// Awards mirror certifications: a title with an optional issuing body and year,
+// laid out on one baseline. Kept as its own builder rather than an alias so the
+// two can diverge (and so awards.html can be authored independently of
+// certifications.html) without one section's markup leaking into the other.
+function buildAwards(entries, partial) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+  if (!partial) {
+    return entries.filter(Boolean).map(e => {
+      const org = e.org ? `<span class="award-org">${escapeHtml(e.org)}</span>` : '<span class="award-org"></span>';
+      const year = e.year ? `<span class="award-year">${escapeHtml(e.year)}</span>` : '<span class="award-year"></span>';
+      return `<div class="award-item">
+      <span class="award-title">${escapeHtml(e.title)}</span>
+      ${org}
+      ${year}
+    </div>`;
+    }).join('\n    ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(Boolean).map(e => {
+    const blockValues = new Map([
+      // As with certifications, an absent field resolves to the partial's
+      // _EMPTY fallback so the table cells stay aligned across rows.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
     ]);
@@ -545,6 +600,8 @@ function renderReport(payload, partials) {
     EDUCATION: buildEducation(payload.education, partials.get('education')),
     SECTION_CERTIFICATIONS: escapeHtml(sectionTitles.certifications),
     CERTIFICATIONS: buildCertifications(payload.certifications, partials.get('certifications')),
+    SECTION_AWARDS: escapeHtml(sectionTitles.awards),
+    AWARDS: buildAwards(payload.awards, partials.get('awards')),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
   };
@@ -604,6 +661,7 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
       projectEntries: (payload.projects || []).length,
       educationEntries: (payload.education || []).length,
       certificationEntries: (payload.certifications || []).length,
+      awardEntries: (payload.awards || []).length,
       skillCategories: (payload.skills || []).length,
       totalBullets: countBullets(payload),
     },
@@ -721,6 +779,7 @@ async function runSelfTest() {
       description: 'Coursework: Data Structures, Algorithms, Machine Learning.',
     }],
     certifications: [{ title: 'Certified Kubernetes Administrator', org: 'CNCF', year: '2025' }],
+    awards: [{ title: 'Gold Medal, International Olympiad in Informatics', org: 'IOI', year: '2023' }],
     skills: [
       { category: 'Languages', items: 'Python, JavaScript, TypeScript' },
       { category: 'Frameworks', items: ['FastAPI', 'React', 'PyTorch'] },
@@ -810,6 +869,10 @@ async function runSelfTest() {
   }
   if (!html.includes('class="cert-item"')) {
     console.error('Self-test failed: certifications section is missing .cert-item class');
+    process.exit(1);
+  }
+  if (!html.includes('class="award-item"')) {
+    console.error('Self-test failed: awards section is missing .award-item class');
     process.exit(1);
   }
 

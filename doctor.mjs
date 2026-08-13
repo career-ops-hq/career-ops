@@ -6,12 +6,14 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
+import { parseConfigByExtension } from './jsonc-parse.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -63,6 +65,52 @@ function checkNodeVersion() {
   };
 }
 
+// El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas
+// preguntando por cuota y coste, y la causa mas repetida es esta. Aviso, nunca
+// fallo: tener una clave puesta es una eleccion legitima, lo que no es legitimo
+// es que el usuario no sepa que la esta usando en vez del plan que ya paga.
+function checkBillingSource() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  // Enabled means SET TO A TRUTHY VALUE, not merely present. These switches are
+  // documented as `=1`, so `CLAUDE_CODE_USE_BEDROCK=0` is how someone turns one
+  // off — and mere presence would then report "requests bill to your cloud
+  // account" at exactly the user who just said they don't. A billing check that
+  // misreads an explicit opt-out causes the confusion it exists to remove.
+  // Matches the repo's own env-flag convention (=== '1' in merge-tracker.mjs
+  // and update-system.mjs), while also accepting `true` since these are
+  // third-party switches users copy from assorted docs.
+  const cloud = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']
+    .filter((v) => /^(1|true|yes|on)$/i.test(String(process.env[v] ?? '').trim()));
+
+  if (cloud.length) {
+    return {
+      warn: true,
+      label: `${cloud[0]} is set, so requests bill to your cloud account, not to a Claude subscription.`,
+      fix: [
+        'Intentional? Nothing to do.',
+        `Not intentional: unset ${cloud[0]} and restart your terminal.`,
+      ],
+    };
+  }
+
+  const which = key ? 'ANTHROPIC_API_KEY' : (authToken ? 'ANTHROPIC_AUTH_TOKEN' : null);
+  if (!which) {
+    return { pass: true, label: 'Billing source: no API key in the environment (a Claude subscription will be used if you are logged in)' };
+  }
+
+  return {
+    warn: true,
+    label: `${which} is set, so it takes precedence over any Claude subscription: this session bills per token even if you pay for Pro or Max.`,
+    fix: [
+      'Intentional (you meant to use API credits)? Nothing to do.',
+      `Not intentional: remove the export of ${which} from ~/.zshrc, ~/.bashrc, ~/.profile or a project .env, restart your terminal, and run /login.`,
+      'Batch runs are the exception: `claude -p` workers do not use the interactive login, so they need `claude setup-token` exported as CLAUDE_CODE_OAUTH_TOKEN.',
+      'Details: docs/RUNNING_ON_A_BUDGET.md section 2b.',
+    ],
+  };
+}
+
 function checkDependencies() {
   if (existsSync(join(projectRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
@@ -105,10 +153,15 @@ async function checkPlaywright() {
   }
 }
 
-// Per-CLI MCP config registry.
+// Per-CLI MCP config registry. `plugins: true` marks a CLI whose MCP servers
+// can also arrive from an installed plugin, i.e. from outside the project root
+// (see isPlaywrightMcpFromPlugin).
 const MCP_CONFIGS = [
-  { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'] },
-  { cli: 'opencode', files: ['opencode.json'] },
+  { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'], plugins: true },
+  // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
+  // there, and JSON.parse throwing on them used to read as "no MCP server
+  // configured" (#2252).
+  { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package.
@@ -118,21 +171,73 @@ function isPlaywrightServer(server) {
   return blob.includes('@playwright/mcp');
 }
 
+// Any bucket shape that can hold a server map. A plugin's own .mcp.json is a
+// BARE map ({ "playwright": {...} }) rather than the mcpServers/mcp wrapper the
+// project-root configs use, so `cfg` itself is a candidate bucket (#2752).
+function hasPlaywrightIn(cfg, { bare = false } = {}) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  const buckets = [cfg.mcpServers, cfg.mcp, ...(bare ? [cfg] : [])]
+    .filter((b) => b && typeof b === 'object');
+  return buckets.some((servers) => Object.values(servers).some(isPlaywrightServer));
+}
+
+// Missing or malformed file reads as "not configured", never as a crash -
+// matches the pre-existing swallow-and-continue behavior of the project scan.
+function readConfigIfPresent(file) {
+  if (!existsSync(file)) return null;
+  try {
+    return parseConfigByExtension(file, readFileSync(file, 'utf8')) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Claude Code's user config dir. CLAUDE_CONFIG_DIR is the documented override;
+// the tests point it at a tmpdir so this never reads the real machine.
+function claudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+// A Claude Code plugin declares its MCP servers in its own .mcp.json, which
+// lives under the user's config dir - never in the project root. The
+// project-root scan below therefore reports "not detected" on a machine where
+// Playwright MCP is installed and working, which reads as though the MANDATORY
+// offer-liveness verification in AGENTS.md cannot be met (#2752).
+//
+// Only ENABLED plugins count: an installed-but-disabled plugin still ships its
+// manifest on disk, but registers no server. Enumeration is driven by the two
+// manifests rather than by walking plugins/cache, so a large cache costs
+// nothing and disabled plugins are never read.
+function isPlaywrightMcpFromPlugin() {
+  const configDir = claudeConfigDir();
+
+  const enabled = readConfigIfPresent(join(configDir, 'settings.json'))?.enabledPlugins;
+  if (!enabled || typeof enabled !== 'object') return false;
+
+  const installed = readConfigIfPresent(join(configDir, 'plugins', 'installed_plugins.json'))?.plugins;
+  if (!installed || typeof installed !== 'object') return false;
+
+  return Object.entries(enabled).some(([key, on]) => {
+    if (on !== true) return false;
+    const entries = Array.isArray(installed[key]) ? installed[key] : [];
+    return entries.some(({ installPath } = {}) => {
+      if (typeof installPath !== 'string' || !installPath) return false;
+      return hasPlaywrightIn(readConfigIfPresent(join(installPath, '.mcp.json')), { bare: true });
+    });
+  });
+}
+
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
-  return entry.files.some((rel) => {
+  const inProject = entry.files.some((rel) => {
     const file = join(root, ...rel.split('/'));
-    if (!existsSync(file)) return false;
-    try {
-      const cfg = JSON.parse(readFileSync(file, 'utf8')) ?? {};
-      const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
-      return buckets.some((servers) => Object.values(servers).some(isPlaywrightServer));
-    } catch {
-      // Malformed config — treat as unconfigured, keep silent (matches prior behavior).
-    }
-    return false;
+    return hasPlaywrightIn(readConfigIfPresent(file));
   });
+  if (inProject) return true;
+  // Gated behind the project scan, so an already-configured project pays no
+  // extra I/O and non-plugin CLIs never touch the user config dir.
+  return entry.plugins === true && isPlaywrightMcpFromPlugin();
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
@@ -189,10 +294,12 @@ function checkPlaywrightMcp(root, activeCli) {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
-      `No project-level MCP config was detected for ${activeCli}.`,
+      entry.plugins
+        ? `No project-level MCP config, and no enabled plugin providing one, was detected for ${activeCli}.`
+        : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
-        : `Add the Playwright MCP server to your ${activeCli} config.`,
+        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
     ],
   };
 }
@@ -400,6 +507,7 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
+    checkBillingSource(),
     checkDependencies(),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot, activeCli),

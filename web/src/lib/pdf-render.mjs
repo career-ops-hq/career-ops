@@ -17,22 +17,72 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Read the agent-written format sidecar. `ok: false` means the sidecar is
- * missing or unparseable — the caller should warn rather than silently trust
- * the "letter" default, since that can ship a European CV in the wrong page
- * size with no signal.
- * @param {string} metaPath
- * @returns {{format: "letter" | "a4", ok: boolean}}
+ * @typedef {Object} PdfRunSignals
+ * @property {object|undefined} envelope - parseCvEnvelope's result for this run.
+ * @property {string|null} noOutputMessage - The route's verdict on "did the CLI
+ *   produce any output at all", or null when it did. That question is about the
+ *   transport, not this module, so the route owns the wording and passes it in
+ *   rather than both places carrying the same two strings.
+ * @property {boolean} sawError - Anything error-shaped on stderr.
+ * @property {boolean} cleanExit - Exit code 0 (not killed, not non-zero).
+ * @property {boolean} hasPaths - The backend resolved its scratch/final paths.
  */
-export function resolveRenderFormat(metaPath) {
+
+/**
+ * Did this pdf run produce a CV worth rendering?
+ *
+ * Pure, and here rather than in the route, because it is the decision point for
+ * the backend pdf pipeline this module implements: nothing is written, rendered or
+ * marked unless this says yes, and the route is a transport layer the repo leaves
+ * untested by design.
+ *
+ * The envelope's own error is preferred over the generic message: "never closed"
+ * and "emitted no envelope" are different bugs and the user can act on the
+ * difference.
+ *
+ * @param {PdfRunSignals} signals
+ * @returns {{ok: true} | {ok: false, message: string}}
+ */
+export function pdfRunOutcome({ envelope, noOutputMessage, sawError, cleanExit, hasPaths }) {
+  // A CLI that produced nothing at all is a different failure from one that ran
+  // and fell short — usually "not installed" or "not authenticated".
+  if (noOutputMessage) return { ok: false, message: noOutputMessage };
+  if (envelope?.ok !== true || !cleanExit || sawError || !hasPaths) {
+    const why = envelope && envelope.ok === false ? ` (${envelope.error})` : "";
+    return {
+      ok: false,
+      message: `This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify.${why}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Persist the CV the agent emitted through its <<cv-html>> envelope (#2185).
+ *
+ * The agent emits the tailored HTML inline and the backend saves it here. The
+ * chosen page format is NOT written to disk: it is already in memory and goes
+ * straight to renderAndMarkPdf. A sidecar written and re-read inside one request
+ * bought only a fallback branch for a state that could not occur, plus an
+ * undeclared ordering dependency between these two functions.
+ *
+ * The scratch directory is created by resolvePdfPaths earlier in the same
+ * request, so this deliberately does not mkdir — a missing directory here means
+ * something is wrong upstream and should surface, not be papered over.
+ *
+ * @param {{pdfPaths: {html: string}, html: string}} args
+ * @returns {{ok: true} | {ok: false, error: string}} Never throws: the caller
+ *   routes the failure through the same honesty gate as every other pdf failure.
+ */
+export function writeCvHtml({ pdfPaths, html }) {
   try {
-    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-    if (meta.format === "a4" || meta.format === "letter") {
-      return { format: meta.format, ok: true };
-    }
-    return { format: "letter", ok: false };
-  } catch {
-    return { format: "letter", ok: false };
+    fs.writeFileSync(pdfPaths.html, html, "utf8");
+    return { ok: true };
+  } catch (err) {
+    // err.path when the platform gives it: a non-fs throw (an oversized-content
+    // RangeError, a bad argument type) carries none, and "could not save to
+    // undefined" tells the user nothing.
+    return { ok: false, error: `Could not save the tailored CV to ${err.path ?? pdfPaths.html}: ${err.message}` };
   }
 }
 
@@ -84,10 +134,11 @@ export function markTrackerReady({ spawnFn, execPath, root, reportNum }) {
 }
 
 /**
- * Glob-clean every scratch file for this run (not just the two known
- * filenames — the agent may legitimately create its own intermediate files
- * en route, e.g. build-cv-html.mjs's JSON payload). Logs rather than
- * silently swallowing failures, so a systemic permissions issue doesn't grow
+ * Glob-clean every scratch file for this run rather than the one known filename.
+ * The agent is not told these paths, and on Claude Code holds no write tool — but
+ * the BACKEND writes here and generate-pdf.mjs may leave its own intermediates, so
+ * matching the run's prefix stays the right sweep. Logs rather than silently
+ * swallowing failures, so a systemic permissions problem doesn't grow
  * `.career-ops-web/pdf-tmp/` forever with no trace anywhere.
  * @param {string} scratchDir
  * @param {string} prefix
@@ -119,7 +170,7 @@ export function cleanupPdfScratch(scratchDir, prefix) {
 /**
  * @typedef {Object} RenderedResult
  * @property {"rendered"} kind
- * @property {string[]} warnings - Non-fatal issues to surface to the user (missing format sidecar, tracker not marked).
+ * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a tracker row that was not marked).
  */
 /** @typedef {RenderFailedResult | RenderedResult} RenderResult */
 
@@ -128,15 +179,15 @@ export function cleanupPdfScratch(scratchDir, prefix) {
  * ready — only after the render is CONFIRMED successful, never
  * optimistically. Always cleans up scratch files, whether the render
  * succeeds or fails.
- * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {html: string, meta: string, finalPdf: string}, reportNum: string}} args
+ *
+ * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
+ * function wrote. `format` is passed in rather than read back off disk, so the two
+ * no longer share a file and the only coupling left is the HTML itself.
+ * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, reportNum }) {
-  const { format, ok: formatOk } = resolveRenderFormat(pdfPaths.meta);
+export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, format, reportNum }) {
   const warnings = [];
-  if (!formatOk) {
-    warnings.push(`No valid page-format file found at ${pdfPaths.meta} — defaulted to letter. Check the rendered PDF's format.`);
-  }
 
   const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);

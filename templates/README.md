@@ -7,7 +7,7 @@ System-layer template files used by career-ops scripts and modes. These files ar
 | File | Used By | Purpose |
 |------|---------|---------|
 | `cv-template.html` | `generate-pdf.mjs` | HTML/CSS template for ATS-optimized CV PDFs |
-| `resume-template.html` | `generate-pdf.mjs` (via `--template`) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section, targets 1–2 page US/industry format. See detailed section below. |
+| `resume-template.html` | `generate-pdf.mjs` (via `--template`) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section (but keeps Awards & Honors), targets 1–2 page US/industry format. See detailed section below. |
 | `cv-template.tex` | `generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
 | `portals.example.yml` | Onboarding | Example portal scanner configuration (copy to `portals.yml` to activate) |
 | `states.yml` | `verify-pipeline.mjs`, `normalize-statuses.mjs`, `merge-tracker.mjs` | Canonical application states and their aliases |
@@ -26,6 +26,12 @@ The HTML template rendered by Playwright into PDF. Uses placeholder tokens (`{{N
 
 **Customization:** Edit this file to change colors, spacing, or section order. The placeholder tokens are documented in `batch/batch-prompt.md` under "Template placeholders."
 
+**Optional sections:** Core Competencies, Projects, Education, Certifications, Awards & Honors, and Skills are dropped in full — section header included — when the payload carries no entries for them (see `cv-sections-core.mjs`). Their markers (`<!-- PROJECTS -->`, `<!-- AWARDS -->`, …) are what the strip matches on, so renaming or removing a marker disables the strip for that section.
+
+**The `<!-- END -->` sentinel (custom templates, read this):** Skills is the last section in the shipped templates, so it has no following section marker for the strip to stop at. A template that renders a Skills section must therefore place a literal `<!-- END -->` comment immediately after it (`%%%%  END  %%%%` in the LaTeX template) — that sentinel is what bounds the strip.
+
+Getting this wrong is safe, by design. If the sentinel is missing, the empty-Skills strip simply does not run: the template is left byte-for-byte untouched and the Skills section renders as a bare header. That is a cosmetic bug, deliberately chosen over the alternative — without the sentinel *and* without this fail-safe, the strip would run to end-of-file and delete the closing `</div></body></html>` (`\end{document}`), producing a truncated document. Custom templates are validated only for `{{NAME}}`, `{{EXPERIENCE}}`, and `{{EDUCATION}}` (see `cv-templates.mjs`); the sentinel is not required, precisely because its absence degrades gracefully.
+
 ### resume-template.html
 
 Resume-branded variant of `cv-template.html` for US/industry job applications. Key differences from the CV template:
@@ -33,6 +39,7 @@ Resume-branded variant of `cv-template.html` for US/industry job applications. K
 - **Title** reads "Resume" instead of "CV"
 - **No Certifications section** — resumes focus on recent, relevant experience
 - **Designed for 1–2 pages** — omits academic-style sections
+- **Awards & Honors is kept** — unlike Certifications. A contest medal or dean's list is a competitive signal rather than academic filler, and it is the strongest line an early-career candidate has when the experience section is thin. It costs nothing when unused: no entries means no section.
 
 Otherwise uses the same placeholder tokens (`{{NAME}}`, `{{SUMMARY_TEXT}}`, etc.) and is fully compatible with the existing PDF pipeline.
 

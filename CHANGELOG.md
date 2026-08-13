@@ -1,5 +1,126 @@
 # Changelog
 
+## [1.26.0](https://github.com/santifer/career-ops/compare/career-ops-v1.25.0...career-ops-v1.26.0) (2026-08-10)
+
+
+### Features
+
+* **cover:** optional letter.signature sign-off block ([#2513](https://github.com/santifer/career-ops/issues/2513)) ([449c1df](https://github.com/santifer/career-ops/commit/449c1df4a235205bb1907c7c572d2fa09a9321b9)), closes [#2510](https://github.com/santifer/career-ops/issues/2510)
+* **cv:** strip the Core Competencies section when it has no entries ([#2512](https://github.com/santifer/career-ops/issues/2512)) ([f1b2bc6](https://github.com/santifer/career-ops/commit/f1b2bc6eb7f553c60d60d43b672c7004a4a6b0ef)), closes [#2509](https://github.com/santifer/career-ops/issues/2509)
+* **doctor:** warn when an API key is overriding the Claude subscription ([ccb7b0d](https://github.com/santifer/career-ops/commit/ccb7b0d86a8de28c5858c9276529b56a448cf7b7))
+* **followup:** rejection-latency signal, courtesy-threshold only ([#2014](https://github.com/santifer/career-ops/issues/2014)) ([70e6152](https://github.com/santifer/career-ops/commit/70e615283794e450a0105ddeaf14d6ff844ecdec))
+* **invite-match:** recognize rejection emails, not just interview invites ([#2100](https://github.com/santifer/career-ops/issues/2100)) ([9bbdd9b](https://github.com/santifer/career-ops/commit/9bbdd9b495974ce3be7d5713f8d0614a1957aec3))
+* **oferta:** minimum-wage lawyer question, arithmetic-only ([#2027](https://github.com/santifer/career-ops/issues/2027)) ([0118404](https://github.com/santifer/career-ops/commit/0118404946260fa68b449399042bf0eb351d4aaf))
+* **oferta:** pay-transparency range-width check, self-computed only ([#2021](https://github.com/santifer/career-ops/issues/2021)) ([9482765](https://github.com/santifer/career-ops/commit/948276555b0e0449d4415ad39b61f8016bbf90b8))
+* **offer-prep:** sub-statutory terms route to lawyer, no floors table ([#2042](https://github.com/santifer/career-ops/issues/2042)) ([51ae334](https://github.com/santifer/career-ops/commit/51ae334b2faf2ae9e1d256139d83a0f7f144829c))
+* **providers:** add join.com SSR __NEXT_DATA__ parser ([#2527](https://github.com/santifer/career-ops/issues/2527)) ([2b64bf5](https://github.com/santifer/career-ops/commit/2b64bf55f3821fe86990e57362f1740ccd1f9d77))
+* **providers:** add remotli — Swiss remote job board ([#2464](https://github.com/santifer/career-ops/issues/2464)) ([dca9418](https://github.com/santifer/career-ops/commit/dca94180f9666dfc93b8dff4ff41bad97e58588d))
+* **scan:** add getro, consider and joinup zero-auth providers ([#825](https://github.com/santifer/career-ops/issues/825)) ([c0a259a](https://github.com/santifer/career-ops/commit/c0a259a900eab439d95d9787eb093b445425d6bb))
+* **scan:** make the pipeline and scan-history paths env-overridable ([#2568](https://github.com/santifer/career-ops/issues/2568)) ([402e798](https://github.com/santifer/career-ops/commit/402e7988d33962ae3e9eb7f76afa2e55ddc37f1c)), closes [#2271](https://github.com/santifer/career-ops/issues/2271)
+
+
+### Bug Fixes
+
+* **a16z-speedrun:** retry a transient page failure instead of aborting the whole board ([#2506](https://github.com/santifer/career-ops/issues/2506)) ([50ce177](https://github.com/santifer/career-ops/commit/50ce17718c3ca5fc36103d41b48b30027eac44d8))
+* **arbeitsagentur:** move to the v6 Jobsuche API ([#2494](https://github.com/santifer/career-ops/issues/2494)) ([a713ed5](https://github.com/santifer/career-ops/commit/a713ed5de2850d6e3f5acb5677f198a31483271a))
+* **cover:** fail on an unresolved template token instead of shipping it into the letter ([#2586](https://github.com/santifer/career-ops/issues/2586)) ([3733414](https://github.com/santifer/career-ops/commit/3733414d6440c3f9c6834c4c2ac73245ef25d778))
+* **cv:** drop empty Skills section instead of rendering a bare header ([#2516](https://github.com/santifer/career-ops/issues/2516)) ([60c4db9](https://github.com/santifer/career-ops/commit/60c4db955d19f7267e1722d9b2a8216843ba3cb3))
+* **cv:** pair _EMPTY fallbacks with their block so mixed rows stay aligned ([#2486](https://github.com/santifer/career-ops/issues/2486)) ([57af06b](https://github.com/santifer/career-ops/commit/57af06ba78515eb22c835adfef65ce5b45cc94eb))
+* **cv:** pass a replacer function so $-patterns in candidate text stay literal ([#2588](https://github.com/santifer/career-ops/issues/2588)) ([097dac0](https://github.com/santifer/career-ops/commit/097dac0c8b811e2145449b6392e56b5d3f2a7fa5))
+* **dedup:** use the shared Unicode-aware company key instead of a local ASCII copy ([#2587](https://github.com/santifer/career-ops/issues/2587)) ([130e3fa](https://github.com/santifer/career-ops/commit/130e3fa073e37655178566312ea741bfba24866c))
+* **dedup:** write the blind-via key prefix as an escape, not a raw NUL byte ([1b57bb6](https://github.com/santifer/career-ops/commit/1b57bb65f30a1614dbd55e6dd6729357a767b7a7))
+* **doctor:** treat the cloud billing switches as opt-in, not merely present ([#2593](https://github.com/santifer/career-ops/issues/2593)) ([acbd060](https://github.com/santifer/career-ops/commit/acbd06061d1ef90eef09a3a81cd4e3d6b7467247)), closes [#2592](https://github.com/santifer/career-ops/issues/2592)
+* extend the backup-file ignore to .npmignore and pin it with a test ([#2560](https://github.com/santifer/career-ops/issues/2560)) ([f0e7a5d](https://github.com/santifer/career-ops/commit/f0e7a5db4fd0b0952492723227f62fb51741cbd6))
+* **http:** consolidate duplicated User-Agent strings into a shared module ([#2536](https://github.com/santifer/career-ops/issues/2536)) ([c8e9a6f](https://github.com/santifer/career-ops/commit/c8e9a6f7bee926a92a9f8cf16ef9403be8b9942e))
+* **invite-match:** non-Latin company names returned zero candidates ([#2517](https://github.com/santifer/career-ops/issues/2517)) ([df43774](https://github.com/santifer/career-ops/commit/df43774c4df0c24acd48791ea513e41598af3757))
+* **jd-skill-gap:** CRLF-terminated JDs extracted zero skills ([fa16f09](https://github.com/santifer/career-ops/commit/fa16f095f02605009e7bd603bba94149b99fef96))
+* **merge-tracker:** write a lower-scored re-evaluation through instead of discarding it ([9036809](https://github.com/santifer/career-ops/commit/90368097c57f9f6ad5ee60efa67415f19d1e54db))
+* **providers:** hackernews thread lookup filters by the whoishiring tag ([3aa5e15](https://github.com/santifer/career-ops/commit/3aa5e159d7c135c7e40f4677475f4b6cbc8583bd))
+* **providers:** move The Hub to the v2 jobsandfeatured API ([6b33fc4](https://github.com/santifer/career-ops/commit/6b33fc45f3d4abe15be300fd0b3c9cf4999c57ff))
+* **providers:** resize a16z page budgets for the 50-job page size ([36d0c44](https://github.com/santifer/career-ops/commit/36d0c444534f518fc127d70b81590aa1d2a3bf1a))
+* **repo:** add .gitattributes so Windows checkouts stop producing whole-file diffs ([80d104f](https://github.com/santifer/career-ops/commit/80d104f994ba1e64a09b7a92a0d86641308cf64a))
+* **scan:** read --company/--posted-after/--posted-before in =value form too ([#2589](https://github.com/santifer/career-ops/issues/2589)) ([b629ca0](https://github.com/santifer/career-ops/commit/b629ca09ae9cd4ea7e0ba871513229fee3bb7545))
+* **scan:** Unicode-aware keys for role dedup and company matching ([#2569](https://github.com/santifer/career-ops/issues/2569)) ([08cda71](https://github.com/santifer/career-ops/commit/08cda7110a0ba5095ddbcb03857382aa07f3a261))
+* **seeds:** walk every YC page instead of stopping after page 1 ([#2526](https://github.com/santifer/career-ops/issues/2526)) ([6cf9e41](https://github.com/santifer/career-ops/commit/6cf9e41952dbe41e4fbe4751558d3107cf3a6924)), closes [#2525](https://github.com/santifer/career-ops/issues/2525)
+* **seeds:** walk every YC page instead of stopping after page 1 ([#2558](https://github.com/santifer/career-ops/issues/2558)) ([9424577](https://github.com/santifer/career-ops/commit/9424577c320016ef1ba13406182e5096facf9724))
+* **update-system:** apply .gitattributes before the files it governs ([b630da2](https://github.com/santifer/career-ops/commit/b630da27e682d326f6ec809c71e0928a8f469680))
+* **web:** derive company matching keys from the core, not an ASCII-only copy ([#2667](https://github.com/santifer/career-ops/issues/2667)) ([9b6582c](https://github.com/santifer/career-ops/commit/9b6582c01c381e6ab22ed674be7f7ef9f13d48df))
+* **web:** re-read states.yml when it changes instead of caching it for the process lifetime ([#2590](https://github.com/santifer/career-ops/issues/2590)) ([2a2e09e](https://github.com/santifer/career-ops/commit/2a2e09e61275e18a2331c1fee39bec3225f9f01c))
+* **web:** route Today's "See all N" link to the fresh-matches view ([#1790](https://github.com/santifer/career-ops/issues/1790)) ([5fcc727](https://github.com/santifer/career-ops/commit/5fcc72773b711be59f8212536df27ea6fd79f88d))
+* **web:** take Write/Edit away from the dashboard's pdf mode ([#2508](https://github.com/santifer/career-ops/issues/2508)) ([1301ed4](https://github.com/santifer/career-ops/commit/1301ed4ccc4b1ead8b7eca024135ad4d1d63932c))
+
+## [1.25.0](https://github.com/santifer/career-ops/compare/career-ops-v1.24.0...career-ops-v1.25.0) (2026-08-04)
+
+
+### Features
+
+* add company:funded — review-first funded-company discovery from public RSS sources ([#2117](https://github.com/santifer/career-ops/issues/2117)) ([7ab92ab](https://github.com/santifer/career-ops/commit/7ab92abb139ccd0e8712d62b2fff4211c551fd33))
+* **cv:** add optional Awards / Honors section to HTML + LaTeX CV templates ([#2220](https://github.com/santifer/career-ops/issues/2220)) ([59df4bb](https://github.com/santifer/career-ops/commit/59df4bb11a278bfacd23dcdec15e4b9cfc401782))
+* **i18n:** add Italian translations for interview modes ([#2335](https://github.com/santifer/career-ops/issues/2335)) ([8127c93](https://github.com/santifer/career-ops/commit/8127c932f0c14200e7e519495ce52d033ab3a3f6))
+* **pdf:** opt-in hiring-manager audit pass — adversarial, research-grounded CV review ([#2239](https://github.com/santifer/career-ops/issues/2239)) ([3024413](https://github.com/santifer/career-ops/commit/3024413f54e683728b581ec1f251fc89c0b60d5a))
+* **providers:** getManfred board-wide feed (Spanish/EU tech, salaries published) ([9474ff1](https://github.com/santifer/career-ops/commit/9474ff12b56b87700cad42dc1ace545ac1f9b3e2))
+* **reposts:** add --help usage block to detect-reposts ([6ec8e15](https://github.com/santifer/career-ops/commit/6ec8e157639a6f2b53e3c3ad9a051ed3c69ea5f8))
+* **scan:** add --since, a relative posted-date bound that also stops paging early ([1d9ff63](https://github.com/santifer/career-ops/commit/1d9ff6343239dfb2dae9d91e091685e6c2641c9d))
+* **test:** dynamic upgrade PR gate — old install applies the commit under test ([#2358](https://github.com/santifer/career-ops/issues/2358)) ([aa57dcb](https://github.com/santifer/career-ops/commit/aa57dcb1803a8a8ae41f60f587308738f9626e3a))
+* **web:** Follow-up Tracker page with logging, history, and cadence settings ([#1422](https://github.com/santifer/career-ops/issues/1422)) ([6554de6](https://github.com/santifer/career-ops/commit/6554de6dcd28b95556e95ae220aebc719cc7a2a0))
+* **weekly-digest:** weekly interview digest aggregator ([#2130](https://github.com/santifer/career-ops/issues/2130)) ([37a5184](https://github.com/santifer/career-ops/commit/37a5184ba0bbcb590f5e17cfbf6a718db1527460))
+
+
+### Bug Fixes
+
+* **batch-runner:** tab-IFS collapse recorded score "-" for every successful offer ([5b312bf](https://github.com/santifer/career-ops/commit/5b312bf57e49147e8273b2e8f3986155f134b109))
+* **cli:** --flag=value was silently ignored in five scripts ([37055d7](https://github.com/santifer/career-ops/commit/37055d7de76bf400eb8aa8ed399efca293deadf2))
+* **company-funded:** catch the layoff spellings [#2404](https://github.com/santifer/career-ops/issues/2404) left through ([aca8b71](https://github.com/santifer/career-ops/commit/aca8b71de30d2a883b9ac8013801bb3d6f4d2a3c))
+* **company-funded:** the cuts N% layoff exclusion never matched ([#2404](https://github.com/santifer/career-ops/issues/2404)) ([476b21b](https://github.com/santifer/career-ops/commit/476b21be740ee2399a5c0209641c91a4c8d6bd41))
+* **company-history:** count a hire as a company response ([#2297](https://github.com/santifer/career-ops/issues/2297)) ([c6220bf](https://github.com/santifer/career-ops/commit/c6220bf1e414b37e9fb0aec6bc6e68c47189b94b))
+* **cv-facts:** the anti-fabrication gate saw nothing in five shipped locales ([599dd82](https://github.com/santifer/career-ops/commit/599dd820fcb73e67eee20b46e88d516f3b349acc))
+* **cv-facts:** the employer/title gate only matched lowercase triggers ([a05c270](https://github.com/santifer/career-ops/commit/a05c270ec21b025f75f072751ae0a4acc65c02e0))
+* **cv-latex:** single mailto: scheme + escape OT1-unsafe glyphs ([#2378](https://github.com/santifer/career-ops/issues/2378)) ([654dce2](https://github.com/santifer/career-ops/commit/654dce2120e342ea9f1fb89e94a2fd597d47cf29))
+* **dashboard:** localize the hired status label and buffer split stream openers ([#2295](https://github.com/santifer/career-ops/issues/2295)) ([8f5d10d](https://github.com/santifer/career-ops/commit/8f5d10d6aa97438a4ac3908814456df5a8cf4083))
+* **dashboard:** the progress funnel dropped Hired from every stage ([#2406](https://github.com/santifer/career-ops/issues/2406)) ([aac93e8](https://github.com/santifer/career-ops/commit/aac93e82809a345430c6e7fe89263cfb6aa86416))
+* **dedup:** use Unicode-aware Via key for blind-employer grouping ([#2397](https://github.com/santifer/career-ops/issues/2397)) ([fe4561b](https://github.com/santifer/career-ops/commit/fe4561b0686b8e2829d5cf6c8d7bbdedb9bfb7cd))
+* **deps:** update npm dependencies (+ Dockerfile playwright pins, web lockfile sync) ([f154f59](https://github.com/santifer/career-ops/commit/f154f5938fed43a37ab5e57efee1c45d664cdc3f))
+* **doctor:** detect Playwright MCP in JSONC OpenCode configs ([#2252](https://github.com/santifer/career-ops/issues/2252)) ([ead7985](https://github.com/santifer/career-ops/commit/ead7985f9fa2f2770cc6738443662549ff16e1e9))
+* **fingerprint:** non-Latin employers no longer collapse to the same company key ([#2501](https://github.com/santifer/career-ops/issues/2501)) ([9326a04](https://github.com/santifer/career-ops/commit/9326a04102e5b8ef517532f4dea94f8688727332))
+* git-ignore article-digest.md and guard the user layer against tracking ([#2365](https://github.com/santifer/career-ops/issues/2365)) ([e8a33cf](https://github.com/santifer/career-ops/commit/e8a33cf4ca26971b3e26050346800caec43b81fe))
+* **jd-skill-gap:** warn when zero skills are classified instead of printing a clean summary ([#2341](https://github.com/santifer/career-ops/issues/2341)) ([9e3586d](https://github.com/santifer/career-ops/commit/9e3586da3e4a54291e2ddab07e218e09cbd76b92))
+* **liveness:** classify transient 5xx as uncertain, not expired ([#2371](https://github.com/santifer/career-ops/issues/2371)) ([6958d84](https://github.com/santifer/career-ops/commit/6958d848085cbecae4adc800e75eebce3eca35b7))
+* **merge-tracker:** collapse placeholder Notes to the re-eval marker ([#2483](https://github.com/santifer/career-ops/issues/2483)) ([0df8a41](https://github.com/santifer/career-ops/commit/0df8a416117cfd66a3e747ad1a602c0a995380ed))
+* **merge-tracker:** four silent data-loss paths in the merge loop, with Unicode-safe company matching ([#2399](https://github.com/santifer/career-ops/issues/2399)) ([7bcae6b](https://github.com/santifer/career-ops/commit/7bcae6be777d029fe9bc6cfb3048a80f9c2bea96))
+* **providers:** a16z speedrun feed silently truncates to 50 jobs ([4abcb32](https://github.com/santifer/career-ops/commit/4abcb3224c506ea05cccf8d67acc4610f8a2a4bc))
+* **providers:** dead boards throw instead of reading as live-but-empty ([#2379](https://github.com/santifer/career-ops/issues/2379)) ([3c331e4](https://github.com/santifer/career-ops/commit/3c331e43662226464fcbfb1dc32985e4646afc5b))
+* resolve the PDF manifest from the tracker, not the install dir ([#2471](https://github.com/santifer/career-ops/issues/2471)) ([bc73c7f](https://github.com/santifer/career-ops/commit/bc73c7fd75192edf8d4927de7339c6cbb6eeaa05))
+* **scan-ats-full:** --since -5 silently scanned nothing and called it a clean run ([#2498](https://github.com/santifer/career-ops/issues/2498)) ([8a10c01](https://github.com/santifer/career-ops/commit/8a10c010f29052f2a252f103ab1f6950aa9ba172))
+* **scan-ats-full:** keep the checkpoint when a resolver outage stops a sweep ([#2283](https://github.com/santifer/career-ops/issues/2283)) ([5764c35](https://github.com/santifer/career-ops/commit/5764c35778b7ce82a8787ceb31d0fec703b077c6))
+* **set-status:** close the report-less-row blind spot and add explicit --row/--report selectors ([#2347](https://github.com/santifer/career-ops/issues/2347)) ([292f55d](https://github.com/santifer/career-ops/commit/292f55d49dc10deaa6e96975634b650143eb08e4))
+* show actual LinkedIn URL as cover-letter link text, not the word "LinkedIn" ([#2338](https://github.com/santifer/career-ops/issues/2338)) ([f04b40e](https://github.com/santifer/career-ops/commit/f04b40e1d1bfbad4a329d2fcc8c24251a8285553))
+* strip GitHub URL scheme case-insensitively in cover letters ([#2340](https://github.com/santifer/career-ops/issues/2340)) ([0157284](https://github.com/santifer/career-ops/commit/0157284500925b7042707184e547a862da0406fe))
+* **sync-pdf:** reject unknown options ([a9b986b](https://github.com/santifer/career-ops/commit/a9b986b78ab68c32b12373b7cd47b4ae839fcca1))
+* **tailor:** prompt-cache the openai-tailor.mjs static system prefix ([#2432](https://github.com/santifer/career-ops/issues/2432)) ([1ec3320](https://github.com/santifer/career-ops/commit/1ec33201f80f94d7affb49a9c61193444d3c90aa))
+* **test-all:** the states.yml freeze guarded 6 of 9 ids ([#2408](https://github.com/santifer/career-ops/issues/2408)) ([d3acdad](https://github.com/santifer/career-ops/commit/d3acdad1d9db5a053a6be436905efa8c5a12d9a9))
+* **test:** forbid finish() in discovered suites — it forges the global verdict ([cd346d3](https://github.com/santifer/career-ops/commit/cd346d3f0e746aeadcafd2e64dcb0afaaec47d15))
+* **test:** report the Windows-unobservable lock contention signal instead of failing ([d2b4ccd](https://github.com/santifer/career-ops/commit/d2b4ccd3847aafd5fea71da453080bfaf5c1fcb3))
+* **tests:** budget harness waits for slow runners and preserve crashed-script diagnostics ([#2332](https://github.com/santifer/career-ops/issues/2332)) ([e439792](https://github.com/santifer/career-ops/commit/e439792bc58740f83fb153807f02929f500f0759))
+* **tests:** find Git Bash under Scoop and name the fallback shell in failures ([#2366](https://github.com/santifer/career-ops/issues/2366)) ([bff961c](https://github.com/santifer/career-ops/commit/bff961c4756b1f0d9c1baa149ed2af75756a485a))
+* **tests:** isolate tracker-columns fixtures from the real reports/ directory ([0f79901](https://github.com/santifer/career-ops/commit/0f79901a756903335fef9e50aa23a248a5135002))
+* **test:** stop test-all silently passing when a node:test suite fails ([#2463](https://github.com/santifer/career-ops/issues/2463)) ([7e02444](https://github.com/santifer/career-ops/commit/7e02444aff702ad3b1d5063c5835b53e44d4a9ff))
+* **test:** use a junction on Windows for the node_modules link ([241bcfd](https://github.com/santifer/career-ops/commit/241bcfd93a3a0a11242c45fad5483f57806ef019))
+* **tracker:** non-Latin company names all keyed to empty string, silently overwriting each other ([#2429](https://github.com/santifer/career-ops/issues/2429)) ([f589ce8](https://github.com/santifer/career-ops/commit/f589ce8306c4b3fcaee15619daca337ede7ce60e))
+* **tracker:** rank Hired in dedup, canonicalize its aliases, stop bare tracker-number merges across roles ([#2377](https://github.com/santifer/career-ops/issues/2377)) ([83cde52](https://github.com/santifer/career-ops/commit/83cde5259131ee075e485a0418dbe8f8912a9539))
+* **verify-cv-facts:** stop the modifier count from deciding whether a claim exists ([#2279](https://github.com/santifer/career-ops/issues/2279)) ([11493bf](https://github.com/santifer/career-ops/commit/11493bfabe2ee9df2e85162bde0857ec18bf2ab4))
+* **verify-pipeline:** orphan check masks and invents orphans ([#1425](https://github.com/santifer/career-ops/issues/1425)) ([b4309a0](https://github.com/santifer/career-ops/commit/b4309a00b0c4dd504689e9a6fe08788be82441de))
+* **verify-pipeline:** Unicode-aware keys for company/role/Via grouping ([00a839f](https://github.com/santifer/career-ops/commit/00a839fe8611607ba8c21f871e11a5132a8066c6))
+* **web:** render PDFs from the backend instead of the spawned agent ([#2182](https://github.com/santifer/career-ops/issues/2182)) ([fef3ff2](https://github.com/santifer/career-ops/commit/fef3ff2e228cc14e55df4ced958e4b0aa630ec65))
+* **weekly-digest:** --from=… was silently ignored, digesting the wrong week ([#2402](https://github.com/santifer/career-ops/issues/2402)) ([43af8c6](https://github.com/santifer/career-ops/commit/43af8c64b29d5110b679f0d5accfb7532baee508))
+* **workable:** use the public widget API so large accounts are scanned ([5ab8425](https://github.com/santifer/career-ops/commit/5ab8425ce824a885af1724522319af46ad52c265))
+
+
+### Performance Improvements
+
+* **detect-reposts:** bucket titles instead of comparing every pair ([#2389](https://github.com/santifer/career-ops/issues/2389)) ([a42a0bf](https://github.com/santifer/career-ops/commit/a42a0bf43b2b14235187c315898257252e0f5b03))
+* **fingerprint:** popcount table + hoisted loop state in findCrossListings ([#2388](https://github.com/santifer/career-ops/issues/2388)) ([f2ffc7a](https://github.com/santifer/career-ops/commit/f2ffc7a065862f6e508b59e12cf1f1dad593cb68))
+* **tests:** fix the dead SSRF DNS stub and cut three fixed costs from test-all ([#2390](https://github.com/santifer/career-ops/issues/2390)) ([2f21fe7](https://github.com/santifer/career-ops/commit/2f21fe7722bb78b9ff322b7d208fc8ebfef56e08))
+
 ## [1.24.0](https://github.com/santifer/career-ops/compare/career-ops-v1.23.0...career-ops-v1.24.0) (2026-07-30)
 
 

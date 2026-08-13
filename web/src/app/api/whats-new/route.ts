@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { getNormalizeTextKey } from "@/lib/core/text-key";
 import type { DiscoveredOffer } from "@/lib/explore";
 
 export const runtime = "nodejs";
@@ -11,7 +12,10 @@ export const dynamic = "force-dynamic";
 // evaluated yet. No scan runs here — it reads the history a past scan already
 // wrote, so the home stays instant + free (directly answers the #1 token-cost
 // complaint). cols: url, first_seen, portal, title, company, status, location.
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Company matching keys come from the CORE (see lib/core/text-key.ts), never a
+// local reimplementation. The previous ASCII-only key deleted every non-Latin
+// letter, so "Škoda" collided with "Koda" — suppressing a real offer as
+// "already evaluated" — and "日本電産" keyed to the empty string (#2666).
 
 export async function GET(req: Request) {
   const days = Math.min(30, Math.max(1, Number(new URL(req.url).searchParams.get("days")) || 7));
@@ -24,6 +28,8 @@ export async function GET(req: Request) {
   }
 
   // Companies already evaluated → don't resurface as "new".
+  const normalizeTextKey = await getNormalizeTextKey();
+  const norm = (s: string) => normalizeTextKey(s, " ");
   const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {

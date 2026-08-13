@@ -222,7 +222,26 @@ export type ReportData = { content: string; file: string };
  *  resolving only by leading filename number misses those. Links are
  *  normalized relative to the tracker file's directory (see #760). Falls back
  *  to the filename scan (reports/{n}-{slug}-{date}.md, possibly zero-padded)
- *  for rows without a parseable link. */
+ *  for rows without a parseable link.
+ *
+ *  Both the linked lookup and the fallback scan skip `{n}-RESERVED.md`
+ *  placeholder files.
+ *  `reserve-report-num.mjs` writes an empty `NNN-RESERVED.md` sentinel to
+ *  claim a report number before a worker has actually written the report;
+ *  it's normally deleted once the real report lands (or GC'd after 4h if
+ *  abandoned). But "RESERVED" sorts alphabetically before nearly every real
+ *  slug (company names start with lowercase/uppercase letters after the
+ *  number-dash, "R" often lands mid-alphabet or earlier), so if a sentinel
+ *  outlives its report — e.g. a worker was driven directly instead of
+ *  through the orchestrator that owns cleanup — `.find()` could return the
+ *  empty sentinel instead of the real report, making the report body and the
+ *  Apply/PDF-ready checks disappear. */
+/** True for a `{n}-RESERVED.md` placeholder sentinel — never a real report,
+ *  whichever branch below found it. */
+function isReservedReportFile(file: string): boolean {
+  return /^\d+-RESERVED\.md$/.test(path.basename(file));
+}
+
 export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
@@ -232,7 +251,7 @@ export function findReportFile(n: string): string | null {
   if (linked) {
     const p = path.resolve(root, "data", linked);
     // Containment: a hand-edited link must not resolve outside the project.
-    if (p.endsWith(".md") && containedRealpath(p, root)) return p;
+    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
   let files: string[];
   try {
@@ -240,7 +259,9 @@ export function findReportFile(n: string): string | null {
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
+  const match = files.find(
+    (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
+  );
   if (!match) return null;
   const p = path.join(root, "reports", match);
   return containedRealpath(p, root) ? p : null;

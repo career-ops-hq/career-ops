@@ -1,0 +1,8 @@
+{
+  "standard": {
+    "en-short-no-photo": { "minPages": 1, "maxPages": 1 },
+    "en-long-photo": { "minPages": 2, "maxPages": 3 },
+    "zh-short-no-photo": { "minPages": 1, "maxPages": 1 },
+    "zh-long-photo": { "minPages": 2, "maxPages": 3 }
+  }
+}

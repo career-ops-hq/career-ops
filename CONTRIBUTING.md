@@ -13,7 +13,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
 - **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
 
-New to all this? That's the point. Claim an issue with a comment, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
+New to all this? That's the point. Claim a good-first-issue by commenting `/assign` on it, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
 
 ## Before Submitting a PR
 
@@ -56,6 +56,14 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - New skill modes (in `modes/`)
 - Script improvements (`.mjs` utilities)
 
+### Claiming a good first issue
+
+Comment `/assign` on any [`good first issue`](https://github.com/santifer/career-ops/contribute) and it's yours: no waiting for a maintainer. How it stays fair:
+
+- **Claims free up on their own.** After 7 quiet days (with a friendly ping at day 3) the issue goes back to the window, so nothing stays stuck. `/extend` restarts the clock, no questions asked; `/unassign` lets go cleanly. An open PR always pauses the clock.
+- **Reserved for newcomers.** Good-first-issues are for contributors with fewer than 3 merged PRs here (`first-timers-only` means exactly that: your very first), one at a time, so a first-time contributor always has a way in. Past that stage? [`help wanted`](https://github.com/santifer/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) is your board.
+- **No claim needed to contribute.** A PR straight onto any unassigned issue is always welcome.
+
 ## The contribution ladder
 
 There's a clear path here — we promote people who show up:
@@ -83,6 +91,24 @@ career-ops says yes to a lot: providers, languages, CLI support, fixes. Where we
 4. **Does it match the project's shape?** A mode or API that breaks established patterns creates cognitive load for every future user and contributor, even when it works. Expect us to ask for the spelling that matches the codebase before the merge.
 
 Failing one of these is a routing, not a rejection. Open the issue first and we will tell you which door fits: core, plugin, or separate project. The plugin registry gives real distribution, and an idea that is wrong for core today can still be the most useful thing you ship.
+
+## Source Indexing Policy
+
+career-ops reads job listings from public sources: ATSes, job boards, company career pages, talent networks. This policy is the single bar every source meets, whoever proposes it — including operators submitting their own board. We don't judge a source's business model; we judge its data. These rules are the [CareerOps Manifesto](MANIFESTO.md) applied to sources.
+
+1. **What gets indexed.** Any source whose listings are real, attributed to an identifiable employer, and free for candidates to read and apply to. Manifesto right 4 — *"You never pay"* — applies to sources too: a source that paywalls listings or applications for candidates doesn't get indexed, whatever else it does.
+
+2. **Canonical URL.** Each listing carries the shortest verifiable path to the employer the source exposes (the ATS or direct application URL when available). The source's own page may travel as secondary attribution.
+
+3. **Paid placement doesn't reach the candidate.** Promoted content cannot buy position in career-ops: ranking happens on each user's machine, providers traverse their source's complete inventory, and the maintainer audits sources for response bias (API totals vs site totals, page distribution). career-ops itself carries no sponsored placements of any kind. This is manifesto right 8 — *"Your agent works for you. Not for a platform, not for an employer."* — enforced at the data layer.
+
+4. **Indexing is not endorsement, and distribution is not owed.** Presence in the registry places listings in front of the installed base (as of August 2026, a single network's launch post drove 15,626 unique machines to clone the repo in a day). Real, measurable, channel-dependent — and no source is owed placement, traffic, or permanence. Sources are listed with their operator declared, and no single source may exceed 40% of the registry.
+
+5. **The aggregation layer belongs to the project.** A provider reads its own source. Cross-source aggregation, ranking, matching and the registry live in core and are never delegated to a source.
+
+To see how the rules have actually been applied, read the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md): one entry per listed source, with what was checked and how.
+
+To propose a source (yours or anyone's): [open a source proposal](https://github.com/santifer/career-ops/issues/new?template=source-proposal.yml) walking through these five rules. A direct PR with the provider is welcome too: the same five rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
 
 ## Guidelines
 
@@ -124,6 +150,14 @@ node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
 **Adding a test for a new scanner provider:** add one file at
 `tests/providers/{name}.test.mjs` — it's auto-discovered (`tests/**/*.test.mjs`),
 no registration needed. Do not add a section to `test-all.mjs` for this.
+
+**Adding a test for the web app:** web suites live under `web/tests/`, mirroring
+the tested module's path below `web/src/` (`src/lib/clean-chips.mjs` →
+`tests/lib/clean-chips.test.mjs`), named `{module}.test.mjs`. `web/`'s own
+`npm test` glob-discovers them, so no registration is needed there either — but
+keep them out of `web/src/` (Next.js scans that tree) and write them as `.mjs`,
+since there is no TypeScript loader for `node --test`. `web/README.md` has the
+detail; `tests/web-test-layout.test.mjs` enforces it on every PR.
 
 **`--only` is a dev convenience, not a PR gate:** it runs *only* the discovered
 `tests/` files matching the given substring and skips every inline core

@@ -43,6 +43,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify:portals` | `verify-portals.mjs` | Probe ATS endpoints to confirm portals.yml slugs resolve (network) |
 | `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
+| `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
 | `npm run ollama:eval` | `ollama-eval.mjs` | Evaluate a JD with a local Ollama model |
 | `npm run openai:eval` | `openai-eval.mjs` | Evaluate a JD via any OpenAI-compatible endpoint |
@@ -50,6 +51,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run archive` | `archive-posting.mjs` | Save a live job posting as PDF before it disappears |
 | `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
 | `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
+| `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 
 ---
 
@@ -136,6 +138,49 @@ node validate-portals.mjs --self-test
 ```
 
 **Exit codes:** `0` no errors (warnings allowed), `1` one or more errors found.
+
+---
+
+## upgrade-tests
+
+The dynamic upgrade regression harness (#2358). `update-system.mjs` has the
+largest blast radius in the repo — it rewrites system files in place on someone
+else's install — and this is the only test that exercises a *real* upgrade
+against a seeded user install instead of asserting on the updater's source.
+
+It is hermetic: a temporary `GIT_CONFIG_GLOBAL` rewrites the canonical GitHub
+URL to a local bare mirror whose `main` ref is forced to the commit under test,
+so no leg ever reaches the network. The old install runs its own `apply`, which
+self-reexecs into the target updater — so the migration code being tested is the
+one the PR ships, not the one already installed.
+
+Two modes:
+
+```bash
+node upgrade-tests.mjs --pr-gate    # newest release tag that is an ancestor of HEAD -> this commit
+node upgrade-tests.mjs --canary     # plant a user-file clobber; the harness MUST report it
+```
+
+`--pr-gate` picks the newest release tag that is an ancestor of `HEAD`, seeds an
+install from that era's fixture state, and upgrades it to the commit under
+review. The leg is red unless all of it holds: `apply` exits 0; a system file
+that genuinely changed between the two revisions now carries the target's blob
+(the non-vacuity oracle — VERSION is never used, since `apply` has no version
+gate); every user file is byte-identical; every path the new manifest adds is
+present; `data/applications.md` still parses with the expected row and status
+counts; `data/salary-observations.tsv` still parses; and `doctor.mjs --json`
+reports `onboardingNeeded: false`. It needs the release tags, which is why CI
+checks out with `fetch-depth: 0`.
+
+`--canary` exists because a gate never seen red proves nothing. It commits a
+poisoned mirror — `cv.md` tracked and added to `SYSTEM_PATHS`, so the old
+updater checks it out over the user's CV — and then requires the harness to
+report that clobber. A canary that comes back green means the harness detected
+the planted damage; a red canary means the gate is incapable of failing and its
+green runs are worthless.
+
+Both modes run on every PR, as the `upgrade-gate` job in
+`.github/workflows/test.yml`.
 
 ---
 
@@ -412,6 +457,22 @@ node check-table-freshness.mjs --self-test
 
 ---
 
+## rejection-latency
+
+Post-interview response-latency signal. Cross-references `data/active-interviews.md` (latest interview date per application — company + role, fuzzy role match via `role-matcher.mjs`) with `data/applications.md` (rows still in `Interview` state — i.e. no `Responded`/`Offer`/`Rejected` transition recorded since) and flags applications whose silence exceeds a soft **courtesy** threshold (30-day default, no legal claim attached) from `rejection_latency.courtesy_days` or `--courtesy-days`. (An earlier revision also shipped a jurisdiction-backed statutory tier; it was removed — the underlying legal threshold could change and the script has no way to re-verify it.) Each flag carries a ready-to-copy `data/blacklist.md` row (same suggestion-only bridge as `modes/interview-redflag.md`, #1854/#1856) — the script never writes to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` (#1742 opt-in guarantee). Surfaced by the `followup` mode.
+
+```bash
+node rejection-latency.mjs             # JSON
+node rejection-latency.mjs --summary   # human-readable table + suggested blacklist rows
+node rejection-latency.mjs --courtesy-days 21
+node rejection-latency.mjs --today 2026-07-17   # deterministic runs/tests
+node rejection-latency.mjs --self-test
+```
+
+**Exit codes:** `0` always (missing data files produce an explanatory empty result), `1` self-test failure.
+
+---
+
 ## update:check
 
 Checks whether a newer version of career-ops is available upstream. Outputs JSON to stdout:
@@ -504,6 +565,26 @@ When the ATS provider's list API returns a description, each new offer is finger
 npm run scan
 node scan.mjs --include-blacklisted   # audit: let blacklisted companies through, annotated
 ```
+
+**Parallel search lanes (#2271):** all four of `scan.mjs`'s files are overridable by environment variable, so a second search with different targeting (a bridge/income track, a career-change track, or a partner sharing the checkout) can be fully self-contained in one clone:
+
+| Variable | Default |
+|---|---|
+| `CAREER_OPS_PORTALS` | `portals.yml` |
+| `CAREER_OPS_PROFILE` | `config/profile.yml` |
+| `CAREER_OPS_PIPELINE` | `data/pipeline.md` |
+| `CAREER_OPS_SCAN_HISTORY` | `data/scan-history.tsv` |
+
+```bash
+CAREER_OPS_PORTALS=portals.bridge.yml \
+CAREER_OPS_PIPELINE=data/pipeline.bridge.md \
+CAREER_OPS_SCAN_HISTORY=data/scan-history.bridge.tsv \
+  node scan.mjs
+```
+
+Give a lane its own `CAREER_OPS_SCAN_HISTORY`, not just its own pipeline. That file is the dedup source, so lanes sharing it silently suppress each other: a posting surfaced in one lane counts as a duplicate in the other and never appears there, with only the `Duplicates: skipped` counter to show for it.
+
+Defaults are unchanged, so a single-lane setup needs none of this. Note that the remaining outputs (`data/scan-runs.tsv`, `data/portal-health.tsv`, `data/applications.md`) are still shared across lanes, so `stats.mjs` and the other analytics scripts pool lanes together.
 
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
 
@@ -732,6 +813,47 @@ node detect-reposts.mjs --summary
 
 ---
 
+## rank-pipeline
+
+Opt-in LLM relevance re-ranker for `data/pipeline.md`. **Off by default and not
+part of any scan** — `scan.mjs` stays 100% zero-token, and this costs nothing
+unless you run it yourself.
+
+It **annotates, it does not filter**: eligible pending rows can gain a labeled
+`rank: {score}/5 — {reason}` segment, riding after `posted:`/`trust:`/`note:`
+like any other labeled segment. No row is removed, reordered, or hidden — the
+reason is there so you can disagree with the score. An entry the model scores
+but cannot explain is left un-annotated rather than reduced to a bare number,
+and a whole batch is left un-annotated if the CLI call fails or returns
+unusable JSON.
+
+Cost is bounded and reported. Only pending (`- [ ]`) rows that are not already
+annotated are eligible, `--limit` caps each run (default 20, hard ceiling 200
+that the flag cannot raise), and a summary prints the entries ranked, the number
+of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
+row is skipped, so you can work through a large pipeline in bounded passes.
+
+The ranking is done by whichever agent CLI you already have installed (the
+Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
+`copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
+dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
+first ~2000 chars) and the selected postings through that CLI's own auth and
+provider handling — review your chosen CLI's data-retention/provider settings
+before running this on sensitive CV content.
+
+```bash
+node rank-pipeline.mjs                  # rank up to 20 pending entries
+node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --cli codex      # override auto-detection
+node rank-pipeline.mjs --dry-run        # print annotations, write nothing
+```
+
+Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
+`scan-ats-full.mjs` use, and the file is re-read inside the lock — so a
+concurrent scan cannot lose rows to this script.
+
+---
+
 ## gemini:eval / ollama:eval / openai:eval
 
 Standalone evaluators — run the same evaluation logic
@@ -813,6 +935,7 @@ These have no `npm run` binding — modes and agents call them with
 | Invocation | Purpose |
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
+| `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
@@ -825,6 +948,85 @@ These have no `npm run` binding — modes and agents call them with
 | `node plugin-install.mjs` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA) |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+
+---
+
+## process-quality.mjs
+
+Aggregates candidate-authored `[process-friction]` tags from the Notes column
+of `data/active-interviews.md` into a per-company friction signal. The tag
+stays free-text on purpose — there's no enforced taxonomy — but here are a
+few example friction patterns worth tagging, illustrative and non-exhaustive:
+
+- `[process-friction: call scheduled for a rejection with no info beyond what email would convey]`
+- `[process-friction: prescreen repeated info already given in a prior round]`
+- `[process-friction: interview rescheduled 2+ times same week]`
+- `[process-friction: no confirmation after stated timeline passed]`
+
+---
+
+## set-status.mjs
+
+Canonical tracker write path: strict `states.yml` validation, shared lock, atomic write. Modes and agents call this instead of hand-editing `applications.md`.
+
+```bash
+node set-status.mjs <report#|company> <state> [--note "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
+node set-status.mjs --row N <state> [--note "..."]          # explicit tracker row ID
+node set-status.mjs --report N <state> [--note "..."]       # row whose Report cell links report #N
+node set-status.mjs "Company Name" Applied --role "Role"    # narrow match by role fragment
+node set-status.mjs --row 12 Applied
+node set-status.mjs --report 345 Applied --on 2026-08-01
+```
+
+A bare number or company name is convenient, but becomes ambiguous when multiple tracker rows exist for a company or when tracker row IDs and report IDs diverge. That divergence is permanent once it starts: `reserve-report-num.mjs` treats tracker row IDs as occupied when it allocates a report number, so a row that never got a report still consumes a number the report sequence then skips — the two counters leapfrog each other and never realign. On a diverged tracker "5" may mean tracker row #5 or report #5, which are different applications. Base selectors resolve the main target, while explicit selectors and filters disambiguate the target row:
+
+- `--row N`: Selects the row whose `#` cell is `N`.
+- `--report N`: Selects the row whose `Report` cell links report `N`.
+- `--role <role>`: Narrowing selector that refines a company, report, row, or bare-number match when multiple tracker rows exist for a single target.
+- `--on <date>`: Specifies an explicit transition date (YYYY-MM-DD) for status logs and notes.
+- `--json`: Formats command output as structured JSON.
+
+`--row` and `--report` are mutually exclusive. Because an explicit selector answers the report-mismatch guard rather than overriding it, `--row` bypasses that guard without needing `--force` (which silences the check while the ambiguity is still real).
+
+This is worth preferring in practice, not just in principle. Once the counters have diverged, a bare number trips the guard whenever the row it matches links a report number other than its own `#`, or links no report at all while a different row claims that number as its report — so on a tracker with a wide gap the check keeps firing, and a check that keeps firing teaches callers to pass `--force` by reflex, which disables it everywhere including the cases it was written to catch. Reach for a selector (or the company name) instead.
+
+### Bare numbers vs. explicit selectors
+
+- **Use a bare number** when tracker row IDs and report IDs are identical or when querying interactively.
+- **Use `--row N` or `--report N`** in automated scripts, modes, or whenever row IDs and report IDs have diverged to avoid triggering report-number mismatch guards or ambiguous updates. Use `--role` alongside a base selector to narrow down multiple matching roles for a company.
+
+Exit codes (the shared `CLI_EXIT` contract in `tracker-utils.mjs`, so these values are stable across every canonical tracker writer):
+
+- `0` success, including an idempotent no-op re-run that changed nothing.
+- `1` for an invalid or conflicting selector, or a non-canonical state.
+- `2` when the selector matches no tracker row.
+- `3` when a bare numeric selector triggers the report-number mismatch guard (`report-number-mismatch`), or a company matches several rows.
+- `4` when the shared tracker lock is busy — retryable, unlike the others.
+
+Nothing is written on any non-zero exit.
+
+To identify a row before writing to it, [find](#find) resolves a number, company, or role fragment to its full identity and surfaces collisions between the two numbering schemes rather than picking one silently.
+
+## mark-pdf-ready.mjs
+
+The web PDF render path calls this utility after a CV PDF has been generated so
+the matching tracker row can be marked ready. It is not normally a manual
+day-to-day command. The argument is the report number from the `reports/NNN-...`
+filename or Report cell, not the tracker row's `#` value.
+
+```bash
+node mark-pdf-ready.mjs <report#>                  # mark the matching row
+node mark-pdf-ready.mjs <report#> --dry-run       # validate without writing
+node mark-pdf-ready.mjs <report#> --json          # emit machine-readable output
+```
+
+The script resolves the report-to-row link, refuses ambiguous matches, and
+leaves an already-ready row unchanged. Writes use the same shared tracker lock
+and atomic replacement as `set-status.mjs`, so concurrent tracker updates do
+not overwrite one another. Exit status `0` covers a successful mark and an
+idempotent no-op; `1` is a usage, column, or write error; `2` means the tracker
+or report row was not found; `3` means the report matched more than one row;
+and `4` means the tracker lock timed out and the operation should be retried.
 
 ---
 

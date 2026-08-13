@@ -149,6 +149,24 @@ try {
     ['prnewswire', 'MegaCorp announces quarterly earnings and financial results'],
     ['prnewswire', 'Foundation awards $5M scholarships and grants'],
     ['techcrunch', 'How to raise seed funding in a difficult market'],
+    // The `cuts N%` exclusion sits in a group that used to close with \b, which
+    // can never match after "%" — so layoff headlines that also mention a raise
+    // were surfaced as funding leads.
+    ['techcrunch', 'Acme raises $40M Series A, then cuts 30% of staff'],
+    ['techcrunch', 'Beta Corp raises $25M seed and cuts 15% of its workforce'],
+    // #2404 fixed one spelling of that headline. These reach the reader with
+    // the same harm — apply to a company that just announced job losses —
+    // and were still surfaced: a space before the percent, a count with no
+    // percent at all, and a different verb entirely.
+    ['techcrunch', 'Gamma raises $40M Series A, then cuts 30 % of staff'],
+    ['techcrunch', 'Delta raises $40M Series A, then cuts 1,200 jobs'],
+    ['techcrunch', 'Epsilon raises $40M Series A and lays off 300 employees'],
+    ['techcrunch', 'Zeta raises $18M Series A after job cuts'],
+    ['prnewswire', 'Eta Corp raises $30M and sheds 90 roles'],
+    ['guardian', 'Theta raises $12M seed amid a workforce reduction'],
+    // Plural: the singular-only form let this straight through (CodeRabbit).
+    ['guardian', 'Iota raises $12M seed amid workforce reductions'],
+    ['techcrunch', 'Mu Corp raises $20M then cuts 25% of the workforce'],
   ].map(([source, title], idx) => ({
     source,
     title,
@@ -159,9 +177,35 @@ try {
   }));
   const negativeCandidates = mod.buildCandidates(negativeItems, { now: new Date('2026-07-20T00:00:00Z'), months: 3, limit: 10 });
   if (negativeCandidates.length === 0) {
-    pass('buildCandidates rejects funds, acquisitions, earnings, scholarships, grants, and generic fundraising advice');
+    pass('buildCandidates rejects funds, acquisitions, earnings, scholarships, grants, generic advice, and every layoff spelling');
   } else {
     fail(`buildCandidates accepted negative items: ${JSON.stringify(negativeCandidates)}`);
+  }
+
+  // The count form requires a workforce noun on purpose. A company cutting
+  // cloud spend while raising is a normal funding lead, and excluding it would
+  // trade one false positive for a lost opportunity.
+  const costCutting = [
+    ['techcrunch', 'Nu raises $40M Series A and cuts 1,200 tonnes of CO2'],
+    ['techcrunch', 'Kappa raises $25M Seed to hire 50 engineers'],
+    // The percent form is scoped to workforce nouns too, so a percentage
+    // reduction of something else is still a lead. Before this PR the
+    // percent alternative had no such requirement and dropped both.
+    ['techcrunch', 'Xi raises $40M Series A, cuts 30% of cloud costs'],
+    ['techcrunch', 'Omicron raises $40M Series A and cuts 30 % of CO2 emissions'],
+  ].map(([source, title], idx) => ({
+    source,
+    title,
+    url: `https://example.test/cost-${idx}`,
+    observedDate: { value: '2026-07-10', precision: 'day', date: new Date('2026-07-10T00:00:00Z') },
+    text: title,
+    categories: [],
+  }));
+  const costCuttingCandidates = mod.buildCandidates(costCutting, { now: new Date('2026-07-20T00:00:00Z'), months: 3, limit: 10 });
+  if (costCuttingCandidates.length === 4) {
+    pass('a reduction of something other than staff is still a funding lead, count or percent — the exclusion is not a blanket "cuts" ban');
+  } else {
+    fail(`cost-cutting/hiring headlines were dropped: kept ${JSON.stringify(costCuttingCandidates.map((c) => c.company))}`);
   }
 
   const mixedDates = [
