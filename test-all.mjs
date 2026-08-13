@@ -379,6 +379,55 @@ try {
     }
   }
 
+  // assessment-log.mjs CLI contract (#2797): help aliases print one shared
+  // usage block, unknown leading-dash arguments fail loudly, and the existing
+  // add/summary paths still accept ordinary values that merely contain dashes.
+  {
+    const assessmentCli = (...argv) => spawnSync(NODE, [join(scriptTmp, 'assessment-log.mjs'), ...argv], {
+      cwd: scriptTmp,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const helpR = assessmentCli('--help');
+    const hR = assessmentCli('-h');
+    if (helpR.status === 0 && hR.status === 0 && helpR.stdout.includes('Usage:')
+        && helpR.stdout.includes('--self-test') && hR.stdout === helpR.stdout
+        && helpR.stderr === '' && hR.stderr === '') {
+      pass('assessment-log.mjs --help/-h print the shared usage block and exit 0 (#2797)');
+    } else {
+      fail(`assessment-log.mjs help handling broken: ${JSON.stringify({ help: { status: helpR.status, stdout: helpR.stdout, stderr: helpR.stderr }, h: { status: hR.status, stdout: hR.stdout, stderr: hR.stderr } })}`);
+    }
+
+    const typoR = assessmentCli('--sumary');
+    const misplacedAddFlagR = assessmentCli('--company', 'Acme-Co');
+    if (typoR.status === 1 && typoR.stderr.includes('unrecognized flag')
+        && typoR.stderr.includes('--sumary') && typoR.stderr.includes('Valid flags:')
+        && typoR.stderr.includes('Usage:') && typoR.stdout === ''
+        && misplacedAddFlagR.status === 1 && misplacedAddFlagR.stderr.includes('--company')) {
+      pass('assessment-log.mjs rejects and names an unrecognized leading-dash flag (#2797)');
+    } else {
+      fail(`assessment-log.mjs unknown flag handling broken: ${JSON.stringify({ typo: { status: typoR.status, stdout: typoR.stdout, stderr: typoR.stderr }, misplacedAddFlag: { status: misplacedAddFlagR.status, stdout: misplacedAddFlagR.stdout, stderr: misplacedAddFlagR.stderr } })}`);
+    }
+
+    const addR = assessmentCli(
+      'add', '--company', 'Acme-Co', '--platform', 'eSkill', '--subject',
+      'Data-Analysis', '--threshold', '70', '--score', '85'
+    );
+    const summaryR = assessmentCli('--summary');
+    let added = null;
+    try { added = JSON.parse(addR.stdout); } catch {}
+    if (addR.status === 0 && added?.added === true
+        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === 'Data-Analysis'
+        && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
+        && summaryR.stdout.includes('Data-Analysis')) {
+      pass('assessment-log.mjs preserves add/summary flags and dash-containing values (#2797 regression)');
+    } else {
+      fail(`assessment-log.mjs existing CLI behavior regressed: ${JSON.stringify({ add: { status: addR.status, stdout: addR.stdout, stderr: addR.stderr }, summary: { status: summaryR.status, stdout: summaryR.stdout, stderr: summaryR.stderr } })}`);
+    }
+  }
+
   // reply-watch.mjs CLI flag validation (#2743). main() used to read
   // process.argv[2] purely positionally with no flag checking: `--help` or
   // any typo'd flag silently became the "candidates path" argument, and
