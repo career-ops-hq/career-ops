@@ -34,9 +34,11 @@ const DEFAULT_MAX_PAGES = 50; // ~300 postings; override via entry.max_pages
 const HARD_MAX_PAGES = 200;
 // Pause between successive page requests. Avature's 6-results-per-page cap makes
 // large boards request-heavy (a 999+ board is ~170 pages); firing those with no
-// gap risks the tenant's WAF rate-limiting the burst. Mirrors workday's
-// INTER_PAGE_DELAY_MS — only boards that paginate past page 0 pay it.
-const INTER_PAGE_DELAY_MS = 150;
+// gap risks the tenant's WAF rate-limiting the burst. 150 ms was verified to
+// cause WAF bans on comparable providers (Getro: 3 boards at 403 + ~2.5 h ban);
+// 250 ms is the cross-provider safe floor (#2706).
+// Only boards that paginate past page 0 pay it.
+const INTER_PAGE_DELAY_MS = 250;
 // The bare key we self-heal to when the primary (`jobOffset`) proves inert.
 const FALLBACK_OFFSET_PARAM = 'offset';
 
