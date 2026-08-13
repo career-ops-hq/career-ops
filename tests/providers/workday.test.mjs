@@ -721,8 +721,10 @@ try {
     } else {
       fail(`workday.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
     }
-    if (pacingDelays.length === 0 || pacingDelays[0] > 0) {
-      pass('workday.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    if (pacingDelays.length === pageCount - 1) {
+      pass(`workday.fetch() does not sleep before page 0 — ${pageCount} pages fetched, ${pacingDelays.length} sleep(s) (one per non-first page)`);
+    } else {
+      fail(`workday sleep count: expected ${pageCount - 1} (one per non-first page), got ${pacingDelays.length}`);
     }
   }
 
