@@ -275,8 +275,20 @@ function allVersions() {
   if (!tags.length) { console.error('No ancestor release tags found — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
   console.log(`Release qualification: ${tags.join(', ')} -> ${targetSha.slice(0, 8)}`);
   const results = [];
-  for (const tag of tags) results.push(runLeg({ oldTag: tag, targetSha }));
-  results.push(rollbackLeg(tags[0], targetSha));
+  // A leg that THROWS (git failure, SYSTEM_PATHS not found, fixture error) must
+  // not abort the sweep — convert it to a reported failed result so every
+  // remaining tag and the rollback leg still run and appear in the summary
+  // (matches the in-leg discipline: report through ok(), never throw out).
+  const guard = (label, fn) => {
+    try { return fn(); }
+    catch (e) {
+      const msg = `leg threw: ${String((e && e.message) || e).split('\n')[0]}`;
+      console.log(`  FAIL [${label}] ${msg}`);
+      return { label, failures: [msg] };
+    }
+  };
+  for (const tag of tags) results.push(guard(tag, () => runLeg({ oldTag: tag, targetSha })));
+  results.push(guard(`rollback:${tags[0]}`, () => rollbackLeg(tags[0], targetSha)));
   const red = results.filter((r) => r.failures.length);
   for (const r of results) console.log(`${r.failures.length ? 'RED ' : 'GREEN'} ${r.label}`);
   process.exit(red.length ? 1 : 0);
