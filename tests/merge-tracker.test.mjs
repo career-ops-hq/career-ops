@@ -575,3 +575,45 @@ try {
 } catch (e) {
   fail(`merge-tracker same-run num collision tests crashed: ${e.message}`);
 }
+
+// ── #2803: N/A re-evaluation must not overwrite a real score ────────────────
+// A re-evaluation whose fetch failed produces an N/A sentinel, which parseScore
+// previously treated as 0 — causing merge-tracker to report a 4.0 → 0 downgrade
+// and silently erase the real score from the tracker.
+console.log('\nmerge-tracker.mjs — N/A score preservation (#2803)');
+try {
+  function dataRows2803(tracker) {
+    return tracker.split('\n').filter(l => /^\|/.test(l) && !/^[|\s-]+$/.test(l) && !/^[|]?\s*#/.test(l));
+  }
+
+  // Baseline: a real score of 4.0/5 in the tracker, then a re-eval with N/A.
+  const naSentinels = ['N/A', '—', '-'];
+  for (const sentinel of naSentinels) {
+    const result = runMerge({
+      [`4-dd.tsv`]: `4\t2026-06-25\tDoorDash\tSenior Associate\tEvaluated\t${sentinel}\t❌\t[4](reports/4-dd.md)\tfetch failed\n`,
+    }, {
+      rows: `| 4 | 2026-06-01 | DoorDash | Senior Associate | 4.0/5 | Evaluated | ❌ | [4](reports/4-dd.md) | good |\n`,
+    });
+    const rows = dataRows2803(result);
+    if (rows.length === 1 && /4\.0\/5/.test(rows[0])) {
+      pass(`merge-tracker preserves 4.0/5 when re-eval carries sentinel "${sentinel}" (#2803)`);
+    } else {
+      fail(`merge-tracker overwrote score with sentinel "${sentinel}": ${rows[0]}`);
+    }
+  }
+
+  // Control: a real score (e.g. 3.0/5) from a re-eval still writes through.
+  const upgradeResult = runMerge({
+    '4-dd.tsv': `4\t2026-06-25\tDoorDash\tSenior Associate\tEvaluated\t3.0/5\t❌\t[4](reports/4-dd.md)\trescore\n`,
+  }, {
+    rows: `| 4 | 2026-06-01 | DoorDash | Senior Associate | 4.0/5 | Evaluated | ❌ | [4](reports/4-dd.md) | good |\n`,
+  });
+  const upgradeRows = dataRows2803(upgradeResult);
+  if (upgradeRows.length === 1 && /3\.0\/5/.test(upgradeRows[0])) {
+    pass('merge-tracker still writes through a lower real score (downgrade is not suppressed by the N/A guard)');
+  } else {
+    fail(`merge-tracker did not write through the 3.0/5 downgrade: ${upgradeRows[0]}`);
+  }
+} catch (e) {
+  fail(`merge-tracker N/A score preservation tests crashed: ${e.message}`);
+}
