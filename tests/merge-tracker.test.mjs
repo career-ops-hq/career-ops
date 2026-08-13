@@ -22,8 +22,8 @@ const TRACKER_HEADER = [
 ].join('\n');
 
 // One merge run in an isolated workspace. Returns the merged tracker text.
-function runMerge(additions) {
-  return runMergeDetailed(additions).tracker;
+function runMerge(additions, opts = {}) {
+  return runMergeDetailed(additions, opts).tracker;
 }
 
 /**
