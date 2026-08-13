@@ -1203,7 +1203,14 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
 	default: // sortScore
-		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+		// Unevaluated rows (HasScore == false) float to the top — "needs
+		// evaluating" is more actionable than "scored badly" (#2758).
+		return func(a, b model.CareerApplication) bool {
+			if a.HasScore != b.HasScore {
+				return !a.HasScore // unscored first
+			}
+			return a.Score > b.Score
+		}
 	}
 }
 
@@ -1680,9 +1687,20 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	}
 	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
-	// Score with color
-	scoreStyle := m.scoreStyle(app.Score)
-	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	// Score with color. Unevaluated rows (sentinel — / N/A / -) render dimmed
+	// rather than as "0.0", which is indistinguishable from a genuine zero (#2758).
+	var score string
+	if app.HasScore {
+		scoreStyle := m.scoreStyle(app.Score)
+		score = scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	} else {
+		sentinelStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+		raw := app.ScoreRaw
+		if raw == "" {
+			raw = "—"
+		}
+		score = sentinelStyle.Render(raw)
+	}
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)
