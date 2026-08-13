@@ -163,6 +163,57 @@ try {
   if (badResponseThrew) pass('themuse.fetch() throws on unexpected API response shape');
   else fail('themuse.fetch() should throw when results array is absent');
 
+  // A transient failure on the first page (after retries) must re-throw — the
+  // feed is unreachable and returning [] would misreport it as "0 jobs" (#2681).
+  let museFirstPageThrew = false;
+  try {
+    await themuse.fetch(
+      { name: 'X', provider: 'themuse' },
+      { sleep: async () => {}, fetchJson: async () => { throw new Error('connection reset'); } },
+    );
+  } catch (e) { museFirstPageThrew = /connection reset/.test(e.message); }
+  if (museFirstPageThrew) pass('themuse.fetch() re-throws when the first page fails after exhausting retries (#2681)');
+  else fail('themuse.fetch() should re-throw on first-page failure, not return []');
+
+  // A transient failure on a LATER page (after retries) keeps every result
+  // already collected from earlier pages (#2681 — "partial failure tolerance").
+  const musePageZeroResult = { name: 'Eng', refs: { landing_page: 'https://www.themuse.com/jobs/x/y' }, company: { name: 'X' }, locations: [] };
+  const museLaterPageFail = await themuse.fetch(
+    { name: 'Y', provider: 'themuse' },
+    {
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        const page = Number(new URL(url).searchParams.get('page'));
+        if (page === 0) return { results: [musePageZeroResult], page: 0, page_count: 3 };
+        throw new Error('upstream 503');
+      },
+    },
+  );
+  if (museLaterPageFail.length === 1 && museLaterPageFail[0].title === 'Eng') {
+    pass('themuse.fetch() keeps page-0 results when a later page fails after retries (#2681)');
+  } else {
+    fail(`themuse.fetch() later-page truncation: expected 1 job from page 0, got ${JSON.stringify(museLaterPageFail)}`);
+  }
+
+  // A transient failure that recovers within the retry window must be transparent.
+  let museRetryAttempts = 0;
+  const museRecovered = await themuse.fetch(
+    { name: 'Z', provider: 'themuse' },
+    {
+      sleep: async () => {},
+      fetchJson: async () => {
+        museRetryAttempts++;
+        if (museRetryAttempts < 3) throw new Error('timeout');
+        return { results: [musePageZeroResult], page: 0, page_count: 1 };
+      },
+    },
+  );
+  if (museRetryAttempts === 3 && museRecovered.length === 1) {
+    pass(`themuse.fetch() retries a transient failure and recovers (${museRetryAttempts} attempts) (#2681)`);
+  } else {
+    fail(`themuse.fetch() retry recovery: ${museRetryAttempts} attempts, ${museRecovered.length} jobs`);
+  }
+
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }
