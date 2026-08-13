@@ -777,6 +777,7 @@ process_offer() {
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
+        fs.writeFileSync(process.argv[1], text);
         console.log(text.split(' ').filter(Boolean).length);
       } catch (e) { console.log(0); }
     " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
