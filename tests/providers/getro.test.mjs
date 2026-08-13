@@ -278,6 +278,23 @@ try {
   const getroEmpty = await getro.fetch(okEntry, { fetchJson: async () => ({}) });
   if (Array.isArray(getroEmpty) && getroEmpty.length === 0) pass('getro.fetch() tolerates an empty payload');
   else fail(`getro.fetch() empty handling: ${JSON.stringify(getroEmpty)}`);
+
+  // Inter-page sleep must be at least 250 ms — 150 ms caused WAF bans on Getro
+  // boards (#2706). Pin the value here so a regression can't slip through.
+  const getroSleepDelays = [];
+  let getroPacingPages = 0;
+  await getro.fetch({ ...okEntry, getro_max_pages: 3 }, {
+    sleep: async (ms) => { getroSleepDelays.push(ms); },
+    fetchJson: async () => {
+      getroPacingPages++;
+      return { results: { count: 100, jobs: [{ title: 'T', url: `https://jobs.examplevc.example/p${getroPacingPages}`, organization: { name: 'Acme' } }] } };
+    },
+  });
+  if (getroSleepDelays.length === 2 && getroSleepDelays.every(d => d >= 250)) {
+    pass(`getro.fetch() sleeps ≥ 250 ms between pages (got ${getroSleepDelays[0]} ms) — WAF-safe pacing (#2706)`);
+  } else {
+    fail(`getro.fetch() pacing: expected 2 sleep calls ≥ 250 ms, got ${JSON.stringify(getroSleepDelays)}`);
+  }
 } catch (e) {
   fail(`getro provider tests crashed: ${e.message}`);
 }
