@@ -621,6 +621,11 @@ if (!wordCountMatch) {
       const ssrfCases = [
         { label: 'loopback',       url: 'http://127.0.0.1/job'                   },
         { label: 'cloud-metadata', url: 'http://169.254.169.254/latest/meta-data' },
+        { label: 'RFC-1918-10',    url: 'http://10.0.0.1/job'                    },
+        { label: 'RFC-1918-172',   url: 'http://172.16.0.1/job'                  },
+        { label: 'RFC-1918-192',   url: 'http://192.168.1.1/job'                 },
+        { label: 'localhost',      url: 'http://localhost/job'                    },
+        { label: 'dot-local',      url: 'http://mybox.local/job'                 },
       ];
       for (const { label, url: badUrl } of ssrfCases) {
         const jdSsrfPath = join(work, `jd-ssrf-${label}.html`);
@@ -646,6 +651,30 @@ if (!wordCountMatch) {
         } else {
           fail(`SSRF guard (${label}): expected blocked — words=${wordsSsrf} curl_called=${curlCalled}`);
         }
+      }
+
+      // Positive case: a safe public URL must pass the guard and reach curl.
+      const jdSafeGuardPath = join(work, 'jd-safe-guard.html');
+      const scriptSafeGuardSource = [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(jdSafeGuardPath)}`,
+        `> "$jd_file"`,
+        `prefetch_min_words=80`,
+        `jd_prefetch_words=0`,
+        `curl_was_called=0`,
+        `curl() { curl_was_called=1; }`,
+        `url="https://jobs.example.com/eng-42"`,
+        curlPrefetchBlock,
+        `printf '%s\\n' "$curl_was_called"`,
+      ].join('\n');
+      const scriptSafeGuard = join(work, 'case-ssrf-safe.sh');
+      writeFileSync(scriptSafeGuard, scriptSafeGuardSource);
+      const resultSafeGuard = execFileSync(bash, [scriptSafeGuard], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const safeGuardCurlCalled = Number(resultSafeGuard.split('\n').at(-1));
+      if (safeGuardCurlCalled === 1) {
+        pass('SSRF guard (safe public URL): guard passes, curl is called — only private IPs are blocked');
+      } else {
+        fail(`SSRF guard (safe public URL): curl_was_called=${safeGuardCurlCalled} — guard is over-blocking public URLs`);
       }
     }
   } finally {
