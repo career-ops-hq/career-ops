@@ -31,6 +31,11 @@
 **ПРАВИЛО: НИКОГДА не приписывать пользователю авторство проекта, репозитория, библиотеки, инструмента, фреймворка или open-source артефакта, если это явно не подтверждено в `cv.md` или `article-digest.md`. Пользоваться инструментом — не значит создать его.**
 **ПРАВИЛО: Переформулировать ключевые слова, но никогда их не выдумывать. Если утверждение о кандидате не подкреплено разрешённым источником — спросить пользователя; нет ответа — опустить. Молчание по теме лучше выдуманной детали.**
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## North Star — Целевые роли
