@@ -413,13 +413,13 @@ try {
 
     const addR = assessmentCli(
       'add', '--company', 'Acme-Co', '--platform', 'eSkill', '--subject',
-      'Data-Analysis', '--threshold', '70', '--score', '85'
+      '-Data-Analysis', '--threshold', '70', '--score', '85'
     );
     const summaryR = assessmentCli('--summary');
     let added = null;
     try { added = JSON.parse(addR.stdout); } catch {}
     if (addR.status === 0 && added?.added === true
-        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === 'Data-Analysis'
+        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === '-Data-Analysis'
         && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
         && summaryR.stdout.includes('Data-Analysis')) {
       pass('assessment-log.mjs preserves add/summary flags and dash-containing values (#2797 regression)');
