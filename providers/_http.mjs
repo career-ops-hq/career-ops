@@ -106,7 +106,7 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
 /** Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock wait. */
-function sleep(ms, ctx) {
+export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

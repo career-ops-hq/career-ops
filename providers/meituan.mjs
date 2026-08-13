@@ -18,6 +18,8 @@
 //                                  # omit to pull the whole board (~2300 postings)
 //     max_pages: 30                # per keyword, pageSize 100
 
+import { sleep } from './_http.mjs';
+
 const API_HOST = 'zhaopin.meituan.com';
 const API = `https://${API_HOST}/api/official/job/getJobList`;
 const DETAIL = `https://${API_HOST}/web/position/detail?jobUnionId=`;
@@ -118,7 +120,6 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
@@ -131,7 +132,7 @@ export default {
 
         for (let attempt = 0; attempt <= EMPTY_RETRIES; attempt++) {
           if (firstRequest) firstRequest = false;
-          else await sleep(attempt > 0 ? RETRY_BACKOFF_MS * attempt : INTER_PAGE_DELAY_MS);
+          else await sleep(attempt > 0 ? RETRY_BACKOFF_MS * attempt : INTER_PAGE_DELAY_MS, ctx);
 
           let json;
           try {

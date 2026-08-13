@@ -12,6 +12,8 @@
 //                                  # omit to pull the whole board (empty-keyword query)
 //     max_pages: 20                # per keyword, pageSize 100 → up to 2000 posts/keyword
 
+import { sleep } from './_http.mjs';
+
 const API_HOST = 'careers.tencent.com';
 const API_PATH = '/tencentcareer/api/post/Query';
 const PAGE_SIZE = 100;
@@ -101,14 +103,13 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         let json;
         try {
           json = /** @type {any} */ (
