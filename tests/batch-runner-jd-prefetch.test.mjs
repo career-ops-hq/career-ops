@@ -424,7 +424,7 @@ if (!wordCountMatch) {
           `    --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \\`,
           `    --output "$jd_file" \\`,
           `    -- "https://example.com/job" 2>/dev/null || true`,
-          `  jd_prefetch_words=$(node -e "${realWordCountSnippet.replace(/"/g, '\\"')}" "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
+          `  jd_prefetch_words=$(node -e "${realWordCountSnippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
           `  jd_prefetch_words="\${jd_prefetch_words//[^0-9]/}"`,
           `  jd_prefetch_words="\${jd_prefetch_words:-0}"`,
           `  if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then`,
