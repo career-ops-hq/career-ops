@@ -2171,8 +2171,11 @@ async function main() {
 
   // Reject unrecognized flags early so a typo (e.g. --dryrun, --dry_run) does
   // not silently run a full scan and write to user-layer data files (#2270).
+  // Only double-dash tokens are checked: single-dash tokens are either known
+  // aliases (-h) or value operands (e.g. --since -5 passes "-5" as a number,
+  // not a flag), and we must not reject those.
   const unknownFlags = args.filter(
-    (a) => a.startsWith('-') && !SCAN_KNOWN_FLAGS.has(a.split('=')[0]),
+    (a) => a.startsWith('--') && !SCAN_KNOWN_FLAGS.has(a.split('=')[0]),
   );
   if (unknownFlags.length > 0) {
     console.error(`Error: unknown option(s): ${unknownFlags.join(', ')}`);
