@@ -22,6 +22,11 @@
 **규칙: proof point의 metric을 절대 하드코딩하지 않습니다.** 평가 시점에 `cv.md`와 `article-digest.md`에서 읽습니다.
 **규칙: article/project metric은 `article-digest.md`가 `cv.md`보다 우선합니다** (`cv.md`에는 더 오래된 수치가 있을 수 있음).
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## North Star -- 목표 역할
