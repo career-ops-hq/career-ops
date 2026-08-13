@@ -104,7 +104,7 @@ If compensation observations exist (report `advertised_comp` keys or `data/salar
 
 Run `node company-history.mjs --summary` as an additional lens. Zero tokens.
 
-**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs <num> <state> --note "responded <date>"` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
+**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs --row <num> <state> --on <response-date>` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
 
 Then present the cards, sorted silent-first (the script already orders them this way).
 
