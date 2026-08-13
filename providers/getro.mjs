@@ -74,10 +74,10 @@ const HARD_MAX_PAGES = 1500;
 const DEFAULT_MAX_AGE_DAYS = 90;   // pagination bound only; global filter does the real cut
 
 // Delay between successive pages of one tenant's own pagination loop (not
-// between tenants). Getro showed no rate-limit evidence in manual testing,
-// but a large board is still a long burst of same-host requests without some
-// pacing.
-const INTER_PAGE_DELAY_MS = 150;
+// between tenants). 150 ms was not enough: wiring up 13 boards back-to-back
+// earned a Datadog WAF block (3 boards at 403 + ~2.5h ban). 250 ms is the
+// verified-safe floor (#2706).
+const INTER_PAGE_DELAY_MS = 250;
 
 function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
