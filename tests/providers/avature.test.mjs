@@ -186,6 +186,34 @@ try {
     else if (badArts.length === 1 && badArts[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('avature.parseArticles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`avature.parseArticles() out-of-range entity wrong: ${JSON.stringify(badArts)}`);
   }
+
+  // Inter-page sleep must be >= 250 ms — 150 ms caused WAF bans on comparable
+  // providers (Getro: 3 boards at 403 + ~2.5 h ban); this pins the safe floor (#2706).
+  {
+    const mkArticles = (ids) => ids.map((id) =>
+      `<article class="article article--result"><h3 class="title"><a class="link" href="https://acme.avature.net/careers/JobDetail/Role-${id}/${id}">Role ${id}</a></h3></article>`).join('');
+    const pacingDelays = [];
+    let pageNum = 0;
+    const pacingCtx = {
+      sleep: async (ms) => { pacingDelays.push(ms); },
+      fetchText: async () => {
+        const p = pageNum++;
+        if (p === 0) return mkArticles([1, 2, 3, 4, 5, 6]);
+        if (p === 1) return mkArticles([7, 8]);
+        return '<div>no articles</div>';
+      },
+    };
+    await avature.fetch({ name: 'PacingTest', api: 'https://acme.avature.net/careers/SearchJobs' }, pacingCtx);
+    if (pacingDelays.length >= 1 && pacingDelays.every((ms) => ms >= 250)) {
+      pass(`avature.fetch() sleeps >= 250 ms between pages (got ${pacingDelays[0]} ms) — WAF-safe pacing (#2706)`);
+    } else {
+      fail(`avature.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
+    }
+    if (pageNum >= 2 && pacingDelays.length === pageNum - 1) {
+      pass('avature.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    }
+  }
+
 } catch (e) {
   fail(`avature provider tests crashed: ${e.message}`);
 }
