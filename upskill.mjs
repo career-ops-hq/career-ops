@@ -24,7 +24,7 @@
 
 import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
@@ -784,15 +784,6 @@ soft_gaps:
   process.exit(0);
 }
 
-// --- CLI ---
-// --- CLI ---
-const args = process.argv.slice(2);
-if (args.includes('--self-test')) runSelfTest();
-
-// ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
-const urlTextIdx = args.indexOf('--url-text');
-const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
-
 // Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
 const dnsCache = new Map();
 
@@ -826,116 +817,154 @@ async function validateUrlSecurity(urlString) {
   return url.toString();
 }
 
-if (urlTextIdx !== -1 || directUrl) {
-  (async () => {
-    let targetText = '';
-    const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+// --- CLI ---
+// Everything below runs ONLY when upskill.mjs is the process entry point.
+//
+// Without this guard the module tail was unconditional, so `import
+// { knownSkillsText } from './upskill.mjs'` re-parsed the IMPORTER's argv and ran
+// one of these branches. That made the pure helpers above un-unit-testable despite
+// their "exported for unit testing" docblocks — every assertion about them had to
+// live inside --self-test.
+//
+// Under tests/ it also broke the harness, because test-all.mjs imports discovered
+// suites IN-PROCESS and they therefore share its argv. Both branches were
+// reachable, and both were measured by pinning isMain to true:
+//   - ordinary argv → the aggregate branch walked the tracker and every linked
+//     report, then dumped a 68-line JSON gap map into the middle of the suite
+//     output.
+//   - argv containing --self-test → runSelfTest() ran and EXITED. test-all died
+//     on the spot with exit 0, no summary line, and every later section silently
+//     skipped: a forged green, which is the exact failure its own source guard
+//     rejects a discovered suite for.
+//
+// Same shape as the other CLIs in this repo (add-entry.mjs, detect-reposts.mjs,
+// contacts.mjs, check-table-freshness.mjs, ...): compare import.meta.url against
+// argv[1]. Node resolves the ESM entry through realpath while pathToFileURL does
+// not, so invoking this file through a SYMLINK reads as "not main" and prints
+// nothing — the same edge contacts.test.mjs documents on macOS. Every caller
+// (test-all.mjs, the modes, package scripts) uses the real path, and matching the
+// repo convention is worth more here than covering a path nothing takes.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-    if (!inputSource) {
-      console.error('Error: Please provide a valid URL or file path after --url-text');
-      process.exit(1);
-    }
+if (isMain) {
+  const args = process.argv.slice(2);
+  if (args.includes('--self-test')) runSelfTest();
 
-    if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
-      let browser;
-      try {
-        const secureUrl = await validateUrlSecurity(inputSource);
-        const { chromium } = await import('playwright');
-        browser = await chromium.launch({ headless: true });
-        const page = await browser.newPage();
+  // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
+  const urlTextIdx = args.indexOf('--url-text');
+  const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-        await page.route('**/*', async (route) => {
-          const requestUrl = route.request().url();
-          try {
-            await validateUrlSecurity(requestUrl);
-            await route.continue();
-          } catch (err) {
-            console.error(`Security Violation on Redirect: ${err.message}`);
-            await route.abort('blockedbyclient');
-            process.exit(1);
-          }
-        });
+  if (urlTextIdx !== -1 || directUrl) {
+    (async () => {
+      let targetText = '';
+      const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
 
-        await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        targetText = await page.innerText('body');
-      } catch (err) {
-        console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
-        try {
-          const secureUrl = await validateUrlSecurity(inputSource);
-          // validateUrlSecurity only vets the initial URL; a redirect could still
-          // steer the fetch at an internal host (SSRF). The Playwright path
-          // re-validates per hop, but this plain fetch must refuse redirects
-          // outright — fail closed rather than follow an unvetted Location (#1851).
-          const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
-          if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-          targetText = await res.text();
-        } catch (fetchErr) {
-          console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
-          process.exit(1);
-        }
-      } finally {
-        if (browser) await browser.close();
-      }
-
-      // Whitespace-collapse + length-cap the fetched page text. Use compactText
-      // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
-      // text } DOM-read object and returns { url, title, text }, so feeding it
-      // the innerText/fetch STRING silently produced { text: '' } — destroying
-      // the JD and then throwing `text.matchAll is not a function` downstream
-      // (#1894). compactText is the string-in/string-out helper this wants.
-      try {
-        const { compactText } = await import('./browser-extract.mjs');
-        targetText = compactText(targetText);
-      } catch (e) {}
-    } else {
-      if (existsSync(inputSource)) {
-        targetText = readFileSync(inputSource, 'utf-8');
-      } else {
-        console.error(`Fatal: Target file not found at path: ${inputSource}`);
+      if (!inputSource) {
+        console.error('Error: Please provide a valid URL or file path after --url-text');
         process.exit(1);
       }
-    }
 
-    // Assemble the known-skills text (cv + profile), matching aggregate mode.
-    // Targeted mode additionally falls back to cv-example.md when cv.md is absent
-    // so a fresh checkout still produces a meaningful comparison.
-    const profileRaw = readOptionalText(PROFILE_FILE);
-    let cvRaw = readOptionalText(CV_FILE);
-    // Fall back to the shipped example when cv.md is absent OR unreadable, so a
-    // fresh checkout still produces a meaningful comparison. Keyed on the read
-    // result rather than existsSync: a cv.md that exists but cannot be read is,
-    // for this purpose, the same as one that is not there.
-    if (!cvRaw) cvRaw = readOptionalText(join(CAREER_OPS, 'cv-example.md'));
+      if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
+        let browser;
+        try {
+          const secureUrl = await validateUrlSecurity(inputSource);
+          const { chromium } = await import('playwright');
+          browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
 
-    const { gaps: gapList, excludedAsKnown, knownSkills } =
-      computeTargetedGaps(
-        targetText,
-        knownSkillsText(cvRaw, profileRaw, warnProfileUnparseable),
-      );
+          await page.route('**/*', async (route) => {
+            const requestUrl = route.request().url();
+            try {
+              await validateUrlSecurity(requestUrl);
+              await route.continue();
+            } catch (err) {
+              console.error(`Security Violation on Redirect: ${err.message}`);
+              await route.abort('blockedbyclient');
+              process.exit(1);
+            }
+          });
 
-    console.log(JSON.stringify({
-      mode: 'targeted',
-      source: inputSource,
-      gaps: gapList.map(skill => ({ skill })),
-      excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
-      knownSkills,
-    }, null, 2));
+          await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
+          targetText = await page.innerText('body');
+        } catch (err) {
+          console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
+          try {
+            const secureUrl = await validateUrlSecurity(inputSource);
+            // validateUrlSecurity only vets the initial URL; a redirect could still
+            // steer the fetch at an internal host (SSRF). The Playwright path
+            // re-validates per hop, but this plain fetch must refuse redirects
+            // outright — fail closed rather than follow an unvetted Location (#1851).
+            const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
+            if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            targetText = await res.text();
+          } catch (fetchErr) {
+            console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
+            process.exit(1);
+          }
+        } finally {
+          if (browser) await browser.close();
+        }
 
-    process.exit(0);
-  })();
-} else {
-  // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
-  const minReportsIdx = args.indexOf('--min-reports');
-  const MIN_REPORTS = (() => {
-    if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-    const n = parseInt(args[minReportsIdx + 1], 10);
-    return Number.isNaN(n) || n < 1 ? 5 : n;
-  })();
+        // Whitespace-collapse + length-cap the fetched page text. Use compactText
+        // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
+        // text } DOM-read object and returns { url, title, text }, so feeding it
+        // the innerText/fetch STRING silently produced { text: '' } — destroying
+        // the JD and then throwing `text.matchAll is not a function` downstream
+        // (#1894). compactText is the string-in/string-out helper this wants.
+        try {
+          const { compactText } = await import('./browser-extract.mjs');
+          targetText = compactText(targetText);
+        } catch (e) {}
+      } else {
+        if (existsSync(inputSource)) {
+          targetText = readFileSync(inputSource, 'utf-8');
+        } else {
+          console.error(`Fatal: Target file not found at path: ${inputSource}`);
+          process.exit(1);
+        }
+      }
 
-  const result = analyze(MIN_REPORTS);
-  if (args.includes('--summary')) {
-    printSummary(result);
+      // Assemble the known-skills text (cv + profile), matching aggregate mode.
+      // Targeted mode additionally falls back to cv-example.md when cv.md is absent
+      // so a fresh checkout still produces a meaningful comparison.
+      const profileRaw = readOptionalText(PROFILE_FILE);
+      let cvRaw = readOptionalText(CV_FILE);
+      // Fall back to the shipped example when cv.md is absent OR unreadable, so a
+      // fresh checkout still produces a meaningful comparison. Keyed on the read
+      // result rather than existsSync: a cv.md that exists but cannot be read is,
+      // for this purpose, the same as one that is not there.
+      if (!cvRaw) cvRaw = readOptionalText(join(CAREER_OPS, 'cv-example.md'));
+
+      const { gaps: gapList, excludedAsKnown, knownSkills } =
+        computeTargetedGaps(
+          targetText,
+          knownSkillsText(cvRaw, profileRaw, warnProfileUnparseable),
+        );
+
+      console.log(JSON.stringify({
+        mode: 'targeted',
+        source: inputSource,
+        gaps: gapList.map(skill => ({ skill })),
+        excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
+        knownSkills,
+      }, null, 2));
+
+      process.exit(0);
+    })();
   } else {
-    console.log(JSON.stringify(result, null, 2));
+    // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
+    const minReportsIdx = args.indexOf('--min-reports');
+    const MIN_REPORTS = (() => {
+      if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
+      const n = parseInt(args[minReportsIdx + 1], 10);
+      return Number.isNaN(n) || n < 1 ? 5 : n;
+    })();
+
+    const result = analyze(MIN_REPORTS);
+    if (args.includes('--summary')) {
+      printSummary(result);
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
   }
 }
