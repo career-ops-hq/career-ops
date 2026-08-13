@@ -65,6 +65,21 @@
  * happened earlier ("they replied Tuesday"). The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
+ *
+ * Two rules the reader enforces that this writer never has to think about,
+ * because it always has a real prior status and always writes its own source.
+ * Any other producer does have to, so they are stated here:
+ *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
+ *     funnel-velocity.mjs treats "-" as "no prior state" and sends anything
+ *     else through resolveCanonicalState, so an empty cell is rejected as
+ *     `unknown from-state ""` and the row is dropped.
+ *   - The source column is a closed set, and VALID_SOURCES in
+ *     funnel-velocity.mjs is the authority on its members. Deliberately not
+ *     enumerated here: a copy of that list in prose is wrong the first time a
+ *     writer is added, and it would be wrong in three files at once.
+ *     A value outside the set parses but is counted as an unknown source and
+ *     excluded from the funnel. Namespacing a source (say "backfill:notes")
+ *     therefore silently loses the row; put that detail in the note column.
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';
