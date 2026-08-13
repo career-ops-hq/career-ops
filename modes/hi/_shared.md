@@ -22,6 +22,11 @@
 **नियम: proof points की metrics को कभी hardcode न करें।** इन्हें मूल्यांकन के समय `cv.md` और `article-digest.md` से पढ़ें।
 **नियम: article/project metrics के लिए, `article-digest.md` को `cv.md` से प्राथमिकता दें** (`cv.md` में पुराने आंकड़े हो सकते हैं)।
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## North Star -- लक्षित भूमिकाएं
