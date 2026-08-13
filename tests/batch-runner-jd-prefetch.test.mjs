@@ -53,6 +53,22 @@ if (/local prefetch_min_words=80/.test(SRC)) {
   fail('could not find local prefetch_min_words=80 in batch-runner.sh');
 }
 
+// The prefetch block must be guarded by `command -v curl` so it is skipped when
+// curl is absent instead of throwing "command not found" and aborting the offer.
+if (/command -v curl/.test(SRC)) {
+  pass('prefetch is guarded by "command -v curl" (skipped gracefully when curl is absent)');
+} else {
+  fail('"command -v curl" guard is missing — a system without curl aborts the offer');
+}
+
+// The curl call must end with `|| true` so a curl failure cannot propagate to
+// the outer `set -e` shell (if enabled) and abort process_offer().
+if (/curl[\s\S]{0,400}2>\/dev\/null \|\| true/.test(SRC)) {
+  pass('curl call uses "|| true" (curl failure cannot abort the offer processing)');
+} else {
+  fail('"|| true" after curl is missing — a curl failure may abort process_offer()');
+}
+
 // The comparison uses the named variable, not a bare literal.
 if (/-lt "\$prefetch_min_words"/.test(SRC)) {
   pass('comparison references $prefetch_min_words (not a bare literal)');
@@ -72,6 +88,34 @@ if (/--max-redirs\s+\d+/.test(SRC)) {
   pass('curl uses --max-redirs to cap redirect chains');
 } else {
   fail('curl is missing --max-redirs — unbounded redirect loops possible');
+}
+
+// curl must request compressed (gzip/deflate) responses.
+if (/--compressed\b/.test(SRC)) {
+  pass('curl uses --compressed (accepts gzip/deflate encoded boards)');
+} else {
+  fail('curl is missing --compressed — gzip responses write binary garbage to $jd_file');
+}
+
+// curl must send an Accept header so boards serve HTML rather than JSON.
+if (/--header.*Accept.*text\/html/.test(SRC) || /--header.*text\/html/.test(SRC)) {
+  pass('curl sends Accept: text/html header (boards serve HTML, not JSON or mobile variant)');
+} else {
+  fail('curl is missing Accept header — some boards may serve JSON or redirect to a mobile view');
+}
+
+// curl must have a separate connect timeout (TCP stall should not eat the full budget).
+if (/--connect-timeout\s+\d+/.test(SRC)) {
+  pass('curl uses --connect-timeout (TCP stalls fail fast, not consuming the full max-time)');
+} else {
+  fail('curl is missing --connect-timeout — unreachable servers stall for the full max-time');
+}
+
+// The integer sanitization guard must be present — strips non-digit chars, defaults to 0.
+if (/jd_prefetch_words="\$\{jd_prefetch_words\/\/\[/.test(SRC) || /jd_prefetch_words.*\[.*\^0-9\]/.test(SRC)) {
+  pass('jd_prefetch_words is sanitized to integer (non-digit characters stripped)');
+} else {
+  fail('jd_prefetch_words integer sanitization is missing — non-integer node output causes bash arithmetic error');
 }
 
 // jd_file must be cleaned up in the rm -f line alongside resolved_prompt.
