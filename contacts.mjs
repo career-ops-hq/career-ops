@@ -49,7 +49,32 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
 const DEFAULT_VCF = join(CAREER_OPS, 'output/contacts.vcf');
 
+
+// --- CLI args ---
+const KNOWN_FLAGS = ['--summary', '--self-test', '--caller-id', '--vcf', '--help', '-h'];
+
+const USAGE = `Usage:
+  node contacts.mjs                     # JSON: contacts + quality + total
+  node contacts.mjs --summary           # human-readable table
+  node contacts.mjs --vcf [path]        # write vCard, default output/contacts.vcf
+  node contacts.mjs --vcf --caller-id   # FN as "Jane Doe (Acme recruiter)"
+  node contacts.mjs --self-test         # run the in-memory test suite
+  node contacts.mjs --help              # print this usage block and exit`;
+
 const args = process.argv.slice(2);
+
+if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+}
+
+const unknownFlags = args.filter((a, idx) =>
+  a.startsWith('-') && !KNOWN_FLAGS.includes(a.split("=")[0]));
+if (unknownFlags.length) {
+  console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+  console.error(USAGE);
+  process.exit(1);
+}
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const callerIdMode = args.includes('--caller-id');

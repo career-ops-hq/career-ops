@@ -324,6 +324,24 @@ try {
   console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
 }
 
+// --help / -h and unknown-flag rejection
+const spawnContacts = (...argv) => spawnSync('node', [scriptPath, ...argv], { encoding: 'utf-8', timeout: 10000 });
+
+const helpR = spawnContacts('--help');
+const hR = spawnContacts('-h');
+ok('--help exits 0', helpR.status === 0);
+ok('-h exits 0', hR.status === 0);
+ok('--help prints Usage:', helpR.stdout.includes('Usage:'));
+ok('-h output matches --help', hR.stdout === helpR.stdout);
+ok('--help writes nothing to stderr', helpR.stderr === '');
+
+const typoR = spawnContacts('--sumary');
+ok('unknown flag exits 1', typoR.status === 1);
+ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
+ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
+ok('unknown flag prints Usage:', typoR.stderr.includes('Usage:'));
+ok('unknown flag writes nothing to stdout', typoR.stdout === '');
+
 // contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
 // copy of the script into a temp dir is a fully isolated career-ops root:
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
