@@ -52,7 +52,10 @@ const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(
 const PAGE_SIZE = 200;
 const MAX_PAGES = 25;             // safety cap (~5000 jobs); hard ceiling like workday
 const RETRY_POLICY = { retries: 3 };
-const INTER_PAGE_DELAY_MS = 150;  // WAF-aware spacing between same-host pages
+// WAF-aware spacing between same-host pages. 150 ms was verified to cause WAF
+// bans on comparable providers (Getro: 3 boards at 403 + ~2.5 h ban); 250 ms
+// is the cross-provider safe floor (#2706).
+const INTER_PAGE_DELAY_MS = 250;
 
 // facetsList is a fixed constant on the finder; %3B is the encoded ';' separator.
 const FACETS_LIST = 'LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS';
