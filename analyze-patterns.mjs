@@ -1159,7 +1159,7 @@ function analyze() {
   if (geoBlocker && geoBlocker.percentage >= 20) {
     recommendations.push({
       action: `Review location and work-authorization filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
-      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are affected by a location or work-authorization restriction. These are wasted evaluation effort.`,
+      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are affected by a location or work-authorization restriction. Review these filters before applying to similar roles.`,
       impact: 'high',
     });
   }

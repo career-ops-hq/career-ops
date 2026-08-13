@@ -188,7 +188,8 @@ Highlight the best-performing archetype and the worst.
 ## Top Blockers
 
 Frequency table of recurring hard blockers (geo-restriction, stack-mismatch, etc.).
-Note the percentage of all applications affected by each.
+Show each frequency against `blockerBase`; its percentage is the share of
+gap-bearing entries, not the share of all applications.
 
 ## Remote Policy Patterns
 
