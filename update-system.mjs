@@ -900,12 +900,31 @@ function addPaths(paths) {
   git('add', '--', ...paths);
 }
 
+// Git's "exclude this from the pathspec" magic prefix. Preserved files are held
+// out of the checkout, the staging and the scoped commit with it, so the one
+// place that has to recognise such an entry again — the index-commit guard —
+// reads the prefix from here rather than re-spelling it.
+const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+
 /**
  * Staged paths that are NOT covered by `owned`.
  *
  * Used to decide whether committing the whole index is equivalent to a
  * pathspec-scoped commit. Entries in `owned` may be directories (`providers/`,
  * `tests/`), which cover everything beneath them, or exact file paths.
+ *
+ * `preserved` is the update's preserved-file list (#2337): system files THIS
+ * install modified locally, which the update deliberately leaves alone. They are
+ * not the update's to commit, so a staged preserved path is reported as
+ * unrelated even when an owned DIRECTORY contains it — `providers/acme.mjs` is
+ * unrelated although `providers/` is owned.
+ *
+ * It has to be passed separately rather than inferred from `owned`, because the
+ * caller expresses preservation as `:(exclude)<path>` git pathspecs and those
+ * never match a staged path: the `providers/` entry would still claim the file,
+ * the guard would wave the bare index commit through, and the content the user
+ * asked to keep would be swept into it — #915 bug 2, reintroduced through the
+ * guard that exists to prevent it.
  *
  * Deliberately reads `--cached` rather than `git status`: only what is STAGED
  * can end up in a commit, and an unstaged working-tree edit is irrelevant to
@@ -919,10 +938,11 @@ function addPaths(paths) {
  * legitimately begin or end with a space and trimming would rewrite it.
  *
  * @param {string[]} owned
+ * @param {string[]} [preserved] exact paths the update leaves to the user
  * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
- * @returns {string[]} staged paths outside `owned` (empty ⇒ safe to commit the index)
+ * @returns {string[]} staged paths the update does not own (empty ⇒ safe to commit the index)
  */
-export function stagedPathsOutside(owned, run = (...args) => gitRawIn(ROOT, ...args)) {
+export function stagedPathsOutside(owned, preserved = [], run = (...args) => gitRawIn(ROOT, ...args)) {
   // -z, and no trimming. Without it git quotes any path holding a space, quote
   // or newline, and trimming would additionally rewrite a legitimate name: a
   // staged ` scan.mjs` (leading space) becomes `scan.mjs`, matches an owned
@@ -938,10 +958,16 @@ export function stagedPathsOutside(owned, run = (...args) => gitRawIn(ROOT, ...a
     if (entry.endsWith('/')) dirs.push(entry);
     else files.add(entry);
   }
+  // Preservation wins over ownership, hence the check BEFORE the owned lookups:
+  // being inside an owned directory is exactly the case that would otherwise
+  // claim a preserved file. Exact paths only — the preserved list comes from
+  // `git diff --name-only` / `git ls-files`, which never emit directories.
+  const preservedFiles = new Set(preserved);
 
   return staged.split('\0')
     .filter(path => path !== '')
-    .filter(path => !files.has(path) && !dirs.some(dir => path.startsWith(dir)));
+    .filter(path => preservedFiles.has(path)
+      || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
 }
 
 function dashboardGoSourcesChanged() {
@@ -1201,7 +1227,7 @@ async function apply() {
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
     // the user asked to keep out.
-    const preserveSpecs = preservedPaths.map((file) => `:(exclude)${file}`);
+    const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
     const preservedSet = new Set(preservedPaths);
 
@@ -1440,7 +1466,18 @@ async function apply() {
       // than assume it, and fall back to the scoped form when anything else is
       // staged. Content is committed identically either way; only the mode bits
       // ride on the index-based path.
-      const unrelated = stagedPathsOutside([...pathsToStage, ...materializedSkillEntrypoints]);
+      //
+      // `pathsToStage` is a git PATHSPEC list, not a path list: the preserved
+      // entries in it are `:(exclude)<path>`, which match no staged path at all.
+      // Handing them to the guard as owned paths would leave a preserved file
+      // claimed by its enclosing owned directory (`providers/` covering
+      // `providers/acme.mjs`) — so strip the exclusions out and pass the
+      // preserved list separately, where preservation outranks ownership.
+      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      const unrelated = stagedPathsOutside(
+        [...ownedPaths, ...materializedSkillEntrypoints],
+        preservedPaths,
+      );
       usedIndexCommit = unrelated.length === 0;
       if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
