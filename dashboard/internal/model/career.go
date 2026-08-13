@@ -8,6 +8,7 @@ type CareerApplication struct {
 	Role         string
 	Status       string
 	Score        float64
+	HasScore     bool   // false when ScoreRaw holds a sentinel (—, N/A, -) rather than a numeric score
 	ScoreRaw     string
 	HasPDF       bool
 	ReportPath   string
