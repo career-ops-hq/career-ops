@@ -111,6 +111,18 @@ test("fractional and non-finite usage figures are ignored, not counted", () => {
     usage: { input_tokens: 2.7, output_tokens: 10, cache_creation_input_tokens: 5 },
   }));
   assert.deepEqual(claude, { tokens: 15 });
+
+  // And a non-finite figure, which needs RAW JSONL to construct: JSON.stringify
+  // turns Infinity into null, so a fixture built the usual way silently tests
+  // something else. `1e400` is how an overflow actually arrives on the wire.
+  assert.deepEqual(
+    parseCodexEvent('{"type":"turn.completed","usage":{"input_tokens":1e400,"output_tokens":10}}'),
+    { tokens: 10, costUsd: null },
+  );
+  assert.deepEqual(
+    parseClaudeEvent('{"type":"result","usage":{"input_tokens":1e400,"output_tokens":10}}'),
+    { tokens: 10 },
+  );
 });
 
 test("malformed Codex usage never reports negative tokens", () => {
@@ -141,6 +153,23 @@ test("a line that parses to a non-object is ignored, not thrown on", () => {
     assert.equal(parseCodexEvent(line), null, `codex: ${line}`);
     assert.equal(parseClaudeEvent(line), null, `claude: ${line}`);
   }
+});
+
+test("a null nested payload is survived, not thrown on", () => {
+  // Given: the root guard above only covers a non-object ROOT. A well-formed
+  // event can still carry a null where an object belongs, and reading through it
+  // would throw past the parser into the route's stdout handler just the same.
+  // The optional chaining that prevents this has no other coverage, so a
+  // regression removing one `?.` would go unnoticed.
+  assert.equal(parseCodexEvent('{"type":"item.started","item":null}'), null);
+  assert.equal(parseCodexEvent('{"type":"item.completed","item":null}'), null);
+  assert.equal(parseCodexEvent('{"type":"turn.completed","usage":null}'), null);
+  assert.equal(parseClaudeEvent('{"type":"stream_event","event":null}'), null);
+  assert.equal(parseClaudeEvent('{"type":"result","usage":null}'), null);
+
+  // A null `error` still yields the default diagnostic rather than throwing —
+  // the event announced a failure, so it must not be silently dropped.
+  assert.deepEqual(parseCodexEvent('{"type":"error","error":null}'), { error: "Codex failed before finishing" });
 });
 
 test("an empty Codex agent message emits nothing", () => {
@@ -403,10 +432,12 @@ test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   assert.deepEqual(args, ["exec", "--json", "--color", "never", "PROMPT"]);
 });
 
-test("a codexStreamArgs run's first event is parseable by parseCodexEvent", () => {
-  // Given: the argv above, whose whole purpose is that its output parses. Guards the
-  // pairing: a change to one of the two must not silently outlive the other.
+test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
+  // Two halves of one contract, asserted separately BY NECESSITY: proving the
+  // linkage for real would mean running codex, which a unit test cannot do. So
+  // this pins each half — the flag that produces JSONL, and the parser that
+  // reads codex's documented first event — and the name says exactly that
+  // rather than claiming a round-trip it never performs.
   assert.ok(codexStreamArgs("p").includes("--json"));
-  // When/Then: the JSONL that argv produces maps to a dashboard status.
   assert.deepEqual(parseCodexEvent(JSON.stringify({ type: "thread.started" })), { status: "Agent ready" });
 });
