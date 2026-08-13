@@ -7674,15 +7674,48 @@ try {
     const cvPath = join(cliTmp, 'cv.md');
     const adPath = join(cliTmp, 'article-digest.md');
     writeFileSync(cvPath, '# CV\n\n## Projects\n\n- **Existing** (OSS) -- here\n');
-    const payloadPath = join(cliTmp, 'p.json');
-    writeFileSync(payloadPath, JSON.stringify({
+    const payloadPath = join(cliTmp, 'payload-with-dash.json');
+    const cliPayload = {
       cv: { section: 'Projects', dedupKey: 'CliProj', entry: '- **CliProj** (OSS) -- desc' },
       articleDigest: { dedupKey: 'CliProj', entry: '## CliProj -- Tagline\n\n**Hero metrics:** x' },
-    }));
+    };
+    writeFileSync(payloadPath, JSON.stringify(cliPayload));
     const env = { ...process.env, CAREER_OPS_CV: cvPath, CAREER_OPS_ARTICLE_DIGEST: adPath };
 
+    const helpOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--help'], { env, encoding: 'utf-8' });
+    const hOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '-h'], { env, encoding: 'utf-8' });
+    if (helpOut.status === 0 && hOut.status === 0 &&
+        helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('--stdin') &&
+        hOut.stdout === helpOut.stdout) {
+      pass('add-entry CLI --help/-h print usage and exit 0');
+    } else {
+      fail(`add-entry CLI help handling => ${JSON.stringify({ help: { status: helpOut.status, stdout: helpOut.stdout, stderr: helpOut.stderr }, h: { status: hOut.status, stdout: hOut.stdout, stderr: hOut.stderr } })}`);
+    }
+
+    const missingPayloadPath = join(cliTmp, 'missing-payload.json');
+    const badFlag = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), missingPayloadPath, '--sumary'], { env, encoding: 'utf-8' });
+    if (badFlag.status === 1 && badFlag.stderr.includes('--sumary') && badFlag.stderr.includes('Usage:') &&
+        !badFlag.stderr.includes('could not parse payload') &&
+        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      pass('add-entry CLI rejects an unrecognized flag before reading or writing payload data');
+    } else {
+      fail(`add-entry CLI unknown flag handling => ${JSON.stringify({ status: badFlag.status, stdout: badFlag.stdout, stderr: badFlag.stderr })}`);
+    }
+
+    const stdinDryRun = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--stdin', '--dry-run'], {
+      env,
+      encoding: 'utf-8',
+      input: JSON.stringify(cliPayload),
+    });
+    if (stdinDryRun.status === 0 && JSON.parse(stdinDryRun.stdout).dryRun === true &&
+        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      pass('add-entry CLI keeps --stdin and --dry-run working together');
+    } else {
+      fail(`add-entry CLI --stdin --dry-run => ${JSON.stringify({ status: stdinDryRun.status, stdout: stdinDryRun.stdout, stderr: stdinDryRun.stderr })}`);
+    }
+
     execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath, '--dry-run'], { env, encoding: 'utf-8' });
-    if (!readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) pass('add-entry CLI --dry-run writes nothing');
+    if (!readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) pass('add-entry CLI --dry-run writes nothing and accepts a payload path containing dashes');
     else fail('add-entry CLI --dry-run should not write');
 
     const realOut = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));

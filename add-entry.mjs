@@ -47,6 +47,13 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const CV_FILE = process.env.CAREER_OPS_CV || join(CAREER_OPS, 'cv.md');
 const ARTICLE_DIGEST_FILE = process.env.CAREER_OPS_ARTICLE_DIGEST || join(CAREER_OPS, 'article-digest.md');
 
+const KNOWN_FLAGS = ['--dry-run', '--stdin', '--help', '-h'];
+
+const USAGE = `Usage:
+  node add-entry.mjs <payload.json> [--dry-run]
+  node add-entry.mjs --stdin [--dry-run]
+  node add-entry.mjs --help                    # print this usage block and exit (-h is an alias)`;
+
 // Normalize a title/heading for duplicate detection: lowercase, collapse to
 // alphanumerics only. "FraudShield", "Fraud-Shield", "fraud shield" all match.
 export function normalizeKey(s) {
@@ -194,12 +201,25 @@ async function readStdin() {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length) {
+    console.error(`add-entry: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
   const dryRun = args.includes('--dry-run');
   const useStdin = args.includes('--stdin');
-  const fileArg = args.find(a => !a.startsWith('--'));
+  const fileArg = args.find(a => !a.startsWith('-'));
 
   if (!useStdin && !fileArg) {
-    console.error('Usage: node add-entry.mjs <payload.json> [--dry-run]  (or --stdin)');
+    console.error(USAGE);
     process.exit(1);
   }
 
