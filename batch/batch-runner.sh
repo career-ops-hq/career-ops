@@ -743,7 +743,7 @@ process_offer() {
   jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
 
   # Pre-populate $jd_file with a static curl fetch so the worker reads HTML
-  # directly instead of always falling through to WebFetch. WebFetch is
+  # directly instead of always falling through to WebFetch (#2492). WebFetch is
   # unreliable on JS-rendered boards (Phenom, Workday, iCIMS) because it hits
   # the rendered JS shell rather than the actual JD text. curl returns the raw
   # HTML in a single round-trip; for static boards that is exactly the JD.
@@ -786,6 +786,9 @@ process_offer() {
     jd_prefetch_words="${jd_prefetch_words:-0}"
     if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
       : > "$jd_file"
+      echo "    ℹ️  JD prefetch: thin content (${jd_prefetch_words} words) — worker will WebFetch"
+    else
+      echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
     fi
   fi
 
