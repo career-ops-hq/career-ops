@@ -728,6 +728,26 @@ try {
     }
   }
 
+  // A single-page board must never call sleep at all — the `if (page > 0)`
+  // guard must fire correctly even for the first and only fetch.
+  {
+    const singlePageSleeps = [];
+    await workday.fetch(entry, {
+      transport: 'http',
+      fetchText: async () => { throw new Error('unexpected'); },
+      sleep: async (ms) => { singlePageSleeps.push(ms); },
+      fetchJson: async () => ({
+        total: 5,
+        jobPostings: Array.from({ length: 5 }, (_, i) => ({ title: `Solo-${i}`, externalPath: `/job/solo-${i}` })),
+      }),
+    });
+    if (singlePageSleeps.length === 0) {
+      pass('workday.fetch() calls zero inter-page sleeps for a single-page board (page 0 guard correct)');
+    } else {
+      fail(`workday single-page sleep: expected 0 sleep calls, got ${JSON.stringify(singlePageSleeps)}`);
+    }
+  }
+
 } catch (e) {
   fail(`workday provider tests crashed: ${e.message}`);
 }
