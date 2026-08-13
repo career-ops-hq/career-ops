@@ -41,6 +41,8 @@ const RETRY_POLICY = { retries: 3 };
 // WAF-level rate limiting on any tenant that paginates several pages deep
 // (large boards like rollsroyce, sec, roche). Only tenants that loop past
 // page 1 pay this; no-date-skip and early-stopped tenants never do.
+// 150 ms was verified to cause WAF bans on comparable providers (Getro: 3
+// boards at 403 + ~2.5 h ban); 250 ms is the cross-provider safe floor (#2706).
 const INTER_PAGE_DELAY_MS = 250;
 
 // Workday returns postings newest-first, so pagination can stop once a
