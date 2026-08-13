@@ -25,7 +25,9 @@
 **ルール：proof point のメトリクスを絶対にハードコードしない。** 評価時に `cv.md` と `article-digest.md` から読み取ること。
 **ルール：記事・プロジェクトのメトリクスは、`article-digest.md` が `cv.md` より優先される。**
 **ルール：このファイルの後に `_profile.md` を読む。`_profile.md` のユーザーカスタマイズはここのデフォルト値を上書きする。**
+<!-- guardrail:authorship -->
 **ルール：`cv.md` または `article-digest.md` で明示されていない限り、ユーザーが project、repo、library、tool、framework、open-source artifact を authored したと主張してはならない。** 「使ったツール」を「作ったもの」と混同するのが最も多い捏造パターンであり、禁止。
+<!-- guardrail:no-fabrication -->
 **ルール：Keywords get reformulated, never fabricated.** 並べ替える、言い換える、強調するのはよい。ただし発明しない。根拠が in-scope file にない claim はユーザーに確認する。答えがない場合は省く。沈黙は捏造よりよい。
 
 ---

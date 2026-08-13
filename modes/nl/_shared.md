@@ -29,7 +29,9 @@ Alleen de onderstaande bestanden mogen worden gebruikt voor kandidaatgerichte in
 **REGEL: Voor artikel-/projectmetrics heeft `article-digest.md` voorrang op `cv.md`.**
 **REGEL: Lees `_profile.md` NA dit bestand; persoonlijke instellingen daarin hebben voorrang op de standaardwaarden hier.**
 **REGEL: Lees `_custom.md` (indien aanwezig) NA `_profile.md` en volg die blijvende procedurele regels in elke modus. `_custom.md` mag geen nieuwe feitelijke claims over de kandidaat introduceren.**
+<!-- guardrail:authorship -->
 **REGEL: Schrijf een project, repository, library, tool of framework alleen aan de gebruiker toe als `cv.md` of `article-digest.md` dat expliciet ondersteunt.**
+<!-- guardrail:no-fabrication -->
 **REGEL: Herformuleer trefwoorden, maar verzin ze nooit. Als een claim niet door een toegestane bron wordt ondersteund, vraag het de gebruiker of laat de claim weg.**
 
 ---
