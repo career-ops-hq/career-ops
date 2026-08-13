@@ -83,3 +83,41 @@ test('--company with no operand is rejected', () => {
   assert.match(r.all, /--company requires a value/);
   assert.notEqual(r.status, 0);
 });
+
+// ── #2270: --help / -h and unknown-flag rejection ─────────────────────────
+
+test('--help exits 0 and prints usage without running a scan (#2270)', () => {
+  const r = runScan('--help');
+  assert.equal(r.status, 0, '--help must exit 0');
+  assert.match(r.stdout, /Usage: node scan\.mjs/, '--help must print usage');
+  // Proof it never reached the scan: no portals-missing error, no scan output.
+  assert.doesNotMatch(r.all, /portals\.yml not found|Scanning/i);
+});
+
+test('-h exits 0 and prints usage without running a scan (#2270)', () => {
+  const r = runScan('-h');
+  assert.equal(r.status, 0, '-h must exit 0');
+  assert.match(r.stdout, /Usage: node scan\.mjs/, '-h must print usage');
+  assert.doesNotMatch(r.all, /portals\.yml not found|Scanning/i);
+});
+
+test('unknown --flag exits 1 with an error, not a silent scan (#2270)', () => {
+  const r = runScan('--dryrun');
+  assert.notEqual(r.status, 0, '--dryrun must be rejected, not silently ignored');
+  assert.match(r.stderr, /unknown option.*--dryrun/, 'error must name the bad flag');
+  assert.match(r.stderr, /--help/, 'error must hint at --help');
+});
+
+test('unknown flag spelled with underscore is rejected (#2270)', () => {
+  const r = runScan('--dry_run');
+  assert.notEqual(r.status, 0, '--dry_run is not a known flag and must be rejected');
+  assert.match(r.stderr, /unknown option.*--dry_run/);
+});
+
+test('multiple unknown flags are all listed in the error (#2270)', () => {
+  const r = runScan('--verbose', '--output=json');
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /unknown option/);
+  assert.match(r.stderr, /--verbose/);
+  assert.match(r.stderr, /--output/);
+});
