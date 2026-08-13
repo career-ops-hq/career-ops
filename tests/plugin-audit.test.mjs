@@ -48,3 +48,18 @@ test('valid directory runs the audit', () => {
   // apify will probably exit 1 due to global fetch usage, but it shouldn't be a flag error.
   assert.match(r.all, /direct global fetch/i);
 });
+
+test('help exits before checking a missing directory', () => {
+  for (const flag of ['--help', '-h']) {
+    const r = runAudit(flag, join(ROOT, '__missing_plugin_audit_fixture__'));
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /Usage:/);
+    assert.equal(r.stderr, '');
+  }
+});
+
+test('--bogus --help is rejected as unknown flag before checking help', () => {
+  const r = runAudit('--bogus', '--help');
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /Error: unrecognized flag\(s\): --bogus/);
+});

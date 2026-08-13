@@ -45,16 +45,16 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
   const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
   if (unknownFlags.length) {
     console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}`);
     console.error(USAGE);
     process.exit(1);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
   }
 
   return {
