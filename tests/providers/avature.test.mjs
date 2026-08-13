@@ -210,7 +210,28 @@ try {
       fail(`avature.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
     }
     if (pageNum >= 2 && pacingDelays.length === pageNum - 1) {
-      pass('avature.fetch() does not sleep before the first page (page 0 has zero added latency)');
+      pass(`avature.fetch() does not sleep before page 0 — ${pageNum} fetches, ${pacingDelays.length} sleep(s) (one per non-first page)`);
+    } else {
+      fail(`avature sleep count: expected ${pageNum - 1} (one per non-first page), got ${pacingDelays.length}`);
+    }
+  }
+
+  // A single-page board (first page is partial: < PAGE_SIZE=6 results) must
+  // never call sleep — the `if (page > 0)` guard must work for page 0.
+  {
+    const singlePageSleeps = [];
+    let spFetches = 0;
+    const mkSingle = (ids) => ids.map((id) =>
+      `<article class="article article--result"><h3 class="title"><a class="link" href="https://acme.avature.net/careers/JobDetail/Solo-${id}/${id}">Solo ${id}</a></h3></article>`).join('');
+    const spCtx = {
+      sleep: async (ms) => { singlePageSleeps.push(ms); },
+      fetchText: async () => { spFetches++; return mkSingle([1, 2, 3]); }, // 3 < PAGE_SIZE → stop after page 0
+    };
+    const spJobs = await avature.fetch({ name: 'SinglePage', api: 'https://acme.avature.net/careers/SearchJobs' }, spCtx);
+    if (singlePageSleeps.length === 0 && spFetches === 1 && spJobs.length === 3) {
+      pass('avature.fetch() calls zero inter-page sleeps for a single-page board (page-0 guard correct)');
+    } else {
+      fail(`avature single-page sleep: expected 0 sleeps/1 fetch/3 jobs, got sleeps=${JSON.stringify(singlePageSleeps)} fetches=${spFetches} jobs=${spJobs.length}`);
     }
   }
 
