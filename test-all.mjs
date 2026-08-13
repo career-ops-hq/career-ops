@@ -13482,9 +13482,8 @@ try {
     { file: 'web/src/app/actions/registry.ts', re: /TAB_VALUES\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
     { file: 'web/src/components/pipeline-view.tsx', re: /TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
     { file: 'web/src/app/analytics/page.tsx', re: /STAGES[^=]*=\s*\[([\s\S]*?)\];/, upper: true, exclude: ['SKIP'] },
-    // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's find, #2282):
-    // it promises to mirror states.yml and drifted to 8 states while the live path had 9.
-    { file: 'web/src/lib/core/states.ts', re: /const FALLBACK[^=]*=\s*\[([\s\S]*?)\n\];/, upper: false, exclude: [] },
+    // The states ACL used to be checked here too. It moved to its own block
+    // below, because it now has TWO valid shapes and this table only knows one.
   ];
   if (stateLabels.length > 0) {
     const drift = [];
@@ -13501,6 +13500,48 @@ try {
       pass('every web status list covers all canonical states from states.yml (#2249)');
     } else {
       fail(`web status list(s) missing canonical state(s) — dashboard can't set/count them (#2249): ${drift.join(' | ')}`);
+    }
+
+    // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's
+    // find, #2282). It promised to mirror states.yml, drifted to 8 states
+    // while the live path had 9, and later to 31 missing aliases (#2705).
+    //
+    // TWO shapes are correct and this asserts both, because the earlier
+    // version asserted only the first and therefore turned a genuine
+    // improvement into a red build: either (a) the literal table is present
+    // and complete, or (b) there is NO table because the fallback derives
+    // from CANONICAL_STATES, which the check above already freezes against
+    // states.yml. Deriving from something already frozen beats guarding a
+    // copy — the copy you delete cannot drift.
+    //
+    // The shape that must never pass is a literal table that is INCOMPLETE.
+    // That is the only one that fails silently: a state missing from the
+    // fallback reads exactly like a state the product does not have.
+    const aclPath = join(ROOT, 'web', 'src', 'lib', 'core', 'states.ts');
+    if (existsSync(aclPath)) {
+      const aclSrc = readFileSync(aclPath, 'utf-8');
+      const literal = aclSrc.match(/const FALLBACK[^=]*=\s*\[([\s\S]*?)\n\];/)?.[1];
+      if (literal !== undefined) {
+        const present = new Set([...literal.matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1]));
+        const missing = stateLabels.filter((l) => !present.has(l));
+        if (missing.length) {
+          fail(`states ACL FALLBACK is missing canonical state(s) it claims to mirror (#2282): ${missing.join(', ')}`);
+        } else {
+          pass('states ACL FALLBACK carries every canonical state (#2282)');
+        }
+        // Assert the ASSIGNMENT, not the appearance of the name. `/CANONICAL_STATES/`
+        // over the whole file was satisfied by the header COMMENT, i.e. by prose,
+        // and worse: the literal regex above is a brittle syntactic match (that
+        // exact name, that exact shape), so routing its miss here flipped its
+        // failure direction from red to green. A reformat or a rename would have
+        // passed silently with seven states unaccounted for. A future legitimate
+        // form (`= buildFrom(CANONICAL_STATES)`) fails this on purpose: widening
+        // the guard should be a decision, not a silence. (career-ops-ui's find.)
+      } else if (/const FALLBACK[^=]*=\s*CANONICAL_STATES\b/.test(aclSrc)) {
+        pass('states ACL fallback derives from the frozen CANONICAL_STATES instead of copying states.yml (#2282)');
+      } else {
+        fail('states ACL has neither a complete FALLBACK table nor a derivation from CANONICAL_STATES — the degraded path can now drift unwatched (#2282)');
+      }
     }
 
     // The assistant preamble also enumerates the states in PROSE (the setStatus
