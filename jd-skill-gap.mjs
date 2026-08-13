@@ -433,6 +433,24 @@ Python, Docker, Zookeeper
     true
   );
 
+  // The cv.md side of the six-level widening: SKILLS_HEADING_RE and
+  // ANY_HEADING_RE also stopped at four. An h5 "Skills" heading meant no
+  // named section was found at all (everything downgraded to
+  // supportedByResume), and once it IS found, the h6 heading after it must
+  // still close the section - otherwise Experience prose leaks into the
+  // named skills and upgrades to existing. One assert per regex: reverting
+  // SKILLS_HEADING_RE to #{1,4} turns the first red, reverting
+  // ANY_HEADING_RE alone turns the second red.
+  const deepHeadingCv = [
+    '# Resume', '',
+    '##### Skills', 'Python, Docker, PostgreSQL', '',
+    '###### Experience', 'Deployed Kubernetes clusters for internal tools.',
+  ].join('\n');
+  const deepCvResult = classifySkillGaps(['Python', 'Docker', 'PostgreSQL', 'Kubernetes'], deepHeadingCv);
+  eq('an h5 Skills heading is recognized as the named section', deepCvResult.existing.includes('Python'), true);
+  eq('the named section stops at the h6 heading (Kubernetes stays prose)', deepCvResult.existing.includes('Kubernetes'), false);
+  eq('prose under the h6 still classifies as supportedByResume', deepCvResult.supportedByResume.includes('Kubernetes'), true);
+
   // Regression: requirement headings that are full sentences or bare
   // uppercase rather than the noun forms ("Requirements", "Qualifications").
   // Each of these silently yielded ZERO skills, which is indistinguishable
