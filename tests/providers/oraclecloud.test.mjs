@@ -423,6 +423,35 @@ try {
     fail(`retry: attempts=${attempts}, slept=${slept}, jobs=${JSON.stringify(retried)}`);
   }
 
+  // Inter-page sleep must be >= 250 ms — 150 ms caused WAF bans on comparable
+  // providers (Getro: 3 boards at 403 + ~2.5 h ban); this pins the safe floor (#2706).
+  {
+    const pacingDelays = [];
+    let pageCount = 0;
+    const PAGE_SIZE_OC = 200;
+    const pacingJobs = await oc.fetch(
+      { name: 'PacingTest', careers_url: careers },
+      {
+        transport: 'http',
+        fetchText: async () => {},
+        sleep: async (ms) => { pacingDelays.push(ms); },
+        fetchJson: async (url) => {
+          const page = pageCount++;
+          const len = page === 0 ? PAGE_SIZE_OC : 5;
+          return { items: [{ TotalJobsCount: PAGE_SIZE_OC + 5, requisitionList: Array.from({ length: len }, (_, i) => ({ Id: `P${page}-${i}`, Title: `R${i}` })) }], hasMore: page === 0 };
+        },
+      },
+    );
+    if (pacingDelays.length >= 1 && pacingDelays.every((ms) => ms >= 250)) {
+      pass(`oraclecloud.fetch() sleeps >= 250 ms between pages (got ${pacingDelays[0]} ms) — WAF-safe pacing (#2706)`);
+    } else {
+      fail(`oraclecloud.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
+    }
+    if (pageCount >= 2 && pacingDelays.length === pageCount - 1) {
+      pass('oraclecloud.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    }
+  }
+
 } catch (e) {
   fail(`oraclecloud provider tests crashed: ${e.message}`);
 }
