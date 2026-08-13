@@ -418,7 +418,7 @@ risk_summary:
   const baseFixture = [];
   for (let i = 0; i < 20; i++) {
     baseFixture.push({
-      outcome: 'self_filtered',
+      outcome: i === 19 ? 'negative' : 'self_filtered',
       notes: i < 3 ? `SKIP: geo-block${i === 0 ? '; SKIP: geo-block' : ''}` : '',
       report: { gaps: [] },
     });
@@ -477,7 +477,8 @@ risk_summary:
   // Empty populations must expose zero bases and no NaN-bearing stats.
   const emptySignals = buildPatternSignals([]);
   if (emptySignals.discardReasonBase !== 0 || emptySignals.blockerBase !== 0
-      || emptySignals.discardReasonStats.length !== 0 || emptySignals.blockerAnalysis.length !== 0) {
+      || emptySignals.discardReasonStats.length !== 0 || emptySignals.blockerAnalysis.length !== 0
+      || emptySignals.discardReasonRecommendation) {
     failures.push(`empty pattern signals were not empty: ${JSON.stringify(emptySignals)}`);
   }
 
@@ -1157,8 +1158,8 @@ function analyze() {
   const geoBlocker = blockerAnalysis.find(b => b.blocker === 'geo-restriction');
   if (geoBlocker && geoBlocker.percentage >= 20) {
     recommendations.push({
-      action: `Tighten location filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
-      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are location-restricted (US/Canada-only). These are wasted evaluation effort.`,
+      action: `Review location and work-authorization filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
+      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are affected by a location or work-authorization restriction. These are wasted evaluation effort.`,
       impact: 'high',
     });
   }
