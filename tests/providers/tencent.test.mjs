@@ -157,10 +157,10 @@ try {
     fail(`tencent.fetch() pagination: ${pagedJobs.length} jobs, ${paged.calls.length} requests`);
   }
 
-  if (paged.sleeps.length === 1 && paged.sleeps[0] > 0) {
-    pass('tencent.fetch() paces follow-up pages via ctx.sleep (no delay before the first request)');
+  if (paged.sleeps.length === 1 && paged.sleeps[0] >= 250) {
+    pass(`tencent.fetch() paces follow-up pages >= 250 ms via ctx.sleep (got ${paged.sleeps[0]} ms) — WAF-safe pacing (#2706)`);
   } else {
-    fail(`tencent.fetch() ctx.sleep calls: ${JSON.stringify(paged.sleeps)}`);
+    fail(`tencent.fetch() ctx.sleep calls: expected 1 call >= 250 ms, got ${JSON.stringify(paged.sleeps)}`);
   }
 
   const overlap = mkCtx(() => ({
@@ -174,10 +174,10 @@ try {
     fail(`tencent.fetch() cross-keyword dedup: ${overlapJobs.length} jobs, ${overlap.calls.length} requests`);
   }
 
-  if (overlap.sleeps.length === 1) {
-    pass('tencent.fetch() also paces keyword switches (page 1 of keyword 2 pays the delay)');
+  if (overlap.sleeps.length === 1 && overlap.sleeps[0] >= 250) {
+    pass(`tencent.fetch() also paces keyword switches >= 250 ms (got ${overlap.sleeps[0]} ms) — WAF-safe pacing (#2706)`);
   } else {
-    fail(`tencent.fetch() keyword-switch pacing: ${JSON.stringify(overlap.sleeps)}`);
+    fail(`tencent.fetch() keyword-switch pacing: expected 1 call >= 250 ms, got ${JSON.stringify(overlap.sleeps)}`);
   }
 
   const capped = mkCtx(() => ({
