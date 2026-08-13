@@ -153,10 +153,10 @@ try {
     fail(`alibaba.fetch() pagination: ${pagedJobs.length} jobs, ${paged.calls.length} requests`);
   }
 
-  if (paged.sleeps.length === 1 && paged.sleeps[0] > 0) {
-    pass('alibaba.fetch() paces follow-up requests via ctx.sleep (no delay before the first request)');
+  if (paged.sleeps.length === 1 && paged.sleeps[0] >= 250) {
+    pass(`alibaba.fetch() paces follow-up requests >= 250 ms via ctx.sleep (got ${paged.sleeps[0]} ms) — WAF-safe pacing (#2706)`);
   } else {
-    fail(`alibaba.fetch() ctx.sleep calls: ${JSON.stringify(paged.sleeps)}`);
+    fail(`alibaba.fetch() ctx.sleep calls: expected 1 call >= 250 ms, got ${JSON.stringify(paged.sleeps)}`);
   }
 
   const h = paged.calls[0].headers || {};
