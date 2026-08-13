@@ -2130,8 +2130,56 @@ function guardStatusFor(code) {
   return 'skipped_invalid_url';
 }
 
+const SCAN_HELP = `\
+Usage: node scan.mjs [options]
+
+Options:
+  --dry-run               Preview scan output without writing files
+  --company <name>        Scan only one company (case-insensitive substring match)
+  --verify                Playwright-check each new URL; drop expired postings
+  --headed-fallback       Retry anti-bot-blocked URLs in a headed browser (needs display)
+  --throttle[=<ms>]       Jittered gap between --verify checks (default 5000 ms)
+  --rediscover-404        On 404/410, search for the moved role before marking expired
+  --include-blacklisted   Let blacklisted companies through (annotated with reason)
+  --posted-after <date>   Absolute lower bound on posting date (YYYY-MM-DD)
+  --posted-before <date>  Absolute upper bound on posting date (YYYY-MM-DD)
+  --since <days>          Relative lower bound on posting date (e.g. --since 7)
+  --quiet                 Suppress manifesto prompt after a successful scan
+  -h, --help              Show this help and exit
+
+Writes to: data/pipeline.md, data/scan-history.tsv
+`.trimEnd();
+
+// Flags that consume the NEXT token as their operand (besides the --flag=value form).
+const SCAN_FLAGS_WITH_VALUE = new Set(['--company', '--posted-after', '--posted-before', '--since']);
+
+// All recognized flag tokens (including both forms of value-taking flags).
+const SCAN_KNOWN_FLAGS = new Set([
+  '--dry-run', '--verify', '--headed-fallback', '--throttle',
+  '--rediscover-404', '--include-blacklisted', '--quiet',
+  '--company', '--posted-after', '--posted-before', '--since',
+  '--help', '-h',
+]);
+
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(SCAN_HELP);
+    process.exit(0);
+  }
+
+  // Reject unrecognized flags early so a typo (e.g. --dryrun, --dry_run) does
+  // not silently run a full scan and write to user-layer data files (#2270).
+  const unknownFlags = args.filter(
+    (a) => a.startsWith('-') && !SCAN_KNOWN_FLAGS.has(a.split('=')[0]),
+  );
+  if (unknownFlags.length > 0) {
+    console.error(`Error: unknown option(s): ${unknownFlags.join(', ')}`);
+    console.error('Run: node scan.mjs --help');
+    process.exit(1);
+  }
+
   const dryRun = args.includes('--dry-run');
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
