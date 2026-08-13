@@ -68,6 +68,11 @@ const SYSTEM_PATHS = [
   // on an existing install, silently (once text=auto is live, git status stays
   // clean and only a second update would repair it).
   '.gitattributes',
+  // .gitignore must be kept in sync with upstream so that new ignore rules
+  // (e.g. new output or temp directories) actually take effect on existing
+  // installs — without this entry every rule added after clone is silently
+  // absent from those installs (#2756).
+  '.gitignore',
   'modes/README.md',
   'modes/_shared.md',
   'modes/_writing.md',
