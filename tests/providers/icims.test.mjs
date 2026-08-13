@@ -169,6 +169,25 @@ const mkCtx = (pages) => ({
   }
 }
 
+// An empty board (page 0 returns no jobs) must never call sleep at all:
+// the provider breaks immediately and never increments pageNum past 0.
+{
+  const emptySleeps = [];
+  let emptyFetches = 0;
+  const emptyCtx = {
+    transport: 'http',
+    sleep: async (ms) => { emptySleeps.push(ms); },
+    fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+    fetchText: async () => { emptyFetches++; return page(); }, // always empty
+  };
+  const emptyJobs = await icims.fetch({ name: 'emptyboard', careers_url: `${ORIGIN}/jobs/search?ss=1` }, emptyCtx);
+  if (emptySleeps.length === 0 && emptyFetches === 1 && emptyJobs.length === 0) {
+    pass('icims.fetch() calls zero inter-page sleeps for an empty board (page-0 guard correct, board marked complete)');
+  } else {
+    fail(`icims empty board: expected 0 sleeps/1 fetch/0 jobs, got sleeps=${JSON.stringify(emptySleeps)} fetches=${emptyFetches} jobs=${emptyJobs.length}`);
+  }
+}
+
 // ── enrichDate(): detail-page JSON-LD ───────────────────────────────
 {
   const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
