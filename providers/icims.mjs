@@ -19,7 +19,9 @@ import { decodeEntities } from './_html-entities.mjs';
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
 const ICIMS_MAX_PAGES = 30;
 // Same per-tenant courtesy delay as workday.mjs — only multi-page tenants pay it.
-const INTER_PAGE_DELAY_MS = 150;
+// 150 ms was verified to cause WAF bans on comparable providers (Getro: 3
+// boards at 403 + ~2.5 h ban); 250 ms is the cross-provider safe floor (#2706).
+const INTER_PAGE_DELAY_MS = 250;
 
 // iCIMS serves 200 directly to a browser-like UA (verified live); the default
 // career-ops UA risks WAF interstitials, same as workday/glints.
