@@ -751,6 +751,12 @@ process_offer() {
   # sufficiency check below detects — the file is then truncated to 0 bytes so
   # the worker's Step-1 WebFetch fallback fires exactly as designed.
   # If curl is absent or fails, $jd_file stays empty and WebFetch fires too.
+  # Minimum visible word count to treat a fetched page as a real JD rather than
+  # a JS shell. A JS app shell (Workday, Phenom, iCIMS) has near-zero visible
+  # words after HTML stripping; a real JD has hundreds. 80 is a conservative
+  # lower bound — any genuine posting has at least a title, summary, and a few
+  # requirements, which together exceed 80 stripped words.
+  local prefetch_min_words=80
   local jd_prefetch_words=0
   if command -v curl >/dev/null 2>&1; then
     curl --silent --location --max-time 20 --fail --max-redirs 10 \
@@ -758,18 +764,25 @@ process_offer() {
       --output "$jd_file" \
       -- "$url" 2>/dev/null || true
     # Strip HTML tags and count visible words to distinguish a real JD (hundreds
-    # of words) from a JS shell (near zero visible text). Threshold: 80 words.
+    # of words) from a JS shell (near zero visible text).
     jd_prefetch_words=$(node -e "
       const fs = require('fs');
       try {
         const text = fs.readFileSync(process.argv[1], 'utf-8')
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
         console.log(text.split(' ').filter(Boolean).length);
       } catch (e) { console.log(0); }
     " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
-    if [[ "${jd_prefetch_words:-0}" -lt 80 ]]; then
+    # Ensure jd_prefetch_words is always a non-negative integer. A non-integer
+    # (e.g. empty string, "NaN") would cause bash arithmetic to fail or
+    # miscompare. Strip everything that is not a digit and default to 0.
+    jd_prefetch_words="${jd_prefetch_words//[^0-9]/}"
+    jd_prefetch_words="${jd_prefetch_words:-0}"
+    if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
       : > "$jd_file"
     fi
   fi
