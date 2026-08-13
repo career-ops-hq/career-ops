@@ -243,6 +243,23 @@ try {
   } else {
     fail('alibaba.fetch() swallowed a first-request failure');
   }
+
+  // A single-page board (totalCount <= PAGE_SIZE) must never call sleep at all.
+  {
+    const singlePageSleeps = [];
+    const singleCtx = mkCtx(({ pageIndex }) => ({
+      success: true,
+      content: { totalCount: 5, datas: Array.from({ length: 5 }, (_, i) => mkJob(8000 + i, `Solo ${i}`)) },
+    }));
+    singleCtx.ctx.sleep = async (ms) => { singlePageSleeps.push(ms); };
+    const soloJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'] }, singleCtx.ctx);
+    if (singlePageSleeps.length === 0 && soloJobs.length === 5) {
+      pass('alibaba.fetch() calls zero inter-page sleeps for a single-page board (page-0 guard correct)');
+    } else {
+      fail(`alibaba single-page sleep: expected 0 sleeps/5 jobs, got sleeps=${JSON.stringify(singlePageSleeps)} jobs=${soloJobs.length}`);
+    }
+  }
+
 } catch (e) {
   fail(`alibaba provider tests crashed: ${e.message}`);
 }
