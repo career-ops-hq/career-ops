@@ -916,10 +916,24 @@ if (isMain) {
           targetText = compactText(targetText);
         } catch (e) {}
       } else {
-        if (existsSync(inputSource)) {
-          targetText = readFileSync(inputSource, 'utf-8');
-        } else {
-          console.error(`Fatal: Target file not found at path: ${inputSource}`);
+        // Same failure class readOptionalText was introduced for, one branch
+        // over. `existsSync(p)` is TRUE for a DIRECTORY, so the readFileSync
+        // that followed threw EISDIR — and it threw inside this async IIFE,
+        // which has no catch and no .catch(), so the process died on an
+        // unhandled rejection printing a raw stack trace instead of the message
+        // below. An unreadable file (EACCES) failed identically.
+        //
+        // Reuse the one reader rather than adding a second guarded read: it
+        // already collapses missing / not-a-file / unreadable to ''. The
+        // difference here is that this input is REQUIRED, so '' is fatal
+        // instead of "optional file absent".
+        //
+        // An empty-but-readable file lands in the same branch deliberately.
+        // It used to compute a gap map from an empty JD and exit 0, which
+        // reads as "no gaps found" when it means "no input was read".
+        targetText = readOptionalText(inputSource);
+        if (!targetText.trim()) {
+          console.error(`Fatal: Target file is missing, unreadable, or empty: ${inputSource}`);
           process.exit(1);
         }
       }
