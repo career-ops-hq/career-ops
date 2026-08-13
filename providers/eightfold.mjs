@@ -51,7 +51,9 @@ const DEFAULT_MAX_PAGES = 200;
 const MAX_PAGES_CAP = 1000;
 // Same-host pacing between pages inside one tenant's own pagination loop.
 // Eightfold's edge rate-limits bursts, and a 616-job board is 62 requests.
-const INTER_PAGE_DELAY_MS = 150;
+// 150 ms was verified to cause WAF bans on comparable providers (Getro: 3
+// boards at 403 + ~2.5 h ban); 250 ms is the cross-provider safe floor (#2706).
+const INTER_PAGE_DELAY_MS = 250;
 
 const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
 
