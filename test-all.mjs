@@ -150,7 +150,26 @@ async function runDiscovered(filter = null) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
-    await import(pathToFileURL(f).href);
+    // Neither guard above survives contact with an uncaught THROW, which ends
+    // the run just as completely and rather more quietly: node unwinds straight
+    // out of test-all, finish() never prints its summary, and every suite
+    // sorting after this one silently never runs. That does not read as a
+    // broken suite — it reads as a finished one, so the screen of green above
+    // the cut looks like a pass. (Measured on a Windows box with no symlink
+    // privilege: tests/intake.test.mjs threw at import and took 2067 of 3693
+    // checks with it, with no verdict line at all — #2828.) A discovered suite
+    // is a guest, not a co-host: its crash is one failure, not the end of the
+    // run.
+    try {
+      await import(pathToFileURL(f).href);
+    } catch (err) {
+      fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+      // The throw site, not just the message: a suite that dies mid-import
+      // leaves no other clue how far it got.
+      for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+        if (line.trim()) console.log(`      ${line.trim()}`);
+      }
+    }
   }
 }
 
