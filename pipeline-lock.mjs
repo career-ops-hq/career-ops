@@ -162,7 +162,31 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         }
       }
 
-      if (Date.now() > deadline) throw new LockTimeoutError(lockDir, timeoutMs);
+      if (Date.now() > deadline) {
+        // Attach who was holding it. A timeout on a critical section that is a
+        // single sub-millisecond append has two very different explanations,
+        // and the owner record separates them in one line:
+        //   - no owner, or an owner whose PID is dead: contention, the queue
+        //     really is that crowded and a fair queue is the answer.
+        //   - an owner whose PID is ALIVE and is not plausibly still inside a
+        //     sub-millisecond append: the directory outlived its holder. On
+        //     Windows `rmSync` of the lock can fail with EPERM/EBUSY while a
+        //     handle is open and release() swallows it by design, and Windows
+        //     recycles PIDs aggressively, so a burst of 30 short-lived
+        //     processes can hand a dead owner's PID to a live sibling. Then
+        //     lockCanRecover() reads "still running", judges the lock fresh
+        //     forever, and no budget is large enough.
+        // Diagnostic only: it never changes whether the error is thrown.
+        const err = new LockTimeoutError(lockDir, timeoutMs);
+        try {
+          const owner = readLockOwner(lockDir);
+          err.owner = owner
+            ? { pid: owner.pid, alive: processIsAlive(owner.pid), started_at: owner.started_at, heldMs: Date.parse(owner.started_at) ? Date.now() - Date.parse(owner.started_at) : null }
+            : { pid: null, alive: null, note: existsSync(lockDir) ? 'lock exists with no readable owner.json' : 'lock vanished before it could be read' };
+          err.message += ` — owner=${JSON.stringify(err.owner)}`;
+        } catch { /* diagnosis must never mask the timeout it describes */ }
+        throw err;
+      }
       // Jitter, because a FIXED retry makes every waiter wake at the same
       // instant and re-race, and whoever loses is picked at random rather than
       // queued. With N waiters that is the coupon-collector problem: serving

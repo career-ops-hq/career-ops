@@ -172,7 +172,11 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
       || lines.find((s) => /\b(EPERM|EBUSY|EACCES|ENOENT|EEXIST)\b/.test(s))
       || lines.slice(-1)[0]
       || '(no stderr)';
-    console.log(`      ↳ ${l.item} exited ${l.code}: ${cause.slice(0, 200)}`);
+    // Generous, because the owner record pipeline-lock.mjs appends to a
+    // LockTimeoutError is the diagnostic payload; truncating it away would
+    // leave the same symptom-without-mechanism this instrumentation exists
+    // to end.
+    console.log(`      ↳ ${l.item} exited ${l.code}: ${cause.slice(0, 500)}`);
   }
   const body = readFileSync(inbox, 'utf8');
   const pending = body.split('\n').filter((l) => l.startsWith('- [ ]'));
