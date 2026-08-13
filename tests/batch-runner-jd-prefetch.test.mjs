@@ -27,6 +27,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
 
+// Extract the curl prefetch block once so flag assertions target only that region,
+// not unrelated SRC matches that happen to share flag names.
+const curlPrefetchBlock = (() => {
+  const m = SRC.match(/if command -v curl >\/dev\/null 2>&1; then[\s\S]*?\n  fi\n/);
+  return m ? m[0] : '';
+})();
+
 console.log('\nbatch-runner.sh — JD pre-fetch (issue #2492)');
 
 // ── presence checks ─────────────────────────────────────────────────────────
@@ -92,28 +99,28 @@ if (/-lt "\$prefetch_min_words"/.test(SRC)) {
 }
 
 // curl must use --fail so HTTP error pages do not reach the worker.
-if (/--fail\b/.test(SRC)) {
+if (/--fail\b/.test(curlPrefetchBlock)) {
   pass('curl uses --fail (HTTP error responses discard body, not passed to worker)');
 } else {
   fail('curl is missing --fail — HTTP error pages could pass the word-count check');
 }
 
 // curl must cap redirect hops.
-if (/--max-redirs\s+\d+/.test(SRC)) {
+if (/--max-redirs\s+\d+/.test(curlPrefetchBlock)) {
   pass('curl uses --max-redirs to cap redirect chains');
 } else {
   fail('curl is missing --max-redirs — unbounded redirect loops possible');
 }
 
 // curl must request compressed (gzip/deflate) responses.
-if (/--compressed\b/.test(SRC)) {
+if (/--compressed\b/.test(curlPrefetchBlock)) {
   pass('curl uses --compressed (accepts gzip/deflate encoded boards)');
 } else {
   fail('curl is missing --compressed — gzip responses write binary garbage to $jd_file');
 }
 
 // curl must send an Accept header so boards serve HTML rather than JSON.
-if (/--header.*Accept.*text\/html/.test(SRC) || /--header.*text\/html/.test(SRC)) {
+if (/--header.*Accept.*text\/html/.test(curlPrefetchBlock) || /--header.*text\/html/.test(curlPrefetchBlock)) {
   pass('curl sends Accept: text/html header (boards serve HTML, not JSON or mobile variant)');
 } else {
   fail('curl is missing Accept header — some boards may serve JSON or redirect to a mobile view');
@@ -121,7 +128,7 @@ if (/--header.*Accept.*text\/html/.test(SRC) || /--header.*text\/html/.test(SRC)
 
 // max-time must be in a sensible range (5–120 seconds). Extract early so it
 // can be referenced by the connect-timeout ordering check below.
-const maxTimeMatch = SRC.match(/--max-time\s+(\d+)/);
+const maxTimeMatch = curlPrefetchBlock.match(/--max-time\s+(\d+)/);
 if (maxTimeMatch) {
   const maxTime = Number(maxTimeMatch[1]);
   if (maxTime >= 5 && maxTime <= 120) {
@@ -134,14 +141,14 @@ if (maxTimeMatch) {
 }
 
 // curl must use a browser-like user-agent so job boards don't block the prefetch.
-if (/--user-agent\s+"Mozilla/.test(SRC)) {
+if (/--user-agent\s+"Mozilla/.test(curlPrefetchBlock)) {
   pass('curl uses a Mozilla/... user-agent (bot-blockers and rate-limiters are less likely to block)');
 } else {
   fail('curl user-agent is missing or does not start with Mozilla — some boards block non-browser UAs');
 }
 
 // curl must have a separate connect timeout (TCP stall should not eat the full budget).
-const connectTimeoutMatch = SRC.match(/--connect-timeout\s+(\d+)/);
+const connectTimeoutMatch = curlPrefetchBlock.match(/--connect-timeout\s+(\d+)/);
 if (connectTimeoutMatch) {
   pass('curl uses --connect-timeout (TCP stalls fail fast, not consuming the full max-time)');
   // connect-timeout must be strictly less than max-time; otherwise it is redundant.
@@ -154,6 +161,20 @@ if (connectTimeoutMatch) {
   }
 } else {
   fail('curl is missing --connect-timeout — unreachable servers stall for the full max-time');
+}
+
+// curl must restrict redirects to http/https (prevents protocol-smuggling redirects to internal targets).
+if (/--proto-redir\s+'https,http'/.test(curlPrefetchBlock) || /--proto-redir\s+https,http/.test(curlPrefetchBlock)) {
+  pass('curl uses --proto-redir https,http (redirects limited to http/https — no protocol smuggling)');
+} else {
+  fail('curl is missing --proto-redir — a redirect could follow a non-http protocol to an internal target');
+}
+
+// curl must cap response size so a huge payload cannot fill disk or stall a batch worker.
+if (/--max-filesize\s+\d+/.test(curlPrefetchBlock)) {
+  pass('curl uses --max-filesize (oversized responses are aborted, not buffered to disk)');
+} else {
+  fail('curl is missing --max-filesize — a multi-GB response could stall or crash a batch worker');
 }
 
 // The integer sanitization guard must be present — strips non-digit chars, defaults to 0.
