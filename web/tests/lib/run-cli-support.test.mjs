@@ -309,11 +309,17 @@ test("a terminal Claude result surfaces its diagnostic instead of a silent succe
     result: "",
     error: "tool execution failed: permission denied",
     usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5 },
+    total_cost_usd: 0.012,
   }));
 
-  // Then: the diagnostic reaches the run log, AND the tokens it burned are
-  // still counted — a failed run costs real money.
-  assert.deepEqual(event, { tokens: 125, error: "tool execution failed: permission denied" });
+  // Then: the diagnostic reaches the run log, AND the tokens and cost it burned
+  // are still reported — a failed run costs real money. Asserting the cost here
+  // pins it against a refactor that early-returns on the error and drops usage.
+  assert.deepEqual(event, {
+    tokens: 125,
+    costUsd: 0.012,
+    error: "tool execution failed: permission denied",
+  });
 });
 
 test("a failed Claude result names the failure when it carries no diagnostic", () => {
