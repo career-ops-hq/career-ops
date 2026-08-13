@@ -968,10 +968,12 @@ if (isMain) {
       // Terminal handler for the whole branch. The local-file read above is now
       // guarded, and the URL fetch has its own try/catch, but everything after
       // them — knownSkillsText, computeTargetedGaps, the JSON.stringify — runs
-      // bare. A throw there would end the process on an unhandled rejection: a
-      // raw stack trace on stderr and Node's own exit code rather than the one
-      // `Fatal:` line and exit 1 the rest of this branch promises (and that
-      // tests/upskill-targeted-input.test.mjs asserts).
+      // bare. A throw there would end the process on an unhandled rejection,
+      // dumping a raw stack trace instead of the single `Fatal:` line the rest
+      // of this branch promises (and that tests/upskill-targeted-input.test.mjs
+      // asserts). What this restores is the DIAGNOSTIC, not the status: Node
+      // already exits 1 on an unhandled rejection, so the exit code was never
+      // the part that was wrong.
       console.error(`Fatal: targeted analysis failed: ${err?.message ?? err}`);
       process.exit(1);
     });
