@@ -1,0 +1,236 @@
+// tests/application-answers.test.mjs — the section must round-trip, not just render.
+//
+// formatApplicationAnswersSection has been write-only since it shipped: nothing
+// in the tree could read a rendered section back, which is why modes/apply.md
+// recovers previous answers by grepping reports for a company name. The seams
+// that matter, and why each is pinned here:
+//
+//   - the fixed-point property. Byte-equality with the INPUT snapshot is not
+//     achievable and asserting it would be wrong: inline() collapses whitespace
+//     in labels, valueText() joins arrays with ', ', pick() discards which of
+//     the four accepted key spellings was used, and empty values render as the
+//     sentinels 'Not recorded' / '> Not recorded.'. What must hold is that one
+//     render normalizes and every render after that is stable:
+//         parse(format(x)) === parse(format(parse(format(x))))
+//     so a parsed snapshot can be handed straight back to the formatter;
+//
+//   - entry key spelling. The parser must emit the PRIMARY key the formatter
+//     picks first (question/answer, question/selection, field/path), otherwise
+//     re-rendering silently falls through to the fallback labels;
+//
+//   - the four sentinels. '- None captured.' must read back as an empty array,
+//     not as an entry titled 'None captured'; the two 'Not recorded' spellings
+//     must read back as empty, not as literal answers;
+//
+//   - section boundaries. parse must agree with upsert about where the section
+//     starts and ends, so a report with sections after Application Answers does
+//     not leak the following block into files;
+//
+//   - multi-line answers, which quoteBlock renders one '> ' per line including
+//     blank lines, and which are the only genuinely lossless payload here.
+//
+// Anti-vacuity: a round-trip suite over an empty corpus passes trivially, so the
+// corpus is asserted to actually produce entries before any equality is checked.
+
+import { pass, fail, ROOT } from './helpers.mjs';
+import { join } from 'path';
+import { pathToFileURL } from 'url';
+
+console.log('\napplication-answers.mjs — rendered sections parse back into snapshots');
+
+try {
+  const {
+    formatApplicationAnswersSection,
+    parseApplicationAnswersSection,
+    upsertApplicationAnswersSection,
+  } = await import(pathToFileURL(join(ROOT, 'application-answers.mjs')).href);
+
+  // ── 1. corpus ────────────────────────────────────────────────────────────
+  // Deliberately includes every lossy path: array selections, a missing file
+  // version, an empty answer, a multi-line answer, a label carrying a colon,
+  // and a non-primary key spelling ('field'/'value' rather than
+  // 'question'/'answer') so the normalization is actually exercised.
+  const corpus = [
+    {
+      name: 'full snapshot',
+      snapshot: {
+        date: '2026-06-30',
+        state: 'submitted',
+        freeText: [
+          { question: 'Why this role?', answer: 'I want to apply production AI agent experience here.' },
+          { question: 'Describe a failure', answer: 'Line one.\n\nLine three after a blank.' },
+          { question: 'Anything else?', answer: '' },
+        ],
+        selections: [
+          { field: 'Technical areas', selected: ['Node.js', 'Go', 'LLM evaluation'] },
+          { question: 'Notice period: current', selection: '30 days' },
+        ],
+        fieldValues: [
+          { field: 'Compensation expectation', value: '$150k base' },
+        ],
+        files: [
+          { field: 'CV', path: 'output/acme-cv.pdf', version: 'v3' },
+          { field: 'Cover letter', path: 'output/acme-cover-letter.pdf' },
+        ],
+      },
+    },
+    {
+      name: 'all groups empty',
+      snapshot: { date: '2026-01-02', state: 'filled' },
+    },
+  ];
+
+  // ── 2. fixed point after one normalization pass ──────────────────────────
+  let fixedPointFailure = null;
+  let observedEntries = 0;
+
+  for (const { name, snapshot } of corpus) {
+    const gen1 = parseApplicationAnswersSection(formatApplicationAnswersSection(snapshot));
+    const gen2 = parseApplicationAnswersSection(formatApplicationAnswersSection(gen1));
+    observedEntries +=
+      gen1.freeText.length + gen1.selections.length + gen1.fieldValues.length + gen1.files.length;
+    if (JSON.stringify(gen1) !== JSON.stringify(gen2)) {
+      fixedPointFailure = { name, gen1, gen2 };
+      break;
+    }
+  }
+
+  if (observedEntries === 0) {
+    fail('round-trip corpus produced zero entries — the equality checks below would be vacuous');
+  } else if (fixedPointFailure) {
+    fail(
+      `re-rendering a parsed snapshot is not a fixed point for "${fixedPointFailure.name}":\n` +
+      `  gen1: ${JSON.stringify(fixedPointFailure.gen1)}\n` +
+      `  gen2: ${JSON.stringify(fixedPointFailure.gen2)}`,
+    );
+  } else {
+    pass(`parse(format(x)) is a fixed point across ${observedEntries} entries in ${corpus.length} snapshots`);
+  }
+
+  // ── 3. values survive, with the primary key spelling ─────────────────────
+  const parsed = parseApplicationAnswersSection(
+    formatApplicationAnswersSection(corpus[0].snapshot),
+  );
+
+  const checks = [
+    [parsed.date === '2026-06-30', `date: ${parsed.date}`],
+    [parsed.state === 'submitted', `state: ${parsed.state}`],
+    [parsed.freeText[0]?.question === 'Why this role?', `freeText label: ${parsed.freeText[0]?.question}`],
+    [
+      parsed.freeText[0]?.answer === 'I want to apply production AI agent experience here.',
+      `freeText answer: ${parsed.freeText[0]?.answer}`,
+    ],
+    [
+      parsed.selections[0]?.selection === 'Node.js, Go, LLM evaluation',
+      `array selection joined: ${parsed.selections[0]?.selection}`,
+    ],
+    [
+      parsed.selections[1]?.question === 'Notice period: current',
+      `label containing a colon: ${parsed.selections[1]?.question}`,
+    ],
+    [
+      parsed.fieldValues[0]?.answer === '$150k base',
+      `fieldValue via non-primary keys: ${parsed.fieldValues[0]?.answer}`,
+    ],
+    [parsed.files[0]?.path === 'output/acme-cv.pdf', `file path: ${parsed.files[0]?.path}`],
+    [parsed.files[0]?.version === 'v3', `file version: ${parsed.files[0]?.version}`],
+    [
+      parsed.files[1] && !('version' in parsed.files[1]),
+      `unversioned file must omit version, got: ${JSON.stringify(parsed.files[1])}`,
+    ],
+  ];
+
+  const broken = checks.filter(([ok]) => !ok).map(([, detail]) => detail);
+  if (broken.length === 0) {
+    pass('parsed values keep their content and the formatter\'s primary key spelling');
+  } else {
+    fail(`parser lost or mis-keyed values:\n  ${broken.join('\n  ')}`);
+  }
+
+  // ── 4. multi-line answers, including the blank line quoteBlock emits ──────
+  const multiline = parsed.freeText[1]?.answer;
+  if (multiline === 'Line one.\n\nLine three after a blank.') {
+    pass('multi-line answers survive the > quote block, blank lines included');
+  } else {
+    fail(`multi-line answer corrupted: ${JSON.stringify(multiline)}`);
+  }
+
+  // ── 5. the four sentinels read back as absence, not as content ────────────
+  const empty = parseApplicationAnswersSection(
+    formatApplicationAnswersSection(corpus[1].snapshot),
+  );
+  const emptyAnswer = parsed.freeText[2]?.answer;
+  if (
+    empty.freeText.length === 0 &&
+    empty.selections.length === 0 &&
+    empty.fieldValues.length === 0 &&
+    empty.files.length === 0 &&
+    emptyAnswer === ''
+  ) {
+    pass('"- None captured." reads back as [] and "> Not recorded." as an empty answer');
+  } else {
+    fail(
+      `sentinels leaked into data: groups=${JSON.stringify({
+        freeText: empty.freeText.length,
+        selections: empty.selections.length,
+        fieldValues: empty.fieldValues.length,
+        files: empty.files.length,
+      })} emptyAnswer=${JSON.stringify(emptyAnswer)}`,
+    );
+  }
+
+  // ── 6. parse agrees with upsert on the section boundary ──────────────────
+  const report = [
+    '# Evaluation: Acme - Staff Engineer',
+    '',
+    '## G) Posting Legitimacy',
+    'original G content',
+    '',
+    '## Keywords extracted',
+    'agentic systems, node, go',
+    '',
+  ].join('\n');
+
+  const withSection = upsertApplicationAnswersSection(report, corpus[0].snapshot);
+  const trailing = `${withSection}\n## Later Additive Section\nlater content\n`;
+  const bounded = parseApplicationAnswersSection(trailing);
+
+  const leaked =
+    JSON.stringify(bounded).includes('later content') ||
+    JSON.stringify(bounded).includes('Keywords extracted');
+
+  if (!leaked && bounded.files.length === 2 && bounded.date === '2026-06-30') {
+    pass('parse stops at the next ## heading, matching upsert\'s own boundary probe');
+  } else {
+    fail(`section boundary disagreement — leaked=${leaked}, files=${bounded.files.length}`);
+  }
+
+  // ── 7. absence is null, not an empty snapshot ────────────────────────────
+  if (
+    parseApplicationAnswersSection(report) === null &&
+    parseApplicationAnswersSection('') === null &&
+    parseApplicationAnswersSection(undefined) === null
+  ) {
+    pass('a report with no Application Answers section parses to null');
+  } else {
+    fail('missing section did not parse to null');
+  }
+
+  // ── 8. the existing formatter contract is untouched ──────────────────────
+  // The prompt layer (modes/apply.md) is coupled to this exact rendering and is
+  // CI-blind, so a reader PR must not perturb a single byte of output.
+  const section = formatApplicationAnswersSection(corpus[0].snapshot);
+  if (
+    section.includes('## Application Answers') &&
+    section.includes('**Date:** 2026-06-30') &&
+    section.includes('**State:** submitted') &&
+    section.includes('Node.js, Go, LLM evaluation') &&
+    section.includes('output/acme-cv.pdf (v3)')
+  ) {
+    pass('formatter output is unchanged by the addition of the reader');
+  } else {
+    fail(`formatter output changed:\n${section}`);
+  }
+} catch (e) {
+  fail(`application answers round-trip tests crashed: ${e.stack || e.message}`);
+}
