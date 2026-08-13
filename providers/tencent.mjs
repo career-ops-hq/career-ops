@@ -20,8 +20,10 @@ const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
 const DEFAULT_MAX_PAGES = 20;
 // Every request after the first pays it — across pages and keyword switches
-// (same idiom as avature/workday).
-const INTER_PAGE_DELAY_MS = 150;
+// (same idiom as avature/workday). 150 ms was verified to cause WAF bans on
+// comparable providers (Getro: 3 boards at 403 + ~2.5 h ban); 250 ms is the
+// cross-provider safe floor (#2706).
+const INTER_PAGE_DELAY_MS = 250;
 
 /** Parse "2026年06月23日" → epoch ms. NaN-safe. */
 function parseCnDate(value) {
