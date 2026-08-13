@@ -96,7 +96,6 @@ location:
 # ALWAYS a separate, per-application, candidate-confirmed decision (see
 # modes/apply.md -- self-identification questions are never auto-answered).
 # disability:
-#   status: "Free-text description of your documented diagnosis"
 #   br_pcd_quota_eligible: true
 
 language:
