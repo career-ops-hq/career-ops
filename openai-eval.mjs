@@ -3,9 +3,13 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
- * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
- * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
+ * Works with OpenAI, OrcaRouter, OpenRouter, Together, Groq, DeepSeek, Zhipu GLM,
+ * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio,
+ * llama.cpp, vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
+ *
+ * OrcaRouter (https://www.orcarouter.ai) is a first-class named provider: set
+ * ORCAROUTER_API_KEY and the script defaults to https://api.orcarouter.ai/v1 with
+ * model orcarouter/auto. Explicit OPENAI_* / --url / --model / --key still win.
  *
  * Reads evaluation logic from modes/oferta.md + modes/_shared.md, reads the
  * user's resume from cv.md, and evaluates a Job Description passed inline or
@@ -79,18 +83,20 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL / ORCAROUTER_MODEL, default gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
-                     (env OPENAI_BASE_URL, default https://api.openai.com/v1)
-    --key <key>      API key             (env OPENAI_API_KEY)
+                     (env OPENAI_BASE_URL / ORCAROUTER_BASE_URL, default https://api.openai.com/v1)
+    --key <key>      API key             (env OPENAI_API_KEY / ORCAROUTER_API_KEY)
     --no-save        Do not save report to reports/ directory
     --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
 
   ENV
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_TIMEOUT_MS
+    ORCAROUTER_API_KEY, ORCAROUTER_BASE_URL, ORCAROUTER_MODEL  (named provider)
 
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
+    OrcaRouter:  ORCAROUTER_API_KEY=sk-orca-... node openai-eval.mjs ...
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
@@ -100,6 +106,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   EXAMPLES
     OPENAI_API_KEY=sk-... node openai-eval.mjs --file ./jds/job.txt
+    ORCAROUTER_API_KEY=sk-orca-... node openai-eval.mjs --file ./jds/job.txt
     node openai-eval.mjs --url http://localhost:1234/v1 --model local "<JD text>"
 `);
   process.exit(0);
@@ -107,9 +114,13 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText     = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-let apiKey     = process.env.OPENAI_API_KEY || '';
+// Named provider: setting ORCAROUTER_API_KEY switches the defaults to the
+// OrcaRouter endpoint + virtual model. Explicit OPENAI_* / --url / --model /
+// --key still take precedence, so this never changes existing behavior.
+const useOrcaRouter = Boolean(process.env.ORCAROUTER_API_KEY);
+let modelName  = process.env.OPENAI_MODEL || (useOrcaRouter ? (process.env.ORCAROUTER_MODEL || 'orcarouter/auto') : 'gpt-4o-mini');
+let baseUrl    = (process.env.OPENAI_BASE_URL || (useOrcaRouter ? (process.env.ORCAROUTER_BASE_URL || 'https://api.orcarouter.ai/v1') : 'https://api.openai.com/v1')).replace(/\/$/, '');
+let apiKey     = process.env.OPENAI_API_KEY || process.env.ORCAROUTER_API_KEY || '';
 let saveReport = true;
 let noCompress = false;
 

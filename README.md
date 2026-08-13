@@ -297,6 +297,28 @@ npm run gemini:eval -- "JD text here"
 
 > **Free tier:** Both options work without billing. Native CLI uses Google OAuth; the API script uses `gemini-3.6-flash` (rate limits are model- and tier-dependent; see Google AI docs for current quotas).
 
+### Standalone OpenAI-compatible eval (No CLI install needed)
+
+The same headless evaluation also runs against any OpenAI-compatible endpoint (`openai-eval.mjs` for evaluation, `openai-tailor.mjs` for CV tailoring). [OrcaRouter](https://www.orcarouter.ai) is a first-class named provider: set `ORCAROUTER_API_KEY` and both scripts default to `https://api.orcarouter.ai/v1` with model `orcarouter/auto`. It also runs gateway-level, zero-trust security for AI agents on the same endpoint — screening every prompt/response and governing every tool call on a default-deny basis, with no application code changes.
+
+```bash
+# 1. Get a key at https://api.orcarouter.ai
+cp .env.example .env
+# Edit .env, set ORCAROUTER_API_KEY=sk-orca-your-key-here
+
+# 2. Install dependencies
+npm install
+
+# 3. Evaluate a job description through OrcaRouter
+node openai-eval.mjs "We are looking for a Senior AI Engineer..."
+node openai-eval.mjs --file ./jds/my-job.txt
+
+# 4. Tailor your CV through OrcaRouter (after an eval report exists)
+node openai-tailor.mjs --jd ./jds/my-job.txt --report reports/001-company-2026-08-14.md
+```
+
+Explicit `OPENAI_*` env vars (or `--url` / `--model` / `--key`) still take precedence when both are set, so existing OpenAI-compatible setups are unaffected.
+
 ## Usage
 
 career-ops uses a shared command router. In CLIs that register slash commands, it looks like this:
