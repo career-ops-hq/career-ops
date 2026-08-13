@@ -315,6 +315,29 @@ try {
   } finally {
     rmSync(externalDir, { recursive: true, force: true });
   }
+
+  // --- Test 8: every entry renders, but writing the .results.json manifest
+  // fails — the batch must still exit 1, never mask a manifest write failure
+  // behind a clean exit. A directory pre-created at the results path forces
+  // writeFileSync to throw (EISDIR/EPERM) while assertInsideProject passes. ---
+  const wfManifest = join(sandbox, 'writefail.json');
+  writeFileSync(wfManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/wf-a.pdf' },
+    { input: 'c.html', output: 'out/wf-c.pdf' },
+  ]), 'utf-8');
+  // Occupy the results path with a directory so the file write cannot succeed.
+  mkdirSync(`${wfManifest}.results.json`, { recursive: true });
+  const writeFail = run([`--batch=${wfManifest}`]);
+  if (
+    writeFail.status === 1 &&
+    writeFail.output.includes('2 ok, 0 failed') &&
+    /Could not write batch results manifest/i.test(writeFail.output) &&
+    existsSync(join(sandbox, 'out', 'wf-a.pdf'))
+  ) {
+    pass('generate-pdf --batch exits 1 when the results manifest write fails despite all renders succeeding');
+  } else {
+    fail(`results-write failure did not fail the batch: status=${writeFail.status}\n${writeFail.output.trim()}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }

@@ -750,6 +750,9 @@ async function runBatchFromManifest(manifestPath, globals) {
     console.log(`🔗 Batch results: ${resultsPath}`);
   } catch (err) {
     console.error(`⚠️  Could not write batch results manifest: ${err.message}`);
+    // A failed results write is itself a batch failure: consumers rely on the
+    // manifest, so exit non-zero even when every entry rendered fine.
+    process.exitCode = 1;
   }
 
   console.log(`📦 Batch complete: ${ok} ok, ${failed} failed`);
