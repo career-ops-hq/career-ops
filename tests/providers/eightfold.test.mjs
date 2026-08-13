@@ -312,6 +312,36 @@ try {
       fail(`unexpected fetch error / fetchJson called=${touched}: ${e.message}`);
     }
   }
+
+  // Inter-page sleep must be >= 250 ms — 150 ms caused WAF bans on comparable
+  // providers (Getro: 3 boards at 403 + ~2.5 h ban); this pins the safe floor (#2706).
+  {
+    const pacingDelays = [];
+    const mkJob = (i) => ({ id: i, name: `Role ${i}`, location: [{ name: 'US' }], req_id: `R${i}`, canonicalPositionUrl: `/careers/jobs/${i}` });
+    const pacingCtx = {
+      transport: 'http',
+      fetchText: async () => '',
+      sleep: async (ms) => { pacingDelays.push(ms); },
+      fetchJson: async (url) => {
+        const start = Number(new URL(url).searchParams.get('start') || '0');
+        // PAGE_SIZE=10; return a full page first so the provider fetches a second page.
+        if (start === 0) return { positions: Array.from({ length: 10 }, (_, i) => mkJob(i + 1)), count: 12 };
+        return { positions: [mkJob(11), mkJob(12)], count: 12 };
+      },
+    };
+    await ef.fetch({ name: 'PacingTest', careers_url: 'https://pacingtest.eightfold.ai/careers' }, pacingCtx);
+    if (pacingDelays.length >= 1 && pacingDelays.every((ms) => ms >= 250)) {
+      pass(`eightfold.fetch() sleeps >= 250 ms between pages (got ${pacingDelays[0]} ms) — WAF-safe pacing (#2706)`);
+    } else {
+      fail(`eightfold.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
+    }
+    if (pacingDelays.length > 0 && pacingDelays[0] === 0) {
+      fail('eightfold.fetch() should NOT sleep before the first page (page 0 has zero added latency)');
+    } else {
+      pass('eightfold.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    }
+  }
+
 } catch (e) {
   fail(`eightfold provider tests crashed: ${e.message}`);
 }
