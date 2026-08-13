@@ -75,12 +75,52 @@ test("Codex turn.started maps to a kind-agnostic working status", () => {
   assert.deepEqual(event, { status: "Agent working" });
 });
 
-test("Codex usage becomes a token count", () => {
+test("Codex usage subtracts cached input, the opposite of Claude's formula", () => {
+  // Given: OpenAI's convention puts cached_input_tokens INSIDE input_tokens, so
+  // input + output folds discounted cache reads back into a metric defined as
+  // tokens billed at FULL rate — inflating Codex ~4.7x against Claude in the
+  // very comparison people use to control cost (formula adapted from #2689).
   const event = parseCodexEvent(JSON.stringify({
     type: "turn.completed",
     usage: { input_tokens: 120, cached_input_tokens: 80, output_tokens: 30 },
   }));
-  assert.deepEqual(event, { tokens: 150 });
+  // Then: (120 − 80) + 30, and no invented cost — Codex reports none.
+  assert.deepEqual(event, { tokens: 70, costUsd: null });
+});
+
+test("a real captured Codex turn reports full-rate tokens, not the raw input", () => {
+  // Given: an actual codex-cli 0.146.0 turn (input 13956 / cached 11008 / output 44).
+  const event = parseCodexEvent(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 13956, cached_input_tokens: 11008, output_tokens: 44 },
+  }));
+  assert.equal(event.tokens, 2992); // not 14000
+});
+
+test("fractional and non-finite usage figures are ignored, not counted", () => {
+  // Given: a token count is a whole number, so anything else in a usage block is
+  // junk from a malformed event and must not reach the running total.
+  const event = parseCodexEvent(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 1.5, cached_input_tokens: 0, output_tokens: 10 },
+  }));
+  assert.deepEqual(event, { tokens: 10, costUsd: null });
+
+  const claude = parseClaudeEvent(JSON.stringify({
+    type: "result",
+    usage: { input_tokens: 2.7, output_tokens: 10, cache_creation_input_tokens: 5 },
+  }));
+  assert.deepEqual(claude, { tokens: 15 });
+});
+
+test("malformed Codex usage never reports negative tokens", () => {
+  // Given: cached exceeding input can only come from a malformed block — the
+  // clamp keeps a nonsense figure from becoming a negative one.
+  const event = parseCodexEvent(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 10, cached_input_tokens: 999, output_tokens: 5 },
+  }));
+  assert.deepEqual(event, { tokens: 5, costUsd: null });
 });
 
 test("Codex turn.completed without usage is ignored, not zeroed", () => {
@@ -91,6 +131,26 @@ test("Codex turn.completed without usage is ignored, not zeroed", () => {
 test("invalid and irrelevant Codex lines are ignored", () => {
   assert.equal(parseCodexEvent("not json"), null);
   assert.equal(parseCodexEvent('{"type":"item.completed","item":{"type":"command_execution"}}'), null);
+});
+
+test("a line that parses to a non-object is ignored, not thrown on", () => {
+  // Given: JSON.parse("null") SUCCEEDS and yields null, so the try/catch around
+  // the parse never fires and reading .type off it would throw out of the
+  // parser and into the route's stdout handler. Same for bare scalars.
+  for (const line of ["null", "42", '"a string"', "true", "[]"]) {
+    assert.equal(parseCodexEvent(line), null, `codex: ${line}`);
+    assert.equal(parseClaudeEvent(line), null, `claude: ${line}`);
+  }
+});
+
+test("an empty Codex agent message emits nothing", () => {
+  // Given: emitting it would put a blank line in the run log and an extra
+  // newline inside pdf mode's line-anchored envelope stream.
+  const event = parseCodexEvent(JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "" },
+  }));
+  assert.equal(event, null);
 });
 
 test("a syntactically-valid but unrecognized Codex event type is ignored", () => {
@@ -265,6 +325,14 @@ test("accumulateTokens ignores a null event (unparseable or unrecognized line)",
 test("completedReportNames filters out RESERVED sentinels", () => {
   const names = completedReportNames(["020-existing.md", "021-RESERVED.md", "readme.txt"]);
   assert.deepEqual([...names].sort(), ["020-existing.md"]);
+});
+
+test("completedReportNames uses the shared predicate, so an unnumbered file is a real report", () => {
+  // Given: only a NUMBERED sentinel comes from the reservation path. This is the
+  // case where the two former copies of this convention disagreed — career-ops.ts
+  // called it a real report, run-cli-support.mjs did not. One definition now.
+  const names = completedReportNames(["notes-RESERVED.md", "030-RESERVED.md"]);
+  assert.deepEqual([...names], ["notes-RESERVED.md"]);
 });
 
 test("replacing a reservation with a report counts as persistence", () => {

@@ -45,9 +45,11 @@ test("spawnHeadlessCli closes stdin so a headless CLI can start", async () => {
   assert.equal(stdout, "READY");
 });
 
-test("spawnHeadlessCli tolerates a call site that already ignored stdin", async () => {
-  // Given: the apply planners pass stdio: ["ignore", …], which makes
-  // child.stdin null — ending it must not throw (hence the optional call).
+test("spawnHeadlessCli tolerates a caller that passes stdio itself", async () => {
+  // Given: no call site spells stdio today — the typed options omit it so
+  // stdout/stderr stay non-null pipes. But an untyped or future caller could
+  // pass stdio: ["ignore", …], which makes child.stdin null, and a hard
+  // .end() would then throw. This pins the optional call that prevents it.
   const child = spawnHeadlessCli(process.execPath, ["-e", 'process.stdout.write("OK")'], {
     cwd: process.cwd(),
     env: process.env,

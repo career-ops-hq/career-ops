@@ -4,17 +4,52 @@
 // "./run-cli-support.mjs") — unlike .ts files, which TypeScript resolves
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
+import { isReservedReportFile } from "./report-files.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
  * Usually at most one payload field (`tool`/`text`/`tokens`/`costUsd`/`error`) is
  * set per event; `status` may accompany any of them, and `tokens`/`costUsd` may
  * co-occur on a Claude `result` event.
- * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, costUsd?: number, error?: string}} ParsedEvent
+ * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field —
+ * Codex sends usage with no cost, and callers must not fill that in with a rate.
+ * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, costUsd?: number | null, error?: string}} ParsedEvent
  */
 
 const STATUS_READY = "Agent ready";
 const STATUS_RECONNECTING = "Reconnecting…";
+
+/**
+ * Token accounting across CLIs — the two conventions are OPPOSITE, and the
+ * formula is the only place that difference is visible (adapted from #2689,
+ * which reached this from the accounting side).
+ *
+ * The dashboard's metric is TOKENS BILLED AT FULL RATE — `/api/usage/route.ts`
+ * defines it as input + output + cache-creation, deliberately omitting
+ * discounted cache reads.
+ *
+ *   Claude  `input_tokens` EXCLUDES cache reads (they live in
+ *           `cache_read_input_tokens`), and cache writes are a separate pool
+ *           billed at full rate. → input + output + cache_creation
+ *   Codex   `input_tokens` INCLUDES `cached_input_tokens` (OpenAI's
+ *           convention), so adding is double-counting and the cached portion
+ *           must be SUBTRACTED. → (input − cached) + output
+ *
+ * Getting this wrong throws nothing and reddens no test — it silently inflates
+ * one runtime against another (~4.7× on a real run) in the very comparison
+ * people use to control cost.
+ */
+
+/**
+ * A usage figure, or 0 — guards nulls and junk in a partial usage block.
+ *
+ * `isSafeInteger`, not `isFinite`: a token count is a whole number, so a
+ * fractional value from a malformed event is junk and must not reach the total
+ * (CodeRabbit's finding on #2689's `n`, whose shape this shares).
+ */
+function tokenCount(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
 
 /** Auth failures, in wording shared across agent CLIs. Deliberately narrow: a
  * structured-output CLI's own event stream + exit code are authoritative for
@@ -101,6 +136,11 @@ export function parseCodexEvent(line) {
   } catch {
     return null;
   }
+  // JSON.parse("null") SUCCEEDS and yields null, and a bare scalar line yields a
+  // number or string — none of which the try above rejects, so reading `.type`
+  // off them throws past this function into the stdout handler. A parser written
+  // to survive hostile input has to survive its own success cases too.
+  if (!event || typeof event !== "object") return null;
 
   if (event.type === "thread.started") return { status: STATUS_READY };
   // Kind-agnostic on purpose: this parser serves every run kind (evaluate, pdf,
@@ -115,7 +155,9 @@ export function parseCodexEvent(line) {
   }
 
   if (event.type === "item.completed" && event.item?.type === "agent_message") {
-    if (typeof event.item.text !== "string") return null;
+    // Empty text carries nothing: emitting it would put a blank line in the run
+    // log and an extra newline inside pdf mode's line-anchored envelope stream.
+    if (typeof event.item.text !== "string" || event.item.text === "") return null;
     // Newline-terminate each message: Codex sends complete messages with NO
     // trailing newline ("hello", not "hello\n"), so consecutive messages would
     // otherwise concatenate mid-line downstream. That glued narration into one
@@ -133,14 +175,12 @@ export function parseCodexEvent(line) {
     // of clobbering a correct running total from an earlier turn.
     if (!event.usage) return null;
     const usage = event.usage;
-    // input + output only, deliberately asymmetric with parseClaudeEvent:
-    // Codex's `cached_input_tokens` is a SUBSET of `input_tokens` (a real turn
-    // reports e.g. input 13956 / cached 11008), so adding it would double-count;
-    // Claude's `cache_creation_input_tokens` is NOT included in its
-    // `input_tokens`, which is why the Claude formula adds it.
-    return {
-      tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-    };
+    // Subtraction, not addition: see the header note on the two conventions.
+    // Clamped at 0 so a malformed usage block can never report negative tokens.
+    const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
+    // costUsd stays null rather than being invented from a token count and a
+    // guessed rate — Codex reports no cost, and a fabricated one reads as real.
+    return { tokens: fresh + tokenCount(usage.output_tokens), costUsd: null };
   }
 
   if (event.type === "turn.failed" || event.type === "error") {
@@ -169,6 +209,8 @@ export function parseClaudeEvent(line) {
   } catch {
     return null;
   }
+  // Same reason as parseCodexEvent's guard: JSON.parse("null") succeeds.
+  if (!ev || typeof ev !== "object") return null;
 
   if (ev.type === "stream_event") {
     const e = ev.event;
@@ -189,9 +231,13 @@ export function parseClaudeEvent(line) {
     // No `usage` block means nothing to report — same null-over-zero rule as
     // parseCodexEvent's turn.completed, for the same reason.
     if (!ev.usage) return null;
-    // Tokens = the same formula /api/usage uses: input + output + cache-creation.
+    // Addition here, subtraction for Codex — see the header note. Claude's
+    // input_tokens excludes cache reads, so cache writes must be added back in;
+    // this is the same formula /api/usage uses.
     const u = ev.usage;
-    const result = { tokens: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0) };
+    const result = {
+      tokens: tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens),
+    };
     if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
     return result;
   }
@@ -213,22 +259,16 @@ export function accumulateTokens(current, ev) {
   return typeof ev?.tokens === "number" ? current + ev.tokens : current;
 }
 
-// Must match reserve-report-num.mjs's own reservation-filename convention
-// (writer: `${formatReportNumber(num)}-RESERVED.md`; reader regex:
-// /^\d+-RESERVED\.md$/) — kept as a local constant rather than a cross-package
-// import since reserve-report-num.mjs is a root-level script web/ doesn't
-// otherwise import from.
-const RESERVED_SUFFIX = "-RESERVED.md";
-
 /**
  * Completed report filenames from a raw `reports/` listing.
- * Reservation sentinels are not completed reports.
+ * Reservation sentinels are not completed reports — `isReservedReportFile` is
+ * the single definition of that convention, shared with career-ops.ts.
  *
  * @param {string[]} entries
  * @returns {Set<string>}
  */
 export function completedReportNames(entries) {
-  return new Set(entries.filter((name) => name.endsWith(".md") && !name.endsWith(RESERVED_SUFFIX)));
+  return new Set(entries.filter((name) => name.endsWith(".md") && !isReservedReportFile(name)));
 }
 
 /**
