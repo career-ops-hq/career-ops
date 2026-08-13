@@ -214,6 +214,19 @@ try {
     fail(`themuse.fetch() retry recovery: ${museRetryAttempts} attempts, ${museRecovered.length} jobs`);
   }
 
+  // A non-Error rejection (plain string) on the first page must rethrow without
+  // crashing the catch block itself (primitive rejection in strict mode throws
+  // when you attempt to set a property on it — `.attempts` assignment in withRetry).
+  let museNonErrorThrew = false;
+  try {
+    await themuse.fetch(
+      { name: 'Q', provider: 'themuse' },
+      { sleep: async () => {}, fetchJson: async () => { throw 'plain string rejection'; } },
+    );
+  } catch (e) { museNonErrorThrew = /plain string rejection/.test(e?.message || String(e)); }
+  if (museNonErrorThrew) pass('themuse.fetch() re-throws a non-Error first-page rejection safely (wraps into Error) (#2681)');
+  else fail('themuse.fetch() should rethrow a non-Error rejection on first-page failure');
+
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }
