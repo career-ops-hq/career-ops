@@ -539,3 +539,62 @@ func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
 		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
 	}
 }
+
+// TestHasScoreDistinguishesSentinelFromNumeric verifies that HasScore is true
+// for rows with a numeric score and false for the three AGENTS.md sentinels
+// (—, N/A, -), so the renderer never displays "0.0" for unevaluated rows
+// (#2758).
+func TestHasScoreDistinguishesSentinelFromNumeric(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("failed to create data dir: %v", err)
+	}
+
+	tracker := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Engineer | 4.2/5 | Applied | ✅ | [1](reports/001.md) | scored |
+| 2 | 2026-06-02 | Beta | Designer | — | Applied | ❌ | [2](reports/002.md) | em dash sentinel |
+| 3 | 2026-06-03 | Gamma | PM | N/A | Applied | ❌ | [3](reports/003.md) | N/A sentinel |
+| 4 | 2026-06-04 | Delta | CTO | - | Applied | ❌ | [4](reports/004.md) | hyphen sentinel |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(tracker), 0o644); err != nil {
+		t.Fatalf("failed to write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 4 {
+		t.Fatalf("expected 4 apps, got %d", len(apps))
+	}
+
+	// Row 1: numeric score — HasScore must be true and Score populated.
+	if !apps[0].HasScore {
+		t.Errorf("app[0] (4.2/5): HasScore = false, want true")
+	}
+	if apps[0].Score != 4.2 {
+		t.Errorf("app[0] Score = %v, want 4.2", apps[0].Score)
+	}
+
+	// Rows 2-4: sentinels — HasScore must be false and Score must be zero.
+	sentinelRows := []struct {
+		index    int
+		company  string
+		scoreRaw string
+	}{
+		{1, "Beta", "—"},
+		{2, "Gamma", "N/A"},
+		{3, "Delta", "-"},
+	}
+	for _, row := range sentinelRows {
+		app := apps[row.index]
+		if app.HasScore {
+			t.Errorf("app[%d] (%s, raw=%q): HasScore = true, want false (sentinel must not set HasScore)", row.index, row.company, row.scoreRaw)
+		}
+		if app.Score != 0 {
+			t.Errorf("app[%d] (%s): Score = %v, want 0 (sentinel must leave Score at zero)", row.index, row.company, app.Score)
+		}
+	}
+}
