@@ -417,6 +417,16 @@ if (!wordCountMatch) {
       // always uses the same logic as batch-runner.sh — no drift possible.
       const realWordCountSnippet = (wordCountMatch && wordCountMatch[1]) || '';
 
+      // Extract the production curl invocation from SRC so buildScript uses the
+      // same flags as batch-runner.sh — no manual sync needed when flags change.
+      const curlInvocationMatch = SRC.match(/curl --silent --location[\s\S]*?-- "\$url"[^\n]*/);
+      const curlLines = curlInvocationMatch
+        ? curlInvocationMatch[0].split('\n').map(l => l.trim()).filter(Boolean)
+        : null;
+      if (!curlLines) {
+        fail('could not extract curl invocation from SRC — e2e buildScript will use fallback flags');
+      }
+
       // Helper: write a script that mocks curl and runs the real prefetch logic.
       const buildScript = (curlOutput, curlExit = 0) => {
         const jdFilePath = join(work, 'jd.html');
@@ -439,12 +449,9 @@ if (!wordCountMatch) {
           `prefetch_min_words=80`,
           `jd_prefetch_words=0`,
           `if command -v curl >/dev/null 2>&1; then`,
-          `  curl --silent --location --max-time 20 --connect-timeout 5 \\`,
-          `    --fail --max-redirs 10 --compressed \\`,
-          `    --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \\`,
-          `    --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \\`,
-          `    --output "$jd_file" \\`,
-          `    -- "https://example.com/job" 2>/dev/null || true`,
+          `url="https://example.com/job"`,
+          // Production curl invocation extracted from SRC — never drifts from batch-runner.sh.
+          ...(curlLines ?? [`curl --output "$jd_file" -- "$url" 2>/dev/null || true`]),
           `  jd_prefetch_words=$(node -e "${realWordCountSnippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" "$jd_file" 2>/dev/null) || jd_prefetch_words=0`,
           `  jd_prefetch_words="\${jd_prefetch_words//[^0-9]/}"`,
           `  jd_prefetch_words="\${jd_prefetch_words:-0}"`,
@@ -470,6 +477,13 @@ if (!wordCountMatch) {
         pass(`rich HTML (${words1} words): file kept (${size1} bytes) — worker reads real JD`);
       } else {
         fail(`rich HTML: expected kept file, got words=${words1} size=${size1}`);
+      }
+      // Node must write stripped text back: file should contain visible text, not raw HTML.
+      const content1 = readFileSync(join(work, 'jd.html'), 'utf-8');
+      if (!/<[^>]+>/.test(content1) && content1.trim().length > 0) {
+        pass('case 1: file contains stripped visible text (HTML tags removed — worker reads clean content)');
+      } else {
+        fail(`case 1: raw HTML or empty file — stripped text not written back; snippet=${JSON.stringify(content1.slice(0, 80))}`);
       }
 
       // Case 2: JS shell HTML → file truncated to 0 bytes
@@ -517,6 +531,13 @@ if (!wordCountMatch) {
         pass(`80-word HTML in bash: file kept (words=${words5}, size=${size5}) — threshold is strict <`);
       } else {
         fail(`80-word HTML in bash: expected kept file, got words=${words5} size=${size5}`);
+      }
+      // Boundary case also gets stripped text written back.
+      const content5 = readFileSync(join(work, 'jd.html'), 'utf-8');
+      if (!/<[^>]+>/.test(content5) && content5.trim().length > 0) {
+        pass('case 5: file contains stripped visible text (boundary — tags removed)');
+      } else {
+        fail(`case 5: raw HTML or empty file at boundary; snippet=${JSON.stringify(content5.slice(0, 80))}`);
       }
 
       // Case 7: page with large inline JS bundle → script stripped → file truncated.
