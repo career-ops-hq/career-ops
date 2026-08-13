@@ -239,6 +239,31 @@ try {
   } else {
     fail('tencent.fetch() swallowed a first-request failure');
   }
+
+  // A single-page board (Count <= PAGE_SIZE, no second page needed) must never
+  // call sleep at all — the `if (page > 0)` guard must work for page 0.
+  {
+    const singlePageSleeps = [];
+    const singleCtx = {
+      calls: [],
+      sleeps: singlePageSleeps,
+      ctx: {
+        sleep: async (ms) => { singlePageSleeps.push(ms); },
+        fetchJson: async (url) => {
+          const page = Number(new URL(url).searchParams.get('pageIndex'));
+          singleCtx.calls.push(page);
+          return { Code: 200, Data: { Count: 3, Posts: Array.from({ length: 3 }, (_, i) => mkPost(9000 + i, `Solo ${i}`)) } };
+        },
+      },
+    };
+    await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, singleCtx.ctx);
+    if (singlePageSleeps.length === 0) {
+      pass('tencent.fetch() calls zero inter-page sleeps for a single-page board (page-0 guard correct)');
+    } else {
+      fail(`tencent single-page sleep: expected 0 sleep calls, got ${JSON.stringify(singlePageSleeps)}`);
+    }
+  }
+
 } catch (e) {
   fail(`tencent provider tests crashed: ${e.message}`);
 }
