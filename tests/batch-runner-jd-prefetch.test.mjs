@@ -570,13 +570,13 @@ if (!wordCountMatch) {
         fail(`inline JS bundle: expected truncated file (JS stripped), got words=${words7} size=${size7}`);
       }
 
-      // Case 6: curl not in PATH → `command -v curl` guard skips the block → file stays empty.
-      // The Node.js test runner removes curl's exact directory from PATH before spawning bash
-      // so `command -v curl` reliably fails regardless of where curl is installed.
-      // The script uses only bash builtins so no external commands are needed from the filtered PATH.
+      // Case 6: fake curl shim on PATH → curl exits non-zero → file stays empty.
+      // A fake curl shim keeps `command -v curl` deterministic without stripping
+      // /usr/bin or /bin from PATH, ensuring bash and core tools remain available.
       const jd6Path = join(work, 'jd-nocurl.html');
       const emptyBinPath = join(work, 'empty-bin');
       mkdirSync(emptyBinPath, { recursive: true });
+      writeFileSync(join(emptyBinPath, 'curl'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
       const script6Source = [
         '#!/usr/bin/env bash',
         `jd_file=${JSON.stringify(jd6Path)}`,
@@ -588,17 +588,14 @@ if (!wordCountMatch) {
       ].join('\n');
       const script6 = join(work, 'case6.sh');
       writeFileSync(script6, script6Source);
-      // Filter PATH entries that contain a curl executable. Using existsSync(join(d, 'curl'))
-      // rather than matching directory names handles /bin → /usr/bin symlinks (Ubuntu, Debian)
-      // where removing /usr/bin still leaves curl discoverable via the aliased /bin entry.
       const env6 = {
         ...process.env,
-        PATH: [emptyBinPath, ...(process.env.PATH || '').split(':').filter(d => d && !existsSync(join(d, 'curl')))].join(':'),
+        PATH: [emptyBinPath, process.env.PATH || ''].join(':'),
       };
       const r6 = spawnSync(bash, [script6], { encoding: 'utf-8', timeout: 30000, env: env6 });
       const exit6 = r6.status ?? 1;
       const stderr6 = (r6.stderr || '').trim();
-      const size6 = readFileSync(jd6Path).length;
+      const size6 = existsSync(jd6Path) ? readFileSync(jd6Path).length : -1;
       if (exit6 === 0 && stderr6 === '' && size6 === 0) {
         pass('curl absent from PATH: file stays empty → WebFetch fallback fires');
       } else {
