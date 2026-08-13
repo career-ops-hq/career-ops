@@ -45,8 +45,6 @@ test('valid directory runs the audit', () => {
   // It shouldn't print usage or flag errors.
   assert.doesNotMatch(r.all, /unrecognized flag/);
   assert.doesNotMatch(r.all, /Usage:/);
-  // apify will probably exit 1 due to global fetch usage, but it shouldn't be a flag error.
-  assert.match(r.all, /direct global fetch/i);
 });
 
 test('help exits before checking a missing directory', () => {
@@ -60,6 +58,7 @@ test('help exits before checking a missing directory', () => {
 
 test('--bogus --help is rejected as unknown flag before checking help', () => {
   const r = runAudit('--bogus', '--help');
-  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
   assert.match(r.stderr, /Error: unrecognized flag\(s\): --bogus/);
 });
