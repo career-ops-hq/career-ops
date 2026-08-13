@@ -21,6 +21,11 @@
 **規則：關於文章與專案指標，`article-digest.md` 的優先權高於 `cv.md`。**
 **規則：一律在讀完本檔之後才讀 `_profile.md`。`_profile.md` 中的使用者自訂內容會覆蓋此處的預設值。**
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## 評分系統 (Scoring System)
