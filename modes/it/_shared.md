@@ -22,6 +22,11 @@
 **REGOLA: Non hardcodare MAI metriche provenienti dai proof point.** Leggerle da `cv.md` e `article-digest.md` al momento della valutazione.
 **REGOLA: Per metriche di articoli/progetti, `article-digest.md` ha priorità su `cv.md`** (`cv.md` può contenere dati meno recenti).
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## North Star -- Ruoli target
