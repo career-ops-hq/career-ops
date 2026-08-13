@@ -14479,6 +14479,33 @@ try {
   fail(`modes/interview-prep.md missing or unreadable: ${e.message}`);
 }
 
+console.log('\nProvider WAF pacing guard — INTER_PAGE_DELAY_MS must be >= 250 ms (#2706)');
+try {
+  // 150 ms was verified to trigger Datadog WAF bans on Getro (3 boards at 403
+  // + ~2.5 h ban). All paginated providers inherit the same risk. This guard
+  // prevents a future edit from silently regressing the safe floor to < 250 ms.
+  const providerFiles = readdirSync(join(ROOT, 'providers'), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.mjs') && !e.name.startsWith('_'))
+    .map((e) => ({ name: e.name, path: `providers/${e.name}` }));
+
+  const LOW_PACING_RE = /INTER_PAGE_DELAY_MS\s*=\s*(\d+)/g;
+  const violators = [];
+  for (const { name, path } of providerFiles) {
+    const src = readFileSync(join(ROOT, path), 'utf-8');
+    for (const m of src.matchAll(LOW_PACING_RE)) {
+      const ms = Number(m[1]);
+      if (ms > 0 && ms < 250) violators.push(`${name}: INTER_PAGE_DELAY_MS=${ms} (< 250 ms)`);
+    }
+  }
+  if (violators.length === 0) {
+    pass(`all ${providerFiles.length} provider files use INTER_PAGE_DELAY_MS >= 250 ms or have no paging delay — WAF-safe (#2706)`);
+  } else {
+    fail(`providers with sub-250 ms inter-page delay (WAF-ban risk, see #2706): ${violators.join(', ')}`);
+  }
+} catch (e) {
+  fail(`WAF pacing guard crashed: ${e.message}`);
+}
+
 console.log('\nTest layout guard (provider tests live in tests/providers/)');
 try {
   const src = readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8');
