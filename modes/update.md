@@ -42,7 +42,7 @@ Present to the user as a clear summary:
 > - Other: {N} files changed
 >
 > **Changelog:**
-> {changelog from update-system.mjs check output}
+> {If changelog is non-empty, render it here. If changelog is empty (git ls-remote fallback — curl-blocked machine), write: "*(changelog unavailable — release notes require network access to GitHub API)*" instead of leaving a blank blockquote line.}
 >
 > Your personal files (CV, profile, tracker, reports) will NOT be touched.
 
