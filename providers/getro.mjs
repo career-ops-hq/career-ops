@@ -43,6 +43,8 @@
 // Each page fetch is retried on a transient failure (429/5xx/timeout-abort)
 // via the shared fetchJsonWithRetry — a large board runs into the hundreds of
 // pages, so one blip mid-sweep shouldn't truncate the whole run (#2506).
+// Pages within a board are paced at 250 ms each (INTER_PAGE_DELAY_MS); 150 ms
+// was verified to trigger a Datadog WAF ban when scanning 13 boards (#2706).
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 
