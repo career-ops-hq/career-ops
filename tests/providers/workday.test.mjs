@@ -699,6 +699,33 @@ try {
     fail(`workday probe should emit no warning, got: ${JSON.stringify(probeWarnings)}`);
   }
 
+  // Inter-page sleep must be at least 250 ms — 150 ms caused WAF bans on Getro
+  // (3 boards at 403 + ~2.5 h ban); providers sharing the same pacing pattern
+  // adopt the same safe floor (#2706).
+  {
+    const pacingDelays = [];
+    let pageCount = 0;
+    const pacingJobs = await workday.fetch(entry, {
+      transport: 'http',
+      fetchText: async () => { throw new Error('unexpected'); },
+      sleep: async (ms) => { pacingDelays.push(ms); },
+      fetchJson: async (_url, opts) => {
+        pageCount++;
+        const body = JSON.parse(opts.body);
+        if (body.offset === 0) return { total: 40, jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `P1-${i}`, externalPath: `/job/${i}` })) };
+        return { total: 40, jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `P2-${i}`, externalPath: `/job/p2-${i}` })) };
+      },
+    });
+    if (pacingDelays.length >= 1 && pacingDelays.every((ms) => ms >= 250)) {
+      pass(`workday.fetch() sleeps >= 250 ms between pages (got ${pacingDelays[0]} ms) — WAF-safe pacing (#2706)`);
+    } else {
+      fail(`workday.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
+    }
+    if (pacingDelays.length === 0 || pacingDelays[0] > 0) {
+      pass('workday.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    }
+  }
+
 } catch (e) {
   fail(`workday provider tests crashed: ${e.message}`);
 }
