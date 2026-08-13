@@ -333,9 +333,12 @@ function mergeNotes(existingNotes, addition, oldScore, newScore, extraMarker = '
     ? ''
     : prevRaw.replace(/\s*\.\s*$/, '');
   const incoming = String(addition.notes ?? '').trim();
+  const scoreArrow = newScore === null
+    ? `${oldScore ?? '—'} (score preserved — N/A re-eval)`
+    : `${oldScore ?? '—'}→${newScore}`;
   const marker = extraMarker
-    ? `Re-eval ${addition.date} (${oldScore}→${newScore}) — ${extraMarker}`
-    : `Re-eval ${addition.date} (${oldScore}→${newScore})`;
+    ? `Re-eval ${addition.date} (${scoreArrow}) — ${extraMarker}`
+    : `Re-eval ${addition.date} (${scoreArrow})`;
   // Re-running the same evaluation would otherwise repeat its own text; the
   // marker still records that the re-evaluation happened. Repeats are detected
   // per CLAUSE — the same '. ' separator this function joins with — not by raw
@@ -359,11 +362,14 @@ function mergeNotes(existingNotes, addition, oldScore, newScore, extraMarker = '
  * details, so only the first numeric value is used.
  *
  * @param {string} s - Raw score cell such as `4.2/5`.
- * @returns {number} Parsed score, or 0 when no numeric value is present.
+ * @returns {number | null} Parsed score, or null when no numeric value is present
+ *   (sentinel values like N/A, —, -). Returning null instead of 0 lets callers
+ *   distinguish "no score" from a genuine 0, preventing N/A re-evaluations from
+ *   overwriting real scores in the duplicate-update path (#2803).
  */
 function parseScore(s) {
   const m = s.replace(/\*\*/g, '').match(/([\d.]+)/);
-  return m ? parseFloat(m[1]) : 0;
+  return m ? parseFloat(m[1]) : null;
 }
 
 /**
@@ -1044,20 +1050,29 @@ for (const file of tsvFiles) {
     // merged/ as if it had landed (#2411). Equal scores write through too, since
     // the notes and report link are still fresher than what the row holds.
     //
+    // EXCEPTION: an unscoreable incoming row (N/A / — / - sentinel, giving
+    // newScore === null) must never overwrite a real score — null means the
+    // fetch failed, not that the evaluation produced a lower number. Status,
+    // notes, report link, PDF, and date still write through; only the score
+    // cell is preserved from the existing row (#2803).
+    //
     // Because the fuzzy matcher can mis-pair genuinely different roles (see
     // role-matcher.mjs — "Senior" is a stopword and short tokens are dropped), a
     // downgrade records the superseded report number so a bad match stays
     // recoverable from the tracker alone. mergeNotes() keeps the existing cell
     // verbatim and first, so a second downgrade preserves the earlier marker
     // rather than overwriting it.
-    const downgrade = newScore < oldScore;
+    const downgrade = newScore !== null && oldScore !== null && newScore < oldScore;
     const oldReportNum = extractReportNum(duplicate.report);
     const supersededNote = downgrade && oldReportNum && oldReportNum !== reportNum
       ? `Superseded report [${oldReportNum}] (was ${oldScore}/5)`
       : '';
 
+    const scoreDisplay = newScore === null
+      ? `${oldScore ?? '—'} (preserved — incoming N/A)`
+      : `${oldScore ?? '—'}→${newScore}`;
     console.log(
-      `${downgrade ? '🔽' : '🔄'} Update: #${duplicate.num} ${addition.company} — ${addition.role} (${oldScore}→${newScore})`
+      `${downgrade ? '🔽' : '🔄'} Update: #${duplicate.num} ${addition.company} — ${addition.role} (${scoreDisplay})`
       + (downgrade ? ' — DOWNGRADE, re-eval scored lower' : ''),
     );
     // The PDF flag describes THE ROW'S REPORT, and this branch replaces that
@@ -1085,7 +1100,11 @@ for (const file of tsvFiles) {
       role: (reportNumMatched || dupReason === 'url') ? addition.role : duplicate.role,
       via: addition.via || duplicate.via || '—',
       location: addition.location || duplicate.location || '—',
-      score: addition.score, status: duplicate.status, pdf,
+      // Preserve the existing score when the incoming one is unscoreable (N/A /
+      // — / sentinel); see parseScore and #2803. Everything else (status, notes,
+      // report link, PDF, date) still writes through from the re-evaluation.
+      score: newScore === null ? duplicate.score : addition.score,
+      status: duplicate.status, pdf,
       report: addition.report,
       notes: mergeNotes(duplicate.notes, addition, oldScore, newScore, supersededNote),
       // Carry the key forward. Without this the update path rewrites the row
