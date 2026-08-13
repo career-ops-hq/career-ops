@@ -297,7 +297,7 @@ node upskill.mjs --self-test
 
 In targeted mode a local `--url-text` path is a **required** input, so it is read strictly: a path that is missing, a directory, unreadable, or empty prints one `Fatal:` line to stderr and exits `1`. The optional `cv.md`/`config/profile.yml` reads keep the opposite contract — unreadable degrades to empty rather than aborting the run.
 
-**Exit codes:** `0` analysis succeeded (including graceful `{error}` JSON for insufficient data), `1` self-test failure, unreadable targeted input, or a failed JD fetch.
+**Exit codes:** `0` analysis succeeded (including graceful `{error}` JSON for insufficient data), `1` self-test failure, a missing `--url-text` argument, unreadable targeted input, a failed JD fetch, or a redirect blocked by the URL security check.
 
 ---
 

@@ -964,7 +964,17 @@ if (isMain) {
       }, null, 2));
 
       process.exit(0);
-    })();
+    })().catch((err) => {
+      // Terminal handler for the whole branch. The local-file read above is now
+      // guarded, and the URL fetch has its own try/catch, but everything after
+      // them — knownSkillsText, computeTargetedGaps, the JSON.stringify — runs
+      // bare. A throw there would end the process on an unhandled rejection: a
+      // raw stack trace on stderr and Node's own exit code rather than the one
+      // `Fatal:` line and exit 1 the rest of this branch promises (and that
+      // tests/upskill-targeted-input.test.mjs asserts).
+      console.error(`Fatal: targeted analysis failed: ${err?.message ?? err}`);
+      process.exit(1);
+    });
   } else {
     // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
     const minReportsIdx = args.indexOf('--min-reports');
