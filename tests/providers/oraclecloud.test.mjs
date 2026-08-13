@@ -448,7 +448,31 @@ try {
       fail(`oraclecloud.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
     }
     if (pageCount >= 2 && pacingDelays.length === pageCount - 1) {
-      pass('oraclecloud.fetch() does not sleep before the first page (page 0 has zero added latency)');
+      pass(`oraclecloud.fetch() does not sleep before page 0 — ${pageCount} pages fetched, ${pacingDelays.length} sleep(s) (one per non-first page)`);
+    } else {
+      fail(`oraclecloud sleep count: expected ${pageCount - 1} (one per non-first page), got ${pacingDelays.length}`);
+    }
+  }
+
+  // A single-page board (results < PAGE_SIZE) must never call sleep at all.
+  {
+    const singlePageSleeps = [];
+    const singleBoard = await oc.fetch(
+      { name: 'SoloBoard', careers_url: careers },
+      {
+        transport: 'http',
+        fetchText: async () => {},
+        sleep: async (ms) => { singlePageSleeps.push(ms); },
+        fetchJson: async () => ({
+          items: [{ TotalJobsCount: 3, requisitionList: Array.from({ length: 3 }, (_, i) => ({ Id: `S${i}`, Title: `Solo ${i}` })) }],
+          hasMore: false,
+        }),
+      },
+    );
+    if (singlePageSleeps.length === 0 && singleBoard.length === 3) {
+      pass('oraclecloud.fetch() calls zero inter-page sleeps for a single-page board (page-0 guard correct)');
+    } else {
+      fail(`oraclecloud single-page sleep: expected 0 sleep calls, got ${JSON.stringify(singlePageSleeps)}`);
     }
   }
 
