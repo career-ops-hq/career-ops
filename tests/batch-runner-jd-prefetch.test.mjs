@@ -19,7 +19,7 @@
 // the implementation can never drift apart.
 import { pass, fail, getBash } from './helpers.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, mkdtempSync as _mdt } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -563,34 +563,38 @@ if (!wordCountMatch) {
         fail(`inline JS bundle: expected truncated file (JS stripped), got words=${words7} size=${size7}`);
       }
 
-      // Case 6: curl not in PATH → file stays empty → WebFetch fallback fires.
-      // Remove curl from PATH so `command -v curl` fails and the block is skipped.
-      const buildNoCurlScript = () => {
-        const jdFilePath = join(work, 'jd-nocurl.html');
-        return [
-          '#!/usr/bin/env bash',
-          `jd_file=${JSON.stringify(jdFilePath)}`,
-          `> "$jd_file"`,  // mktemp creates empty file
-          `prefetch_min_words=80`,
-          `jd_prefetch_words=0`,
-          // Remove curl from PATH
-          `export PATH="$(echo "$PATH" | tr ':' '\\n' | grep -v curl | tr '\\n' ':')"`,
-          // The actual guard from batch-runner.sh
-          `if command -v curl >/dev/null 2>&1; then`,
-          `  echo 'ERROR: curl should not be found in this test' >&2`,
-          `fi`,
-          `file_size=$(wc -c < "$jd_file" 2>/dev/null || echo 0)`,
-          `printf '%s|%s\\n' "$jd_prefetch_words" "$file_size"`,
-        ].join('\n');
-      };
+      // Case 6: curl not in PATH → `command -v curl` guard skips the block → file stays empty.
+      // The Node.js test runner removes curl's exact directory from PATH before spawning bash
+      // so `command -v curl` reliably fails regardless of where curl is installed.
+      // The script uses only bash builtins so no external commands are needed from the filtered PATH.
+      const jd6Path = join(work, 'jd-nocurl.html');
+      const emptyBinPath = join(work, 'empty-bin');
+      mkdirSync(emptyBinPath, { recursive: true });
+      const script6Source = [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(jd6Path)}`,
+        `> "$jd_file"`,
+        `if command -v curl >/dev/null 2>&1; then`,
+        `  echo 'ERROR: curl was found — PATH filtering did not remove it' >&2`,
+        `fi`,
+      ].join('\n');
       const script6 = join(work, 'case6.sh');
-      writeFileSync(script6, buildNoCurlScript());
-      const result6 = execFileSync(bash, [script6], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [, size6] = result6.split('|').map(Number);
-      if (size6 === 0) {
+      writeFileSync(script6, script6Source);
+      // Find curl's actual directory and exclude it from PATH for this subprocess.
+      const curlLocation = spawnSync(bash, ['-c', 'command -v curl 2>/dev/null'], { encoding: 'utf-8' });
+      const curlDir = curlLocation.stdout.trim() ? dirname(curlLocation.stdout.trim()) : null;
+      const env6 = {
+        ...process.env,
+        PATH: [emptyBinPath, ...(process.env.PATH || '').split(':').filter(d => d && d !== curlDir)].join(':'),
+      };
+      const r6 = spawnSync(bash, [script6], { encoding: 'utf-8', timeout: 30000, env: env6 });
+      const exit6 = r6.status ?? 1;
+      const stderr6 = (r6.stderr || '').trim();
+      const size6 = readFileSync(jd6Path).length;
+      if (exit6 === 0 && stderr6 === '' && size6 === 0) {
         pass('curl absent from PATH: file stays empty → WebFetch fallback fires');
       } else {
-        fail(`curl absent: expected empty file, got size=${size6}`);
+        fail(`curl absent: exit=${exit6} stderr=${JSON.stringify(stderr6)} size=${size6}`);
       }
     }
   } finally {
