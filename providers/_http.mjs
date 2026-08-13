@@ -105,6 +105,11 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
  */
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
+// Cross-provider safe floor for INTER_PAGE_DELAY_MS: 250 ms.
+// 150 ms was verified to trigger Datadog WAF bans on Getro (3 boards at 403
+// + ~2.5 h ban at a board level). Every paginated provider inherits this risk
+// and must use >= 250 ms for any inter-page sleep (#2706).
+
 /** Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock wait. */
 export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
