@@ -451,6 +451,12 @@ risk_summary:
       { description: 'US-only residency required', severity: 'hard' },
     ] } },
     { outcome: 'negative', notes: '', report: { gaps: [{ description: 'US-only remote', severity: 'hard' }] } },
+    // Gapless rows make the fixture distinguish blockerBase (2) from the old
+    // full-tracker denominator (5). Restoring `/ enriched.length` must turn the
+    // expected 100% into 40% and fail this regression.
+    { outcome: 'pending', notes: '', report: { gaps: [] } },
+    { outcome: 'pending', notes: '', report: null },
+    { outcome: 'positive', notes: '', report: { gaps: [] } },
   ];
   const blockerSignals = buildPatternSignals(dupBlockerFixture);
   const geoBlocker = blockerSignals.blockerAnalysis.find(b => b.blocker === 'geo-restriction');
@@ -1151,7 +1157,7 @@ function analyze() {
   const geoBlocker = blockerAnalysis.find(b => b.blocker === 'geo-restriction');
   if (geoBlocker && geoBlocker.percentage >= 20) {
     recommendations.push({
-      action: `Tighten location filters in portals.yml -- ${geoBlocker.percentage}% of applications hit a geo-restriction blocker`,
+      action: `Tighten location filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
       reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are location-restricted (US/Canada-only). These are wasted evaluation effort.`,
       impact: 'high',
     });
