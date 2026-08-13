@@ -19,7 +19,7 @@
 // the implementation can never drift apart.
 import { pass, fail, getBash } from './helpers.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, mkdtempSync as _mdt } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -580,12 +580,12 @@ if (!wordCountMatch) {
       ].join('\n');
       const script6 = join(work, 'case6.sh');
       writeFileSync(script6, script6Source);
-      // Find curl's actual directory and exclude it from PATH for this subprocess.
-      const curlLocation = spawnSync(bash, ['-c', 'command -v curl 2>/dev/null'], { encoding: 'utf-8' });
-      const curlDir = curlLocation.stdout.trim() ? dirname(curlLocation.stdout.trim()) : null;
+      // Filter PATH entries that contain a curl executable. Using existsSync(join(d, 'curl'))
+      // rather than matching directory names handles /bin → /usr/bin symlinks (Ubuntu, Debian)
+      // where removing /usr/bin still leaves curl discoverable via the aliased /bin entry.
       const env6 = {
         ...process.env,
-        PATH: [emptyBinPath, ...(process.env.PATH || '').split(':').filter(d => d && d !== curlDir)].join(':'),
+        PATH: [emptyBinPath, ...(process.env.PATH || '').split(':').filter(d => d && !existsSync(join(d, 'curl')))].join(':'),
       };
       const r6 = spawnSync(bash, [script6], { encoding: 'utf-8', timeout: 30000, env: env6 });
       const exit6 = r6.status ?? 1;
