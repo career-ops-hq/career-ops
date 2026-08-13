@@ -303,6 +303,10 @@ const allowedSystemUserOverlap = new Set([
   // the updater ships these two, but never the real session files alongside them.
   'interview-prep/sessions/.gitkeep',
   'interview-prep/sessions/README.md',
+  // Same pattern for the user-layer documents/ intake dir (#1723): the
+  // updater ships the scaffold, never the user's source documents.
+  'documents/.gitkeep',
+  'documents/README.md',
 ]);
 let hasSystemUserCollision = false;
 for (const systemPath of systemPaths) {
