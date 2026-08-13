@@ -21,6 +21,11 @@
 **KURAL: Makale/proje metrikleri için `article-digest.md`, `cv.md`'ye göre önceliklidir.**
 **KURAL: `_profile.md`'yi bu dosyadan SONRA oku. Kullanıcının `_profile.md`'deki özelleştirmeleri buradaki varsayılanları geçersiz kılar.**
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## Puanlama Sistemi
