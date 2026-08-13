@@ -33,12 +33,15 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const trackerPath = resolveTrackerPath(__dirname);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -339,15 +342,16 @@ function countRenderedPdfPages(pdfBuffer) {
 }
 
 /**
- * Convert a path to a repo-relative manifest entry, or blank if it is unknown
- * or outside the career-ops repository.
+ * Convert a path to a workspace-relative manifest entry, or blank if it is
+ * unknown or outside the tracker-owned workspace.
  *
  * @param {string} pathValue - Absolute or cwd-relative filesystem path.
- * @returns {string} Repo-relative path using forward slashes, or an empty string.
+ * @param {string} [rootDir] - Workspace root used as the manifest base.
+ * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function repoRelativeManifestPath(pathValue) {
+export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
+  const rel = relative(rootDir, resolve(pathValue));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
 }
@@ -390,10 +394,10 @@ export function injectPrintPageCss(html, format = 'a4') {
  * gitignored output/ artifacts and is meaningless on another machine.
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+  const manifestPath = resolvePdfIndexPath(trackerPath);
+  const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = repoRelativeManifestPath(htmlPath);
+  const relHTML = repoRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
@@ -477,14 +481,14 @@ async function generatePDF() {
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
 
-  // Path-traversal guard: keep the PDF write inside the project directory so a
-  // crafted output argument (e.g. "../../etc/cron.d/x") can't escape the repo.
-  // Anchored to the repo root (__dirname), not process.cwd(): running the script
+  // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
+  // so a crafted output argument cannot escape into another user's directory.
+  // Anchored to the workspace root, not process.cwd(): running the script
   // from outside the repo used to falsely refuse in-repo outputs — and, worse,
   // would have allowed writes anywhere under an arbitrary cwd.
-  const relOut = relative(__dirname, outputPath);
+  const relOut = relative(workspaceRoot, outputPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
-    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
 
@@ -503,7 +507,7 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
@@ -525,6 +529,7 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
   });
 }
 

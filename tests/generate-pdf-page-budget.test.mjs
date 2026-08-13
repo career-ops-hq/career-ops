@@ -27,6 +27,12 @@ copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 // theming, #1837); copy it into the sandbox too or the isolated script fails
 // to load with ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+// generate-pdf resolves output and manifest paths from the tracker-owned
+// workspace. Copy the shared resolver and its local parser dependency so this
+// remains a genuinely isolated CLI test.
+copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs'));
+copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
+copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',
@@ -112,9 +118,10 @@ writeFileSync(defaultOverflowInput, `<!doctype html>
 </html>
 `, 'utf-8');
 
-function runPdf(args) {
+function runPdf(args, env = {}) {
   const result = spawnSync(NODE, [script, ...args], {
     cwd: sandbox,
+    env: { ...process.env, ...env },
     encoding: 'utf-8',
     timeout: 30_000,
   });
@@ -225,6 +232,38 @@ try {
     pass('generate-pdf rejects overflow only with --strict-pages');
   } else {
     fail(`generate-pdf strict page budget regressed: ${strictOverflow.output.trim()}`);
+  }
+
+  // A redirected tracker defines a separate workspace. The renderer must allow
+  // output there and honor an explicit manifest path instead of writing beside
+  // the installed script.
+  const redirectedRoot = join(sandbox, 'redirected-workspace');
+  const redirectedInput = join(redirectedRoot, 'source.html');
+  const redirectedPdf = join(redirectedRoot, 'output', 'redirected.pdf');
+  const redirectedTracker = join(redirectedRoot, 'applications.md');
+  const redirectedManifest = join(sandbox, 'custom-manifests', 'pdf-index.tsv');
+  mkdirSync(join(redirectedRoot, 'output'), { recursive: true });
+  writeFileSync(redirectedInput, readFileSync(input, 'utf8'), 'utf8');
+  writeFileSync(redirectedTracker, '# Applications\n', 'utf8');
+
+  const redirected = runPdf([redirectedInput, redirectedPdf, '--report=42'], {
+    CAREER_OPS_TRACKER: redirectedTracker,
+    CAREER_OPS_PDF_INDEX: redirectedManifest,
+  });
+  const redirectedManifestText = existsSync(redirectedManifest)
+    ? readFileSync(redirectedManifest, 'utf8')
+    : '';
+  if (
+    redirected.status === 0 &&
+    existsSync(redirectedPdf) &&
+    redirectedManifestText.split('\n').some((line) => {
+      const fields = line.split('\t');
+      return fields[0] === '42' && fields[1] === 'output/redirected.pdf' && fields[2] === 'source.html';
+    })
+  ) {
+    pass('generate-pdf follows the tracker workspace and explicit manifest override');
+  } else {
+    fail(`generate-pdf ignored redirected workspace paths: ${redirected.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
