@@ -468,6 +468,33 @@ risk_summary:
     failures.push(`duplicate tag deduplication failed: geo-block counted ${dupReasons.get('geo-block')}, expected 2`);
   }
 
+  // Same rule for blocker types: one report whose gaps all resolve to the same
+  // type is one affected entry. Without the per-entry Set the first entry below
+  // contributes 3, taking the share past 100% of a 2-entry base.
+  const dupBlockerFixture = [
+    { report: { gaps: [
+      { description: 'US-only remote', severity: 'hard' },
+      { description: 'Remote US only, no sponsorship', severity: 'hard' },
+      { description: 'must reside in the US', severity: 'hard' },
+    ] } },
+    { report: { gaps: [{ description: 'US-only remote', severity: 'hard' }] } },
+  ];
+  const dupBlockers = new Map();
+  for (const e of dupBlockerFixture) {
+    if (!e.report?.gaps) continue;
+    const entryBlockers = new Set();
+    for (const gap of e.report.gaps) {
+      const type = extractBlockerType(gap);
+      if (type) entryBlockers.add(type);
+    }
+    for (const type of entryBlockers) dupBlockers.set(type, (dupBlockers.get(type) || 0) + 1);
+  }
+  for (const [type, count] of dupBlockers) {
+    if (count > dupBlockerFixture.length) {
+      failures.push(`blocker "${type}" counted ${count} across ${dupBlockerFixture.length} entries — exceeds its own base`);
+    }
+  }
+
   // Remote classifier (regression): the "70+" signal ends in "+", so a
   // trailing \b silently dropped it and "70+ countries" postings fell to the
   // weaker 'regional remote' bucket instead of 'global remote'.
@@ -932,9 +959,16 @@ function analyze() {
   const blockerBase = gapBearingBase(enriched);
   for (const e of enriched) {
     if (!e.report?.gaps) continue;
+    // One entry contributes at most once per blocker type. Several gaps in the
+    // same report resolving to the same type describe one affected entry, not
+    // several — counting each would push a share above its own base.
+    const entryBlockers = new Set();
     for (const gap of e.report.gaps) {
       const type = extractBlockerType(gap);
       if (!type) continue;
+      entryBlockers.add(type);
+    }
+    for (const type of entryBlockers) {
       blockerCounts.set(type, (blockerCounts.get(type) || 0) + 1);
     }
   }
