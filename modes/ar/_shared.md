@@ -22,6 +22,11 @@
 **قاعدة: بالنسبة للمشاريع والمقالات، يكون لملف article-digest.md الأولوية على cv.md.**
 **قاعدة: اقرأ ملف _profile.md بعد قراءة هذا الملف. إعدادات وتخصيصات المستخدم في _profile.md تلغي وتتفوق على الإعدادات الافتراضية هنا.**
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## نظام التقييم (Scoring System)
