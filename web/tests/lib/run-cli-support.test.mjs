@@ -298,6 +298,43 @@ test("Claude result without usage is ignored, not zeroed", () => {
   assert.equal(event, null);
 });
 
+test("a terminal Claude result surfaces its diagnostic instead of a silent success", () => {
+  // Given: is_error is the authoritative flag on a terminal result. Dropping it
+  // left the gate inferring failure from the exit code alone — and a run that
+  // failed while exiting 0 would then be banked as a confident score.
+  const event = parseClaudeEvent(JSON.stringify({
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    result: "",
+    error: "tool execution failed: permission denied",
+    usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5 },
+  }));
+
+  // Then: the diagnostic reaches the run log, AND the tokens it burned are
+  // still counted — a failed run costs real money.
+  assert.deepEqual(event, { tokens: 125, error: "tool execution failed: permission denied" });
+});
+
+test("a failed Claude result names the failure when it carries no diagnostic", () => {
+  // Given: the real subtypes are error_max_turns / error_during_execution —
+  // never a bare "error" — so the match is by prefix, and the subtype is the
+  // last usable description when no error string is supplied.
+  const event = parseClaudeEvent(JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true }));
+  assert.deepEqual(event, { error: "error_max_turns" });
+});
+
+test("a successful Claude result is never mistaken for a failure", () => {
+  const event = parseClaudeEvent(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "VERDICT: 4.5/5 — strong fit",
+    usage: { input_tokens: 10, output_tokens: 2 },
+  }));
+  assert.deepEqual(event, { tokens: 12 });
+});
+
 test("invalid and irrelevant Claude lines are ignored", () => {
   assert.equal(parseClaudeEvent("not json"), null);
   assert.equal(parseClaudeEvent('{"type":"stream_event","event":{"type":"content_block_stop"}}'), null);

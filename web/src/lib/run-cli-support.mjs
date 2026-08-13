@@ -228,18 +228,37 @@ export function parseClaudeEvent(line) {
   }
 
   if (ev.type === "result") {
-    // No `usage` block means nothing to report — same null-over-zero rule as
-    // parseCodexEvent's turn.completed, for the same reason.
-    if (!ev.usage) return null;
-    // Addition here, subtraction for Codex — see the header note. Claude's
-    // input_tokens excludes cache reads, so cache writes must be added back in;
-    // this is the same formula /api/usage uses.
-    const u = ev.usage;
-    const result = {
-      tokens: tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens),
-    };
-    if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
-    return result;
+    // Usage first, so a FAILED result still reports what it burned — the tokens
+    // were spent either way, and dropping them undercounts exactly the runs a
+    // user most wants to see the cost of.
+    const result = {};
+    if (ev.usage) {
+      // Addition here, subtraction for Codex — see the header note. Claude's
+      // input_tokens excludes cache reads, so cache writes must be added back
+      // in; this is the same formula /api/usage uses.
+      const u = ev.usage;
+      result.tokens = tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens);
+      if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
+    }
+    // A terminal failure, the counterpart of parseCodexEvent's turn.failed. The
+    // route's gate would otherwise have to infer this from the exit code alone,
+    // and a non-zero exit is not guaranteed — a run that failed while exiting 0
+    // would be banked as a confident score, the dishonest-success case this
+    // whole file exists to prevent. `is_error` is the authoritative flag;
+    // subtype is checked by PREFIX because the real values are
+    // `error_max_turns` / `error_during_execution`, never a bare "error".
+    if (ev.is_error === true || (typeof ev.subtype === "string" && ev.subtype.startsWith("error"))) {
+      // `result` carries the final text and is empty on failure, so it is only a
+      // fallback; the subtype names the failure when no diagnostic is supplied.
+      const diagnostic =
+        (typeof ev.error === "string" && ev.error) ||
+        (typeof ev.result === "string" && ev.result) ||
+        (typeof ev.subtype === "string" && ev.subtype) ||
+        "Claude failed before finishing";
+      result.error = String(diagnostic);
+    }
+    // Null over an empty object: nothing to report must not look like an event.
+    return Object.keys(result).length > 0 ? result : null;
   }
 
   return null;
