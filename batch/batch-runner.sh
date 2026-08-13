@@ -759,8 +759,10 @@ process_offer() {
   local prefetch_min_words=80
   local jd_prefetch_words=0
   if command -v curl >/dev/null 2>&1; then
-    curl --silent --location --max-time 20 --fail --max-redirs 10 \
+    curl --silent --location --max-time 20 --connect-timeout 5 \
+      --fail --max-redirs 10 --compressed \
       --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
+      --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
       --output "$jd_file" \
       -- "$url" 2>/dev/null || true
     # Strip HTML tags and count visible words to distinguish a real JD (hundreds
