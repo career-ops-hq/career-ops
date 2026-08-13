@@ -138,6 +138,35 @@ const mkCtx = (pages) => ({
   }
 }
 
+// Inter-page sleep must be >= 250 ms — 150 ms caused WAF bans on comparable
+// providers (Getro: 3 boards at 403 + ~2.5 h ban); this pins the safe floor
+// so a future edit doesn't silently regress it (#2706).
+{
+  const pacingDelays = [];
+  const pacingCtx = {
+    transport: 'http',
+    sleep: async (ms) => { pacingDelays.push(ms); },
+    fetchJson: async () => { throw new Error('fetchJson should not be called'); },
+    fetchText: async (url) => {
+      const pr = Number(new URL(url).searchParams.get('pr'));
+      if (pr === 0) return page(mkCard(1, 'Pacing A'), mkCard(2, 'Pacing B'));
+      if (pr === 1) return page(mkCard(3, 'Pacing C'));
+      return page(); // empty → stop
+    },
+  };
+  await icims.fetch({ name: 'pacingtest', careers_url: `${ORIGIN}/jobs/search?ss=1` }, pacingCtx);
+  if (pacingDelays.length >= 1 && pacingDelays.every((ms) => ms >= 250)) {
+    pass(`icims.fetch() sleeps >= 250 ms between pages (got ${pacingDelays[0]} ms) — WAF-safe pacing (#2706)`);
+  } else {
+    fail(`icims.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
+  }
+  if (pacingDelays.length > 0 && pacingDelays[0] === 0) {
+    fail('icims.fetch() should NOT sleep before the first page');
+  } else {
+    pass('icims.fetch() does not sleep before the first page (page 0 has zero added latency)');
+  }
+}
+
 // ── enrichDate(): detail-page JSON-LD ───────────────────────────────
 {
   const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
