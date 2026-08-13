@@ -344,6 +344,23 @@ try {
     }
   }
 
+  // A single-page board (< PAGE_SIZE results) must never call sleep at all.
+  {
+    const singlePageSleeps = [];
+    const mkJob = (i) => ({ id: i, name: `Solo ${i}`, location: [{ name: 'US' }], req_id: `R${i}`, canonicalPositionUrl: `/careers/jobs/solo-${i}` });
+    await ef.fetch({ name: 'SoloBoard', careers_url: 'https://soloboard.eightfold.ai/careers' }, {
+      transport: 'http',
+      fetchText: async () => '',
+      sleep: async (ms) => { singlePageSleeps.push(ms); },
+      fetchJson: async () => ({ positions: Array.from({ length: 5 }, (_, i) => mkJob(i + 1)), count: 5 }),
+    });
+    if (singlePageSleeps.length === 0) {
+      pass('eightfold.fetch() calls zero inter-page sleeps for a single-page board (page-0 guard correct)');
+    } else {
+      fail(`eightfold single-page sleep: expected 0 sleep calls, got ${JSON.stringify(singlePageSleeps)}`);
+    }
+  }
+
 } catch (e) {
   fail(`eightfold provider tests crashed: ${e.message}`);
 }
