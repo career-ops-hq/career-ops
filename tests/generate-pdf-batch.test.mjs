@@ -332,7 +332,8 @@ try {
     writeFail.status === 1 &&
     writeFail.output.includes('2 ok, 0 failed') &&
     /Could not write batch results manifest/i.test(writeFail.output) &&
-    existsSync(join(sandbox, 'out', 'wf-a.pdf'))
+    existsSync(join(sandbox, 'out', 'wf-a.pdf')) &&
+    existsSync(join(sandbox, 'out', 'wf-c.pdf'))
   ) {
     pass('generate-pdf --batch exits 1 when the results manifest write fails despite all renders succeeding');
   } else {
