@@ -127,15 +127,25 @@ export { extractSkills };
  * so a malformed profile degrades to "slightly over-eager" rather than
  * "no known skills at all", which would flood the gap map with false gaps.
  *
+ * That fallback re-opens the exact hole this function closes: the raw text
+ * still carries its comments, so an unparseable profile can register
+ * `# not using Kubernetes anymore` as a known skill again. Degrading is still
+ * the right default, but doing it SILENTLY is what made the original bug
+ * expensive — "suppressed because known" was indistinguishable from "never
+ * appeared". `onParseFailure` lets the caller say so out loud. Omit it and the
+ * function stays pure, which is how the self-tests use it.
+ *
  * @param {string} raw
+ * @param {(err: Error) => void} [onParseFailure]  called before falling back
  * @returns {string}
  */
-export function yamlValueText(raw) {
+export function yamlValueText(raw, onParseFailure) {
   if (!raw) return '';
   let doc;
   try {
     doc = yamlLoad(raw);
-  } catch {
+  } catch (err) {
+    if (onParseFailure) onParseFailure(err);
     return raw;
   }
   const out = [];
@@ -181,10 +191,33 @@ export function stripMarkdownComments(raw) {
  *
  * @param {string} cvRaw       raw cv.md (or cv-example.md)
  * @param {string} profileRaw  raw config/profile.yml
+ * @param {(err: Error) => void} [onProfileParseFailure]  forwarded to yamlValueText
  * @returns {string}
  */
-export function knownSkillsText(cvRaw, profileRaw) {
-  return [stripMarkdownComments(cvRaw), yamlValueText(profileRaw)].join('\n');
+export function knownSkillsText(cvRaw, profileRaw, onProfileParseFailure) {
+  return [
+    stripMarkdownComments(cvRaw),
+    yamlValueText(profileRaw, onProfileParseFailure),
+  ].join('\n');
+}
+
+/**
+ * The one warning for an unparseable profile, shared by both CLI paths so they
+ * cannot word it differently or forget it independently.
+ *
+ * stderr, not stdout: stdout carries the JSON contract that the `upskill` mode
+ * and any downstream tooling parse, and a warning line there would break it.
+ *
+ * @param {Error} err
+ */
+function warnProfileUnparseable(err) {
+  const detail = String(err?.message ?? '').split('\n')[0];
+  console.error(
+    `upskill: warning — config/profile.yml could not be parsed (${detail}). ` +
+    'Falling back to its raw text, so comments in it may still register as ' +
+    'known skills and be suppressed from the gap map. Fix the YAML to restore ' +
+    'comment-aware extraction.'
+  );
 }
 
 /**
@@ -405,6 +438,7 @@ function analyze(minReports) {
   const knownText = knownSkillsText(
     readOptionalText(CV_FILE),
     readOptionalText(PROFILE_FILE),
+    warnProfileUnparseable,
   );
   const knownSkills = extractSkills(knownText);
 
@@ -676,6 +710,40 @@ soft_gaps:
       failures.push('known-skills: unparseable YAML should fall back to raw text');
     }
 
+    // ...but that fallback re-exposes the bug, so it must not be silent. The
+    // caller has to be told, or a malformed profile quietly reinstates exactly
+    // the suppression this fix removes.
+    {
+      const badProfile = '# We dropped Kubernetes.\nkey: [unclosed\n  bad: : :';
+      let notified = 0;
+      const text = yamlValueText(badProfile, () => { notified++; });
+      if (notified !== 1) {
+        failures.push(`known-skills: unparseable YAML must notify the caller exactly once (got ${notified})`);
+      }
+      if (!text.includes('unclosed')) {
+        failures.push('known-skills: notifying must not change the raw-text fallback');
+      }
+      // The leak the warning exists to announce — assert it is real, so this
+      // test cannot pass because the fixture stopped being malformed.
+      if (!extractSkills(text).has('Kubernetes')) {
+        failures.push('known-skills: malformed-YAML fixture no longer leaks — rewrite it, not the warning');
+      }
+      // Valid YAML must stay quiet: a warning on every run is noise, and noise
+      // is how a real one gets ignored.
+      let spurious = 0;
+      yamlValueText('skills:\n  - Python\n', () => { spurious++; });
+      if (spurious !== 0) {
+        failures.push('known-skills: valid YAML must not emit a parse-failure warning');
+      }
+      // knownSkillsText must forward the callback — the CLI paths rely on it,
+      // and a dropped forward would silently disable both warnings at once.
+      let forwarded = 0;
+      knownSkillsText('# CV\n', badProfile, () => { forwarded++; });
+      if (forwarded !== 1) {
+        failures.push(`known-skills: knownSkillsText must forward the parse-failure callback (got ${forwarded})`);
+      }
+    }
+
     if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
       failures.push('known-skills: markdown comment not stripped');
     }
@@ -840,7 +908,10 @@ if (urlTextIdx !== -1 || directUrl) {
     if (!cvRaw) cvRaw = readOptionalText(join(CAREER_OPS, 'cv-example.md'));
 
     const { gaps: gapList, excludedAsKnown, knownSkills } =
-      computeTargetedGaps(targetText, knownSkillsText(cvRaw, profileRaw));
+      computeTargetedGaps(
+        targetText,
+        knownSkillsText(cvRaw, profileRaw, warnProfileUnparseable),
+      );
 
     console.log(JSON.stringify({
       mode: 'targeted',
