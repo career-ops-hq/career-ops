@@ -22,6 +22,11 @@
 **ATURAN: JANGAN PERNAH menuliskan metrik dari proof point secara hardcode.** Baca metrik dari `cv.md` dan `article-digest.md` pada saat evaluasi.
 **ATURAN: Untuk metrik artikel/proyek, `article-digest.md` lebih diutamakan daripada `cv.md`** (`cv.md` bisa memuat angka yang lebih lama).
 
+<!-- guardrail:authorship -->
+**RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
+<!-- guardrail:no-fabrication -->
+**RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
 ---
 
 ## North Star -- Role target
