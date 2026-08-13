@@ -118,6 +118,22 @@ if (/jd_prefetch_words="\$\{jd_prefetch_words\/\/\[/.test(SRC) || /jd_prefetch_w
   fail('jd_prefetch_words integer sanitization is missing — non-integer node output causes bash arithmetic error');
 }
 
+// The curl call must use `-- "$url"` to separate options from the URL operand.
+// A URL starting with `-` would otherwise be parsed as a curl flag (flag injection).
+if (/-- "\$url"/.test(SRC)) {
+  pass('curl uses -- before $url (URL-as-flag injection prevented)');
+} else {
+  fail('curl is missing "-- \\"$url\\"" — a URL starting with - would be parsed as a flag');
+}
+
+// The node word-count snippet must use process.argv[1] (not "$jd_file" expanded into the JS)
+// to prevent shell injection if the temp path ever contains characters meaningful to JavaScript.
+if (/readFileSync\(process\.argv\[1\]/.test(SRC)) {
+  pass('node snippet reads file via process.argv[1] (not shell-expanded path in JS string — injection safe)');
+} else {
+  fail('node snippet does not use process.argv[1] — a special-char temp path could cause JS parse error');
+}
+
 // jd_file must be cleaned up in the rm -f line alongside resolved_prompt.
 if (/rm -f "\$resolved_prompt" "\$jd_file"/.test(SRC) || /rm -f "\$jd_file"/.test(SRC)) {
   pass('$jd_file is removed during cleanup (no temp file leak)');
@@ -372,6 +388,60 @@ if (!wordCountMatch) {
         pass('curl failure: file stays empty → WebFetch fallback fires');
       } else {
         fail(`curl failure: expected empty file, got size=${size3}`);
+      }
+
+      // Case 4: exactly 79 words → truncated (< 80)
+      const html79 = '<p>' + 'word '.repeat(79).trim() + '</p>';
+      const script4 = join(work, 'case4.sh');
+      writeFileSync(script4, buildScript(html79));
+      const result4 = execFileSync(bash, [script4], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [words4, size4] = result4.split('|').map(Number);
+      if (size4 === 0) {
+        pass(`79-word HTML in bash: file truncated (words=${words4}) → WebFetch fallback fires`);
+      } else {
+        fail(`79-word HTML in bash: expected truncated, got words=${words4} size=${size4}`);
+      }
+
+      // Case 5: exactly 80 words → file kept (threshold is < 80, not <=)
+      const html80 = '<p>' + 'word '.repeat(80).trim() + '</p>';
+      const script5 = join(work, 'case5.sh');
+      writeFileSync(script5, buildScript(html80));
+      const result5 = execFileSync(bash, [script5], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [words5, size5] = result5.split('|').map(Number);
+      if (size5 > 0) {
+        pass(`80-word HTML in bash: file kept (words=${words5}, size=${size5}) — threshold is strict <`);
+      } else {
+        fail(`80-word HTML in bash: expected kept file, got words=${words5} size=${size5}`);
+      }
+
+      // Case 6: curl not in PATH → file stays empty → WebFetch fallback fires.
+      // Remove curl from PATH so `command -v curl` fails and the block is skipped.
+      const buildNoCurlScript = () => {
+        const jdFilePath = join(work, 'jd-nocurl.html');
+        return [
+          '#!/usr/bin/env bash',
+          `jd_file=${JSON.stringify(jdFilePath)}`,
+          `> "$jd_file"`,  // mktemp creates empty file
+          `prefetch_min_words=80`,
+          `jd_prefetch_words=0`,
+          // Remove curl from PATH
+          `export PATH="$(echo "$PATH" | tr ':' '\\n' | grep -v curl | tr '\\n' ':')"`,
+          // The actual guard from batch-runner.sh
+          `if command -v curl >/dev/null 2>&1; then`,
+          `  echo 'ERROR: curl should not be found in this test' >&2`,
+          `fi`,
+          `file_size=$(wc -c < "$jd_file" 2>/dev/null || echo 0)`,
+          `printf '%s|%s\\n' "$jd_prefetch_words" "$file_size"`,
+        ].join('\n');
+      };
+      const script6 = join(work, 'case6.sh');
+      writeFileSync(script6, buildNoCurlScript());
+      const result6 = execFileSync(bash, [script6], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [, size6] = result6.split('|').map(Number);
+      if (size6 === 0) {
+        pass('curl absent from PATH: file stays empty → WebFetch fallback fires');
+      } else {
+        fail(`curl absent: expected empty file, got size=${size6}`);
       }
     }
   } finally {
