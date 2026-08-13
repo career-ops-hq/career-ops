@@ -143,11 +143,13 @@ const mkCtx = (pages) => ({
 // so a future edit doesn't silently regress it (#2706).
 {
   const pacingDelays = [];
+  let fetchCount = 0;
   const pacingCtx = {
     transport: 'http',
     sleep: async (ms) => { pacingDelays.push(ms); },
     fetchJson: async () => { throw new Error('fetchJson should not be called'); },
     fetchText: async (url) => {
+      fetchCount++;
       const pr = Number(new URL(url).searchParams.get('pr'));
       if (pr === 0) return page(mkCard(1, 'Pacing A'), mkCard(2, 'Pacing B'));
       if (pr === 1) return page(mkCard(3, 'Pacing C'));
@@ -160,10 +162,10 @@ const mkCtx = (pages) => ({
   } else {
     fail(`icims.fetch() pacing: expected >=1 sleep call all >= 250 ms, got ${JSON.stringify(pacingDelays)}`);
   }
-  if (pacingDelays.length > 0 && pacingDelays[0] === 0) {
-    fail('icims.fetch() should NOT sleep before the first page');
+  if (pacingDelays.length === fetchCount - 1) {
+    pass(`icims.fetch() does not sleep before page 0 — ${fetchCount} fetches, ${pacingDelays.length} sleep(s) (one per non-first page)`);
   } else {
-    pass('icims.fetch() does not sleep before the first page (page 0 has zero added latency)');
+    fail(`icims sleep count: expected ${fetchCount - 1} (one per non-first page), got ${pacingDelays.length}`);
   }
 }
 
