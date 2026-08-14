@@ -16,6 +16,11 @@ test("report number is anchored on the markdown-link form, not the first digit a
   // fed the wrong CV to an application under the old "first digit run"
   // regex.
   assert.equal(reportNumberFromCell("re-evaluated 2026-08-05, see [041](reports/041-acme-2026-08-05.md)"), 41);
+  // A bracketed number with no link destination is not a link — a note like
+  // "see [010] before [011](...)" must resolve to 11, never to the number
+  // that merely happens to sit in brackets first.
+  assert.equal(reportNumberFromCell("[010]"), null);
+  assert.equal(reportNumberFromCell("see [010] before [011](reports/011-acme-2026-08-05.md)"), 11);
 });
 
 test("PDF selection uses the exact report, not the newest row", () => {
