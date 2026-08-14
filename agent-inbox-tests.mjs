@@ -14,16 +14,19 @@
  *      the personal queue isn't accidentally tracked.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
+ *   8. The lock underneath 7 is never held by two processes at once. 7 reports
+ *      WHAT was lost; 8 reports whether the lock is WHY, so a red run separates
+ *      "two writers got in" from "a write went missing" without a round trip.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -186,6 +189,111 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
   const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
   check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('8. the lock is never held by two processes at once');
+{
+  // Case 7 says WHAT was lost. This says WHETHER THE LOCK IS THE REASON.
+  //
+  // When 7 goes red on windows-latest the log reads `kept=27 of 30` with every
+  // child exiting 0, and two very different explanations fit that equally well:
+  //
+  //   - the lock let two writers in at once, so their appends interleaved and
+  //     one overwrote the other; or
+  //   - the lock held perfectly and the append itself lost a write.
+  //
+  // Nothing in 7 separates them, so each red run costs a round trip of guessing.
+  // This case answers it directly by measuring the property in question —
+  // mutual exclusion — instead of its downstream symptom.
+  //
+  // Each child records its own hold interval to its OWN file. That is
+  // deliberate: a shared log would reintroduce the concurrent-append question
+  // under test, and a line lost from it could not be told apart from a lock
+  // failure. Separate files keep the two independent. The parent then looks for
+  // overlapping [enter, exit] intervals — any overlap means two processes were
+  // inside the critical section together.
+  //
+  // Read the pair together:
+  //   7 red + 8 green  -> the lock held; suspect the append.
+  //   7 red + 8 red    -> the lock was double-held; the append is downstream.
+  //   8 red alone      -> a lock bug that has not yet cost an item.
+  const dir = tmp('inbox-holds-');
+  const outDir = join(dir, 'holds');
+  mkdirSync(outDir);
+  const N = 30;
+  const HOLD_MS = 8;
+  // Every child waits for a shared wall-clock start before it even tries to
+  // acquire, so all N contend at once.
+  //
+  // This barrier is the difference between a test and a decoration. Without it
+  // the children simply start when `spawn` gets round to them — hundreds of
+  // milliseconds apart — and a short hold then never overlaps ANOTHER hold even
+  // when there is no lock at all. Verified: with mutual exclusion removed
+  // outright, the un-barriered version of this case still passed. Staggered
+  // starts were doing the serialising, not the lock.
+  const startAt = Date.now() + 1200;
+
+  // Small enough to be obviously correct, and it drives the SAME
+  // withPipelineLock that add() uses — this is the real lock, not a model of it.
+  const holder = join(dir, 'hold-once.mjs');
+  writeFileSync(holder, `
+import { writeFileSync } from 'node:fs';
+import { withPipelineLock } from ${JSON.stringify(pathToFileURL(join(ROOT, 'pipeline-lock.mjs')).href)};
+const [,, target, out, id, startAt] = process.argv;
+// Spin to the barrier rather than sleeping to it: a timer would return control
+// to the loop and let this process drift behind the others by a scheduling
+// slice, which is exactly the stagger the barrier exists to remove.
+while (Date.now() < Number(startAt)) { /* wait for the others */ }
+try {
+  await withPipelineLock(target, () => {
+    const enter = process.hrtime.bigint();
+    // Busy-wait rather than await: the critical section has to occupy real
+    // wall-clock time without yielding, so an overlap is a genuine overlap and
+    // not two holds that merely interleaved on the event loop.
+    const until = Date.now() + ${HOLD_MS};
+    while (Date.now() < until) { /* hold it */ }
+    writeFileSync(out, JSON.stringify({ id, enter: enter.toString(), exit: process.hrtime.bigint().toString() }));
+  });
+} catch (err) {
+  writeFileSync(out, JSON.stringify({ id, error: err?.code ?? err?.name ?? 'ERR' }));
+}
+`, 'utf8');
+
+  const target = join(dir, 'pipeline.md');
+  await Promise.all(Array.from({ length: N }, (_, i) => new Promise((res) => {
+    const p = spawn(NODE, [holder, target, join(outDir, `${i}.json`), String(i), String(startAt)], {
+      cwd: dir, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    p.on('exit', () => res());
+  })));
+
+  const holds = [];
+  const errored = [];
+  for (const f of readdirSync(outDir)) {
+    const rec = JSON.parse(readFileSync(join(outDir, f), 'utf8'));
+    if (rec.error) errored.push(`#${rec.id}:${rec.error}`);
+    else holds.push({ id: rec.id, enter: BigInt(rec.enter), exit: BigInt(rec.exit) });
+  }
+
+  // An acquire that failed outright is a different fault from a double-hold,
+  // and folding them together would make this case lie about which happened.
+  check(`all ${N} holders acquired the lock`, errored.length === 0, errored.join(', '));
+
+  holds.sort((a, b) => (a.enter < b.enter ? -1 : a.enter > b.enter ? 1 : 0));
+  const overlaps = [];
+  for (let i = 1; i < holds.length; i++) {
+    const prev = holds[i - 1];
+    const cur = holds[i];
+    if (cur.enter < prev.exit) {
+      overlaps.push(`#${prev.id} held until ${prev.exit}, #${cur.id} entered ${cur.enter}`);
+    }
+  }
+  check(
+    'no two holders were inside the critical section at the same time',
+    overlaps.length === 0,
+    overlaps.slice(0, 3).join(' | '),
+  );
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
