@@ -219,6 +219,24 @@ try {
   if (getroProbePages === 1) pass('getro.fetch() honors ctx.maxPages as a health-probe cap');
   else fail(`getro.fetch() made ${getroProbePages} requests despite ctx.maxPages=1`);
 
+  // A multi-page board must pace same-board POSTs; 150 ms was enough to
+  // trigger the observed Datadog WAF ban (#2706).
+  const getroDelays = [];
+  let getroPagedCalls = 0;
+  await getro.fetch(okEntry, {
+    maxPages: 2,
+    sleep: async (ms) => { getroDelays.push(ms); },
+    fetchJson: async () => {
+      getroPagedCalls++;
+      return { results: { count: 21, jobs: [{ title: `P${getroPagedCalls}`, url: `https://jobs.examplevc.example/p${getroPagedCalls}`, organization: { name: 'Acme' } }] } };
+    },
+  });
+  if (getroPagedCalls === 2 && getroDelays.length === 1 && getroDelays[0] >= 250) {
+    pass(`getro.fetch() paces follow-up pages at >= 250 ms (${getroDelays[0]} ms) (#2706)`);
+  } else {
+    fail(`getro.fetch() WAF pacing: calls=${getroPagedCalls}, delays=${JSON.stringify(getroDelays)}`);
+  }
+
   // Postings older than getro_max_age_days stop the walk (newest-first pagination bound).
   const staleCreatedAt = Math.floor((Date.now() - 200 * 86_400_000) / 1000);
   let getroAgePages = 0;
