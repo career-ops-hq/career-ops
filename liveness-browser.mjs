@@ -325,32 +325,41 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     // an empty document and changes nothing. Poll until it has content, bounded.
     // The cost is only paid on pages that actually have a same-origin child
     // frame, so the ATS that render inline are unaffected.
+    // Frame aggregation is an enhancement, never a requirement. Callers may pass
+    // a lightweight page object that only implements goto/url/evaluate — the
+    // test doubles in test-all.mjs do — and such a caller must keep getting the
+    // top-level verdict rather than a navigation_error.
+    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
+
     const childFrames = () =>
-      page.frames().filter((frame) => {
-        if (frame === page.mainFrame()) return false;
-        try {
-          return sameOrigin(frame.url() || '', finalUrl); // excludes about:blank, ads, tag managers
-        } catch {
-          return false;
-        }
-      });
+      !supportsFrames
+        ? []
+        : page.frames().filter((frame) => {
+            if (frame === page.mainFrame()) return false;
+            try {
+              return sameOrigin(frame.url() || '', finalUrl); // excludes about:blank, ads, tag managers
+            } catch {
+              return false;
+            }
+          });
 
     if (childFrames().length > 0) {
       const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
+      // Wait for EVERY qualifying frame, not merely the first one to fill: with
+      // two same-origin frames the posting could otherwise be read while still
+      // empty. Measured across five iCIMS tenants there is exactly one
+      // qualifying frame per page, so in practice this is the same loop.
       for (;;) {
-        let filled = false;
+        let anyEmpty = false;
         for (const frame of childFrames()) {
           try {
             const probe = await frame.evaluate(() => document.body?.innerText ?? '');
-            if (probe.trim().length > 0) {
-              filled = true;
-              break;
-            }
+            if (!probe.trim()) anyEmpty = true;
           } catch {
             // detached mid-poll; try again on the next tick
           }
         }
-        if (filled || Date.now() >= deadline) break;
+        if (!anyEmpty || Date.now() >= deadline) break;
         await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
       }
     }
