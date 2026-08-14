@@ -51,6 +51,18 @@ console.log('\n🧪 Testing updater rollback behavior (#2015)...');
   } else {
     fail('stale system pruning would delete files from an empty remote tree');
   }
+
+  const userDeleted = staleSystemFiles(
+    ['data/applications.md', 'tests/old.test.mjs'],
+    ['tests/new.test.mjs'],
+    ['tests/', 'data/'],
+    ['data/'],
+  );
+  if (userDeleted.includes('tests/old.test.mjs') && !userDeleted.includes('data/applications.md')) {
+    pass('stale system pruning excludes an upstream-deleted user-layer file');
+  } else {
+    fail(`stale system pruning would select a user-layer file: ${JSON.stringify(userDeleted)}`);
+  }
 }
 
 // ── 1. protectedPaths: a user's pre-staged work survives a rollback ──
