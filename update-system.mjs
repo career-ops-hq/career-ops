@@ -1117,6 +1117,100 @@ async function check() {
   }));
 }
 
+// ── .gitignore RECONCILE ────────────────────────────────────────
+
+// The header the appended block is written under. Purely cosmetic: the
+// reconciler keys off pattern presence, never off this marker, so a user who
+// deletes or moves it loses nothing.
+const GITIGNORE_BLOCK_HEADER = [
+  '# Added by career-ops update-system.mjs.',
+  '# System-owned ignore rules that were missing from this file. Your own rules',
+  '# are never modified, reordered or removed: the updater only appends patterns',
+  '# it cannot already find somewhere in this file. Reordering these lines, or',
+  '# moving them elsewhere in the file, is safe and will not bring them back.',
+  '# Deleting or commenting one out is not: they are system-owned, several of',
+  '# them guard files holding personal data, and the next update re-adds any',
+  '# that is no longer present as a live pattern.',
+];
+
+/**
+ * Reconcile a local .gitignore against the upstream one by appending only the
+ * system-owned patterns it is missing.
+ *
+ * .gitignore cannot join SYSTEM_PATHS: unlike every other system file it is
+ * co-owned. Users add their own rules to it, and the raw `git checkout` the
+ * update stage performs would delete those silently, which is a worse bug than
+ * the one this fixes. So it gets the append-if-missing treatment
+ * agent-inbox.mjs:ensureGitignored() already applies to its own single rule,
+ * generalized to the whole upstream rule set.
+ *
+ * Deliberately append-only. An upstream rule that was REMOVED or REWRITTEN
+ * (e.g. `*.bak` becoming `*.bak*`) leaves the superseded line in place, because
+ * there is no way to tell a stale system rule from a user rule the same shape.
+ * A redundant ignore rule is harmless; deleting a user's is not.
+ *
+ * Ordering caveat: missing patterns are appended at the end in upstream order,
+ * which preserves each negation's position relative to the pattern it negates
+ * *within the appended block*. A user-authored negation earlier in the file can
+ * still be overridden by a newly appended pattern, since later lines win in
+ * .gitignore. That is the correct precedence for a system rule, and it is the
+ * only ordering that does not require rewriting lines we do not own.
+ *
+ * @param {string} localText - Current .gitignore content.
+ * @param {string} upstreamText - Upstream .gitignore content (FETCH_HEAD).
+ * @returns {{ text: string, added: string[] }} Reconciled content and the
+ *   patterns appended. `added` is empty and `text` is byte-identical to
+ *   `localText` when nothing was missing, which is what makes repeated runs
+ *   idempotent and keeps a no-op update out of the commit.
+ */
+export function reconcileGitignore(localText, upstreamText) {
+  // One set for both patterns and comments. A comment can never collide with a
+  // pattern (only comments start with '#'), so membership answers both "does
+  // this install already have this rule?" and "has this rationale block already
+  // been copied by an earlier update?" with no second structure to keep in sync.
+  const seen = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+
+  const block = [];
+  const added = [];
+  let pendingComments = [];
+  for (const raw of upstreamText.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') { pendingComments = []; continue; }
+    if (line.startsWith('#')) { pendingComments.push([raw, line]); continue; }
+    if (seen.has(line)) { pendingComments = []; continue; }
+    // Carry the rule's own rationale across with it. Several of these comments
+    // are the only record of WHY a path is ignored (which ones hold PII, why a
+    // glob has a trailing `*`), and an install that gets the pattern without
+    // the reason is one edit away from removing it as noise.
+    for (const [rawComment, comment] of pendingComments) {
+      if (!seen.has(comment)) { block.push(rawComment); seen.add(comment); }
+    }
+    pendingComments = [];
+    // Emitted verbatim, compared normalized. A pattern whose trailing space is
+    // backslash-escaped (`secret\ `) is significant in .gitignore and would be
+    // corrupted by writing back the trimmed form used for matching.
+    block.push(raw);
+    added.push(line);
+    // Guard against an upstream file that lists the same pattern twice.
+    seen.add(line);
+  }
+
+  if (added.length === 0) return { text: localText, added };
+
+  // Match the local file's dominant line ending. A checkout on Windows under
+  // `core.autocrlf=true` leaves CRLF on disk, and appending LF-only lines to it
+  // makes `git diff` show the whole file as changed.
+  const crlfCount = (localText.match(/\r\n/g) || []).length;
+  const lfCount = (localText.match(/\n/g) || []).length - crlfCount;
+  const eol = crlfCount > lfCount ? '\r\n' : '\n';
+  const body = [...GITIGNORE_BLOCK_HEADER, ...block].join(eol);
+  // An empty (or whitespace-only) local file takes no separator, or the result
+  // would open with two blank lines.
+  const head = localText.replace(/\s*$/, '');
+  const separator = head === '' ? '' : `${eol}${eol}`;
+  return { text: `${head}${separator}${body}${eol}`, added };
+}
+
 // ── APPLY ───────────────────────────────────────────────────────
 
 async function apply() {
@@ -1349,6 +1443,59 @@ async function apply() {
         // silently skipping the prune step.
         console.error(`Stale-file prune step failed for ${prunePrefix}: ${err.message}`);
       }
+    }
+
+    // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
+    // above; this one cannot be, because it is the one system file users also
+    // write to. A raw checkout would delete their rules silently — the same
+    // failure shape as the bug being fixed. Append what is missing, touch
+    // nothing else. The consequence of skipping it entirely for 43 releases was
+    // that new ignore rules never reached an existing install, so a candidate's
+    // CV or tracker could sit unignored in a fork after a reflexive `git add .`
+    // — exactly what tests/user-layer-gitignored.test.mjs exists to prevent,
+    // and what it could only prevent inside this repository.
+    try {
+      const gitignorePath = join(ROOT, '.gitignore');
+      const upstreamGitignore = gitQuiet('show', 'FETCH_HEAD:.gitignore');
+      // Uncommitted local edits to .gitignore are the user's, and that is a
+      // routine state rather than an exotic one: agent-inbox.mjs's own
+      // ensureGitignored() appends a rule without committing it. Such a file
+      // must stay OUT of `updated`, for the two reasons #2337 established for
+      // system files. `updated` is the rollback pathspec, and revertPaths()
+      // runs a bare `git checkout HEAD -- <path>` whose protectedPaths guard
+      // covers only newly ADDED files, so a tracked .gitignore would be hard
+      // reset and the user's uncommitted rules destroyed. `updated` is also the
+      // commit pathspec, so their edit would be swept in under an "auto-update
+      // system files" message. The reconciled rules are live on disk either
+      // way, which is all that ignoring actually requires.
+      const gitignoreWasDirty = initialStatusPaths.has('.gitignore');
+      const trackGitignore = () => {
+        if (!gitignoreWasDirty) {
+          updated.push('.gitignore');
+          return;
+        }
+        console.log('.gitignore had uncommitted local changes. The new rules are applied but left');
+        console.log('  unstaged, so they land in your own commit rather than in this update.');
+      };
+      if (!existsSync(gitignorePath)) {
+        // No local file at all (deleted by hand, or a checkout predating it).
+        // Nothing is co-owned yet, so the upstream copy can be written whole.
+        writeFileSync(gitignorePath, `${upstreamGitignore}\n`);
+        trackGitignore();
+        console.log('Restored .gitignore (it was missing).');
+      } else {
+        const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
+        if (added.length > 0) {
+          writeFileSync(gitignorePath, text);
+          trackGitignore();
+          console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      // Never abort an update over this, but never swallow it either: a silent
+      // skip here is precisely how the original bug stayed invisible.
+      console.error(`Could not reconcile .gitignore: ${err.message}`);
+      console.error('Your own rules were left untouched. Compare manually with: git diff FETCH_HEAD -- .gitignore');
     }
 
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
