@@ -158,3 +158,41 @@ test("isShellSafeCompanyName: refuses anything that could close the quote", () =
   assert.equal(isShellSafeCompanyName("x".repeat(81)), false);
   assert.equal(isShellSafeCompanyName(undefined), false);
 });
+
+// ── the tracker-additions TSV row (#1298) ───────────────────────────────────
+//
+// The web is a WRITER of batch/tracker-additions/*.tsv, not just a reader of the
+// tracker. merge-tracker accepts 9 fields forever, so a stale template can never
+// go red — it just silently leaves every web-evaluated job out of the URL dedup.
+// Nothing else in this repo can catch that, which is why it is asserted here.
+
+/** The example row the evaluate prompt tells the agent to append. */
+function exampleTsvRow(prompt) {
+  const line = prompt.split("\n").find((l) => l.includes("\t"));
+  assert.ok(line, "the evaluate prompt must contain a literal tab-separated example row");
+  return line.trim().split("\t");
+}
+
+test("buildPrompt: the evaluate prompt's TSV row carries all 10 fields, url last", () => {
+  // Given an evaluate run
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+  const fields = exampleTsvRow(prompt);
+
+  // Then the row has the 10 fields merge-tracker reads, with the posting URL last
+  assert.equal(fields.length, 10, `expected 10 tab-separated fields, got ${fields.length}: ${JSON.stringify(fields)}`);
+  assert.match(fields[9], /posting URL/i, "the 10th field must be the posting URL");
+  // ...and the prose agrees, so the agent is not told "9" while shown 10
+  assert.match(prompt, /10 TAB-separated columns/);
+});
+
+test("buildPrompt: the evaluate prompt demands an EMPTY url field, never a placeholder", () => {
+  // Given merge-tracker's parseTsvExtras drops "N/A"/"-" precisely so they can't
+  // be misread as the row's LOCATION, and an unconditional template is one an
+  // agent actually follows
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+
+  // Then the instruction says to write all 10 fields and leave the last empty
+  assert.match(prompt, /ALWAYS write all 10 fields/i);
+  assert.match(prompt, /EMPTY if there is no posting URL/i);
+  assert.match(prompt, /never "N\/A"/i);
+});
