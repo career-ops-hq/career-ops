@@ -38,16 +38,15 @@ export async function POST(req: Request) {
   }
 
   const lines = md.split("\n");
-  // Find the Status and Report column indices from the header row (robust to
-  // 8- vs 9-col and an optional Via column that shifts everything right).
-  // Also remember the header line's index so the row-scan below can never
-  // target it (a request with n: "#" must not match the header's own "#"
-  // cell text and corrupt the table's structure). The separator row (e.g.
-  // "|---|---|...|") is excluded generically in that scan instead, since it
-  // normally follows immediately after the header — this loop breaks at the
-  // header before ever reaching it.
+  // Find the Status column index from the header row (robust to 8- vs 9-col
+  // and an optional Via column that shifts everything right). Also remember
+  // the header line's index so the row-scan below can never target it (a
+  // request with n: "#" must not match the header's own "#" cell text and
+  // corrupt the table's structure). The separator row (e.g. "|---|---|...|")
+  // is excluded generically in that scan instead, since it normally follows
+  // immediately after the header — this loop breaks at the header before
+  // ever reaching it.
   let statusIdx = 6;
-  let reportIdx = -1;
   let headerLineIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -56,7 +55,6 @@ export async function POST(req: Request) {
     const sIdx = cells.findIndex((c) => c === "status");
     if (sIdx > 0) {
       statusIdx = sIdx;
-      reportIdx = cells.findIndex((c) => c === "report");
       headerLineIdx = i;
       break;
     }
@@ -71,24 +69,18 @@ export async function POST(req: Request) {
     }
   }
 
-  // Resolve the row by its `#` cell first (the historical primary key), then
-  // fall back to the report number parsed from its Report cell. The tracker `#`
-  // and the report's own leading number can drift apart (a re-sequenced `#`
-  // column), and the read side already resolves links/lookups by report number
-  // (#1673, #1931). Without this fallback the writeback silently 404s on any row
-  // whose `#` no longer equals its report number, so the client-side status
-  // dropdown reverts and the row can never be updated from the web UI.
+  // Resolve the row by its `#` cell — the tracker's own primary key. A
+  // report-number fallback was considered here (the read side resolves by
+  // report number too, #1673/#1931) but every current caller already sends
+  // the row's own `#` (decision-card.tsx, status-select.tsx, the assistant
+  // registry), so the fallback had no live caller to serve — only the risk
+  // of one: if row #10 is ever deleted or renumbered, n:"10" would silently
+  // start matching whichever OTHER row's Report cell happens to be [010],
+  // writing status to the wrong role with no error. A write path should
+  // refuse an ambiguous identifier, not guess it — so this stays a single,
+  // unambiguous `#`-cell match.
   const target = String(n).trim();
-  const targetNum = Number.parseInt(target, 10);
-  const reportNumOf = (parts: string[]): number => {
-    if (reportIdx < 0 || reportIdx >= parts.length) return NaN;
-    const m = parts[reportIdx].match(/\[(\d+)\]/); // "[010](../reports/010-…)" → 10
-    return m ? Number.parseInt(m[1], 10) : NaN;
-  };
-
-  let primaryHit = -1; // exact `#`-cell match
-  let reportHit = -1; // report-number match (fallback)
-  const rows: string[][] = [];
+  let changed = false;
   for (let i = 0; i < lines.length; i++) {
     if (i === headerLineIdx) continue; // never let n:"#" match the header's own "#" cell
     if (!lines[i].trim().startsWith("|")) continue;
@@ -96,21 +88,11 @@ export async function POST(req: Request) {
     if (parts.length < 8) continue;
     if (statusIdx >= parts.length - 1) continue; // guard malformed row
     if (/^:?-{2,}:?$/.test(parts[1]?.trim() ?? "")) continue; // never let n:"---" match the separator row
-    rows[i] = parts;
-    if (parts[1].trim() === target) {
-      primaryHit = i;
-      break; // exact `#`-cell match always wins — no need to keep scanning for a report-number fallback
-    }
-    if (reportHit < 0 && !Number.isNaN(targetNum) && reportNumOf(parts) === targetNum) reportHit = i;
-  }
-
-  const hit = primaryHit >= 0 ? primaryHit : reportHit;
-  let changed = false;
-  if (hit >= 0) {
-    const parts = rows[hit];
+    if (parts[1].trim() !== target) continue;
     parts[statusIdx] = ` ${canon} `;
-    lines[hit] = parts.join("|");
+    lines[i] = parts.join("|");
     changed = true;
+    break;
   }
   if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
 
