@@ -633,6 +633,7 @@ export async function inlineLocalFonts(html) {
  *   baseDir?: string,
  *   reportNum?: string,
  *   inputPath?: string,
+ *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
@@ -642,12 +643,13 @@ export async function inlineLocalFonts(html) {
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
   const baseDir = opts.baseDir || process.cwd();
+  const outputRoot = opts.workspaceRoot || workspaceRoot;
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
-  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+  if (!isWorkspaceOutputPath(outputPath, outputRoot)) {
     throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
   }
 
