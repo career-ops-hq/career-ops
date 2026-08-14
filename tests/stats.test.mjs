@@ -225,6 +225,22 @@ try {
     fail('stats.mjs --summary missing header');
   }
 
+  // --help smoke: must print usage, exit 0, and not read any data file.
+  const helpOut = run(NODE, [join(ROOT, 'stats.mjs'), '--help']);
+  if (helpOut && helpOut.includes('Usage:') && helpOut.includes('--summary') && helpOut.includes('--help|-h')) {
+    pass('stats.mjs --help prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs --help missing usage output: ${helpOut}`);
+  }
+
+  // -h alias smoke: same behavior as --help.
+  const hOut = run(NODE, [join(ROOT, 'stats.mjs'), '-h']);
+  if (hOut && hOut.includes('Usage:') && hOut.includes('--help|-h')) {
+    pass('stats.mjs -h prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs -h missing usage output: ${hOut}`);
+  }
+
   // --summary cold-classification integration (#2123): the CLI reads its
   // fixed data/ paths, so exercise it against real (temporary) tracker +
   // follow-ups files at those exact paths, then restore whatever was there.

@@ -21,7 +21,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 
@@ -387,7 +387,18 @@ export function computeRunStats(content) {
     });
   }
   if (rows.length === 0) return null;
-  const completed = rows.filter((r) => r.status !== 'failed');
+  // Inclusion by 'completed', not exclusion by known failure names: any
+  // status a future scan.mjs writes is excluded from trend averages until
+  // this aggregator learns what it means. Rows from pre-status files default
+  // to 'completed' above, so old data keeps counting.
+  //
+  // No-op on today's data: scan.mjs only ever writes 'completed' or 'failed',
+  // and both predicates ('!== failed' vs '=== completed') agree on those two.
+  // The switch is a guard for a future third status (e.g. 'aborted'), not a
+  // behavior change now. One edge is reachable only by hand-editing the TSV:
+  // an explicitly empty status flips from counted to failedRuns, since
+  // appendScanRunSummary always writes a non-empty status.
+  const completed = rows.filter((r) => r.status === 'completed');
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
@@ -524,8 +535,23 @@ function printSummary(stats) {
   console.log('');
 }
 
+// ── CLI flags + help ────────────────────────────────────────────────
+
+const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+
+const USAGE = `Usage:
+  node stats.mjs             # full JSON stats to stdout
+  node stats.mjs --summary   # human-readable table
+  node stats.mjs --help|-h   # print this usage block and exit`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const stats = computeAllStats();
-  if (process.argv.includes('--summary')) printSummary(stats);
-  else console.log(JSON.stringify(stats, null, 2));
+  const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+  } else {
+    const stats = computeAllStats();
+    if (args.includes('--summary')) printSummary(stats);
+    else console.log(JSON.stringify(stats, null, 2));
+  }
 }

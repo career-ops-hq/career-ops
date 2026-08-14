@@ -27,6 +27,8 @@
  * (no slashes / traversal), and server-side redirects are refused.
  */
 
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+
 const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template.
@@ -54,6 +56,9 @@ function isSafeValue(v) {
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
 //   `interpret`  — read the 200 response body to decide liveness (org-level APIs
 //                  where a 200 alone doesn't prove THIS posting is live).
+//   `api404Authoritative` — defaults to true (a 404/410 means gone). Set to
+//                  false when the provider's public API can 404 a posting that
+//                  is still genuinely live elsewhere (see the `lever` entry).
 const ATS_PROVIDERS = [
   {
     id: 'greenhouse',
@@ -75,6 +80,13 @@ const ATS_PROVIDERS = [
       return m ? { apiHost: `api.${host[1]}`, slug: m[1], id: m[2] } : null;
     },
     api: ({ apiHost, slug, id }) => `https://${apiHost}/v0/postings/${slug}/${id}`,
+    // Lever's Confidential/Internal Postings feature explicitly excludes some
+    // live postings from the public v0/postings API while the direct
+    // jobs.lever.co page keeps serving them normally. Real-world repro
+    // (2026-08-09): api.lever.co 404s two postings whose jobs.lever.co pages
+    // return 200 with the real job title and a working Apply control. A 404
+    // here is NOT proof of removal — fall through to Playwright instead.
+    api404Authoritative: false,
   },
   {
     id: 'ashby',
@@ -159,7 +171,7 @@ export function classifyAshbyBoard(json, jobId) {
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired', code: string, reason: string } | null> } | null}
+ * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired', code: string, reason: string } | null>, api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -176,7 +188,14 @@ export function resolveAtsApi(rawUrl) {
     // most providers, or (Workday) a slash-separated sequence of safe segments.
     // isSafeValue enforces the same charset + no-".." rule either way.
     if (!Object.values(parts).every(isSafeValue)) return null;
-    return { ats: provider.id, apiUrl: provider.api(parts), parts, timeoutMs: provider.timeoutMs, interpret: provider.interpret };
+    return {
+      ats: provider.id,
+      apiUrl: provider.api(parts),
+      parts,
+      timeoutMs: provider.timeoutMs,
+      interpret: provider.interpret,
+      api404Authoritative: provider.api404Authoritative !== false,
+    };
   }
   return null;
 }
@@ -195,7 +214,7 @@ export function isAtsPosting(url) {
 export async function checkLivenessViaApi(url) {
   const resolved = resolveAtsApi(url);
   if (!resolved) return null;
-  const { ats, apiUrl, parts, interpret, timeoutMs } = resolved;
+  const { ats, apiUrl, parts, interpret, timeoutMs, api404Authoritative } = resolved;
 
   // The timeout guards the whole classification (fetch + any `interpret` body read),
   // since aborting the shared signal also tears down an in-flight res.json().
@@ -206,7 +225,7 @@ export async function checkLivenessViaApi(url) {
     try {
       res = await fetch(apiUrl, {
         method: 'GET',
-        headers: { 'user-agent': 'career-ops-liveness/1.0', accept: 'application/json' },
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json' },
         redirect: 'error', // refuse server-side redirects (SSRF + ambiguity guard)
         signal: controller.signal,
       });
@@ -215,6 +234,7 @@ export async function checkLivenessViaApi(url) {
     }
 
     if (res.status === 404 || res.status === 410) {
+      if (!api404Authoritative) return null; // inconclusive → let Playwright check the real page
       return { result: 'expired', code: `${ats}_api_gone`, reason: `ATS API ${res.status} — posting removed` };
     }
     if (res.status === 200) {

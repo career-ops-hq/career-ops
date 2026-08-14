@@ -6,6 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
+import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
@@ -15,7 +16,8 @@ import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
+const norm = (s: string) => normalizeTextKey(s, " ");
 const CLI_NAMES: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",

@@ -4,6 +4,7 @@ import {
   extractDomain,
   checkCompanyMatch,
   checkRoleMatch,
+  checkRoleMatchExact,
   getAppDomains,
   matchCandidates,
   classifyReply
@@ -43,6 +44,53 @@ test('checkRoleMatch', () => {
   // Chinese role matches
   assert.ok(checkRoleMatch('邀请您参加PY01_python开发工程师的面试', 'python开发工程师'));
   assert.ok(checkRoleMatch('邀请您参加python开发工程师的面试', 'PY01_python开发工程师'));
+});
+
+test('checkRoleMatch - generic recruiting words never match alone (#2671)', () => {
+  // A signature line from an unrelated recruiter ("Talent Acquisition & Diversity")
+  // must not satisfy a role match against a "Talent Acquisition Specialist"
+  // tracker row just because "Talent" and "Acquisition" both appear >3 chars long.
+  assert.equal(
+    checkRoleMatch('Jane Doe, Talent Acquisition & Diversity, Contoso Inc.', 'Talent Acquisition Specialist'),
+    false
+  );
+  assert.equal(checkRoleMatch('Our People Operations team will be in touch.', 'People Operations Coordinator'), false);
+  assert.equal(checkRoleMatch('Please reach out to our recruiter for next steps.', 'Recruiter'), false);
+});
+
+test('checkRoleMatchExact - only a full contiguous role-title match counts', () => {
+  assert.ok(checkRoleMatchExact('Update for Software Engineer role', 'Software Engineer'));
+  assert.equal(
+    checkRoleMatchExact('Jane Doe, Talent Acquisition & Diversity, Contoso Inc.', 'Talent Acquisition Specialist'),
+    false
+  );
+  // A genuinely specific, non-generic partial word is not "exact" either —
+  // checkRoleMatchExact only credits the whole role string.
+  assert.equal(checkRoleMatchExact('邀请您参加python开发工程师的面试', 'PY01_python开发工程师'), false);
+  // Chinese compound titles have no separators to split on, so a "single part"
+  // Chinese role is still a whole-role match, not a bare single word.
+  assert.ok(checkRoleMatchExact('邀请您参加python开发工程师的面试', 'python开发工程师'));
+});
+
+test('checkRoleMatchExact - a single-word role, even a specific one, never counts standalone (CodeRabbit #2672)', () => {
+  // "Engineer" is not generic-recruiting vocabulary, but a single word gives a
+  // "whole role" check no more specificity than a bare-word check — it must
+  // fall through to the partial-match path and require corroboration, same as
+  // any other single significant word.
+  assert.equal(checkRoleMatchExact('We are excited to have you interview as an Engineer.', 'Engineer'), false);
+  // checkRoleMatch (the boolean convenience wrapper) still reports a match via
+  // the partial-word path; matchCandidates is what enforces corroboration.
+  assert.ok(checkRoleMatch('We are excited to have you interview as an Engineer.', 'Engineer'));
+});
+
+test('checkRoleMatchExact - a whitespace-only role never matches (CodeRabbit #2672)', () => {
+  // normalizeStr(' ') === '', and ''.includes('') === true for any text, so a
+  // blank role must be explicitly rejected — otherwise it would "exactly"
+  // match arbitrary text and bypass corroboration entirely. isSingleWordRole
+  // doesn't catch this: splitting a whitespace-only string on separators
+  // yields zero parts, not one.
+  assert.equal(checkRoleMatchExact('Completely unrelated message about anything at all.', '   '), false);
+  assert.equal(checkRoleMatchExact('Completely unrelated message about anything at all.', ' '), false);
 });
 
 test('getAppDomains - drops prose tokens and filenames, keeps real hostnames', () => {
@@ -264,6 +312,110 @@ test('matchCandidates - a shared ATS domain in one application does not capture 
     !results[0].signals.includes('sender-domain'),
     'a shared ATS sender must not score a domain match against an unrelated application'
   );
+});
+
+test('matchCandidates - a generic role-title word from an unrelated sender does not match (#2671)', () => {
+  const apps = [
+    { num: 30, company: 'Contoso', role: 'Talent Acquisition Specialist', notes: '' }
+  ];
+
+  const candidates = [
+    {
+      message_id: 'msg7',
+      // Different company, different domain, no company-name mention. The only
+      // overlap with the tracker row is the generic "Talent Acquisition" phrase
+      // inside an unrelated recruiter's signature line, from a different thread
+      // about a different role entirely.
+      from: 'jane.doe@fabrikam.example',
+      subject: 'Following up on your application to Fabrikam',
+      body_snippet: 'Best,\nJane Doe\nTalent Acquisition & Diversity, Fabrikam',
+      signal: null
+    }
+  ];
+
+  const results = matchCandidates(candidates, apps, []);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].application_num, null, 'a bare generic-word overlap must not be attributed to the tracker row');
+  assert.ok(!results[0].signals.includes('role-title'));
+});
+
+test('matchCandidates - a partial role-word match corroborated by company name still matches', () => {
+  const apps = [
+    { num: 31, company: 'Northwind Traders', role: 'PY01_Senior Backend Engineer', notes: '' }
+  ];
+
+  const candidates = [
+    {
+      message_id: 'msg8',
+      from: 'careers@northwindtraders.example',
+      subject: 'Interview with Northwind Traders — Backend Engineer role',
+      body_snippet: 'We would like to invite you to interview.',
+      signal: 'interview_invite'
+    }
+  ];
+
+  const results = matchCandidates(candidates, apps, []);
+
+  assert.equal(results[0].application_num, 31);
+  assert.ok(results[0].signals.includes('company-name'));
+  assert.ok(results[0].signals.includes('role-title'));
+  assert.equal(results[0].confidence, 'high');
+});
+
+test('matchCandidates - a partial role-word match corroborated by sender domain alone still matches (CodeRabbit #2672)', () => {
+  const apps = [
+    {
+      num: 32,
+      company: 'Fabrikam Systems',
+      role: 'PY01_Senior Backend Engineer',
+      notes: 'Recruiter contact: talent@fabrikam-careers.example'
+    }
+  ];
+
+  const candidates = [
+    {
+      message_id: 'msg10',
+      // Sender domain matches the recruiter contact domain in notes via
+      // getAppDomains. Neither "Fabrikam" nor "Fabrikam Systems" appears
+      // anywhere in the message text, so company-name matching cannot fire —
+      // the only corroboration available is the sender domain.
+      from: 'jane@fabrikam-careers.example',
+      subject: 'Backend Engineer — next steps',
+      body_snippet: 'We would like to invite you to interview.',
+      signal: 'interview_invite'
+    }
+  ];
+
+  const results = matchCandidates(candidates, apps, []);
+
+  assert.equal(results[0].application_num, 32);
+  assert.ok(results[0].signals.includes('sender-domain'));
+  assert.ok(results[0].signals.includes('role-title'));
+  assert.ok(!results[0].signals.includes('company-name'));
+  assert.equal(results[0].confidence, 'high');
+});
+
+test('matchCandidates - a genuinely specific role match still works standalone', () => {
+  // Regression guard: exact/near-exact and non-generic role matches must keep
+  // working without corroboration, per the existing "high confidence" fixture.
+  const apps = [
+    { num: 1, company: 'Acme Corp', role: 'Software Engineer', notes: '' }
+  ];
+
+  const candidates = [
+    {
+      message_id: 'msg9',
+      from: 'no-reply@unrelated.example',
+      subject: 'Update for Software Engineer role',
+      body_snippet: '',
+      signal: null
+    }
+  ];
+
+  const results = matchCandidates(candidates, apps, []);
+  assert.equal(results[0].application_num, 1);
+  assert.ok(results[0].signals.includes('role-title'));
 });
 
 test('classifyReply - high confidence interview fixtures', () => {
