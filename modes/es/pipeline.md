@@ -36,6 +36,7 @@ Procesa las URLs de ofertas acumuladas en `data/pipeline.md`. El candidato añad
 ## Detección inteligente de la oferta desde la URL
 
 1. **Playwright (preferido):** `browser_navigate` + `browser_snapshot`. Funciona con todas las SPAs.
+   - **Opcional — extractor CLI (`scan.extractor: cli` en `config/profile.yml`):** ejecuta `node browser-extract.mjs <url>` (`--mode jd`) en su lugar — `{ "url", "title", "text" }` compacto, menos tokens (según el portal). **Recurre en silencio** a `browser_navigate` + `browser_snapshot` si falla o no está disponible.
 2. **WebFetch (fallback):** Para páginas estáticas o cuando Playwright no está disponible.
 3. **WebSearch (último recurso):** Buscar en portales secundarios que indexen la oferta.
 

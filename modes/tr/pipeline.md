@@ -36,6 +36,7 @@
 ## URL'den İlan İçeriği Çekme
 
 1. **Playwright (tercih edilen):** `browser_navigate` + `browser_snapshot` — tüm SPA'larla çalışır.
+   - **İsteğe bağlı — CLI çıkarıcı (`config/profile.yml` içinde `scan.extractor: cli`):** bunun yerine `node browser-extract.mjs <url>` (`--mode jd`) çalıştır — kompakt `{ "url", "title", "text" }`, daha az token (portala bağlı). Hata veya eksiklik durumunda **sessizce** `browser_navigate` + `browser_snapshot`'a geri dön.
 2. **WebFetch (yedek):** Playwright mevcut değilse (toplu/headless mod). Bu durumda rapor başlığına `**Doğrulama:** doğrulanmamış (toplu mod)` ekle — kullanıcı daha sonra manuel doğrulayabilir.
 3. **WebSearch (son çare):** İlanı indeksleyen diğer platformlarda ara. WebFetch'te olduğu gibi rapor başlığına `**Doğrulama:** doğrulanmamış (toplu mod)` ekle.
 

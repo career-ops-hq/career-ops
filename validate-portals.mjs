@@ -13,7 +13,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -176,6 +177,21 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  if (config.visa_filter !== undefined) {
+    if (!isObject(config.visa_filter)) {
+      add(errors, 'visa_filter', 'visa_filter must be an object');
+    } else {
+      if (config.visa_filter.enabled !== undefined && typeof config.visa_filter.enabled !== 'boolean') {
+        add(errors, 'visa_filter.enabled', 'must be a boolean when set');
+      }
+      if (config.visa_filter.require_mention !== undefined && typeof config.visa_filter.require_mention !== 'boolean') {
+        add(errors, 'visa_filter.require_mention', 'must be a boolean when set');
+      }
+      validateKeywordList(config.visa_filter.positive, 'visa_filter.positive', errors);
+      validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
+    }
+  }
+
   if (config.search_queries !== undefined && !Array.isArray(config.search_queries)) {
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }
@@ -266,8 +282,11 @@ async function main() {
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '');
+  // An explicit but empty `--file=` must reach the usage error below. Passing
+  // '' to resolve() would return the CURRENT DIRECTORY, and the script would
+  // then try to validate a directory and report a filesystem error instead.
+  const fileFlag = hasFlag(args, '--file') ? (flagValue(args, '--file') ?? '') : undefined;
+  const filePath = fileFlag === undefined ? resolve(DEFAULT_PORTALS_PATH) : (fileFlag ? resolve(fileFlag) : '');
   if (!filePath) {
     console.error('Usage: node validate-portals.mjs [--file portals.yml] [--self-test]');
     process.exit(1);

@@ -201,6 +201,13 @@ init_state() {
   fi
 }
 
+# A lock held longer than this is assumed abandoned, independent of the
+# PID-liveness check below. This exists because `kill -0 $pid` is unreliable
+# on Git Bash/Windows (MSYS PIDs from $!/$BASHPID don't reliably map to real
+# Windows process IDs), so a genuinely-dead lock holder can otherwise never
+# be recovered there and every other worker times out waiting for it.
+STATE_LOCK_STALE_AGE_SECONDS=15
+
 acquire_state_lock() {
   if [[ "${STATE_LOCK_DISABLED:-0}" -eq 1 ]]; then
     return 0
@@ -211,13 +218,13 @@ acquire_state_lock() {
 
   while true; do
     if mkdir "$STATE_LOCK_DIR" 2>/dev/null; then
-      if printf '%s\n' "${BASHPID:-$$}" > "$STATE_LOCK_PID_FILE"; then
+      if printf '%s\t%s\n' "${BASHPID:-$$}" "$(date +%s)" > "$STATE_LOCK_PID_FILE"; then
         STATE_LOCK_OWNED=1
         return 0
       fi
       rm -f "$STATE_LOCK_PID_FILE" 2>/dev/null || true
       rmdir "$STATE_LOCK_DIR" 2>/dev/null || true
-      echo "ERROR: Failed to initialize state lock metadata at $STATE_LOCK_DIR"
+      echo "ERROR: Failed to initialize state lock metadata at $STATE_LOCK_DIR" >&2
       return 1
     fi
 
@@ -228,25 +235,64 @@ acquire_state_lock() {
         STATE_LOCK_OWNED=0
         return 0
       fi
-      echo "ERROR: Failed to create state lock directory $STATE_LOCK_DIR"
+      echo "ERROR: Failed to create state lock directory $STATE_LOCK_DIR" >&2
       return 1
     fi
 
     if [[ -f "$STATE_LOCK_PID_FILE" ]]; then
-      local lock_pid
-      lock_pid=$(cat "$STATE_LOCK_PID_FILE" 2>/dev/null || true)
-      if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      local lock_pid lock_epoch
+      lock_pid=$(cut -f1 "$STATE_LOCK_PID_FILE" 2>/dev/null || true)
+      lock_epoch=$(cut -f2 "$STATE_LOCK_PID_FILE" 2>/dev/null || true)
+      local stale=false
+      local stale_reason=""
+
+      # SAFETY INVARIANT: never treat the lock as stale while kill -0
+      # positively confirms the recorded PID is still running — a
+      # confirmed-alive owner may still write update_state_unlocked's
+      # rewrite of STATE_FILE, and reclaiming under it would let two
+      # processes rewrite $STATE_FILE.tmp concurrently (real data loss).
+      # The age-based fallback below only ever fires when the PID check
+      # could NOT confirm liveness (empty/missing PID, or kill -0 itself
+      # reported not-running) — it narrows, but does not replace, the PID
+      # check. This intentionally leaves one Windows/Git-Bash edge case
+      # unhandled: a `kill -0` FALSE POSITIVE (reports alive for a PID
+      # that Windows has actually reused for an unrelated process). That
+      # gap is accepted because the alternative — reclaiming while any
+      # chance remains the owner is genuinely alive — risks silent
+      # concurrent-write corruption, which is worse than this lock
+      # occasionally timing out (recoverable via retry) in that rare case.
+      local pid_confirmed_alive=false
+      if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+        pid_confirmed_alive=true
+      fi
+
+      if [[ "$pid_confirmed_alive" == "false" ]]; then
+        if [[ -n "$lock_pid" ]]; then
+          stale=true
+          stale_reason="PID $lock_pid not running"
+        elif [[ "$lock_epoch" =~ ^[0-9]+$ ]]; then
+          local now age
+          now=$(date +%s)
+          age=$((now - lock_epoch))
+          if (( age >= STATE_LOCK_STALE_AGE_SECONDS )); then
+            stale=true
+            stale_reason="lock age ${age}s >= ${STATE_LOCK_STALE_AGE_SECONDS}s (no PID recorded to check liveness against)"
+          fi
+        fi
+      fi
+
+      if [[ "$stale" == "true" ]]; then
         rm -f "$STATE_LOCK_PID_FILE"
         if rmdir "$STATE_LOCK_DIR" 2>/dev/null; then
-          echo "WARN: Recovered stale state lock (PID $lock_pid not running)."
+          echo "WARN: Recovered stale state lock ($stale_reason)." >&2
           continue
         fi
       fi
     fi
 
     if (( waited >= max_waits )); then
-      echo "ERROR: Timed out waiting for state lock at $STATE_LOCK_DIR"
-      echo "If no batch-runner worker is active, remove the stale lock directory."
+      echo "ERROR: Timed out waiting for state lock at $STATE_LOCK_DIR" >&2
+      echo "If no batch-runner worker is active, remove the stale lock directory." >&2
       return 1
     fi
 
@@ -346,8 +392,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-4-8" ;;
-    standard|*) echo "claude-sonnet-4-6" ;;
+    premium) echo "claude-opus-5" ;;
+    standard|*) echo "claude-sonnet-5" ;;
   esac
 }
 
@@ -374,39 +420,21 @@ log_discard() {
   printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
 }
 
-# Calculate next report number.
-# Caller must hold STATE_LOCK_DIR while this runs.
-next_report_num_unlocked() {
-  local max_num=0
-  if [[ -d "$REPORTS_DIR" ]]; then
-    for f in "$REPORTS_DIR"/*.md; do
-      [[ -f "$f" ]] || continue
-      local basename
-      basename=$(basename "$f")
-      local num="${basename%%-*}"
-      num=$((10#$num)) # Remove leading zeros for arithmetic
-      if (( num > max_num )); then
-        max_num=$num
-      fi
-    done
-  fi
-  # Also check state file for assigned report numbers
-  if [[ -f "$STATE_FILE" ]]; then
-    while IFS=$'\t' read -r _ _ _ _ _ rnum _ _ _; do
-      [[ "$rnum" == "report_num" || "$rnum" == "-" || -z "$rnum" ]] && continue
-      local n=$((10#$rnum))
-      if (( n > max_num )); then
-        max_num=$n
-      fi
-    done < "$STATE_FILE"
-  fi
-  printf '%03d' $((max_num + 1))
-}
 
 # Update or insert state for an offer.
 # Caller must hold STATE_LOCK_DIR while this runs.
 update_state_unlocked() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
+
+  # batch-state.tsv is tab-separated with one row per line -- a literal tab,
+  # newline, or carriage return inside $error (e.g. from a worker's raw error
+  # text, or JSON.parse unescaping \n/\r/\t in a caller upstream) would split
+  # into extra columns or extra rows and corrupt every row after it. Collapse
+  # them to spaces centrally here so every caller is protected, not just the
+  # one that happened to trigger this.
+  error=${error//$'\r'/ }
+  error=${error//$'\n'/ }
+  error=${error//$'\t'/ }
 
   if [[ ! -f "$STATE_FILE" ]]; then
     init_state
@@ -443,6 +471,179 @@ update_state() {
   run_with_state_lock update_state_unlocked "$@"
 }
 
+# Durable last-resort records of state transitions that could NOT be written
+# into $STATE_FILE (state-lock exhausted its retries). ONE FILE PER RECORD:
+# each failed transition gets its own uniquely-named file via mktemp
+# (O_CREAT|O_EXCL — atomic creation, guaranteed-unique name), so no two
+# workers ever write to the same file and no shared-file truncate/append
+# race can exist on any platform. That matters here because recovery writes
+# are CORRELATED, not independent: they fire exactly when the state lock is
+# jammed, which makes all parallel workers fail (and try to record) at the
+# same moment — a shared recovery file is racing precisely when it is
+# needed most (PR #2417 review). This mechanism must also never depend on
+# the state lock that just failed, and it doesn't: creation is the only
+# synchronization. reconcile_recovery_records() (start of the next run,
+# single-threaded, before any worker spawns) merges each record into
+# $STATE_FILE and deletes its file only on success — there is no
+# rewrite-and-rename step, so nothing here needs cross-filesystem atomicity.
+RECOVERY_DIR="$BATCH_DIR/batch-state-recovery.d"
+
+append_recovery_record() {
+  local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
+  # Same rationale as update_state_unlocked: a literal tab/newline/CR in
+  # $error would split this single-line record into extra fields or rows,
+  # corrupting the record and the state row it later reconciles into.
+  error=${error//$'\r'/ }
+  error=${error//$'\n'/ }
+  error=${error//$'\t'/ }
+  # \x1f is used as the in-memory delimiter when this record is read back
+  # (see reconcile_recovery_records); strip it here too so a stray unit
+  # separator in $error can't inject a field boundary on the read side.
+  error=${error//$'\x1f'/ }
+  mkdir -p "$RECOVERY_DIR" || return 1
+  local rec
+  rec=$(mktemp "$RECOVERY_DIR/rec-XXXXXX") || return 1
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" > "$rec"
+}
+
+# A recovery record is ALWAYS older than whatever $STATE_FILE holds for the
+# same id: the record is only written when the lock was unreachable, so any
+# row present for that id now was written afterwards by a path that did reach
+# the lock. Merging it blindly therefore rolls a finished offer backwards --
+# the score and completed_at are overwritten, and since rate_limited and
+# failed are NOT terminal, the offer re-enters pending selection in main()
+# and gets evaluated a second time. Cost: one lost evaluation plus one
+# duplicate run, on a path that by construction only fires when something
+# already went wrong.
+#
+# Terminal set mirrors the pending-selection guard in main() exactly. Keep
+# the two in sync: adding a terminal status there without adding it here
+# reopens this rollback for that status.
+recovery_record_is_superseded() {
+  local current="$1"
+  [[ "$current" == "completed" || "$current" == "skipped" ]]
+}
+
+# Merge one recovery record, but only into a row that has not already reached
+# a terminal state. The status read happens INSIDE the lock deliberately: a
+# check-then-write gap would let a worker finish between the two and
+# reintroduce the same rollback. get_status is a lock-free reader (plain awk
+# over $STATE_FILE), so calling it here does not re-enter the non-reentrant
+# mkdir lock.
+#
+# Exit codes: 0 merged · 3 superseded (record is stale, caller should drop
+# it) · anything else is a real failure. 3 avoids colliding with the 1 that
+# acquire_state_lock returns when the lock itself is unreachable.
+reconcile_one_unlocked() {
+  local id="$1"
+  local current
+  current=$(get_status "$id")
+  if recovery_record_is_superseded "$current"; then
+    echo "    Superseded: offer id=$id already '$current' in state — discarding stale recovery record (would have rolled it back to '$3')."
+    return 3
+  fi
+  update_state_unlocked "$@"
+}
+
+reconcile_one() {
+  run_with_state_lock reconcile_one_unlocked "$@"
+}
+
+# Merge any recovery records left by a prior run into $STATE_FILE. Runs
+# single-threaded at the very start of main(), before any worker is spawned,
+# so there is no lock contention here — this is the one place these records
+# are guaranteed a clean shot at the lock. Each record file is deleted only
+# after its transition lands in $STATE_FILE (or is found to be superseded);
+# genuine failures leave the file in place for the run after that.
+reconcile_recovery_records() {
+  [[ -d "$RECOVERY_DIR" ]] || return 0
+
+  local -a rec_files=()
+  local f
+  for f in "$RECOVERY_DIR"/rec-*; do
+    [[ -f "$f" ]] || continue
+    rec_files+=("$f")
+  done
+  if (( ${#rec_files[@]} == 0 )); then
+    rmdir "$RECOVERY_DIR" 2>/dev/null || true
+    return 0
+  fi
+
+  echo "=== Reconciling ${#rec_files[@]} recovery record(s) from a prior interrupted run ==="
+  local merged=0 superseded=0 still_failed=0
+  local rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries
+  local rline
+  local rc
+  for f in "${rec_files[@]}"; do
+    rline=""
+    # Don't split with `IFS=$'\t' read`: tab is IFS *whitespace*, so a run of
+    # tabs around an empty interior field (e.g. an empty completed_at on a
+    # non-terminal record) collapses to one delimiter and every later field
+    # shifts left, corrupting the merge. Read the line raw, then split on \x1f
+    # (a non-whitespace unit separator that preserves empty fields) after
+    # translating the on-disk tabs to it. Same rationale as process_offer.
+    IFS= read -r rline < "$f" || true
+    IFS=$'\x1f' read -r rid rurl rstatus rstarted rcompleted rreport rscore rerror rretries <<< "${rline//$'\t'/$'\x1f'}"
+    if [[ -z "$rid" ]]; then
+      echo "    WARN: discarding unreadable recovery record $f" >&2
+      rm -f "$f"
+      continue
+    fi
+    rc=0
+    reconcile_one "$rid" "$rurl" "$rstatus" "$rstarted" "$rcompleted" "$rreport" "$rscore" "$rerror" "$rretries" || rc=$?
+    if (( rc == 0 )); then
+      rm -f "$f"
+      merged=$((merged + 1))
+    elif (( rc == 3 )); then
+      # Stale by definition, not a failure — the row it targets already
+      # finished. Dropping the file is correct; keeping it would retry the
+      # same rollback on every subsequent run.
+      rm -f "$f"
+      superseded=$((superseded + 1))
+    else
+      still_failed=$((still_failed + 1))
+    fi
+  done
+
+  echo "    Merged: $merged | Superseded: $superseded | Still unrecovered: $still_failed"
+  if (( still_failed > 0 )); then
+    echo "    WARN: $still_failed record(s) could not be merged even single-threaded — check $STATE_LOCK_DIR for a genuinely stuck lock. Unmerged records remain in $RECOVERY_DIR." >&2
+  else
+    rmdir "$RECOVERY_DIR" 2>/dev/null || true
+  fi
+}
+
+# Retry wrapper around update_state. Bare `update_state ...` calls under
+# `set -e` will silently kill the entire background worker subshell if a
+# single lock-timeout failure propagates — this wrapper retries a few times
+# and, if it still fails, falls back to append_recovery_record so the
+# transition is never actually lost (only delayed until the next run's
+# reconcile step), then logs a clear warning and returns non-zero so the
+# CALLER can still decide whether to skip side effects that assumed success
+# (found under --parallel 5 on Git Bash/Windows: ~47 of 50 jobs silently
+# dropped in one run from exactly this before the retry+recovery-log fix).
+update_state_retrying() {
+  local attempt=0
+  local max_attempts=3
+  while (( attempt < max_attempts )); do
+    if update_state "$@"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if (( attempt < max_attempts )); then
+      echo "    ⚠️  State update failed (attempt $attempt/$max_attempts), retrying in 2s..." >&2
+      sleep 2
+    fi
+  done
+  if append_recovery_record "$@"; then
+    echo "    ⚠️  State update failed after $max_attempts attempts — offer id=$1 status=$3 recorded to $RECOVERY_DIR for reconciliation on next run." >&2
+  else
+    echo "    ❌ State update failed after $max_attempts attempts AND recovery-record write also failed — offer id=$1 status=$3 was NOT recorded anywhere. It will be retried as pending next run." >&2
+  fi
+  return 1
+}
+
 is_rate_limit_log() {
   local log_file="$1"
   grep -Eiq '(rate limit|rate_limit|too many requests|429|quota exceeded|try again later|temporarily unavailable)' "$log_file"
@@ -459,7 +660,7 @@ mark_paused_rate_limit() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local error_msg
   error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "session/rate limit reached")
-  update_state "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
+  update_state_retrying "$id" "$url" "paused_rate_limit" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
   printf '%s\t%s\t%s\n' "$id" "$report_num" "$error_msg" > "$PAUSE_FILE"
   BATCH_PAUSED=true
 }
@@ -467,16 +668,58 @@ mark_paused_rate_limit() {
 reserve_report_num_unlocked() {
   local id="$1" url="$2" started="$3" retries="$4"
 
+  # Use the shared, cross-process-atomic reservation system (O_CREAT|O_EXCL
+  # sentinel files in reserve-report-num.mjs) instead of the old bash-native
+  # max(existing report files, batch-state.tsv numbers)+1 scan. The bash-native
+  # version had zero visibility into reservations made by any OTHER process
+  # calling `node reserve-report-num.mjs` directly -- e.g. an interactively
+  # dispatched Agent evaluating one offer with a browser tool while a batch
+  # run is in flight. Both could independently compute the same "next" number
+  # and collide on disk. Found 2026-07-30: two separate collisions (report
+  # 049, report 051) in one batch run for exactly this reason -- routing every
+  # caller through the same node script means they all share one real lock.
   local report_num=""
-  if report_num=$(next_report_num_unlocked); then
+  report_num=$(node "$PROJECT_DIR/reserve-report-num.mjs" 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "$report_num" ]]; then
     update_state_unlocked "$id" "$url" "processing" "$started" "-" "$report_num" "-" "-" "$retries"
   fi
 
   printf '%s\n' "$report_num"
 }
 
+# Release a report-number reservation via the shared atomic system. Safe to
+# call even if the number was never actually reserved this way (e.g. a
+# resumed/paused offer) -- the underlying script no-ops on a missing sentinel.
+release_report_num() {
+  local report_num="$1"
+  [[ -n "$report_num" && "$report_num" != "-" ]] || return 0
+  node "$PROJECT_DIR/reserve-report-num.mjs" --release "$report_num" >/dev/null 2>&1 || true
+}
+
 reserve_report_num() {
   run_with_state_lock reserve_report_num_unlocked "$@"
+}
+
+# Retry wrapper — same rationale as update_state_retrying above. A bare
+# `x=$(reserve_report_num ...)` under `set -e` kills the worker subshell
+# silently on a single lock-timeout; this retries and logs instead.
+reserve_report_num_retrying() {
+  local attempt=0
+  local max_attempts=3
+  local result=""
+  while (( attempt < max_attempts )); do
+    if result=$(reserve_report_num "$@"); then
+      printf '%s\n' "$result"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if (( attempt < max_attempts )); then
+      echo "    ⚠️  Report-number reservation failed (attempt $attempt/$max_attempts), retrying in 2s..." >&2
+      sleep 2
+    fi
+  done
+  echo "    ❌ Report-number reservation failed after $max_attempts attempts for offer id=$1 — leaving it pending for next run." >&2
+  return 1
 }
 
 # Process a single offer
@@ -488,7 +731,9 @@ process_offer() {
   local retries
   retries=$(get_retries "$id")
   local report_num
-  report_num=$(reserve_report_num "$id" "$url" "$started_at" "$retries")
+  if ! report_num=$(reserve_report_num_retrying "$id" "$url" "$started_at" "$retries"); then
+    return 1
+  fi
   local date
   date=$(date +%Y-%m-%d)
   # Use mktemp instead of a predictable /tmp path: a fixed name like
@@ -598,7 +843,7 @@ process_offer() {
       retries=$((retries + 1))
       local retry_completed_at
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      update_state "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries"
+      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries" || true
       echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${RATE_LIMIT_SLEEP}s before retry..."
       sleep "$RATE_LIMIT_SLEEP"
       continue
@@ -614,24 +859,112 @@ process_offer() {
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   if [[ $exit_code -eq 0 ]]; then
-    # Try to extract score from worker output
-    local score="-"
-    local score_match
-   score_match=$(sed -nE 's/.*"score":[[:space:]]*([0-9.]+).*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
-    if [[ -n "$score_match" ]]; then
-      score="$score_match"
+    # A worker can exit 0 (no crash) but still self-report failure inside its
+    # own JSON summary — e.g. it correctly declines to fabricate an evaluation
+    # when the JD couldn't be extracted (Data Contract: never fabricate).
+    # Without this check such offers were silently marked "completed" with no
+    # report file on disk and score "-" (found 2026-07-29, offer id 6 / report
+    # 019 — Deepgram JD unextractable in headless mode). Only the downstream
+    # reconcile-pipeline.mjs safety net (which leaves an entry in Pending when
+    # its report file is missing) prevented the offer from being lost.
+    # Extract only the LAST ```json fenced block in the log -- that's the
+    # worker's one authoritative final result (batch-prompt.md Step 6), not
+    # arbitrary text anywhere else in stdout/stderr -- and parse it as real
+    # JSON so an unrelated line merely containing the substring
+    # `"status": "failed"` can never falsely flip a successful run.
+    local worker_result_json
+    worker_result_json=$(awk '
+      /^```json[[:space:]]*$/ { in_block=1; block=""; next }
+      in_block && /^```[[:space:]]*$/ { in_block=0; last=block; next }
+      in_block { block = block $0 "\n" }
+      END { printf "%s", last }
+    ' "$log_file" 2>/dev/null || true)
+
+    # Parse status, error, AND score from the same authoritative JSON object
+    # in one pass -- score extraction used to be a separate sed regex over
+    # the whole log (`.*"score":...`), which grabbed the first match
+    # anywhere in the log rather than the one from this final result object,
+    # producing a spurious score "-" whenever an earlier line in the log
+    # (reasoning text, an intermediate example, Block D's "Comp score: 4/5"
+    # mention, etc.) matched first. Reading it from the same parsed object
+    # as status/error fixes both by construction -- there's only one place
+    # left to look.
+    local worker_failed_match="" worker_error_match="" score="-"
+    if [[ -n "$worker_result_json" ]]; then
+      local parsed
+      parsed=$(printf '%s' "$worker_result_json" | node -e '
+        let data = "";
+        process.stdin.on("data", d => data += d);
+        process.stdin.on("end", () => {
+          try {
+            const obj = JSON.parse(data);
+            const status = typeof obj.status === "string" ? obj.status : "";
+            const error = typeof obj.error === "string" ? obj.error : "";
+            const score = typeof obj.score === "number" ? String(obj.score) : "";
+            process.stdout.write(status + "\x1f" + error + "\x1f" + score);
+          } catch {
+            process.stdout.write("");
+          }
+        });
+      ' 2>/dev/null || true)
+      if [[ -n "$parsed" ]]; then
+        # \x1f (US), not \t: tab is IFS *whitespace*, so bash collapses runs of it
+        # and strips leading/trailing ones. On the common path -- a worker that
+        # succeeded, so `error` is empty -- the two tabs around that empty field
+        # collapse into one, `score` slides into parsed_error, and parsed_score
+        # comes back empty. The `elif` below then never fires and every
+        # successful offer records score "-". A non-whitespace delimiter gets
+        # one-field-per-unit splitting with empty fields preserved.
+        IFS=$'\x1f' read -r parsed_status parsed_error parsed_score <<< "$parsed"
+        if [[ "$parsed_status" == "failed" ]]; then
+          worker_failed_match="failed"
+          worker_error_match="$parsed_error"
+        elif [[ -n "$parsed_score" ]]; then
+          score="$parsed_score"
+        fi
+      fi
+    fi
+
+    if [[ -n "$worker_failed_match" ]]; then
+      [[ -z "$worker_error_match" ]] && worker_error_match="worker reported status:failed (exit code 0)"
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$worker_error_match" "$retries" || true
+      release_report_num "$report_num"
+      echo "    ❌ Failed (worker-reported, attempt $retries): $worker_error_match"
+      return 0
+    fi
+
+    # A worker can exit 0, self-report a non-"failed" status (or no parseable
+    # JSON at all), and STILL never actually write the report file it claims
+    # -- exit code and JSON status alone are not proof a report exists. Found
+    # 2026-07-30: offer id 6/report 049 was marked "completed" this way with
+    # no file on disk, silently freeing that number for a second, unrelated
+    # offer to claim (a real collision). Verify the file before trusting
+    # "completed" -- fail closed, not open.
+    if [[ -z "$(compgen -G "$REPORTS_DIR/${report_num}-*.md")" ]]; then
+      if (( retries < MAX_RETRIES )); then
+        retries=$((retries + 1))
+      fi
+      update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "worker exited cleanly but wrote no report file for this report number" "$retries" || true
+      release_report_num "$report_num"
+      echo "    ❌ Failed (no report file on disk, attempt $retries)"
+      return 0
     fi
 
     # Check min-score gate
     if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
       if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
-        update_state "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries"
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
+        release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
         return 0
       fi
     fi
 
-    update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
+    update_state_retrying "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries" || true
+    release_report_num "$report_num"
     echo "    ✅ Completed (score: $score, report: $report_num)"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
     if (( retries < MAX_RETRIES )); then
@@ -639,7 +972,8 @@ process_offer() {
     fi
     local error_msg
     error_msg=$(tail -5 "$log_file" 2>/dev/null | tr '\n' ' ' | cut -c1-200 || echo "Unknown error (exit code $exit_code)")
-    update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries"
+    update_state_retrying "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "-" "$error_msg" "$retries" || true
+    release_report_num "$report_num"
     echo "    ❌ Failed (attempt $retries, exit code $exit_code)"
   fi
 }
@@ -692,6 +1026,12 @@ print_summary() {
     local avg
     avg=$(awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
     echo "Average score: $avg/5 ($score_count scored)"
+  fi
+
+  if [[ -f "$BATCH_DIR/aggregate-tokens.mjs" ]]; then
+    if ! node "$BATCH_DIR/aggregate-tokens.mjs"; then
+      echo "Warning: token aggregation failed." >&2
+    fi
   fi
 }
 
@@ -826,6 +1166,10 @@ main() {
   fi
 
   init_state
+
+  if [[ "$DRY_RUN" == "false" ]]; then
+    reconcile_recovery_records
+  fi
 
   # Count input offers (skip header, ignore blank lines)
   local total_input

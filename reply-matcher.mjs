@@ -43,27 +43,127 @@ export function checkCompanyMatch(text, company) {
   return false;
 }
 
-export function checkRoleMatch(text, role) {
+// Generic recruiting/HR vocabulary. These words are common enough in unrelated
+// senders' signatures, job titles, and boilerplate (e.g. "Talent Acquisition &
+// Diversity" in a recruiter's signature for a *different* company/role) that
+// they must never, by themselves, count as a "significant word" match against
+// a tracker role title — regardless of length (see #2671).
+const GENERIC_ROLE_WORDS = new Set([
+  'talent', 'acquisition', 'specialist', 'coordinator', 'operations',
+  'recruiter', 'recruiting', 'human', 'resources', 'people'
+]);
+
+// Matches any CJK ideograph. Chinese role titles are normally written with no
+// whitespace/underscore separators at all ("python开发工程师" is one semantic
+// phrase, not one "word"), so the single-word rule below must not treat them
+// as a bare single word the way it does for Latin-script titles.
+const CJK_RE = /[一-鿿㐀-䶿]/;
+
+// A role title that reduces to a single word — whether that word is generic
+// recruiting vocabulary ("Recruiter") or a specific one ("Engineer") — is not
+// specific enough to stand alone as an "exact" match: checking it as a whole-
+// role substring degenerates into exactly the same bare-word check the
+// corroboration requirement exists to gate. Such roles fall through to the
+// partial-match path in checkRoleMatch(), which requires company/domain
+// corroboration in matchCandidates(). Chinese compound titles are exempted:
+// they carry no separators to split on, so "single part" doesn't mean
+// "single word" for them.
+function isSingleWordRole(role) {
+  const parts = role.split(/[\s_\\/()-]+/).filter(Boolean);
+  return parts.length === 1 && !CJK_RE.test(parts[0]);
+}
+
+// True only when the *entire* role title (or its Chinese, symbol-stripped form)
+// appears in the text as one contiguous substring. This is specific enough to
+// stand on its own, with no need for a corroborating company/domain signal —
+// unless the role is nothing but a single word (see isSingleWordRole).
+export function checkRoleMatchExact(text, role) {
   if (!role || !text) return false;
-  
+  if (isSingleWordRole(role)) return false;
+
   const tNorm = normalizeStr(text);
   const rNorm = normalizeStr(role);
+  // A whitespace-only role normalizes to '' (normalizeStr strips whitespace),
+  // and String.prototype.includes('') is always true — without this guard a
+  // blank role would "exactly" match any text at all, bypassing corroboration
+  // entirely. isSingleWordRole doesn't catch this: splitting a whitespace-only
+  // string on separators yields zero parts, not one.
+  if (!rNorm) return false;
   if (tNorm.includes(rNorm)) return true;
-
-  // Sometimes role has extra descriptors, we check if a significant part matches
-  // Like "PY01_python开发工程师" vs "python开发工程师"
-  const roleParts = role.split(/[\s_\\/()-]+/);
-  for (const part of roleParts) {
-    if (part.length > 3 && tNorm.includes(normalizeStr(part))) {
-      return true; // partial match on a significant word
-    }
-  }
 
   // Handle Chinese role titles ignoring symbols
   const cleanRole = role.replace(/[\s_\\/()-]+/g, '');
   if (cleanRole.length > 2 && tNorm.includes(cleanRole.toLowerCase())) return true;
-  
+
   return false;
+}
+
+export function checkRoleMatch(text, role) {
+  if (!role || !text) return false;
+
+  if (checkRoleMatchExact(text, role)) return true;
+
+  const tNorm = normalizeStr(text);
+
+  // Sometimes role has extra descriptors, we check if a significant part matches
+  // Like "PY01_python开发工程师" vs "python开发工程师". Generic recruiting words
+  // (see GENERIC_ROLE_WORDS) are excluded no matter how long they are — a bare
+  // "Talent" or "Specialist" match is exactly the false-positive pattern from
+  // #2671, not evidence of a real match.
+  const roleParts = role.split(/[\s_\\/()-]+/);
+  for (const part of roleParts) {
+    if (part.length > 3 && !GENERIC_ROLE_WORDS.has(part.toLowerCase()) && tNorm.includes(normalizeStr(part))) {
+      return true; // partial match on a significant word
+    }
+  }
+
+  return false;
+}
+
+// Shared ATS, job board, and webmail hosts. Mail from one of these identifies a
+// vendor, never an employer, so it must never become a candidate domain: every
+// message from the host would then score a sender-domain match against whichever
+// application happened to mention it.
+const SHARED_DOMAINS = [
+  'linkedin.com',
+  'applytojob.com',
+  'greenhouse.io',
+  'lever.co',
+  'icims.com',
+  'myworkday.com',
+  'ashbyhq.com',
+  'smartrecruiters.com',
+  'taleo.net',
+  'successfactors.com',
+  'gmail.com',
+  'outlook.com',
+  'yahoo.com',
+  'hotmail.com'
+];
+
+// Dot-separated labels ending in a letters-only TLD. Rejects the shapes tracker
+// prose produces: sentence-final words ("gaps."), bare numerics ("3.34.5."), and
+// paths or filenames ("output/cv-2026-06-23.pdf").
+const DOMAIN_SHAPE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
+
+// Extensions of the artifacts career-ops writes into tracker notes. Several parse
+// as a valid TLD, so shape alone cannot tell a filename from a hostname: "cv.md"
+// would otherwise read as a Moldovan domain. Deliberately excludes extensions that
+// are common employer TLDs (io, co, ai, sh, me, dev, app).
+const FILE_EXTENSIONS = [
+  'pdf', 'md', 'doc', 'docx', 'txt', 'html', 'htm',
+  'png', 'jpg', 'jpeg', 'csv', 'tsv', 'json', 'yaml', 'yml', 'mjs'
+];
+
+function isUsableDomain(domain) {
+  if (!DOMAIN_SHAPE.test(domain)) return false;
+  if (FILE_EXTENSIONS.includes(domain.slice(domain.lastIndexOf('.') + 1))) return false;
+  return !SHARED_DOMAINS.some(shared => domain === shared || domain.endsWith(`.${shared}`));
+}
+
+function addDomain(domains, value) {
+  const domain = (value || '').toLowerCase();
+  if (isUsableDomain(domain)) domains.add(domain);
 }
 
 export function getAppDomains(app, followups) {
@@ -73,15 +173,16 @@ export function getAppDomains(app, followups) {
   if (app.notes) {
     const emails = app.notes.match(/[\w.-]+@[\w.-]+\.\w+/g) || [];
     for (const email of emails) {
-      const d = extractDomain(email);
-      if (d) domains.add(d);
+      addDomain(domains, extractDomain(email));
     }
     // Also look for explicit domains in notes (e.g. "ATS: lever.co")
     const words = app.notes.split(/\s+/);
     for (const w of words) {
       if (w.includes('.') && !w.includes('@')) {
-        // very rough domain check
-        domains.add(w.toLowerCase().replace(/[^a-z0-9.-]/g, ''));
+        // Notes are prose, so trim the punctuation wrapping the token rather than
+        // deleting every disallowed character: dropping "/" would splice a path
+        // like "output/cv-2026-06-23.pdf" into one plausible-looking hostname.
+        addDomain(domains, w.replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9]+$/, ''));
       }
     }
   }
@@ -90,27 +191,26 @@ export function getAppDomains(app, followups) {
   const appFollowups = followups.filter(f => f.appNum === app.num);
   for (const fu of appFollowups) {
     if (fu.contact) {
-      const d = extractDomain(fu.contact);
-      if (d) domains.add(d);
+      addDomain(domains, extractDomain(fu.contact));
     }
     if (fu.notes) {
        const emails = fu.notes.match(/[\w.-]+@[\w.-]+\.\w+/g) || [];
        for (const email of emails) {
-         const d = extractDomain(email);
-         if (d) domains.add(d);
+         addDomain(domains, extractDomain(email));
        }
     }
   }
 
-  // Add common company domain guess (companyname.com)
+  // Add common company domain guess (companyname.com). "?" is the structural
+  // marker for a confidential employer, not a name, so there is nothing to guess.
   const cNorm = normalizeStr(app.company);
-  if (cNorm) {
-    domains.add(`${cNorm}.com`);
-    domains.add(`${cNorm}.co`);
-    domains.add(`${cNorm}.io`);
+  if (cNorm && cNorm !== '?') {
+    addDomain(domains, `${cNorm}.com`);
+    addDomain(domains, `${cNorm}.co`);
+    addDomain(domains, `${cNorm}.io`);
   }
 
-  return Array.from(domains).filter(Boolean);
+  return Array.from(domains);
 }
 
 export function matchCandidates(candidates, apps, followups = []) {
@@ -135,14 +235,7 @@ export function matchCandidates(candidates, apps, followups = []) {
         signals.push('company-name');
         companyHint = app.company;
       }
-      
-      const isRoleMatch = checkRoleMatch(textContext, app.role);
-      if (isRoleMatch) {
-        score += 1.5;
-        signals.push('role-title');
-        roleHint = app.role;
-      }
-      
+
       let hasDomainMatch = false;
       if (fromDomain) {
         const appDomains = getAppDomains(app, followups);
@@ -152,6 +245,22 @@ export function matchCandidates(candidates, apps, followups = []) {
           signals.push('sender-domain');
           companyHint = companyHint || app.company;
         }
+      }
+
+      // A role match on the *entire* role title is specific enough to stand on
+      // its own. A match on just one "significant word" of the role (e.g. the
+      // role split into descriptor parts) is not — those partial matches must be
+      // corroborated by a company-name or sender-domain signal, otherwise a
+      // generic multi-word title (e.g. "Talent Acquisition Specialist") lets any
+      // unrelated email that happens to contain one of those words falsely
+      // attribute itself to this application (#2671).
+      const isRoleExactMatch = checkRoleMatchExact(textContext, app.role);
+      const isRolePartialMatch = !isRoleExactMatch && checkRoleMatch(textContext, app.role);
+      const isRoleMatch = isRoleExactMatch || (isRolePartialMatch && (isCompanyMatch || hasDomainMatch));
+      if (isRoleMatch) {
+        score += 1.5;
+        signals.push('role-title');
+        roleHint = app.role;
       }
 
       const postAppKeywords = ['interview', 'offer', 'rejection', '邀您面试', '简历通过', 'next steps', 'update on your application'];
@@ -251,10 +360,12 @@ export function classifyReply(cand) {
     'job alert', 'invitation to apply', 'recommended jobs', 'newsletter', 'marketing digest', 'job recommendation', 'suggested jobs'
   ];
 
-  // 2. Offer keywords
+  // 2. Offer keywords — specific phrases only. A bare 'offer' substring is deliberately
+  //    excluded: it collides with rejection wording such as 'unable to offer' (see
+  //    rejectionKeywords) and would mis-type rejections as offers.
   const offerKeywords = [
     '录取通知书', '录用信', '录用通知', '录用', '薪资确认', '入职协议', '意向书',
-    'offer letter', 'employment agreement', 'job offer', 'congratulations on the offer', 'compensation details', 'offer'
+    'offer letter', 'employment agreement', 'job offer', 'congratulations on the offer', 'compensation details', 'pleased to offer'
   ];
 
   // 3. Rejected keywords
@@ -297,17 +408,11 @@ export function classifyReply(cand) {
     };
   }
 
-  const hasOfferKeywords = check(offerKeywords);
-  const isOffer = signal === 'offer' || hasOfferKeywords;
-  if (isOffer) {
-    if (signal === 'offer' && !evidence.includes('offer')) evidence.push('offer');
-    return {
-      type: 'Offer',
-      evidence: Array.from(new Set(evidence)),
-      suggestedTrackerUpdate: 'Offer'
-    };
-  }
-
+  // Rejection is decided before Offer: an explicit rejection signal or rejection
+  // wording (e.g. 'unable to offer', or 'we will not be sending an offer letter'
+  // which still contains the 'offer letter' phrase) must win even when offer-ish
+  // phrasing is present. Deciding Offer first would type such replies as Offer and
+  // push a spurious Offer tracker update.
   const hasRejectionKeywords = check(rejectionKeywords);
   const isRejected = signal === 'rejection' || hasRejectionKeywords;
   if (isRejected) {
@@ -316,6 +421,17 @@ export function classifyReply(cand) {
       type: 'Rejected',
       evidence: Array.from(new Set(evidence)),
       suggestedTrackerUpdate: 'Rejected'
+    };
+  }
+
+  const hasOfferKeywords = check(offerKeywords);
+  const isOffer = signal === 'offer' || hasOfferKeywords;
+  if (isOffer) {
+    if (signal === 'offer' && !evidence.includes('offer')) evidence.push('offer');
+    return {
+      type: 'Offer',
+      evidence: Array.from(new Set(evidence)),
+      suggestedTrackerUpdate: 'Offer'
     };
   }
 

@@ -20,6 +20,8 @@
 //   graphqlQuery    — Custom GraphQL query string. If not provided, the
 //                     built-in default query is used.
 
+import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+
 const DEFAULT_API = 'https://glints.com/api/v2-alc/graphql';
 const DEFAULT_COUNTRY = 'ID';
 const DEFAULT_PAGE_SIZE = 30;
@@ -153,7 +155,7 @@ async function graphqlPage(apiUrl, query, variables, ctx) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'user-agent': BROWSER_LIKE_USER_AGENT,
         'origin': 'https://glints.com',
         'referer': 'https://glints.com/id/opportunities/jobs/explore',
       },

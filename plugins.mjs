@@ -19,7 +19,7 @@
 import path from 'path';
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
@@ -162,7 +162,7 @@ async function cmdRun(args) {
     const jobs = found.filter(j => !known.has(j.url) && !seen.has(j.url) && seen.add(j.url));
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
-    if (jobs.length) { appendToPipeline(jobs); console.log(`→ Appended ${jobs.length} to data/pipeline.md. Run /career-ops pipeline to evaluate.`); }
+    if (jobs.length) { await appendToPipeline(jobs); console.log(`→ Appended ${jobs.length} to data/pipeline.md. Run /career-ops pipeline to evaluate.`); }
     return;
   }
 

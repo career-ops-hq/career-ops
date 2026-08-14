@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
 
 // SAP SuccessFactors provider — Recruiting Marketing (RMK, ex-jobs2web) career
 // sites (Career Site Builder's branded job boards). These are the portals big
@@ -68,7 +69,7 @@ const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
 const CSB_LOCALE_PRIORITY = ['de_DE', 'en_US', 'en_GB', 'en_EN'];
 
 /** @param {import('./_types.js').PortalEntry} entry */
-function resolveConfig(entry) {
+export function resolveConfig(entry) {
   const raw = entry.api || entry.careers_url || '';
   let u;
   try {
@@ -77,28 +78,33 @@ function resolveConfig(entry) {
     return null;
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // Preserve a brand/tenant path prefix when the configured URL carries one —
+  // some holding companies run several acquired brands off one shared RMK
+  // instance, disambiguated by a path segment instead of a separate domain
+  // (e.g. careers.nemetschek.com/Bluebeam/ vs. .../Vectorworks/). Strip a
+  // trailing known-endpoint segment — /search/ (the page tenants commonly
+  // configure as careers_url), or one of the API paths this module itself
+  // builds below (/tile-search-results/, /services/recruiting/v1/jobs), in
+  // case an `api:` override points straight at one — plus any trailing
+  // slash, so all of those collapse to the same brand-scoped base instead of
+  // doubling the endpoint segment onto itself. Single-domain tenants (the
+  // common case) have an empty pathname, so base === origin unchanged.
+  const path = u.pathname
+    .replace(/\/(?:search|tile-search-results|services\/recruiting\/v1\/jobs)\/?$/i, '')
+    .replace(/\/+$/, '');
+  const base = u.origin + path;
   return {
     origin: u.origin,
-    tileApi: `${u.origin}/tile-search-results/`,
+    base,
+    tileApi: `${base}/tile-search-results/`,
+    // jobBase stays origin-only: RMK tile data-url paths for a brand-scoped
+    // tenant already carry the brand segment (confirmed against Nemetschek's
+    // /Bluebeam/tile-search-results/ output), so prefixing base here would
+    // double it up.
     jobBase: u.origin,
-    jobsApi: `${u.origin}/services/recruiting/v1/jobs`,
-    searchPage: `${u.origin}/search/`,
+    jobsApi: `${base}/services/recruiting/v1/jobs`,
+    searchPage: `${base}/search/`,
   };
-}
-
-// Minimal HTML entity decoder — titles carry named (&amp;) and numeric
-// (&#252; / &#xfc;) entities. We only need the handful that show up in job
-// titles; anything else is left as-is.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
-  });
 }
 
 /** @param {string} s */
@@ -247,7 +253,7 @@ export function cleanCsbLocation(raw) {
 // Map one CSB jobs-API response to raw {id, title, url, location, postedAt}.
 // Records nest the useful fields under `.response`; a record without an id or a
 // title is skipped (can't build a stable dedup key or a meaningful listing).
-/** @param {any} json @param {{origin:string}} cfg @param {string} locale */
+/** @param {any} json @param {{origin:string, base?:string}} cfg @param {string} locale */
 export function parseCsbJobs(json, cfg, locale) {
   const list = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult : [];
   const out = [];
@@ -267,7 +273,7 @@ export function parseCsbJobs(json, cfg, locale) {
     const slug = decodeEntities(String(r.unifiedUrlTitle || r.urlTitle || 'job'))
       .replace(/[?#&]+/g, '-')
       .replace(/-{2,}/g, '-');
-    const url = `${cfg.origin}/job/${slug}/${id}-${locale}`;
+    const url = `${cfg.base || cfg.origin}/job/${slug}/${id}-${locale}`;
     out.push({
       id,
       title,
@@ -289,8 +295,12 @@ function resolveCsbMaxPages(entry) {
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
 // by id across locales+pages. `total` from the first page bounds pagination;
 // an empty/short page also stops the loop.
-/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
-async function fetchCsb(entry, cfg, ctx) {
+//
+// `probe: true` marks the post-RMK fallback probe: RMK already answered (the
+// board is reachable, just empty of tiles), so an all-locales CSB failure must
+// NOT read as a dead board — return [] instead of throwing.
+/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
+async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
   let locales = CSB_DEFAULT_LOCALES;
   try {
     const html = await ctx.fetchText(cfg.searchPage, { redirect: 'error', headers: { accept: 'text/html' } });
@@ -303,6 +313,13 @@ async function fetchCsb(entry, cfg, ctx) {
   const maxPages = resolveCsbMaxPages(entry);
   const jobs = [];
   const seen = new Set();
+  // When EVERY locale fails without a single successful request the board is
+  // unreachable, not empty — THROW so scan/portal-health record a failure
+  // instead of "live but empty" (meituan/tencent idiom). The FIRST failure is
+  // retained and surfaced: later locales usually fail for the same root cause,
+  // and keeping the first makes the thrown error deterministic.
+  let succeededOnce = false;
+  let firstErr = null;
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
@@ -316,9 +333,11 @@ async function fetchCsb(entry, cfg, ctx) {
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
         });
-      } catch {
+      } catch (err) {
+        firstErr ??= err;
         break; // this locale failed (e.g. 307 legacy redirect) — try the next
       }
+      succeededOnce = true;
       if (total === null) {
         total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
       }
@@ -344,6 +363,7 @@ async function fetchCsb(entry, cfg, ctx) {
       if (rawCount < CSB_PAGE_SIZE) break;
     }
   }
+  if (!probe && !succeededOnce && firstErr) throw firstErr;
   return jobs;
 }
 
@@ -405,6 +425,9 @@ export default {
     }
     const rmkJobs = await fetchRmk(entry, cfg, ctx);
     if (rmkJobs.length > 0) return rmkJobs;
-    return fetchCsb(entry, cfg, ctx);
+    // RMK answered (healthy, possibly legitimately empty) — the CSB call here
+    // is only a probe for the empty-shell signature, so it must not turn a
+    // failing/absent CSB endpoint into a dead-board throw.
+    return fetchCsb(entry, cfg, ctx, { probe: true });
   },
 };

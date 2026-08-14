@@ -1,0 +1,22 @@
+<!--
+  education.html — section partial for Education (#2183).
+
+  Field placeholders filled per entry:
+    TITLE      — degree / course title
+    ORG_BLOCK  — conditional: institution span when org is present; omitted otherwise
+    YEAR       — graduation / completion year (empty string when absent)
+    DESC_BLOCK — conditional: description div when description is present; omitted otherwise
+
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
+-->
+<!--ENTRY-->
+<div class="edu-item">
+  <div class="edu-header">
+    <div class="edu-title">{{TITLE}}{{ORG_BLOCK}}</div>
+    <div class="edu-year">{{YEAR}}</div>
+  </div>
+  {{DESC_BLOCK}}
+</div>
+<!--ORG_BLOCK--> <span class="edu-org">{{ORG}}</span><!--/ORG_BLOCK-->
+<!--DESC_BLOCK--><div class="edu-desc">{{DESC}}</div><!--/DESC_BLOCK-->
+<!--/ENTRY-->

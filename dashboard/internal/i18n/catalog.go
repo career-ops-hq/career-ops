@@ -21,6 +21,7 @@ type Catalog struct {
 	TabEvaluated string
 	TabApplied   string
 	TabInterview string
+	TabResponded string
 	TabTop       string
 	TabSkip      string
 	TabRejected  string
@@ -100,6 +101,7 @@ type Catalog struct {
 	HelpPage       string
 	HelpTopEnd     string
 	HelpLanguage   string
+	HelpManifesto  string
 	HelpBack       string
 	HelpNavigate   string
 	HelpToggle     string
@@ -169,13 +171,16 @@ func (c *Catalog) ViewModeLabel(mode string) string {
 }
 
 // StatusLabel returns the localized display label for a canonical status ID
-// (interview, offer, responded, applied, evaluated, skip, rejected, discarded).
+// (interview, offer, hired, responded, applied, evaluated, skip, rejected,
+// discarded).
 func (c *Catalog) StatusLabel(norm string) string {
 	switch strings.ToLower(strings.TrimSpace(norm)) {
 	case "interview":
 		return c.StatusInterview
 	case "offer":
 		return c.StatusOffer
+	case "hired":
+		return c.StatusHired
 	case "responded":
 		return c.StatusResponded
 	case "applied":
@@ -230,6 +235,7 @@ var En = Catalog{
 	TabEvaluated: "EVALUATED",
 	TabApplied:   "APPLIED",
 	TabInterview: "INTERVIEW",
+	TabResponded: "RESPONDED",
 	TabTop:       "TOP ≥4",
 	TabSkip:      "SKIP",
 	TabRejected:  "REJECTED",
@@ -309,6 +315,7 @@ var En = Catalog{
 	HelpPage:       " page  ",
 	HelpTopEnd:     " top/end  ",
 	HelpLanguage:   " lang  ",
+	HelpManifesto:  " manifesto  ",
 	HelpBack:       " back",
 	HelpNavigate:   " navigate  ",
 	HelpToggle:     " toggle  ",
@@ -356,6 +363,7 @@ var Tr = Catalog{
 	TabEvaluated: "DEĞERLENDİRİLDİ",
 	TabApplied:   "BAŞVURULDU",
 	TabInterview: "MÜLAKAT",
+	TabResponded: "YANIT VERİLDİ",
 	TabTop:       "EN İYİ ≥4",
 	TabSkip:      "UYGUN DEĞİL",
 	TabRejected:  "REDDEDİLDİ",
@@ -435,6 +443,7 @@ var Tr = Catalog{
 	HelpPage:       " sayfa  ",
 	HelpTopEnd:     " baş/son  ",
 	HelpLanguage:   " dil  ",
+	HelpManifesto:  " manifesto  ",
 	HelpBack:       " geri",
 	HelpNavigate:   " gezin  ",
 	HelpToggle:     " değiştir  ",
@@ -469,14 +478,147 @@ var Tr = Catalog{
 	ViewFlat:     "düz",
 }
 
+// Es is the static Spanish translation catalog.
+var Es = Catalog{
+	// Screen banners & general
+	AppTitle:       "FLUJO DE CARRERA",
+	OffersSummary:  "%d ofertas | Prom %s/5",
+	NoOffersMatch:  "Ninguna oferta coincide con este filtro",
+	LoadingPreview: "Cargando vista previa...",
+
+	// Tabs & filters
+	TabAll:       "TODAS",
+	TabEvaluated: "EVALUADAS",
+	TabApplied:   "APLICADAS",
+	TabInterview: "ENTREVISTA",
+	TabResponded: "RESPONDIDAS",
+	TabTop:       "TOP ≥4",
+	TabSkip:      "OMITIR",
+	TabRejected:  "RECHAZADAS",
+	TabDiscarded: "DESCARTADAS",
+
+	// Table column headers
+	ColFit:      "AJUSTE",
+	ColApplied:  "APLICADA",
+	ColCompany:  "EMPRESA",
+	ColRole:     "PUESTO",
+	ColStatus:   "ESTADO",
+	ColLocation: "UBICACIÓN",
+	ColPay:      "SALARIO",
+	ColLast:     "ÚLTIMO",
+
+	// Preview labels
+	LabelLoc:     "Ubic: ",
+	LabelPay:     "Salario: ",
+	LabelLast:    "Último contacto: ",
+	LabelRemote:  "Remoto: ",
+	LabelOutcome: "Resultado: ",
+
+	// Work modes
+	ModeRemote:     "Remoto",
+	ModeRemoteFlex: "Remoto (Flex)",
+	ModeHybrid:     "Híbrido",
+	ModeFull:       "Presencial",
+
+	// Progress screen
+	ProgressTitle:   "PROGRESO DE BÚSQUEDA",
+	ProgressSummary: "%d evaluadas | %.1f puntuación media",
+	FunnelTitle:     "Embudo del proceso",
+	ScoresTitle:     "Distribución de puntuaciones",
+	RatesTitle:      "Tasas de conversión",
+	WeeklyTitle:     "Actividad semanal",
+	ActiveInfo:      "%d solicitudes activas | %d ofertas totales",
+
+	// Relative dates
+	TimeToday:     "hoy",
+	TimeYesterday: "ayer",
+	TimeDaysAgo:   "hace %dd",
+
+	// Status display names
+	StatusEvaluated: "Evaluada",
+	StatusApplied:   "Aplicada",
+	StatusResponded: "Respondida",
+	StatusInterview: "Entrevista",
+	StatusOffer:     "Oferta",
+	StatusRejected:  "Rechazada",
+	StatusDiscarded: "Descartada",
+	StatusSkip:      "OMITIR",
+	StatusHired:     "Contratada",
+
+	// Additional UI strings
+	NoData:        "Sin datos",
+	EmptyFile:     "(archivo vacío)",
+	RateResponse:  "Tasa de respuesta: ",
+	RateInterview: "Tasa de entrevistas: ",
+	RateOffer:     "Tasa de ofertas: ",
+
+	// Footer descriptions & hints
+	HelpNav:        " navegar  ",
+	HelpTabs:       " pestañas  ",
+	HelpSearch:     " buscar  ",
+	HelpSort:       " ordenar  ",
+	HelpRefresh:    " actualizar  ",
+	HelpReport:     " informe  ",
+	HelpOpenURL:    " abrir URL  ",
+	HelpOpenPDF:    " abrir PDF  ",
+	HelpRegenPDF:   " regenerar PDF  ",
+	HelpChange:     " cambiar  ",
+	HelpColumns:    " columnas  ",
+	HelpView:       " vista  ",
+	HelpProgress:   " progreso  ",
+	HelpQuit:       " salir",
+	HelpScroll:     " desplazar  ",
+	HelpPage:       " página  ",
+	HelpTopEnd:     " inicio/fin  ",
+	HelpLanguage:   " idioma  ",
+	HelpManifesto:  " manifiesto  ",
+	HelpBack:       " atrás",
+	HelpNavigate:   " navegar  ",
+	HelpToggle:     " alternar  ",
+	HelpClose:      " cerrar",
+	HelpConfirm:    " confirmar  ",
+	HelpCancel:     " cancelar",
+	HelpFilterLive: " filtrar en vivo  ",
+	HelpKeep:       " guardar  ",
+	HelpClear:      " limpiar  ",
+
+	// Picker overlay titles & bar hints
+	PickerChangeStatus: "Cambiar estado:",
+	PickerColumnsTitle: "─── Columnas (SPACE alternar · ESC cerrar) ───",
+	SearchHintInput:    "   Enter: guardar   Esc: cancelar   Ctrl+U: limpiar",
+	SearchHintNormal:   "   Esc: limpiar   /: editar",
+	SearchMatching:     "  %d/%d coincidencias",
+	SortLabel:          "[Orden: %s]",
+	ViewLabel:          "[Vista: %s]",
+	ShownCount:         "%d mostradas",
+	ColReport:          "INF",
+	ColPDF:             "PDF",
+
+	// Sort & view modes
+	SortScore:    "puntuación",
+	SortDate:     "fecha",
+	SortCompany:  "empresa",
+	SortStatus:   "estado",
+	SortLocation: "ubicación",
+	SortPay:      "salario",
+	SortLast:     "último",
+	ViewGrouped:  "agrupado",
+	ViewFlat:     "plano",
+}
+
 // Current points to the active language catalog. Defaults to English (&En).
 var Current = &En
 
-// SetLang sets the active catalog based on language code prefix (e.g., "tr", "tr_TR" -> &Tr).
+// SetLang sets the active catalog based on language code prefix
+// (e.g., "tr", "tr_TR" -> &Tr; "es", "es_ES" -> &Es; anything else -> &En).
 func SetLang(lang string) {
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "tr") {
+	l := strings.ToLower(strings.TrimSpace(lang))
+	switch {
+	case strings.HasPrefix(l, "tr"):
 		Current = &Tr
-	} else {
+	case strings.HasPrefix(l, "es"):
+		Current = &Es
+	default:
 		Current = &En
 	}
 }
@@ -490,10 +632,14 @@ func ToggleLang() {
 	}
 }
 
-// GetLang returns the active language code ("tr" if Current == &Tr, else "en").
+// GetLang returns the active language code ("tr" if Current == &Tr, "es" if
+// Current == &Es, else "en").
 func GetLang() string {
 	if Current == &Tr {
 		return "tr"
+	}
+	if Current == &Es {
+		return "es"
 	}
 	return "en"
 }

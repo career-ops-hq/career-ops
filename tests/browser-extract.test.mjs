@@ -47,6 +47,20 @@ try {
   if (badMax.max === 200) pass('parseArgs falls back to the default for a non-integer --max');
   else fail(`parseArgs --max abc => ${badMax.max}`);
 
+  // parseArgs --max-chars (#configurable JD cap): overrides the jd text cap,
+  // defaults to 12000, and rejects non-positive/non-integer values.
+  if (parseArgs(['https://x/1']).maxChars === 12000) pass('parseArgs defaults maxChars to the 12000 JD cap');
+  else fail(`parseArgs default maxChars => ${parseArgs(['https://x/1']).maxChars}`);
+  const bigChars = parseArgs(['https://x/1', '--max-chars', '40000']);
+  if (bigChars.maxChars === 40000) pass('parseArgs honors an explicit --max-chars');
+  else fail(`parseArgs --max-chars 40000 => ${bigChars.maxChars}`);
+  const badChars = parseArgs(['https://x/1', '--max-chars', '0']);
+  if (badChars.maxChars === 12000) pass('parseArgs ignores a non-positive --max-chars (keeps the default cap)');
+  else fail(`parseArgs --max-chars 0 => ${badChars.maxChars}`);
+  const nonIntChars = parseArgs(['https://x/1', '--max-chars', '1.5']);
+  if (nonIntChars.maxChars === 12000) pass('parseArgs ignores a non-integer --max-chars (keeps the default cap)');
+  else fail(`parseArgs --max-chars 1.5 => ${nonIntChars.maxChars}`);
+
   // compactText — collapse whitespace + cap length
   if (compactText('a   b\t\tc') === 'a b c') pass('compactText collapses runs of whitespace');
   else fail(`compactText => ${JSON.stringify(compactText('a   b\t\tc'))}`);
@@ -60,6 +74,18 @@ try {
     pass('normalizeJd shapes { url, title, text } and compacts both');
   } else {
     fail(`normalizeJd => ${JSON.stringify(jd)}`);
+  }
+
+  // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
+  // silently at the 12000 default) while leaving the default behavior unchanged.
+  const longText = 'y'.repeat(20000);
+  const raised = normalizeJd({ title: 'Role', text: longText }, 'https://x/1', 15000);
+  const defaulted = normalizeJd({ title: 'Role', text: longText }, 'https://x/1');
+  if (raised.text.length === 15001 && raised.text.endsWith('…') &&
+      defaulted.text.length === 12001 && defaulted.text.endsWith('…')) {
+    pass('normalizeJd applies a custom textCap and defaults to the 12000 JD cap');
+  } else {
+    fail(`normalizeJd textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
   }
 
   // normalizeListing — resolve relatives, drop nav/short labels, dedup, cap

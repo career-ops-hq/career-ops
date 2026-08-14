@@ -6,6 +6,7 @@
  */
 
 import { classifyLiveness } from './liveness-core.mjs';
+import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;
@@ -16,8 +17,7 @@ const HYDRATION_WAIT_MS = 2_000;
 // headlessly (the scan parser scripts/parsers/pracuj-jobs.mjs relies on the same
 // trick), so the common case never needs the slower headed-browser fallback.
 export const LIVENESS_CONTEXT_OPTIONS = {
-  userAgent:
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  userAgent: BROWSER_LIKE_USER_AGENT,
   locale: 'en-US',
 };
 
@@ -125,10 +125,120 @@ export function rejectPrivateOrInvalid(url) {
   return null;
 }
 
+const dnsCache = new Map();
+
+// Real DNS: resolve4 + resolve6 + lookup, each tolerant of its own failure, so a
+// host that only answers on one of the three still yields an address list.
+async function resolveViaDns(hostname) {
+  const dns = await import('dns/promises');
+  const [ipv4, ipv6, lookupList] = await Promise.all([
+    dns.resolve4(hostname).catch(() => []),
+    dns.resolve6(hostname).catch(() => []),
+    dns.lookup(hostname, { all: true }).catch(() => [])
+  ]);
+  return Array.from(new Set([
+    ...ipv4,
+    ...ipv6,
+    ...lookupList.map(item => item.address)
+  ]));
+}
+
+let hostResolver = resolveViaDns;
+
+/**
+ * Swap the resolver the egress guard uses, returning a restore function.
+ *
+ * `dns/promises` is imported dynamically and the guard calls the ESM namespace
+ * bindings, which are immutable — monkey-patching the module object has no
+ * effect on them (#2386). Without this seam a test can only ever reach the
+ * "host resolved to nothing" branch: the real resolver returns an empty list
+ * for the synthetic hostname, the guard blocks on that, and the loopback
+ * rejection the test exists to cover never runs. The memo cache is cleared on
+ * every swap, in both directions, so a verdict computed under one resolver can
+ * never be served to the next.
+ *
+ * @param {((hostname: string) => Promise<string[]>)|null} resolver - Resolver to
+ *   install, or null to restore the real DNS one.
+ * @returns {() => void} Restores the resolver in place before this call.
+ */
+export function setHostResolver(resolver) {
+  const previous = hostResolver;
+  hostResolver = resolver ?? resolveViaDns;
+  dnsCache.clear();
+  return () => {
+    hostResolver = previous;
+    dnsCache.clear();
+  };
+}
+
+async function resolveDnsCached(hostname) {
+  if (dnsCache.has(hostname)) {
+    const cached = dnsCache.get(hostname);
+    if (cached instanceof Error) throw cached;
+    return cached;
+  }
+  try {
+    const addresses = await hostResolver(hostname);
+    if (addresses.length === 0) {
+      throw new Error(`DNS resolution returned no addresses for ${hostname}`);
+    }
+    dnsCache.set(hostname, addresses);
+    return addresses;
+  } catch (err) {
+    dnsCache.set(hostname, err);
+    throw err;
+  }
+}
+
+// Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
+// literal host, so a public hostname that *resolves* to private space still
+// gets through it. Resolve and re-check every address before the request is
+// allowed out. Exported so other Playwright callers (archive-posting.mjs) wire
+// up the same two-layer guard instead of growing a second implementation.
+export async function validateUrlSecurity(urlString) {
+  const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
+  const hostname = url.hostname;
+  const host = normalizeHost(hostname);
+  const addresses = await resolveDnsCached(host);
+  for (const ip of addresses) {
+    const norm = normalizeHost(ip);
+    const mapped = extractMappedIPv4(norm);
+    const candidates = mapped ? [norm, mapped] : [norm];
+    for (const candidate of candidates) {
+      if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate))) {
+        throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
+      }
+    }
+  }
+}
+
 export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
   const guardError = rejectPrivateOrInvalid(url);
   if (guardError) {
     return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
+  }
+  if (page) {
+    page._blockedByGuard = null;
+  }
+  if (page && typeof page.route === 'function' && !page._routeInterceptorRegistered) {
+    page._routeInterceptorRegistered = true;
+    await page.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      const errGuard = rejectPrivateOrInvalid(requestUrl);
+      if (errGuard) {
+        console.warn(`Blocked request to restricted destination: ${requestUrl}`);
+        page._blockedByGuard = errGuard;
+        return route.abort('blockedbyclient');
+      }
+      try {
+        await validateUrlSecurity(requestUrl);
+        return route.continue();
+      } catch (err) {
+        console.warn(`Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
+        page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        return route.abort('blockedbyclient');
+      }
+    });
   }
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
@@ -173,8 +283,15 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     });
 
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
+
     return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
   } catch (err) {
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
     // permanently filtering it out on subsequent scans.

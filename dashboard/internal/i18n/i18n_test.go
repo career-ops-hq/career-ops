@@ -10,16 +10,18 @@ func TestStatusLabel(t *testing.T) {
 		norm string
 		en   string
 		tr   string
+		es   string
 	}{
-		{"interview", "Interview", "Mülakat"},
-		{"offer", "Offer", "Teklif"},
-		{"responded", "Responded", "Yanıt Verildi"},
-		{"applied", "Applied", "Başvuruldu"},
-		{"evaluated", "Evaluated", "Değerlendirildi"},
-		{"skip", "SKIP", "Uygun Değil"},
-		{"rejected", "Rejected", "Reddedildi"},
-		{"discarded", "Discarded", "İptal Edildi"},
-		{"unknown", "unknown", "unknown"},
+		{"interview", "Interview", "Mülakat", "Entrevista"},
+		{"offer", "Offer", "Teklif", "Oferta"},
+		{"hired", "Hired", "İşe Alındı", "Contratada"},
+		{"responded", "Responded", "Yanıt Verildi", "Respondida"},
+		{"applied", "Applied", "Başvuruldu", "Aplicada"},
+		{"evaluated", "Evaluated", "Değerlendirildi", "Evaluada"},
+		{"skip", "SKIP", "Uygun Değil", "OMITIR"},
+		{"rejected", "Rejected", "Reddedildi", "Rechazada"},
+		{"discarded", "Discarded", "İptal Edildi", "Descartada"},
+		{"unknown", "unknown", "unknown", "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -31,6 +33,9 @@ func TestStatusLabel(t *testing.T) {
 			}
 			if got := Tr.StatusLabel(tt.norm); got != tt.tr {
 				t.Fatalf("Tr.StatusLabel(%q) = %q, expected %q", tt.norm, got, tt.tr)
+			}
+			if got := Es.StatusLabel(tt.norm); got != tt.es {
+				t.Fatalf("Es.StatusLabel(%q) = %q, expected %q", tt.norm, got, tt.es)
 			}
 		})
 	}
@@ -81,6 +86,23 @@ func TestFormatTimeAgo(t *testing.T) {
 	if got := Tr.FormatTimeAgo("not-a-date"); got != "not-a-date" {
 		t.Errorf("Tr.FormatTimeAgo(invalid) = %q; want \"not-a-date\"", got)
 	}
+
+	// Spanish tests
+	if got := Es.FormatTimeAgo(today); got != "hoy" {
+		t.Errorf("Es.FormatTimeAgo(today) = %q; want \"hoy\"", got)
+	}
+	if got := Es.FormatTimeAgo(yesterday); got != "ayer" {
+		t.Errorf("Es.FormatTimeAgo(yesterday) = %q; want \"ayer\"", got)
+	}
+	if got := Es.FormatTimeAgo(threeDaysAgo); got != "hace 3d" {
+		t.Errorf("Es.FormatTimeAgo(3d ago) = %q; want \"hace 3d\"", got)
+	}
+	if got := Es.FormatTimeAgo(tomorrow); got != "hoy" {
+		t.Errorf("Es.FormatTimeAgo(tomorrow) = %q; want \"hoy\"", got)
+	}
+	if got := Es.FormatTimeAgo("not-a-date"); got != "not-a-date" {
+		t.Errorf("Es.FormatTimeAgo(invalid) = %q; want \"not-a-date\"", got)
+	}
 }
 
 func TestRuntimeLanguageManagement(t *testing.T) {
@@ -99,6 +121,16 @@ func TestRuntimeLanguageManagement(t *testing.T) {
 	SetLang("tr_TR")
 	if Current != &Tr || GetLang() != "tr" {
 		t.Errorf("after SetLang(\"tr_TR\"), GetLang() = %q; want \"tr\"", GetLang())
+	}
+
+	SetLang("es")
+	if Current != &Es || GetLang() != "es" {
+		t.Errorf("after SetLang(\"es\"), GetLang() = %q; want \"es\"", GetLang())
+	}
+
+	SetLang("es_ES")
+	if Current != &Es || GetLang() != "es" {
+		t.Errorf("after SetLang(\"es_ES\"), GetLang() = %q; want \"es\"", GetLang())
 	}
 
 	SetLang("en")
@@ -167,6 +199,25 @@ func TestSortModeLabel(t *testing.T) {
 			}
 		})
 	}
+
+	esCases := []sortTestCase{
+		{name: "score", mode: "score", want: "puntuación"},
+		{name: "date", mode: "date", want: "fecha"},
+		{name: "company", mode: "company", want: "empresa"},
+		{name: "status", mode: "status", want: "estado"},
+		{name: "location", mode: "location", want: "ubicación"},
+		{name: "pay", mode: "pay", want: "salario"},
+		{name: "last", mode: "last", want: "último"},
+		{name: "unknown", mode: "unknown", want: "unknown"},
+	}
+
+	for _, tc := range esCases {
+		t.Run("Es/"+tc.name, func(t *testing.T) {
+			if got := Es.SortModeLabel(tc.mode); got != tc.want {
+				t.Errorf("Es.SortModeLabel(%q) = %q; want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestViewModeLabel(t *testing.T) {
@@ -200,6 +251,20 @@ func TestViewModeLabel(t *testing.T) {
 		t.Run("Tr/"+tc.name, func(t *testing.T) {
 			if got := Tr.ViewModeLabel(tc.mode); got != tc.want {
 				t.Errorf("Tr.ViewModeLabel(%q) = %q; want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
+
+	esCases := []viewTestCase{
+		{name: "grouped", mode: "grouped", want: "agrupado"},
+		{name: "flat", mode: "flat", want: "plano"},
+		{name: "unknown", mode: "unknown", want: "unknown"},
+	}
+
+	for _, tc := range esCases {
+		t.Run("Es/"+tc.name, func(t *testing.T) {
+			if got := Es.ViewModeLabel(tc.mode); got != tc.want {
+				t.Errorf("Es.ViewModeLabel(%q) = %q; want %q", tc.mode, got, tc.want)
 			}
 		})
 	}

@@ -1,0 +1,11 @@
+{
+  "id": "pm-architect-ambiguous",
+  "synthetic": true,
+  "jd": "AI Solutions Lead — Northwind Enterprise (Hybrid)\n\nA senior role sitting between product and engineering for our enterprise AI offering. You will own the technical architecture of how our AI capabilities integrate into large-customer environments — the reference design, the integration patterns, the systems-level decisions — while also maintaining a lightweight roadmap and keeping stakeholders aligned on sequencing. There is a PRD-flavored side to this (you will write the occasional spec and run some discovery), but the center of gravity is architecture: customers buy the design, and you are accountable for the integration working across their systems. Enterprise integration depth is the hard requirement; product instincts are the multiplier. Base band published: $195k–$225k plus equity.",
+  "label": {
+    "archetype": "AI Solutions Architect",
+    "score": 3.7,
+    "provenance": "reference-frozen-v1",
+    "edge_note": "reads PM-adjacent (roadmap/stakeholder/PRD) but reference resolves to Architect — the accountable deliverable is the integration architecture, product work is secondary"
+  }
+}

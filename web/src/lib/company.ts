@@ -96,6 +96,7 @@ const DOMAIN_OVERRIDES: Record<string, string> = {
   "typeform": "typeform.com",
   factorial: "factorialhr.com",
   "n26": "n26.com",
+  vdab: "vdab.be",
   "red hat": "redhat.com",
   redhat: "redhat.com",
 };

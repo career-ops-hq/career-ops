@@ -15,6 +15,7 @@
  * 10. Every report file has a tracker row referencing it (warning — see #1425)
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
+ * 13. applications.md <-> active-interviews.md status sync (see #1504)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -22,6 +23,11 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
+  normalizeTextKey, normalizeVia,
+} from './tracker-parse.mjs';
+import { checkTrackerSync } from './tracker-sync-check.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -80,24 +86,13 @@ const lines = content.split('\n');
 // Location column after Role). Fixed-position indexing would otherwise read
 // Location where Score is expected and flag false errors. Falls back to the
 // legacy fixed layout when no recognizable header row is found.
-const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
-const HEADER_ALIASES = {
-  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'via': 'via', 'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
-  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
-};
-function detectColumns(allLines) {
-  for (const line of allLines) {
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim().toLowerCase());
-    if (!cells.includes('company') || !cells.includes('role')) continue;
-    const map = {};
-    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
-  }
-  return null;
-}
-const COLMAP = detectColumns(lines) || LEGACY_COLMAP;
+//
+// Sourced from tracker-parse.mjs rather than re-declared here: this file used
+// to carry its own copy of LEGACY_COLMAP, HEADER_ALIASES and detectColumns, so
+// a fix to the shared module left verify-pipeline reading a different layout
+// than merge-tracker wrote — the drift tracker-parse.mjs exists to prevent, and
+// the same half-application #1291 was filed for.
+const COLMAP = resolveColumns(lines);
 const MAX_IDX = Math.max(...Object.values(COLMAP));
 
 const entries = [];
@@ -154,8 +149,10 @@ if (badStatuses === 0) ok('All statuses are canonical');
 const companyRoleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
-  const key = e.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '::' +
-    e.role.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+  // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
+  // so every Japanese company and every Japanese role keyed to '' and unrelated
+  // rows were reported as "possible duplicates".
+  const key = normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
 }
@@ -188,8 +185,7 @@ if (brokenReports === 0) ok('All report links valid');
 // --- Check 4: Score format ---
 let badScores = 0;
 for (const e of entries) {
-  const s = e.score.replace(/\*\*/g, '').trim();
-  if (!/^\d+\.?\d*\/5$/.test(s) && s !== 'N/A' && s !== 'DUP') {
+  if (!looksLikeScoreCell(e.score)) {
     error(`#${e.num}: Invalid score format: "${e.score}"`);
     badScores++;
   }
@@ -200,7 +196,7 @@ if (badScores === 0) ok('All scores valid');
 let badRows = 0;
 for (const line of lines) {
   if (!line.startsWith('|')) continue;
-  if (line.includes('---') || line.includes('Empresa')) continue;
+  if (isSeparatorRow(line) || isHeaderRow(line)) continue;
   const parts = line.split('|');
   if (parts.length <= MAX_IDX) {
     error(`Row with too few columns (need ${MAX_IDX} data cols): ${line.substring(0, 80)}...`);
@@ -262,7 +258,15 @@ if (staleSentinels === 0) ok('No stale reservation sentinels');
 // Warning-level, not error: duplicates can be legitimate (re-evaluation
 // after a JD change).
 const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
-const normalizeKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Shares normalizeTextKey with Check 2 so the two checks fold text the same
+// way (#2393). That is where the guarantee ends: this check keys off the
+// FILENAME slug, already ASCII by the time a report is written, while Check 2
+// keys off the tracker's Company column with the original spelling intact. So
+// the two can and do disagree — `İstanbul Tekstil` vs `Istanbul Tekstil` is
+// flagged here and not there, because the dotted I survives in one input and
+// not the other. Sharing a normalizer is not sharing a contract when the
+// callers feed it different things. Pinned in test-all.mjs.
+const normalizeKey = normalizeTextKey;
 
 // Role comes from the report body: the Machine Summary YAML fence when
 // present (field names are exact by contract), else the title line
@@ -311,17 +315,35 @@ for (const group of reportsByRole.values()) {
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
 
 // --- Check 10: Orphan reports with no tracker row (#1425) ---
-// Every reports/NNN-*.md should be referenced by a tracker row — by the row's
-// own number, the [NNN] link text, or the NNN- prefix of the linked filename.
-// A report none of them reference is usually the loser of a tracker dedup.
+// Every reports/NNN-*.md should be referenced by a tracker row — by the
+// [NNN] link text(s), the NNN- prefix of the linked filename(s), or (only when
+// the cell carries no markdown link at all) the row's own number.
+//
+// The row's own number is a LAST RESORT, not a standing signal. Tracker row
+// numbers and report numbers are independent counters that diverge in normal
+// operation — #1733 established that a reserved report number is discarded
+// when it is <= the tracker max, permanently desynchronising the two. Treating
+// a row's number as a reference whenever it merely coexists with an unrelated
+// link therefore masks real orphans: a row numbered 950 that legitimately
+// links to report 955 also silently "references" an unrelated orphaned
+// report 950. Only when the cell has no link is the row number the only signal
+// available, and only then is it used.
+//
+// Links are matched GLOBALLY. A cell can carry more than one — "[901](…) /
+// [902](…)" is the documented form for a re-evaluation that keeps both reports
+// on record — and a single .match() sees only the first, so every later link
+// in the cell false-positives as an orphan.
 const referencedNums = new Set();
 for (const e of entries) {
-  referencedNums.add(e.num);
-  const linkText = e.report.match(/\[(\d+)\]/);
-  if (linkText) referencedNums.add(parseInt(linkText[1], 10));
-  const linkTarget = e.report.match(/\]\(([^)]+)\)/);
-  if (linkTarget) {
-    const m = linkTarget[1].split('/').pop().match(/^(\d+)-/);
+  const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
+  const linkTargets = [...e.report.matchAll(/\]\(([^)]+)\)/g)];
+  if (linkTexts.length === 0 && linkTargets.length === 0) {
+    referencedNums.add(e.num);
+    continue;
+  }
+  for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
+  for (const lt of linkTargets) {
+    const m = lt[1].split('/').pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }
@@ -362,10 +384,12 @@ for (const e of entries) {
 }
 // Same company+role reached through different channels: both submissions are
 // real, so this is a warning to the human (double-submission risk), never an
-// auto-merge. Channel identity is normalized the same way merge-tracker.mjs
-// normalizes companies (strip non-alphanumerics, lowercase), so "Hays" and
-// "HAYS " read as one channel; the raw spelling is kept for the message.
-const normalizeChannel = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'direct';
+// auto-merge. Channel identity uses the shared normalizeVia() that merge-tracker
+// and dedup-tracker key agencies with (#2397), so "Hays" and "HAYS " read as one
+// channel while リクルート and パーソル stay two; the raw spelling is kept for
+// the message. Before this, both non-Latin agencies normalized to '' and fell
+// back to 'direct', hiding exactly the double-submission this check exists for.
+const normalizeChannel = (v) => normalizeVia(v ?? '') || 'direct';
 const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
@@ -384,7 +408,6 @@ for (const [key, vias] of channelsByRole) {
   }
 }
 if (viaIssues === 0) ok('Via channels consistent');
-
 // --- Check 12: Duplicate tracker numbers (#1704) ---
 // The # column is a row id and must be unique. Unlike Check 2 (company+role
 // dedup, which can false-positive on a legitimate re-application), the SAME
@@ -408,6 +431,40 @@ for (const [num, group] of numGroups) {
   }
 }
 if (dupeNums === 0) ok('No duplicate tracker numbers');
+
+// --- Check 13: applications.md <-> active-interviews.md status sync (#1504) ---
+// Delegates to tracker-sync-check.mjs's exported checkTrackerSync() rather than
+// re-implementing the matching/two-tier resolution logic here or shelling out
+// to a second process. Read-only: this only surfaces drift, it does not write
+// a fix (tracker-sync-check.mjs is intentionally reporting-only for now — see
+// its module header).
+let syncResult;
+try {
+  syncResult = checkTrackerSync({ appsFile: APPS_FILE });
+} catch (err) {
+  warn(`Sync check could not run: ${err.message}`);
+}
+
+if (syncResult) {
+  const tier1Mismatches = syncResult.mismatches.filter(m => m.resolution === 'auto-tier1');
+  const tier2Mismatches = syncResult.mismatches.filter(m => m.resolution === 'needs-review-tier2');
+  const unmatchedRows = syncResult.mismatches.filter(m => m.resolution === 'unmatched');
+
+  for (const m of tier1Mismatches) {
+    warn(`Sync drift (auto-resolvable): ${m.company} — ${m.role}: applications.md="${m.applicationsStatus}" vs active-interviews.md="${m.activeInterviewsStatus}" -> suggest "${m.suggestedStatus}" in ${m.staleIn} (run node tracker-sync-check.mjs for details)`);
+  }
+  for (const m of tier2Mismatches) {
+    warn(`Sync drift (needs human review): ${m.company} — ${m.role}: applications.md="${m.applicationsStatus}" (${m.applicationsLastModified || 'no blame info'}) vs active-interviews.md="${m.activeInterviewsStatus}" (${m.activeInterviewsLastModified || 'no blame info'})`);
+  }
+  for (const m of unmatchedRows) {
+    warn(`Sync check: active-interviews.md row for "${m.company}" — "${m.role}" could not be matched to a tracker row (${m.note})`);
+  }
+  if (tier1Mismatches.length === 0 && tier2Mismatches.length === 0 && unmatchedRows.length === 0) {
+    ok(syncResult.summary.total > 0
+      ? 'applications.md and active-interviews.md are in sync'
+      : 'No active-interviews.md rows to sync-check');
+  }
+}
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

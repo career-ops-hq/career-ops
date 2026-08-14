@@ -1,5 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 // Avature provider — parses the public Avature career-site job list.
 // Auto-detects from a careers_url on `*.avature.net`; a branded custom domain
@@ -54,18 +56,6 @@ function resolveConfig(entry) {
   // e.g. /en_US/searchjobs/SearchJobs); otherwise default to the classic path.
   const searchPath = /\/SearchJobs\b/i.test(u.pathname) ? u.pathname.replace(/\/+$/, '') : '/careers/SearchJobs';
   return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin };
-}
-
-const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#8226': '•' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z0-9]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED[body.toLowerCase()] ?? m;
-  });
 }
 
 /** @param {string} s */
@@ -164,7 +154,6 @@ export default {
 
     const jobs = [];
     const seen = new Set();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
 
     const getPage = async (param, page) => {
       const htmlText = await ctx.fetchText(`${cfg.searchUrl}?${param}=${page * PAGE_SIZE}`, {
@@ -192,7 +181,7 @@ export default {
     };
 
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS);
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let articles = await getPage(offsetParam, page);
       let fresh = absorb(articles);
 
@@ -206,7 +195,7 @@ export default {
       // or an inert key that returns an empty page 1 would exit without healing.
       if (fresh === 0 && canHeal && page === 1) {
         canHeal = false;
-        await sleep(INTER_PAGE_DELAY_MS);
+        await sleep(INTER_PAGE_DELAY_MS, ctx);
         const altArticles = await getPage(FALLBACK_OFFSET_PARAM, page);
         const altFresh = absorb(altArticles);
         if (altFresh > 0) {

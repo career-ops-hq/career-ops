@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
 
 // Rheinmetall provider — single-company (like ibm.mjs / dassault.mjs). The
 // public vacancy list at https://www.rheinmetall.com/{lang}/career/vacancies is
@@ -27,20 +28,6 @@
 const MAX_PAGES = 150; // safety cap (~1350 postings at 10/page); tune via entry.max_pages
 const MAX_JOBS = 1500; // cap total postings pulled
 const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential requests
-
-// Minimal HTML entity decoder — titles carry named (&amp;) and numeric
-// (&#252; / &#xfc;) entities. Mirrors successfactors.mjs / dassault.mjs.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
-  });
-}
 
 /** @param {string} s */
 function clean(s) {
