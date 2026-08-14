@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { join, relative } from 'path';
@@ -14,6 +15,7 @@ import { pass, fail, ROOT, NODE } from './helpers.mjs';
 const outputRoot = join(ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 const sandbox = mkdtempSync(join(outputRoot, 'page-budget-test-'));
+const externalOutput = mkdtempSync(join(outputRoot, 'page-budget-external-'));
 const script = join(sandbox, 'generate-pdf.mjs');
 const input = join(sandbox, 'two-pages.html');
 const defaultOverflowInput = join(sandbox, 'three-pages.html');
@@ -265,6 +267,21 @@ try {
   } else {
     fail(`generate-pdf ignored redirected workspace paths: ${redirected.output.trim()}`);
   }
+
+  const linkedOutput = join(sandbox, 'linked-output');
+  const escapedPdf = join(externalOutput, 'escaped.pdf');
+  symlinkSync(externalOutput, linkedOutput, process.platform === 'win32' ? 'junction' : 'dir');
+  const symlinkEscape = runPdf([input, join(linkedOutput, 'escaped.pdf')]);
+  if (
+    symlinkEscape.status !== 0 &&
+    symlinkEscape.output.includes('Refusing to write the PDF outside the tracker workspace') &&
+    !existsSync(escapedPdf)
+  ) {
+    pass('generate-pdf rejects output directories symlinked outside the tracker workspace');
+  } else {
+    fail(`generate-pdf followed an output symlink outside its workspace: ${symlinkEscape.output.trim()}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
+  rmSync(externalOutput, { recursive: true, force: true });
 }
