@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -173,13 +173,12 @@ export async function POST(req: Request) {
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
       let stderrBuf = "";
-      // Fallback for a CLI with no CliSpec.stderrIsFatal of its own: widened over
-      // time because auth/login/quota failures are the most common real error and a
-      // narrow regex missed them (silent false "success"). A CLI whose own event
-      // stream and exit code are authoritative overrides it — that bare `error` term
-      // failed Codex runs that had merely logged a benign diagnostic (#2085).
-      const STDERR_FAILURE = /error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i;
-      const isFatalStderr = spec.stderrIsFatal ?? ((line: string) => STDERR_FAILURE.test(line));
+      // Fallback for a CLI with no CliSpec.stderrIsFatal of its own. Moved into
+      // run-cli-support.mjs beside the per-CLI classifiers so it has a reachable
+      // test: as an inline regex in this closure nothing could assert it, which
+      // is how a bare `auth` came to match "Authentication successful" and mark a
+      // successful run as failed on six of the eight runtimes (#1974).
+      const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
       const flagStderrLine = (line: string) => {
         if (!line.trim() || !isFatalStderr(line)) return;
         sawError = true;

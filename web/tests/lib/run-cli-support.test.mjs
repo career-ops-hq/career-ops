@@ -16,6 +16,7 @@ import {
   hasNewCompletedReport,
   isFatalClaudeStderr,
   isFatalCodexStderr,
+  isFatalGenericStderr,
   parseClaudeEvent,
   parseCodexEvent,
 } from "../../src/lib/run-cli-support.mjs";
@@ -440,4 +441,45 @@ test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
   // rather than claiming a round-trip it never performs.
   assert.ok(codexStreamArgs("p").includes("--json"));
   assert.deepEqual(parseCodexEvent(JSON.stringify({ type: "thread.started" })), { status: "Agent ready" });
+});
+
+// ── the fallback stderr classifier (#1974) ──────────────────────────────────
+//
+// Only claude and codex define `stderrIsFatal`, so six of the eight entries in
+// KNOWN reach this path. It lived as an inline regex inside route.ts's stream
+// closure, where nothing could assert it — which is how `auth` came to match
+// inside "author" and a success message came to fail a run.
+
+test("the fallback does not fail a run because a word appeared", () => {
+  for (const line of [
+    "Authentication successful",      // a SUCCESS message
+    "Authorized to work in the US",
+    "warning: no author found",       // "auth" inside "author"
+    "fetching author metadata",
+    "Errors: 0",
+    "Logged in as santifer",
+    "npm notice New minor version",
+  ]) {
+    assert.equal(isFatalGenericStderr(line), false, `benign line treated as fatal: ${line}`);
+  }
+});
+
+test("the fallback still catches every real failure it caught before", () => {
+  // Anchoring, not narrowing: this list must not shrink when the regex is edited.
+  for (const line of [
+    "Error: connection refused",
+    "HTTP 401 unauthorized",
+    "not authenticated",
+    "authentication failed",
+    "please log in",
+    "invalid api key",
+    "missing credentials",
+    "quota exceeded",
+    "rate limit hit",
+    "permission denied",
+    "fatal: not a git repository",
+    "command not found",
+  ]) {
+    assert.equal(isFatalGenericStderr(line), true, `real failure no longer detected: ${line}`);
+  }
 });

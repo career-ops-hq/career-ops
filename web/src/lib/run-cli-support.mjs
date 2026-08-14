@@ -109,6 +109,40 @@ export function isFatalClaudeStderr(line) {
 }
 
 /**
+ * Fallback classifier for a CLI with no `stderrIsFatal` of its own.
+ *
+ * Only claude and codex define one, so SIX of the eight entries in KNOWN reach
+ * this path — including every runtime people pick to spend less than they would
+ * on those two.
+ *
+ * The terms are ANCHORED. Unanchored, `auth` matched inside ordinary words and a
+ * successful run got reported as failed because a word appeared:
+ *
+ *   "Authentication successful"   → fatal    ← a SUCCESS message
+ *   "warning: no author found"    → fatal    ← "auth" inside "author"
+ *   "fetching author metadata"    → fatal
+ *   "Errors: 0"                   → fatal
+ *
+ * That is the same failure #2085 exists to remove, on the path #2102 left
+ * untouched. Found by @gregaro in #1974.
+ *
+ * Anchoring, NOT narrowing: `not authenticated` and `authentication failed`
+ * still match, and the multi-word phrases keep no `\b` because they cannot
+ * collide with prose. Lives here rather than inline in route.ts so it can be
+ * tested — the reason the drift went unnoticed is that a regex in a .ts closure
+ * had no reachable test.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+export function isFatalGenericStderr(line) {
+  return GENERIC_FATAL_STDERR_RE.test(line);
+}
+
+const GENERIC_FATAL_STDERR_RE =
+  /\berror\b|\bdenied\b|\bfatal\b|not found|\bunauthorized\b|\bforbidden\b|not authenticated|authentication failed|\blogin\b|log in|\bcredentials?\b|api[ -]?key|\bquota\b|rate limit/i;
+
+/**
  * The argv that makes `codex exec` emit the JSONL `parseCodexEvent` reads.
  *
  * Lives beside that parser rather than inline in clis.ts because the two are one
