@@ -8,8 +8,9 @@
  *
  * Usage:
  *   node update-system.mjs check      # Check if update available
- *   node update-system.mjs apply      # Apply update (after user confirms)
- *   node update-system.mjs apply --force
+ *   node update-system.mjs apply --confirm
+ *                                     # Apply update after explicit confirmation
+ *   node update-system.mjs apply --force --confirm
  *                                     # …and overwrite system files this
  *                                     # install edited locally (#2337). Without
  *                                     # it those files are kept and listed.
@@ -1901,12 +1902,20 @@ async function apply() {
   // env var carries the flag across the self-reexec, which re-invokes the
   // TARGET updater as `update-system.mjs apply` with a fixed argv.
   const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
+  const updateConfirmed = process.argv.includes('--confirm') || process.env.CAREER_OPS_UPDATE_CONFIRM === '1';
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
   // Backups created by this apply run are expected updater output, not user
   // files the checkout modified. Record only successful copies so an unrelated
   // pre-existing .bak can never receive this exemption.
   const generatedBackupPaths = new Set();
   const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
+
+  if (!updateConfirmed) {
+    throw new Error(
+      `Installation requires explicit confirmation. Re-run with --confirm${updateForce ? ' --force --confirm' : ''}. ` +
+      'A scheduled update check never installs files.',
+    );
+  }
 
   // Check for lock
   const lockFile = join(ROOT, '.update-lock');
@@ -1977,6 +1986,7 @@ async function apply() {
             CAREER_OPS_UPDATE_REEXEC: '1',
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
             ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
+            CAREER_OPS_UPDATE_CONFIRM: '1',
           },
         });
         return;
@@ -2031,7 +2041,7 @@ async function apply() {
       } else {
         preservedPaths.push(...atRisk);
         console.log('Keeping your versions. They will NOT receive upstream changes.');
-        console.log('Re-run with `node update-system.mjs apply --force` to take the upstream version instead.');
+        console.log('Re-run with `node update-system.mjs apply --force --confirm` to take the upstream version instead.');
       }
       console.log('');
     }
@@ -2576,7 +2586,7 @@ if (isCli) {
       case 'rollback': rollback(); break;
       case 'dismiss': dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check|apply [--force]|rollback|dismiss]');
+        console.log('Usage: node update-system.mjs [check|apply --confirm [--force]|rollback|dismiss]');
         process.exit(1);
     }
   } catch (err) {

@@ -45,6 +45,14 @@ const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
+if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)/.test(source) &&
+    /Installation requires explicit confirmation/.test(source) &&
+    /CAREER_OPS_UPDATE_CONFIRM: '1'/.test(source)) {
+  pass('apply requires explicit confirmation and carries it through self-reexec');
+} else {
+  fail('apply can install without an explicit confirmation flag');
+}
+
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
 // BOOTSTRAP_PATHS) must exist in the working tree. A path deleted upstream
 // but left in the manifest survives as a permanent `error: pathspec ...` in
