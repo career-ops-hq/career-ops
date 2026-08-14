@@ -110,8 +110,13 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    const yaml = (await import('js-yaml')).default;
-    const parsed = yaml.load(readFileSync(file, 'utf8'));
+    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
+    // export, so `.default` is undefined there and `yaml.load` throws straight
+    // into the catch below. That catch fails OPEN — it returns {}, so every
+    // configured plugin silently stops loading and the only trace is one ⚠️ line
+    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
+    const { load } = await import('js-yaml');
+    const parsed = load(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);

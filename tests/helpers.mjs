@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -237,6 +237,38 @@ export function formatRunFailure(maxChars = 2000) {
  * @returns {boolean} True when the file exists.
  */
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
+
+/**
+ * Recursively collect files under `dir` whose basename matches `match`.
+ *
+ * Deterministic by construction: entries are sorted lexicographically at every
+ * level, so the result is identical on every run and every OS — the same
+ * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ *
+ * A missing `dir` yields `[]` rather than throwing, so the caller reports its
+ * own contract failure (e.g. "discovery is empty") instead of the run dying
+ * mid-traversal with an ENOENT that says nothing about what was expected.
+ *
+ * @param {string} dir - Absolute directory to walk.
+ * @param {RegExp} match - Tested against each entry's basename.
+ * @param {Set<string>} [skipDirs] - Directory names never descended into.
+ * @returns {string[]} Absolute paths, parents before children.
+ */
+export function walkFiles(dir, match, skipDirs = new Set()) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  const entries = readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
+    } else if (match.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
 
 let bashCache = null;
 let bashSourceCache = null;

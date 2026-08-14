@@ -18,7 +18,7 @@
  * Pure + dependency-light (js-yaml only) so it's unit-testable without Playwright.
  */
 import { readFileSync, existsSync } from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 // Recognized style tokens → the CSS custom property each maps to. Anything not
 // listed here is ignored, so a typo or an unrelated `style:` key is inert.
@@ -90,6 +90,13 @@ export function buildThemeStyleBlock(tokens) {
 export function injectThemeStyle(html, tokens) {
   const block = buildThemeStyleBlock(tokens);
   if (!block) return html;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${block}\n</head>`);
+  // Replacer FUNCTION, not a string: `block` carries values straight from the
+  // user's config/profile.yml `style:` block, and a string replacement argument
+  // is scanned by JS for $-patterns. A font_family of `A$'B` makes `$'` mean
+  // "everything after the match", splicing the entire document body INTO the
+  // <head> inside the style element — silently, with a valid-looking exit 0.
+  // The sanitizer drops `; { } < >` but has no reason to drop `$`, which is
+  // legal in a CSS value. Same class as #2588 fixed in the CV builders.
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${block}\n</head>`);
   return `${block}\n${html}`;
 }
