@@ -36,7 +36,7 @@
 import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
@@ -403,11 +403,54 @@ function countRenderedPdfPages(pdfBuffer) {
  * @param {string} [rootDir] - Workspace root used as the manifest base.
  * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
   if (!pathValue) return '';
   const rel = relative(rootDir, resolve(pathValue));
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
+}
+
+/** @deprecated Use workspaceRelativeManifestPath. */
+export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+  return workspaceRelativeManifestPath(pathValue, rootDir);
+}
+
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Confirm a PDF destination is lexically and canonically inside its workspace.
+ * Resolving the nearest existing ancestor catches output directories that are
+ * symlinks to another location before Chromium writes through them.
+ */
+export function isWorkspaceOutputPath(pathValue, rootDir = workspaceRoot) {
+  const root = resolve(rootDir);
+  const candidate = resolve(pathValue);
+  const lexical = relative(root, candidate);
+  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
+    return false;
+  }
+
+  try {
+    const canonicalRoot = realpathSync(root);
+    const canonicalAnchor = realpathSync(nearestExistingPath(candidate));
+    const canonical = relative(canonicalRoot, canonicalAnchor);
+    return canonical === '' || (canonical !== '..' && !canonical.startsWith(`..${sep}`) && !isAbsolute(canonical));
+  } catch {
+    return false;
+  }
 }
 
 export function injectPrintPageCss(html, format = 'a4') {
@@ -442,7 +485,7 @@ export function injectPrintPageCss(html, format = 'a4') {
  * report number to the exact PDF (and its source HTML for regeneration).
  *
  * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * career-ops root with forward slashes. One row per PDF path; when a report
+ * tracker workspace with forward slashes. One row per PDF path; when a report
  * number is given, older rows for that report are dropped too (regenerated
  * CVs supersede stale entries). The file is gitignored: it references
  * gitignored output/ artifacts and is meaningless on another machine.
@@ -451,7 +494,7 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
   const manifestPath = resolvePdfIndexPath(trackerPath);
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = repoRelativeManifestPath(htmlPath, workspaceRoot);
+  const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
@@ -565,9 +608,12 @@ async function generatePDF() {
   // would have allowed writes anywhere under an arbitrary cwd.
   try {
     assertInsideWorkspace(inputPath, 'input');
-    assertInsideWorkspace(outputPath, 'output');
   } catch (err) {
     console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
+    process.exit(1);
+  }
+  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
 
