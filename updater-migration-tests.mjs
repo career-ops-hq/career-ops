@@ -45,6 +45,12 @@ const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
+if (/diff', '--ignore-space-at-eol', '--name-only'/.test(source)) {
+  pass('local system edit detection ignores CRLF/LF-only drift from .gitattributes (#2817)');
+} else {
+  fail('local system edit detection can misclassify CRLF/LF-only drift as user edits (#2817)');
+}
+
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
 // BOOTSTRAP_PATHS) must exist in the working tree. A path deleted upstream
 // but left in the manifest survives as a permanent `error: pathspec ...` in

@@ -743,7 +743,11 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
 
   const diffNames = (ref) => {
     try {
-      return runGit('diff', '--name-only', ref, '--', ...paths).split('\n').map((p) => p.trim()).filter(Boolean);
+      // A pre-.gitattributes install can differ from the normalized upstream
+      // blob only by CRLF/LF at end of line. That is not a user edit and must
+      // not make every system file look locally modified (#2817).
+      return runGit('diff', '--ignore-space-at-eol', '--name-only', ref, '--', ...paths)
+        .split('\n').map((p) => p.trim()).filter(Boolean);
     } catch {
       // An unreadable ref (shallow clone, unrelated histories) must never abort
       // the update — it degrades the warning, not the checkout.
