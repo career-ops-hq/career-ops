@@ -124,6 +124,23 @@ try {
   if (!prose.has('SAFe')) pass('extractSkills does not read the word "safe" in prose as the SAFe certification');
   else fail(`extractSkills prose-safe boundary => ${[...prose].join(',')}`);
 
+  // The case above is rejected on CASE alone, so it holds the `(?<!\w)` half of
+  // SAFE_CERT_PATTERN and nothing else. 'SAFety' is the one that needs the
+  // TRAILING `(?!\w)`: it is capitalized exactly like the certification and
+  // differs only by what follows. Verified as a real hole rather than a
+  // hypothetical — dropping `(?!\w)` makes extractSkills('SAFety training
+  // programs') return SAFe, and without this line the suite stays green while
+  // it does. The 'SAFe 6' positive is its pair: the boundary must reject a
+  // trailing letter without also rejecting a trailing space and digit, which is
+  // how the framework's own versioned name is written.
+  const safetyProse = extractSkills('SAFety training programs run quarterly.');
+  if (!safetyProse.has('SAFe')) pass('extractSkills does not read "SAFety" as the SAFe certification (trailing word boundary)');
+  else fail(`extractSkills SAFety boundary => ${[...safetyProse].join(',')}`);
+
+  const safeVersioned = extractSkills('SAFe 6 rollout experience required.');
+  if (safeVersioned.has('SAFe')) pass('extractSkills still matches the versioned "SAFe 6" form');
+  else fail(`extractSkills SAFe 6 => ${[...safeVersioned].join(',') || '(none)'}`);
+
   if (canonicalize('safe') === 'safe' && canonicalize('SAFe') === 'SAFe') {
     pass('canonicalize leaves "safe" unchanged and does not fold it into "SAFe"');
   } else {
@@ -132,8 +149,13 @@ try {
 
   // 'CSM' is deliberately NOT a token: in job-posting text it far more often
   // means Customer Success Manager than Certified ScrumMaster.
+  // Asserted against the specific credential rather than an empty set: the
+  // claim is "CSM is not read as Certified ScrumMaster", and `size === 0` also
+  // asserts that nothing ELSE in this sentence is a skill. A token added later
+  // that legitimately matches "Manager" or "AE" would then fail this test for a
+  // reason it was never about.
   const csm = extractSkills('This role is part Customer Success Manager (CSM), partnered with an AE.');
-  if (csm.size === 0) pass('extractSkills does not treat "CSM" as a certification (Customer Success Manager collision)');
+  if (!csm.has('Certified ScrumMaster')) pass('extractSkills does not treat "CSM" as a certification (Customer Success Manager collision)');
   else fail(`extractSkills CSM collision => ${[...csm].join(',')}`);
 
   // empty / falsy input
