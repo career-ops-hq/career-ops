@@ -10,9 +10,9 @@
  *
  * Test 1 is the NEGATIVE CONTROL: it reproduces that loss with the pathspec form,
  * so tests 2 and 3 are demonstrating a fix rather than describing an absence.
- * Tests 4-9 cover `stagedPathsOutside`, the guard that decides when committing the
+ * Tests 4-11 cover `stagedPathsOutside`, the guard that decides when committing the
  * index is equivalent to the scoped commit and therefore safe (#915 bug 2).
- * Tests 10-12 pin the #2337 preserved-file case, with its own negative control.
+ * Tests 9-11 pin the #2337 preserved-file case, with its own negative control.
  *
  * Behavioural rather than source-pattern, driven against a throwaway repo through
  * the git-runner seam — same approach as tests/updater-rollback-behavior.test.mjs.
@@ -36,7 +36,7 @@ function makeRepo() {
   g('config', 'user.name', 'Test');
   g('config', 'core.fileMode', 'false');
   // stagedPathsOutside needs the RAW runner: gitIn trims, which would strip a
-  // leading space off a path and defeat the very case test 8 pins.
+  // leading space off a path and defeat the very case test 7 pins.
   const raw = (...args) => gitRawIn(dir, ...args);
   return { dir, g, raw };
 }
@@ -143,7 +143,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 8. Path names are preserved exactly (raised in PR review) ──────────
+// ── 7. Path names are preserved exactly (raised in PR review) ──────────
 // A staged path with a leading space must NOT be normalised into a different
 // one. Trimming would turn ` scan.mjs` into `scan.mjs`, match the owned entry,
 // and silently sweep a user's file into the update commit — #915 bug 2
@@ -166,7 +166,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 9. Nothing staged at all ───────────────────────────────────────────
+// ── 8. Nothing staged at all ───────────────────────────────────────────
 {
   const { dir, g, raw } = makeRepo();
   writeFileSync(join(dir, 'a.mjs'), 'x\n');
@@ -181,7 +181,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 10-12. A PRESERVED file under an update-owned directory (PR review) ─
+// ── 9-11. A PRESERVED file under an update-owned directory (PR review) ─
 // #2337 leaves system files this install modified locally alone, expressed as
 // `:(exclude)<path>` pathspecs. Those pathspecs match no staged path, so handing
 // them to the guard as owned entries left the enclosing owned directory
@@ -190,7 +190,7 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
 // to keep went into it under "chore: auto-update system files". That is #915
 // bug 2 back, through the guard that exists to prevent it.
 //
-// Test 10 is the NEGATIVE CONTROL: it drives the guard the OLD way (exclusion
+// Test 9 is the NEGATIVE CONTROL: it drives the guard the OLD way (exclusion
 // pathspecs as owned entries, no preserved list) and shows the sweep, so 11 and
 // 12 demonstrate a fix rather than describe an absence.
 {
