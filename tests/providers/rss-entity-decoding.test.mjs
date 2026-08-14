@@ -156,10 +156,17 @@ for (const [label, getTitle] of checked) {
 {
   const { readdirSync, readFileSync } = await import('fs');
   const dir = join(ROOT, 'providers');
-  const SHARED_IMPORT = "from './_html-entities.mjs'";
-  const PRIVATE_DECL = /function\s+(decodeEntities|decodeXmlEntities|fromCodePoint)\b/;
+  // Every provider on main writes the import one way, but the guard must not
+  // depend on that: quote style and `const`/arrow declarations are exactly the
+  // cosmetic variations a re-introduced copy would arrive with, and matching
+  // one spelling would let it back in (CodeRabbit on this PR).
+  const SHARED_IMPORT = /\bfrom\s*['"]\.\/_html-entities\.mjs['"]/;
+  const PRIVATE_DECL =
+    /(?:function\s*\*?\s+|(?:const|let|var)\s+)(decodeEntities|decodeXmlEntities|fromCodePoint)\b/;
   // Declarations only — remotli.mjs names String.fromCodePoint in a comment
   // explaining why it uses the shared decoder, which is not a private copy.
+  // A destructure (`const { decodeEntities } = …`) has a brace after `const`
+  // and so does not match either.
 
   const MIGRATED = [
     'jobspresso.mjs', 'higheredjobs.mjs', 'nodesk.mjs', 'larajobs.mjs',
@@ -185,7 +192,7 @@ for (const [label, getTitle] of checked) {
         offenders.push(`${file} (unreadable: ${e.message})`);
         continue;
       }
-      if (!src.includes(SHARED_IMPORT)) {
+      if (!SHARED_IMPORT.test(src)) {
         offenders.push(`${file} (no longer imports the shared decoder)`);
         continue;
       }
@@ -196,8 +203,14 @@ for (const [label, getTitle] of checked) {
     for (const file of files) {
       if (!file.endsWith('.mjs') || file === '_html-entities.mjs') continue;
       if (MIGRATED.includes(file)) continue; // already asserted, and more strictly
-      const src = readFileSync(join(dir, file), 'utf-8');
-      if (!src.includes(SHARED_IMPORT)) continue;
+      let src;
+      try {
+        src = readFileSync(join(dir, file), 'utf-8');
+      } catch (e) {
+        offenders.push(`${file} (unreadable: ${e.message})`);
+        continue;
+      }
+      if (!SHARED_IMPORT.test(src)) continue;
       const local = src.match(PRIVATE_DECL);
       if (local) offenders.push(`${file} (declares ${local[1]})`);
     }
