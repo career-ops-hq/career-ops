@@ -392,10 +392,10 @@ A capture is copied into `data/outcomes/` under its own extension (`posting.pdf`
 
 ### TSV Format for Tracker Additions
 
-One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
+One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns plus an optional trailing `url`:
 
 ```
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
 
 **Column order (IMPORTANT -- status BEFORE score):** 1 `num` (integer) · 2 `date` (YYYY-MM-DD) · 3 `company` · 4 `role` · 5 `status` (canonical) · 6 `score` (`X.X/5`) · 7 `pdf` (`✅`/`❌`) · 8 `report` (markdown link, always **root-relative**: `[num](reports/...)`) · 9 `notes` (one line).
@@ -405,6 +405,8 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 **Backfilled entries with no evaluation (#1799):** a row added retroactively without an evaluation must carry one of the recognized score sentinels — `N/A`, `—` (em dash), or `-` (hyphen) — never blank, never another placeholder. The column-swap guard (`looksLikeScoreCell` in `tracker-parse.mjs`, #1427) identifies the score column by content pattern (`X.X/5` or one of these sentinels); an unrecognized placeholder makes the row ambiguous and it is skipped with a warning.
 
 **Optional Via field (#1596):** applications through an agency/recruiter append a **tagged** extra field `via={Agency}` (e.g. `via=Hays`) after notes — never positional; the tag is mandatory. A single untagged extra keeps its legacy meaning (location). Unknown end employer → `?` as company (locale-invariant marker, never "Confidential") + a descriptor in notes. `merge-tracker.mjs` rejects ambiguous extras loudly; `--migrate-via` adds the column to an existing tracker.
+
+**Optional posting URL — the deterministic dedup key:** append the posting URL as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
 
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 

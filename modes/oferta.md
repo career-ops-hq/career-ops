@@ -619,6 +619,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
 - Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)
+- Notes — when the pipeline entry carries a `| posted: {YYYY-MM-DD}` segment (written by the scanner from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it through as its own trailing segment: `…; posted: 2026-08-07`. This is the only path by which the posting date reaches the tracker, and the dashboard's POSTED column — requisition age, "is this still plausibly being worked?" — reads it from the note. Copy it verbatim; when the entry has no segment, write nothing rather than inferring a date, since the column renders an absent date as `—` and a guessed one would report a months-old req as fresh.
 
 **Tracker format:**
 
