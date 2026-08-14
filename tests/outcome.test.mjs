@@ -1,6 +1,6 @@
 // tests/outcome.test.mjs — Unit test suite for outcome.mjs (#1722).
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, utimesSync, realpathSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -216,7 +216,7 @@ try {
       },
       encoding: 'utf-8',
     }));
-    const expectedDir = join(rootLayoutDir, 'data', 'outcomes', '7_root-corp_platform-engineer');
+    const expectedDir = join(realpathSync(rootLayoutDir), 'data', 'outcomes', '7_root-corp_platform-engineer');
     check('Root-layout outcome directory stays under workspace/data', rootResult.outcomeDir === expectedDir);
     check('Outcome honors CAREER_OPS_PDF_INDEX', readFileSync(join(expectedDir, 'submitted_cv.pdf'), 'utf8') === 'ROOT-LAYOUT-PDF');
   } finally {
