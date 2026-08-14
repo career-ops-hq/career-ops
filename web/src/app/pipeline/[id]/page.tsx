@@ -16,7 +16,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       report={report?.content ?? null}
       file={report?.file ?? null}
       canDelete={trackerCanDelete()}
-      pdfReadyFromIndex={pdfReadyForReport(id)}
+      pdfReadyFromIndex={await pdfReadyForReport(id)}
     />
   );
 }

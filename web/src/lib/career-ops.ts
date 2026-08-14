@@ -5,6 +5,11 @@ import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
+import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
+// Pure parser, no I/O — shared with the apply flow's CV resolver so the two
+// don't drift into two different definitions of "which report does this
+// index row belong to" (#2599, #2008 review).
+import { pdfPathForReport as pdfPathForReportNumber } from "@/lib/apply/cv-selection.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -152,37 +157,55 @@ export function readApplications(): Application[] {
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
  *  Digits-only, full-string match — parseInt alone would let "12abc" resolve to
- *  report 12, matching the wrong index row. Returns null for anything malformed
- *  or with no indexed PDF, so callers never have to re-validate. */
-function pdfIndexTarget(n: string): string | null {
+ *  report 12, matching the wrong index row. Returns null for anything malformed,
+ *  so callers never have to re-validate. */
+function pdfIndexTarget(n: string): number | null {
   const trimmed = n.trim();
   if (!/^\d+$/.test(trimmed)) return null;
-  return String(Number.parseInt(trimmed, 10)).padStart(3, "0");
+  return Number.parseInt(trimmed, 10);
 }
 
-export function pdfReadyForReport(n: string): boolean {
-  return pdfPathForReport(n) !== null;
+export async function pdfReadyForReport(n: string): Promise<boolean> {
+  return (await pdfPathForReport(n)) !== null;
 }
 
 /** The exact PDF path indexed for this report number, or null if none exists
- *  (malformed id, no index row, or the indexed file is missing on disk). Lets
- *  the viewer route serve the SPECIFIC report's PDF instead of guessing the
- *  newest file for the company — two applications at the same company have
- *  two different tailored CVs. */
-export function pdfPathForReport(n: string): string | null {
+ *  (malformed id, no index row, the indexed file is missing on disk, or the
+ *  index resolved outside the workspace). Lets the viewer route serve the
+ *  SPECIFIC report's PDF instead of guessing the newest file for the company —
+ *  two applications at the same company have two different tailored CVs.
+ *
+ *  The manifest path comes from the core's resolvePdfIndexPath (ACL, honors
+ *  CAREER_OPS_PDF_INDEX) rather than a hardcoded "data/pdf-index.tsv" literal
+ *  — the exact class of bug that #2471 fixed in the core, once, for every
+ *  reader. The parsing itself is pdfPathForReportNumber, a pure function
+ *  shared with the apply flow's own CV resolver (cv-selection.mjs) so there
+ *  is one definition of "which row matches this report", not two. */
+export async function pdfPathForReport(n: string): Promise<string | null> {
   const target = pdfIndexTarget(n);
-  if (!target) return null;
-  const tsv = read("data/pdf-index.tsv");
-  if (!tsv) return null;
-
-  for (const line of tsv.split("\n")) {
-    if (!line.trim()) continue;
-    const [report, pdfRel] = line.split("\t");
-    if (report?.trim() !== target || !pdfRel?.trim()) continue;
-    const abs = path.join(careerOpsRoot(), pdfRel.trim());
-    if (fs.existsSync(abs)) return abs;
+  if (target === null) return null;
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath) return null;
+  let tsv: string;
+  try {
+    tsv = fs.readFileSync(indexPath, "utf8");
+  } catch {
+    return null;
   }
-  return null;
+  const root = careerOpsRoot();
+  const rel = pdfPathForReportNumber(tsv, target);
+  if (!rel) return null;
+  // The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
+  // stops a hand edit) turned into a filesystem read that this route then
+  // serves — the path must be contained BY CONSTRUCTION, not by trusting the
+  // writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
+  // not to the manifest's own data/ directory — same base the pre-ACL version
+  // of this function used — and must stay under the project's output/ tree.
+  const abs = path.resolve(root, rel);
+  const outputDir = path.resolve(root, "output");
+  if (!abs.startsWith(outputDir + path.sep)) return null;
+  if (!fs.existsSync(abs) || !containedRealpath(abs, root)) return null;
+  return abs;
 }
 
 /**

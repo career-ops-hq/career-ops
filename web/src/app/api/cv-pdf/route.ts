@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   // different tailored CVs — the company-slug fallback below can't tell them
   // apart and would open the wrong report's PDF.
   if (n) {
-    const exact = pdfPathForReport(n);
+    const exact = await pdfPathForReport(n);
     if (exact) {
       try {
         return servePdf(exact);
