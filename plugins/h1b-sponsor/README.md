@@ -42,7 +42,7 @@ node plugins.mjs list
 Then install the index (about 8 MiB, downloaded from the data repo's GitHub releases):
 
 ```bash
-node plugins/h1b-sponsor/install-index.mjs
+node plugins/h1b-sponsor/install-h1b-index.mjs
 ```
 
 The installer reads a small pointer file the release publishes, `index-latest.json`, which names the current quarter's index file and its sha256. The download is checked against that digest before it is moved into place, so a truncated or substituted file is never what a lookup reads. It lands in `data/h1b/`, which is already gitignored.
@@ -56,7 +56,7 @@ Both assets live under a permanent `index-latest` release tag whose contents are
 DOL publishes new disclosure data quarterly. Pull the current build over the old one:
 
 ```bash
-node plugins/h1b-sponsor/install-index.mjs --force
+node plugins/h1b-sponsor/install-h1b-index.mjs --force
 ```
 
 `--force` is required to replace an existing index, so a re-run cannot quietly change the numbers under you. Cached answers are stamped with the index they came from, so a refresh invalidates them rather than mixing builds. The installer prints the build it installed and records it in `index.ndjson.gz.meta.json` next to the index, so you can tell which quarter you are on without downloading anything. `--tag <release>` reads the pointer from a different release tag, for a pinned quarter or a fork.

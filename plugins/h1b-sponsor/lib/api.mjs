@@ -113,7 +113,7 @@ function sleep(ms) {
 //
 // allowedOrigins names where the request may end up. It defaults to the
 // configured API base, so every existing caller keeps the same one-host guard;
-// install-index.mjs passes its own list because a GitHub release download is
+// install-h1b-index.mjs passes its own list because a GitHub release download is
 // answered by a different host than the one that serves the release metadata,
 // and hard-coding apiBase() there would both refuse that hop and drag an
 // unrelated H1B_API_BASE misconfiguration into a download that never touches

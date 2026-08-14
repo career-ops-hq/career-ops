@@ -35,7 +35,7 @@ const API_PATH = join(PLUGIN_DIR, 'lib', 'api.mjs');
 const INDEX_PATH = join(PLUGIN_DIR, 'lib', 'index.mjs');
 const CHECK_PATH = join(PLUGIN_DIR, 'check.mjs');
 const TOKEN_PATH = join(PLUGIN_DIR, 'token.mjs');
-const INSTALL_PATH = join(PLUGIN_DIR, 'install-index.mjs');
+const INSTALL_PATH = join(PLUGIN_DIR, 'install-h1b-index.mjs');
 const ENGINE_PATH = join(ROOT, 'plugins', '_engine.mjs');
 
 // ---------- fixture index ----------
@@ -1308,9 +1308,9 @@ if (!existsSync(API_PATH)) {
           && parsed.friendlinessTier === 'unknown'
           && Boolean(parsed.totals)
           && Boolean(parsed.redFlags)
-          && /install-index\.mjs/.test(String(parsed.error || ''));
+          && /install-h1b-index\.mjs/.test(String(parsed.error || ''));
         if (code === 1 && shaped) {
-          pass('check.mjs: with no index and no endpoint, the envelope says unknown and names install-index.mjs');
+          pass('check.mjs: with no index and no endpoint, the envelope says unknown and names install-h1b-index.mjs');
         } else {
           fail(`check.mjs no backend: exit ${code}, stdout=${String(stdout || '').slice(0, 200)}`);
         }
@@ -1777,7 +1777,7 @@ if (!existsSync(CHECK_PATH)) {
   }
 }
 
-// ---------- install-index.mjs: download, verify, install ----------
+// ---------- install-h1b-index.mjs: download, verify, install ----------
 // Offline: installIndex takes an injectable fetch with fetchWithTimeout's
 // shape, so every branch is testable without reaching GitHub. The one that
 // matters most is the mismatch: a download that does not hash to the published
@@ -1791,18 +1791,18 @@ if (!existsSync(CHECK_PATH)) {
 // repo cuts a code release. Both facts are asserted below, because they are a
 // contract with a repo this suite cannot see.
 if (!existsSync(INSTALL_PATH)) {
-  fail('install-index.mjs missing: the plugin ships it');
+  fail('install-h1b-index.mjs missing: the plugin ships it');
 } else {
-  if (run(NODE, ['--check', INSTALL_PATH]) !== null) pass('install-index.mjs parses (node --check)');
-  else fail('install-index.mjs failed node --check');
+  if (run(NODE, ['--check', INSTALL_PATH]) !== null) pass('install-h1b-index.mjs parses (node --check)');
+  else fail('install-h1b-index.mjs failed node --check');
 
   await new Promise((resolve) => {
     execFile(process.execPath, [INSTALL_PATH, '--nonsense'], { timeout: 20_000 }, (err, _stdout, stderr) => {
       const code = (err && typeof err.code === 'number') ? err.code : 0;
-      if (code === 2 && /install-index\.mjs/.test(String(stderr || ''))) {
-        pass('install-index.mjs (unknown flag): exit 2 with usage on stderr');
+      if (code === 2 && /install-h1b-index\.mjs/.test(String(stderr || ''))) {
+        pass('install-h1b-index.mjs (unknown flag): exit 2 with usage on stderr');
       } else {
-        fail(`install-index.mjs unknown flag: exit ${code}, stderr=${String(stderr || '').slice(0, 120)}`);
+        fail(`install-h1b-index.mjs unknown flag: exit ${code}, stderr=${String(stderr || '').slice(0, 120)}`);
       }
       resolve();
     });
@@ -1972,7 +1972,7 @@ if (!existsSync(INSTALL_PATH)) {
       if (process.platform !== 'win32') await chmod(deniedDir, 0o755).catch(() => {});
     }
   } catch (e) {
-    fail(`install-index tests crashed: ${e.message}`);
+    fail(`install-h1b-index tests crashed: ${e.message}`);
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }

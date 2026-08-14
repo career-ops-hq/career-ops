@@ -138,7 +138,7 @@ export function indexPath() {
   return trimmed;
 }
 
-/** The sidecar install-index.mjs writes beside the index. */
+/** The sidecar install-h1b-index.mjs writes beside the index. */
 export function metaPath(file = indexPath()) {
   return `${file}.meta.json`;
 }
@@ -153,7 +153,7 @@ let cachedDigest = null;
 
 /**
  * Digest of the installed index, used as the provenance stamp on cached
- * answers. The sidecar carries the digest install-index.mjs verified before it
+ * answers. The sidecar carries the digest install-h1b-index.mjs verified before it
  * moved the file into place, which saves re-hashing 8 MiB on every lookup; it
  * is trusted only when it still describes a file of that size, so an index
  * swapped underneath a stale sidecar gets hashed rather than mislabelled.

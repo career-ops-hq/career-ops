@@ -8,7 +8,7 @@
 //
 // Backends, in order:
 //   1. An HTTP endpoint, used when H1B_API_BASE names one explicitly.
-//   2. The local index (data/h1b/), installed by install-index.mjs. The
+//   2. The local index (data/h1b/), installed by install-h1b-index.mjs. The
 //      default, and the only one where the question never leaves the machine.
 // With neither, the CLI reports `unknown` and says how to install the index.
 // It does NOT fall back to a default host: which employers someone checks
@@ -78,7 +78,7 @@ async function selectBackend() {
     };
   }
   throw new Error(
-    'no local H-1B index and no H1B_API_BASE. Install the index with: node plugins/h1b-sponsor/install-index.mjs '
+    'no local H-1B index and no H1B_API_BASE. Install the index with: node plugins/h1b-sponsor/install-h1b-index.mjs '
     + '(about 8 MiB of public DOL data; lookups then stay on this machine). To use an HTTP endpoint instead, '
     + 'set H1B_API_BASE to one you trust.',
   );

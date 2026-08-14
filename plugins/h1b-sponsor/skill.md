@@ -14,12 +14,12 @@ If none of those apply, skip the check silently. Do not run it on non-US roles j
 
 ## If there is no index installed
 
-The check reads a local copy of the DOL data, so the question never leaves the user's machine. When that index is missing and no `H1B_API_BASE` is configured, the CLI exits non-zero and its `error` field names `install-index.mjs`. No lookup happened and nothing was sent anywhere.
+The check reads a local copy of the DOL data, so the question never leaves the user's machine. When that index is missing and no `H1B_API_BASE` is configured, the CLI exits non-zero and its `error` field names `install-h1b-index.mjs`. No lookup happened and nothing was sent anywhere.
 
 Installing downloads about 8 MiB from GitHub. That is an outward action in the same sense minting a key is, so ask first and run it only after the user agrees in the conversation:
 
 ```bash
-node plugins/h1b-sponsor/install-index.mjs
+node plugins/h1b-sponsor/install-h1b-index.mjs
 ```
 
 Do not install on your own initiative to make a failing check succeed, and do not install inside an unattended scan or a batch run. Without the user's agreement the sponsorship check is simply inconclusive for that evaluation: skip the Block G bullet and carry on. The same applies to `--force`, which replaces an installed index with a newer release.

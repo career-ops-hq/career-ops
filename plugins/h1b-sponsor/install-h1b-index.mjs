@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Downloads the local H-1B index so check.mjs can answer offline.
-// Usage: node plugins/h1b-sponsor/install-index.mjs [--tag <release>] [--force]
+// Usage: node plugins/h1b-sponsor/install-h1b-index.mjs [--tag <release>] [--force]
 //
 // This is the one command in the plugin that reaches the network on the read
 // path's behalf, and it is deliberately separate from check.mjs: keeping the
@@ -39,7 +39,7 @@ const REPO = 'msampath/h1b-sponsor-data';
 const DEFAULT_TAG = 'index-latest';
 const POINTER = 'index-latest.json';
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
-const USAGE = 'Usage: node plugins/h1b-sponsor/install-index.mjs [--tag <release>] [--force]';
+const USAGE = 'Usage: node plugins/h1b-sponsor/install-h1b-index.mjs [--tag <release>] [--force]';
 
 // A release download starts on github.com and is answered by whichever asset
 // host GitHub redirects to, so the egress guard is given all of them rather
