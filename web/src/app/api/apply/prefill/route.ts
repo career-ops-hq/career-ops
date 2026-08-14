@@ -4,6 +4,14 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,Glob,Grep");
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,13 +151,19 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
+      // A runtime with no verified fencing mechanism plans with its default access.
+      // log() is this route's non-fatal channel; it surfaces in the collapsed
+      // "Pre-fill diagnostics" drawer, which is where its other planner facts go
+      // (#2507).
+      const fencing = fencingReport({ cliId: spec.id, cliName: spec.name, capabilities: CAPS.localReadOnly });
+      if (fencing.notice) log(`⚠️ ${fencing.notice}`);
 
       const isClaude = cliId === "claude";
       // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
       // faster startup (skips the user's global playwright/gmail/linear/… servers
       // the planner doesn't need; it only reads local files).
       const args = isClaude
-        ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
+        ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed]
         : spec.args(prompt);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
@@ -158,7 +172,18 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
         // wait on piped input that will never arrive.
-        const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+        // Drafts answers from local files only: the Claude branch allows
+        // Read,Glob,Grep and denies WebFetch/WebSearch along with every write
+        // tool, so Codex gets a true read-only sandbox here.
+        const child = spawnHeadlessCli(
+          binPath,
+          args,
+          { cwd: careerOpsRoot(), env: process.env },
+          // spec.id, not the request's cliId: same value once resolveCli has
+          // accepted it, but typed as the canonical id rather than the caller's
+          // optional string.
+          { cliId: spec.id, capabilities: CAPS.localReadOnly },
+        );
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {

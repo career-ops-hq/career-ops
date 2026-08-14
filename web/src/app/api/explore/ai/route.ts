@@ -5,6 +5,14 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,WebFetch,WebSearch,Glob,Grep");
+import { fencingReport } from "@/lib/cli-fencing.mjs";
 
 // AI search orchestrates modes/discover.md by running the USER'S configured CLI
 // headless (CLI-agnostic, like the assistant). Web hunting is slow → generous
@@ -213,9 +221,9 @@ export async function POST(req: Request) {
         "--permission-mode",
         "acceptEdits",
         "--allowedTools",
-        "Read,WebFetch,WebSearch,Glob,Grep", // WebSearch ADDED vs the read-only assistant
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task", // proposer-not-writer, by construction
+        ADVISOR_SCOPE.allowed,
+      "--disallowedTools",
+        ADVISOR_SCOPE.disallowed,
       ]
     : isCodex
       ? [
@@ -240,11 +248,15 @@ export async function POST(req: Request) {
   const useCodexProcessGroup =
     isCodex && process.platform !== "win32";
 
-  const child = spawnHeadlessCli(binPath, args, {
-    cwd: childCwd,
-    env: process.env,
-    detached: useCodexProcessGroup,
-  });
+  // Proposer-not-writer, as the Claude branch above spells it: Read + WebFetch +
+  // WebSearch allowed, every write tool denied. WebFetch/WebSearch is why this is
+  // networkReadOnly rather than the stricter localReadOnly.
+  const child = spawnHeadlessCli(
+    binPath,
+    args,
+    { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
+    { cliId, capabilities: CAPS.networkReadOnly },
+  );
 
   const cleanupChildCwd = () => {
     if (!isCodex) return;
@@ -350,6 +362,14 @@ export async function POST(req: Request) {
       const emit = (s: string) => {
         if (safeEnqueue(s)) emitted = true;
       };
+      // Same honesty as /api/run: a runtime with no verified fencing mechanism
+      // runs with its default access, and that must be visible rather than
+      // inferred from which CLI happens to be selected (#2507). This stream is
+      // plain text, so the notice is a leading line rather than an event.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.networkReadOnly });
+      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+
+`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;

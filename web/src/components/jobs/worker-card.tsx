@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import { isFencingNotice } from "@/lib/cli-fencing.mjs";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -28,6 +29,17 @@ function isAuthError(job: Job): boolean {
   if (job.status !== "error") return false;
   const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
   return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
+}
+
+// The unfenced-runtime notice is emitted as the run's FIRST step, before the CLI
+// produces any output — and this card renders only the newest step, so it would be
+// displaced within a second of the run starting. Scan the whole list instead, and
+// render it in the sticky slot below, the same shape isAuthError already uses.
+// The predicate comes from cli-fencing.mjs so the emitter and this detector cannot
+// drift apart on a reworded sentence, and so a second notice shape (a partly
+// restricted run) is caught without editing this file (#2507).
+function isUnfenced(job: Job): boolean {
+  return job.steps.some((s) => isFencingNotice(s.label));
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -86,6 +98,7 @@ export function WorkerCard({
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
+  const unfenced = isUnfenced(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -129,6 +142,11 @@ export function WorkerCard({
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           Sign your CLI in from Config, then re-run.
+        </div>
+      )}
+      {unfenced && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          This CLI can&apos;t be permission-restricted — the agent ran with its default access.
         </div>
       )}
       {tokens > 0 && (

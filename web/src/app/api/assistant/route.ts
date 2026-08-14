@@ -1,6 +1,14 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,WebFetch,Glob,Grep");
+import { fencingReport } from "@/lib/cli-fencing.mjs";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -103,13 +111,21 @@ export async function POST(req: Request) {
         "--permission-mode",
         "acceptEdits",
         "--allowedTools",
-        "Read,WebFetch,Glob,Grep",
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task",
+        ADVISOR_SCOPE.allowed,
+      "--disallowedTools",
+        ADVISOR_SCOPE.disallowed,
       ]
     : spec.args(prompt);
 
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  // The advisor reads and fetches but must never write — the same intent the
+  // Claude branch spells as Read,WebFetch,Glob,Grep with Bash/Write/Edit denied.
+  // networkReadOnly, not localReadOnly, because WebFetch is in that allow list.
+  const child = spawnHeadlessCli(
+    binPath,
+    args,
+    { cwd: careerOpsRoot(), env: process.env },
+    { cliId, capabilities: CAPS.networkReadOnly },
+  );
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -152,6 +168,14 @@ export async function POST(req: Request) {
       const emit = (s: string) => {
         if (safeEnqueue(s)) emitted = true;
       };
+      // Same honesty as /api/run: a runtime with no verified fencing mechanism
+      // runs with its default access, and that must be visible rather than
+      // inferred from which CLI happens to be selected (#2507). This stream is
+      // plain text, so the notice is a leading line rather than an event.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.networkReadOnly });
+      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+
+`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;

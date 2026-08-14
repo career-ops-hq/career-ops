@@ -13,6 +13,8 @@ import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
@@ -109,12 +111,12 @@ export async function POST(req: Request) {
   // claude-invocation.mjs — see its header for the policy and for why it is asserted on
   // built values rather than on this file's source. NEVER auto-submits; that
   // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args() at all, so their agents
-  // stay unrestricted here. That gap is route-wide (it applies to 'evaluate' too),
-  // not specific to pdf, and each CLI needs its own mechanism researched — tracked
-  // as #2507 rather than half-fixed here. On those CLIs the backend is the only
-  // INTENDED writer — the agent is not asked to write — but that is mitigation, not
-  // enforcement: the capability is still there for an injected posting to reach.
+  // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
+  // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
+  // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
+  // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
+  // verified mechanism. Those report level "none" and the run says so
+  // below, rather than looking identical to a fenced one (#2507).
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
@@ -147,7 +149,12 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawnHeadlessCli(
+    binPath,
+    args,
+    { cwd: careerOpsRoot(), env: process.env },
+    { cliId, capabilities: capabilitiesFor(kind) },
+  );
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
@@ -213,6 +220,18 @@ export async function POST(req: Request) {
         if (closed) return;
         try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
       };
+      // Say so when the chosen runtime has no permission mechanism we can apply.
+      // Claude gets tool allow/deny lists and Codex an OS sandbox; the rest run
+      // with whatever they grant by default. Without this the two cases are
+      // indistinguishable in the UI, and a run that is not fenced reads exactly
+      // like one that is — which is the assumption #2507 was filed against.
+      //
+      // Sent as a status so it lands in job.steps, which the run detail page and
+      // the saved run log both render in full. The worker card shows only the
+      // latest step, so it also carries a sticky notice, matched via
+      // isFencingNotice() rather than a literal spelled in two files.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
+      if (fencing.notice) send({ type: "status", label: fencing.notice });
       const close = () => {
         if (!closed) {
           closed = true;

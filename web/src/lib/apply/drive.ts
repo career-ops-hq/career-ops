@@ -4,6 +4,7 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import type { DriveStep } from "./issue";
+import { CAPS } from "../worker-capabilities.mjs";
 
 export type { DriveStep };
 
@@ -57,9 +58,21 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
 function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,MultiEdit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
   return new Promise((resolve) => {
-    const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    // Claude-only by construction — driveSession returns before the loop unless
+    // cliId is "claude", and this argv is Claude's own (--resume, --output-format
+    // json). That is why there is deliberately no unfenced notice here, unlike the
+    // other CLI-spawning paths: claude is always fenceable, so the check could
+    // never fire and the branch would be dead code (#2507). The narrowest scope in
+    // the app: the disallowedTools above denies every tool including Read, so the
+    // planner reasons over the snapshot it was handed and nothing else.
+    const child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId: "claude", capabilities: CAPS.localReadOnly },
+    );
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});

@@ -3,6 +3,13 @@ import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
+import { CAPS } from "../worker-capabilities.mjs";
+import { scopeFrom } from "../claude-invocation.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AGENTIC FALLBACK — the AI interprets the LIVE form, like a human does with
@@ -79,10 +86,21 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+// Takes cliId rather than a precomputed isClaude: spawnHeadlessCli needs the id
+// to pick this runtime's permission mechanism, and deriving the boolean here
+// keeps the two from disagreeing about which CLI is being run.
+function runPlanner(binPath: string, cliId: string, argsFor: (p: string) => string[], prompt: string): Promise<string> {
+  const isClaude = cliId === "claude";
+  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed] : argsFor(prompt);
   return new Promise((resolve) => {
-    const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    // Reads the captured controls and returns JSON — the narrowest scope here:
+    // the Claude branch allows Read alone and denies fetching outright.
+    const child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: CAPS.localReadOnly },
+    );
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -115,7 +133,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
   const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
   if (!cands.length) return [];
 
-  const out = await runPlanner(resolved.binPath, cliId === "claude", resolved.spec.args, buildPrompt(title, cands));
+  const out = await runPlanner(resolved.binPath, cliId, resolved.spec.args, buildPrompt(title, cands));
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) return [];
   let parsed: Interpreted[];

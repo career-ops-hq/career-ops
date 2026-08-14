@@ -1,0 +1,331 @@
+// Tests for translating worker capabilities into a CLI's permission flags (#2507).
+//
+// Asserts on the argv that actually ships, never on a caller's source text —
+// claude-invocation.mjs's header lists the five ways source-text guards for this
+// were defeated. The values below encode a fact verified against codex-cli
+// 0.146.0 rather than a preference, so read the comments before "tightening" one:
+// under `read-only` the Codex sandbox blocks DNS outright, and the network escape
+// hatch only exists for `workspace-write`.
+//
+// Run:  node --test tests/lib/cli-fencing.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { fenceArgs, fencingReport, isFencingNotice } from "../../src/lib/cli-fencing.mjs";
+import { CAPS, KNOWN_KINDS, capabilitiesFor } from "../../src/lib/worker-capabilities.mjs";
+import { scopeFrom } from "../../src/lib/claude-invocation.mjs";
+
+/** The argv shape /api/run ships for codex (codexStreamArgs), prompt last. */
+const codexArgv = (prompt = "PROMPT") => ["exec", "--json", "--color", "never", prompt];
+
+/** A Claude argv built the way the routes build theirs: deny list DERIVED from
+ *  the allow list, so nothing forbidden is left merely unmentioned. */
+const claudeArgv = (allowed = "Read,Glob,Grep") => {
+  const scope = scopeFrom(allowed);
+  return ["-p", "PROMPT", "--allowedTools", scope.allowed, "--disallowedTools", scope.disallowed];
+};
+
+/** Read a `-c key=value` override back out of a built argv. */
+function configValue(args, key) {
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] === "-c" && args[i + 1].startsWith(`${key}=`)) return args[i + 1].slice(key.length + 1);
+  }
+  return null;
+}
+
+test("the fixture these guards read still looks like itself", () => {
+  // Given a suite that leans on KNOWN_KINDS to enumerate work
+  // When it is empty, every loop below passes vacuously
+  assert.ok(KNOWN_KINDS.length > 0, "KNOWN_KINDS must not be empty");
+  for (const id of ["codex", "claude"]) {
+    assert.equal(fencingReport({ cliId: id, cliName: id, capabilities: CAPS.workspaceWrite }).level, "full",
+      `${id} must still be fenceable`);
+  }
+});
+
+test("a local read-only worker gets a true read-only sandbox", () => {
+  // Given a worker that reads local files and never fetches (pdf, cv/ingest,
+  // apply/prefill, the drive planner)
+  // When its codex argv is fenced
+  const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.localReadOnly });
+
+  // Then the sandbox is read-only, and no network hatch is opened.
+  assert.equal(configValue(args, "sandbox_mode"), "read-only");
+  assert.equal(configValue(args, "sandbox_workspace_write.network_access"), null);
+});
+
+test("a fetching worker gets workspace-write plus the network hatch", () => {
+  // Given a worker that must fetch but is not asked to write (research, the
+  // assistant and explore advisors)
+  // When its codex argv is fenced
+  const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.networkReadOnly });
+
+  // Then it lands on workspace-write WITH network — deliberately, not by
+  // oversight. Verified on codex-cli 0.146.0: `read-only` blocks DNS and its
+  // escape hatch (sandbox_workspace_write.network_access) applies only to
+  // workspace-write, so there is no read-only-plus-network policy to ask for.
+  // "Tightening" this to read-only silently breaks every fetch these workers make.
+  assert.equal(configValue(args, "sandbox_mode"), "workspace-write");
+  assert.equal(configValue(args, "sandbox_workspace_write.network_access"), "true");
+});
+
+test("a persisting worker gets workspace-write plus the network hatch", () => {
+  // Given evaluate/fix-portal, which fetch a posting and then write artifacts
+  const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.workspaceWrite });
+
+  // Then writes are confined to the workspace and the fetch still works.
+  assert.equal(configValue(args, "sandbox_mode"), "workspace-write");
+  assert.equal(configValue(args, "sandbox_workspace_write.network_access"), "true");
+});
+
+test("no capability ever yields an unsandboxed run", () => {
+  // Given every capability record that exists
+  for (const [name, caps] of Object.entries(CAPS)) {
+    const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: caps });
+
+    // Then the policy is one of the two constrained modes. danger-full-access
+    // disables the sandbox entirely; no worker has a reason to ask for it, and a
+    // run that quietly received it would look fenced while being anything but.
+    const mode = configValue(args, "sandbox_mode");
+    assert.ok(["read-only", "workspace-write"].includes(mode), `${name} produced sandbox_mode=${mode}`);
+  }
+});
+
+test("the sandbox policy is spelled with -c, which beats the user's config.toml", () => {
+  // Given career-ops does not pass --ignore-user-config, so a user's
+  // ~/.codex/config.toml still applies to these runs
+  const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.localReadOnly });
+
+  // Then the mode is a `-c` override, whose precedence over config.toml was
+  // verified (a config setting danger-full-access is overridden by
+  // `-c sandbox_mode=read-only`). `-s` was NOT used: its precedence could not be
+  // verified the same way, and an unproven override leaves the fence defeatable
+  // by any user who had set that key for other work.
+  assert.ok(args.includes("-c"), "sandbox policy must be passed as a -c override");
+  assert.ok(!args.includes("-s") && !args.includes("--sandbox"), "must not rely on -s (precedence unverified)");
+});
+
+test("fencing never disturbs the prompt or the subcommand", () => {
+  // Given codex reads the prompt as the last positional argument, and
+  // parseCodexEvent only understands output produced by this exact argv
+  const original = codexArgv("the prompt");
+  const { args } = fenceArgs({ cliId: "codex", args: original, capabilities: CAPS.workspaceWrite });
+
+  // Then the subcommand stays first, the prompt stays last, and the transport
+  // flags survive — flags are inserted between, never appended past the prompt.
+  assert.equal(args[0], "exec");
+  assert.equal(args.at(-1), "the prompt");
+  for (const flag of ["--json", "--color", "never"]) {
+    assert.ok(args.includes(flag), `${flag} must survive fencing`);
+  }
+  // And the caller's array is not mutated underneath it.
+  assert.deepEqual(original, codexArgv("the prompt"));
+});
+
+test("an unrecognized codex argv shape throws instead of guessing", () => {
+  // Given an argv this module does not know how to fence (no `exec` subcommand)
+  // When fencing is attempted
+  // Then it fails loudly. Splicing flags into an unknown command line could
+  // produce a run graded "full" while being unsandboxed — the exact dishonesty
+  // fencingReport exists to prevent.
+  assert.throws(
+    () => fenceArgs({ cliId: "codex", args: ["-p", "PROMPT"], capabilities: CAPS.localReadOnly }),
+    /must start with "exec"/,
+  );
+});
+
+test("claude is fenced by its own tool flags, so its argv passes through", () => {
+  // Given claudeCliArgs already spelled --allowedTools/--disallowedTools
+  const original = claudeArgv();
+  const { args } = fenceArgs({ cliId: "claude", args: original, capabilities: CAPS.localReadOnly });
+
+  // Then nothing is added — "unchanged" here means "already fenced", not
+  // "unfenced" — and §55.6's assertions on that argv stay valid untouched.
+  assert.deepEqual(args, original);
+});
+
+test("a CLI with no verified mechanism is passed through and reported honestly", () => {
+  // Given the runtimes nobody has been able to verify a fencing mechanism for
+  for (const cliId of ["gemini", "opencode", "copilot", "qwen", "antigravity", "grok"]) {
+    const original = ["-p", "PROMPT"];
+    const { args } = fenceArgs({ cliId, args: original, capabilities: CAPS.workspaceWrite });
+
+    // Then their invocation is byte-identical to before this change — adding
+    // this layer must not alter a runtime it cannot actually restrict...
+    assert.deepEqual(args, original, `${cliId} argv must be untouched`);
+    // ...and the run says so rather than looking fenced (#2507).
+    const { level, notice } = fencingReport({ cliId, cliName: cliId, capabilities: CAPS.workspaceWrite });
+    assert.equal(level, "none", `${cliId} has no verified mechanism and must not claim one`);
+    assert.ok(isFencingNotice(notice), `${cliId} must produce a detectable notice`);
+  }
+});
+
+test("every runtime and capability pair grades to a defined level", () => {
+  // Given fencingReport replaced a boolean that nothing read. A boolean could not
+  // describe the middle case at all: Codex has no read-only-plus-network policy,
+  // so a worker that must fetch but is not asked to write receives a writable
+  // workspace — fenced on one axis, not the other.
+  const grades = [];
+  for (const cliId of ["claude", "codex", "gemini", "made-up-cli"]) {
+    for (const [name, caps] of Object.entries(CAPS)) {
+      const { level, notice } = fencingReport({ cliId, cliName: cliId, capabilities: caps });
+
+      // Then the level is one of the three, and a notice exists exactly when the
+      // run is less fenced than the record declares.
+      assert.ok(["full", "partial", "none"].includes(level), `${cliId}/${name} → ${level}`);
+      assert.equal(notice === null, level === "full", `${cliId}/${name}: notice must accompany a non-full level`);
+      if (notice) assert.ok(isFencingNotice(notice), `${cliId}/${name}: notice must be detectable by the UI`);
+      grades.push(`${cliId}/${name}=${level}`);
+    }
+  }
+  // And the middle case is genuinely reachable — a suite where nothing is ever
+  // "partial" would pass while the level meant nothing.
+  assert.ok(grades.includes("codex/networkReadOnly=partial"), `no partial case reached: ${grades.join(" ")}`);
+});
+
+test("a kind needing neither writes nor network gets a true read-only sandbox", () => {
+  // Given the stronger claim the test below cannot make: for a worker that both
+  // axes say needs nothing, read-only is the only correct answer, and any other
+  // mode is a fence that does not fence.
+  for (const kind of KNOWN_KINDS) {
+    const caps = capabilitiesFor(kind);
+    if (caps.writes || caps.network) continue;
+
+    const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: caps });
+    assert.equal(configValue(args, "sandbox_mode"), "read-only", `${kind} needs nothing yet is not read-only`);
+  }
+});
+
+test("a non-writing kind gets a writable sandbox only when it needs the network", () => {
+  // Given the whole point of the shared policy: one classification, honoured by
+  // every CLI. This is the invariant that would have caught a duplicated,
+  // drifted copy of the writing-kinds list.
+  for (const kind of [...KNOWN_KINDS, "unknown-kind"]) {
+    const caps = capabilitiesFor(kind);
+    if (caps.writes) continue;
+
+    const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: caps });
+    const mode = configValue(args, "sandbox_mode");
+
+    // Named for what it asserts. A non-writing worker may still land on
+    // workspace-write, but ONLY as the price of network access — never because
+    // the policy said it writes. (Its previous name claimed no read-only kind
+    // ever gets a writable sandbox, which the `|| caps.network` arm contradicts;
+    // the case above makes that stronger claim where it actually holds.)
+    assert.ok(
+      mode === "read-only" || caps.network,
+      `${kind} does not write and does not fetch, yet received sandbox_mode=${mode}`,
+    );
+  }
+});
+
+test("a forbidden tool that is merely unmentioned is refused, not certified", () => {
+  // Given --permission-mode acceptEdits auto-approves whatever nobody named, so a
+  // deny list that omits a forbidden tool GRANTS it. Two real argvs used to pass:
+  // one denying only Task (Write/Edit/Bash auto-approved), and all six advisor
+  // routes, every one of which omitted MultiEdit.
+  // When such an argv is presented
+  // Then it is refused — this is the #2185 rule, applied to the fencing gate.
+  assert.throws(
+    () =>
+      fenceArgs({
+        cliId: "claude",
+        args: ["-p", "PROMPT", "--permission-mode", "acceptEdits", "--disallowedTools", "Task"],
+        capabilities: CAPS.localReadOnly,
+      }),
+    /does not deny/,
+  );
+  assert.throws(
+    () =>
+      fenceArgs({
+        cliId: "claude",
+        // The pre-fix advisor deny list, verbatim: MultiEdit missing.
+        args: ["-p", "PROMPT", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"],
+        capabilities: CAPS.localReadOnly,
+      }),
+    /does not deny MultiEdit/,
+  );
+  assert.throws(
+    () => fenceArgs({ cliId: "claude", args: ["-p", "PROMPT"], capabilities: CAPS.localReadOnly }),
+    /does not deny/,
+  );
+});
+
+test("a claude argv that contradicts its declared capabilities is refused", () => {
+  // Given six of the seven call sites hand-write their Claude argv next to a
+  // hand-picked capability record, with nothing checking the two agree — so a
+  // route could deny Bash to Claude while handing Codex a writable sandbox and
+  // both halves would look right in isolation.
+  // When the argv grants what the record forbids
+  // Then fencing refuses, naming the offending tool.
+  assert.throws(
+    () =>
+      fenceArgs({
+        cliId: "claude",
+        args: claudeArgv("Read,Write,Glob"), // grants Write, so the derived list cannot deny it
+        capabilities: CAPS.localReadOnly, // writes: false
+      }),
+    /does not deny Write/,
+  );
+
+  assert.throws(
+    () =>
+      fenceArgs({
+        cliId: "claude",
+        args: claudeArgv("Read,WebFetch,Glob"), // grants WebFetch
+        capabilities: CAPS.localReadOnly, // network: false
+      }),
+    /does not deny WebFetch/,
+  );
+});
+
+test("a claude argv consistent with its capabilities passes verification", () => {
+  // Given the two records that permit more than the strictest one
+  // When each is paired with an argv that matches
+  // Then verification is silent — it refuses contradictions, it does not demand
+  // that every permitted tool be present.
+  const net = fenceArgs({
+    cliId: "claude",
+    args: claudeArgv("Read,WebFetch,WebSearch,Glob,Grep"),
+    capabilities: CAPS.networkReadOnly,
+  });
+  assert.equal(fencingReport({ cliId: "claude", cliName: "Claude Code", capabilities: CAPS.networkReadOnly }).level, "full");
+
+  const write = fenceArgs({
+    cliId: "claude",
+    args: claudeArgv("Read,WebFetch,Write,Edit,Bash"),
+    capabilities: CAPS.workspaceWrite,
+  });
+  assert.equal(fencingReport({ cliId: "claude", cliName: "Claude Code", capabilities: CAPS.workspaceWrite }).level, "full");
+});
+
+test("each notice is detectable by the UI and names the runtime", () => {
+  // Given the notice is emitted by API routes and detected by a client component,
+  // a copied string literal would drift the first time the wording is edited — and
+  // the failure would be silent: the warning simply stops rendering.
+  const unfenced = fencingReport({ cliId: "gemini", cliName: "Gemini CLI", capabilities: CAPS.localReadOnly });
+  const partial = fencingReport({ cliId: "codex", cliName: "Codex", capabilities: CAPS.networkReadOnly });
+
+  // Then BOTH shapes are detectable — a predicate that knew only the first would
+  // go stale the day the second was added, which is why it is not a bare marker.
+  for (const [name, report] of [["unfenced", unfenced], ["partial", partial]]) {
+    assert.ok(isFencingNotice(report.notice), `${name} notice must be detectable`);
+  }
+  assert.ok(unfenced.notice.includes("Gemini CLI"), "notice must name the runtime");
+  assert.ok(partial.notice.includes("Codex"), "notice must name the runtime");
+  // And a plain step label is not mistaken for one.
+  assert.equal(isFencingNotice("Reading your CV & profile"), false);
+  assert.equal(isFencingNotice(undefined), false);
+});
+
+test("fencingReport answers for the runtimes the routes actually ask about", () => {
+  // Given the routes call it for every entry in clis.ts
+  for (const cliId of ["gemini", "opencode", "copilot", "qwen", "antigravity", "grok"]) {
+    // Then each unverified runtime reports honestly rather than defaulting to a
+    // reassuring answer.
+    assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "none");
+  }
+  for (const cliId of ["claude", "codex"]) {
+    assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "full");
+  }
+});

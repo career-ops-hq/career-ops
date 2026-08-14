@@ -17,8 +17,9 @@ import {
   claudeCliArgs,
   argValue,
   toolNames,
-  KNOWN_KINDS,
 } from "../../src/lib/claude-invocation.mjs";
+// KNOWN_KINDS lives with the policy both CLIs read, not on Claude's path (#2507).
+import { KNOWN_KINDS } from "../../src/lib/worker-capabilities.mjs";
 
 test("toolScopeFor: pdf gets no write-capable tool at all", () => {
   // Given the pdf kind, whose agent only tailors content and emits it inline
@@ -70,12 +71,21 @@ test("toolScopeFor: pdf can still read what it needs to tailor", () => {
   }
 });
 
-test("toolScopeFor: research is read-only too, and shares pdf's scope", () => {
-  // Given research is documented as fully read-only
-  // When comparing it with pdf
-  // Then they are the same object — one read-only arm, not two that can drift
-  assert.equal(toolScopeFor("research"), toolScopeFor("pdf"));
-  assert.equal(toolScopeFor("research"), TOOL_SCOPES.readOnly);
+test("toolScopeFor: research is read-only too, but is NOT pdf's scope", () => {
+  // Given both are read-only, yet they differ on the other axis: research fetches
+  // ("use WebFetch for URLs") and pdf reads local files only. They shared one
+  // scope until the network axis was wired up, which is exactly how pdf came to
+  // declare network:false while still being handed WebFetch on Claude (#2507).
+  const research = toolScopeFor("research");
+  const pdf = toolScopeFor("pdf");
+
+  // Then neither can write...
+  assert.equal(grantsWriteCapability(research), false);
+  assert.equal(grantsWriteCapability(pdf), false);
+  // ...and they are deliberately different arms, not one shared read-only arm.
+  assert.equal(research, TOOL_SCOPES.networkReadOnly);
+  assert.equal(pdf, TOOL_SCOPES.localReadOnly);
+  assert.notEqual(research, pdf);
 });
 
 test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
@@ -83,9 +93,10 @@ test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
   // When resolving its scope
   const scope = toolScopeFor("some-future-kind");
 
-  // Then it is read-only — the safe default, since granting write to an unknown
-  // kind is the one unrecoverable mistake here
-  assert.equal(scope, TOOL_SCOPES.readOnly);
+  // Then it is the NARROWEST scope — no write tool and no network tool. Granting
+  // either to a worker nobody has classified is the unrecoverable mistake here,
+  // and the fallback must be the strictest arm, not merely a non-writing one.
+  assert.equal(scope, TOOL_SCOPES.localReadOnly);
 });
 
 test("toolScopeFor: evaluate and fix-portal keep Write and Bash on purpose", () => {
