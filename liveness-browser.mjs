@@ -343,6 +343,20 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
             }
           });
 
+    // A 404/410 is decided by the status line alone, so no amount of frame
+    // content can change it. Without this, a dead posting whose error page also
+    // renders into an iframe pays the poll while that error page fills, purely
+    // to be told what the status already said. Measured on two dead iCIMS
+    // postings: 5822ms and 3314ms end to end, the spread being poll iterations.
+    //
+    // The status rule is NOT restated here. classifyLiveness owns it, so this
+    // asks it and keys off the code it returns; a duplicated `status === 410`
+    // would be a second copy of that rule waiting to drift.
+    const topLevelVerdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+    if (topLevelVerdict.code === 'http_gone') {
+      return topLevelVerdict;
+    }
+
     if (childFrames().length > 0) {
       const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
       // Wait for EVERY qualifying frame, not merely the first one to fill: with
