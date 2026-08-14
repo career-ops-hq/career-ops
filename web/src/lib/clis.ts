@@ -14,6 +14,29 @@ export type CliSpec = {
   args: (prompt: string) => string[];
 };
 
+/**
+ * NO RUNTIME HERE MAY GRANT ITSELF MORE PERMISSION THAN THE AUDITED ONE.
+ *
+ * The permission model is per-worker AND per-CLI, but only one axis is written
+ * down: WRITE_CAPABLE_TOOLS and the per-kind deny lists live in
+ * claude-invocation.mjs — i.e. on Claude's path. A new CLI arriving with a
+ * blanket auto-approve flag (`--always-approve`, `--yolo`,
+ * `--dangerously-skip-permissions`, `--yes`) is not breaking that rule; it is
+ * entering where the rule does not exist.
+ *
+ * Concretely: the `pdf` worker has Bash explicitly denied and must never regain
+ * it. Pair Grok with `--always-approve` and that same worker gets Write and
+ * Bash auto-approved — so the user's choice of runtime silently changes what a
+ * worker may do to their files, while both paths look identical in the UI.
+ *
+ * If a CLI has no per-tool deny list to pair with, the answer is NOT to
+ * auto-approve: it is to withhold the workers that write. Needing such a flag
+ * to make a runtime work is a core architecture issue, not a line inside a
+ * CLI-support PR.
+ *
+ * Enforced by tests/lib/clis-permissions.test.mjs, because a rule that only
+ * lives in a comment is a rule the next contributor may never read.
+ */
 export const KNOWN: CliSpec[] = [
   { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p] },
