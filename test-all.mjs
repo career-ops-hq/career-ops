@@ -150,7 +150,26 @@ async function runDiscovered(filter = null) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
-    await import(pathToFileURL(f).href);
+    // Neither guard above survives contact with an uncaught THROW, which ends
+    // the run just as completely and rather more quietly: node unwinds straight
+    // out of test-all, finish() never prints its summary, and every suite
+    // sorting after this one silently never runs. That does not read as a
+    // broken suite — it reads as a finished one, so the screen of green above
+    // the cut looks like a pass. (Measured on a Windows box with no symlink
+    // privilege: tests/intake.test.mjs threw at import and took 2067 of 3693
+    // checks with it, with no verdict line at all — #2828.) A discovered suite
+    // is a guest, not a co-host: its crash is one failure, not the end of the
+    // run.
+    try {
+      await import(pathToFileURL(f).href);
+    } catch (err) {
+      fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+      // The throw site, not just the message: a suite that dies mid-import
+      // leaves no other clue how far it got.
+      for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+        if (line.trim()) console.log(`      ${line.trim()}`);
+      }
+    }
   }
 }
 
@@ -5478,6 +5497,34 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 
 console.log('\n12c. Materialized skill index mode');
 
+/**
+ * Build a git environment nothing ambient can reach into.
+ *
+ * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
+ * close the RUNTIME layer: GIT_CONFIG_COUNT with its KEY_n / VALUE_n pairs is
+ * applied AFTER every config file, so an ambient `core.excludesFile` injected
+ * that way overrides even the one a fixture sets for itself, and the isolation
+ * silently stops holding - the exact leak this pinning exists to close,
+ * arriving through the one door left open (#2567).
+ *
+ * COUNT is set to 0 rather than deleting the variables: it is a single
+ * authoritative value, and git reads KEY_n / VALUE_n only up to COUNT, so any
+ * stragglers are inert without having to enumerate them.
+ *
+ * `base` exists so the regression case below can hand in a parent environment
+ * carrying the injection. Both callers share this one construction on purpose:
+ * a test that hand-rolled its own env would keep passing if the pin were
+ * dropped here, which is how the gap got in.
+ */
+function hermeticGitEnv(gitConfigPath, base = process.env) {
+  return {
+    ...base,
+    GIT_CONFIG_COUNT: '0',
+    GIT_CONFIG_GLOBAL: gitConfigPath,
+    GIT_CONFIG_SYSTEM: gitConfigPath,
+  };
+}
+
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
   // The fixture stages the very paths career-ops legitimately tracks - .agents/,
@@ -5504,7 +5551,7 @@ console.log('\n12c. Materialized skill index mode');
   // both platforms tested but are not worth depending on.
   const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
   writeFileSync(emptyExcludes, '');
-  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigPath, GIT_CONFIG_SYSTEM: gitConfigPath };
+  const gitEnv = hermeticGitEnv(gitConfigPath);
   const gitRun = (args, opts = {}) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
@@ -5610,6 +5657,69 @@ console.log('\n12c. Materialized skill index mode');
     // The staging-precondition branch already reported all three assertions
     // individually; re-reporting here would double-count and re-bury the cause.
     if (!e?.alreadyReported) fail(`skill entrypoint index-mode test crashed: ${e.message}`);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(gitConfigRoot, { recursive: true, force: true });
+  }
+}
+
+// The block above pins the file layers and the runtime layer, but it can only
+// prove the pin holds against whatever the machine running it happens to carry.
+// On a clean machine an injected-config leak stays invisible, and the pin could
+// be removed with every assertion still green - which is how this one got in.
+// So inject the leak on purpose and assert the pin absorbs it (CodeRabbit,
+// reviewing #2567).
+{
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-'));
+  const gitConfigRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-cfg-'));
+  try {
+    const gitConfigPath = join(gitConfigRoot, 'gitconfig');
+    writeFileSync(gitConfigPath, '');
+    const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
+    writeFileSync(emptyExcludes, '');
+    // The ignore rule an agent-tool user plausibly carries machine-wide, in the
+    // one layer GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM do not cover.
+    const ambientExcludes = join(gitConfigRoot, 'ambient-ignore');
+    writeFileSync(ambientExcludes, '.agents/\n');
+    // Through hermeticGitEnv, not around it: this asserts the production
+    // construction absorbs the injection, so dropping the pin there turns this
+    // red rather than leaving it green on a clean machine.
+    const gitEnv = hermeticGitEnv(gitConfigPath, {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.excludesFile',
+      GIT_CONFIG_VALUE_0: ambientExcludes,
+    });
+    const gitRun = (args) => execFileSync('git', args, {
+      cwd: fixtureRoot,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: gitEnv,
+    }).trim();
+
+    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
+    mkdirSync(canonicalDir, { recursive: true });
+    gitRun(['init']);
+    const excludePath = join(fixtureRoot, '.git', 'info', 'exclude');
+    mkdirSync(dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, '');
+    gitRun(['config', 'core.excludesFile', emptyExcludes]);
+    writeFileSync(join(canonicalDir, 'SKILL.md'), '---\nname: career-ops\n---\n');
+
+    let staged = '';
+    try {
+      gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+      staged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
+    } catch {
+      // Left empty: the assertion below is the report.
+    }
+    if (staged) {
+      pass('injected GIT_CONFIG_* core.excludesFile cannot reach the skill fixture (#2567)');
+    } else {
+      fail('injected GIT_CONFIG_* core.excludesFile reached the fixture - the runtime config layer is unpinned (#2567)');
+    }
+  } catch (e) {
+    fail(`injected git-config isolation test crashed: ${e.message}`);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
     rmSync(gitConfigRoot, { recursive: true, force: true });
@@ -7873,6 +7983,51 @@ try {
     rmSync(cliTmp, { recursive: true, force: true });
   }
 
+  // Non-Latin CVs (#2849). normalizeKey stripped [^a-z0-9], so every heading and
+  // dedupKey in a Japanese/Russian/Hindi CV keyed to '' — which made `add`
+  // UNUSABLE, not inaccurate: the non-empty-dedupKey guard rejected a key the
+  // user had supplied, and two different headings both keying to '' matched
+  // each other, so an entry could land under the wrong section.
+  {
+    const jpTmp = mkdtempSync(join(tmpdir(), 'career-ops-add-jp-'));
+    try {
+      const cvPath = join(jpTmp, 'cv.md');
+      writeFileSync(cvPath, '# CV\n\n## \u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\n\n- \u65E2\u5B58\n\n## \u8077\u52D9\u7D4C\u6B74\n\n- \u65E2\u5B58\n');
+      const payloadPath = join(jpTmp, 'p.json');
+      writeFileSync(payloadPath, JSON.stringify({ cv: {
+        section: '\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        dedupKey: '\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9',
+        entry: '- **\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9**',
+      } }));
+      const env = { ...process.env, CAREER_OPS_CV: cvPath };
+      const out = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      out.cv.status === 'added'
+        ? pass('add-entry: a non-Latin dedupKey is accepted and the entry is added (#2849)')
+        : fail(`add-entry: non-Latin payload => ${JSON.stringify(out.cv)}`);
+
+      const rerun = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      rerun.cv.status === 'duplicate'
+        ? pass('add-entry: a non-Latin entry is idempotent on re-run (#2849)')
+        : fail(`add-entry: non-Latin re-run => ${JSON.stringify(rerun.cv)}`);
+
+      // A different heading must not collide via a shared empty key.
+      const p2 = join(jpTmp, 'p2.json');
+      writeFileSync(p2, JSON.stringify({ cv: {
+        section: '\u8077\u52D9\u7D4C\u6B74',
+        dedupKey: '\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        entry: '- **\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8**',
+      } }));
+      execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), p2], { env, encoding: 'utf-8' });
+      const finalCv = readFileSync(cvPath, 'utf-8');
+      const [projSection, workSection] = finalCv.split('## \u8077\u52D9\u7D4C\u6B74');
+      (workSection || '').includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8') && !projSection.includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8')
+        ? pass('add-entry: two different non-Latin sections stay distinct (#2849)')
+        : fail(`add-entry: entry landed under the wrong non-Latin section:\n${finalCv}`);
+    } finally {
+      rmSync(jpTmp, { recursive: true, force: true });
+    }
+  }
+
 } catch (e) {
   fail(`add-entry tests crashed: ${e.message}`);
 }
@@ -9967,6 +10122,54 @@ try {
     : fail(`foldStatusInput('TEKLİF') = ${JSON.stringify(foldStatusInput('TEKLİF'))}, expected "teklif"`);
 } catch (e) {
   fail(`Turkish casing guard crashed: ${e.message}`);
+}
+
+// ── ROLE TITLES IN NON-LATIN SCRIPTS (#2781) ──────────────────────
+// roleTokens ran an [a-z0-9\s] strip, so every non-Latin role title tokenized
+// to []. merge-tracker's dedup then never matched two spellings of the SAME
+// role at the same company, and a re-evaluation was appended as a duplicate row
+// instead of updating the existing one — while the Latin equivalent merged
+// cleanly. normalizeTitle also stripped every \p{Mn}, folding Devanagari
+// matras, Cyrillic breve and Japanese dakuten onto their bases.
+console.log('\n🧪 Testing role tokenization across scripts (#2781)...');
+try {
+  const { roleTokens, roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
+
+  const empty = ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A', '\u0938\u0949\u092B\u094D\u091F\u0935\u0947\u092F\u0930 \u0907\u0902\u091C\u0940\u0928\u093F\u092F\u0930'].filter((t) => roleTokens(t).length === 0);
+  empty.length === 0
+    ? pass('space-separated non-Latin role titles produce tokens (#2781)')
+    : fail(`role titles still tokenize to nothing: ${empty.join(', ')}`);
+
+  const samePairs = [
+    ['Backend Engineer, Payments', 'Backend Engineer (Payments)'],
+    ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A, \u043F\u043B\u0430\u0442\u0435\u0436\u0438', '\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A (\u043F\u043B\u0430\u0442\u0435\u0436\u0438)'],
+  ];
+  const notMatched = samePairs.filter(([a, b]) => !roleFuzzyMatch(a, b));
+  notMatched.length === 0
+    ? pass('the same role written with different punctuation matches in every script (#2781)')
+    : fail(`same-role pairs did not match: ${notMatched.map(([a]) => a).join('; ')}`);
+
+  const diffPairs = [
+    ['Backend Engineer', 'Data Scientist'],
+    ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A', '\u0410\u043D\u0430\u043B\u0438\u0442\u0438\u043A \u0434\u0430\u043D\u043D\u044B\u0445'],
+  ];
+  const wronglyMatched = diffPairs.filter(([a, b]) => roleFuzzyMatch(a, b));
+  wronglyMatched.length === 0
+    ? pass('different roles stay distinct in every script (#2781)')
+    : fail(`widening merged different roles: ${wronglyMatched.map(([a, b]) => `${a}/${b}`).join('; ')}`);
+
+  // Marks that carry meaning survive; Latin accent-folding is unchanged (#2209).
+  const marks = [
+    ['\u0915\u0902\u092A\u0928\u0940', '\u0915\u092A\u0928\u0940', false, 'Devanagari matra'],
+    ['\u0419\u043E\u0433\u0443\u0440\u0442', '\u0418\u043E\u0433\u0443\u0440\u0442', false, 'Cyrillic breve'],
+    ['S\u00EAnior Backend Engineer', 'Senior Backend Engineer', true, 'Latin accent folding (#2209)'],
+  ];
+  const markWrong = marks.filter(([a, b, must]) => (roleTokens(a).join(' ') === roleTokens(b).join(' ')) !== must);
+  markWrong.length === 0
+    ? pass('meaningful marks survive while Latin accents still fold (#2781)')
+    : fail(`mark handling wrong: ${markWrong.map(([a, b, m, why]) => `${a}/${b} expected ${m ? 'same' : 'different'} (${why})`).join('; ')}`);
+} catch (e) {
+  fail(`role tokenization guard crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER: DISTINCT NON-LATIN COMPANIES (#2429) ───────────
@@ -13432,6 +13635,37 @@ try {
     pass('match-star scorer: exact tag token "leadership" still scores +3 after tokenized fix');
   } else {
     fail(`match-star scorer: exact tag match regressed (expected 3, got ${leadershipExactTag})`);
+  }
+
+  // Non-Latin story banks (#2847). tokenize() stripped [^a-z0-9\s], so a story
+  // written in Russian or Hindi produced [] and scored 0 against a question in
+  // the SAME language — the matcher was inert, not degraded, for anyone whose
+  // language.output is not English.
+  {
+    const mk = (title, theme, action, result, tags = []) => ({ title, theme, action, result, tags });
+    const ru = mk('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439', '\u043F\u043B\u0430\u0442\u0435\u0436\u0438', '\u0412\u043E\u0437\u0433\u043B\u0430\u0432\u0438\u043B \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044E \u043F\u043B\u0430\u0442\u0451\u0436\u043D\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B', '\u0421\u043D\u0438\u0437\u0438\u043B \u043E\u0442\u043A\u0430\u0437\u044B', ['\u043F\u043B\u0430\u0442\u0435\u0436\u0438']);
+    const hi = mk('\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u093E \u0928\u0947\u0924\u0943\u0924\u094D\u0935', '\u0935\u093F\u092B\u0932\u0924\u093E\u090F\u0902 \u0918\u091F\u093E\u0908\u0902', ['\u092D\u0941\u0917\u0924\u093E\u0928']);
+
+    const ruTokens = tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u0438 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439');
+    const hiTokens = tokenize('\u092E\u0941\u091D\u0947 \u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902 \u092C\u0924\u093E\u090F\u0902');
+
+    tokenize('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F').length > 0 && tokenize('\u092D\u0941\u0917\u0924\u093E\u0928').length > 0
+      ? pass('match-star: non-Latin text produces tokens (#2847)')
+      : fail('match-star: non-Latin text still tokenizes to nothing');
+
+    score(ru, ruTokens, []) > 0 && score(hi, hiTokens, []) > 0
+      ? pass('match-star: a story matches a question in its own language (#2847)')
+      : fail(`match-star: same-language match still scores 0 (ru=${score(ru, ruTokens, [])}, hi=${score(hi, hiTokens, [])})`);
+
+    // The widening must not make everything match everything.
+    score(ru, tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043D\u0430\u0439\u043C\u0435 \u043A\u043E\u043C\u0430\u043D\u0434\u044B'), []) === 0
+      ? pass('match-star: an unrelated same-language question still scores 0 (#2847)')
+      : fail('match-star: widening made an unrelated question match');
+
+    // Devanagari matras must survive; without \p{M} they become spaces.
+    tokenize('\u092D\u0941\u0917\u0924\u093E\u0928')[0] === '\u092D\u0941\u0917\u0924\u093E\u0928'
+      ? pass('match-star: Devanagari matras survive tokenization (#2847)')
+      : fail(`match-star: matras stripped — token came back as ${JSON.stringify(tokenize('\u092D\u0941\u0917\u0924\u093E\u0928'))}`);
   }
 
   // match-star.mjs file must exist (existsSync-guarded in the script itself)
