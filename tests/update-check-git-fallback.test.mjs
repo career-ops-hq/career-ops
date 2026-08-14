@@ -142,17 +142,35 @@ console.log('\n🧪 Testing update-check git fallback...');
 {
   const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
 
-  // The stderr retry notice sits between the guard and the probe call, so
-  // the pattern spans the guard block. The (?!\n    \}) lookahead refuses to
-  // cross the guard's own closing brace (4-space indent, alone on its line) —
-  // without it, moving the probe call to just AFTER the guard would still
-  // match. The call-site count keeps the probe from appearing anywhere else.
-  const gatedProbe = /if \(bothNetworkFailed\)\s*\{(?:(?!\n    \})[\s\S]){0,700}?gitProbe = gitRemoteVersion\(\)/.test(src);
-  const probeCallSites = (src.match(/(?<!function )gitRemoteVersion\(\)/g) || []).length;
-  if (gatedProbe && probeCallSites === 1) {
-    pass('check() consults gitRemoteVersion() only inside the both-curls-failed guard (never on the parseable-failure path)');
+  // Guard-slice extraction, replacing a {0,700} character-window regex whose
+  // ~26 chars of slack meant an ordinary comment inside the guard turned CI
+  // red with a message accusing the author of removing the gating. Each
+  // extraction stage fails with its OWN message naming the real problem, so
+  // a rename or a reformat is never misreported as a behavior break.
+  // Locator rule: the slice ends at the FIRST `\n    }` (newline + exactly
+  // four spaces + closing brace) after the marker — the guard sits at
+  // 4-space indent and everything nested inside closes deeper, so this finds
+  // the guard's own close. Coupling to watch: a multi-line template literal
+  // inside the guard must never contain a line that is exactly `    }` (keep
+  // continuation lines at 8-space indent).
+  const guardMarker = 'if (bothNetworkFailed) {';
+  const guardStart = src.indexOf(guardMarker);
+  let guardSlice = '';
+  if (guardStart === -1) {
+    fail(`guard marker ${JSON.stringify(guardMarker)} not found — if the guard was renamed or refactored, update this test's anchor; this is not necessarily a behavior break`);
   } else {
-    fail('the git fallback is no longer gated on bothNetworkFailed — it must not run on the no-remote-version path');
+    const guardEnd = src.indexOf('\n    }', guardStart);
+    if (guardEnd === -1) {
+      fail('guard closing brace (newline + 4-space indent + }) not found — a reformat, or a `\\n    }` sequence inside a template literal, broke slice extraction; fix the extraction, the gating itself may be intact');
+    } else {
+      guardSlice = src.slice(guardStart, guardEnd);
+    }
+  }
+  const probeCallSites = (src.match(/(?<!function )gitRemoteVersion\(\)/g) || []).length;
+  if (guardSlice && guardSlice.includes('gitProbe = gitRemoteVersion()') && probeCallSites === 1) {
+    pass('check() consults gitRemoteVersion() only inside the both-curls-failed guard (never on the parseable-failure path)');
+  } else if (guardSlice) {
+    fail(`the git fallback is no longer gated on bothNetworkFailed (probe in guard slice: ${guardSlice.includes('gitProbe = gitRemoteVersion()')}, call sites: ${probeCallSites}) — it must not run on the no-remote-version path`);
   }
 
   // repoUrl is a test-injection param; its DEFAULT binds the production
@@ -201,8 +219,13 @@ console.log('\n🧪 Testing update-check git fallback...');
   // before the user's first interaction. The curl legs run in parallel and
   // chain into the git probe, so the two constants below bound the whole
   // check: the three terms (parallel curl legs, +1s JS backstop, git probe)
-  // must stay ≤11s wall clock — ≈ the pre-fallback ceiling. A raised
-  // budget here is a session-start regression on captive-portal networks.
+  // must stay ≤16s wall clock. The 10s curl budget matches the pre-fallback
+  // main and is paid only when curl HANGS — deterministic failures exit
+  // immediately regardless of budget. A 5s budget was tried and rejected in
+  // review: it hung up on a slow-but-answering curl and fabricated a false
+  // "offline" on git-blocked networks (round 7). Raising any constant past
+  // the ceiling is a session-start regression; lowering the curl budget
+  // re-opens the round-7 false offline — change either only with numbers.
   const curlBudget = src.match(/const CHECK_CURL_MAX_TIME_S = (\d+);/);
   const gitBudget = src.match(/const CHECK_GIT_PROBE_TIMEOUT_MS = (\d+);/);
   // Worst case sums ALL three timeout terms: curl --max-time (parallel legs =
@@ -211,10 +234,10 @@ console.log('\n🧪 Testing update-check git fallback...');
   const worstCaseS = curlBudget && gitBudget
     ? Number(curlBudget[1]) + 1 + Number(gitBudget[1]) / 1000
     : Infinity;
-  if (worstCaseS <= 11) {
-    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + 1s JS backstop + ${Number(gitBudget[1]) / 1000}s git probe = ${worstCaseS}s ≤ 11s`);
+  if (worstCaseS <= 16) {
+    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + 1s JS backstop + ${Number(gitBudget[1]) / 1000}s git probe = ${worstCaseS}s ≤ 16s`);
   } else {
-    fail('check() latency budget exceeded — curl + JS backstop + git probe worst case must stay ≤11s (session-start dead time)');
+    fail(`check() latency budget exceeded: CHECK_CURL_MAX_TIME_S=${curlBudget ? curlBudget[1] : '?'}s + 1s JS backstop + CHECK_GIT_PROBE_TIMEOUT_MS=${gitBudget ? Number(gitBudget[1]) / 1000 : '?'}s = ${worstCaseS}s > 16s — name which constant grew and why the new ceiling is safe (session-start dead time)`);
   }
 
   if (/--max-time', String\(CHECK_CURL_MAX_TIME_S\)/.test(src)
@@ -227,11 +250,25 @@ console.log('\n🧪 Testing update-check git fallback...');
 
   // writeSync, not console.error: on Windows stderr-to-pipe writes are async
   // and the sync git probe blocks the event loop, so a console.error here
-  // would flush AFTER the wait it announces. Pin the sync form.
-  if (/writeSync\(\s*process\.stderr\.fd,\s*`career-ops update check: GitHub unreachable over curl[\s\S]{0,220}?retrying over git/.test(src)) {
+  // would flush AFTER the wait it announces. Pin the sync form and the
+  // notice content as separate slice-membership checks (window-free — the
+  // previous {0,220} character window was the same brittleness class as the
+  // {0,700} one replaced above).
+  const noticeSync = /writeSync\(\s*process\.stderr\.fd,\s*`career-ops update check: GitHub unreachable over curl/.test(guardSlice);
+  const noticeNamesRetry = guardSlice.includes('retrying over git');
+  if (noticeSync && noticeNamesRetry) {
     pass('the git retry announces itself via a SYNCHRONOUS stderr write before the blocking probe (async console.error would flush after the wait on Windows)');
   } else {
-    fail('the retry notice is missing or no longer a synchronous stderr write — on Windows it would appear only after the probe finishes');
+    fail(`the retry notice broke (sync writeSync form in guard: ${noticeSync}, names the git retry: ${noticeNamesRetry}) — on Windows an async write would appear only after the probe finishes`);
+  }
+
+  // curl exit 28 (its own --max-time firing — the normal hang-topology
+  // failure) must render as a readable timeout, not the bare code "28",
+  // in the offline detail the update mode now shows verbatim.
+  if (/error\.code === 28\s*\?\s*`timeout \(\$\{CHECK_CURL_MAX_TIME_S\}s\)`/.test(src)) {
+    pass('curl exit 28 maps to a readable timeout detail (offline payloads never render a bare "28")');
+  } else {
+    fail('the exit-28 → timeout detail mapping is gone — offline detail would render "curl VERSION: 28" on hang topologies');
   }
 }
 

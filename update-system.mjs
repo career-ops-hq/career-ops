@@ -912,13 +912,21 @@ function rebuildDashboardBinaryIfNeeded() {
 
 // Session-start latency budget for check(): AGENTS.md runs the check on the
 // first message of every session, so its worst case is user-visible dead time
-// before the first interaction — on exactly the networks that are already
-// misbehaving (captive portals, black-hole egress that hangs rather than
-// refuses). The two curl legs run in parallel (one wall-clock leg) and the
-// git probe runs after them, so worst case = max(CHECK_CURL_MAX_TIME_S, its
-// +1s JS backstop) + CHECK_GIT_PROBE_TIMEOUT_MS ≤ 11s — ≈ the ceiling before
-// the git fallback existed. Healthy networks never come near either cap.
-const CHECK_CURL_MAX_TIME_S = 5;
+// before the first interaction. The two curl legs run in parallel (one
+// wall-clock leg) and the git probe runs after them, so worst case =
+// max(CHECK_CURL_MAX_TIME_S, its +1s JS backstop) + CHECK_GIT_PROBE_TIMEOUT_MS
+// ≤ 16s. That ceiling is the acknowledged price of the 10s curl budget, and
+// it is paid ONLY when curl hangs (black-hole egress that swallows packets):
+// deterministic failures — DNS, connection refused, curl missing from PATH —
+// exit immediately regardless of the budget, so shortening it buys those
+// paths nothing. A 5s budget was tried here and rejected in review: on a
+// slow-but-working connection with the git transport blocked, it hung up on
+// a curl that was about to answer and turned a correct ~7s result into a
+// false "offline" — recreating the exact bug this fallback exists to kill,
+// one network over. Healthy networks never come near either cap. (The stderr
+// retry notice below serves direct terminal invocation; agent harnesses
+// buffer stderr and surface it only after the process exits.)
+const CHECK_CURL_MAX_TIME_S = 10;
 const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;
 
 // curl helper used by check() — curl works inside the Claude Code sandbox
@@ -946,10 +954,14 @@ export function curlGet(url, extraArgs = []) {
           if (error) {
             // A curl that hangs past its own --max-time gets killed by the JS
             // backstop; error.code is null then and the message is the whole
-            // command line — map it to a terse 'timeout' instead.
+            // command line — map it to a terse 'timeout' instead. curl hitting
+            // its own --max-time exits 28: map that too, or the rendered
+            // offline detail is a bare "28" with no unit and nothing greppable.
             const detail = error.killed
               ? `timeout (${CHECK_CURL_MAX_TIME_S + 1}s)`
-              : error.code || error.message.split('\n')[0];
+              : error.code === 28
+                ? `timeout (${CHECK_CURL_MAX_TIME_S}s)`
+                : error.code || error.message.split('\n')[0];
             resolve({ ok: false, detail });
           } else {
             resolve({ ok: true, body: stdout.trim() });
