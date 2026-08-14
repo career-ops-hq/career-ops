@@ -213,3 +213,60 @@ test("appendStatusTransition: values containing a tab or newline are rejected, n
   assert.equal(res.reason, "invalid-field");
   assert.equal(fs.existsSync(ledgerFor(tracker)), false);
 });
+
+// ── Round trip: the writer's output against the reader that consumes it ──────
+//
+// Every test above checks this writer against its own idea of the format, and
+// funnel-velocity.mjs's self-test checks that reader against its own. Both pass
+// while disagreeing with each other, which is exactly the gap that let the
+// source column diverge unnoticed. These parse the real written file with the
+// real reader.
+//
+// funnel-velocity.mjs is a root ESM module; importing it by relative path keeps
+// the two halves genuinely coupled rather than restating the format here.
+test("round trip: a written row parses back through funnel-velocity's reader", async () => {
+  const { parseStatusLog } = await import("../../../funnel-velocity.mjs");
+  const { loadCanonicalStates } = await import("../../../tracker-utils.mjs");
+  const states = loadCanonicalStates(path.join(import.meta.dirname, "../../../templates/states.yml"));
+
+  const tracker = fixture();
+  appendStatusTransition({
+    trackerFile: tracker,
+    num: 7,
+    from: "Evaluated",
+    to: "Applied",
+    source: "web",
+    date: "2026-06-01",
+  });
+  appendStatusTransition({
+    trackerFile: tracker,
+    num: 7,
+    from: "Applied",
+    to: "Responded",
+    source: "web",
+    date: "2026-06-08",
+  });
+
+  const parsed = parseStatusLog(fs.readFileSync(ledgerFor(tracker), "utf8"), states);
+
+  // Nothing malformed: the reader rejects a row whose field count, date or
+  // state names it cannot make sense of, so an empty unparseable list is the
+  // real assertion that the two formats agree.
+  assert.deepEqual(parsed.unparseable, []);
+  assert.equal(parsed.observations.length, 2);
+
+  const [first, second] = parsed.observations;
+  assert.equal(first.num, 7);
+  assert.equal(first.date, "2026-06-01");
+  assert.equal(first.from, "Evaluated");
+  assert.equal(first.to, "Applied");
+  assert.equal(second.to, "Responded");
+
+  // Deliberately NOT asserted here: that these observations are trusted for
+  // day-math (`dayMath === true`, and absent from `dataQuality.unknownSources`).
+  // That is true of the format but not yet of the reader — `web` is in neither
+  // of its source allow-lists, so both rows come back flagged and reach no hop
+  // figure. Asserting it now would fail for a reason this PR cannot fix from
+  // inside `web/`. Fixed separately in #2897 / #2898; this assertion tightens to
+  // include it once that lands.
+});
