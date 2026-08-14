@@ -1,6 +1,13 @@
-/** Return the report number referenced by a tracker report cell. */
+/** Return the report number referenced by a tracker report cell, e.g.
+ *  "[010](../reports/010-decagon-2026-07-13.md)" -> 10. Anchored on the
+ *  markdown-link form specifically (mirrors reportNumFromCell in
+ *  web/src/lib/format.ts) rather than the first digit run anywhere in the
+ *  cell: this number selects which tailored CV gets attached to a real
+ *  application, so a leading number in prose before the link (a note, a
+ *  date) must never be mistaken for the report id — a wrong CV attached
+ *  silently is worse than no CV found. */
 export function reportNumberFromCell(cell) {
-  const match = String(cell ?? "").match(/(?:^|[^0-9])(\d{1,})(?=[^0-9]|$)/);
+  const match = /\[(\d+)\]/.exec(String(cell ?? ""));
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
