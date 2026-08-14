@@ -55,17 +55,39 @@ export const SKILL_TOKENS = [
   // Longest-first within each family so alternation prefers the specific form
   // ('Lean Six Sigma' before 'Six Sigma'), matching the existing
   // 'React Native'-before-'React' convention above.
-  'PMI-ACP', 'PgMP', 'CAPM', 'PMBOK', 'PMP',
-  'PRINCE2', 'Certified ScrumMaster', 'CSPO',
+  // Both spellings of every fused credential. A certification the user HOLDS
+  // and writes the ordinary way must not come back as a gap: the tool then
+  // tells them to go and earn something already on their CV, which is worse
+  // than the silence this vocabulary was added to fix, because it is
+  // confidently wrong. 'Certified Scrum Master' with the space is how most
+  // people write it; 'PMI ACP', 'PRINCE 2', 'Six-Sigma' are the same story with
+  // a hyphen or space moved. Each spaced form canonicalizes to the SAME display
+  // string as its fused sibling (see CANONICAL), so recognition and the
+  // known-skills set agree however the CV happens to spell it.
+  'PMI-ACP', 'PMI ACP', 'PgMP', 'CAPM', 'PMBOK', 'PMP',
+  'PRINCE2', 'PRINCE 2',
+  'Certified Scrum Product Owner', 'Certified ScrumMaster', 'Certified Scrum Master', 'CSPO',
   'ITIL', 'COBIT', 'TOGAF',
-  'Lean Six Sigma', 'Six Sigma',
+  'Lean Six Sigma', 'Lean Six-Sigma', 'Six Sigma', 'Six-Sigma',
   'CISSP', 'CISM', 'CIPP',
-  // DELIBERATELY OMITTED — 'CSM'. It is a legitimate abbreviation for Certified
-  // ScrumMaster, but in this corpus it far more often means Customer Success
-  // Manager, which is a documented FAIL family (lessons-learned 2026-07-03,
-  // blocked in portals.yml → title_filter.negative). Adding it would turn every
-  // CSM-shaped rejection into a phantom certification gap. 'Certified
-  // ScrumMaster' is listed in full above and carries no such collision.
+  // DELIBERATELY OMITTED — 'CSM', and kept out on purpose after review (#2603).
+  // It is a legitimate abbreviation for Certified ScrumMaster, but in job-ad
+  // prose it far more often expands to Customer Success Manager, and the
+  // collision lands hardest on exactly the people this vocabulary was added for:
+  // program, product and delivery managers, whose postings are the ones that say
+  // "part Customer Success Manager (CSM)". The fixture in
+  // tests/skill-extract.test.mjs pins that sentence.
+  //
+  // The trade is asymmetric and runs the other way from the spellings above. A
+  // missing alias costs a real credential ONCE, in a note the user can see and
+  // correct. Admitting 'CSM' would mint a phantom certification gap out of every
+  // customer-success posting the scanner touches, and "go get certified" for a
+  // credential the role never asked for is advice with no fix attached.
+  //
+  // Both unambiguous spellings — 'Certified ScrumMaster' and 'Certified Scrum
+  // Master' — are listed above and carry no such collision, so the credential is
+  // still recognized whenever it is written out. CAPM and CIPP stay in for the
+  // same reason: neither has an everyday expansion competing for the acronym.
   //
   // 'SAFe' is NOT here either — it is handled case-sensitively below, for the
   // same reason 'Go' is: 'safe' is an everyday English word.
@@ -142,6 +164,18 @@ export const CANONICAL = {
   'itil': 'ITIL', 'cobit': 'COBIT', 'togaf': 'TOGAF',
   'lean six sigma': 'Lean Six Sigma', 'six sigma': 'Six Sigma',
   'cissp': 'CISSP', 'cism': 'CISM', 'cipp': 'CIPP',
+  // Alternate spellings of the SAME credential, each mapping to the display
+  // form its fused sibling already uses. This is the half that makes the token
+  // additions count: without it 'Certified Scrum Master' extracts as its own
+  // string, never matches the known-skills set built from a CV that wrote it
+  // 'Certified ScrumMaster', and the credential is reported as a gap the user
+  // already holds. Aliasing to one display string is what collapses them.
+  'certified scrum master': 'Certified ScrumMaster',
+  'certified scrum product owner': 'CSPO',
+  'pmi acp': 'PMI-ACP',
+  'prince 2': 'PRINCE2',
+  'lean six-sigma': 'Lean Six Sigma',
+  'six-sigma': 'Six Sigma',
   // NOTE: no 'safe' entry here, deliberately. canonicalize() lowercases its
   // input before reading this map, so a 'safe' key would make
   // canonicalize('safe') return 'SAFe' — re-opening through the exported

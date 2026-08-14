@@ -79,6 +79,19 @@ try {
     ['cissp', 'CISSP'],
     ['cism', 'CISM'],
     ['cipp', 'CIPP'],
+    // Alternate spellings of credentials already above, each expected to land
+    // on the SAME display string. This is the pairing that stops the tool
+    // telling someone to earn a certification their CV already lists: the
+    // known-skills set is built from the CV's spelling and the gap map from the
+    // JD's, so the two only cancel if both collapse to one form. Written next to
+    // their fused siblings on purpose — a future edit that changes one display
+    // string and not the other fails here rather than in a user's gap map.
+    ['certified scrum master', 'Certified ScrumMaster'],
+    ['certified scrum product owner', 'CSPO'],
+    ['pmi acp', 'PMI-ACP'],
+    ['prince 2', 'PRINCE2'],
+    ['lean six-sigma', 'Lean Six Sigma'],
+    ['six-sigma', 'Six Sigma'],
   ];
   const certFailures = [];
   for (const [raw, display] of certificationCases) {
