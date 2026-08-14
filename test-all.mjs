@@ -3276,6 +3276,16 @@ if (
   fail('pipeline mode missing batch liveness sweep for unconfirmed entries');
 }
 
+if (
+  pipelineMode.includes('Concurrency is conditional on the extraction tool') &&
+  pipelineMode.includes('multiple workers must never share one browser session') &&
+  pipelineMode.includes('When in doubt, use the sequential path')
+) {
+  pass('pipeline mode prevents parallel Playwright session cross-contamination (#2551)');
+} else {
+  fail('pipeline mode still permits unsafe parallel Playwright workers (#2551)');
+}
+
 // --- salary tracking mode wiring (#1656 PR-2) ---
 const trackerModeDoc = readFile('modes/tracker.md');
 const patternsModeDoc = readFile('modes/patterns.md');
