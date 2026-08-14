@@ -38,6 +38,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -46,6 +47,29 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
 
 // --- CLI args ---
 const args = process.argv.slice(2);
+
+// --help fell through to the matcher and printed a JSON match report (#2853's
+// sibling, #2854). Handled via lib/cli-flags.mjs's validateFlags() (#2775).
+//
+// The call itself is deliberately NOT here at module scope: scan.mjs,
+// detect-reposts.mjs and tracker-sync-check.mjs all import normalizeCompanyName
+// from this file, so a module-scope check would read THEIR argv and exit the
+// process on their own perfectly valid flags. It runs inside the CLI-only guard
+// at the bottom instead.
+const KNOWN_FLAGS = ['--file', '--id', '--apply', '--json', '--summary', '--self-test', '--help', '-h'];
+
+// Flags whose value is the next argv token.
+const VALUE_FLAGS = ['--file', '--id'];
+
+const USAGE = `Usage:
+  node invite-match.mjs "<pasted invite text>"   # match an invite against the tracker
+  node invite-match.mjs --file <path>            # read the invite from a file
+  node invite-match.mjs --id <tracker#>          # force a specific tracker row
+  node invite-match.mjs --apply                  # advance the matched row to Rejected
+  node invite-match.mjs --summary                # human-readable output (default: JSON)
+  node invite-match.mjs --self-test              # run the inline self-test
+  node invite-match.mjs --help                   # show this message`;
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const fileIdx = args.indexOf('--file');
@@ -1072,6 +1096,7 @@ function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) {
     runSelfTest();
   } else {
