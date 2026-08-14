@@ -516,16 +516,28 @@ function gitTimeoutEnvVar(args) {
   return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
 }
 
-export function gitIn(root, ...args) {
+/**
+ * gitIn without the trailing/leading trim.
+ *
+ * Needed for output where whitespace is significant: `--name-only -z` emits
+ * NUL-delimited paths, and a path may legitimately begin or end with a space.
+ * Trimming the whole buffer would rewrite such a path into a different one.
+ * Everything else should keep using gitIn.
+ */
+export function gitRawIn(root, ...args) {
   const timeout = gitTimeoutMs(args);
   try {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
+    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout });
   } catch (err) {
     if (isTimeoutLikeError(err)) {
       throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
     }
     throw err;
   }
+}
+
+export function gitIn(root, ...args) {
+  return gitRawIn(root, ...args).trim();
 }
 
 function git(...args) {
@@ -907,6 +919,76 @@ function addPaths(paths) {
   git('add', '--', ...paths);
 }
 
+// Git's "exclude this from the pathspec" magic prefix. Preserved files are held
+// out of the checkout, the staging and the scoped commit with it, so the one
+// place that has to recognise such an entry again — the index-commit guard —
+// reads the prefix from here rather than re-spelling it.
+const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+
+/**
+ * Staged paths that are NOT covered by `owned`.
+ *
+ * Used to decide whether committing the whole index is equivalent to a
+ * pathspec-scoped commit. Entries in `owned` may be directories (`providers/`,
+ * `tests/`), which cover everything beneath them, or exact file paths.
+ *
+ * `preserved` is the update's preserved-file list (#2337): system files THIS
+ * install modified locally, which the update deliberately leaves alone. They are
+ * not the update's to commit, so a staged preserved path is reported as
+ * unrelated even when an owned DIRECTORY contains it — `providers/acme.mjs` is
+ * unrelated although `providers/` is owned.
+ *
+ * It has to be passed separately rather than inferred from `owned`, because the
+ * caller expresses preservation as `:(exclude)<path>` git pathspecs and those
+ * never match a staged path: the `providers/` entry would still claim the file,
+ * the guard would wave the bare index commit through, and the content the user
+ * asked to keep would be swept into it — #915 bug 2, reintroduced through the
+ * guard that exists to prevent it.
+ *
+ * Deliberately reads `--cached` rather than `git status`: only what is STAGED
+ * can end up in a commit, and an unstaged working-tree edit is irrelevant to
+ * that question.
+ *
+ * Takes the git runner as a seam (defaulting to the ROOT-bound one) so it can be
+ * driven against a throwaway repo, matching removeAdditionsNotInHead and
+ * tests/updater-rollback-behavior.test.mjs.
+ *
+ * Takes a RAW git runner — one that does not trim — because a path may
+ * legitimately begin or end with a space and trimming would rewrite it.
+ *
+ * @param {string[]} owned
+ * @param {string[]} [preserved] exact paths the update leaves to the user
+ * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
+ * @returns {string[]} staged paths the update does not own (empty ⇒ safe to commit the index)
+ */
+export function stagedPathsOutside(owned, preserved = [], run = (...args) => gitRawIn(ROOT, ...args)) {
+  // -z, and no trimming. Without it git quotes any path holding a space, quote
+  // or newline, and trimming would additionally rewrite a legitimate name: a
+  // staged ` scan.mjs` (leading space) becomes `scan.mjs`, matches an owned
+  // entry, and is silently treated as the update's own file — sweeping a user's
+  // work into the commit, which is the exact #915 bug 2 regression this guard
+  // exists to prevent. NUL-delimited output is unambiguous and unquoted.
+  const staged = run('diff', '--cached', '--name-only', '-z');
+  if (!staged) return [];
+
+  const files = new Set();
+  const dirs = [];
+  for (const entry of owned) {
+    if (entry.endsWith('/')) dirs.push(entry);
+    else files.add(entry);
+  }
+  // Preservation wins over ownership, hence the check BEFORE the owned lookups:
+  // being inside an owned directory is exactly the case that would otherwise
+  // claim a preserved file. Exact paths only — the preserved list comes from
+  // `git diff --name-only` / `git ls-files`, which never emit directories.
+  const preservedFiles = new Set(preserved);
+
+  return staged.split('\0')
+    .filter(path => path !== '')
+    .filter(path => preservedFiles.has(path)
+      || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
+}
+
 function dashboardGoSourcesChanged() {
   try {
     const changed = git('diff', '--name-only', 'HEAD', '--', 'dashboard');
@@ -1164,7 +1246,7 @@ async function apply() {
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
     // the user asked to keep out.
-    const preserveSpecs = preservedPaths.map((file) => `:(exclude)${file}`);
+    const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
     const preservedSet = new Set(preservedPaths);
 
@@ -1377,6 +1459,10 @@ async function apply() {
       pathsToStage.push('.update-dismissed');
     }
 
+    // Which commit form was used, so the failure path can suggest the matching
+    // recovery command. Declared outside the try because the catch reads it.
+    let usedIndexCommit = false;
+
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
       addPaths(pathsToStage);
@@ -1384,7 +1470,39 @@ async function apply() {
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the
       // commit to exactly the files this update touched.
-      git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      //
+      // …but the pathspec form builds the commit from the WORKING TREE for those
+      // paths rather than from the index. Where `core.fileMode` is false — the
+      // default on Windows — the working tree cannot express the executable bit,
+      // so a mode change that `git checkout FETCH_HEAD -- <path>` just staged is
+      // dropped from the commit and left sitting in the index. The install is
+      // dirty the instant a "clean" update finishes, and stays dirty, because
+      // every later update re-stages the same mode and drops it again.
+      //
+      // Committing the index captures the mode. That is only equivalent to the
+      // scoped commit when the index holds nothing beyond what this update
+      // staged — which is precisely the #915 bug 2 hazard — so verify it rather
+      // than assume it, and fall back to the scoped form when anything else is
+      // staged. Content is committed identically either way; only the mode bits
+      // ride on the index-based path.
+      //
+      // `pathsToStage` is a git PATHSPEC list, not a path list: the preserved
+      // entries in it are `:(exclude)<path>`, which match no staged path at all.
+      // Handing them to the guard as owned paths would leave a preserved file
+      // claimed by its enclosing owned directory (`providers/` covering
+      // `providers/acme.mjs`) — so strip the exclusions out and pass the
+      // preserved list separately, where preservation outranks ownership.
+      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      const unrelated = stagedPathsOutside(
+        [...ownedPaths, ...materializedSkillEntrypoints],
+        preservedPaths,
+      );
+      usedIndexCommit = unrelated.length === 0;
+      if (usedIndexCommit) {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`);
+      } else {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      }
     } catch (e) {
       let commitFailed = false;
       try {
@@ -1399,11 +1517,18 @@ async function apply() {
       if (commitFailed) {
         const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
         const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
+        // Print the command matching the path actually taken. Suggesting the
+        // pathspec form after the index form was selected would tell the user to
+        // run the very thing that drops the staged mode bits — a recovery step
+        // that quietly reintroduces the bug it is recovering from.
+        const recovery = usedIndexCommit
+          ? `git commit -m "chore: auto-update system files to v${remote}"`
+          : `git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`;
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
           `    Please run manually to finish the update:\n` +
-          `    git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`
+          `    ${recovery}`
         );
       }
       // Otherwise, genuinely nothing to commit (already up to date)
