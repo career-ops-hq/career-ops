@@ -750,7 +750,17 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
       // files and silently no-ops the whole update (#2817). This ignores only
       // the carriage return at end of line, so a genuine trailing-whitespace or
       // content edit is still detected.
-      return runGit('diff', '--ignore-cr-at-eol', '--name-only', ref, '--', ...paths).split('\n').map((p) => p.trim()).filter(Boolean);
+      //
+      // `--numstat`, deliberately, NOT `--name-only`: `--name-only` can list a
+      // path on the blob-OID comparison alone, before the textual diff runs, so
+      // a CRLF/LF-only file survives `--ignore-cr-at-eol` and the guard leaks
+      // right back. `--numstat` forces the textual diff, so the ignore rule is
+      // actually applied and a CR-only file drops out of the output entirely.
+      // The path is field 3 (a binary file renders as `-\t-\tpath`, still field
+      // 3). Reads less obviously than `--name-only`; keep it as-is.
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...paths)
+        .split('\n').map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.split('\t')[2]).filter(Boolean);
     } catch {
       // An unreadable ref (shallow clone, unrelated histories) must never abort
       // the update — it degrades the warning, not the checkout.
