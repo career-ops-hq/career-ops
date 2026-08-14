@@ -293,7 +293,12 @@ function isCrossReferencedMention(text, index) {
   // "Has the reference already been satisfied?" is what separates them, and it
   // is checked against the text before the LAST separator so a date belonging
   // to the citation cannot be read as belonging to a later clause.
-  const lastSeparator = [...sinceRef.matchAll(/[;|]\s/g)].pop();
+  //
+  // No trailing-whitespace requirement, unlike the sentence rule above. A full
+  // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
+  // appear inside numbers or abbreviations, and a hand-typed note writes
+  // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
+  const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
   if (lastSeparator) {
     const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
     if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;

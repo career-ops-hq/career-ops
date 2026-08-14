@@ -6542,6 +6542,12 @@ try {
   for (const [note, want, why] of [
     ['#154 Sr PM (applied 2026-08-04); applied 2026-06-15', '2026-06-15', 'semicolon, citation already dated'],
     ['#154 Sr PM (applied 2026-08-04) | applied 2026-06-15', '2026-06-15', 'pipe, citation already dated'],
+    // No space after the separator. A full stop needs trailing whitespace to
+    // avoid firing on "3.5", but `;` and `|` never appear inside numbers, and a
+    // hand-typed note writes ";applied" as readily as "; applied".
+    ['#154 Sr PM (applied 2026-08-04);applied 2026-06-15', '2026-06-15', 'unspaced semicolon'],
+    ['#154 Sr PM (applied 2026-08-04)|applied 2026-06-15', '2026-06-15', 'unspaced pipe'],
+    ['#154 is already live;applied 2026-08-04.', null, 'unspaced separator, citation NOT yet dated'],
     ['#154 Sr PM (applied 2026-08-04)', null, 'citation dated, nothing after it'],
   ]) {
     const got = cadence.parseAppliedDate(note);
