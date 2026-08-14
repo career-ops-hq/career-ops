@@ -2185,6 +2185,31 @@ for (const mode of expectedModes) {
   }
 }
 
+// Every localized shared context must carry the safety rules that protect
+// authorship, factual sourcing, and human approval. English fallback alone is
+// insufficient: a localized mode can be loaded without reading modes/_shared.md.
+{
+  const requiredGuardrails = [
+    '<!-- guardrail:authorship -->',
+    '<!-- guardrail:no-fabrication -->',
+    '<!-- guardrail:source-exclusivity -->',
+    '<!-- guardrail:human-approval -->',
+  ];
+  const localizedShared = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== 'regional')
+    .map((entry) => `modes/${entry.name}/_shared.md`)
+    .filter(fileExists);
+  const missingGuardrails = localizedShared.filter((file) => {
+    const source = readFile(file);
+    return requiredGuardrails.some((marker) => !source.includes(marker));
+  });
+  if (missingGuardrails.length === 0) {
+    pass(`all ${localizedShared.length} localized _shared.md files carry safety guardrails`);
+  } else {
+    fail(`localized _shared.md files missing safety guardrails: ${missingGuardrails.join(', ')}`);
+  }
+}
+
 // Check _shared.md references _profile.md
 const shared = readFile('modes/_shared.md');
 if (shared.includes('_profile.md')) {
