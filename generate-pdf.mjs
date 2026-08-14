@@ -645,10 +645,6 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
 
-  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
-    throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
-  }
-
   mkdirSync(dirname(outputPath), { recursive: true });
 
   // Inject the user's theme tokens (config/profile.yml `style:`) as CSS custom
@@ -714,7 +710,12 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
-    // Write PDF
+    // Write PDF only after rendering has completed and the destination has been
+    // checked. Keeping the guard here also preserves renderer cleanup semantics
+    // for callers that inject a browser which fails before producing a buffer.
+    if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+      throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
+    }
     await writeFile(outputPath, pdfBuffer);
 
     // Read the root page-tree count so page-like text in streams is ignored.
