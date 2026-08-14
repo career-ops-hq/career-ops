@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, removeAdditionsNotInHead } from '../update-system.mjs';
+import { gitIn, removeAdditionsNotInHead, staleSystemFiles } from '../update-system.mjs';
 
 // A throwaway git repo plus a ctx that binds the rollback helper's git runner
 // and filesystem root to it, so nothing touches the real working tree.
@@ -33,6 +33,25 @@ function stagedPaths(g) {
 }
 
 console.log('\n🧪 Testing updater rollback behavior (#2015)...');
+
+// ── 0. system-file pruning is complete but user-safe (#2532) ──
+{
+  const local = ['plugins-registry.json', 'tests/old.test.mjs', 'data/applications.md', 'scratch.txt'];
+  const remote = ['tests/new.test.mjs', 'data/applications.md'];
+  const system = ['plugins-registry.json', 'tests/', 'data/'];
+  const user = ['data/'];
+  const stale = staleSystemFiles(local, remote, system, user);
+  if (stale.length === 2 && stale.includes('plugins-registry.json') && stale.includes('tests/old.test.mjs')) {
+    pass('stale system pruning removes upstream-deleted root files and system descendants');
+  } else {
+    fail(`stale system pruning selected the wrong files: ${JSON.stringify(stale)}`);
+  }
+  if (staleSystemFiles(local, [], system, user).length === 0) {
+    pass('stale system pruning never treats an empty remote tree as a delete-all signal');
+  } else {
+    fail('stale system pruning would delete files from an empty remote tree');
+  }
+}
 
 // ── 1. protectedPaths: a user's pre-staged work survives a rollback ──
 {
