@@ -204,7 +204,12 @@ export async function pdfPathForReport(n: string): Promise<string | null> {
   const abs = path.resolve(root, rel);
   const outputDir = path.resolve(root, "output");
   if (!abs.startsWith(outputDir + path.sep)) return null;
-  if (!fs.existsSync(abs) || !containedRealpath(abs, root)) return null;
+  // Scoped to outputDir, not the broader root: the lexical startsWith check
+  // above only rejects an unresolved path outside output/, but a symlink
+  // PLACED under output/ can still resolve to somewhere else inside root
+  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
+  // this route was never meant to expose.
+  if (!fs.existsSync(abs) || !containedRealpath(abs, outputDir)) return null;
   return abs;
 }
 

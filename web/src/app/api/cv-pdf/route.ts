@@ -25,6 +25,12 @@ export async function GET(req: NextRequest) {
   // different tailored CVs — the company-slug fallback below can't tell them
   // apart and would open the wrong report's PDF.
   if (n) {
+    // A malformed n (typo, tampered query string) must not silently fall
+    // through to the company heuristic below — pdfPathForReport returns null
+    // for both "malformed" and "valid but not indexed", and conflating them
+    // would let a bad n quietly serve the wrong report's PDF instead of
+    // surfacing the mistake.
+    if (!/^\d+$/.test(n)) return new Response("invalid report number", { status: 400 });
     const exact = await pdfPathForReport(n);
     if (exact) {
       try {
