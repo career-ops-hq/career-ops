@@ -7,11 +7,11 @@ import { loadPortalsDocument, mergePortalFilters, PortalsConfigError } from "@/l
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Merge-safe writer for portals.yml's title_filter (a USER-LAYER file). Replaces
-// ONLY title_filter.positive (the role keywords the free scanner matches), seeding
-// from templates/portals.example.yml on first create, and PRESERVING tracked_companies
-// + every other block. Atomic write, confirm-gated (setProfile/setPortals). This is
-// what loads the very first home scan once the user confirms their target roles.
+// Merge-safe writer for portals.yml's web-owned filters (a USER-LAYER file).
+// Replaces title_filter.positive and, when provided, location_filter.allow;
+// seeds from templates/portals.example.yml on first create; and PRESERVES
+// tracked_companies plus every other block. Atomic write, confirm-gated
+// (setProfile/setPortals). This loads the first home scan after role confirmation.
 
 export async function POST(req: Request) {
   let body: { roles?: string[]; location?: string[] };

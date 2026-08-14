@@ -55,6 +55,16 @@ test("a scalar user document is rejected as an invalid mapping", () => {
   );
 });
 
+test("a YAML timestamp scalar is rejected as an invalid mapping", () => {
+  const { file, template } = fixture();
+  writeFileSync(file, "2024-01-01\n", "utf8");
+
+  assert.throws(
+    () => loadPortalsDocument(file, template),
+    (error) => error instanceof PortalsConfigError && error.kind === "invalid-user-config",
+  );
+});
+
 test("valid custom blocks survive the web-owned filter update", () => {
   const original = {
     tracked_companies: [{ name: "Acme", careers_url: "https://example.com/jobs" }],
