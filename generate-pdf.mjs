@@ -645,6 +645,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
 
+  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+    throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
+  }
+
   mkdirSync(dirname(outputPath), { recursive: true });
 
   // Inject the user's theme tokens (config/profile.yml `style:`) as CSS custom
