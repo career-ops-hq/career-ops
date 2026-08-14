@@ -85,6 +85,20 @@ If NO slug variant resolves, say so clearly and leave portals.yml unchanged. Nev
 End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what you changed, ≤12 words}`;
   }
   // evaluate (default) — run the REAL oferta mode + persist canonically
+  //
+  // The TSV row carries 10 fields, the 10th being the posting URL that
+  // merge-tracker dedupes on (#1298). The web is a WRITER of that file, not only
+  // a reader: emitting 9 fields stays valid forever, so nothing would ever go
+  // red — every job evaluated from the web would simply sit outside the
+  // URL dedup. Compatible and half-dead at once, which is the failure mode with
+  // no symptom.
+  //
+  // ALWAYS 10 fields, empty when there is no URL, deliberately: an
+  // unconditional template is one an agent follows, "emit 9 or 10 depending"
+  // is one it sometimes forgets. Empty and absent are byte-identical in the
+  // written row (verified against merge-tracker), so the robust instruction
+  // costs nothing. Not "N/A" either — parseTsvExtras drops placeholders
+  // precisely so they can't be misread as the row's LOCATION.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
 1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
@@ -92,8 +106,8 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
+   c. Append ONE row of 10 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score). ALWAYS write all 10 fields — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
+      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
