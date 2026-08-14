@@ -30,6 +30,14 @@ async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers =
       err.status = res.status;
       err.body = responseText;
       err.retryAfter = res.headers.get('retry-after');
+      // Only ever populated under redirect:'manual', where the 3xx arrives as a
+      // non-ok response instead of being followed or thrown. Attached so a
+      // caller can tell WHICH redirect it hit without gaining the ability to
+      // follow it: jobvite distinguishes a feed pointing at NoJobs.htm (an
+      // empty board) from a board pointing at search.jobvite.com?invalid=1 (a
+      // retired tenant), and those two need opposite handling. Relative, as the
+      // server wrote it — resolve against the request URL before matching.
+      err.location = res.headers.get('location');
       throw err;
     }
     // Body consumption must stay inside the timer window: a server that sends
@@ -50,12 +58,26 @@ export async function fetchText(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.text());
 }
 
-// Returns the raw Response (after the timeout + non-2xx guard) so providers that
-// need response headers — e.g. startup.ch reads Set-Cookie to prime a session —
-// can route through ctx instead of re-implementing fetch. Pass redirect:'error'
-// like every other provider call so a 3xx can't be followed to a private IP.
+// Returns a Response (after the timeout + non-2xx guard) so providers that need
+// response headers — csod.mjs reads Set-Cookie to prime the session its search
+// API requires — can route through ctx instead of re-implementing fetch. Pass
+// redirect:'error' like every other provider call so a 3xx can't be followed to
+// a private IP.
+//
+// The body is read here, inside the timer window, and handed back as an
+// equivalent Response. Two reasons: returning the live Response would let a
+// server that stalls its body hang the caller forever with the abort timer
+// already cleared (the failure fetchWithTimeout documents above), and this
+// function previously omitted the `consume` argument entirely, so it threw
+// "consume is not a function" on every call — it had no working callers to
+// preserve bug-compatibility with. Header identity, including repeated
+// Set-Cookie (getSetCookie()), survives the reconstruction.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 export async function fetchResponse(url, opts = {}) {
-  return await fetchWithTimeout(url, opts);
+  return await fetchWithTimeout(url, opts, async (res) => {
+    const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  });
 }
 
 /** Jitter added to a backoff so concurrent retries don't re-collide in lockstep. */
@@ -84,7 +106,7 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
 /** Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock wait. */
-function sleep(ms, ctx) {
+export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -120,7 +142,7 @@ export function isRetryableError(err) {
 }
 
 /**
- * Fetch JSON with bounded retry on transient failures.
+ * Bounded retry on transient failures, around any request.
  *
  * Shared by every provider that retries a fetch (a16z-speedrun-talent.mjs,
  * workday.mjs, oraclecloud.mjs, each via its own `policy` override — see
@@ -137,21 +159,29 @@ export function isRetryableError(err) {
  * so a caller logging a summary doesn't have to assume the full `retries + 1`
  * — a non-retryable error can end the loop after just one.
  *
- * @param {{fetchJson: Function, sleep?: Function}} ctx - Transport context.
- * @param {string} url - Absolute URL.
- * @param {object} [opts] - Passed through to ctx.fetchJson.
+ * Nothing in the loop ever inspected the response body, so it is parameterised
+ * by the request rather than duplicated per content type: `fetchJsonWithRetry`
+ * and `fetchTextWithRetry` are the same policy over a different transport call.
+ * Splitting them into two copies is how the entity decoders drifted (#1555,
+ * #1639).
+ *
+ * @param {() => Promise<any>} request - Performs one attempt.
+ * @param {{sleep?: Function}} ctx - Transport context (may supply a test clock).
  * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
- * @returns {Promise<any>} Parsed JSON.
  */
-export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
+async function withRetry(request, ctx, policy = {}) {
   const { retries, baseDelayMs, maxDelayMs } = { ...RETRY_DEFAULTS, ...policy };
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await ctx.fetchJson(url, opts);
+      return await request();
     } catch (err) {
       lastErr = err;
-      err.attempts = attempt + 1;
+      // A rejection isn't guaranteed to be an object — assigning a property to
+      // a primitive (a string, a number) throws in strict mode (ESM always is),
+      // which would replace the real rejection with an unrelated TypeError
+      // right here in the catch, before any caller sees it.
+      if (err !== null && (typeof err === 'object' || typeof err === 'function')) err.attempts = attempt + 1;
       if (attempt === retries || !isRetryableError(err)) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
@@ -172,6 +202,42 @@ export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
     }
   }
   throw lastErr;
+}
+
+/**
+ * Fetch JSON with bounded retry on transient failures.
+ *
+ * @param {{fetchJson: Function, sleep?: Function}} ctx - Transport context.
+ * @param {string} url - Absolute URL.
+ * @param {object} [opts] - Passed through to ctx.fetchJson.
+ * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @returns {Promise<any>} Parsed JSON.
+ */
+export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
+  return withRetry(() => ctx.fetchJson(url, opts), ctx, policy);
+}
+
+/**
+ * Fetch text with bounded retry on transient failures.
+ *
+ * Same policy as the JSON form; exists because rate limiting is not a property
+ * of the content type. jobvite's XML feed answers `429 Retry-After: 30` from
+ * the second request onward — reliably enough that scanning two tenants
+ * back-to-back trips it — and a scraped HTML board is just as capable of a
+ * transient 5xx as a JSON API. Also used by providers that resolve config
+ * (e.g. a board id) from a one-shot page fetch before pagination even starts
+ * — that single request used to have no retry at all, so a single
+ * DNS/TLS/connection blip on it failed the whole provider before a single
+ * page was ever fetched.
+ *
+ * @param {{fetchText: Function, sleep?: Function}} ctx - Transport context.
+ * @param {string} url - Absolute URL.
+ * @param {object} [opts] - Passed through to ctx.fetchText.
+ * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @returns {Promise<string>} Response body.
+ */
+export async function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
+  return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
 export function makeHttpCtx() {

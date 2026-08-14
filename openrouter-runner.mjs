@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
@@ -678,7 +678,12 @@ async function cmdEvaluate(input, ctx) {
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
     const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    // AGENTS.md: a tracker-addition TSV is a SINGLE data line of 9 tab-separated
+    // columns. merge-tracker.mjs reads the whole file as ONE record (no line
+    // splitting), so a leading header row makes parts[4]/parts[5] the literal
+    // "status"/"score" and the evaluation is skipped ("cannot tell score from
+    // status"). Write only the data line.
+    writeFile(tsvFile, tsvLine);
 
     console.log(`\n✅ Report saved: ${relPath}`);
     console.log('\n─── EVALUATION ──────────────────────────────────────\n');

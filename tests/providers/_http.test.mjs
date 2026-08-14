@@ -12,7 +12,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _http retry helpers');
 
-const { isRetryableError, fetchJsonWithRetry } =
+const { isRetryableError, fetchJsonWithRetry, fetchResponse } =
   await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
@@ -90,5 +90,43 @@ if (isRetryableError(nonTypeErrorLookalike) === true) {
     } else {
       fail(`fetchJsonWithRetry redirect refusal: calls=${calls}, error=${e?.message}`);
     }
+  }
+}
+
+// ── fetchResponse() ─────────────────────────────────────────────────────────
+// Regression: fetchResponse() previously called the internal fetchWithTimeout
+// WITHOUT its required `consume` callback, so every call threw
+// "consume is not a function". It had no callers, so nothing caught it until
+// csod.mjs needed Set-Cookie off the bootstrap response. These tests pin the
+// contract it is meant to provide.
+{
+  const realFetch = globalThis.fetch;
+  const stub = (body, init) => { globalThis.fetch = async () => new Response(body, init); };
+  try {
+    // Repeated Set-Cookie must survive — this is the whole reason the helper
+    // exists, and a naive header copy collapses them into one comma-joined value.
+    const headers = new Headers();
+    headers.append('set-cookie', 'ASP.NET_SessionId=abc; path=/; HttpOnly');
+    headers.append('set-cookie', 'tenant=kln; Secure');
+    stub('{"token":"tok"}', { status: 200, headers });
+    const res = await fetchResponse('https://example.com/home');
+    const cookies = res.headers.getSetCookie();
+    if (cookies.length === 2 && cookies[0].startsWith('ASP.NET_SessionId=abc')) {
+      pass('fetchResponse() preserves repeated Set-Cookie headers');
+    } else {
+      fail(`fetchResponse() set-cookie wrong: ${JSON.stringify(cookies)}`);
+    }
+    if (await res.text() === '{"token":"tok"}') pass('fetchResponse() body is still readable by the caller');
+    else fail('fetchResponse() body should be readable');
+
+    // A null-body status must not blow up the Response reconstruction.
+    stub(null, { status: 204 });
+    const empty = await fetchResponse('https://example.com/empty');
+    if (empty.status === 204) pass('fetchResponse() handles null-body statuses (204) without throwing');
+    else fail(`fetchResponse() 204 wrong: status=${empty.status}`);
+  } catch (e) {
+    fail(`fetchResponse() threw: ${e.message}`);
+  } finally {
+    globalThis.fetch = realFetch;
   }
 }
