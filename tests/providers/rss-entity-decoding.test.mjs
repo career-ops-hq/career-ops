@@ -70,27 +70,93 @@ const rssProviders = [
   ['teamtailor.mjs', 'parseTeamtailorFeed', 'https://x.teamtailor.com/jobs/1'],
   ['weworkremotely.mjs', 'parseWwrFeed', 'https://weworkremotely.com/remote-jobs/x'],
 ];
+// Every (label, getTitle) pair checked above, reused by the decode-equivalence
+// pass at the bottom so it covers the same set without re-deriving it.
+const checked = [];
+
 for (const [file, fn, link] of rssProviders) {
   const parse = (await load(file))[fn];
-  checkProvider(fn, (input) => parse(rss(input, link))[0]?.title);
+  const getTitle = (input) => parse(rss(input, link))[0]?.title;
+  checkProvider(fn, getTitle);
+  checked.push([fn, getTitle]);
 }
 
 // ── personio: title and location decode through the shared decoder on both the
 // XML feed path (tagText → extractText) and the HTML-fallback path. ──
 const { parsePersonioXml, parsePersonioHtml } = await load('personio.mjs');
 
-checkProvider('parsePersonioXml', (input) =>
+const personioXmlTitle = (input) =>
   parsePersonioXml(
     `<workzag-jobs><position><name>${input}</name><id>123</id><office>Remote</office></position></workzag-jobs>`,
     'Acme',
     'acme.jobs.personio.de',
-  )[0]?.title,
-);
+  )[0]?.title;
 
-checkProvider('parsePersonioHtml', (input) =>
+const personioHtmlTitle = (input) =>
   parsePersonioHtml(
     `<a class="job-box" href="/job/123"><h3>${input}</h3><span class="jobMetaText">Remote</span></a>`,
     'Acme',
     'acme.jobs.personio.de',
-  )[0]?.title,
-);
+  )[0]?.title;
+
+checkProvider('parsePersonioXml', personioXmlTitle);
+checkProvider('parsePersonioHtml', personioHtmlTitle);
+checked.push(['parsePersonioXml', personioXmlTitle], ['parsePersonioHtml', personioHtmlTitle]);
+
+// ── Legitimate references must still decode, the same way the shared decoder
+// decodes them. The cases above prove a provider rejects what it should; on
+// their own they are also satisfied by a provider that has stopped decoding
+// altogether, since `decodeEntities` leaves every one of them as raw text too.
+//
+// These also pin the two places the private copies used to differ from the
+// shared decoder, so a re-introduced copy that only gets *these* wrong still
+// fails: they knew five named entities and matched them case-sensitively, so
+// `&nbsp;` survived as literal text and `&AMP;` / `&#Xfc;` never decoded.
+const decodingCases = ['R&amp;D f&#252;r Z&#xfc;rich', 'A&nbsp;B', 'A&AMP;B', 'Z&#Xfc;rich'];
+
+for (const [label, getTitle] of checked) {
+  let ok = true;
+  for (const raw of decodingCases) {
+    const input = `${raw} Engineer`;
+    const title = getTitle(input) ?? '';
+    if (title !== decodeEntities(input)) {
+      fail(`${label}: ${raw}: got ${JSON.stringify(title)}, want ${JSON.stringify(decodeEntities(input))}`);
+      ok = false;
+      break;
+    }
+  }
+  if (ok) pass(`${label} decodes legitimate references exactly as the shared decoder does`);
+}
+
+// ── Source-level guard ──
+// Everything above compares a provider's output to the shared decoder on a
+// fixed set of inputs, which catches a private copy that behaves differently
+// *today*. But the failure this bug class keeps having is a copy that is
+// correct when it lands and drifts afterwards — #1555, #1639 and #2623 were
+// each a copy that had been right at some point. So assert it at the source:
+// a provider that imports the shared decoder must not also declare its own,
+// and the commit that re-introduces one fails here rather than years later.
+//
+// Scoped to importers on purpose. providers/jobvite.mjs still carries a
+// private decoder (a correct one — isEmittableCodePoint was upstreamed from
+// it in #2623) and does not import the shared module, so it is legitimately
+// outside this set rather than silently excused by an exception list.
+{
+  const { readdirSync, readFileSync } = await import('fs');
+  const dir = join(ROOT, 'providers');
+  const offenders = [];
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.mjs') || file === '_html-entities.mjs') continue;
+    const src = readFileSync(join(dir, file), 'utf-8');
+    if (!src.includes("from './_html-entities.mjs'")) continue;
+    // Declarations only — remotli.mjs names String.fromCodePoint in a comment
+    // explaining why it uses the shared decoder, which is not a private copy.
+    const local = src.match(/function\s+(decodeEntities|decodeXmlEntities|fromCodePoint)\b/);
+    if (local) offenders.push(`${file} (declares ${local[1]})`);
+  }
+  if (offenders.length === 0) {
+    pass('no provider both imports the shared decoder and declares a private one');
+  } else {
+    fail(`private entity decoder re-introduced in: ${offenders.join(', ')}`);
+  }
+}
