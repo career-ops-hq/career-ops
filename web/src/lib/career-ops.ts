@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+// One definition of the `{n}-RESERVED.md` convention, shared with
+// run-cli-support.mjs — see report-files.mjs for why it lives there.
+import { isReservedReportFile } from "@/lib/report-files.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -236,12 +239,6 @@ export type ReportData = { content: string; file: string };
  *  through the orchestrator that owns cleanup — `.find()` could return the
  *  empty sentinel instead of the real report, making the report body and the
  *  Apply/PDF-ready checks disappear. */
-/** True for a `{n}-RESERVED.md` placeholder sentinel — never a real report,
- *  whichever branch below found it. */
-function isReservedReportFile(file: string): boolean {
-  return /^\d+-RESERVED\.md$/.test(path.basename(file));
-}
-
 export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
