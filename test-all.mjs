@@ -6526,9 +6526,27 @@ try {
   // referenced row's.
   const semicolonRef = '#154 is already live; applied 2026-08-04. Not submitted here yet.';
   if (cadence.parseAppliedDate(semicolonRef) === null) {
-    pass('parseAppliedDate: a semicolon does NOT end the row-reference scope');
+    pass('parseAppliedDate: a semicolon does NOT end the scope of a reference that has no date yet');
   } else {
     fail(`parseAppliedDate semicolon scope: got ${JSON.stringify(cadence.parseAppliedDate(semicolonRef))}, want null`);
+  }
+  // ...but once the citation HAS been given its own date, a separator does end
+  // it, and what follows is this row's. This is the mixed shape #2610 review
+  // called out: the note names a sibling AND records this submission, which is
+  // the common case when two roles are live at one employer. Reading the whole
+  // note as the sibling's throws away a real measured date.
+  //
+  // It is also the pair a future simplification would silently re-break — the
+  // two cases differ only by whether a date precedes the separator, so they are
+  // asserted together on purpose.
+  for (const [note, want, why] of [
+    ['#154 Sr PM (applied 2026-08-04); applied 2026-06-15', '2026-06-15', 'semicolon, citation already dated'],
+    ['#154 Sr PM (applied 2026-08-04) | applied 2026-06-15', '2026-06-15', 'pipe, citation already dated'],
+    ['#154 Sr PM (applied 2026-08-04)', null, 'citation dated, nothing after it'],
+  ]) {
+    const got = cadence.parseAppliedDate(note);
+    if (got === want) pass(`parseAppliedDate: ${why} → ${JSON.stringify(want)}`);
+    else fail(`parseAppliedDate ${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
   }
   // When EVERY apply-date belongs to another row, the note does not state this
   // row's date. Degrade to the labelled evaluation-date fallback rather than

@@ -221,13 +221,27 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
  * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
  * row's own date.
  *
- * A SEMICOLON IS NOT A BOUNDARY. It joins independent clauses inside one
- * sentence, so the subject carries across it: "#154 is already live; applied
- * 2026-08-04" is still about #154. Treating `;` as a break let that foreign
- * date through as measured. Where the reading is genuinely ambiguous the tie
- * goes to "cross-referenced", because the two errors are not symmetric — a
- * false positive degrades to a fallback that is LABELLED as not-measured, while
- * a false negative reports another row's date as this row's measured one.
+ * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
+ * These are the separators this Notes column actually uses, and they do two
+ * different jobs depending on what came before:
+ *
+ *   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+ *        the citation already carries its date, so the second one is a new
+ *        subject — this row's own. Reading the whole note as #154's discards a
+ *        real measured date, and this is the MORE common shape: two roles live
+ *        at one employer, and the note naming the sibling is usually the same
+ *        note that records this submission.
+ *
+ *   "#154 is already live; applied 2026-08-04"
+ *        the citation has no date yet, so the one after the separator is still
+ *        its own — a semicolon joins independent clauses within a sentence and
+ *        the subject carries across it. Treating it as a break here adopts a
+ *        foreign date and reports it as MEASURED.
+ *
+ * Where the reading is genuinely ambiguous the tie goes to "cross-referenced",
+ * because the two errors are not symmetric — a false positive degrades to a
+ * fallback that is LABELLED as not-measured, while a false negative reports
+ * another row's date as this row's measured one.
  *
  * Both failure directions are survivable, which is why a heuristic is
  * acceptable here: a false positive degrades to the evaluation date, labelled
@@ -253,7 +267,38 @@ function isCrossReferencedMention(text, index) {
     refEnd = m.index + m[0].length;
   }
   if (refEnd === -1) return false;
-  return !/[.!?]\s/.test(window.slice(refEnd));
+
+  const sinceRef = window.slice(refEnd);
+  // A sentence break always ends the reference's scope.
+  if (/[.!?]\s/.test(sinceRef)) return false;
+
+  // A semicolon or pipe ends it too — but only once the reference has already
+  // been GIVEN a date. Those are the separators this Notes column actually uses,
+  // and they do two different jobs depending on what came before:
+  //
+  //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+  //        the citation already has its date, so the second one is a new
+  //        subject: this row's own. Reading the whole note as #154's loses a
+  //        real measured date, and that is the more common shape — two roles
+  //        live at one employer, and the note naming the sibling is usually the
+  //        same note recording this submission.
+  //
+  //   "#154 is already live; applied 2026-08-04"
+  //        the citation has NO date yet, so the one after the semicolon is
+  //        still its own: a semicolon joins independent clauses within a
+  //        sentence and the subject carries across it. Treating it as a break
+  //        here adopts a foreign date and reports it as MEASURED, which is the
+  //        failure this whole function exists to prevent.
+  //
+  // "Has the reference already been satisfied?" is what separates them, and it
+  // is checked against the text before the LAST separator so a date belonging
+  // to the citation cannot be read as belonging to a later clause.
+  const lastSeparator = [...sinceRef.matchAll(/[;|]\s/g)].pop();
+  if (lastSeparator) {
+    const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
+    if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;
+  }
+  return true;
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a
