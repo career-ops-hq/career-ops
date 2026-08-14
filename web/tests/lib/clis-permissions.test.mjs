@@ -27,13 +27,17 @@ const CLIS_TS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src",
 const src = readFileSync(CLIS_TS, "utf8");
 
 /** The KNOWN array body — the shipped argv, not the surrounding prose. A flag
- *  named in the header comment as forbidden must not make this test fail. */
+ *  named in the header comment as forbidden must not make this test fail.
+ *
+ *  Anchored past the `=` on purpose: `indexOf("[")` finds the bracket in the
+ *  TYPE (`CliSpec[]`), not the array literal. That still produced the right
+ *  answer, since the extra four characters carry no flags and the closing
+ *  `\n];` is the real one — but a parser that is accidentally correct is the
+ *  thing this whole file exists to distrust. `[^=]*` skips the annotation, so
+ *  `CliSpec[]`, `Array<CliSpec>` and `readonly CliSpec[]` all land on the
+ *  literal itself. (Caught by career-ops-maintainer in review.) */
 function knownBody(text) {
-  const start = text.indexOf("export const KNOWN");
-  if (start === -1) return "";
-  const open = text.indexOf("[", start);
-  const close = text.indexOf("\n];", open);
-  return open === -1 || close === -1 ? "" : text.slice(open, close);
+  return text.match(/export const KNOWN[^=]*=\s*\[([\s\S]*?)\n\];/)?.[1] ?? "";
 }
 
 /** Flags that hand a CLI blanket approval for write-capable tools. */
