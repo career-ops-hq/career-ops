@@ -211,6 +211,30 @@ try {
   } else {
     fail(`equal-score re-eval mishandled: ${sameRow.trim()} | ${same.output.trim()}`);
   }
+
+  // --- An unscoreable (N/A) re-eval must NOT overwrite a real score (#2803) ---
+  // parseScore('N/A') is 0, so a re-eval that failed to fetch used to read as a
+  // genuine zero, trip the downgrade path above, and overwrite the real score
+  // with the sentinel — unrecoverably, since the tracker is gitignored and no
+  // .bak is written. "No score" is not "scored zero": the row must be left as is.
+  const NA_SEED = '| 4 | 2026-06-01 | DoorDash | Senior Associate, Finance & Strategy | 4.0/5 | Evaluated | ❌ | '
+    + '[4](../reports/4-dd.md) | good |\n';
+  const naReeval = runMergeDetailed({
+    '4-dd.tsv': '4\t2026-06-25\tDoorDash\tSenior Associate, Finance & Strategy\tEvaluated\tN/A\t❌\t[4](reports/4-dd.md)\tfetch failed\n',
+  }, { rows: NA_SEED });
+  const naRow = naReeval.tracker.split('\n').find(l => /DoorDash/.test(l)) || '';
+
+  if (/\|\s*4\.0\/5\s*\|/.test(naRow) && !/\|\s*N\/A\s*\|/.test(naRow)) {
+    pass('an unscoreable (N/A) re-eval keeps the existing real score (#2803)');
+  } else {
+    fail(`N/A re-eval overwrote the real score: ${naRow.trim()}`);
+  }
+
+  if (/⏭️1 skipped/.test(naReeval.output) && !/🔄1 updated/.test(naReeval.output) && !/DOWNGRADE/.test(naReeval.output)) {
+    pass('an unscoreable re-eval is skipped, not applied as a downgrade (#2803)');
+  } else {
+    fail(`N/A re-eval was not skipped cleanly: ${naReeval.output.trim()}`);
+  }
 } catch (e) {
   fail(`merge-tracker.mjs tests crashed: ${e.message}`);
 }
