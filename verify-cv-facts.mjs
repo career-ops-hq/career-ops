@@ -289,16 +289,41 @@ export function metricClaims(text) {
   return claims;
 }
 
+/**
+ * Build the allow-list a metric claim is checked against.
+ *
+ * Claims extracted from text are folded through NOUN_SYNONYMS; allow_metrics
+ * entries used to be normalized only, so an exception written in the spelling
+ * a human reaches for - `77 repos` - never matched the canonical `77
+ * repositories` the extractor produces. The entry then did nothing at all and
+ * the CV still failed the gate, with no diagnostic pointing at the allow-list
+ * (CodeRabbit, reviewing #2175). A silently inert exception is the same failure
+ * class this script exists to catch.
+ *
+ * Both spellings are added rather than the canonical one alone: metricClaims()
+ * yields nothing for an entry no pattern recognizes (a bare `$900k`, a
+ * percentage), so replacing normalizeClaim outright would drop those exceptions
+ * instead of widening them. The union can only ever allow more, never less.
+ */
+function allowedMetricSet(sourceText, allowMetrics) {
+  const allowed = new Set(metricClaims(sourceText));
+  for (const entry of allowMetrics || []) {
+    allowed.add(normalizeClaim(entry));
+    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+  }
+  return allowed;
+}
+
 /** Compare generated metric claims against source text without reading files. */
 export function auditClaims(targetText, sourceText, config = {}) {
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...(config.allow_metrics || []).map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const invented = [...metricClaims(targetText)].filter(claim => !allowed.has(claim));
+  // Hoisted: stripMarkup re-ran the whole markup pass once per configured
+  // phrase (CodeRabbit, reviewing #2175). Same result, one pass.
+  const targetPlain = stripMarkup(targetText).toLowerCase();
   const forbidden = (config.forbidden_phrases || [])
     .filter(Boolean)
-    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+    .filter(phrase => targetPlain.includes(String(phrase).toLowerCase()));
   return { invented, forbidden };
 }
 
@@ -339,10 +364,7 @@ export function verifyFacts(targetText, {
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
   const config = loadConfig(resolveInputPath(configPath, cwd));
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...config.allow_metrics.map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
@@ -451,6 +473,19 @@ function runSelfTest() {
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,
     []
   );
+  // An exception is written in the spelling a human reaches for, which is not
+  // always the canonical noun the extractor emits. Before the allow-list was
+  // folded too, this entry matched nothing and the CV stayed red.
+  equal('a synonym-spelled exception is honoured',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repos'] }).invented, []);
+  equal('the canonical spelling still works',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repositories'] }).invented, []);
+  // and folding the allow-list must not swallow an entry no claim pattern
+  // recognizes, which is what routing it through metricClaims alone would do.
+  equal('a currency exception survives the folding',
+    auditClaims('Managed a $900K budget', source, { allow_metrics: ['$900K'] }).invented, []);
+  equal('an unrelated exception still leaves the claim invented',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['12 repos'] }).invented, ['77 repositories']);
   equal(
     'forbidden phrase',
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,

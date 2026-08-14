@@ -1,3 +1,4 @@
+import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -54,33 +55,11 @@ export default {
   },
 };
 
-function fromCodePoint(cp) {
-  try {
-    return String.fromCodePoint(cp);
-  } catch {
-    return '';
-  }
-}
-
-// Decode the XML entities that appear in RSS text: numeric (&#38; / &#x27;)
-// and the named five. Numeric forms are decoded first; &amp; is decoded LAST
-// so a literal "&amp;lt;" yields "&lt;" rather than over-decoding to "<".
-function decodeXmlEntities(s) {
-  return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => fromCodePoint(parseInt(d, 10)))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
 // Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
 function extractText(inner) {
   const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
   if (cdata) return cdata[1].trim();
-  return decodeXmlEntities(inner).trim();
+  return decodeEntities(inner).trim();
 }
 
 // Extract the text of the first <tag>...</tag> in a block. Returns '' when absent.
