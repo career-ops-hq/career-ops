@@ -18,7 +18,9 @@ test("every configured WOFF2 asset is vendored", () => {
   for (const relativePath of assets) {
     const bytes = readFileSync(new URL(relativePath, import.meta.url));
     assert.equal(bytes.subarray(0, 4).toString("ascii"), "wOF2", `${relativePath} is not a WOFF2 file`);
-    assert.match(fontsSource, new RegExp(relativePath.split("/").at(-1).replaceAll(".", "\\.")));
+    const configuredPath = relativePath.replace("../../src/", "../");
+    const escapedPath = configuredPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(fontsSource, new RegExp(`path:\\s*["']${escapedPath}["']`));
   }
 });
 
