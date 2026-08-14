@@ -31,7 +31,7 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   for (const userRule of ['my-scratch-notes/', '*.secret']) {
     ok(lines.includes(userRule), `user rule survives: ${userRule}`);
   }
-  ok(text.startsWith(local.replace(/\s*$/, '')), 'the original file is a prefix of the result (nothing above was rewritten)');
+  ok(text.startsWith(local), 'the original file is a byte-for-byte prefix of the result (no line above was touched)');
   eq(added.join(','), 'data/*,!data/.gitkeep', 'both missing upstream rules were appended');
   ok(!added.includes('cv.md'), 'a rule already present is not duplicated');
 }
@@ -109,6 +109,18 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   ok(text.split('\n').includes('secret\\ '), 'but written back verbatim, with its escaped trailing space intact');
   const again = reconcileGitignore(text, upstream);
   eq(again.added.length, 0, 'and the verbatim line is still recognized on the next pass (no re-add loop)');
+}
+
+// ── A local rule's significant trailing space survives verbatim ────────────────────────
+// The mirror of the case above: normalization is for MATCHING only. Trimming
+// the local file's tail would modify a line the user wrote, which is the one
+// thing this function promises never to do.
+{
+  const local = 'cv.md\nsecret\\ ';   // no trailing newline, escaped space is significant
+  const { text } = reconcileGitignore(local, 'cv.md\ndata/*\n');
+  ok(text.startsWith(local), 'the local file is preserved byte-for-byte, escaped trailing space included');
+  ok(text.split(/\r?\n/).includes('secret\\ '), 'and the user rule keeps its significant trailing space');
+  ok(text.split(/\r?\n/).includes('data/*'), 'while the missing upstream rule is still appended');
 }
 
 // ── An empty local file gets no leading blank lines ──────────────────────────

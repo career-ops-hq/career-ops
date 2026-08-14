@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -1134,6 +1134,31 @@ const GITIGNORE_BLOCK_HEADER = [
 ];
 
 /**
+ * Write .gitignore atomically: temp file on the same filesystem, then rename.
+ *
+ * writeFileSync opens with O_TRUNC, so a crash or I/O error partway through
+ * leaves the file empty or half-written. For most files that is an annoyance.
+ * For this one it un-ignores everything the truncated portion covered, turning
+ * a failed update into exactly the exposure the file exists to prevent, and
+ * doing it silently. Mirrors discover-ats.mjs and followup-seed.mjs.
+ *
+ * @param {string} filePath - Absolute path to write.
+ * @param {string} content - Full file content.
+ * @returns {void}
+ */
+function writeGitignoreAtomic(filePath, content) {
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmpPath, content);
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    // The original is still intact: the rename either happened or it did not.
+    try { rmSync(tmpPath, { force: true }); } catch { /* already gone */ }
+    throw err;
+  }
+}
+
+/**
  * Reconcile a local .gitignore against the upstream one by appending only the
  * system-owned patterns it is missing.
  *
@@ -1204,11 +1229,15 @@ export function reconcileGitignore(localText, upstreamText) {
   const lfCount = (localText.match(/\n/g) || []).length - crlfCount;
   const eol = crlfCount > lfCount ? '\r\n' : '\n';
   const body = [...GITIGNORE_BLOCK_HEADER, ...block].join(eol);
-  // An empty (or whitespace-only) local file takes no separator, or the result
-  // would open with two blank lines.
-  const head = localText.replace(/\s*$/, '');
-  const separator = head === '' ? '' : `${eol}${eol}`;
-  return { text: `${head}${separator}${body}${eol}`, added };
+  // localText is concatenated verbatim, never trimmed. A local rule whose
+  // trailing space is backslash-escaped is significant, and stripping it would
+  // MODIFY a user's line, which is the one thing this function promises not to
+  // do. Only the separator varies: none for an empty file, one EOL when the
+  // file already ends in a newline, two when it does not.
+  const separator = localText === ''
+    ? ''
+    : (/\r?\n$/.test(localText) ? eol : `${eol}${eol}`);
+  return { text: `${localText}${separator}${body}${eol}`, added };
 }
 
 // ── APPLY ───────────────────────────────────────────────────────
@@ -1480,13 +1509,13 @@ async function apply() {
       if (!existsSync(gitignorePath)) {
         // No local file at all (deleted by hand, or a checkout predating it).
         // Nothing is co-owned yet, so the upstream copy can be written whole.
-        writeFileSync(gitignorePath, `${upstreamGitignore}\n`);
+        writeGitignoreAtomic(gitignorePath, `${upstreamGitignore}\n`);
         trackGitignore();
         console.log('Restored .gitignore (it was missing).');
       } else {
         const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
         if (added.length > 0) {
-          writeFileSync(gitignorePath, text);
+          writeGitignoreAtomic(gitignorePath, text);
           trackGitignore();
           console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
         }
