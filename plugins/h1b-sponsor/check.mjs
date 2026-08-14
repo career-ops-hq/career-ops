@@ -2,36 +2,104 @@
 // CLI entrypoint for the H-1B sponsor check.
 // Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]
 //   --search lists every matching employer entity instead of checking one.
-// Env: H1B_API_TOKEN (optional; anon requests are throttled 30/hr per IP+ASN).
-//      H1B_API_BASE  (optional; defaults to the maintained endpoint).
+// Env: H1B_INDEX_PATH (optional; relocates the local index).
+//      H1B_API_BASE   (optional; opts into the HTTP backend, see below).
+//      H1B_API_TOKEN  (optional; HTTP backend only, raises the rate limit).
+//
+// Backends, in order:
+//   1. An HTTP endpoint, used when H1B_API_BASE names one explicitly.
+//   2. The local index (data/h1b/), installed by install-index.mjs. The
+//      default, and the only one where the question never leaves the machine.
+// With neither, the CLI reports `unknown` and says how to install the index.
+// It does NOT fall back to a default host: which employers someone checks
+// discloses that they need a visa and who they are applying to, so that
+// destination is a choice the user makes, never one made for them by a missing
+// file.
 //
 // Output format (JSON):
 //   { found, employerId, displayName, hasSponsorshipHistory,
-//     totals: { n_lca, n_pwd, n_perm, first_year, last_year, does_gc },
+//     totals: { n_lca, n_certified, n_pwd, n_perm, first_year, last_year, does_gc },
 //     redFlags: { staffing_shop: {...} | null },
 //     friendlinessTier, source, fetchedAt }
+// n_lca counts what the employer FILED. n_certified is how much of it came
+// back certified, reported beside it and never in place of it: a denial is
+// USCIS's decision and a withdrawal is usually the candidate taking another
+// offer, so neither is evidence the employer will not sponsor. It is null when
+// the backend does not report it, which is not the same as 0.
 
-import { resolveEmployer, searchEmployers, getEmployerProfile, apiBase } from './lib/api.mjs';
+import * as httpBackend from './lib/api.mjs';
+import { num } from './lib/api.mjs';
+import * as localBackend from './lib/index.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
 
-function sourceUrl(employerId) {
-  // A misconfigured base must not throw out of the error handler that exists
-  // to report it, so an unresolvable endpoint reports no source rather than
-  // naming one the user did not choose.
-  let base;
-  try {
-    base = apiBase();
-  } catch {
-    return null;
+// Set once main() has chosen a backend. Null while unchosen and after a failed
+// choice, which is what lets the error handler report a source of null instead
+// of naming an endpoint the user never selected.
+let backend = null;
+
+/**
+ * Pick where this lookup is answered from.
+ *
+ * Explicit choice first, then the local default, then an error. H1B_API_BASE is
+ * something a user only ever sets on purpose, and an installed index used to
+ * win over it unconditionally, so that choice was read and then ignored without
+ * a word. Silently disregarding what someone configured is the same surprise as
+ * silently picking a host for them, which is what the rest of this ordering
+ * exists to rule out; both are now impossible.
+ *
+ * With nothing set, the index answers, so the default path still has no server
+ * in it. Selection is deliberately not a fallback chain in the other direction:
+ * a missing index does not silently become a request to somebody's server. It
+ * becomes an error that says how to install the index.
+ */
+async function selectBackend() {
+  if (process.env.H1B_API_BASE !== undefined) {
+    const token = process.env.H1B_API_TOKEN;
+    return {
+      kind: 'api',
+      source: httpBackend.apiBase(),
+      opts: token ? { token } : {},
+      resolveEmployer: httpBackend.resolveEmployer,
+      searchEmployers: httpBackend.searchEmployers,
+      getEmployerProfile: httpBackend.getEmployerProfile,
+    };
   }
-  return employerId ? `${base}/employers/${encodeURIComponent(employerId)}` : base + '/employers';
+  if (localBackend.hasIndex()) {
+    return {
+      kind: 'index',
+      // The index digest, so a cached answer is tied to the exact data that
+      // produced it and a refreshed index invalidates the old numbers.
+      source: await localBackend.indexSource(),
+      opts: {},
+      resolveEmployer: localBackend.resolveEmployer,
+      searchEmployers: localBackend.searchEmployers,
+      getEmployerProfile: localBackend.getEmployerProfile,
+    };
+  }
+  throw new Error(
+    'no local H-1B index and no H1B_API_BASE. Install the index with: node plugins/h1b-sponsor/install-index.mjs '
+    + '(about 8 MiB of public DOL data; lookups then stay on this machine). To use an HTTP endpoint instead, '
+    + 'set H1B_API_BASE to one you trust.',
+  );
 }
 
-// API-controlled text goes through this before any non-JSON output: collapse
-// whitespace so a line stays a line, then strip C0, DEL, and C1 control
-// characters so a crafted name cannot smuggle terminal escapes or forged
-// rows into the text output. JSON output keeps the raw fields. The collapse
+// Where the answer came from, reported back to the caller. The HTTP path names
+// the employer's own URL so the number can be checked by hand; the local path
+// names the index build, which is the equivalent handle for data on disk.
+function sourceRef(employerId) {
+  if (!backend) return null;
+  if (backend.kind === 'index') return backend.source;
+  return employerId
+    ? `${backend.source}/employers/${encodeURIComponent(employerId)}`
+    : `${backend.source}/employers`;
+}
+
+// Text from the backend goes through this before any non-JSON output, whether
+// it came from an endpoint or off the index: collapse whitespace so a line
+// stays a line, then strip C0, DEL, and C1 control characters so a crafted
+// name cannot smuggle terminal escapes or forged rows into the text output.
+// JSON output keeps the raw fields. The collapse
 // runs first because newlines and tabs are control chars too, and stripping
 // them before the collapse would glue words together instead of separating
 // them; what survives the collapse (ESC, BEL, DEL, C1) is not whitespace.
@@ -41,12 +109,24 @@ function displayClean(s) {
   return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
 }
 
+// What the numbers in a cache entry MEAN, versioned. An entry written before
+// this bump carries a certified count in `n_lca`, because that is what the
+// field held then; the tier now reads that field as filings, so serving one
+// would answer with a number that means something else, and quietly. Entries
+// without the marker are misses (see main()), which costs one re-read.
+//
+// The local backend self-heals without this: its source stamp is the index
+// digest, so a rebuilt index invalidates its own entries. The HTTP path has no
+// such handle, since an endpoint's URL does not change when its payload's
+// meaning does, and that is the gap the marker closes.
+const CACHE_SCHEMA = 2;
+
 // The cache is an optimization: a failed write (read-only FS, full disk, a
 // --cache-dir typo) must never discard a lookup that already succeeded and
 // already spent rate-limit budget.
 async function writeCacheSafe(name, data, opts) {
   try {
-    await writeCache(name, data, opts);
+    await writeCache(name, { ...data, schema: CACHE_SCHEMA }, opts);
   } catch (err) {
     const msg = displayClean((err && err.message) ? err.message : err);
     process.stderr.write(`h1b-sponsor: cache write failed (${msg}); continuing without cache\n`);
@@ -99,6 +179,10 @@ function buildResult(displayName, employerId, profile, source, fetchedAt) {
     hasSponsorshipHistory: (nLca + nPwd + nPerm) > 0,
     totals: {
       n_lca: nLca,
+      // Not coerced through `|| 0` like the counts above: 0 certified is a
+      // real answer about an employer that filed, and null means the backend
+      // did not report the number at all.
+      n_certified: num(profile?.n_certified),
       n_pwd: nPwd,
       n_perm: nPerm,
       first_year: profile?.first_year ?? null,
@@ -112,17 +196,17 @@ function buildResult(displayName, employerId, profile, source, fetchedAt) {
   };
 }
 
-function notFoundResult(name) {
+function notFoundResult(name, fetchedAt = new Date().toISOString()) {
   return {
     found: false,
     employerId: null,
     displayName: name,
     hasSponsorshipHistory: false,
-    totals: { n_lca: 0, n_pwd: 0, n_perm: 0, first_year: null, last_year: null, does_gc: false },
+    totals: { n_lca: 0, n_certified: null, n_pwd: 0, n_perm: 0, first_year: null, last_year: null, does_gc: false },
     redFlags: { staffing_shop: null },
     friendlinessTier: 'unknown',
-    source: sourceUrl(null),
-    fetchedAt: new Date().toISOString(),
+    source: sourceRef(null),
+    fetchedAt,
   };
 }
 
@@ -162,14 +246,16 @@ async function main() {
     process.exit(2);
   }
 
-  const token = process.env.H1B_API_TOKEN;
-  const apiOpts = token ? { token } : {};
+  // Chosen before anything else runs: with no backend available this throws,
+  // and it throws before a single request or read is issued.
+  backend = await selectBackend();
+  const opts = backend.opts;
   const cacheOpts = cacheDir ? { cacheDir } : {};
 
   // --search lists every matching entity and stops; it never resolves to one or
   // touches the cache. Each listed name can then be checked on its own.
   if (search) {
-    const { total, results } = await searchEmployers(name, apiOpts);
+    const { total, results } = await backend.searchEmployers(name, opts);
     emitSearch(format, name, total, results);
     return;
   }
@@ -177,36 +263,43 @@ async function main() {
   if (!refresh) {
     const cached = await readCache(name, cacheOpts);
     if (cached) {
-      if (cached.negative && cached.data && cached.data.base === apiBase()) {
+      // One rule for both kinds of entry. A negative entry carries no counts,
+      // so the schema bump is not strictly load-bearing for it; versioning it
+      // with the rest is what keeps "is this entry from this code" a single
+      // question rather than two that can drift apart.
+      const sameSchema = Boolean(cached.data) && cached.data.schema === CACHE_SCHEMA;
+      if (sameSchema && cached.negative && cached.data.source === backend.source) {
         const out = notFoundResult(name);
-        // Keep source a URL (the documented contract); the stale fetchedAt is
-        // what signals this answer came from cache.
+        // Keep source in its documented form; the stale fetchedAt is what
+        // signals this answer came from cache.
         out.fetchedAt = cached.fetchedAt;
         emit(format, out);
         return;
       }
-      const { displayName, employerId, profile, base } = cached.data || {};
-      // An answer from one instance is not an answer from another, and the
-      // source field is rebuilt from the CURRENT endpoint, so serving a stale
-      // entry across a switch would label one instance's data as the other's.
-      // Treat a different endpoint as a miss and re-fetch.
-      if (displayName && employerId && profile && base === apiBase()) {
-        const out = buildResult(displayName, employerId, profile, sourceUrl(employerId), cached.fetchedAt);
+      const { displayName, employerId, profile, source } = cached.data || {};
+      // An answer from one backend is not an answer from another, and the
+      // source field is rebuilt from the CURRENT one, so serving a stale entry
+      // across a switch would label one backend's data as the other's. This
+      // covers both endpoints (a different H1B_API_BASE) and index builds (a
+      // quarterly refresh changes the digest), and it treats entries written
+      // before this field existed as misses rather than trusting them blind.
+      if (sameSchema && displayName && employerId && profile && source === backend.source) {
+        const out = buildResult(displayName, employerId, profile, sourceRef(employerId), cached.fetchedAt);
         emit(format, out);
         return;
       }
     }
   }
 
-  const match = await resolveEmployer(name, apiOpts);
+  const match = await backend.resolveEmployer(name, opts);
   if (!match) {
-    await writeCacheSafe(name, { name, base: apiBase() }, { ...cacheOpts, negative: true });
     const out = notFoundResult(name);
+    await writeCacheSafe(name, { name, source: backend.source }, { ...cacheOpts, negative: true, fetchedAt: out.fetchedAt });
     emit(format, out);
     return;
   }
 
-  const profile = await getEmployerProfile(match.id, apiOpts);
+  const profile = await backend.getEmployerProfile(match.id, opts);
   const now = new Date().toISOString();
   // A null profile is unreadable on the way back out (the cache-hit guard
   // requires a truthy profile), so writing it would only burn a file slot.
@@ -215,16 +308,16 @@ async function main() {
       displayName: match.displayName,
       employerId: match.id,
       profile,
-      base: apiBase(),
-    }, cacheOpts);
+      source: backend.source,
+    }, { ...cacheOpts, fetchedAt: now });
   }
-  const out = buildResult(match.displayName, match.id, profile, sourceUrl(match.id), now);
+  const out = buildResult(match.displayName, match.id, profile, sourceRef(match.id), now);
   emit(format, out);
 }
 
 main().catch(err => {
   // The message can embed up to 200 chars of API-controlled response body, and
-  // the summary contract is one line — collapse all whitespace before printing.
+  // the summary contract is one line: collapse all whitespace before printing.
   const message = displayClean((err && err.message) ? err.message : err);
   const argv = process.argv.slice(2);
   const format = argv.includes('--json') ? 'json' : 'summary';

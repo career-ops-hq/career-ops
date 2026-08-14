@@ -1,6 +1,6 @@
 // Thin client for the H-1B sponsorship API.
 // Uses global fetch + AbortController. Handles the 429/Retry-After retry-once
-// policy specified in the plugin contract. Self-contained — no imports from
+// policy specified in the plugin contract. Self-contained: no imports from
 // career-ops core (so this plugin can later ship as its own npm package).
 
 const DEFAULT_BASE = 'https://api.surakshith.com/immigration/v1';
@@ -60,7 +60,7 @@ function resolveBase() {
     throw new Error('H1B_API_BASE must not contain a query string or a fragment.');
   }
   // Plain http would put an Authorization header on the wire in the clear.
-  // Loopback is exempt so a self-hoster can develop against a local worker —
+  // Loopback is exempt so a self-hoster can develop against a local worker,
   // but only for http. Exempting every scheme on a loopback host let
   // ftp://localhost and ws://localhost past validation, and those die later
   // inside fetch as a bare "fetch failed", which is the opaque failure this
@@ -111,17 +111,25 @@ function sleep(ms) {
 // and body, which is what a GET wants and what a mint POST must never do
 // (each re-POST could spend mint budget again). The mint passes 0.
 //
+// allowedOrigins names where the request may end up. It defaults to the
+// configured API base, so every existing caller keeps the same one-host guard;
+// install-index.mjs passes its own list because a GitHub release download is
+// answered by a different host than the one that serves the release metadata,
+// and hard-coding apiBase() there would both refuse that hop and drag an
+// unrelated H1B_API_BASE misconfiguration into a download that never touches
+// the API. Resolved lazily inside the call so a caller that supplies the list
+// never reads H1B_API_BASE at all.
+//
 // consume runs INSIDE the abort-timer window: a server that sends headers and
 // then stalls the body would otherwise hang the caller forever, because the
 // timer is cleared before the caller could parse. Callers that read the body
 // must pass consume; the no-consume form returns the raw Response and is only
 // safe when the body is never read.
-export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS } = {}, consume) {
+export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, method = 'GET', body, maxRedirects = MAX_REDIRECTS, allowedOrigins } = {}, consume) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
-  const configured = new URL(apiBase());
-  const baseHost = configured.host;
-  const baseProtocol = configured.protocol;
+  const allowed = (Array.isArray(allowedOrigins) && allowedOrigins.length > 0 ? allowedOrigins : [apiBase()])
+    .map(o => new URL(o));
   try {
     // Egress guard: redirects are followed manually so an off-host target is
     // rejected BEFORE the request (and its query string) is issued to it.
@@ -135,14 +143,14 @@ export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_
       }
 
       const loc = res.headers.get('location');
-      // A 3xx without a Location header is not actionable (e.g. 304) — hand it
+      // A 3xx without a Location header is not actionable (e.g. 304): hand it
       // back to the caller unchanged.
       if (!loc) return consume ? await consume(res) : res;
 
       const next = new URL(loc, requestUrl);
       // Host AND scheme must match: an http:// downgrade on the same host
       // would resend the Authorization header in cleartext.
-      if (next.host !== baseHost || next.protocol !== baseProtocol) {
+      if (!allowed.some(a => a.host === next.host && a.protocol === next.protocol)) {
         const e = new Error(`H-1B API redirected off-host: ${next.protocol}//${next.host}`);
         e.code = 'REDIRECT_OFF_HOST';
         throw e;
@@ -172,7 +180,7 @@ export async function fetchWithTimeout(url, { headers = {}, timeoutMs = DEFAULT_
  *
  * `maxBytes` is required and inclusive: a body of exactly `maxBytes` comes
  * back, one byte more does not. Returns `{ text }` when the body was read
- * whole, else `{ oversized: true }` — which marks a refused body, covering both
+ * whole, else `{ oversized: true }`, which marks a refused body, covering both
  * one past the ceiling and a chunk that cannot report a usable size, since
  * neither yields text a caller may trust. Read failures (including an
  * AbortError from the caller's timeout) propagate to the caller.
@@ -330,7 +338,12 @@ async function requestJson(url, opts, { allow404 } = {}) {
   return out.body;
 }
 
-function normalize(str) {
+// normalize, plausibleMatch and pickBestMatch are exported for lib/index.mjs,
+// which resolves the same names against the local index. A second copy of these
+// rules would drift, and they are the thing that stops "Meta" resolving to
+// "Metabolic Diagnostics Inc", so the local backend imports them rather than
+// reimplementing them, and a fix lands once for both.
+export function normalize(str) {
   return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
@@ -354,7 +367,7 @@ const SUFFIX_CANON = new Map([
 // matches "Microsoft", but "Meta" does not match "Metabolic Diagnostics Inc"
 // (substring tests did, which cached a confidently wrong employer for 90
 // days). No plausible candidate -> no match, and the CLI reports unknown.
-function plausibleMatch(query, candidateName) {
+export function plausibleMatch(query, candidateName) {
   // Normalize both names, then compare token for token, one list against the
   // start of the other. A leading "the" is dropped ("Home Depot" must match
   // "The Home Depot"). A trailing long-form legal word is folded to its short
@@ -366,7 +379,19 @@ function plausibleMatch(query, candidateName) {
   // catches two identical names first.
   const tokens = s => {
     const t = String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    const out = t[0] === 'the' ? t.slice(1) : t.slice();
+    // A dotted or spaced initialism arrives as a run of one-letter tokens
+    // ("I.B.M." splits to i, b, m) while the filer spells it joined ("IBM
+    // Corporation"), so a run of two or more one-letter tokens folds into
+    // one. A lone one-letter token stays as it is: "Meta 4 LLC" keeps its 4
+    // and "AT&T" its trailing t, so the fold unifies initialisms without
+    // loosening anything else.
+    const merged = [];
+    for (let i = 0; i < t.length; i++) {
+      let j = i;
+      while (t[j].length === 1 && j + 1 < t.length && t[j + 1].length === 1) j++;
+      if (j > i) { merged.push(t.slice(i, j + 1).join('')); i = j; } else { merged.push(t[i]); }
+    }
+    const out = merged[0] === 'the' ? merged.slice(1) : merged.slice();
     if (out.length > 0) {
       const canon = SUFFIX_CANON.get(out[out.length - 1]);
       if (canon) out[out.length - 1] = canon;
@@ -381,15 +406,21 @@ function plausibleMatch(query, candidateName) {
   return isPrefix(q, c) || isPrefix(c, q);
 }
 
-function pickBestMatch(name, results) {
+export function pickBestMatch(name, results) {
   if (!Array.isArray(results) || results.length === 0) return null;
   const target = normalize(name);
   // 1. Exact normalized match.
   const exact = results.find(r => r && normalize(r.name) === target);
   if (exact) return exact;
-  // 2. First result (API already ranks) — but only if it plausibly matches.
-  const first = results[0];
-  if (first && plausibleMatch(name, first.name)) return first;
+  // 2. First PLAUSIBLE result, wherever it sits in the list. This used to look
+  // at results[0] alone and lean on the search endpoint having ranked the page
+  // for us. The local index has no ranking to lean on, since its candidates
+  // come out in file order, so a rank-dependent rule would resolve a name over
+  // HTTP and fail to resolve the same name locally. plausibleMatch is what
+  // keeps this honest: an implausible candidate is still refused no matter
+  // where it sits.
+  const plausible = results.find(r => r && plausibleMatch(name, r.name));
+  if (plausible) return plausible;
   return null;
 }
 
@@ -430,8 +461,10 @@ export async function searchEmployers(name, opts = {}) {
 }
 
 // Number(null) === 0 and Number(' ') === 0, so a null or blank field would
-// otherwise look like a real zero.
-function num(v) {
+// otherwise look like a real zero. Exported for the same reason as the matchers
+// above: lib/index.mjs builds the identical profile shape from index records,
+// and null-vs-zero is exactly the distinction a second copy would get wrong.
+export function num(v) {
   if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -460,21 +493,34 @@ function normalizeProfile(raw) {
     || (nPwd !== null && nPwd > 0)
     || (nPerm !== null && nPerm > 0);
 
-  // A missing/null year stays null — it must never collapse to year 0.
+  // A missing/null year stays null: it must never collapse to year 0.
   const firstYear = num(years.first);
   const lastYear = num(years.last);
 
   // LCA volume is a separate track from the green_card block (an employer can
-  // be LCA-active with zero GC filings). Prefer the certified count — that is
-  // what the Block G bullet reports — falling back to the total filing count.
-  // The fallback runs on null, so a null `certified` no longer masks a real
-  // `lca` total the way `Number(null) === 0` did.
+  // be LCA-active with zero GC filings). The count is the RAW filing total:
+  // filing an LCA is the employer's own act of willingness to sponsor, which
+  // is the question being asked here. Whether a given filing was certified is
+  // USCIS's decision, and a withdrawal is usually the candidate taking another
+  // offer or a cancelled req, so neither says this employer will not sponsor.
+  // Preferring `certified`, which is what this used to do, reported 3,777
+  // employers in the 2026Q2 data as tier `none` (the phrase the skill prints
+  // for "the DOL data shows nothing") despite their having filed.
+  //
+  // certified stays as the fallback so a payload from an API old enough to
+  // omit `lca` still answers. The fallback runs on null, never on 0, so a real
+  // zero is not masked the way `Number(null) === 0` did.
   const nCertified = num(filings.certified);
   const nLcaTotal = num(filings.lca);
-  const nLca = nCertified ?? nLcaTotal ?? 0;
+  const nLca = nLcaTotal ?? nCertified ?? 0;
 
   return {
     n_lca: nLca ?? 0,
+    // The outcome, carried through for display beside the filing count. Null
+    // rather than 0 when the payload does not report it: "not reported" and
+    // "reported as none certified" are different statements, and the skill
+    // prints them differently.
+    n_certified: nCertified ?? null,
     n_pwd: nPwd ?? 0,
     n_perm: nPerm ?? 0,
     does_gc: doesGc === true,

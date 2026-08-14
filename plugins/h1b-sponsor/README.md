@@ -11,11 +11,19 @@ Career-ops users evaluating US roles who need to know whether a specific employe
 Given a company name, the plugin:
 
 1. Resolves the name to a single best-matching DOL employer entity. If no candidate matches the name closely enough, the result is unknown rather than a guess.
-2. Pulls the last five years of LCA and PERM records for that entity.
+2. Pulls that entity's LCA and PERM records, built from DOL's FY2020 through FY2026-Q2 disclosure files.
 3. Computes a tier (see below) from filing volume, recency, GC evidence, and secondary-entity share.
 4. Returns the tier plus the counts the tier was derived from.
 
 The plugin does not source or apply to jobs. It answers one question: does the DOL data show this employer actually sponsors.
+
+## Where the lookup happens
+
+Locally, by default. The plugin reads a downloaded index of the DOL data from disk; nothing about the query leaves your machine.
+
+That is the point rather than a detail. A sponsorship lookup discloses two things about you: that you need a visa, and which employers you are considering. Sending that to a server means someone else holds it. So the default path has no server in it at all.
+
+An HTTP backend still exists and is described further down. It runs when you have named an endpoint yourself in `H1B_API_BASE`, which is the only way it ever runs. With no index and no endpoint, the check reports `unknown` and tells you how to install the index. It never picks a host for you.
 
 ## Install and enable
 
@@ -30,6 +38,30 @@ To confirm it is active:
 ```bash
 node plugins.mjs list
 ```
+
+Then install the index (about 8 MiB, downloaded from the data repo's GitHub releases):
+
+```bash
+node plugins/h1b-sponsor/install-index.mjs
+```
+
+The installer reads a small pointer file the release publishes, `index-latest.json`, which names the current quarter's index file and its sha256. The download is checked against that digest before it is moved into place, so a truncated or substituted file is never what a lookup reads. It lands in `data/h1b/`, which is already gitignored.
+
+Both assets live under a permanent `index-latest` release tag whose contents are replaced each quarter, rather than under GitHub's "latest release" path, which resolves to the newest release of any kind in the data repo and would start pointing at the wrong thing the day that repo cuts a code release.
+
+`data/h1b/` holds the index and nothing else. It is deliberately separate from `data/cache/h1b/`, where the lookup cache lives: everything in the cache tree is disposable, and the index is an 8 MiB download you chose to install.
+
+### Refreshing
+
+DOL publishes new disclosure data quarterly. Pull the current build over the old one:
+
+```bash
+node plugins/h1b-sponsor/install-index.mjs --force
+```
+
+`--force` is required to replace an existing index, so a re-run cannot quietly change the numbers under you. Cached answers are stamped with the index they came from, so a refresh invalidates them rather than mixing builds. The installer prints the build it installed and records it in `index.ndjson.gz.meta.json` next to the index, so you can tell which quarter you are on without downloading anything. `--tag <release>` reads the pointer from a different release tag, for a pinned quarter or a fork.
+
+Installing is the one thing here that touches the network, and it only happens when you run that command. Nothing installs or refreshes on its own.
 
 ## CLI usage
 
@@ -52,17 +84,21 @@ node plugins/h1b-sponsor/check.mjs "Acme Corp" --summary
 # strong: Acme Corp - 412 LCAs, 5 PWDs, 37 PERMs, active 2020-2024
 ```
 
-List matching entities instead of checking one. A large employer files under many distinct FEINs, and the API serves one page of matches at a time, so a broad name shows the first page and the full count. Narrow the query to reach entities past the page cap, then check a specific one by passing its exact name:
+The LCA number there is what the employer filed. How many of those filings came back certified is in the JSON envelope as `totals.n_certified`, which is null when the backend does not report it; the summary form stays one line and leaves it out.
+
+List matching entities instead of checking one. A large employer files under many distinct FEINs, and the listing shows one page of matches at a time, so a broad name shows the first page and the full count. Narrow the query to reach entities past the page cap, then check a specific one by passing its exact name:
 
 ```bash
 node plugins/h1b-sponsor/check.mjs "Amazon" --search
-# 50 of 96 matches for "Amazon" (narrow the query to see the rest):
+# 50 of 97 matches for "Amazon" (narrow the query to see the rest):
 #   820544687  Amazon.com Services LLC
 #   204938068  Amazon Web Services, Inc.
 #   ...
 ```
 
-Bypass the disk cache and re-fetch from the API:
+`--search` does not return the same set on both backends. Locally it lists every entity whose normalized name *contains* the query, ordered by the same filed plus PWD plus PERM sum that ranks resolution; the HTTP endpoint serves prefix buckets keyed on the leading characters of the normalized name, so it misses a mid-name match the local contains test keeps and can surface a shared-prefix neighbour the local test excludes. The single-entity check that `--search` exists to feed applies the same matching rules either way; the residual difference is the endpoint's 50-result page, which can hide a long low-volume name that the local full scan still sees.
+
+Bypass the disk cache and look the employer up again:
 
 ```bash
 node plugins/h1b-sponsor/check.mjs "Acme Corp" --refresh
@@ -74,7 +110,17 @@ Write the cache somewhere else, which is useful for tests and throwaway runs:
 node plugins/h1b-sponsor/check.mjs "Acme Corp" --cache-dir /tmp/h1b-cache
 ```
 
-Responses are cached under `data/cache/h1b/` keyed by the company name passed on the command line. Two spellings of the same employer produce two cache entries. The cache file records `fetchedAt`; re-runs with the same name within the cache window return the cached payload without hitting the API.
+Answers are cached under `data/cache/h1b/` keyed by the company name passed on the command line. Two spellings of the same employer produce two cache entries. The cache file records `fetchedAt`; re-runs with the same name within the cache window return the cached payload without re-reading the index.
+
+The index is a single compressed file with no seek structure, so a lookup streams it, and every lookup reads all of it. About 2 seconds on the shipped 335k-employer build, hit or miss, against a floor of roughly 1 second for decompressing the file with no work on top.
+
+Nothing can exit early, in either direction. A miss cannot, because the file is ordered by the publisher's normalizer rather than the one this plugin matches with, so running past the query alphabetically proves nothing about what is still ahead. A hit cannot either, because a match found part-way through can still be beaten further down: distinct employers share a name constantly (`Amazon.com Services LLC` appears eight times across casing and punctuation variants, with 1 and 92,132 LCAs among them), and the answer is the one that actually files, which is only known once the file has been read. `--search` reads it all for the same reason.
+
+`H1B_INDEX_PATH` points the plugin at an index somewhere else, for a copy shared between checkouts or kept on another volume:
+
+```bash
+export H1B_INDEX_PATH=/opt/h1b/index.ndjson.gz
+```
 
 ## Agent usage
 
@@ -86,79 +132,45 @@ node plugins.mjs skill h1b-sponsor
 
 That prints the how-to the agent reads before running a check during an `oferta` evaluation. The skill covers trigger conditions, per-tier interpretation, and the exact Block G bullet template.
 
-## Auth and rate limits
+## The HTTP backend, if you want one
 
-The default API is `https://api.surakshith.com/immigration/v1`. Set `H1B_API_BASE` to send lookups somewhere else instead (see "Running your own endpoint" below).
-
-- Anonymous: 30 requests per hour per (IP, ASN) pair.
-- Keyed: 200 requests per hour per key. Suitable for batch runs.
-
-A check costs at most two requests, one to resolve the name and one to read the profile. A name that does not resolve costs one, and a cached answer costs none, so 30 per hour covers rather more than fifteen companies in practice.
-
-Request a key yourself:
+A remote endpoint is opt-in, not the default. It runs when `H1B_API_BASE` names an endpoint, and only then. Set it to your own instance, or to the author's:
 
 ```bash
-node plugins/h1b-sponsor/token.mjs request
+export H1B_API_BASE=https://api.surakshith.com/immigration/v1
 ```
 
-It prints the token once and the `H1B_API_TOKEN=` line, and never writes any file for you. Set that variable in your shell before running the plugin:
+The dataset is public DOL disclosure data and the worker that serves it is open source at https://github.com/msampath/h1b-sponsor-data, so a private instance answers the same questions from the same source. `api.surakshith.com` is operated by the plugin author (msampath); it is one option among them, and no longer the one you get by not choosing.
 
-```bash
-export H1B_API_TOKEN=h1b_your_token_here
-```
+If the endpoint goes away or errors, the plugin fails closed: results come back `unknown`, the skill skips the Block G bullet, and nothing is fabricated.
 
-The CLI reads `H1B_API_TOKEN` from the environment. It does not load `.env` on its own, so put the line in `.env` only if your workflow loads that file (direnv, or `node --env-file=.env`).
+Rate limits on the author's instance are 30 requests per hour per (IP, ASN) anonymously and 200 per hour with a key. A check costs at most two requests. Mint a key with `node plugins/h1b-sponsor/token.mjs request`; it prints the token and the `H1B_API_TOKEN=` line once and writes no file for you, since where a durable credential lives is your call. A new key can take about a minute to work on every server, so a 401 in that window means wait and retry. Minting is metered per address: 2 keys at once, then one more every 12 hours.
 
-A new key takes up to about 60 seconds to be recognized on every server, so a 401 in the first minute is a sign to wait and retry.
-
-The same endpoint with curl, if you prefer:
-
-```bash
-curl -X POST "${H1B_API_BASE:-https://api.surakshith.com/immigration/v1}/keys/request"
-```
-
-Minting is metered per address with a token bucket: 2 keys are available at once, then one more every 12 hours. If you are throttled or the endpoint is unreachable, email `sms@surakshith.com` with the repo URL you plan to use it from.
-
-## Who runs the backend
-
-The API at `api.surakshith.com` is operated by the plugin author (msampath). The worker is open source at https://github.com/msampath/h1b-sponsor-data, and it is built over the public US DOL disclosure files at https://www.dol.gov/agencies/eta/foreign-labor/performance.
-
-If the API goes away or starts returning errors, the plugin fails closed: results come back `unknown`, the skill skips the Block G bullet, and nothing is fabricated. Cached results keep serving until their TTL runs out.
-
-## Running your own endpoint
-
-The default instance is a convenience, not a requirement. Point the plugin anywhere with `H1B_API_BASE`:
-
-```bash
-export H1B_API_BASE=https://h1b.example.org/immigration/v1
-```
-
-Two reasons you might. The queries are sensitive: which companies you check says that you need a visa and names the employers you are considering, and career-ops is local-first about that kind of thing. And a default that only one person can operate is a single point of failure for everyone else.
-
-The data is public DOL disclosure files and the worker that serves them is open source at https://github.com/msampath/h1b-sponsor-data, so a private instance answers the same questions from the same source.
-
-Notes:
+Notes on configuring an endpoint:
 
 - The URL must be https. Loopback (`http://localhost:8787/...`) is allowed so you can develop against a local worker.
 - The redirect guard follows whatever you configure: a response that redirects off your configured host is refused, so a private endpoint does not widen where requests can go.
+- `H1B_API_BASE` wins over an installed index. Setting it is a deliberate act, so it is honoured: an index on disk no longer overrides it silently. Unset the variable to go back to the local index; leave it unset and the index is what answers.
 - `manifest.json` lists `allowedHosts`, but that field is advisory: the engine applies it only to plugins that call through its own fetch, and these CLIs call `fetch` directly, so editing it changes nothing about where requests go. Leave it alone. Editing a bundled plugin's manifest also trips the engine's tamper check and makes it ask for consent again.
-- A bad value fails the command that needed it rather than quietly falling back to the default, because silently sending these queries somewhere the user did not choose is the outcome worth avoiding. Setting the variable to an empty string counts as a bad value, since that is what a typo'd shell expansion or a blank `.env` line produces.
+- A bad value fails the command that needed it rather than quietly falling back to anything, because silently sending these queries somewhere the user did not choose is the whole outcome worth avoiding. Setting the variable to an empty string counts as a bad value, since that is what a typo'd shell expansion or a blank `.env` line produces.
 - The endpoint is read from the environment only. career-ops has per-plugin settings in `config/plugins.yml`, but these CLIs run standalone and do not read them, so a `base` key there would be ignored.
 - A key is issued by one instance and means nothing to another. Unset `H1B_API_TOKEN` when you switch, and mint a new one against the endpoint you moved to.
-- Cached answers record the endpoint that produced them, so switching does not serve you another instance's data.
+- Cached answers record what produced them, an endpoint or an index build, so switching between them never serves you the other's numbers.
 
 ## Tiers
 
 - `strong`: recent filing volume plus GC evidence, secondary-entity share under 20%.
 - `moderate`: recent filings, secondary-entity share under 50%, without meeting the strong bar (no GC evidence, or a share of 20% or more).
 - `staffing-shop`: majority of filings list a secondary worksite, indicating placement at client sites.
-- `weak`: filings exist but are stale (most recent filing more than two calendar years back) or below the volume floor (fewer than 5 filings).
-- `none`: employer resolved cleanly, zero filings in the window.
-- `unknown`: the name did not resolve, or the API call failed. This is not the same as `none`.
+- `weak`: filings exist but are stale (most recent filing more than two calendar years back) or below the volume floor (fewer than 5 LCA, PWD, and PERM records combined).
+- `none`: employer resolved cleanly, zero LCA filings and zero PWD or PERM records in the window.
+- `unknown`: the name did not resolve, the lookup failed, or no backend was available. This is not the same as `none`.
+
+Every tier counts filings, not certifications. Filing an LCA is the employer's own act of willingness to sponsor, while a certification, a denial, or a withdrawal is what happened to that filing afterwards: USCIS decides a denial, and a withdrawal usually means the candidate took another offer or the req was cancelled, so neither says anything about whether this employer sponsors. Both numbers are reported, `totals.n_lca` for what was filed and `totals.n_certified` for what was certified, and only the first one feeds the tier.
 
 ## Data source and disclaimer
 
-Data comes from public US Department of Labor disclosure files (LCA, PERM). The plugin does not scrape private data and does not store any personally identifying information beyond what DOL already publishes. The disk cache holds API responses only.
+Data comes from public US Department of Labor disclosure files (LCA, PERM), published at https://www.dol.gov/agencies/eta/foreign-labor/performance. The plugin does not scrape private data and does not store any personally identifying information beyond what DOL already publishes. The disk cache holds lookup results only.
 
 This is not legal or immigration advice. A tier reflects historical filings, not a company's willingness to sponsor you specifically for the role you are looking at. Talk to an immigration attorney for anything that turns on policy.
 
@@ -170,4 +182,4 @@ Remove the plugin from the active config:
 node plugins.mjs remove h1b-sponsor
 ```
 
-For a bundled plugin this unregisters it and clears its consent pin; the shipped files stay in `plugins/h1b-sponsor/`, so re-adding it later just needs `node plugins.mjs enable h1b-sponsor --confirm`. To delete it entirely, remove the `plugins/h1b-sponsor/` directory. Cached responses under `data/cache/h1b/` are safe to delete at any time.
+For a bundled plugin this unregisters it and clears its consent pin; the shipped files stay in `plugins/h1b-sponsor/`, so re-adding it later just needs `node plugins.mjs enable h1b-sponsor --confirm`. To delete it entirely, remove the `plugins/h1b-sponsor/` directory. Everything under `data/cache/h1b/` is safe to delete at any time; those are cached answers and the next lookup rebuilds them. Deleting `data/h1b/` removes the index, which means downloading it again.

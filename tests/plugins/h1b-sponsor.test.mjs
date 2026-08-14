@@ -1,39 +1,85 @@
-// tests/plugins/h1b-sponsor.test.mjs — contracts for the h1b-sponsor plugin
-// (manifest shape, classifyTier branches, cache round-trip/expiry, and the
-// check.mjs CLI JSON envelope). BOTH the check.mjs CLI block AND the live-API
-// integration are guarded behind H1B_API_TEST=1 — check.mjs is designed to
-// hit api.surakshith.com on cache miss, so a plain suite run must never
-// invoke it (it would touch the network and pollute the on-disk cache).
+// tests/plugins/h1b-sponsor.test.mjs: contracts for the h1b-sponsor plugin
+// (manifest shape, classifyTier branches, cache round-trip/expiry, the local
+// index backend, and the check.mjs CLI JSON envelope).
 //
-// token.mjs gets a third gate of its own, H1B_MINT_TEST=1: unlike a read, a
-// mint spends the 2-keys-per-address-per-day budget, so it must not ride along
-// with H1B_API_TEST.
+// Almost everything here runs on every suite run. check.mjs answers from a
+// local index by default, so the CLI contract can be driven against a fixture
+// index this file builds: no network, no gate, no dependence on what the
+// machine happens to have installed. Only the live-API block stays behind
+// H1B_API_TEST=1, and token.mjs's mint keeps its own H1B_MINT_TEST=1 gate:
+// unlike a read, a mint spends the 2-keys-per-address-per-day budget.
+//
+// Every spawn of check.mjs sets H1B_INDEX_PATH explicitly, at the fixture or
+// at a path with nothing in it. A developer with a real index installed must
+// get the same result as CI, and no test may read the repo's own index.
 //
 // The plugin ships all of these files, so a missing one is a real failure, not
-// a skip. Only the network-dependent blocks are opt-in (H1B_API_TEST=1).
+// a skip.
 import { pass, fail, warn, run, NODE, ROOT } from '../helpers.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { execFile } from 'node:child_process';
 
-console.log('\nPlugin — h1b-sponsor');
+console.log('\nPlugin: h1b-sponsor');
 
 const PLUGIN_DIR = join(ROOT, 'plugins', 'h1b-sponsor');
 const MANIFEST_PATH = join(PLUGIN_DIR, 'manifest.json');
 const TIER_PATH = join(PLUGIN_DIR, 'lib', 'tier.mjs');
 const CACHE_PATH = join(PLUGIN_DIR, 'lib', 'cache.mjs');
 const API_PATH = join(PLUGIN_DIR, 'lib', 'api.mjs');
+const INDEX_PATH = join(PLUGIN_DIR, 'lib', 'index.mjs');
 const CHECK_PATH = join(PLUGIN_DIR, 'check.mjs');
 const TOKEN_PATH = join(PLUGIN_DIR, 'token.mjs');
+const INSTALL_PATH = join(PLUGIN_DIR, 'install-index.mjs');
 const ENGINE_PATH = join(ROOT, 'plugins', '_engine.mjs');
+
+// ---------- fixture index ----------
+// The shipped index is one gzipped NDJSON record per employer, sorted by name,
+// with the publisher's short field names. These fixtures use the same shape so
+// the tests exercise the real reader rather than a parallel format.
+//
+// `filed` is what the employer filed and `cert` is how much of it came back
+// certified: two fields, because the tier counts the first and the report
+// prints both. They replaced one `lca` field that carried the certified count
+// under the filing count's name, which reported an employer that filed and had
+// nothing certified as tier `none`.
+const YEAR = new Date().getUTCFullYear();
+const FIXTURE_RECORDS = [
+  { k: '900000001', n: 'Fixture Strong Corp', fy: 2019, ly: YEAR, filed: 5000, cert: 4800, pwd: 200, perm: 150, gc: true, sv: false, sh: 0.05, ns: 12 },
+  { k: '900000002', n: 'Fixture Staffing LLC', fy: 2019, ly: YEAR, filed: 900, cert: 880, pwd: 10, perm: 5, gc: true, sv: true, sh: 0.87, ns: 800 },
+  { k: '900000003', n: 'Fixture Quiet Inc', fy: 2019, ly: 2019, filed: 0, cert: 0, pwd: 0, perm: 0, gc: false, sv: false, sh: 0, ns: 0 },
+];
+// Control characters are built from char codes rather than written literally:
+// an editor or a patch tool that rewrites this file must not be able to turn
+// the escape sequence back into a raw byte in the source.
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+const EVIL_NAME = `Evil${ESC}[31mRED${ESC}[0m${BEL}Co${CRLF}FORGED  ROW`;
+const EVIL_ID = `12${ESC}[7m34`;
+
+/**
+ * Write a gzipped NDJSON index. `extraLines` go in verbatim, which is how the
+ * malformed-line case gets a line that is not JSON at all.
+ */
+async function writeFixtureIndex(file, records = FIXTURE_RECORDS, extraLines = []) {
+  const body = [...records.map(r => JSON.stringify(r)), ...extraLines].join('\n') + '\n';
+  await mkdir(join(file, '..'), { recursive: true });
+  await writeFile(file, gzipSync(Buffer.from(body, 'utf8')));
+}
+
+// Somewhere with no index in it: the value every test that must NOT use one
+// passes for H1B_INDEX_PATH.
+const NO_INDEX = join(tmpdir(), `h1b-no-index-${randomUUID()}`, 'index.ndjson.gz');
 
 // ---------- manifest.json ----------
 if (!existsSync(MANIFEST_PATH)) {
-  fail('manifest.json missing — the plugin ships it');
+  fail('manifest.json missing: the plugin ships it');
 } else {
   try {
     const raw = await readFile(MANIFEST_PATH, 'utf8');
@@ -59,7 +105,7 @@ if (!existsSync(MANIFEST_PATH)) {
       if (Array.isArray(manifest.hooks) && manifest.hooks.length > 0) pass('manifest.hooks is a non-empty array');
       else fail(`manifest.hooks = ${JSON.stringify(manifest.hooks)}`);
 
-      // Exact element equality (===), not URL-substring matching — phrased with
+      // Exact element equality (===), not URL-substring matching, phrased with
       // .some() because scanners misread Array.includes('host') as the
       // url.includes('trusted.com') sanitization anti-pattern (CodeQL #103).
       if (Array.isArray(manifest.allowedHosts) && manifest.allowedHosts.some(h => h === 'api.surakshith.com')) {
@@ -68,15 +114,25 @@ if (!existsSync(MANIFEST_PATH)) {
         fail(`manifest.allowedHosts = ${JSON.stringify(manifest.allowedHosts)}`);
       }
 
-      if (Array.isArray(manifest.optionalEnv) && manifest.optionalEnv.includes('H1B_API_TOKEN')) {
-        pass('manifest.optionalEnv contains "H1B_API_TOKEN"');
+      // The index is downloaded from a GitHub release, so the release host
+      // belongs in the same advisory list as the API host.
+      if (Array.isArray(manifest.allowedHosts) && manifest.allowedHosts.some(h => h === 'github.com')) {
+        pass('manifest.allowedHosts contains the release host "github.com"');
       } else {
-        fail(`manifest.optionalEnv = ${JSON.stringify(manifest.optionalEnv)}`);
+        fail(`manifest.allowedHosts = ${JSON.stringify(manifest.allowedHosts)}`);
+      }
+
+      for (const key of ['H1B_API_TOKEN', 'H1B_INDEX_PATH']) {
+        if (Array.isArray(manifest.optionalEnv) && manifest.optionalEnv.includes(key)) {
+          pass(`manifest.optionalEnv contains "${key}"`);
+        } else {
+          fail(`manifest.optionalEnv = ${JSON.stringify(manifest.optionalEnv)} (missing ${key})`);
+        }
       }
 
       // Engine validateManifest should accept it.
       if (!existsSync(ENGINE_PATH)) {
-        warn('plugins/_engine.mjs missing — skipping validateManifest check');
+        warn('plugins/_engine.mjs missing, skipping validateManifest check');
       } else {
         try {
           const engine = await import(pathToFileURL(ENGINE_PATH).href);
@@ -96,9 +152,9 @@ if (!existsSync(MANIFEST_PATH)) {
   }
 }
 
-// ---------- lib/tier.mjs — classifyTier ----------
+// ---------- lib/tier.mjs: classifyTier ----------
 if (!existsSync(TIER_PATH)) {
-  fail('lib/tier.mjs missing — the plugin ships it');
+  fail('lib/tier.mjs missing: the plugin ships it');
 } else {
   try {
     const { classifyTier } = await import(pathToFileURL(TIER_PATH).href);
@@ -180,22 +236,22 @@ if (!existsSync(TIER_PATH)) {
         continue;
       }
       if (c.accept.includes(got)) pass(`classifyTier: ${c.label} (got "${got}")`);
-      else fail(`classifyTier: ${c.label} — got "${got}", expected one of ${JSON.stringify(c.accept)}`);
+      else fail(`classifyTier: ${c.label}: got "${got}", expected one of ${JSON.stringify(c.accept)}`);
     }
   } catch (e) {
     fail(`classifyTier import crashed: ${e.message}`);
   }
 }
 
-// ---------- lib/cache.mjs — cacheKey, readCache, writeCache ----------
+// ---------- lib/cache.mjs: cacheKey, readCache, writeCache ----------
 if (!existsSync(CACHE_PATH)) {
-  fail('lib/cache.mjs missing — the plugin ships it');
+  fail('lib/cache.mjs missing: the plugin ships it');
 } else {
   const tmpCacheDir = join(tmpdir(), `h1b-cache-${randomUUID()}`);
   try {
     const { cacheKey, readCache, writeCache } = await import(pathToFileURL(CACHE_PATH).href);
 
-    // cacheKey — filesystem-safe slug.
+    // cacheKey: filesystem-safe slug.
     const slug = cacheKey('Microsoft Corp');
     if (typeof slug === 'string' && /^[a-z0-9-]+$/.test(slug)) {
       pass(`cacheKey("Microsoft Corp") is a filesystem-safe slug ("${slug}")`);
@@ -203,7 +259,7 @@ if (!existsSync(CACHE_PATH)) {
       fail(`cacheKey("Microsoft Corp") = ${JSON.stringify(slug)}`);
     }
 
-    // cacheKey('') — accept any non-empty safe fallback.
+    // cacheKey(''): accept any non-empty safe fallback.
     const emptySlug = cacheKey('');
     if (typeof emptySlug === 'string' && emptySlug.length > 0 && /^[a-z0-9-]+$/.test(emptySlug)) {
       pass(`cacheKey("") returns non-empty safe fallback ("${emptySlug}")`);
@@ -256,7 +312,7 @@ if (!existsSync(CACHE_PATH)) {
       fail(`readCache threw on a missing cache directory: ${e.message}`);
     }
 
-    // Entry without a `data` key is malformed — fail closed.
+    // Entry without a `data` key is malformed, so fail closed.
     const noDataFile = join(tmpCacheDir, `${cacheKey('NoDataCo')}.json`);
     await writeFile(
       noDataFile,
@@ -267,7 +323,7 @@ if (!existsSync(CACHE_PATH)) {
     if (noData === null) pass('readCache returns null for an entry with no data key');
     else fail(`readCache on data-less entry = ${JSON.stringify(noData)}`);
 
-    // A future fetchedAt is clock skew or tampering — not usable either way.
+    // A future fetchedAt is clock skew or tampering. Not usable either way.
     const futureFile = join(tmpCacheDir, `${cacheKey('FutureCo')}.json`);
     await writeFile(
       futureFile,
@@ -288,12 +344,35 @@ if (!existsSync(CACHE_PATH)) {
   }
 }
 
-// ---------- lib/api.mjs — name matching (offline, stubbed fetch) ----------
-// plausibleMatch is module-private, so it is exercised through resolveEmployer
-// with globalThis.fetch stubbed: the stub returns one candidate and the
-// assertion is whether resolveEmployer accepts or rejects it. No network.
+// ---------- cache fetchedAt pass-through ----------
+{
+  const { mkdtemp: mkdtempTs } = await import('node:fs/promises');
+  const { tmpdir: tmpdirTs } = await import('node:os');
+  const { join: joinTs } = await import('node:path');
+  const cacheTs = await import(new URL('../../plugins/h1b-sponsor/lib/cache.mjs', import.meta.url).href);
+  const dirTs = await mkdtempTs(joinTs(tmpdirTs(), 'h1b-ts-'));
+  // A minute in the past: old enough to prove no fresh stamp replaced it,
+  // young enough that the 90-day TTL cannot expire it out of the read.
+  const pinned = new Date(Date.now() - 60_000).toISOString();
+  await cacheTs.writeCache('ts probe', { hello: 'ts' }, { cacheDir: dirTs, fetchedAt: pinned });
+  const backTs = await cacheTs.readCache('ts probe', { cacheDir: dirTs });
+  if (backTs && backTs.fetchedAt === pinned) pass('writeCache persists a caller-pinned fetchedAt verbatim');
+  else fail(`pinned fetchedAt: ${JSON.stringify(backTs && backTs.fetchedAt)}`);
+  await cacheTs.writeCache('ts probe 2', { hello: 'ts' }, { cacheDir: dirTs });
+  const backTs2 = await cacheTs.readCache('ts probe 2', { cacheDir: dirTs });
+  if (backTs2 && typeof backTs2.fetchedAt === 'string' && Number.isFinite(Date.parse(backTs2.fetchedAt))) {
+    pass('writeCache still stamps its own fetchedAt when the caller pins none');
+  } else fail(`unpinned fetchedAt: ${JSON.stringify(backTs2 && backTs2.fetchedAt)}`);
+}
+
+// ---------- lib/api.mjs: name matching ----------
+// pickBestMatch and plausibleMatch are exported (lib/index.mjs resolves names
+// with the same rules), so the matcher is driven directly with a candidate
+// list. That used to require stubbing globalThis.fetch and pushing candidates
+// through resolveEmployer's HTTP path, which tested the transport to assert
+// something about string comparison.
 if (!existsSync(API_PATH)) {
-  fail('lib/api.mjs missing — the plugin ships it');
+  fail('lib/api.mjs missing: the plugin ships it');
 } else {
   const originalFetch = globalThis.fetch;
   try {
@@ -318,8 +397,6 @@ if (!existsSync(API_PATH)) {
         },
       };
     };
-    const stubOneResult = (candidateName) => async () =>
-      jsonStream({ results: [{ id: 'stub-1', name: candidateName }] });
 
     const matchCases = [
       // Legal-suffix canonicalization, both directions: neither pair is an
@@ -342,15 +419,21 @@ if (!existsSync(API_PATH)) {
       { query: 'Delta LLC', candidate: 'Delta Corporation', expect: false },
       // A name that is only "the" plus suffixes must not resolve to anything.
       { query: 'The Company Inc', candidate: 'Google LLC', expect: false },
+      // Dotted or spaced initialisms fold into one token on both sides, so
+      // "I.B.M." reaches IBM Corporation instead of an unrelated small filer.
+      { query: 'I.B.M.', candidate: 'IBM Corporation', expect: true },
+      { query: 'U S Steel', candidate: 'US Steel Corporation', expect: true },
+      { query: 'A B C Corp', candidate: 'ABC Corporation', expect: true },
+      // The fold never bridges a real word boundary: 4 is not platforms.
+      { query: 'Meta 4 LLC', candidate: 'Meta Platforms, Inc', expect: false },
     ];
 
     for (const c of matchCases) {
-      globalThis.fetch = stubOneResult(c.candidate);
       let got;
       try {
-        got = await api.resolveEmployer(c.query, { timeoutMs: 1_000 });
+        got = api.pickBestMatch(c.query, [{ id: 'stub-1', name: c.candidate }]);
       } catch (e) {
-        fail(`resolveEmployer("${c.query}") crashed: ${e.message}`);
+        fail(`pickBestMatch("${c.query}") crashed: ${e.message}`);
         continue;
       }
       const matched = Boolean(got && got.id);
@@ -359,6 +442,48 @@ if (!existsSync(API_PATH)) {
       } else {
         fail(`matcher: "${c.query}" vs "${c.candidate}" → got ${matched ? 'match' : 'no match'}, expected ${c.expect ? 'match' : 'no match'}`);
       }
+    }
+
+    // Rank independence. The fallback rule used to look at results[0] alone,
+    // which was only safe because the search endpoint ranked the page first.
+    // The local index has no ranking of its own: candidates arrive in file
+    // order, so a plausible name has to win from anywhere in the list, or the
+    // same query would resolve over HTTP and come back unknown locally.
+    const ranked = api.pickBestMatch('Acme Corp', [
+      { id: 'noise-1', name: 'Zebra Logistics Inc' },
+      { id: 'noise-2', name: 'Metabolic Diagnostics Inc' },
+      { id: 'real-1', name: 'Acme Corporation' },
+    ]);
+    if (ranked && ranked.id === 'real-1') {
+      pass('pickBestMatch: a plausible match is found regardless of its position in the list');
+    } else {
+      fail(`pickBestMatch rank independence: ${JSON.stringify(ranked)}`);
+    }
+
+    // Rank independence must not cost tier precedence: an exact normalized name
+    // still beats a merely plausible one that came first. resolveEmployer on the
+    // index leans on this: its ranked candidate list can seat a high-volume
+    // plausible name ahead of the exact one, and the exact one must still win.
+    const exactWins = api.pickBestMatch('Acme Corp', [
+      { id: 'plausible-1', name: 'Acme Corporation Holdings' },
+      { id: 'exact-1', name: 'ACME CORP.' },
+    ]);
+    if (exactWins && exactWins.id === 'exact-1') {
+      pass('pickBestMatch: an exact normalized name still outranks an earlier plausible one');
+    } else {
+      fail(`pickBestMatch exact precedence: ${JSON.stringify(exactWins)}`);
+    }
+
+    // Nothing plausible anywhere in a long list is still no match: position
+    // independence widens where a match may be found, not what counts as one.
+    const noneMatch = api.pickBestMatch('Meta', [
+      { id: 'a', name: 'Metabolic Diagnostics Inc' },
+      { id: 'b', name: 'Metallurgy Partners LLC' },
+    ]);
+    if (noneMatch === null) {
+      pass('pickBestMatch: a list of implausible candidates still resolves to nothing');
+    } else {
+      fail(`pickBestMatch implausible list: ${JSON.stringify(noneMatch)}`);
     }
 
     // searchEmployers surfaces every version, not just the best pick, and
@@ -387,6 +512,319 @@ if (!existsSync(API_PATH)) {
     fail(`matcher tests crashed: ${e.message}`);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+}
+
+// ---------- lib/index.mjs: the local index backend ----------
+// The default path, exercised against a fixture index written here. Offline by
+// construction: this backend has no transport.
+if (!existsSync(INDEX_PATH)) {
+  fail('lib/index.mjs missing: the plugin ships it');
+} else {
+  const tmpDir = join(tmpdir(), `h1b-index-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
+  try {
+    const idx = await import(pathToFileURL(INDEX_PATH).href);
+    const { classifyTier } = await import(pathToFileURL(TIER_PATH).href);
+    // A line that is not JSON at all, to prove one bad record costs one
+    // employer rather than the whole lookup.
+    await writeFixtureIndex(fixture, FIXTURE_RECORDS, ['{not json at all']);
+    const opts = { indexPath: fixture };
+
+    if (idx.hasIndex(fixture) === true && idx.hasIndex(join(tmpDir, 'nope.gz')) === false) {
+      pass('hasIndex: true for an installed index, false for a missing one');
+    } else {
+      fail('hasIndex: wrong answer for present/absent index');
+    }
+
+    const strong = await idx.resolveEmployer('Fixture Strong Corp', opts);
+    if (strong && strong.id === '900000001' && strong.displayName === 'Fixture Strong Corp') {
+      pass('resolveEmployer: an exact name resolves to its employer id');
+    } else {
+      fail(`resolveEmployer exact: ${JSON.stringify(strong)}`);
+    }
+
+    // Records after the malformed line must still be reachable, which is the
+    // point of skipping a bad line rather than failing the scan.
+    const staffing = await idx.resolveEmployer('Fixture Staffing LLC', opts);
+    if (staffing && staffing.id === '900000002') {
+      pass('resolveEmployer: a malformed line is skipped, later records still resolve');
+    } else {
+      fail(`resolveEmployer past malformed line: ${JSON.stringify(staffing)}`);
+    }
+
+    // The suffix rules are the shared ones, so the local path accepts the same
+    // spellings the HTTP path does.
+    const canon = await idx.resolveEmployer('Fixture Strong Corporation', opts);
+    if (canon && canon.id === '900000001') {
+      pass('resolveEmployer: a canonicalized legal suffix matches on the index too');
+    } else {
+      fail(`resolveEmployer suffix canon: ${JSON.stringify(canon)}`);
+    }
+
+    const profile = await idx.getEmployerProfile('900000001', opts);
+    const keys = profile ? Object.keys(profile).sort().join(',') : '';
+    const expectedKeys = ['does_gc', 'employer_id', 'employer_name', 'first_year', 'last_year', 'n_certified', 'n_lca', 'n_perm', 'n_pwd', 'red_flags'].join(',');
+    if (keys === expectedKeys) {
+      pass('getEmployerProfile: returns exactly the flat profile shape the API path produces');
+    } else {
+      fail(`getEmployerProfile shape: ${keys}`);
+    }
+    if (profile && profile.n_lca === 5000 && profile.n_certified === 4800 && profile.n_pwd === 200 && profile.n_perm === 150
+        && profile.does_gc === true && profile.first_year === 2019 && profile.last_year === YEAR) {
+      pass('getEmployerProfile: counts and years come through unchanged, filed and certified both');
+    } else {
+      fail(`getEmployerProfile values: ${JSON.stringify(profile)}`);
+    }
+    // n_total is the filing count: the share's denominator is `filed`, which is
+    // why the index stopped shipping the same number twice.
+    const shop = profile && profile.red_flags && profile.red_flags.staffing_shop;
+    if (shop && shop.value === false && shop.share === 0.05 && shop.n_secondary === 12 && shop.n_total === 5000
+        && shop.basis === 'secondary_entity_share') {
+      pass('getEmployerProfile: the staffing_shop block carries its basis, with the filing count as its denominator');
+    } else {
+      fail(`getEmployerProfile staffing_shop: ${JSON.stringify(shop)}`);
+    }
+
+    // A record in the pre-release shape (one `lca` field, no `filed`) is not
+    // readable as the current one: its certified count would land in the field
+    // the tier reads as filings. Skipped like any other malformed line.
+    const oldShape = join(tmpDir, 'old-shape.ndjson.gz');
+    await writeFixtureIndex(oldShape, [], [
+      JSON.stringify({ k: '900000004', n: 'Fixture Old Shape Inc', fy: 2019, ly: YEAR, lca: 4800, pwd: 200, perm: 150, gc: true, sv: false, sh: 0, ns: 0, nt: 5000 }),
+    ]);
+    const oldResolved = await idx.resolveEmployer('Fixture Old Shape Inc', { indexPath: oldShape });
+    const oldProfile = await idx.getEmployerProfile('900000004', { indexPath: oldShape });
+    if (oldResolved === null && oldProfile === null) {
+      pass('readRecords: a record in the old single-lca shape is skipped, not misread as filings');
+    } else {
+      fail(`old-shape record: resolved=${JSON.stringify(oldResolved)} profile=${JSON.stringify(oldProfile)}`);
+    }
+
+    // classifyTier is the same pure function on both backends; these pin that
+    // an index record reaches it in a form it can read.
+    const tierCases = [
+      ['900000001', 'strong'],
+      ['900000002', 'staffing-shop'],
+      ['900000003', 'none'],
+    ];
+    for (const [id, expected] of tierCases) {
+      const got = classifyTier(await idx.getEmployerProfile(id, opts));
+      if (got === expected) pass(`classifyTier over an index record (${id}) === "${expected}"`);
+      else fail(`classifyTier over index record ${id}: got "${got}", expected "${expected}"`);
+    }
+
+    // does_gc mirrors the HTTP path's normalizeProfile: the gc flag, or any GC
+    // filing at all. An index row whose flag lags its own counts must not
+    // classify differently across backends.
+    const gcFixture = join(tmpDir, 'gc-or.ndjson.gz');
+    await writeFixtureIndex(gcFixture, [
+      { k: '900000009', n: 'Fixture GC Lag Inc', fy: 2019, ly: YEAR, filed: 500, cert: 500, pwd: 3, perm: 0, gc: false, sv: false, sh: 0, ns: 0 },
+    ]);
+    const gcLag = await idx.getEmployerProfile('900000009', { indexPath: gcFixture });
+    if (gcLag && gcLag.does_gc === true) {
+      pass('getEmployerProfile: GC filings imply does_gc even when the gc flag is false, matching the HTTP path');
+    } else {
+      fail(`getEmployerProfile gc OR: ${JSON.stringify(gcLag)}`);
+    }
+
+    const missName = await idx.resolveEmployer('__definitely_not_a_real_employer_xyz__', opts);
+    if (missName === null) pass('resolveEmployer: an unknown name resolves to null, not a near neighbour');
+    else fail(`resolveEmployer unknown name: ${JSON.stringify(missName)}`);
+
+    const missId = await idx.getEmployerProfile('nope-nope-nope', opts);
+    if (missId === null) pass('getEmployerProfile: an unknown id returns null rather than an empty profile');
+    else fail(`getEmployerProfile unknown id: ${JSON.stringify(missId)}`);
+
+    const search = await idx.searchEmployers('Fixture', opts);
+    if (search.total === 3 && search.results.length === 3 && search.results.every(r => r.id && r.name)) {
+      pass('searchEmployers: lists every entity whose name contains the query, with its id');
+    } else {
+      fail(`searchEmployers index: ${JSON.stringify(search)}`);
+    }
+    const searchShort = await idx.searchEmployers('a', opts);
+    if (searchShort.total === 0 && searchShort.results.length === 0) {
+      pass('searchEmployers: a sub-2-char query returns nothing without reading the index');
+    } else {
+      fail(`searchEmployers short query on index: ${JSON.stringify(searchShort)}`);
+    }
+
+    // The source stamp is the digest, so a rebuilt index is a different source
+    // even at the same path. That is what scopes cached answers to one build.
+    const source = await idx.indexSource(fixture);
+    if (/^local:h1b-index@sha256-[0-9a-f]{12}$/.test(source)) {
+      pass(`indexSource: names the index build by digest (${source})`);
+    } else {
+      fail(`indexSource: ${JSON.stringify(source)}`);
+    }
+    const other = join(tmpDir, 'other.ndjson.gz');
+    await writeFixtureIndex(other, [{ ...FIXTURE_RECORDS[0], filed: 4999 }]);
+    if (await idx.indexSource(other) !== source) {
+      pass('indexSource: different index contents produce a different source stamp');
+    } else {
+      fail('indexSource: two different indexes produced the same stamp');
+    }
+
+    // A file that is not gzip at all has to fail loudly. .pipe() does not
+    // forward errors, so before the source stream was wired to destroy the
+    // gunzip this hung forever instead of throwing.
+    const corrupt = join(tmpDir, 'corrupt.ndjson.gz');
+    await writeFile(corrupt, Buffer.from('this is not gzip', 'utf8'));
+    let corruptCode = null;
+    try {
+      await idx.resolveEmployer('Fixture Strong Corp', { indexPath: corrupt });
+    } catch (e) {
+      corruptCode = e && e.code;
+    }
+    if (corruptCode === 'INDEX_UNREADABLE') {
+      pass('resolveEmployer: an unreadable index throws INDEX_UNREADABLE rather than hanging');
+    } else {
+      fail(`corrupt index: code=${corruptCode}`);
+    }
+
+    // H1B_INDEX_PATH gets the same treatment H1B_API_BASE does: blank means a
+    // typo'd expansion or an empty .env line, and reading the default index
+    // while the user believes they replaced it is the failure worth refusing.
+    const savedEnv = process.env.H1B_INDEX_PATH;
+    try {
+      process.env.H1B_INDEX_PATH = '   ';
+      let blankMsg = '';
+      try {
+        idx.indexPath();
+      } catch (e) {
+        blankMsg = String(e && e.message);
+      }
+      if (/set but empty/.test(blankMsg)) {
+        pass('indexPath: a blank H1B_INDEX_PATH is refused instead of silently using the default');
+      } else {
+        fail(`indexPath blank: ${JSON.stringify(blankMsg)}`);
+      }
+      process.env.H1B_INDEX_PATH = fixture;
+      if (idx.indexPath() === fixture) pass('indexPath: H1B_INDEX_PATH relocates the index');
+      else fail(`indexPath override: ${idx.indexPath()}`);
+    } finally {
+      if (savedEnv === undefined) delete process.env.H1B_INDEX_PATH;
+      else process.env.H1B_INDEX_PATH = savedEnv;
+    }
+  } catch (e) {
+    fail(`index backend tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ---------- lib/index.mjs: candidates are ranked by sponsorship evidence ----------
+// The API's search buckets are published in descending EVIDENCE order, the
+// sum of LCA filings plus PWD plus PERM that etl/publish.py's search_volume()
+// computes, so the HTTP backend hands pickBestMatch a ranked list and it lands
+// on the employer that actually files. The index is stored in NAME order, and taking
+// candidates off it in that order let the alphabet answer instead: against the
+// real 335,626-record build, "Meta" resolved to a zero-filing "META 4 LLC" over
+// "Meta Platforms, Inc" (38,117 LCAs), and "Google" to "Google Client Services
+// LLC" (2) over "Google LLC" (70,985). A tier of `none` for an employer with
+// 38,117 filings is the confidently wrong answer this plugin exists to prevent.
+//
+// The fixture reproduces the shape rather than the size: records in name order,
+// the lookalikes ahead of the real entity, real counts.
+if (!existsSync(INDEX_PATH)) {
+  fail('lib/index.mjs missing: the plugin ships it');
+} else {
+  const tmpDir = join(tmpdir(), `h1b-rank-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
+  const capFixture = join(tmpDir, 'cap.ndjson.gz');
+  try {
+    const idx = await import(pathToFileURL(INDEX_PATH).href);
+    const rec = (k, n, filed, extra = {}) => ({ k, n, fy: 2019, ly: YEAR, filed, cert: filed, pwd: 0, perm: 0, gc: false, sv: false, sh: 0, ns: 0, ...extra });
+    await writeFixtureIndex(fixture, [
+      // Name order, which is the order the publisher writes and this backend
+      // reads. Every zero- and low-volume lookalike sits ahead of the real one.
+      rec('r-meta-4', 'META 4 LLC', 0),
+      rec('r-meta-care', 'Meta Care, Inc.', 2),
+      rec('r-meta-platforms', 'Meta Platforms, Inc', 38117),
+      rec('r-google-client', 'Google Client Services LLC', 2),
+      rec('r-google-inc', 'GOOGLE INC.', 0),
+      rec('r-google-llc', 'Google LLC', 70985),
+      // Two records with the SAME normalized name and wildly different volumes,
+      // the small one first. Resolving stopped at the first exact name it saw,
+      // which on the real index took "Amazon.com Services LLC" at 1 LCA over the
+      // 92,132-LCA entity spelled the same way.
+      rec('r-amzn-small', 'AMAZON COM SERVICES LLC', 1),
+      rec('r-amzn-big', 'Amazon.com Services LLC', 92132),
+      // A green card only employer and a same-named sibling with nothing at
+      // all, the empty one first. 156,616 employers in the shipped build look
+      // like this: no LCA rows, real PWD and PERM filings. Rank on any filing
+      // count alone and both of these score 0, which hands the answer back to
+      // the alphabet; the evidence sum is what separates them.
+      rec('r-willow-shell', 'WILLOW CREEK DENTAL PC', 0),
+      rec('r-willow-gc', 'Willow Creek Dental, P.C.', 0, { pwd: 3, perm: 2, gc: true }),
+    ]);
+    const opts = { indexPath: fixture };
+
+    const rankCases = [
+      ['Meta', 'r-meta-platforms', 'Meta Platforms, Inc'],
+      ['Google', 'r-google-llc', 'Google LLC'],
+      ['Amazon.com Services LLC', 'r-amzn-big', 'Amazon.com Services LLC'],
+    ];
+    for (const [query, wantId, wantName] of rankCases) {
+      const got = await idx.resolveEmployer(query, opts);
+      if (got && got.id === wantId && got.displayName === wantName) {
+        pass(`resolveEmployer: "${query}" resolves to "${wantName}", not the lookalike that sorts first`);
+      } else {
+        fail(`resolveEmployer volume rank for "${query}": ${JSON.stringify(got)}`);
+      }
+    }
+
+    // The specific failure worth naming: a zero-filing shell entity winning
+    // makes the CLI report tier `none`, which reads as "DOL data shows nothing"
+    // for a company with tens of thousands of filings.
+    const zeroLoser = await idx.resolveEmployer('Meta', opts);
+    const zeroProfile = zeroLoser ? await idx.getEmployerProfile(zeroLoser.id, opts) : null;
+    if (zeroProfile && zeroProfile.n_lca === 38117) {
+      pass('resolveEmployer: a zero-filing lookalike never wins over a high-volume plausible match');
+    } else {
+      fail(`resolveEmployer zero-filing lookalike: ${JSON.stringify(zeroProfile)}`);
+    }
+
+    // Green card evidence is evidence. Both of these file zero LCAs, so a rank
+    // key built on any filing count alone cannot tell them apart and the file's
+    // name order decides, seating the shell first. The sum classifyTier adds up
+    // is what makes the entity with 5 green card filings the answer.
+    const gcOnly = await idx.resolveEmployer('Willow Creek Dental PC', opts);
+    const gcProfile = gcOnly ? await idx.getEmployerProfile(gcOnly.id, opts) : null;
+    if (gcOnly && gcOnly.id === 'r-willow-gc' && gcProfile && gcProfile.n_lca === 0
+        && gcProfile.n_pwd === 3 && gcProfile.n_perm === 2) {
+      pass('resolveEmployer: a GC-only employer outranks a same-named sibling with no evidence at all');
+    } else {
+      fail(`resolveEmployer GC-only rank: ${JSON.stringify(gcOnly)} ${JSON.stringify(gcProfile)}`);
+    }
+
+    // The page a broad --search shows is the top of the ranking too, not the
+    // top of the alphabet, so the entities that file are the ones on it.
+    const searched = await idx.searchEmployers('Amazon', opts);
+    if (searched.total === 2 && searched.results.length === 2 && searched.results[0].id === 'r-amzn-big') {
+      pass('searchEmployers: the page leads with the highest-volume match');
+    } else {
+      fail(`searchEmployers volume rank: ${JSON.stringify(searched)}`);
+    }
+
+    // The candidate cap is rank-trimmed, not first-N-in-file-order. A one-token
+    // query can be plausible for well over the cap (1,401 employers lead with
+    // "New" in the shipped index), and keeping the first 500 by name would drop
+    // the only one that files.
+    const capRecords = [];
+    for (let i = 0; i < 1200; i++) capRecords.push(rec(`r-fill-${i}`, `Capco Fill ${String(i).padStart(4, '0')} Inc`, 0));
+    capRecords.push(rec('r-capco-real', 'Capco Zulu Inc', 9999));
+    await writeFixtureIndex(capFixture, capRecords);
+    const capped = await idx.resolveEmployer('Capco', { indexPath: capFixture });
+    if (capped && capped.id === 'r-capco-real') {
+      pass('resolveEmployer: the candidate cap drops the lowest-volume matches, never the highest');
+    } else {
+      fail(`resolveEmployer candidate cap: ${JSON.stringify(capped)}`);
+    }
+  } catch (e) {
+    fail(`volume-rank tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -539,13 +977,13 @@ if (!existsSync(API_PATH)) {
   }
 }
 
-// ---------- lib/api.mjs readBoundedText — streaming byte ceiling ----------
+// ---------- lib/api.mjs readBoundedText: streaming byte ceiling ----------
 // Ungated and offline. res.text()/res.json() buffer a whole body before any
 // size check can run, so the reader streams and cancels mid-body instead. These
 // drive the REAL reader (the mintToken envelope tests use a fake envelope and
 // never reach it).
 if (!existsSync(API_PATH)) {
-  fail('lib/api.mjs missing — the plugin ships it');
+  fail('lib/api.mjs missing: the plugin ships it');
 } else {
   const { readBoundedText } = await import(pathToFileURL(API_PATH).href);
 
@@ -612,7 +1050,7 @@ if (!existsSync(API_PATH)) {
   }
 
   // A Content-Length past the ceiling short-circuits before any read, and
-  // cancels the body it is walking away from — returning without cancelling
+  // cancels the body it is walking away from. Returning without cancelling
   // would leave the connection pinned until garbage collection.
   const declared = streamRes([enc.encode('small')], { 'content-length': String(5 * 1024 * 1024) });
   const declaredOut = await readBoundedText(declared.res, 1024);
@@ -634,8 +1072,8 @@ if (!existsSync(API_PATH)) {
   else fail(`readBoundedText empty: ${JSON.stringify(empty)}`);
 
   // The body-less fallback has no stream to count, so it measures the buffered
-  // text in BYTES. Measuring UTF-16 code units instead — what String.length
-  // reports — waves a multibyte body straight past a byte ceiling: these 400
+  // text in BYTES. Measuring UTF-16 code units instead (what String.length
+  // reports) waves a multibyte body straight past a byte ceiling: these 400
   // CJK characters are 400 units but 1200 bytes.
   const wide = '日'.repeat(400);
   const wideOut = await readBoundedText({ headers: { get: () => null }, text: async () => wide }, 1000);
@@ -681,8 +1119,8 @@ if (!existsSync(API_PATH)) {
 
   // The other half of that distinction: an AbortError is the shared fetch timer
   // firing, not an unusable body, so it has to stay a TIMEOUT. Both body reads
-  // re-throw it for that reason — the 2xx read and the error-status read that
-  // only collects an excerpt — and a catch that swallowed it would report a
+  // re-throw it for that reason (the 2xx read and the error-status read that
+  // only collects an excerpt), and a catch that swallowed it would report a
   // timed-out request as BAD_JSON or as the bare HTTP status, hiding the cause
   // and pointing the user at the wrong fix.
   {
@@ -746,31 +1184,28 @@ if (!existsSync(API_PATH)) {
 }
 
 // ---------- check.mjs --search display sanitizer ----------
-// Runs UNGATED: the child process stubs globalThis.fetch before importing
-// check.mjs, so nothing touches the network or the cache. This pins the
-// control-char strip on the text output (a crafted employer name must not
+// Driven end to end against a fixture index holding one hostile employer name,
+// so the assertion covers the real read path rather than a stubbed transport.
+// This pins the control-char strip on the text output (a crafted name must not
 // smuggle terminal escapes or a forged row) and the raw pass-through on JSON.
 {
   const tmpDir = join(tmpdir(), `h1b-sanitize-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
   try {
-    await mkdir(tmpDir, { recursive: true });
-    const evilName = 'Evil\\u001b[31mRED\\u001b[0m\\u0007Co\\r\\nFORGED  ROW';
-    const wrapper = (jsonFlag) => [
-      `globalThis.fetch = async () => new Response(JSON.stringify({`,
-      `  total: 5,`,
-      `  results: [{ id: '12\\u001b[7m34', name: '${evilName}' }],`,
-      `}), { status: 200 });`,
-      `process.argv = [process.argv[0], ${JSON.stringify(CHECK_PATH)}, 'EvilCo', '--search'${jsonFlag ? ", '--json'" : ''}];`,
-      `await import(${JSON.stringify(pathToFileURL(CHECK_PATH).href)});`,
-    ].join('\n');
+    await writeFixtureIndex(fixture, [
+      { k: EVIL_ID, n: EVIL_NAME, fy: 2020, ly: YEAR, filed: 5, cert: 5, pwd: 0, perm: 0, gc: false, sv: false, sh: 0, ns: 0 },
+    ]);
 
-    const runWrapper = (file) => new Promise((resolve) => {
-      execFile(process.execPath, [file], { timeout: 20_000 }, (err, stdout) => resolve(String(stdout || '')));
+    const runSearch = (extra) => new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        [CHECK_PATH, 'Evil', '--search', ...extra],
+        { env: { ...process.env, H1B_INDEX_PATH: fixture }, timeout: 20_000 },
+        (err, stdout) => resolve(String(stdout || '')),
+      );
     });
 
-    const textWrapper = join(tmpDir, 'text.mjs');
-    await writeFile(textWrapper, wrapper(false), 'utf8');
-    const textOut = await runWrapper(textWrapper);
+    const textOut = await runSearch([]);
     const hasControl = [...textOut].some(ch => { const c = ch.charCodeAt(0); return (c < 32 && c !== 10 && c !== 13) || c === 127 || (c >= 128 && c <= 159); });
     const oneRow = textOut.trim().split('\n').length === 2; // header + single row
     if (!hasControl && oneRow && /FORGED ROW/.test(textOut)) {
@@ -779,13 +1214,10 @@ if (!existsSync(API_PATH)) {
       fail(`search text sanitizer: control=${hasControl} rows=${textOut.trim().split('\n').length}`);
     }
 
-    const jsonWrapper = join(tmpDir, 'json.mjs');
-    await writeFile(jsonWrapper, wrapper(true), 'utf8');
-    const jsonOut = await runWrapper(jsonWrapper);
+    const jsonOut = await runSearch(['--json']);
     let rawKept = false;
     try {
       const parsed = JSON.parse(jsonOut);
-      const ESC = String.fromCharCode(27);
       rawKept = parsed.results[0].name.includes(ESC + '[31m') && parsed.results[0].id.includes(ESC + '[7m');
     } catch { rawKept = false; }
     if (rawKept) pass('search JSON output keeps the raw unsanitized fields');
@@ -797,23 +1229,25 @@ if (!existsSync(API_PATH)) {
   }
 }
 
-// ---------- check.mjs — a broken base still emits the documented envelope ----------
+// ---------- check.mjs: a broken base still emits the documented envelope ----------
 // The base resolves lazily and is reported back through `source`, so the error
-// handler that exists to report a bad value calls apiBase() itself. Letting
-// that throw replaces the documented JSON envelope with a raw stack trace on
-// stderr. Ungated and offline: apiBase() throws before any URL is built, so
-// nothing reaches the network, and --cache-dir keeps the repo cache untouched.
+// handler that exists to report a bad value has to survive it throwing. Letting
+// it escape replaces the documented JSON envelope with a raw stack trace on
+// stderr. Ungated and offline: a set H1B_API_BASE selects the HTTP backend, and
+// apiBase() then throws before any URL is built. H1B_INDEX_PATH points where no
+// index is so the failure cannot be read as a fallback that worked.
+// --cache-dir keeps the repo cache untouched.
 {
   const tmpDir = join(tmpdir(), `h1b-badbase-${randomUUID()}`);
   await new Promise((resolve) => {
     execFile(
       process.execPath,
       [CHECK_PATH, 'Acme', '--json', '--cache-dir', tmpDir],
-      { env: { ...process.env, H1B_API_BASE: 'not a url' }, timeout: 20_000 },
+      { env: { ...process.env, H1B_API_BASE: 'not a url', H1B_INDEX_PATH: NO_INDEX }, timeout: 20_000 },
       (err, stdout, stderr) => {
         const code = (err && typeof err.code === 'number') ? err.code : 0;
         let parsed = null;
-        try { parsed = JSON.parse(String(stdout || '')); } catch { /* not JSON — asserted below */ }
+        try { parsed = JSON.parse(String(stdout || '')); } catch { /* not JSON, asserted below */ }
         const shaped = Boolean(parsed)
           && parsed.found === false
           && parsed.source === null
@@ -836,23 +1270,166 @@ if (!existsSync(API_PATH)) {
   await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 }
 
-// ---------- check.mjs — the cache is endpoint-aware ----------
-// A cached answer belongs to the instance that produced it, and `source` is
-// rebuilt from the CURRENT base, so serving an entry another endpoint wrote
-// would label one instance's data as the other's. Entries written before the
-// endpoint was configurable carry no `base` at all, so the first run after an
-// upgrade has to re-fetch rather than serve them blind — for negative entries
-// too, where a stale "unknown" is the answer that quietly ends a search.
+// ---------- check.mjs: no index and no endpoint sends nothing ----------
+// The behaviour the local-first default exists for. With no index installed and
+// no H1B_API_BASE, the CLI must report `unknown`, say how to install the index,
+// and make no request at all, rather than quietly falling back to a default
+// host, which would send exactly the query the local path exists to keep at
+// home.
+//
+// The proof is a poisoned globalThis.fetch that records the attempt to a file
+// before throwing. A marker file rather than an in-process counter because the
+// CLI's error path ends the process itself, discarding whatever a wrapper had
+// buffered but not yet written.
+{
+  const tmpDir = join(tmpdir(), `h1b-nobackend-${randomUUID()}`);
+  const marker = join(tmpDir, 'egress.txt');
+  const wrapperFile = join(tmpDir, 'run.mjs');
+  try {
+    await mkdir(tmpDir, { recursive: true });
+    await writeFile(wrapperFile, [
+      "import { writeFileSync } from 'node:fs';",
+      `globalThis.fetch = async (...args) => { writeFileSync(${JSON.stringify(marker)}, String(args[0]), 'utf8'); throw new Error('EGRESS'); };`,
+      `process.argv = [process.argv[0], ${JSON.stringify(CHECK_PATH)}, 'Acme Corp', '--json', '--cache-dir', ${JSON.stringify(join(tmpDir, 'cache'))}];`,
+      `await import(${JSON.stringify(pathToFileURL(CHECK_PATH).href)});`,
+    ].join('\n'), 'utf8');
+
+    await new Promise((resolve) => {
+      const env = { ...process.env, H1B_INDEX_PATH: NO_INDEX };
+      delete env.H1B_API_BASE;
+      delete env.H1B_API_TOKEN;
+      execFile(process.execPath, [wrapperFile], { env, timeout: 20_000 }, (err, stdout) => {
+        const code = (err && typeof err.code === 'number') ? err.code : 0;
+        let parsed = null;
+        try { parsed = JSON.parse(String(stdout || '')); } catch { /* asserted below */ }
+        const shaped = Boolean(parsed)
+          && parsed.found === false
+          && parsed.source === null
+          && parsed.friendlinessTier === 'unknown'
+          && Boolean(parsed.totals)
+          && Boolean(parsed.redFlags)
+          && /install-index\.mjs/.test(String(parsed.error || ''));
+        if (code === 1 && shaped) {
+          pass('check.mjs: with no index and no endpoint, the envelope says unknown and names install-index.mjs');
+        } else {
+          fail(`check.mjs no backend: exit ${code}, stdout=${String(stdout || '').slice(0, 200)}`);
+        }
+        if (!existsSync(marker)) {
+          pass('check.mjs: with no index and no endpoint, fetch is never called (zero egress)');
+        } else {
+          fail('check.mjs no backend: fetch was called, the marker file was written');
+        }
+        resolve();
+      });
+    });
+  } catch (e) {
+    fail(`no-backend tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ---------- check.mjs: an explicit H1B_API_BASE wins over an installed index ----------
+// Backend order is explicit choice, then the local default, then an error. An
+// installed index used to win unconditionally, so someone who deliberately set
+// H1B_API_BASE had it read and then ignored without a word. Silently
+// disregarding a configured value is the same class of surprise as silently
+// picking a host, which the local-first default exists to rule out.
+//
+// Both halves are asserted in one place because they are one rule: with the
+// variable set the endpoint answers even though an index is right there, and
+// with it unset the same index answers and nothing is sent. The child stubs
+// globalThis.fetch, so the endpoint half is offline too, and its employer id is
+// one the fixture index does not contain, which is what tells the two apart.
+if (!existsSync(CHECK_PATH) || !existsSync(INDEX_PATH)) {
+  fail('check.mjs or lib/index.mjs missing: the plugin ships them');
+} else {
+  const tmpDir = join(tmpdir(), `h1b-precedence-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
+  const BASE = 'https://precedence-probe.example/v1';
+  const NAME = 'Fixture Strong Corp';
+  try {
+    await writeFixtureIndex(fixture);
+    const wrapperFile = join(tmpDir, 'run.mjs');
+    await mkdir(tmpDir, { recursive: true });
+    await writeFile(wrapperFile, [
+      'let calls = 0;',
+      'globalThis.fetch = async (url) => {',
+      '  calls++;',
+      "  const body = String(url).includes('/employers/search')",
+      `    ? { results: [{ id: 'from-endpoint', name: ${JSON.stringify(NAME)} }] }`,
+      `    : { employer: { name: ${JSON.stringify(NAME)}, id: 'from-endpoint' }, filings: { certified: 42 }, green_card: { pwd: 0, perm: 0 } };`,
+      '  return new Response(JSON.stringify(body), { status: 200 });',
+      '};',
+      `process.argv = [process.argv[0], ${JSON.stringify(CHECK_PATH)}, ${JSON.stringify(NAME)}, '--json', '--cache-dir', ${JSON.stringify(join(tmpDir, 'cache'))}, '--refresh'];`,
+      'const chunks = [];',
+      'const write = process.stdout.write.bind(process.stdout);',
+      'process.stdout.write = (s) => { chunks.push(String(s)); return true; };',
+      `await import(${JSON.stringify(pathToFileURL(CHECK_PATH).href)});`,
+      'for (let i = 0; i < 200 && chunks.length === 0; i++) await new Promise(r => setTimeout(r, 25));',
+      'process.stdout.write = write;',
+      "write(JSON.stringify({ calls, out: chunks.join('') }));",
+    ].join('\n'), 'utf8');
+
+    const runWith = (base) => new Promise((resolve) => {
+      const env = { ...process.env, H1B_INDEX_PATH: fixture };
+      delete env.H1B_API_TOKEN;
+      if (base === undefined) delete env.H1B_API_BASE;
+      else env.H1B_API_BASE = base;
+      execFile(process.execPath, [wrapperFile], { env, timeout: 30_000 }, (_err, stdout) => {
+        let outer = null;
+        try { outer = JSON.parse(String(stdout || '')); } catch { /* reported by the caller */ }
+        let result = null;
+        try { result = JSON.parse(String((outer && outer.out) || '')); } catch { /* ditto */ }
+        resolve({ calls: outer && outer.calls, result, raw: String(stdout || '').slice(0, 200) });
+      });
+    });
+
+    const withBase = await runWith(BASE);
+    if (withBase.result && withBase.result.employerId === 'from-endpoint'
+        && withBase.result.source === `${BASE}/employers/from-endpoint` && withBase.calls === 2) {
+      pass('check.mjs: an explicit H1B_API_BASE is used even with an index installed');
+    } else {
+      fail(`check.mjs base precedence: calls=${withBase.calls} result=${JSON.stringify(withBase.result)} raw=${withBase.raw}`);
+    }
+
+    const withoutBase = await runWith(undefined);
+    if (withoutBase.result && withoutBase.result.employerId === '900000001'
+        && String(withoutBase.result.source).startsWith('local:h1b-index@') && withoutBase.calls === 0) {
+      pass('check.mjs: with H1B_API_BASE unset the index still answers, and nothing is sent');
+    } else {
+      fail(`check.mjs default backend: calls=${withoutBase.calls} result=${JSON.stringify(withoutBase.result)} raw=${withoutBase.raw}`);
+    }
+  } catch (e) {
+    fail(`backend precedence tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ---------- check.mjs: the cache is backend-aware ----------
+// A cached answer belongs to whatever produced it, and the `source` field is
+// rebuilt from the CURRENT backend, so serving an entry another one wrote would
+// label its data as this one's. Entries written before this field existed carry
+// a `base` instead, so the first run after an upgrade has to re-fetch rather
+// than serve them blind, for negative entries too, where a stale "unknown" is
+// the answer that quietly ends a search.
 //
 // Ungated and offline: the child stubs globalThis.fetch (and counts calls)
-// before importing check.mjs, and every run uses a scratch cache dir. The base
-// values are fictional so the assertion never depends on which endpoint the
-// machine running the suite is configured for.
+// before importing check.mjs, every run uses a scratch cache dir, and
+// H1B_INDEX_PATH points where no index is so the HTTP backend is the one under
+// test. The base values are fictional so the assertion never depends on which
+// endpoint the machine running the suite is configured for.
 if (!existsSync(CHECK_PATH) || !existsSync(CACHE_PATH)) {
-  fail('check.mjs or lib/cache.mjs missing — the plugin ships them');
+  fail('check.mjs or lib/cache.mjs missing: the plugin ships them');
 } else {
   const { cacheKey } = await import(pathToFileURL(CACHE_PATH).href);
   const tmpDir = join(tmpdir(), `h1b-endpoint-cache-${randomUUID()}`);
+  // The marker check.mjs stamps entries with. It exists because what the
+  // numbers in an entry MEAN can change without the endpoint changing: the
+  // bump to 2 is when n_lca stopped being a certified count and became the
+  // filing count the tier sums.
+  const SCHEMA = 2;
   const CURRENT = 'https://cache-probe.example/v1';
   const OTHER = 'https://other-probe.example/v1';
   const NAME = 'CachedProbeCo';
@@ -897,7 +1474,7 @@ if (!existsSync(CHECK_PATH) || !existsSync(CACHE_PATH)) {
       execFile(
         process.execPath,
         [wrapperFile],
-        { env: { ...process.env, H1B_API_BASE: CURRENT }, timeout: 30_000 },
+        { env: { ...process.env, H1B_API_BASE: CURRENT, H1B_INDEX_PATH: NO_INDEX }, timeout: 30_000 },
         (_err, stdout) => {
           let outer = null;
           try { outer = JSON.parse(String(stdout || '')); } catch { /* reported by the caller */ }
@@ -912,27 +1489,47 @@ if (!existsSync(CHECK_PATH) || !existsSync(CACHE_PATH)) {
   const cases = [
     {
       label: 'an entry from the CURRENT endpoint is served without a request',
-      entry: { data: { displayName: 'Cached Same', employerId: 'same-1', profile: PROFILE, base: CURRENT } },
+      entry: { data: { displayName: 'Cached Same', employerId: 'same-1', profile: PROFILE, source: CURRENT, schema: SCHEMA } },
       ok: (r) => r.calls === 0 && r.result && r.result.employerId === 'same-1',
     },
     {
-      label: 'an entry from ANOTHER endpoint is a miss, not another instance’s answer',
-      entry: { data: { displayName: 'Cached Other', employerId: 'other-1', profile: PROFILE, base: OTHER } },
+      // The endpoint's URL does not change when the meaning of its numbers
+      // does, so provenance alone cannot catch this one: an entry written
+      // before the bump has a certified count sitting in `n_lca`, which the
+      // tier now reads as filings. The marker is what makes it a miss.
+      label: 'an entry written before the schema bump is a miss even from the current endpoint',
+      entry: { data: { displayName: 'Cached Pre-Bump', employerId: 'prebump-1', profile: PROFILE, source: CURRENT } },
+      ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched'
+        && r.result.totals && r.result.totals.n_certified === 777,
+    },
+    {
+      label: 'an entry from ANOTHER endpoint is a miss, not the answer from another instance',
+      entry: { data: { displayName: 'Cached Other', employerId: 'other-1', profile: PROFILE, source: OTHER } },
       ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
     },
     {
-      label: 'a pre-upgrade entry with no base re-fetches instead of serving blind',
-      entry: { data: { displayName: 'Cached Legacy', employerId: 'legacy-1', profile: PROFILE } },
+      label: 'an entry stamped with an index build is a miss on an endpoint',
+      entry: { data: { displayName: 'Cached Local', employerId: 'local-1', profile: PROFILE, source: 'local:h1b-index@sha256-000000000000' } },
+      ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
+    },
+    {
+      label: 'a pre-upgrade entry keyed on `base` re-fetches instead of serving blind',
+      entry: { data: { displayName: 'Cached Legacy', employerId: 'legacy-1', profile: PROFILE, base: CURRENT } },
+      ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
+    },
+    {
+      label: 'an entry with no provenance at all re-fetches instead of serving blind',
+      entry: { data: { displayName: 'Cached Ancient', employerId: 'ancient-1', profile: PROFILE } },
       ok: (r) => r.calls === 2 && r.result && r.result.employerId === 'refetched',
     },
     {
       label: 'a NEGATIVE entry from the current endpoint still short-circuits',
-      entry: { negative: true, data: { name: NAME, base: CURRENT } },
+      entry: { negative: true, data: { name: NAME, source: CURRENT, schema: SCHEMA } },
       ok: (r) => r.calls === 0 && r.result && r.result.found === false,
     },
     {
       label: 'a pre-upgrade NEGATIVE entry re-fetches rather than repeating a stale unknown',
-      entry: { negative: true, data: { name: NAME } },
+      entry: { negative: true, data: { name: NAME, base: CURRENT } },
       ok: (r) => r.calls === 2 && r.result && r.result.found === true,
     },
     {
@@ -951,88 +1548,441 @@ if (!existsSync(CHECK_PATH) || !existsSync(CACHE_PATH)) {
       continue;
     }
     if (c.ok(got)) pass(`endpoint cache: ${c.label}`);
-    else fail(`endpoint cache: ${c.label} — calls=${got.calls} result=${JSON.stringify(got.result)} raw=${got.raw}`);
+    else fail(`endpoint cache: ${c.label}: calls=${got.calls} result=${JSON.stringify(got.result)} raw=${got.raw}`);
   }
   await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 }
 
-// ---------- check.mjs — CLI JSON contract ----------
-// GATED: check.mjs is designed to hit api.surakshith.com on cache miss, so it
-// cannot run in a unit context without either network mocking (out of scope
-// for this file) or an explicit opt-in. Same env gate as the live-API block
-// below — a plain suite run must never touch the network or write to the
-// on-disk cache under data/cache/h1b/.
-if (process.env.H1B_API_TEST !== '1') {
-  warn('CLI test skipped (set H1B_API_TEST=1 to enable; the CLI hits the live API on cache miss)');
-} else if (!existsSync(CHECK_PATH)) {
-  fail('check.mjs missing — the plugin ships it');
+// ---------- check.mjs: cached answers are scoped to the index build ----------
+// The local equivalent of the endpoint scoping above. DOL republishes quarterly
+// and the refresh changes every number an employer has, so an answer from the
+// previous build must not survive into the next one. The stamp is the index
+// digest, which changes on any rebuild.
+//
+// There is no request to count here, so the seeded entry carries a distinctive
+// employer id: getting it back means it was served, and getting the fixture's
+// own id means the index was read again.
+if (!existsSync(CHECK_PATH) || !existsSync(INDEX_PATH)) {
+  fail('check.mjs or lib/index.mjs missing: the plugin ships them');
 } else {
-  // The endpoint is configurable, so the expected source prefix comes from the
-  // client rather than a literal host.
-  const { apiBase: liveBase } = await import(pathToFileURL(API_PATH).href);
-  const expectedBase = liveBase();
-  // --cache-dir keeps the run's 30-day negative entry out of the repo's real
-  // cache tree; the tmp dir is removed once the callback has resolved.
-  const cliCacheDir = join(tmpdir(), `h1b-cli-cache-${randomUUID()}`);
-  await new Promise((resolve) => {
-    const env = { ...process.env };
-    delete env.H1B_API_TOKEN;
-    const VALID_TIERS = ['strong', 'moderate', 'staffing-shop', 'weak', 'none', 'unknown'];
-    execFile(
-      process.execPath,
-      [CHECK_PATH, '--json', '--cache-dir', cliCacheDir, '__definitely_not_a_real_employer_xyz__'],
-      { env, timeout: 20_000 },
-      (err, stdout, _stderr) => {
-        const out = String(stdout || '');
-        let parsed = null;
-        try {
-          const jsonStart = out.indexOf('{');
-          if (jsonStart >= 0) parsed = JSON.parse(out.slice(jsonStart));
-        } catch { /* not JSON — fall through to summary-form assertions */ }
+  const { cacheKey } = await import(pathToFileURL(CACHE_PATH).href);
+  const idx = await import(pathToFileURL(INDEX_PATH).href);
+  const tmpDir = join(tmpdir(), `h1b-index-cache-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
+  const cacheDir = join(tmpDir, 'cache');
+  const NAME = 'Fixture Strong Corp';
+  try {
+    await writeFixtureIndex(fixture);
+    const current = await idx.indexSource(fixture);
 
-        if (parsed) {
-          // JSON path — strict.
-          if (VALID_TIERS.includes(parsed.friendlinessTier)) {
-            pass(`check.mjs --json: friendlinessTier "${parsed.friendlinessTier}" is one of the six valid strings`);
-          } else {
-            fail(`check.mjs --json: friendlinessTier = ${JSON.stringify(parsed.friendlinessTier)} (expected one of ${VALID_TIERS.join('|')})`);
-          }
-          if (typeof parsed.found === 'boolean') {
-            pass(`check.mjs --json: typeof found === "boolean" (${parsed.found})`);
-          } else {
-            fail(`check.mjs --json: typeof found = ${typeof parsed.found} (${JSON.stringify(parsed.found)})`);
-          }
-          if (parsed.source === undefined || parsed.source === null) {
-            pass('check.mjs --json: source absent (acceptable when found === false)');
-          } else if (typeof parsed.source === 'string' && parsed.source.startsWith(`${expectedBase}/`)) {
-            // Compared against the CONFIGURED endpoint, not a literal host: a
-            // self-hoster running this gated block would otherwise fail on a
-            // correct result.
-            pass(`check.mjs --json: source starts with the configured API base (${parsed.source})`);
-          } else {
-            fail(`check.mjs --json: source = ${JSON.stringify(parsed.source)} (expected undefined or ${expectedBase}/…)`);
-          }
+    const runWithEntry = async (entry) => {
+      await mkdir(cacheDir, { recursive: true });
+      await writeFile(
+        join(cacheDir, `${cacheKey(NAME)}.json`),
+        JSON.stringify({ ...entry, fetchedAt: new Date().toISOString() }, null, 2),
+        'utf8',
+      );
+      // H1B_API_BASE is unset explicitly, not just left alone: it now outranks
+      // an installed index, so a developer who has one configured would
+      // otherwise run this against their endpoint instead of the fixture.
+      const env = { ...process.env, H1B_INDEX_PATH: fixture };
+      delete env.H1B_API_BASE;
+      return new Promise((resolve) => {
+        execFile(
+          process.execPath,
+          [CHECK_PATH, NAME, '--json', '--cache-dir', cacheDir],
+          { env, timeout: 30_000 },
+          (_err, stdout) => {
+            let parsed = null;
+            try { parsed = JSON.parse(String(stdout || '')); } catch { /* reported by the caller */ }
+            resolve({ parsed, raw: String(stdout || '').slice(0, 200) });
+          },
+        );
+      });
+    };
+
+    const hit = await runWithEntry({
+      data: { displayName: 'Cached Build', employerId: 'cached-local-1', profile: { n_lca: 1, n_certified: 1, n_pwd: 0, n_perm: 0, does_gc: false, first_year: 2019, last_year: YEAR, red_flags: { staffing_shop: null } }, source: current, schema: 2 },
+    });
+    if (hit.parsed && hit.parsed.employerId === 'cached-local-1' && hit.parsed.source === current) {
+      pass('index cache: an entry stamped with the installed build is served as-is');
+    } else {
+      fail(`index cache same-build: ${hit.raw}`);
+    }
+
+    // The local backend self-heals on the digest alone, since a rebuilt index
+    // is a different source. The schema marker is still required, so an entry
+    // from before the bump cannot be served even at an unchanged digest.
+    const preBump = await runWithEntry({
+      data: { displayName: 'Cached Pre-Bump', employerId: 'cached-prebump-1', profile: { n_lca: 1, n_pwd: 0, n_perm: 0, does_gc: false, first_year: 2019, last_year: YEAR, red_flags: { staffing_shop: null } }, source: current },
+    });
+    if (preBump.parsed && preBump.parsed.employerId === '900000001' && preBump.parsed.totals.n_lca === 5000) {
+      pass('index cache: an entry without the schema marker is re-read from the installed index');
+    } else {
+      fail(`index cache pre-bump entry: ${preBump.raw}`);
+    }
+
+    const stale = await runWithEntry({
+      data: { displayName: 'Cached Old Build', employerId: 'cached-old-1', profile: { n_lca: 1, n_pwd: 0, n_perm: 0, does_gc: false, first_year: 2019, last_year: YEAR, red_flags: { staffing_shop: null } }, source: 'local:h1b-index@sha256-000000000000' },
+    });
+    if (stale.parsed && stale.parsed.employerId === '900000001' && stale.parsed.totals.n_lca === 5000) {
+      pass('index cache: an entry from a different build is re-read from the installed index');
+    } else {
+      fail(`index cache other-build: ${stale.raw}`);
+    }
+
+    const fromEndpoint = await runWithEntry({
+      data: { displayName: 'Cached Endpoint', employerId: 'endpoint-1', profile: { n_lca: 1, n_pwd: 0, n_perm: 0, does_gc: false, first_year: 2019, last_year: YEAR, red_flags: { staffing_shop: null } }, source: 'https://cache-probe.example/v1' },
+    });
+    if (fromEndpoint.parsed && fromEndpoint.parsed.employerId === '900000001') {
+      pass('index cache: an entry written by an endpoint is not served by the local backend');
+    } else {
+      fail(`index cache endpoint entry: ${fromEndpoint.raw}`);
+    }
+  } catch (e) {
+    fail(`index cache tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ---------- check.mjs: CLI JSON contract ----------
+// UNGATED, and that is the point of the local backend: the CLI can be driven
+// against a fixture index on every run, so the output contract is checked in CI
+// instead of only when someone remembered to set H1B_API_TEST=1 and was willing
+// to spend live rate limit on it. No network, and --cache-dir keeps the repo's
+// own cache tree untouched.
+if (!existsSync(CHECK_PATH)) {
+  fail('check.mjs missing: the plugin ships it');
+} else {
+  const VALID_TIERS = ['strong', 'moderate', 'staffing-shop', 'weak', 'none', 'unknown'];
+  const tmpDir = join(tmpdir(), `h1b-cli-${randomUUID()}`);
+  const fixture = join(tmpDir, 'index.ndjson.gz');
+  try {
+    await writeFixtureIndex(fixture, [
+      ...FIXTURE_RECORDS,
+      // Filed 66, certified none of them. 3,777 employers in the shipped build
+      // are shaped like this, and every one of them reported as tier `none`
+      // while the count came from the certified column: "the DOL data shows
+      // nothing" about an employer with 66 filings on record.
+      { k: '900000005', n: 'Fixture All Denied Inc', fy: 2019, ly: YEAR, filed: 66, cert: 0, pwd: 0, perm: 0, gc: false, sv: false, sh: 0, ns: 0 },
+    ]);
+
+    const runCli = (args) => new Promise((resolve) => {
+      const env = { ...process.env, H1B_INDEX_PATH: fixture };
+      delete env.H1B_API_TOKEN;
+      // Outranks the index now, so it has to be cleared for the fixture to be
+      // what answers on a machine that has an endpoint configured.
+      delete env.H1B_API_BASE;
+      execFile(
+        process.execPath,
+        [CHECK_PATH, ...args, '--cache-dir', join(tmpDir, `cache-${randomUUID()}`)],
+        { env, timeout: 30_000 },
+        (err, stdout) => resolve({ err, out: String(stdout || '') }),
+      );
+    });
+
+    // A name that resolves: every documented field, and a source naming the
+    // index build rather than a host.
+    const found = await runCli(['Fixture Strong Corp', '--json']);
+    let parsed = null;
+    try { parsed = JSON.parse(found.out); } catch { /* asserted below */ }
+    if (parsed && VALID_TIERS.includes(parsed.friendlinessTier)) {
+      pass(`check.mjs --json: friendlinessTier "${parsed.friendlinessTier}" is one of the six valid strings`);
+    } else {
+      fail(`check.mjs --json: friendlinessTier = ${JSON.stringify(parsed && parsed.friendlinessTier)}`);
+    }
+    if (parsed && typeof parsed.found === 'boolean' && parsed.found === true) {
+      pass('check.mjs --json: typeof found === "boolean" (true for a resolved name)');
+    } else {
+      fail(`check.mjs --json: found = ${JSON.stringify(parsed && parsed.found)}`);
+    }
+    if (parsed && typeof parsed.source === 'string' && parsed.source.startsWith('local:h1b-index@')) {
+      pass(`check.mjs --json: source names the index build (${parsed.source})`);
+    } else {
+      fail(`check.mjs --json: source = ${JSON.stringify(parsed && parsed.source)}`);
+    }
+    const shaped = Boolean(parsed) && Boolean(parsed.totals) && Boolean(parsed.redFlags)
+      && parsed.employerId === '900000001'
+      && parsed.hasSponsorshipHistory === true
+      && parsed.totals.n_lca === 5000 && parsed.totals.n_certified === 4800
+      && parsed.totals.does_gc === true
+      && typeof parsed.fetchedAt === 'string';
+    if (shaped) {
+      pass('check.mjs --json: the full envelope (totals, redFlags, employerId, fetchedAt) is populated from the index');
+    } else {
+      fail(`check.mjs --json envelope: ${found.out.slice(0, 240)}`);
+    }
+
+    // The tier comes off what was filed, and the certified count rides along
+    // for the report to print. An employer that filed 66 times and had none of
+    // them certified is not an employer the data shows nothing about, which is
+    // exactly what `none` says and what this used to report.
+    const denied = await runCli(['Fixture All Denied Inc', '--json']);
+    let deniedParsed = null;
+    try { deniedParsed = JSON.parse(denied.out); } catch { /* asserted below */ }
+    const deniedOk = Boolean(deniedParsed)
+      && deniedParsed.totals.n_lca === 66
+      && deniedParsed.totals.n_certified === 0
+      && deniedParsed.hasSponsorshipHistory === true
+      && deniedParsed.friendlinessTier === 'moderate';
+    if (deniedOk) {
+      pass('check.mjs --json: an all-denied filer reports its filings (tier "moderate", n_lca 66, n_certified 0), not "none"');
+    } else {
+      fail(`check.mjs --json all-denied: ${denied.out.slice(0, 240)}`);
+    }
+
+    // A name that does not resolve: still the full envelope, still exit 0, and
+    // `unknown` rather than `none`, which mean different things.
+    const missing = await runCli(['__definitely_not_a_real_employer_xyz__', '--json']);
+    let missParsed = null;
+    try { missParsed = JSON.parse(missing.out); } catch { /* asserted below */ }
+    const missShaped = Boolean(missParsed)
+      && missParsed.found === false
+      && missParsed.friendlinessTier === 'unknown'
+      && missParsed.employerId === null
+      && Boolean(missParsed.totals) && Boolean(missParsed.redFlags)
+      && missParsed.error === undefined;
+    if (missShaped && !missing.err) {
+      pass('check.mjs --json: an unresolved name is a clean "unknown" envelope, exit 0');
+    } else {
+      fail(`check.mjs --json unresolved: err=${missing.err && missing.err.message} out=${missing.out.slice(0, 200)}`);
+    }
+
+    // Summary form: one line, tier prefix first.
+    const summary = await runCli(['Fixture Staffing LLC', '--summary']);
+    const firstLine = summary.out.split(/\r?\n/).map(l => l.trim()).find(l => l.length > 0) || '';
+    if (/^staffing-shop: /.test(firstLine) && summary.out.trim().split('\n').length === 1) {
+      pass(`check.mjs summary: one line, tier prefix first ("${firstLine.slice(0, 60)}")`);
+    } else {
+      fail(`check.mjs summary: ${JSON.stringify(firstLine)}`);
+    }
+
+    // No name at all is a usage error, and must not be read as a lookup.
+    await new Promise((resolve) => {
+      execFile(process.execPath, [CHECK_PATH], { env: { ...process.env, H1B_INDEX_PATH: fixture }, timeout: 20_000 }, (err, _stdout, stderr) => {
+        const code = (err && typeof err.code === 'number') ? err.code : 0;
+        if (code === 2 && /Usage: node plugins\/h1b-sponsor\/check\.mjs/.test(String(stderr || ''))) {
+          pass('check.mjs: no company name exits 2 with usage on stderr');
         } else {
-          // Summary path — strict regex: `<tier>:` prefix on the first non-blank line.
-          const firstLine = out.split(/\r?\n/).map(l => l.trim()).find(l => l.length > 0) || '';
-          if (/^(strong|moderate|staffing-shop|weak|none|unknown):/.test(firstLine)) {
-            pass(`check.mjs summary: first line begins with a valid tier prefix ("${firstLine.slice(0, 60)}")`);
-          } else {
-            fail(`check.mjs: neither JSON envelope nor tier-prefixed summary. First line = ${JSON.stringify(firstLine)}, err=${err && err.message}`);
-          }
+          fail(`check.mjs no args: exit ${code}, stderr=${String(stderr || '').slice(0, 120)}`);
         }
         resolve();
-      },
-    );
+      });
+    });
+  } catch (e) {
+    fail(`CLI contract tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ---------- install-index.mjs: download, verify, install ----------
+// Offline: installIndex takes an injectable fetch with fetchWithTimeout's
+// shape, so every branch is testable without reaching GitHub. The one that
+// matters most is the mismatch: a download that does not hash to the published
+// digest must leave nothing behind, because whatever is on disk is what every
+// later lookup will believe.
+//
+// The release publishes index-latest.json, a pointer naming the quarter's file
+// and its sha256, plus that file. Both are read from a permanent `index-latest`
+// tag rather than GitHub's /releases/latest/download/ path, which resolves to
+// the newest release of any kind and would break every client the day the data
+// repo cuts a code release. Both facts are asserted below, because they are a
+// contract with a repo this suite cannot see.
+if (!existsSync(INSTALL_PATH)) {
+  fail('install-index.mjs missing: the plugin ships it');
+} else {
+  if (run(NODE, ['--check', INSTALL_PATH]) !== null) pass('install-index.mjs parses (node --check)');
+  else fail('install-index.mjs failed node --check');
+
+  await new Promise((resolve) => {
+    execFile(process.execPath, [INSTALL_PATH, '--nonsense'], { timeout: 20_000 }, (err, _stdout, stderr) => {
+      const code = (err && typeof err.code === 'number') ? err.code : 0;
+      if (code === 2 && /install-index\.mjs/.test(String(stderr || ''))) {
+        pass('install-index.mjs (unknown flag): exit 2 with usage on stderr');
+      } else {
+        fail(`install-index.mjs unknown flag: exit ${code}, stderr=${String(stderr || '').slice(0, 120)}`);
+      }
+      resolve();
+    });
   });
-  await rm(cliCacheDir, { recursive: true, force: true }).catch(() => {});
+
+  const tmpDir = join(tmpdir(), `h1b-install-${randomUUID()}`);
+  try {
+    await mkdir(tmpDir, { recursive: true });
+    const { installIndex } = await import(pathToFileURL(INSTALL_PATH).href);
+    const idx = await import(pathToFileURL(INDEX_PATH).href);
+
+    // The bytes a release would publish: a real gzipped index, and its digest.
+    const payload = gzipSync(Buffer.from(FIXTURE_RECORDS.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8'));
+    const trueDigest = createHash('sha256').update(payload).digest('hex');
+    const ASSET_NAME = 'index-2026Q2.ndjson.gz';
+    const POINTER_URL = 'https://github.com/msampath/h1b-sponsor-data/releases/download/index-latest/index-latest.json';
+
+    let calls = 0;
+    const urls = [];
+    // `pointer` is served verbatim so a non-JSON body is expressible; pass an
+    // object to publish a well-formed one.
+    const fakeRelease = (pointer) => async (url, _opts, consume) => {
+      calls++;
+      urls.push(String(url));
+      if (String(url).endsWith('.json')) {
+        const text = typeof pointer === 'string' ? pointer : JSON.stringify(pointer);
+        return consume({ status: 200, headers: { get: () => null }, text: async () => text });
+      }
+      let sent = false;
+      return consume({
+        status: 200,
+        headers: { get: () => null },
+        body: {
+          getReader: () => ({
+            read: async () => (sent ? { done: true } : ((sent = true), { done: false, value: payload })),
+            cancel: async () => {},
+            releaseLock: () => {},
+          }),
+        },
+      });
+    };
+    const goodPointer = (over = {}) => ({
+      version: '2026Q2',
+      built_at: '2026-07-01T00:00:00Z',
+      employers: 335626,
+      bytes: payload.length,
+      sha256: trueDigest,
+      filename: ASSET_NAME,
+      ...over,
+    });
+
+    // Mismatch: a digest that does not describe the bytes.
+    const badTarget = join(tmpDir, 'bad', 'index.ndjson.gz');
+    const bad = await installIndex({ fetchImpl: fakeRelease(goodPointer({ sha256: 'f'.repeat(64) })), targetPath: badTarget });
+    const leftovers = (await readdir(join(tmpDir, 'bad')).catch(() => [])).filter(f => f.endsWith('.tmp'));
+    if (!bad.ok && /checksum mismatch/.test(bad.message) && !existsSync(badTarget) && leftovers.length === 0) {
+      pass('installIndex: a checksum mismatch installs nothing and leaves no partial file behind');
+    } else {
+      fail(`installIndex mismatch: ${JSON.stringify(bad)} target=${existsSync(badTarget)} leftovers=${JSON.stringify(leftovers)}`);
+    }
+
+    // Everything the pointer can be wrong about is refused before a byte of the
+    // index is downloaded: it names the file to fetch and carries the only
+    // digest standing between a substituted download and a lookup that trusts
+    // it, so neither field may be taken on faith.
+    const pointerCases = [
+      { label: 'a pointer that is not JSON', pointer: 'not json at all', expect: /not JSON/ },
+      { label: 'a pointer with no sha256', pointer: goodPointer({ sha256: undefined }), expect: /sha256/ },
+      { label: 'a pointer whose sha256 is not a digest', pointer: goodPointer({ sha256: 'not-a-digest' }), expect: /sha256/ },
+      { label: 'a pointer with no filename', pointer: goodPointer({ filename: undefined }), expect: /unusable index filename/ },
+      { label: 'a pointer whose filename walks out of the release', pointer: goodPointer({ filename: '../../../etc/passwd' }), expect: /unusable index filename/ },
+    ];
+    for (const c of pointerCases) {
+      const target = join(tmpDir, `reject-${randomUUID()}`, 'index.ndjson.gz');
+      const before = calls;
+      const got = await installIndex({ fetchImpl: fakeRelease(c.pointer), targetPath: target });
+      // Exactly one request: the pointer read, and nothing after it.
+      if (!got.ok && c.expect.test(got.message) && !existsSync(target) && calls - before === 1) {
+        pass(`installIndex: ${c.label} is refused before the index is downloaded`);
+      } else {
+        fail(`installIndex ${c.label}: ${JSON.stringify(got)} requests=${calls - before}`);
+      }
+    }
+
+    // Happy path: verified bytes land at the target with a sidecar, and the
+    // result is readable by the backend that will use it.
+    const goodTarget = join(tmpDir, 'good', 'index.ndjson.gz');
+    urls.length = 0;
+    const good = await installIndex({ fetchImpl: fakeRelease(goodPointer()), targetPath: goodTarget });
+    if (good.ok && good.digest === trueDigest && good.bytes === payload.length && existsSync(goodTarget)) {
+      pass('installIndex: a verified download is installed and reports its digest and size');
+    } else {
+      fail(`installIndex happy path: ${JSON.stringify(good)}`);
+    }
+    // The two URLs are the contract with the data repo: a fixed `index-latest`
+    // tag, the pointer by its documented name, then the file the pointer names.
+    // /releases/latest/download/ must never appear; it resolves to the newest
+    // release of any kind, so a code release in that repo would redirect every
+    // client here at something that is not an index.
+    const assetUrlUsed = `https://github.com/msampath/h1b-sponsor-data/releases/download/index-latest/${ASSET_NAME}`;
+    if (urls.length === 2 && urls[0] === POINTER_URL && urls[1] === assetUrlUsed) {
+      pass('installIndex: reads the pointer at the fixed index-latest tag, then the file it names');
+    } else {
+      fail(`installIndex urls: ${JSON.stringify(urls)}`);
+    }
+    let meta = null;
+    try { meta = JSON.parse(await readFile(idx.metaPath(goodTarget), 'utf8')); } catch { /* asserted below */ }
+    if (meta && meta.sha256 === trueDigest && meta.bytes === payload.length && typeof meta.installedAt === 'string') {
+      pass('installIndex: the sidecar records the verified digest, size and install time');
+    } else {
+      fail(`installIndex sidecar: ${JSON.stringify(meta)}`);
+    }
+    // The quarter, kept so the installed build can be named later without
+    // asking GitHub again.
+    if (meta && meta.version === '2026Q2' && meta.filename === ASSET_NAME && good.version === '2026Q2') {
+      pass('installIndex: the sidecar records which quarter is installed');
+    } else {
+      fail(`installIndex version: sidecar=${JSON.stringify(meta && meta.version)} result=${JSON.stringify(good.version)}`);
+    }
+    const resolved = await idx.resolveEmployer('Fixture Strong Corp', { indexPath: goodTarget });
+    if (resolved && resolved.id === '900000001') {
+      pass('installIndex: the installed file is a working index');
+    } else {
+      fail(`installIndex readback: ${JSON.stringify(resolved)}`);
+    }
+    if (await idx.indexSource(goodTarget) === `local:h1b-index@sha256-${trueDigest.slice(0, 12)}`) {
+      pass('installIndex: the sidecar digest is what stamps cached answers');
+    } else {
+      fail(`installIndex source stamp: ${await idx.indexSource(goodTarget)}`);
+    }
+
+    // An installed index is not replaced by accident: a re-run without --force
+    // stops before it reaches the network at all.
+    const before = calls;
+    const again = await installIndex({ fetchImpl: fakeRelease(goodPointer()), targetPath: goodTarget });
+    if (!again.ok && again.exitCode === 0 && /--force/.test(again.message) && calls === before) {
+      pass('installIndex: an existing index is kept, and no request is made, without --force');
+    } else {
+      fail(`installIndex no-force: ${JSON.stringify(again)} calls=${calls - before}`);
+    }
+
+    // A tmp-file write failure (disk full, an unwritable target) must come
+    // back as the envelope, not escape as an uncaughtException off the write
+    // stream; the crash path also skipped the cleanup that removes the
+    // partial .tmp file. The trigger is platform-specific, an invalid
+    // filename character on Windows and an unwritable directory elsewhere;
+    // both surface as the same 'error' event a mid-write ENOSPC raises.
+    if (process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0) {
+      warn('installIndex write-failure test skipped (root ignores directory modes)');
+    } else {
+      const deniedDir = join(tmpDir, 'unwritable');
+      await mkdir(deniedDir, { recursive: true });
+      let deniedTarget;
+      if (process.platform === 'win32') {
+        deniedTarget = join(deniedDir, 'index?.ndjson.gz');
+      } else {
+        await chmod(deniedDir, 0o555);
+        deniedTarget = join(deniedDir, 'index.ndjson.gz');
+      }
+      const denied = await installIndex({ fetchImpl: fakeRelease(goodPointer()), targetPath: deniedTarget });
+      const deniedLeftovers = (await readdir(deniedDir).catch(() => [])).filter(f => f.endsWith('.tmp'));
+      if (!denied.ok && denied.exitCode === 1 && /could not install the index/.test(denied.message) && deniedLeftovers.length === 0) {
+        pass('installIndex: a tmp-file write failure returns the envelope and leaves no partial file');
+      } else {
+        fail(`installIndex write failure: ${JSON.stringify(denied)} leftovers=${JSON.stringify(deniedLeftovers)}`);
+      }
+      if (process.platform !== 'win32') await chmod(deniedDir, 0o755).catch(() => {});
+    }
+  } catch (e) {
+    fail(`install-index tests crashed: ${e.message}`);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 // ---------- Live-API integration (guarded) ----------
 if (process.env.H1B_API_TEST !== '1') {
   warn('live-api tests skipped (set H1B_API_TEST=1 to enable)');
 } else if (!existsSync(API_PATH) || !existsSync(TIER_PATH)) {
-  fail('lib/api.mjs or lib/tier.mjs missing — the plugin ships them');
+  fail('lib/api.mjs or lib/tier.mjs missing: the plugin ships them');
 } else {
   try {
     const api = await import(pathToFileURL(API_PATH).href);
@@ -1063,13 +2013,13 @@ if (process.env.H1B_API_TEST !== '1') {
   }
 }
 
-// ---------- token.mjs — key-request CLI ----------
+// ---------- token.mjs: key-request CLI ----------
 // The argument-handling checks are offline: token.mjs validates argv before it
 // opens a socket, so a bad-usage spawn never reaches the network. Only the
-// mint itself is gated, behind its OWN env var rather than H1B_API_TEST —
+// mint itself is gated, behind its OWN env var rather than H1B_API_TEST,
 // reading the API is cheap and repeatable, minting is neither.
 if (!existsSync(TOKEN_PATH)) {
-  fail('token.mjs missing — the plugin ships it');
+  fail('token.mjs missing: the plugin ships it');
 } else {
   if (run(NODE, ['--check', TOKEN_PATH]) !== null) pass('token.mjs parses (node --check)');
   else fail('token.mjs failed node --check');

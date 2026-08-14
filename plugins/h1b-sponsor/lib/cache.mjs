@@ -50,7 +50,7 @@ export async function readCache(name, opts = {}) {
   }
   if (!entry || typeof entry !== 'object' || typeof entry.fetchedAt !== 'string') return null;
   // A well-formed entry always carries a data payload (writeCache guarantees
-  // it) — an entry without one is malformed, so fail closed.
+  // it): an entry without one is malformed, so fail closed.
   if (!('data' in entry)) return null;
 
   const fetchedAt = Date.parse(entry.fetchedAt);
@@ -72,7 +72,10 @@ export async function writeCache(name, data, opts = {}) {
 
   await mkdir(cacheDir, { recursive: true });
 
-  const entry = { data, fetchedAt: new Date().toISOString() };
+  // The caller may pin the timestamp it already printed, so a later warm
+  // read serves back exactly the bytes the original run reported.
+  const fetchedAt = typeof opts.fetchedAt === 'string' ? opts.fetchedAt : new Date().toISOString();
+  const entry = { data, fetchedAt };
   if (negative) entry.negative = true;
 
   const finalPath = entryPath(cacheDir, name);
