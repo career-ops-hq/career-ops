@@ -845,6 +845,7 @@ async function main() {
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
+          recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.icimsTruncated) {
@@ -882,6 +883,7 @@ async function main() {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
+        saveDeadBoards(DEAD_BOARDS_PATH, deadBoards);
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
@@ -908,6 +910,7 @@ async function main() {
         try {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
+            recordBoardResult(deadBoards, name, boardKey(entry), 200);
             await processJobs(jobs, name, source.provider);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
@@ -916,6 +919,7 @@ async function main() {
           })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {
           errors++;
+          recordBoardResult(deadBoards, name, boardKey(entry), err?.status);
           if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
         }
       }

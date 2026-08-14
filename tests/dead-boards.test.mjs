@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pass, fail } from './helpers.mjs';
@@ -22,6 +22,10 @@ try {
   recordBoardResult(rows, 'lever', board, 429, now);
   if (shouldSkipDeadBoard(rows, 'lever', board, now)) pass('429 does not create or clear a dead-board record');
   else fail('429 incorrectly changed dead-board state');
+  const cleanBoard = 'https://jobs.example.test/clean';
+  recordBoardResult(rows, 'lever', cleanBoard, 429, now);
+  if (!rows.has(`lever\t${cleanBoard}`)) pass('429 does not create a dead-board record');
+  else fail('429 incorrectly created a dead-board record');
   recordBoardResult(rows, 'lever', board, 200, now);
   if (!shouldSkipDeadBoard(rows, 'lever', board, now)) pass('a successful response clears a retired board');
   else fail('a successful response left a board retired');
@@ -29,8 +33,23 @@ try {
   recordBoardResult(rows, 'lever', board, 404, now);
   recordBoardResult(rows, 'lever', board, 404, now);
   saveDeadBoards(file, rows);
-  if (/^ats\tboard\tmisses\tlast_checked\nlever\t/.test(readFileSync(file, 'utf8'))) pass('dead-board store persists the safe TSV contract');
+  const serialized = readFileSync(file, 'utf8');
+  if (/^ats\tboard\tmisses\tlast_checked\nlever\thttps:\/\/jobs\.example\.test\/acme\t3\t2026-08-14T00:00:00\.000Z\n$/.test(serialized)) pass('dead-board store persists the safe TSV contract');
   else fail('dead-board store wrote an invalid TSV contract');
+  const reloaded = loadDeadBoards(file, now);
+  if (shouldSkipDeadBoard(reloaded, 'lever', board, now)) pass('saved dead-board state reloads into the same skip decision');
+  else fail('saved dead-board state did not reload correctly');
+  const malformedFile = join(root, 'data', 'malformed.tsv');
+  writeFileSync(malformedFile, `${serialized}lever\tbad\tNaN\tnot-a-date\n`, 'utf8');
+  if (loadDeadBoards(malformedFile, now).size === 1) pass('malformed dead-board rows are ignored on reload');
+  else fail('malformed dead-board rows were not ignored on reload');
+  if (shouldSkipDeadBoard(reloaded, 'lever', board, now + 29 * 86_400_000) && !shouldSkipDeadBoard(reloaded, 'lever', board, now + 30 * 86_400_000)) pass('retired boards re-probe at the 30-day boundary');
+  else fail('retired board re-probe window has the wrong boundary');
+  const partial = new Map();
+  recordBoardResult(partial, 'lever', board, 404, now);
+  recordBoardResult(partial, 'lever', board, 500, now);
+  if (!partial.has(`lever\t${board}`)) pass('transient errors clear partial 404 progress');
+  else fail('transient errors kept partial 404 progress');
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
