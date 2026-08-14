@@ -177,7 +177,11 @@ async function withRetry(request, ctx, policy = {}) {
       return await request();
     } catch (err) {
       lastErr = err;
-      err.attempts = attempt + 1;
+      // A rejection isn't guaranteed to be an object — assigning a property to
+      // a primitive (a string, a number) throws in strict mode (ESM always is),
+      // which would replace the real rejection with an unrelated TypeError
+      // right here in the catch, before any caller sees it.
+      if (err !== null && (typeof err === 'object' || typeof err === 'function')) err.attempts = attempt + 1;
       if (attempt === retries || !isRetryableError(err)) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
@@ -220,7 +224,11 @@ export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
  * of the content type. jobvite's XML feed answers `429 Retry-After: 30` from
  * the second request onward — reliably enough that scanning two tenants
  * back-to-back trips it — and a scraped HTML board is just as capable of a
- * transient 5xx as a JSON API.
+ * transient 5xx as a JSON API. Also used by providers that resolve config
+ * (e.g. a board id) from a one-shot page fetch before pagination even starts
+ * — that single request used to have no retry at all, so a single
+ * DNS/TLS/connection blip on it failed the whole provider before a single
+ * page was ever fetched.
  *
  * @param {{fetchText: Function, sleep?: Function}} ctx - Transport context.
  * @param {string} url - Absolute URL.

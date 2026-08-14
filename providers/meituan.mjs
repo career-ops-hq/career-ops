@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
 // (no auth, no browser, no special headers). Verified 2026-07 by capturing the
 // site's own XHR:

@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Tencent careers provider — hits the public careers.tencent.com JSON API.
 // Zero-token, no browser needed. Verified 2026-07: GET returns structured
 // JSON with title, location, BG, category, JD text and last-update time.
