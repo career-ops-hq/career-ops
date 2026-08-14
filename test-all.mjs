@@ -6547,6 +6547,29 @@ try {
       fail(`resolveAppliedDate cross-ref-only: got ${JSON.stringify(r)}`);
     }
   }
+  // A `#NNN` carrying a req/job/posting/ref label is THIS row's ATS identifier,
+  // not a pointer at another tracker row. Without this scoping the row's own
+  // posting id disqualified the row's own apply date — a false positive that
+  // costs a real measured date, so the extra rule earns its keep (#2610 review).
+  for (const [note, why] of [
+    ['Req #1311 - applied 2026-08-06.', 'req'],
+    ['Job ID #65136; applied 2026-08-06.', 'job id'],
+    ['Posting #4471 — applied 2026-08-06.', 'posting'],
+    ['Ref #R2857957 applied 2026-08-06.', 'ref'],
+  ]) {
+    if (cadence.parseAppliedDate(note) === '2026-08-06') {
+      pass(`parseAppliedDate reads a "${why}"-labelled #id as this row's own, not a cross-reference`);
+    } else {
+      fail(`parseAppliedDate "${why}"-labelled id: got ${JSON.stringify(cadence.parseAppliedDate(note))}, expected 2026-08-06`);
+    }
+  }
+  // ...and the exemption must not blunt the rule it scopes: a BARE #NNN in the
+  // same shape is still a cross-reference.
+  if (cadence.parseAppliedDate('Sibling #1311 - applied 2026-08-06.') === null) {
+    pass('parseAppliedDate still treats a bare #id in the same shape as a cross-reference');
+  } else {
+    fail('the req-label exemption swallowed a genuine cross-reference');
+  }
   // A malformed value must be rejected, not silently truncated to a plausible
   // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
   // measured application date and quietly shift the whole cadence — worse than

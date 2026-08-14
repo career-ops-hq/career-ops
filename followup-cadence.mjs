@@ -184,10 +184,17 @@ export function parseAppliedDate(notes, options = {}) {
   if (own.length > 0) return own[0].date;
 
   // Every apply-date in the note belongs to another row, so this note does not
-  // state when THIS row was submitted. Returning null degrades to the labelled
-  // evaluation-date fallback, which is the honest answer — the alternative is
-  // reporting a real but foreign date as `appDateSource: 'notes'`, i.e.
-  // measured, which is precisely the failure the header comment warns about.
+  // state when THIS row was submitted. Returning null is the honest answer —
+  // the alternative is reporting a real but foreign date as
+  // `appDateSource: 'notes'`, i.e. measured, which is precisely the failure the
+  // header comment warns about.
+  //
+  // Both consumers degrade to a LABELLED evaluation-date fallback:
+  // resolveAppliedDate below reports `appDateSource: 'evaluation-date-fallback'`,
+  // and followup-seed.mjs reports `appDateSource: 'evaluation-date'`. That was
+  // not true when this was written — seed fell through to today(), unlabelled,
+  // which made an old application look new and silently reset its follow-up
+  // clock. #2607 changed seed's fallback so the claim below actually holds.
   return null;
 }
 
@@ -196,6 +203,14 @@ export function parseAppliedDate(notes, options = {}) {
 // that an unrelated "#123" earlier in a long note does not reach forward and
 // disqualify a genuine date.
 const CROSS_REF_LOOKBACK = 120;
+
+// A `#NNN` immediately preceded by a req/job/posting/reference label is an ATS
+// identifier for THIS row, not a pointer at another tracker row. Anchored at the
+// end so it only matches a label sitting directly before the `#`, and the
+// separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
+// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Notes column.
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
 
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
@@ -211,12 +226,13 @@ const CROSS_REF_LOOKBACK = 120;
  * 2026-08-04" is still about #154. Treating `;` as a break let that foreign
  * date through as measured. Where the reading is genuinely ambiguous the tie
  * goes to "cross-referenced", because the two errors are not symmetric — a
- * false positive degrades to the labelled evaluation-date fallback, while a
- * false negative reports another row's date as this row's measured one.
+ * false positive degrades to a fallback that is LABELLED as not-measured, while
+ * a false negative reports another row's date as this row's measured one.
  *
  * Both failure directions are survivable, which is why a heuristic is
- * acceptable here: a false positive degrades to the labelled evaluation-date
- * fallback, and a false negative is just today's behaviour.
+ * acceptable here: a false positive degrades to the evaluation date, labelled
+ * as a fallback by both consumers (see the note in parseAppliedDate), and a
+ * false negative is just the pre-#2607 behaviour. Neither invents a date.
  *
  * @param {string} text
  * @param {number} index - offset of the "applied" match within `text`
@@ -225,7 +241,17 @@ const CROSS_REF_LOOKBACK = 120;
 function isCrossReferencedMention(text, index) {
   const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
   let refEnd = -1;
-  for (const m of window.matchAll(/#\d+\b/g)) refEnd = m.index + m[0].length;
+  for (const m of window.matchAll(/#\d+\b/g)) {
+    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
+    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
+    // this row's own date, and reading it as a cross-reference would discard a
+    // genuine date. The label vocabulary is the one merge-tracker.mjs already
+    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // being written the same way rather than imported — merge-tracker's regex
+    // also captures the id itself, which is not wanted here.
+    if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
+    refEnd = m.index + m[0].length;
+  }
   if (refEnd === -1) return false;
   return !/[.!?]\s/.test(window.slice(refEnd));
 }
