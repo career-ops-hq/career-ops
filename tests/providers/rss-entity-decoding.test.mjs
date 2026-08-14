@@ -137,26 +137,75 @@ for (const [label, getTitle] of checked) {
 // a provider that imports the shared decoder must not also declare its own,
 // and the commit that re-introduces one fails here rather than years later.
 //
-// Scoped to importers on purpose. providers/jobvite.mjs still carries a
-// private decoder (a correct one — isEmittableCodePoint was upstreamed from
-// it in #2623) and does not import the shared module, so it is legitimately
-// outside this set rather than silently excused by an exception list.
+// Two passes, because "imports the shared decoder" alone is escapable: a
+// provider that DROPS the import while restoring a private copy would simply
+// fall out of a discovery sweep, and a correct-looking copy passes every
+// output case above (CodeRabbit on this PR).
+//
+//   1. The seven files #2818 migrated are named explicitly. That set is
+//      historical and does not move, so a hardcoded list is the right shape:
+//      each MUST still import the shared module, and dropping the import is
+//      itself the failure.
+//   2. Every other importer is swept dynamically, so a provider added later
+//      that grows its own copy is caught without anyone updating a list.
+//
+// providers/jobvite.mjs is in neither set: it still carries a private decoder
+// (a correct one — isEmittableCodePoint was upstreamed from it in #2623) and
+// does not import the shared module, so it is legitimately outside this guard
+// rather than silently excused by an exception list.
 {
   const { readdirSync, readFileSync } = await import('fs');
   const dir = join(ROOT, 'providers');
-  const offenders = [];
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.mjs') || file === '_html-entities.mjs') continue;
-    const src = readFileSync(join(dir, file), 'utf-8');
-    if (!src.includes("from './_html-entities.mjs'")) continue;
-    // Declarations only — remotli.mjs names String.fromCodePoint in a comment
-    // explaining why it uses the shared decoder, which is not a private copy.
-    const local = src.match(/function\s+(decodeEntities|decodeXmlEntities|fromCodePoint)\b/);
-    if (local) offenders.push(`${file} (declares ${local[1]})`);
+  const SHARED_IMPORT = "from './_html-entities.mjs'";
+  const PRIVATE_DECL = /function\s+(decodeEntities|decodeXmlEntities|fromCodePoint)\b/;
+  // Declarations only — remotli.mjs names String.fromCodePoint in a comment
+  // explaining why it uses the shared decoder, which is not a private copy.
+
+  const MIGRATED = [
+    'jobspresso.mjs', 'higheredjobs.mjs', 'nodesk.mjs', 'larajobs.mjs',
+    'personio.mjs', 'teamtailor.mjs', 'weworkremotely.mjs',
+  ];
+
+  let files;
+  try {
+    files = readdirSync(dir);
+  } catch (e) {
+    files = null;
+    fail(`cannot read ${dir}: ${e.message}`);
   }
-  if (offenders.length === 0) {
-    pass('no provider both imports the shared decoder and declares a private one');
-  } else {
-    fail(`private entity decoder re-introduced in: ${offenders.join(', ')}`);
+
+  if (files) {
+    const offenders = [];
+
+    for (const file of MIGRATED) {
+      let src;
+      try {
+        src = readFileSync(join(dir, file), 'utf-8');
+      } catch (e) {
+        offenders.push(`${file} (unreadable: ${e.message})`);
+        continue;
+      }
+      if (!src.includes(SHARED_IMPORT)) {
+        offenders.push(`${file} (no longer imports the shared decoder)`);
+        continue;
+      }
+      const local = src.match(PRIVATE_DECL);
+      if (local) offenders.push(`${file} (declares ${local[1]})`);
+    }
+
+    for (const file of files) {
+      if (!file.endsWith('.mjs') || file === '_html-entities.mjs') continue;
+      if (MIGRATED.includes(file)) continue; // already asserted, and more strictly
+      const src = readFileSync(join(dir, file), 'utf-8');
+      if (!src.includes(SHARED_IMPORT)) continue;
+      const local = src.match(PRIVATE_DECL);
+      if (local) offenders.push(`${file} (declares ${local[1]})`);
+    }
+
+    if (offenders.length === 0) {
+      pass('no provider both imports the shared decoder and declares a private one');
+    } else {
+      fail(`private entity decoder re-introduced in: ${offenders.join(', ')}`);
+    }
   }
 }
