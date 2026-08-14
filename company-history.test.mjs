@@ -150,6 +150,7 @@ console.log('\n--- 1. multi-source 3-company scenario ---');
   eq('Silent Systems silent fact appliedDate comes from notes, not the date column', silentFact.appliedDate, '2026-03-10');
   eq('Silent Systems silent fact confidence: confirmed-by-followups (1 follow-up joined by appNum)', silentFact.confidence, 'confirmed-by-followups');
   ok('Silent Systems silent fact clearInstruction references set-status', typeof silentFact.clearInstruction === 'string' && silentFact.clearInstruction.includes('set-status'));
+  ok('Silent Systems silent fact clearInstruction selects the row via --row and records the response date via --on, not a --note workaround', silentFact.clearInstruction.includes('--row') && silentFact.clearInstruction.includes('--on') && !silentFact.clearInstruction.includes('--note'));
 
   // --- postingChurn cluster shape (only role/repostCount/daysSpan/lastSeen survive the mapping) ---
   const churnCluster = silent.postingChurn.clusters[0];

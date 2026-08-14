@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, e
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -559,8 +559,42 @@ export function loadCanonicalStates(statesPath) {
  * @param {{id:string,label:string,aliases:string[]}[]} states - From loadCanonicalStates().
  * @returns {string|null} Canonical label (e.g. "Applied"), or null when unknown.
  */
+/**
+ * Case-fold a status the way a HUMAN typed it, not the way JS lowercases it.
+ *
+ * JavaScript lowercases the Turkish dotted capital `İ` (U+0130) to `i` plus a
+ * COMBINING DOT ABOVE (U+0307), and the mark survives — so `TEKLİF` becomes
+ * `tekli\u0307f`, which equals no alias anyone would ever write. Turkish
+ * uppercase status words are ordinary, so every all-caps Turkish row missed.
+ *
+ * Dropping U+0307 after an NFKC lowercase repairs it for every alias at once, rather
+ * than listing the ~32 mark-bearing spellings the aliases would otherwise need
+ * — a list that would also have to carry `ski\u0307p` and `hi\u0307red`, and that
+ * would silently need extending on every future alias containing an `i`.
+ *
+ * No canonical state, label or alias legitimately contains U+0307, so this
+ * cannot collapse two different states together (asserted in test-all).
+ *
+ * @param {*} input - Raw status text.
+ * @returns {string} Lowercased, mark-folded, bold/whitespace-stripped status.
+ */
+export function foldStatusInput(input) {
+  return String(input ?? '')
+    .replace(/\*\*/g, '')
+    .trim()
+    .normalize('NFKC')
+    .toLowerCase()
+    // NO `NFD`, for the same structural reason normalizeTextKey documents:
+    // NFKC leaves ż, ė and ġ as SINGLE precomposed code points so this strip
+    // cannot reach their dots, while `i` + U+0307 (what lowercasing `İ`
+    // produces) has no precomposed form and stays exposed. Decomposing first
+    // looks equivalent and is not — it collapses Żubr/Zubr, Ėmė/Eme and
+    // Ġenerali/Generali, which is what 5df43e7 had to undo on the company key.
+    .replace(/\u0307/gu, '');
+}
+
 export function resolveCanonicalState(input, states) {
-  const clean = String(input ?? '').replace(/\*\*/g, '').trim().toLowerCase();
+  const clean = foldStatusInput(input);
   if (!clean) return null;
   for (const s of states) {
     if (s.label.toLowerCase() === clean) return s.label;

@@ -224,6 +224,70 @@ try {
     fail(`workday fetch cap: expected a truncation warning, got ${JSON.stringify(capturedWarnings)}`);
   }
 
+  // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
+  // bound (#2495). "raise max_pages on this entry for more" is only actionable
+  // when the caller has a real portals.yml tracked_companies entry to edit;
+  // scan-ats-full.mjs synthesizes its entries from an external dataset and has
+  // nothing to point at, so it gets the terser line.
+  //
+  // `sinceMs === null` used to stand in for that distinction because
+  // scan-ats-full.mjs was the only caller setting it. Since #2418 `scan.mjs
+  // --since` sets ctx.sinceMs too, so the proxy silently mislabels a tracked
+  // entry as synthesized. These three cases pin the two messages to provenance
+  // so the next caller to start setting sinceMs cannot re-couple them.
+  const capEntry = { name: 'CappedCo', careers_url: 'https://cappedco.wd5.myworkdayjobs.com/careers', max_pages: 3 };
+  // total=200 → 10 pages available, capped at 3. Every posting is "Posted
+  // Today" so the --since early-stop never pre-empts the cap.
+  const capPage = () => ({
+    total: 200,
+    jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}`, postedOn: 'Posted Today' })),
+  });
+  const runCapCase = async (ctxExtra) => {
+    const { errors } = await captureConsoleErrors(() =>
+      workday.fetch(capEntry, mkWorkdayCtx(async () => capPage(), ctxExtra)));
+    return errors.map(String);
+  };
+  const ADVICE = /raise max_pages on this entry for more/;
+  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
+
+  // scan.mjs without --since — the case that always worked.
+  const capFullRun = await runCapCase({});
+  if (capFullRun.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a full scan.mjs run gets the "raise max_pages" advice');
+  } else {
+    fail(`workday cap warning (full run): expected the raise-max_pages advice, got ${JSON.stringify(capFullRun)}`);
+  }
+
+  // scan.mjs --since — same tracked entry, same cap; only the date bound differs.
+  const capSinceRun = await runCapCase({ sinceMs: sevenDaysAgo, includeUndated: true });
+  if (capSinceRun.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a scan.mjs --since run keeps the "raise max_pages" advice');
+  } else {
+    fail(`workday cap warning (--since run): expected the raise-max_pages advice, got ${JSON.stringify(capSinceRun)}`);
+  }
+
+  // scan-ats-full.mjs — synthesized entries, nothing for the user to edit.
+  const capReverseScan = await runCapCase({ sinceMs: sevenDaysAgo, syntheticEntries: true });
+  if (capReverseScan.some(w => /truncated at 3 pages/.test(w)) && !capReverseScan.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a reverse scan (synthesized entries) stays terse, no advice');
+  } else {
+    fail(`workday cap warning (reverse scan): expected the terse line without advice, got ${JSON.stringify(capReverseScan)}`);
+  }
+
+  // The "total may be Workday-capped" tag rides on the terse line and is about
+  // the tenant's total, not about provenance — it must survive the rekey.
+  const suspectEntry = { name: 'SuspectCo', careers_url: 'https://suspectco.wd5.myworkdayjobs.com/careers', max_pages: 3 };
+  const { errors: suspectWarnings } = await captureConsoleErrors(() =>
+    workday.fetch(suspectEntry, mkWorkdayCtx(async () => ({
+      total: 60, // exactly max_pages * PAGE_SIZE → the suspicious shape
+      jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}`, postedOn: 'Posted Today' })),
+    }), { sinceMs: sevenDaysAgo, syntheticEntries: true })));
+  if (suspectWarnings.some(w => /total may be Workday-capped, not real/.test(String(w)))) {
+    pass('workday.fetch() cap warning: the Workday-capped-total tag survives on the reverse-scan line');
+  } else {
+    fail(`workday cap warning (suspect total): expected the capped-total tag, got ${JSON.stringify(suspectWarnings)}`);
+  }
+
   // fetch() pagination cap — entry.max_pages raises the cap for a genuinely
   // large tenant (e.g. Deutsche Bank-scale postings)
   let overriddenWorkdayRequests = 0;
@@ -394,7 +458,7 @@ try {
   // fetch() retry — a non-retryable 4xx (e.g. malformed request) breaks
   // immediately, without wasting retry attempts.
   let non429Attempts = 0;
-  const { result: non429Jobs } = await captureConsoleErrors(() =>
+  const { result: non429Jobs, errors: non429Warnings } = await captureConsoleErrors(() =>
     workday.fetch(entry, mkWorkdayCtx(async (_url, opts) => {
       non429Attempts++;
       const body = JSON.parse(opts.body);
@@ -405,6 +469,15 @@ try {
     pass('workday.fetch() does not retry a non-retryable 4xx error');
   } else {
     fail(`workday non-retryable 4xx: attempts=${non429Attempts}, jobs=${non429Jobs.length} (expected 2/20)`);
+  }
+  // The truncation warning must report the REAL attempt count (1 — the error
+  // isn't retryable, so fetchJsonWithRetry gives up immediately), not the
+  // RETRY_POLICY-derived upper bound (4) that only applies when retries are
+  // actually exhausted.
+  if (non429Warnings.some(w => /truncated at 2 of \d+ pages after 1 attempts/.test(w))) {
+    pass('workday.fetch() truncation warning reports the real attempt count for a non-retryable failure (1, not the retry-cap upper bound)');
+  } else {
+    fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
   }
 
   // fetch() early-stop — once a page's postings are all clearly past
@@ -461,8 +534,8 @@ try {
     fail(`workday wide-since: requests=${wideRequests}, jobs=${wideJobs.length} (expected 2/40)`);
   }
 
-  // fetch() cap-hit warning — reverse-scan context (ctx.sinceMs set, as
-  // scan-ats-full.mjs always does) where entries are synthesized from an
+  // fetch() cap-hit warning — reverse-scan context (ctx.syntheticEntries set,
+  // as scan-ats-full.mjs does) where entries are synthesized from an
   // external dataset, not portals.yml: there's no portal entry to edit, and
   // — per the "no fixed cap can guarantee full coverage" conclusion — no
   // fix to advise at all, so the message is just the short fact, with
@@ -474,7 +547,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 1_000_000,
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `NoDate ${i}`, externalPath: `/job/board/nodate-${i}` })), // no postedOn
-    }), { sinceMs: noDateSinceMs, includeUndated: true })));
+    }), { sinceMs: noDateSinceMs, includeUndated: true, syntheticEntries: true })));
   if (noDateWarnings.some(w => /truncated at \d+ pages/.test(w))) {
     pass('workday.fetch() cap-hit warning fires in reverse-scan context (tenant has no dates, includeUndated on)');
   } else {
@@ -545,7 +618,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 1_000_000,
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Fresh ${i}`, externalPath: `/job/board/fresh-${i}`, postedOn: 'Posted Today' })),
-    }), { sinceMs: datedCapSinceMs })));
+    }), { sinceMs: datedCapSinceMs, syntheticEntries: true })));
   if (datedCapWarnings.some(w => /truncated at \d+ pages \(2000 of 1000000 jobs\)/.test(w))) {
     pass('workday.fetch() cap-hit warning reports the short "truncated at N pages" form');
   } else {
@@ -568,7 +641,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 2000, // === DEFAULT_MAX_PAGES (100) * PAGE_SIZE (20)
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Suspect ${i}`, externalPath: `/job/board/suspect-${i}`, postedOn: 'Posted Today' })),
-    }), { sinceMs: suspectCapSinceMs })));
+    }), { sinceMs: suspectCapSinceMs, syntheticEntries: true })));
   if (suspectCapWarnings.some(w => /\(total may be Workday-capped, not real\)/.test(w))) {
     pass('workday.fetch() cap-hit warning flags a suspected Workday-side total cap when total === maxPages*PAGE_SIZE');
   } else {

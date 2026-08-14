@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       ]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before

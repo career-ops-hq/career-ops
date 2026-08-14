@@ -34,7 +34,7 @@
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';

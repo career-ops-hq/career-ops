@@ -9,6 +9,10 @@
  * Usage:
  *   node update-system.mjs check      # Check if update available
  *   node update-system.mjs apply      # Apply update (after user confirms)
+ *   node update-system.mjs apply --force
+ *                                     # …and overwrite system files this
+ *                                     # install edited locally (#2337). Without
+ *                                     # it those files are kept and listed.
  *   node update-system.mjs rollback   # Rollback last update
  *   node update-system.mjs dismiss    # Dismiss update check
  *
@@ -16,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -103,6 +107,9 @@ const SYSTEM_PATHS = [
   'modes/patterns.md',
   'modes/titles.md',
   'modes/upskill.md',
+  'modes/intake.md',
+  'documents/.gitkeep',
+  'documents/README.md',
   'modes/update.md',
   'modes/agent-inbox.md',
   'modes/reply-watch.md',
@@ -153,9 +160,11 @@ const SYSTEM_PATHS = [
   'lib/golden-budget-analysis.mjs',
   'img-to-pdf.mjs',
   'archive-posting.mjs',
+  'jd-capture.mjs',
   'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
+  'url-key.mjs',
   'sync-pdf-flags.mjs',
   'tracker-links.mjs',
   'tracker.mjs',
@@ -190,6 +199,7 @@ const SYSTEM_PATHS = [
   'providers/',
   'seeds/',
   'tests/',
+  'user-agent.mjs',
   'doctor.mjs',
   // doctor.mjs imports this one: an install that receives the new doctor
   // without it would crash on startup.
@@ -202,8 +212,10 @@ const SYSTEM_PATHS = [
   'analyze-patterns.mjs',
   'upskill.mjs',
   'skill-extract.mjs',
+  'intake.mjs',
   'stats.mjs',
   'detect-reposts.mjs',
+  'rank-pipeline.mjs',
   'discover-ats.mjs',
   'discover-ats.test.mjs',
   'check-table-freshness.mjs',
@@ -212,12 +224,14 @@ const SYSTEM_PATHS = [
   'process-quality.test.mjs',
   'company-history.mjs',
   'company-history.test.mjs',
+  'rejection-latency.mjs',
   'salary-gap.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
   'contacts.test.mjs',
   'weekly-digest.mjs',
+  'tracker-sync-check.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',
@@ -382,7 +396,14 @@ const BOOTSTRAP_PATHS = [
 ];
 
 // User layer paths — NEVER touch these (safety check)
-const USER_PATHS = [
+/**
+ * Files and directories the updater must never touch — the USER layer of the
+ * data contract (DATA_CONTRACT.md). Exported so other tooling can derive the
+ * same boundary instead of re-listing it: a hardcoded second copy is how a
+ * fourth user file eventually gets policed by something that has no business
+ * having an opinion about it (#2480).
+ */
+export const USER_PATHS = [
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',
@@ -392,6 +413,7 @@ const USER_PATHS = [
   'portals.yml',
   'article-digest.md',
   'interview-prep/',
+  'documents/',
   'data/',
   'reports/',
   'output/',
@@ -689,6 +711,115 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
   return prepared;
 }
 
+/**
+ * System-layer files this install changed locally that the update is about to
+ * overwrite (#2337).
+ *
+ * apply() checks out every SYSTEM_PATHS entry from the upstream ref — a raw
+ * checkout, not a merge — so a local fix to a system file is discarded with no
+ * diff, no warning, and no list. The system layer stays system-owned (this is
+ * NOT a merge, by design); the point is telling people what they are about to
+ * lose.
+ *
+ * A file is at risk only when BOTH hold:
+ *
+ *   1. it differs from the merge-base — the last commit this install shares
+ *      with upstream, i.e. the baseline it was last synced to. Anything that
+ *      differs from it was changed HERE, whether committed or still in the
+ *      working tree (`git diff <ref> -- <path>` compares against the worktree);
+ *   2. it differs from the upstream ref. A local fix upstream has since adopted
+ *      independently is byte-identical there, so the checkout costs nothing and
+ *      warning about it would be noise — the exact case the #2337 reporter
+ *      isolated when one of their two fixes survived an update.
+ *
+ * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
+ * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
+ * @param {{git?: Function}} [ctx] - injectable git runner, for tests.
+ * @returns {string[]} repo-relative file paths, sorted.
+ */
+export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  if (!paths || paths.length === 0) return [];
+
+  const diffNames = (ref) => {
+    try {
+      // `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line
+      // ending must not read as a local edit. Installs that last synced before
+      // `.gitattributes` was introduced (80d104f9) have a merge-base predating
+      // it, so every text file not renormalized in that commit differs from the
+      // baseline by line endings alone — which otherwise flags ~150 untouched
+      // files and silently no-ops the whole update (#2817). This ignores only
+      // the carriage return at end of line, so a genuine trailing-whitespace or
+      // content edit is still detected.
+      //
+      // `--numstat`, deliberately, NOT `--name-only`: `--name-only` can list a
+      // path on the blob-OID comparison alone, before the textual diff runs, so
+      // a CRLF/LF-only file survives `--ignore-cr-at-eol` and the guard leaks
+      // right back. `--numstat` forces the textual diff, so the ignore rule is
+      // actually applied and a CR-only file drops out of the output entirely.
+      // The path is field 3 (a binary file renders as `-\t-\tpath`, still field
+      // 3). Reads less obviously than `--name-only`; keep it as-is.
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...paths)
+        .split('\n').map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.split('\t')[2]).filter(Boolean);
+    } catch {
+      // An unreadable ref (shallow clone, unrelated histories) must never abort
+      // the update — it degrades the warning, not the checkout.
+      return [];
+    }
+  };
+
+  // Without a merge-base (unrelated histories, a shallow clone) fall back to
+  // HEAD: that still catches uncommitted local edits, which is the common case,
+  // and simply misses local edits already committed.
+  let baseline = null;
+  try {
+    baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+  } catch {
+    baseline = null;
+  }
+
+  const changedLocally = new Set(diffNames(baseline || 'HEAD'));
+  const differsFromUpstream = new Set(diffNames(upstreamRef));
+  const atRisk = [...changedLocally].filter((file) => differsFromUpstream.has(file));
+
+  // `git diff` never lists untracked files, so a file created locally at a path
+  // the upstream ref DOES ship escapes both sets above — and the checkout
+  // overwrites it with no warning and no .bak, which is the very loss mode this
+  // exists to prevent. Only untracked files upstream actually ships can be
+  // clobbered, so the upstream existence check is the whole filter.
+  let untracked = [];
+  try {
+    untracked = runGit('ls-files', '--others', '--exclude-standard', '--', ...paths)
+      .split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    // Same degradation contract as diffNames: a warning we cannot compute must
+    // never abort the update.
+  }
+  for (const file of untracked) {
+    try {
+      runGit('cat-file', '-e', `${upstreamRef}:${file}`);
+      atRisk.push(file);
+    } catch {
+      // Purely local file, absent upstream — the checkout cannot touch it.
+    }
+  }
+
+  // A path that is not on disk cannot be overwritten, so it is not at risk.
+  // `git diff --name-only` lists DELETIONS, so a system file the user removed
+  // landed in both sets above and was then "preserved" — excluded from the
+  // checkout, which is exactly what stops it being restored. The update printed
+  // `Keeping your versions` about a file that does not exist, failed to write
+  // its `.bak` with ENOENT, and exited 1 telling the user to run apply again;
+  // re-running reproduces the same state, so the install stayed stuck. Filtering
+  // here also gives the `.bak` failure branch back its single meaning: a backup
+  // that genuinely could not be written (permissions, full disk).
+  const root = ctx.root || ROOT;
+  return [...new Set(atRisk)]
+    .filter((file) => existsSync(join(root, ...file.split('/'))))
+    .sort();
+}
+
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   const runGit = ctx.git || git;
   const root = ctx.root || ROOT;
@@ -908,6 +1039,10 @@ async function check() {
 
 async function apply() {
   const local = localVersion();
+  // --force overwrites system files this install edited locally (#2337). The
+  // env var carries the flag across the self-reexec, which re-invokes the
+  // TARGET updater as `update-system.mjs apply` with a fixed argv.
+  const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
   const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
 
@@ -965,6 +1100,7 @@ async function apply() {
             ...process.env,
             CAREER_OPS_UPDATE_REEXEC: '1',
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
+            ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
           },
         });
         return;
@@ -994,8 +1130,66 @@ async function apply() {
     // target updater's SYSTEM_PATHS is now the source of truth for new files.
     const updatePaths = mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS);
 
+    // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
+    // so anything this install fixed locally and upstream has not adopted is
+    // about to vanish silently. Default is to KEEP the local version and say
+    // so; `--force` overwrites. Either way a .bak of the local content is
+    // written first, so the fix is recoverable even from the forced path.
+    const preservedPaths = [];
+    const atRisk = locallyModifiedSystemFiles(updatePaths, 'FETCH_HEAD');
+    if (atRisk.length > 0) {
+      console.log('');
+      console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
+      for (const file of atRisk) {
+        const backup = `${join(ROOT, ...file.split('/'))}.bak`;
+        try {
+          copyFileSync(join(ROOT, ...file.split('/')), backup);
+          console.log(`  ${file}  (local copy saved: ${file}.bak)`);
+        } catch (err) {
+          // A .bak we could not write is worth saying out loud, but it must not
+          // abort the update — the file itself is still listed either way.
+          console.log(`  ${file}  (could not write ${file}.bak: ${err.message})`);
+        }
+      }
+      if (updateForce) {
+        console.log('--force: overwriting them with the upstream version.');
+      } else {
+        preservedPaths.push(...atRisk);
+        console.log('Keeping your versions. They will NOT receive upstream changes.');
+        console.log('Re-run with `node update-system.mjs apply --force` to take the upstream version instead.');
+      }
+      console.log('');
+    }
+    // Excluding by pathspec keeps the index and the working tree in agreement:
+    // checking out and restoring afterwards would leave the index holding the
+    // upstream blob, so the scoped commit below would record the very content
+    // the user asked to keep out.
+    const preserveSpecs = preservedPaths.map((file) => `:(exclude)${file}`);
+
+    const preservedSet = new Set(preservedPaths);
+
     const skippedPaths = [];
     for (const path of updatePaths) {
+      // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
+      // match any file(s)" when the exclusions cancel the whole pathspec — and
+      // that error is indistinguishable from a genuine failure at the catch
+      // below, so it would abort the entire update. Skip the entry instead when
+      // nothing would be left to check out. Only entries that actually contain
+      // a preserved file pay for the extra ls-tree, normally none.
+      if (preservedSet.size > 0) {
+        const preservedHere = preservedPaths.filter((f) => (path.endsWith('/') ? f.startsWith(path) : f === path));
+        if (preservedHere.length > 0) {
+          let upstreamFiles = [];
+          try {
+            upstreamFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
+              .split('\n').map((f) => f.trim()).filter(Boolean);
+          } catch {
+            // Unreadable entry — fall through to the normal checkout, which
+            // reports the real failure with its own diagnostics.
+          }
+          if (upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f))) continue;
+        }
+      }
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -1003,7 +1197,7 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', 'FETCH_HEAD', '--', path);
+        gitQuiet('checkout', 'FETCH_HEAD', '--', path, ...preserveSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
@@ -1173,7 +1367,10 @@ async function apply() {
 
     // 7. Commit the update
     const remote = localVersion(); // Re-read after checkout updated VERSION
-    const pathsToStage = [...updated];
+    // Files deliberately left untouched are excluded from the staging pathspec
+    // too: this update did not change them, so an "auto-update system files"
+    // commit must not sweep the user's local edit in under its message (#2337).
+    const pathsToStage = [...updated, ...preserveSpecs];
     const dismissFile = join(ROOT, '.update-dismissed');
     if (existsSync(dismissFile)) {
       unlinkSync(dismissFile);
@@ -1355,7 +1552,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case 'rollback': rollback(); break;
       case 'dismiss': dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check|apply|rollback|dismiss]');
+        console.log('Usage: node update-system.mjs [check|apply [--force]|rollback|dismiss]');
         process.exit(1);
     }
   } catch (err) {

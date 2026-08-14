@@ -26,7 +26,11 @@ The HTML template rendered by Playwright into PDF. Uses placeholder tokens (`{{N
 
 **Customization:** Edit this file to change colors, spacing, or section order. The placeholder tokens are documented in `batch/batch-prompt.md` under "Template placeholders."
 
-**Optional sections:** Projects, Education, Certifications, and Awards & Honors are dropped in full — section header included — when the payload carries no entries for them (see `cv-sections-core.mjs`). Their markers (`<!-- PROJECTS -->`, `<!-- AWARDS -->`, …) are what the strip matches on, so renaming or removing a marker disables the strip for that section.
+**Optional sections:** Core Competencies, Projects, Education, Certifications, Awards & Honors, and Skills are dropped in full — section header included — when the payload carries no entries for them (see `cv-sections-core.mjs`). Their markers (`<!-- PROJECTS -->`, `<!-- AWARDS -->`, …) are what the strip matches on, so renaming or removing a marker disables the strip for that section.
+
+**The `<!-- END -->` sentinel (custom templates, read this):** Skills is the last section in the shipped templates, so it has no following section marker for the strip to stop at. A template that renders a Skills section must therefore place a literal `<!-- END -->` comment immediately after it (`%%%%  END  %%%%` in the LaTeX template) — that sentinel is what bounds the strip.
+
+Getting this wrong is safe, by design. If the sentinel is missing, the empty-Skills strip simply does not run: the template is left byte-for-byte untouched and the Skills section renders as a bare header. That is a cosmetic bug, deliberately chosen over the alternative — without the sentinel *and* without this fail-safe, the strip would run to end-of-file and delete the closing `</div></body></html>` (`\end{document}`), producing a truncated document. Custom templates are validated only for `{{NAME}}`, `{{EXPERIENCE}}`, and `{{EDUCATION}}` (see `cv-templates.mjs`); the sentinel is not required, precisely because its absence degrades gracefully.
 
 ### resume-template.html
 

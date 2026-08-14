@@ -16,6 +16,14 @@
  * This is a company/process-level signal only — never tied to a named
  * individual recruiter. See issue #1466.
  *
+ * Example friction patterns (illustrative, NOT an enforced taxonomy — the
+ * tag stays free-text; tag anything that fits the spirit even if it doesn't
+ * match one of these verbatim):
+ *   [process-friction: call scheduled for a rejection with no info beyond what email would convey]
+ *   [process-friction: prescreen repeated info already given in a prior round]
+ *   [process-friction: interview rescheduled 2+ times same week]
+ *   [process-friction: no confirmation after stated timeline passed]
+ *
  * Run: node process-quality.mjs             (JSON to stdout)
  *      node process-quality.mjs --summary   (human-readable table)
  *      node process-quality.mjs --min-threshold 2  (min total interviews per company to report)

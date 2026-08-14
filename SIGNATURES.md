@@ -114,3 +114,13 @@ public commit with a stated reason.
 - @namnhatpham1995 | 2026-08-07 | "thank you for a great project, I really love career-ops" | id:50907520 | src:https://github.com/santifer/career-ops/discussions/2571 | n:66
 - @Andrei-WongE | Andrei-WongE | 2026-08-07 | id:44266405 | src:https://github.com/santifer/career-ops/discussions/2574 | n:67
 - @alexkons | Alekons | 2026-08-07 | id:22054290 | src:https://github.com/santifer/career-ops/discussions/2578 | n:68
+- @raghavrallan | Raghav Rallan | 2026-08-08 | id:168067295 | src:https://github.com/santifer/career-ops/discussions/2622 | n:69
+- @iyousif | Yousif Anwar | 2026-08-09 | "Makes the world a better place. One update at a time!" | id:18438102 | src:https://github.com/santifer/career-ops/discussions/2638 | n:70
+- @Honeypanchi | 2026-08-10 | "Garv Sajnani" | id:146434822 | src:https://github.com/santifer/career-ops/discussions/2660 | n:71
+- @abankar1 | Akshay Bankar | 2026-08-11 | "career-ops is more than a job-search helper - it runs the whole pipeline locally, and a search you can audit is a search you can win." | id:47008224 | src:https://github.com/santifer/career-ops/discussions/2712 | n:72
+- @anshulgeorge | 2026-08-11 | "If companies and recruiters forgo using machine learning to screen candidates, then I will forgo using CareerOps" | id:60569434 | src:https://github.com/santifer/career-ops/discussions/2716 | n:73
+- @ShiosOS | Julius Walton | 2026-08-12 | id:31512984 | src:https://github.com/santifer/career-ops/discussions/2742 | n:74
+- @lambda125 | 2026-08-12 | "CareerOps is a must have for everyone who wants to take control over their data, their career and the way they present themselves. I wholeheartedly agree with this and commit to building on top of…" | id:927405 | src:https://github.com/santifer/career-ops/discussions/2761 | n:75
+- @DJK95 | 2026-08-13 | id:100816857 | src:https://github.com/santifer/career-ops/discussions/2805 | n:76
+- @Siddharth0207 | Siddharth Gautam | 2026-08-13 | id:81465411 | src:https://github.com/santifer/career-ops/discussions/2806 | n:77
+- @Mickey374 | Michael Kobby Asante | 2026-08-13 | "Career Ops has indeed revolutionalized my perspective on how you need to position yourself for the evolving job market. A win in the chats." | id:41800926 | src:https://github.com/santifer/career-ops/discussions/2814 | n:78
