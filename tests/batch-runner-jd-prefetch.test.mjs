@@ -272,6 +272,17 @@ if (!wordCountMatch) {
       return parseInt(result.stdout.trim(), 10) || 0;
     };
 
+    const runWordCountWithColor = (content) => {
+      const filePath = join(work, 'jd-force-color.html');
+      writeFileSync(filePath, content);
+      const result = spawnSync(process.execPath, ['-e', nodeSnippet, filePath], {
+        encoding: 'utf-8',
+        timeout: 10000,
+        env: { ...process.env, FORCE_COLOR: '3', TERM: 'xterm-256color' },
+      });
+      return result.stdout.trim();
+    };
+
     // A real job description has hundreds of visible words.
     const realJdHtml = `
       <html><body>
@@ -290,6 +301,13 @@ if (!wordCountMatch) {
       pass(`real JD HTML counts ${realCount} visible words (>= 80 threshold)`);
     } else {
       fail(`real JD HTML counted only ${realCount} words — threshold of 80 would wrongly truncate it`);
+    }
+
+    const colorCount = runWordCountWithColor('<p>' + 'word '.repeat(79).trim() + '</p>');
+    if (/^79$/.test(colorCount)) {
+      pass('FORCE_COLOR does not add ANSI escapes to the machine-readable word count');
+    } else {
+      fail(`FORCE_COLOR produced ${JSON.stringify(colorCount)} instead of the machine-readable count 79`);
     }
 
     // A JS shell (Workday, Phenom, iCIMS pattern) has near-zero visible text.

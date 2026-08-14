@@ -800,8 +800,8 @@ process_offer() {
             .replace(/\s+/g, ' ')
             .trim();
           fs.writeFileSync(process.argv[1], text);
-          console.log(text.split(' ').filter(Boolean).length);
-        } catch (e) { console.log(0); }
+          process.stdout.write(String(text.split(' ').filter(Boolean).length));
+        } catch (e) { process.stdout.write('0'); }
       " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
       # Ensure jd_prefetch_words is always a non-negative integer. A non-integer
       # (e.g. empty string, "NaN") would cause bash arithmetic to fail or
