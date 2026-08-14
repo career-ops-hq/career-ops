@@ -56,10 +56,22 @@ function trackerPathFor(options = {}) {
     : resolveTrackerPath(options.rootDir || ROOT);
 }
 
+// A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
+// its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
+// as report #2026 — pushing every later reservation to 2027+, silently and
+// permanently.
+//
+// Deliberately narrow: report filenames in the wild are not all
+// `NNN-slug-DATE.md` (`1001-taken.md` and `NNN-RESERVED.md` are both real), so
+// requiring a trailing date would drop legitimate occupancy. Exclude only names
+// that are *entirely* a date. See tests/reserve-report-num.test.mjs.
+const BARE_DATE_FILE_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
+
 function occupiedFromReports(reportsDir) {
   const occupied = new Set();
   if (!existsSync(reportsDir)) return occupied;
   for (const name of readdirSync(reportsDir)) {
+    if (BARE_DATE_FILE_RE.test(name)) continue;
     const match = name.match(/^(\d+)-/);
     if (!match) continue;
     const num = parseInt(match[1], 10);

@@ -190,7 +190,12 @@ async function resolveDnsCached(hostname) {
   }
 }
 
-async function validateUrlSecurity(urlString) {
+// Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
+// literal host, so a public hostname that *resolves* to private space still
+// gets through it. Resolve and re-check every address before the request is
+// allowed out. Exported so other Playwright callers (archive-posting.mjs) wire
+// up the same two-layer guard instead of growing a second implementation.
+export async function validateUrlSecurity(urlString) {
   const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
   const hostname = url.hostname;
   const host = normalizeHost(hostname);

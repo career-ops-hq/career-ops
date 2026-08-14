@@ -320,3 +320,46 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#12 real local edit lost from atRisk: ${JSON.stringify(atRisk)}`);
   }
 }
+
+// ── 13. A file differing from the baseline ONLY by CRLF/LF is not a local edit ──
+//    Reproduces #2817: installs synced before `.gitattributes` (80d104f9) have a
+//    merge-base whose text blobs predate line-ending normalization, so an
+//    untouched file reads as a local edit — inflating the flagged set to ~150
+//    files and silently no-op'ing the whole update. The CR-only difference must
+//    be ignored; a genuine content edit must still be reported.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'co-crlf-'));
+  const g = (...args) => gitIn(dir, ...args);
+  g('init', '-q', '-b', 'main', '.');
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
+  g('config', 'core.autocrlf', 'false');
+  g('config', 'core.eol', 'lf');
+  mkdirSync(join(dir, 'modes'), { recursive: true });
+  // Base blobs committed with CRLF, standing in for a pre-`.gitattributes` tree.
+  writeFileSync(join(dir, 'modes', 'pdf.md'), 'shipped pdf\r\nline two\r\n');
+  writeFileSync(join(dir, 'generate-cover-letter.mjs'), 'shipped script\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base (CRLF blobs)');
+  g('branch', 'upstream');
+  // Upstream changes the content of both files.
+  g('checkout', '-q', 'upstream');
+  writeFileSync(join(dir, 'modes', 'pdf.md'), 'shipped pdf v2\r\nline two\r\n');
+  writeFileSync(join(dir, 'generate-cover-letter.mjs'), 'shipped script v2\n');
+  g('commit', '-qam', 'upstream changes');
+  g('checkout', '-q', 'main');
+  // main: pdf.md renormalized to LF (a CR-only diff from the base); the script
+  // carries a genuine local edit.
+  writeFileSync(join(dir, 'modes', 'pdf.md'), 'shipped pdf\nline two\n');
+  writeFileSync(join(dir, 'generate-cover-letter.mjs'), 'local real fix\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', { git: g, root: dir });
+  if (atRisk.length === 1 && atRisk[0] === 'generate-cover-letter.mjs') {
+    pass('a CRLF/LF-only difference from the baseline is not a local edit (#2817)');
+  } else {
+    fail(`#13 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
