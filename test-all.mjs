@@ -1058,9 +1058,14 @@ try {
     // from the main document.
     const deadThirdParty = (navigation) => {
       let cb = null;
+      let abortCount = 0;
       const main = {};
       return {
         _blockedByGuard: null,
+        // The verdict is only half the claim. The other half is that the egress
+        // guard still ABORTS the request in both cases — relaxing the verdict
+        // must not quietly start letting a non-resolving host through.
+        get abortCount() { return abortCount; },
         mainFrame: () => main,
         async route(_pattern, callback) { cb = callback; },
         async goto() {
@@ -1070,7 +1075,7 @@ try {
               isNavigationRequest: () => navigation,
               frame: () => (navigation ? main : {}),
             }),
-            abort: async () => {},
+            abort: async () => { abortCount += 1; },
             continue: async () => {},
           });
           return { status: () => 200 };
@@ -1084,18 +1089,26 @@ try {
       };
     };
 
-    const subresourceDead = await checkUrlLiveness(deadThirdParty(false), 'https://careers.example.com/jobs/1');
-    if (subresourceDead.result === 'active') {
-      pass('a non-resolving third-party subresource does not poison the verdict');
+    const subresourcePage = deadThirdParty(false);
+    const subresourceDead = await checkUrlLiveness(subresourcePage, 'https://careers.example.com/jobs/1');
+    if (subresourceDead.result === 'active' && subresourcePage.abortCount === 1) {
+      pass('a dead third-party subresource is still aborted, but no longer decides the verdict');
     } else {
-      fail(`dead third-party subresource still decided the page: ${JSON.stringify(subresourceDead)}`);
+      fail(
+        `dead third-party subresource handled wrongly: ${JSON.stringify(subresourceDead)}, ` +
+        `aborts=${subresourcePage.abortCount} (want result active, aborts 1)`
+      );
     }
 
-    const mainDocDead = await checkUrlLiveness(deadThirdParty(true), 'https://careers.example.com/jobs/1');
-    if (mainDocDead.result === 'uncertain' && mainDocDead.code === 'blocked_host') {
-      pass('a non-resolving MAIN DOCUMENT still returns blocked_host');
+    const mainDocPage = deadThirdParty(true);
+    const mainDocDead = await checkUrlLiveness(mainDocPage, 'https://careers.example.com/jobs/1');
+    if (mainDocDead.result === 'uncertain' && mainDocDead.code === 'blocked_host' && mainDocPage.abortCount === 1) {
+      pass('a non-resolving MAIN DOCUMENT is aborted and still returns blocked_host');
     } else {
-      fail(`main-document DNS failure stopped being reported: ${JSON.stringify(mainDocDead)}`);
+      fail(
+        `main-document DNS failure handled wrongly: ${JSON.stringify(mainDocDead)}, ` +
+        `aborts=${mainDocPage.abortCount} (want uncertain/blocked_host, aborts 1)`
+      );
     }
   } finally {
     // Always put the real resolver back, even if an assertion above throws:
