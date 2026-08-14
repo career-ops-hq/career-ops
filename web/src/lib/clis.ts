@@ -33,6 +33,29 @@ export type CliSpec = {
   stderrIsFatal?: (line: string) => boolean;
 };
 
+/**
+ * NO RUNTIME HERE MAY GRANT ITSELF MORE PERMISSION THAN THE AUDITED ONE.
+ *
+ * The permission model is per-worker AND per-CLI, but only one axis is written
+ * down: WRITE_CAPABLE_TOOLS and the per-kind deny lists live in
+ * claude-invocation.mjs — i.e. on Claude's path. A new CLI arriving with a
+ * blanket auto-approve flag (`--always-approve`, `--yolo`,
+ * `--dangerously-skip-permissions`, `--yes`) is not breaking that rule; it is
+ * entering where the rule does not exist.
+ *
+ * Concretely: the `pdf` worker has Bash explicitly denied and must never regain
+ * it. Pair Grok with `--always-approve` and that same worker gets Write and
+ * Bash auto-approved — so the user's choice of runtime silently changes what a
+ * worker may do to their files, while both paths look identical in the UI.
+ *
+ * If a CLI has no per-tool deny list to pair with, the answer is NOT to
+ * auto-approve: it is to withhold the workers that write. Needing such a flag
+ * to make a runtime work is a core architecture issue, not a line inside a
+ * CLI-support PR.
+ *
+ * Enforced by tests/lib/clis-permissions.test.mjs, because a rule that only
+ * lives in a comment is a rule the next contributor may never read.
+ */
 export const KNOWN: CliSpec[] = [
   { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
@@ -41,6 +64,11 @@ export const KNOWN: CliSpec[] = [
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
   { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p] },
   { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
+  // Grok Build also speaks `--output-format streaming-json`, but that is its own
+  // schema, not Claude's `stream-json` — and the run route only parses the
+  // latter. Plain `-p` streams text, which is what every other non-Claude entry
+  // here does.
+  { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p] },
 ];
 
 function searchDirs(): string[] {
@@ -50,6 +78,7 @@ function searchDirs(): string[] {
     path.join(home, ".npm-global/bin"),
     path.join(home, ".bun/bin"),
     path.join(home, ".deno/bin"),
+    path.join(home, ".opencode/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
