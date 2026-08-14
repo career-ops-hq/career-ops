@@ -1049,6 +1049,54 @@ try {
     } else {
       fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
     }
+
+    // A dead THIRD-PARTY host must not decide the verdict for the posting.
+    // Analytics vendors get shut down and their script tags stay in career
+    // pages forever; without this, every posting on such a page reports
+    // uncertain. The route double here is real-shaped (isNavigationRequest and
+    // frame), because that is the only way the guard can tell a subresource
+    // from the main document.
+    const deadThirdParty = (navigation) => {
+      let cb = null;
+      const main = {};
+      return {
+        _blockedByGuard: null,
+        mainFrame: () => main,
+        async route(_pattern, callback) { cb = callback; },
+        async goto() {
+          await cb({
+            request: () => ({
+              url: () => 'https://dead-analytics-vendor.invalid/widget.js',
+              isNavigationRequest: () => navigation,
+              frame: () => (navigation ? main : {}),
+            }),
+            abort: async () => {},
+            continue: async () => {},
+          });
+          return { status: () => 200 };
+        },
+        async waitForTimeout() {},
+        url: () => 'https://careers.example.com/jobs/1',
+        async evaluate() {
+          this._n = (this._n || 0) + 1;
+          return this._n === 1 ? 'Senior Analyst. '.repeat(30) : ['Apply for this job'];
+        },
+      };
+    };
+
+    const subresourceDead = await checkUrlLiveness(deadThirdParty(false), 'https://careers.example.com/jobs/1');
+    if (subresourceDead.result === 'active') {
+      pass('a non-resolving third-party subresource does not poison the verdict');
+    } else {
+      fail(`dead third-party subresource still decided the page: ${JSON.stringify(subresourceDead)}`);
+    }
+
+    const mainDocDead = await checkUrlLiveness(deadThirdParty(true), 'https://careers.example.com/jobs/1');
+    if (mainDocDead.result === 'uncertain' && mainDocDead.code === 'blocked_host') {
+      pass('a non-resolving MAIN DOCUMENT still returns blocked_host');
+    } else {
+      fail(`main-document DNS failure stopped being reported: ${JSON.stringify(mainDocDead)}`);
+    }
   } finally {
     // Always put the real resolver back, even if an assertion above throws:
     // a leaked stub would silently answer for every later suite in this process.

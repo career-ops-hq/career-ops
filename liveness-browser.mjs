@@ -254,8 +254,20 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         // nothing. Only the VERDICT stops being poisoned, and only for a
         // subresource: if the main document itself cannot resolve, that is a
         // real finding about the posting and still counts.
-        const request = route.request();
-        const isMainDocument = request.isNavigationRequest() && request.frame() === page.mainFrame();
+        // Whether this was the main document or a subresource can only be asked
+        // of a real Playwright request. Callers may pass a lighter route double
+        // (the test suite does, with request() returning just a url()), and for
+        // those the answer is unknowable — so default to TRUE, which keeps the
+        // pre-existing behaviour of poisoning the verdict. The relaxation only
+        // applies where we can positively establish it was a subresource.
+        const request = typeof route?.request === 'function' ? route.request() : null;
+        const canTell =
+          typeof request?.isNavigationRequest === 'function' &&
+          typeof request?.frame === 'function' &&
+          typeof page?.mainFrame === 'function';
+        const isMainDocument = canTell
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
         if (err?.livenessCode !== 'dns_no_addresses' || isMainDocument) {
           page._blockedByGuard = { code: 'blocked_host', reason: err.message };
         }
