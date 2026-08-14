@@ -149,14 +149,30 @@ try {
 
   // 'CSM' is deliberately NOT a token: in job-posting text it far more often
   // means Customer Success Manager than Certified ScrumMaster.
-  // Asserted against the specific credential rather than an empty set: the
-  // claim is "CSM is not read as Certified ScrumMaster", and `size === 0` also
-  // asserts that nothing ELSE in this sentence is a skill. A token added later
-  // that legitimately matches "Manager" or "AE" would then fail this test for a
-  // reason it was never about.
+  //
+  // Two assertions, because the exclusion has two halves and each one alone
+  // leaves a hole the other closes:
+  //
+  //   - CONTEXTUAL: the collision sentence must not yield the credential.
+  //     Asserted against that one value rather than `size === 0`, which would
+  //     also assert nothing ELSE in the sentence is a skill — a token added
+  //     later that legitimately matches "Manager" or "AE" would then fail this
+  //     test for a reason it was never about.
+  //   - STANDALONE: 'CSM' must not become a skill under ANY name. Narrowing to
+  //     the credential above lost this: admitting 'CSM' as its own token makes
+  //     extractSkills('CSM required.') return ['CSM'], and the contextual check
+  //     still passes because the value it looks for is absent. Verified by
+  //     temporarily adding the token — the contextual assertion stayed green.
   const csm = extractSkills('This role is part Customer Success Manager (CSM), partnered with an AE.');
   if (!csm.has('Certified ScrumMaster')) pass('extractSkills does not treat "CSM" as a certification (Customer Success Manager collision)');
   else fail(`extractSkills CSM collision => ${[...csm].join(',')}`);
+
+  const csmAlone = extractSkills('CSM required.');
+  if (!csmAlone.has('CSM') && !csmAlone.has('Certified ScrumMaster')) {
+    pass('extractSkills does not admit a standalone "CSM" as a skill under any name');
+  } else {
+    fail(`extractSkills standalone CSM => ${[...csmAlone].join(',')}`);
+  }
 
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');
