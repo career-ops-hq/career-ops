@@ -247,10 +247,17 @@ try {
   const naOntoNa = runMergeDetailed({
     '6-globex.tsv': '6\t2026-06-25\tGlobex\tData Eng\tEvaluated\tN/A\t❌\t[6](reports/6-globex.md)\trefetch, still no score\n',
   }, { rows: NOSCORE_SEED });
-  if (/🔄1 updated/.test(naOntoNa.output) && !/⏭️1 skipped/.test(naOntoNa.output)) {
-    pass('a sentinel re-eval of an already-unscored row still writes through (nothing to lose)');
+  const naOntoNaRow = naOntoNa.tracker.split('\n').find(l => /Globex/.test(l)) || '';
+  const wroteThrough = /🔄1 updated/.test(naOntoNa.output) && !/⏭️1 skipped/.test(naOntoNa.output);
+  // Counters alone can lie — assert the row actually took the re-eval's date,
+  // report and notes (keeping the existing note first, per mergeNotes #2483).
+  const refreshed = /\|\s*2026-06-25\s*\|/.test(naOntoNaRow)
+    && /\[6\]\(reports\/6-globex\.md\)/.test(naOntoNaRow)
+    && /pending eval\. Re-eval 2026-06-25.*refetch, still no score/.test(naOntoNaRow);
+  if (wroteThrough && refreshed) {
+    pass('a sentinel re-eval of an already-unscored row writes through, refreshing date/report/notes (nothing to lose)');
   } else {
-    fail(`sentinel re-eval of an unscored row was mishandled: ${naOntoNa.output.trim()}`);
+    fail(`sentinel re-eval of an unscored row was mishandled: ${naOntoNaRow.trim()} | ${naOntoNa.output.trim()}`);
   }
 } catch (e) {
   fail(`merge-tracker.mjs tests crashed: ${e.message}`);
