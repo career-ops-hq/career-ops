@@ -27,7 +27,7 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
-  indicator, plus AI-assisted discovery (bring your own CLI/keys).
+  indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
