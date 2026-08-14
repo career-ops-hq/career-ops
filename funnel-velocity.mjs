@@ -42,6 +42,7 @@ import { computeFunnel, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
 import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
@@ -49,6 +50,22 @@ const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+
+// --help used to fall through to a full analysis and print the JSON report
+// (#2853). Validated in main() via lib/cli-flags.mjs's validateFlags() (#2775),
+// which also rejects unrecognized flags first so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--summary', '--self-test', '--benchmarks', '--help', '-h'];
+
+// --benchmarks takes its value as the next argv token, so that token must not
+// be mistaken for an unrecognized flag.
+const VALUE_FLAGS = ['--benchmarks'];
+
+const USAGE = `Usage:
+  node funnel-velocity.mjs                       # JSON velocity report
+  node funnel-velocity.mjs --summary             # human-readable table
+  node funnel-velocity.mjs --benchmarks <path>   # override the benchmarks file
+  node funnel-velocity.mjs --self-test           # run the inline self-test
+  node funnel-velocity.mjs --help                # show this message`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_SOURCES = new Set(['set-status', 'correction', 'backfill', 'manual']);
@@ -653,6 +670,7 @@ function flagValue(name) {
 }
 
 function main() {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) { selfTest(); return; }
 
   let benchmarks;
