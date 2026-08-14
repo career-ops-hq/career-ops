@@ -7873,6 +7873,51 @@ try {
     rmSync(cliTmp, { recursive: true, force: true });
   }
 
+  // Non-Latin CVs (#2849). normalizeKey stripped [^a-z0-9], so every heading and
+  // dedupKey in a Japanese/Russian/Hindi CV keyed to '' — which made `add`
+  // UNUSABLE, not inaccurate: the non-empty-dedupKey guard rejected a key the
+  // user had supplied, and two different headings both keying to '' matched
+  // each other, so an entry could land under the wrong section.
+  {
+    const jpTmp = mkdtempSync(join(tmpdir(), 'career-ops-add-jp-'));
+    try {
+      const cvPath = join(jpTmp, 'cv.md');
+      writeFileSync(cvPath, '# CV\n\n## \u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\n\n- \u65E2\u5B58\n\n## \u8077\u52D9\u7D4C\u6B74\n\n- \u65E2\u5B58\n');
+      const payloadPath = join(jpTmp, 'p.json');
+      writeFileSync(payloadPath, JSON.stringify({ cv: {
+        section: '\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        dedupKey: '\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9',
+        entry: '- **\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9**',
+      } }));
+      const env = { ...process.env, CAREER_OPS_CV: cvPath };
+      const out = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      out.cv.status === 'added'
+        ? pass('add-entry: a non-Latin dedupKey is accepted and the entry is added (#2849)')
+        : fail(`add-entry: non-Latin payload => ${JSON.stringify(out.cv)}`);
+
+      const rerun = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      rerun.cv.status === 'duplicate'
+        ? pass('add-entry: a non-Latin entry is idempotent on re-run (#2849)')
+        : fail(`add-entry: non-Latin re-run => ${JSON.stringify(rerun.cv)}`);
+
+      // A different heading must not collide via a shared empty key.
+      const p2 = join(jpTmp, 'p2.json');
+      writeFileSync(p2, JSON.stringify({ cv: {
+        section: '\u8077\u52D9\u7D4C\u6B74',
+        dedupKey: '\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        entry: '- **\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8**',
+      } }));
+      execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), p2], { env, encoding: 'utf-8' });
+      const finalCv = readFileSync(cvPath, 'utf-8');
+      const [projSection, workSection] = finalCv.split('## \u8077\u52D9\u7D4C\u6B74');
+      (workSection || '').includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8') && !projSection.includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8')
+        ? pass('add-entry: two different non-Latin sections stay distinct (#2849)')
+        : fail(`add-entry: entry landed under the wrong non-Latin section:\n${finalCv}`);
+    } finally {
+      rmSync(jpTmp, { recursive: true, force: true });
+    }
+  }
+
 } catch (e) {
   fail(`add-entry tests crashed: ${e.message}`);
 }
@@ -13432,6 +13477,37 @@ try {
     pass('match-star scorer: exact tag token "leadership" still scores +3 after tokenized fix');
   } else {
     fail(`match-star scorer: exact tag match regressed (expected 3, got ${leadershipExactTag})`);
+  }
+
+  // Non-Latin story banks (#2847). tokenize() stripped [^a-z0-9\s], so a story
+  // written in Russian or Hindi produced [] and scored 0 against a question in
+  // the SAME language — the matcher was inert, not degraded, for anyone whose
+  // language.output is not English.
+  {
+    const mk = (title, theme, action, result, tags = []) => ({ title, theme, action, result, tags });
+    const ru = mk('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439', '\u043F\u043B\u0430\u0442\u0435\u0436\u0438', '\u0412\u043E\u0437\u0433\u043B\u0430\u0432\u0438\u043B \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044E \u043F\u043B\u0430\u0442\u0451\u0436\u043D\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B', '\u0421\u043D\u0438\u0437\u0438\u043B \u043E\u0442\u043A\u0430\u0437\u044B', ['\u043F\u043B\u0430\u0442\u0435\u0436\u0438']);
+    const hi = mk('\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u093E \u0928\u0947\u0924\u0943\u0924\u094D\u0935', '\u0935\u093F\u092B\u0932\u0924\u093E\u090F\u0902 \u0918\u091F\u093E\u0908\u0902', ['\u092D\u0941\u0917\u0924\u093E\u0928']);
+
+    const ruTokens = tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u0438 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439');
+    const hiTokens = tokenize('\u092E\u0941\u091D\u0947 \u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902 \u092C\u0924\u093E\u090F\u0902');
+
+    tokenize('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F').length > 0 && tokenize('\u092D\u0941\u0917\u0924\u093E\u0928').length > 0
+      ? pass('match-star: non-Latin text produces tokens (#2847)')
+      : fail('match-star: non-Latin text still tokenizes to nothing');
+
+    score(ru, ruTokens, []) > 0 && score(hi, hiTokens, []) > 0
+      ? pass('match-star: a story matches a question in its own language (#2847)')
+      : fail(`match-star: same-language match still scores 0 (ru=${score(ru, ruTokens, [])}, hi=${score(hi, hiTokens, [])})`);
+
+    // The widening must not make everything match everything.
+    score(ru, tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043D\u0430\u0439\u043C\u0435 \u043A\u043E\u043C\u0430\u043D\u0434\u044B'), []) === 0
+      ? pass('match-star: an unrelated same-language question still scores 0 (#2847)')
+      : fail('match-star: widening made an unrelated question match');
+
+    // Devanagari matras must survive; without \p{M} they become spaces.
+    tokenize('\u092D\u0941\u0917\u0924\u093E\u0928')[0] === '\u092D\u0941\u0917\u0924\u093E\u0928'
+      ? pass('match-star: Devanagari matras survive tokenization (#2847)')
+      : fail(`match-star: matras stripped — token came back as ${JSON.stringify(tokenize('\u092D\u0941\u0917\u0924\u093E\u0928'))}`);
   }
 
   // match-star.mjs file must exist (existsSync-guarded in the script itself)
