@@ -29,12 +29,18 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+ *   node scan.mjs --since 7                    # postings from the last 7 days
+ *   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+ *   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+ *   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+ *   node scan.mjs --quiet                      # suppress the manifesto footer
+ *   node scan.mjs --help                       # print this usage block and exit
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
@@ -46,7 +52,7 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 
 try {
@@ -1800,25 +1806,36 @@ export async function appendToPipeline(offers) {
   });
 }
 
-export function appendToScanHistory(offers, date, status = 'added') {
-  // Ensure file + header exist. The header names every column the row writer
-  // (formatScanHistoryRow) emits, in the same order: the original 7 positional
-  // cols (url…location) plus the append-only trailing cols added since —
-  // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-  // normalized_company (11). Written ONLY on fresh-file creation; existing files
-  // (including headerless legacy files and older 7-col-header files) are never
-  // rewritten. All readers either skip line 0 unconditionally, detect the header
-  // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
-  // backward-compatible. `status` is parameterized so callers can record verify
-  // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
-  if (!existsSync(SCAN_HISTORY_PATH)) {
-    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
-  }
+// data/scan-history.tsv has exactly the same set of concurrent writers as
+// data/pipeline.md — scan.mjs, scan-ats-full.mjs, scan-interamt.mjs and
+// plugins.mjs — so it takes the same lock appendToPipeline does, on its own
+// path. Unlocked, two writers race in two places: the create branch below is a
+// check-then-write, and its writeFileSync truncates, so a scanner that loses
+// the race erases rows the winner already appended; and a multi-row
+// appendFileSync is not atomic, so a concurrent append can interleave mid-line.
+// Both surface as rows that silently stop counting, because every reader skips
+// a malformed line quietly.
+export async function appendToScanHistory(offers, date, status = 'added') {
+  await withPipelineLock(SCAN_HISTORY_PATH, () => {
+    // Ensure file + header exist. The header names every column the row writer
+    // (formatScanHistoryRow) emits, in the same order: the original 7 positional
+    // cols (url…location) plus the append-only trailing cols added since —
+    // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
+    // normalized_company (11). Written ONLY on fresh-file creation; existing files
+    // (including headerless legacy files and older 7-col-header files) are never
+    // rewritten. All readers either skip line 0 unconditionally, detect the header
+    // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
+    // backward-compatible. `status` is parameterized so callers can record verify
+    // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
+    if (!existsSync(SCAN_HISTORY_PATH)) {
+      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
+      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
+    }
 
-  const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
+    const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-  appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+  });
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
@@ -1876,11 +1893,36 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 
 // One row of run counters per non-dry scan — today these numbers are printed
 // once in the summary and lost when the terminal scrolls. Full ISO timestamp
-// (two scans in one day must not collapse). `status` is reserved: always
-// 'completed' in v1; a follow-up wires failure-path writes so trend stats can
-// exclude survivorship bias. Consumers MUST parse by header name, never by
-// position — columns may be appended in later versions.
+// (two scans in one day must not collapse). `status` is 'completed' for a
+// finished run; a run that dies after the sweep starts records 'failed' via
+// writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
+// Consumers MUST parse by header name, never by position — columns may be
+// appended in later versions.
 export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+
+// Failure-path writes (#2643). main() registers a snapshot closure once the
+// sweep's counters exist (never on --dry-run, never before the sweep starts —
+// a config error is not a run). The fatal catch and the SIGINT handler both
+// call writeRunFailureRow; the snapshot is consumed on first use so the two
+// signals can never double-write. Best-effort by design: a failure to record
+// the failure must not mask the original error, so everything is swallowed.
+let runFailureSnapshot = null;
+
+export function registerRunFailureSnapshot(fn) {
+  runFailureSnapshot = typeof fn === 'function' ? fn : null;
+}
+
+export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH) {
+  const snapshot = runFailureSnapshot;
+  runFailureSnapshot = null;
+  if (!snapshot) return false;
+  try {
+    appendScanRunSummary({ ...snapshot(), status }, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -2094,8 +2136,43 @@ function guardStatusFor(code) {
   return 'skipped_invalid_url';
 }
 
+// ── CLI args ────────────────────────────────────────────────────────
+// #2270: `node scan.mjs --help` used to run a full live scan and write to
+// pipeline.md/scan-history.tsv instead of printing usage — the flag was
+// never checked at all. Same shape as scan-ats-full.mjs (#1633/#1635),
+// reply-watch.mjs (#2743/#2745) and dedup-tracker.mjs (#2744/#2746), shared
+// via lib/cli-flags.mjs's validateFlags() (#2775).
+const KNOWN_FLAGS = [
+  '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
+  '--include-blacklisted', '--company', '--posted-after', '--posted-before',
+  '--since', '--quiet', '--help', '-h',
+];
+
+// Flags whose space-separated value is the NEXT argv token (the `--flag=value`
+// form is self-contained and never needs this). --throttle is deliberately
+// excluded: only its bare and `--throttle=<ms>` forms are read below, so a
+// following token is never its value.
+const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
+
+const USAGE = `Usage:
+  node scan.mjs                              # scan all enabled companies
+  node scan.mjs --dry-run                    # preview without writing files
+  node scan.mjs --company Cohere             # scan a single company
+  node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
+  node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
+  node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
+  node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+  node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+  node scan.mjs --since 7                    # postings from the last 7 days
+  node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+  node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --quiet                      # suppress the manifesto footer
+  node scan.mjs --help                       # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
@@ -2320,6 +2397,32 @@ async function main() {
   const errors = [...resolveErrors];
   const emptyTargets = [];
 
+  // Arm the failure-path row (#2643) now that the sweep is about to start and
+  // every counter it reads is in scope. new_added is hardcoded 0 on a failed
+  // run even if the sweep added postings before dying (the count isn't settled
+  // mid-sweep). Excluded from trend averages so it can't skew them, but a
+  // raw-TSV reader should treat that 0 as a sentinel, not a true count.
+  if (!dryRun) {
+    registerRunFailureSnapshot(() => ({
+      timestamp: new Date().toISOString(),
+      companies: targets.filter(t => !t._isBoard).length,
+      boards: targets.filter(t => t._isBoard).length,
+      found: totalFound, filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
+      filteredLocation: totalFilteredLocation, filteredPostingAge: totalFilteredPostingAge,
+      filteredSalary: totalFilteredSalary, filteredContent: totalFilteredContent,
+      filteredCooldown: totalFilteredCooldown, dupes: totalDupes, newAdded: 0,
+      errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
+    }));
+    // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
+    // with the conventional SIGINT code.
+    process.once('SIGINT', () => {
+      writeRunFailureRow('failed');
+      process.exit(130);
+    });
+  }
+
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     // includeUndated is deliberately ALWAYS true, independent of the window.
@@ -2507,7 +2610,7 @@ async function main() {
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
-    appendToScanHistory(verifiedOffers, date);
+    await appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
@@ -2518,7 +2621,7 @@ async function main() {
       cooldownGroups[item.status].push(item.job);
     }
     for (const [status, group] of Object.entries(cooldownGroups)) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
   // Expired postings — plus the old URLs of migrated offers — are recorded as
@@ -2528,12 +2631,12 @@ async function main() {
     ...migratedOffers.map(o => ({ ...o, url: o.previousUrl })),
   ];
   if (!dryRun && expiredForHistory.length > 0) {
-    appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+    await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
   if (!dryRun && droppedOffers.length > 0) {
-    appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
@@ -2547,7 +2650,7 @@ async function main() {
       byStatus.get(status).push(o);
     }
     for (const [status, group] of byStatus) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
 
@@ -2759,6 +2862,8 @@ async function main() {
       filteredCountryEligibility: totalFilteredCountryEligibility,
     });
   }
+  // The run completed (or was a dry run) — disarm the failure row.
+  registerRunFailureSnapshot(null);
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
@@ -2786,6 +2891,7 @@ async function main() {
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main().catch(err => {
     console.error('Fatal:', err.message);
+    writeRunFailureRow('failed');
     process.exit(1);
   });
 }

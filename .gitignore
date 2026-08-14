@@ -142,3 +142,12 @@ plan/
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
 # patterns above (cv.md, portals.yml).
 !test-fixtures/**
+
+# Profile intake sources (master CV / LinkedIn export / diplomas / references
+# — user PII, never commit). Ship only the system-owned scaffold. #1723
+documents/*
+!documents/.gitkeep
+!documents/README.md
+# Intake fingerprints — the recorded source filenames may themselves carry
+# PII (e.g. cv/jane-doe-master-cv.pdf). #1723
+data/intake-state.json

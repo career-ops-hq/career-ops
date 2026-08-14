@@ -34,7 +34,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSyn
 import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
@@ -46,6 +46,7 @@ import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -226,28 +227,13 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  // A value-taking flag's space-separated value (e.g. the `-tmp` in
-  // `--md-out -tmp`) must not be mistaken for an unrecognized flag just
-  // because it happens to start with `-`. Mirrors valueOf()'s own adjacency
-  // rule below so `--flag value` and `--flag=value` are validated consistently.
-  const consumedValueIndices = new Set();
-  args.forEach((a, idx) => {
-    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
-      consumedValueIndices.add(idx + 1);
-    }
-  });
-
-  const unknownFlags = args.filter((a, idx) =>
-    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    process.exit(1);
-  }
+  // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
+  // lib/cli-flags.mjs (#2775). This also fixes a latent ordering bug this
+  // script had before the pattern was consolidated: the unrecognized-flag
+  // check now runs BEFORE --help, so `--help --bogus` still errors instead
+  // of exiting 0 having never looked at `--bogus` (the same ordering
+  // CodeRabbit flagged on #2745/#2746).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
@@ -641,7 +627,14 @@ async function main() {
   // sinceMs once postings are confidently past the --since window, and
   // includeUndated (when false) for a tenant that exposes no postedOn at
   // all, since its postings would all be dropped as undated below anyway.
-  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
+  //
+  // syntheticEntries states what this scanner's entries ARE: built from the
+  // external ATS dataset, not read from portals.yml tracked_companies.
+  // workday.mjs picks its cap-hit warning from it — there is no portal entry
+  // here for the user to edit, so "raise max_pages on this entry" would be
+  // inactionable. It used to infer that from sinceMs being set, which stopped
+  // being true once #2418 taught scan.mjs --since to set it too (#2495).
+  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
   const date = new Date().toISOString().slice(0, 10);
 
   // Same defensive default as completedSources/counters below: a version-1
@@ -972,7 +965,7 @@ async function main() {
       writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
     }
     await appendToPipeline(offers);
-    appendToScanHistory(offers, date);
+    await appendToScanHistory(offers, date);
     saved = true;
     log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);
 

@@ -2,9 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
+import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -94,12 +95,12 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
   }
 
   if (filters.positive.length === 0) {
-    const profile = loadYaml("config/profile.yml");
-    const roles = (profile?.target_roles ?? {}) as Record<string, unknown>;
-    const fromRoles = listFrom([
-      ...(typeof roles.primary === "string" ? [roles.primary] : []),
-      ...(Array.isArray(roles.archetypes) ? roles.archetypes : []),
-    ]);
+    // Shape-reading lives in profile-keywords.mjs, mirroring the core's
+    // providers/_profile-keywords.mjs. Inlined here it had drifted from the
+    // core on BOTH fields — `primary` read as a string when it is a list,
+    // `archetypes` spread raw when its entries are objects — so this fallback
+    // returned nothing for every profile.yml the app itself writes.
+    const fromRoles = listFrom(profileTargetKeywords(loadYaml("config/profile.yml")));
     if (fromRoles.length) {
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");
