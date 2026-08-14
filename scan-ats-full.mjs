@@ -723,7 +723,8 @@ async function main() {
   const datasetStatus = {};
 
   const snapshotCounters = () => ({
-    totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
+    totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
+    droppedNoDate, droppedContent,
     noDateSkipCompanies, noDateSkipJobs, cappedBoards,
   });
   const checkpointBase = () => ({
