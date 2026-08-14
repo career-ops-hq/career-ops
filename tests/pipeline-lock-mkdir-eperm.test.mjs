@@ -28,11 +28,30 @@ import { acquirePipelineLock, LockTimeoutError } from '../pipeline-lock.mjs';
 
 console.log('\n🔒 pipeline-lock: a non-EEXIST mkdir refusal is contention, not fatal');
 
-// Running as root defeats permission bits entirely, so the refusal never
-// happens and a pass here would be vacuous. Skipping loudly beats asserting
-// nothing quietly.
-if (typeof process.getuid === 'function' && process.getuid() === 0) {
-  console.log('  ⏭  skipped: running as root, permission bits do not apply');
+// Two environments cannot produce the refusal this case needs, and in both a
+// green result would mean nothing. Skipping loudly beats asserting nothing
+// quietly.
+//
+//   - root: permission bits do not apply, so mkdir simply succeeds.
+//   - win32: a POSIX mode of 0o500 does not stop directory creation there.
+//     Windows uses ACLs, `chmod` maps onto the read-only attribute, and that
+//     attribute does not deny mkdir inside the directory, so acquisition
+//     succeeds and no error is thrown at all. Measured, not assumed: this
+//     case failed on windows-latest with `got undefined` while the real
+//     Windows EPERM it defends against was already gone from the same run.
+//
+// The bug is Windows-only and the test is POSIX-only, which reads as a
+// contradiction and is not one: EACCES and EPERM meet in the same branch of
+// isMkdirContention(), so exercising either one covers the code path. What
+// cannot be reproduced anywhere on demand is Windows' *timing* window, which
+// is why this test manufactures a deterministic refusal instead of waiting
+// for a race.
+const cannotRefuse = (typeof process.getuid === 'function' && process.getuid() === 0)
+  ? 'running as root, permission bits do not apply'
+  : (process.platform === 'win32' ? 'win32: a POSIX mode cannot deny mkdir, so the refusal never happens' : null);
+
+if (cannotRefuse) {
+  console.log(`  ⏭  skipped: ${cannotRefuse}`);
 } else {
   const base = mkdtempSync(join(tmpdir(), 'co-lock-eperm-'));
   const sealed = join(base, 'sealed');
