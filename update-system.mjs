@@ -107,6 +107,9 @@ const SYSTEM_PATHS = [
   'modes/patterns.md',
   'modes/titles.md',
   'modes/upskill.md',
+  'modes/intake.md',
+  'documents/.gitkeep',
+  'documents/README.md',
   'modes/update.md',
   'modes/agent-inbox.md',
   'modes/reply-watch.md',
@@ -161,6 +164,7 @@ const SYSTEM_PATHS = [
   'application-answers.mjs',
   'generate-cover-letter.mjs',
   'merge-tracker.mjs',
+  'url-key.mjs',
   'sync-pdf-flags.mjs',
   'tracker-links.mjs',
   'tracker.mjs',
@@ -208,6 +212,7 @@ const SYSTEM_PATHS = [
   'analyze-patterns.mjs',
   'upskill.mjs',
   'skill-extract.mjs',
+  'intake.mjs',
   'stats.mjs',
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
@@ -226,6 +231,7 @@ const SYSTEM_PATHS = [
   'contacts.mjs',
   'contacts.test.mjs',
   'weekly-digest.mjs',
+  'tracker-sync-check.mjs',
   'followup-cadence.mjs',
   'followup-cadence.test.mjs',
   'invite-match.mjs',
@@ -407,6 +413,7 @@ export const USER_PATHS = [
   'portals.yml',
   'article-digest.md',
   'interview-prep/',
+  'documents/',
   'data/',
   'reports/',
   'output/',
@@ -736,7 +743,25 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
 
   const diffNames = (ref) => {
     try {
-      return runGit('diff', '--name-only', ref, '--', ...paths).split('\n').map((p) => p.trim()).filter(Boolean);
+      // `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line
+      // ending must not read as a local edit. Installs that last synced before
+      // `.gitattributes` was introduced (80d104f9) have a merge-base predating
+      // it, so every text file not renormalized in that commit differs from the
+      // baseline by line endings alone — which otherwise flags ~150 untouched
+      // files and silently no-ops the whole update (#2817). This ignores only
+      // the carriage return at end of line, so a genuine trailing-whitespace or
+      // content edit is still detected.
+      //
+      // `--numstat`, deliberately, NOT `--name-only`: `--name-only` can list a
+      // path on the blob-OID comparison alone, before the textual diff runs, so
+      // a CRLF/LF-only file survives `--ignore-cr-at-eol` and the guard leaks
+      // right back. `--numstat` forces the textual diff, so the ignore rule is
+      // actually applied and a CR-only file drops out of the output entirely.
+      // The path is field 3 (a binary file renders as `-\t-\tpath`, still field
+      // 3). Reads less obviously than `--name-only`; keep it as-is.
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...paths)
+        .split('\n').map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.split('\t')[2]).filter(Boolean);
     } catch {
       // An unreadable ref (shallow clone, unrelated histories) must never abort
       // the update — it degrades the warning, not the checkout.

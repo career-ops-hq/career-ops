@@ -17,12 +17,26 @@ import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath, normalizeCompany,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
+// ── CLI args ────────────────────────────────────────────────────────
+// Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
+// (#2743): an unrecognized flag must fail fast, never silently fall through
+// to the live-run default and write to the real tracker (#2744). Shared via
+// lib/cli-flags.mjs's validateFlags() (#2775).
+const KNOWN_FLAGS = ['--dry-run', '--help', '-h'];
+const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
+
+const cliArgs = process.argv.slice(2);
+
+validateFlags(cliArgs, KNOWN_FLAGS, USAGE);
+
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.

@@ -135,12 +135,39 @@ export function recommendCvReuse(newJd, previousText, options = {}) {
   return { decision: 'regenerate', score, reason: 'low-similarity' };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [newJdPath, previousPath] = process.argv.slice(2);
-  if (!newJdPath || !previousPath) {
-    console.error('Usage: node jd-similarity.mjs <new-jd.txt> <previous-jd-or-cv.txt>');
+// ── CLI ─────────────────────────────────────────────────────────────
+
+const KNOWN_FLAGS = ['--help', '-h'];
+
+const USAGE = `Usage:
+  node jd-similarity.mjs new-jd.txt previous-jd-or-cv.txt
+  node jd-similarity.mjs --help                    # print this usage block and exit`;
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
     process.exit(1);
   }
+  const [newJdPath, previousPath] = args;
+  if (args.length !== 2 || !newJdPath || !previousPath) {
+    console.error('Error: expected two file paths.');
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  return { newJdPath, previousPath };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { newJdPath, previousPath } = parseArgs(process.argv);
   try {
     const result = recommendCvReuse(readFileSync(newJdPath, 'utf8'), readFileSync(previousPath, 'utf8'));
     console.log(JSON.stringify(result, null, 2));

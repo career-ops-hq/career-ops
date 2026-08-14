@@ -58,12 +58,26 @@ export async function fetchText(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.text());
 }
 
-// Returns the raw Response (after the timeout + non-2xx guard) so providers that
-// need response headers — e.g. startup.ch reads Set-Cookie to prime a session —
-// can route through ctx instead of re-implementing fetch. Pass redirect:'error'
-// like every other provider call so a 3xx can't be followed to a private IP.
+// Returns a Response (after the timeout + non-2xx guard) so providers that need
+// response headers — csod.mjs reads Set-Cookie to prime the session its search
+// API requires — can route through ctx instead of re-implementing fetch. Pass
+// redirect:'error' like every other provider call so a 3xx can't be followed to
+// a private IP.
+//
+// The body is read here, inside the timer window, and handed back as an
+// equivalent Response. Two reasons: returning the live Response would let a
+// server that stalls its body hang the caller forever with the abort timer
+// already cleared (the failure fetchWithTimeout documents above), and this
+// function previously omitted the `consume` argument entirely, so it threw
+// "consume is not a function" on every call — it had no working callers to
+// preserve bug-compatibility with. Header identity, including repeated
+// Set-Cookie (getSetCookie()), survives the reconstruction.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 export async function fetchResponse(url, opts = {}) {
-  return await fetchWithTimeout(url, opts);
+  return await fetchWithTimeout(url, opts, async (res) => {
+    const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  });
 }
 
 /** Jitter added to a backoff so concurrent retries don't re-collide in lockstep. */
@@ -92,7 +106,7 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
 /** Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock wait. */
-function sleep(ms, ctx) {
+export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -163,7 +177,11 @@ async function withRetry(request, ctx, policy = {}) {
       return await request();
     } catch (err) {
       lastErr = err;
-      err.attempts = attempt + 1;
+      // A rejection isn't guaranteed to be an object — assigning a property to
+      // a primitive (a string, a number) throws in strict mode (ESM always is),
+      // which would replace the real rejection with an unrelated TypeError
+      // right here in the catch, before any caller sees it.
+      if (err !== null && (typeof err === 'object' || typeof err === 'function')) err.attempts = attempt + 1;
       if (attempt === retries || !isRetryableError(err)) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
@@ -206,7 +224,11 @@ export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
  * of the content type. jobvite's XML feed answers `429 Retry-After: 30` from
  * the second request onward — reliably enough that scanning two tenants
  * back-to-back trips it — and a scraped HTML board is just as capable of a
- * transient 5xx as a JSON API.
+ * transient 5xx as a JSON API. Also used by providers that resolve config
+ * (e.g. a board id) from a one-shot page fetch before pagination even starts
+ * — that single request used to have no retry at all, so a single
+ * DNS/TLS/connection blip on it failed the whole provider before a single
+ * page was ever fetched.
  *
  * @param {{fetchText: Function, sleep?: Function}} ctx - Transport context.
  * @param {string} url - Absolute URL.

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -59,7 +59,7 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
   const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
