@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -8,13 +8,16 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"tests/**/*.test.mjs\" test-stream-parse.mjs test-act-envelope.mjs"
+    "test": "node --test \"tests/**/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.78",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.1",
     "lucide-react": "^1.8.0",
     "next": "16.3.0",
     "playwright-core": "^1.61.0",

@@ -69,6 +69,28 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
+// mkdir's "someone else already has this" answer is NOT portable. POSIX gives
+// EEXIST; Windows gives EEXIST *sometimes* and EPERM/EACCES when the target is
+// mid-flight — being created, or being removed, by another process at that
+// instant. That is not an error condition here, it is the contention this loop
+// exists to handle, and it is precisely what a burst of concurrent writers
+// manufactures.
+//
+// Treating it as fatal is how an item gets LOST. Measured on windows-latest
+// (#2777, run 31745798742): one of 30 concurrent `agent-inbox add` processes
+// died with `EPERM: operation not permitted, mkdir '…agent-inbox.md.lock.recover'`
+// and its line was never appended. The two budget increases before this one
+// (#2506 jitter, #2825's 30s) both moved the symptom without touching this,
+// because a starving writer and a writer killed by EPERM produce the same
+// `kept=29 of 30` and only the second is a crash.
+//
+// A genuine permissions problem still surfaces: it simply stops being an
+// instant throw and becomes a timeout that names the last error it saw, which
+// is the correct trade when the alternative is silent data loss.
+function isMkdirContention(err) {
+  return err?.code === 'EEXIST' || err?.code === 'EPERM' || err?.code === 'EACCES';
+}
+
 function processIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -123,6 +145,37 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   const recoverGuardDir = `${lockDir}.recover`;
   const token = randomUUID();
   const deadline = Date.now() + timeoutMs;
+  // The last mkdir error this caller treated as contention. On POSIX it is
+  // always EEXIST and says nothing; on Windows an EPERM/EACCES that persists
+  // to the deadline is the difference between "crowded" and "this process
+  // cannot create directories here at all", and without it a real permissions
+  // problem would present as a plain, unexplained timeout.
+  let lastContentionError = null;
+
+  // Built at the throw site so the diagnosis reflects the moment it gave up.
+  // A timeout on a critical section that is a single sub-millisecond append
+  // has more than one explanation, and the owner record separates them:
+  //   - no owner, or an owner whose PID is dead: real contention, and the
+  //     structural answer is a fair queue rather than a bigger budget.
+  //   - an owner reported ALIVE after tens of seconds: the directory outlived
+  //     its holder, because release()'s rmSync can fail on Windows while a
+  //     handle is open and is swallowed by design.
+  // Diagnostic only: it never changes whether the error is thrown.
+  const buildTimeoutError = () => {
+    const err = new LockTimeoutError(lockDir, timeoutMs);
+    try {
+      const owner = readLockOwner(lockDir);
+      err.owner = owner
+        ? { pid: owner.pid, alive: processIsAlive(owner.pid), started_at: owner.started_at, heldMs: Date.parse(owner.started_at) ? Date.now() - Date.parse(owner.started_at) : null }
+        : { pid: null, alive: null, note: existsSync(lockDir) ? 'lock exists with no readable owner.json' : 'lock vanished before it could be read' };
+      err.message += ` — owner=${JSON.stringify(err.owner)}`;
+      if (lastContentionError && lastContentionError.code !== 'EEXIST') {
+        err.lastMkdirError = lastContentionError.code;
+        err.message += `, last mkdir error=${lastContentionError.code} on ${lastContentionError.path ?? '?'}`;
+      }
+    } catch { /* diagnosis must never mask the timeout it describes */ }
+    return err;
+  };
 
   // A fresh install may not have data/ yet — plugins.mjs's cmdRun calls
   // appendToPipeline with no directory pre-creation, so create it here rather
@@ -133,7 +186,8 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
     try {
       mkdirSync(lockDir);
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
+      if (!isMkdirContention(err)) throw err;
+      lastContentionError = err;
 
       // Serialize stale-reclaim behind a second atomic guard so only one
       // caller can be inside the decide-then-delete window at a time.
@@ -142,7 +196,17 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         mkdirSync(recoverGuardDir);
         hasRecoverGuard = true;
       } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
+        if (!isMkdirContention(guardErr)) throw guardErr;
+        lastContentionError = guardErr;
+        // An EPERM/EACCES here says the guard directory is mid-flight, not that
+        // it is sitting there abandoned, so the age check below would be
+        // reasoning about a directory it cannot even stat reliably. Back off to
+        // the retry loop instead of judging it.
+        if (guardErr.code !== 'EEXIST') {
+          if (Date.now() > deadline) throw buildTimeoutError();
+          await sleep(retryMs * (0.5 + Math.random()));
+          continue;
+        }
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
@@ -162,8 +226,29 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         }
       }
 
-      if (Date.now() > deadline) throw new LockTimeoutError(lockDir, timeoutMs);
-      await sleep(retryMs);
+      if (Date.now() > deadline) throw buildTimeoutError();
+      // Jitter, because a FIXED retry makes every waiter wake at the same
+      // instant and re-race, and whoever loses is picked at random rather than
+      // queued. With N waiters that is the coupon-collector problem: serving
+      // all of them takes about N·H(N) rounds, so 30 concurrent adds need ~120
+      // and the default budget only affords 8000/80 = 100. The starving writer
+      // then times out and its item is LOST — the exact failure #2777 removed
+      // from the silent path, reappearing as a loud one under contention.
+      // Spreading wake-ups over [0.5x, 1.5x) breaks the herd so waiters stop
+      // colliding on every round. It does not make the lock fair; it makes
+      // unfairness cost a retry instead of an item.
+      //
+      // Measured, 20 runs per arm alternated on the same machine with the
+      // budget forced to 220ms (2.75 rounds for 30 writers, short by
+      // construction so the effect is visible without waiting out 8s):
+      //   with jitter    2 of 20 runs lose an item
+      //   without jitter 12 of 20
+      // So this is a ~6x reduction, NOT a cure: a starving writer is still
+      // possible, and the structural fix is a fair queue rather than a retry
+      // lottery. Left as a lottery because fairness needs an ordered wait and
+      // that is a different lock; recorded here so nobody reads the jitter as
+      // "the race is gone".
+      await sleep(retryMs * (0.5 + Math.random()));
       continue;
     }
 

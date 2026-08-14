@@ -196,8 +196,30 @@ const twoPassManifestChecks = [
   {
     // execFileSync inherits stderr, so an expected per-path skip printed git's
     // raw pathspec error right before the success banner (#1998).
+    // The trailing spread is the #2337 preserve-exclusions; the property this
+    // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path\)/,
+    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+  },
+  {
+    // #2337: a system file this install edited must be listed and backed up
+    // before the checkout, not overwritten in silence.
+    name: 'locally edited system files are detected before checkout (#2337)',
+    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, 'FETCH_HEAD'\)/,
+  },
+  {
+    name: 'the local copy is saved as .bak before any overwrite (#2337)',
+    pattern: /copyFileSync\([\s\S]{0,80}?backup\)/,
+  },
+  {
+    name: 'overwriting a locally edited system file requires --force (#2337)',
+    pattern: /updateForce[\s\S]{0,400}?preservedPaths\.push\(\.\.\.atRisk\)/,
+  },
+  {
+    // Excluded paths must stay out of the scoped commit too, or the
+    // "auto-update" commit records the very edit the user kept (#2337).
+    name: 'preserved paths are excluded from the update commit (#2337)',
+    pattern: /pathsToStage = \[\.\.\.updated, \.\.\.preserveSpecs\]/,
   },
   {
     name: 'skipped upstream-absent paths are summarized explicitly (#1998)',
@@ -281,6 +303,10 @@ const allowedSystemUserOverlap = new Set([
   // the updater ships these two, but never the real session files alongside them.
   'interview-prep/sessions/.gitkeep',
   'interview-prep/sessions/README.md',
+  // Same pattern for the user-layer documents/ intake dir (#1723): the
+  // updater ships the scaffold, never the user's source documents.
+  'documents/.gitkeep',
+  'documents/README.md',
 ]);
 let hasSystemUserCollision = false;
 for (const systemPath of systemPaths) {

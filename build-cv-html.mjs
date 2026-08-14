@@ -64,8 +64,12 @@ const DEFAULT_SECTION_TITLES = {
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
 function escapeHtml(text) {
-  if (typeof text !== 'string') return '';
-  return text
+  // Blank out only truly absent/structural values. A number or boolean scalar
+  // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
+  // not vanish: the old `typeof text !== 'string' → ''` guard silently dropped
+  // numeric years/dates from the CV while `present` stayed true.
+  if (text === null || text === undefined || typeof text === 'object') return '';
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

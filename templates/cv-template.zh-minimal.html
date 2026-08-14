@@ -516,6 +516,18 @@ version: 1.0.0
     overflow-wrap: break-word;
   }
 
+  /* Traditional Chinese. `html[lang="zh"]` does not match `zh-TW`, and this
+     template's default stack is Simplified — which substitutes the wrong glyph
+     forms for TC text — so zh-TW needs TC faces explicitly. modes/zh-TW/ ships
+     as a supported locale. (No `ko` rule here on purpose: this is the Chinese
+     minimal template, not a general one.) */
+  html[lang="zh-TW"] body,
+  html[lang="zh-TW"] .contact-row {
+    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang TC',
+      'Microsoft JhengHei', 'Noto Sans CJK TC',
+      'Noto Sans TC', 'Source Han Sans TC', sans-serif;
+  }
+
   .header {
     margin-bottom: 18px;
   }
@@ -731,6 +743,8 @@ version: 1.0.0
     <div class="section-title">{{SECTION_SKILLS}}</div>
     {{SKILLS}}
   </div>
+
+  <!-- END -->
 
 </div>
 </body>

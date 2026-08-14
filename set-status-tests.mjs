@@ -233,6 +233,126 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// ── 1f. Non-Latin titles must not all collapse to the same role (#2670) ─
+// The equality normalizer stripped `[^a-z0-9]`, which deletes every non-Latin
+// LETTER, not just punctuation. Any title written entirely in Japanese, Arabic
+// or Cyrillic keyed to "", two different titles compared equal ("" === ""), and
+// the guard that exists to stop a status reaching the wrong row accepted the
+// mismatch and wrote. The repo ships modes/ja/, modes/ar/ and modes/ru/, so
+// these are shipped-market titles, not exotica. Company matching already used
+// the Unicode-aware normalizeTextKey; only the role guard was left ASCII-only.
+{
+  const TRACKER_CJK = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | バックエンドエンジニア | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`;
+  const sb = makeSandbox(TRACKER_CJK);
+  const before = readTracker(sb);
+  const r = runSetStatus(['リクルート', 'Rejected', '--role', 'フロントエンドエンジニア', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: a different Japanese title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Two titles differing ONLY by a parenthesised city — the fullwidth
+  // parentheses are punctuation and must still collapse, so what has to
+  // distinguish them is the city itself.
+  const sb2 = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | エンジニア（東京） | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`);
+  const before2 = readTracker(sb2);
+  const r2 = runSetStatus(['リクルート', 'Rejected', '--role', 'エンジニア（大阪）', '--json'], sb2);
+  if (r2.code === 3 && readTracker(sb2) === before2) {
+    pass('role-mismatch: same Japanese title, different city does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk-city: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+
+  // The guard must not over-fire: the SAME non-Latin title still proceeds,
+  // including across a Unicode normalization form (NFD input vs NFC row).
+  const r3 = runSetStatus(['リクルート', 'Applied', '--role', 'バックエンドエンジニア'], sb);
+  if (r3.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: the same Japanese title still proceeds (#2670)');
+  } else {
+    fail(`role-mismatch cjk-equal: code=${r3.code}\n${r3.stdout}${r3.stderr}`);
+  }
+  const nfdRole = "バックエンドエンジニア".normalize('NFD');
+  if (nfdRole === "バックエンドエンジニア") {
+    fail("role-mismatch cjk-nfd: fixture is not actually decomposed — the case would prove nothing");
+  }
+  const r4 = runSetStatus(["リクルート", 'Responded', '--role', nfdRole], sb);
+  if (r4.code === 0 && /\| 1 \|[^\n]*\| Responded \|/.test(readTracker(sb))) {
+    pass('role-mismatch: a decomposed (NFD) Japanese title still matches (#2670)');
+  } else {
+    fail(`role-mismatch cjk-nfd: code=${r4.code}\n${r4.stdout}${r4.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+  rmSync(sb2.dir, { recursive: true, force: true });
+}
+
+// ── 1g. The same collapse hits Arabic and Cyrillic (#2670) ─
+// Not a CJK quirk: `[^a-z0-9]` deletes every letter outside the Latin range,
+// so modes/ar/ and modes/ru/ titles were equally unprotected.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Яндекс | Разработчик | 4.0/5 | Evaluated | ✅ | [1](../reports/001-yandex-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['Яндекс', 'Rejected', '--role', 'Тестировщик', '--json'], sb);
+  if (r.code === 3 && readTracker(sb) === before) {
+    pass('role-mismatch: a different Cyrillic title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cyrillic: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1h. Fullwidth C＃ / C＋＋ must not collapse together (#2670) ─
+// The symbol pre-map matches ASCII "#" and "++", but normalizeTextKey folds
+// NFKC AFTER it, so a fullwidth ＃/＋＋ reached the collapse still fullwidth, was
+// stripped as punctuation, and both titles keyed to "c engineer". Fullwidth
+// forms are ordinary Japanese typography, so this is the same shipped-market
+// surface as §1f. Pre-normalizing NFKC lets the ASCII pre-map see them.
+// The collision predates the #2670 fix — "[^a-z0-9]" dropped them too.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Contoso | C＋＋ Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-contoso-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C＃ Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: fullwidth C＃ does not match a fullwidth C＋＋ row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Not over-firing: the ASCII spelling of the SAME title still matches, which
+  // is exactly what the NFKC folding buys.
+  const r2 = runSetStatus(['contoso', 'Applied', '--role', 'C++ Engineer'], sb);
+  if (r2.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: ASCII "C++ Engineer" matches the fullwidth row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // ── 2. Update by company name (single match) ────────────────────
 {
   const sb = makeSandbox(TRACKER_9);

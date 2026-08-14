@@ -1,0 +1,159 @@
+# gfi-claims: self-serve claiming for good-first-issues.
+#
+# What it does, and deliberately nothing more:
+#   /assign (or /claim)  -> assigns the issue to the commenter, if eligible
+#   /extend              -> restarts the 7-day window, no questions asked
+#   /unassign            -> frees the issue immediately
+#   daily sweep          -> pings a silent assignee at day 3, frees the issue at
+#                          day 7 (never before a ping, never while the assignee
+#                          has an open PR, and it NEVER closes the issue)
+#
+# Eligibility keeps the shop window honest: good-first-issues are reserved for
+# newcomers (fewer than 3 merged PRs here; first-timers-only requires 0), one
+# at a time per person. Experienced contributors are redirected to help-wanted.
+#
+# Escape hatches: the `claim-pinned` label exempts an issue from the sweep, and
+# maintainers can always assign manually. Landing a PR directly on an
+# UNASSIGNED issue needs no claim at all and always stays welcome.
+name: gfi-claims
+
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  claim:
+    if: github.event_name == 'issue_comment' && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gfi-claim-${{ github.event.issue.number }}
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const cmd = ((context.payload.comment.body || '').trim().split(/\s+/)[0] || '').toLowerCase();
+            if (!['/assign', '/claim', '/extend', '/unassign'].includes(cmd)) return;
+            if (context.payload.comment.user.type === 'Bot') return;
+            const { owner, repo } = context.repo;
+            const num = context.payload.issue.number;
+            // Fresh read: the payload snapshot can lose a race between two claims.
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: num });
+            const labels = issue.labels.map(l => (l.name || '').toLowerCase());
+            const isFto = labels.includes('first-timers-only');
+            if (!labels.includes('good first issue') && !isFto) return;
+            const user = context.payload.comment.user.login;
+            const say = (body) => github.rest.issues.createComment({ owner, repo, issue_number: num, body });
+            const FREE = `https://github.com/${owner}/${repo}/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee`;
+
+            if (cmd === '/unassign') {
+              if (issue.assignees.some(a => a.login === user)) {
+                await github.rest.issues.removeAssignees({ owner, repo, issue_number: num, assignees: [user] });
+                await say(`Done, @${user}: freed it up. Thanks for letting go cleanly, and grab another one whenever you like.`);
+              }
+              return;
+            }
+
+            if (cmd === '/extend') {
+              if (issue.assignees.some(a => a.login === user)) {
+                await say(`Extended, @${user}: the 7-day window restarts today. No questions asked.`);
+              }
+              return;
+            }
+
+            // /assign or /claim
+            if (issue.assignees.length) {
+              if (issue.assignees.some(a => a.login === user)) return;
+              await say(`Someone's already on this one, @${user}. If it goes quiet it frees up automatically within a week, so watch this space. Free good-first-issues live here: ${FREE}`);
+              return;
+            }
+
+            const { data: merged } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:pr is:merged author:${user}`, per_page: 1 });
+            const cap = isFto ? 0 : 2;
+            if (merged.total_count > cap) {
+              const HW = `https://github.com/${owner}/${repo}/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22`;
+              await say(`@${user} you're way past good-first-issue territory :) These are reserved so a first-time contributor always has a way in. The help-wanted board is here: ${HW}, and if you want something meatier, say the word and I'll point you at one.`);
+              return;
+            }
+
+            const { data: mine } = await github.rest.issues.listForRepo({ owner, repo, state: 'open', assignee: user, per_page: 100 });
+            const held = mine.filter(i => !i.pull_request && i.number !== num &&
+              i.labels.some(l => ['good first issue', 'first-timers-only'].includes((l.name || '').toLowerCase())));
+            if (held.length) {
+              await say(`One at a time keeps the window fair, @${user}: you already have #${held[0].number}. Finish or \`/unassign\` that one first, and this one is yours if it is still free.`);
+              return;
+            }
+
+            await github.rest.issues.addAssignees({ owner, repo, issue_number: num, assignees: [user] });
+            await say(`It's yours, @${user}! Quick heads-up on how this works: if I don't see a linked PR or a comment from you in 7 days, this frees up for the next person, so issues never get stuck. Need more time? Just say \`/extend\`, no questions asked. CONTRIBUTING.md has the setup, and ping here if anything blocks you.`);
+
+  sweep:
+    if: github.event_name != 'issue_comment'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gfi-sweep
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const DAY = 86400000, now = Date.now();
+            const seen = new Set();
+            for (const label of ['good first issue', 'first-timers-only']) {
+              const issues = await github.paginate(github.rest.issues.listForRepo,
+                { owner, repo, state: 'open', labels: label, per_page: 100 });
+              for (const issue of issues) {
+                if (issue.pull_request || seen.has(issue.number)) continue;
+                seen.add(issue.number);
+                if (!issue.assignees.length) continue;
+                if (issue.labels.some(l => (l.name || '').toLowerCase() === 'claim-pinned')) continue;
+                const assignee = issue.assignees[0].login;
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline,
+                  { owner, repo, issue_number: issue.number, per_page: 100 });
+                // An open PR from the assignee puts the ball in the maintainer's court: never expire.
+                if (timeline.some(e => e.event === 'cross-referenced' && e.source?.issue?.pull_request
+                  && e.source.issue.user?.login === assignee && e.source.issue.state === 'open')) continue;
+                const signals = timeline.filter(e =>
+                  (e.event === 'commented' && e.actor?.login === assignee) ||
+                  (e.event === 'assigned' && e.assignee?.login === assignee) ||
+                  (e.event === 'cross-referenced' && e.source?.issue?.user?.login === assignee))
+                  .map(e => new Date(e.created_at || e.source?.issue?.created_at || 0).getTime());
+                const last = signals.length ? Math.max(...signals) : 0;
+                if (!last) continue;
+                const comments = await github.paginate(github.rest.issues.listComments,
+                  { owner, repo, issue_number: issue.number, per_page: 100 });
+                // The clock measures the silence the assignee OWES, not silence in
+                // general: while the latest human word in the thread belongs to
+                // someone else (say, a maintainer answering a scope question days
+                // late), the assignee is the one who has been waiting, and their
+                // clock restarts at that reply. Bot comments never move the clock.
+                const isBot = (c) => c.user?.type === 'Bot' || (c.user?.login || '').endsWith('[bot]');
+                const othersLast = Math.max(0, ...comments
+                  .filter(c => !isBot(c) && c.user?.login !== assignee)
+                  .map(c => new Date(c.created_at).getTime()));
+                const waitingSince = Math.max(last, othersLast);
+                const silentDays = (now - waitingSince) / DAY;
+                if (silentDays < 3) continue;
+                // The ping marker is the memory, and it lives in the thread itself:
+                // any comment carrying it since the clock last restarted counts, no
+                // matter who posted it (a maintainer's manual check-in both restarts
+                // the clock and IS the ping, hence >=).
+                const ping = comments.filter(c => (c.body || '').includes('<!-- gfi-ping -->')
+                  && new Date(c.created_at).getTime() >= waitingSince).pop();
+                if (silentDays >= 7 && ping && (now - new Date(ping.created_at).getTime()) / DAY >= 2) {
+                  await github.rest.issues.removeAssignees({ owner, repo, issue_number: issue.number,
+                    assignees: issue.assignees.map(a => a.login) });
+                  await github.rest.issues.createComment({ owner, repo, issue_number: issue.number,
+                    body: `Freeing this one up for the next person: a week went by without a signal, and that is on the calendar, not on you, @${assignee}. Still interested? \`/assign\` takes it right back. Thanks for raising your hand in the first place.` });
+                } else if (!ping) {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: issue.number,
+                    body: `How's it going, @${assignee}? No pressure: a one-line comment here keeps this yours. If I don't hear back in a few days I'll open it up for the next person, and you can always grab it again later. <!-- gfi-ping -->` });
+                }
+              }
+            }
