@@ -8,7 +8,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
@@ -92,7 +92,17 @@ export async function POST(req: Request) {
     pdfPaths = pathsResult.paths;
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today });
+  // Resolve the posting date HERE rather than asking the agent for it. The
+  // scanner already wrote it from the provider's own `offer.postedAt`, so this
+  // copies a recorded value instead of inviting a guess — and modes/oferta.md is
+  // explicit that a guessed date is worse than an absent one (the POSTED column
+  // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
+  // → the prompt writes no segment at all.
+  const postedAt =
+    kind === "evaluate"
+      ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
+      : undefined;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
