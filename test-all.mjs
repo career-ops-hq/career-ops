@@ -293,7 +293,21 @@ const scripts = [
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
-  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0 },
+  // The one script in this list that genuinely needs longer than the shared
+  // budget. It spawns competing writer processes for 27 contention cases, and
+  // that cost is the behaviour under test rather than slack to be trimmed.
+  //
+  // Measured on current main on a 24-core Windows box, four consecutive runs:
+  // 13.4s, 17.8s, 19.8s, 20.1s — already 67% of the default 30s before a
+  // 2-core CI runner's load is added. On windows-latest it crossed the line and
+  // was killed mid-matrix (`exit null, signal SIGTERM`), while every other
+  // check on the same commit passed (#2906).
+  //
+  // Raised here rather than in run()'s default so the outlier is treated as an
+  // outlier: every other script keeps the 30s bound, and a NEW script that
+  // starts taking half a minute still fails loudly instead of inheriting a
+  // budget sized for this one.
+  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
@@ -378,13 +392,18 @@ try {
     'utf-8'
   );
 
-  for (const { name, allowFail } of scripts) {
+  for (const { name, allowFail, timeoutMs } of scripts) {
     const parts = name.split(' ');
     const scriptFile = parts[0];
     const args = parts.slice(1);
+    // Only an entry that declares `timeoutMs` overrides run()'s shared budget,
+    // and it is spread in rather than defaulted so an absent value cannot
+    // quietly become `timeout: undefined` — execFileSync reads that as "no
+    // timeout at all", which would turn a hung script into a hung CI job.
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(timeoutMs ? { timeout: timeoutMs } : {}),
     });
     if (result !== null) {
       pass(`${name} runs OK`);
