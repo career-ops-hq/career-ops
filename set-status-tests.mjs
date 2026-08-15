@@ -1241,5 +1241,62 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   }
 }
 
+// ── #2932: "today" is the LOCAL calendar day, never the UTC one ──────────
+{
+  // Auckland is always at or ahead of the UTC day, so for the first hours of
+  // its local day the UTC day is still yesterday. Comparing --on against the
+  // UTC day therefore rejected the user's own today:
+  //   TZ=Pacific/Auckland --on 2026-08-16  ->  "date is in the future"
+  const nzToday = execFileSync(NODE, ['-e',
+    "const d=new Date(),p=n=>String(n).padStart(2,'0');process.stdout.write(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`)",
+  ], { env: { ...process.env, TZ: 'Pacific/Auckland' }, encoding: 'utf-8' }).trim();
+
+  const sandbox = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', nzToday, '--dry-run'], sandbox, { TZ: 'Pacific/Auckland' });
+    if (r.code === 0) pass('#2932: --on accepts the local today east of UTC');
+    else fail(`#2932: --on rejected Auckland's own today (${nzToday}): code=${r.code} ${(r.stderr || r.stdout).split('\n')[0]}`);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+
+  // MUST NOT CHANGE: a genuinely future date is still refused. Without this,
+  // deleting the check entirely would pass the assertion above.
+  const sandbox2 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2099-01-01', '--dry-run'], sandbox2, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: a genuinely future --on is still rejected');
+    else fail(`#2932: future date not rejected (code=${r.code})`);
+  } finally {
+    rmSync(sandbox2.dir, { recursive: true, force: true });
+  }
+
+  // The west-of-UTC half, pinned to an instant so it does not depend on when
+  // the suite runs: at 01:30 UTC it is still the previous day in New York, and
+  // the UTC-day form would write tomorrow into status-log.tsv.
+  const probe = execFileSync(NODE, ['-e',
+    "const {localToday}=await import('./lib/local-today.mjs');" +
+    "const i=new Date('2026-08-16T01:30:00Z');" +
+    "process.stdout.write(localToday(i)+' '+i.toISOString().slice(0,10));",
+    '--input-type=module',
+  ], { cwd: ROOT, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf-8' }).trim();
+  if (probe === '2026-08-15 2026-08-16') {
+    pass('#2932: localToday() resolves the local day west of UTC where the UTC day is tomorrow');
+  } else {
+    fail(`#2932: localToday() west-of-UTC probe returned "${probe}", want "2026-08-15 2026-08-16"`);
+  }
+
+  // MUST NOT CHANGE: the round-trip validity check is date PARSING on UTC
+  // midnight and is deliberately untouched, so a malformed date still fails.
+  const sandbox3 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2026-02-30', '--dry-run'], sandbox3, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: an impossible calendar date is still rejected');
+    else fail(`#2932: 2026-02-30 accepted (code=${r.code})`);
+  } finally {
+    rmSync(sandbox3.dir, { recursive: true, force: true });
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

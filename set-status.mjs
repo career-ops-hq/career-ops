@@ -72,6 +72,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
@@ -161,7 +162,13 @@ if (flags.on !== null) {
   const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
   const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
   if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
-  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
+  // LOCAL today, not the UTC day. At a positive UTC offset the UTC day is
+  // still yesterday for the first hours of the local day, so comparing against
+  // it rejected the user's own today: `TZ=Pacific/Auckland --on 2026-08-16`
+  // failed with "date is in the future" on 2026-08-16 (#2932). The round-trip
+  // check above deliberately stays on UTC — that is date PARSING, not "what
+  // day is it here".
+  if (flags.on > localToday()) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
 const selector = explicitSelector ? null : positional[0];
@@ -499,7 +506,12 @@ if (changed && !flags.dryRun) {
 let statusLogged = false;
 if (statusChanged && !flags.dryRun) {
   const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
+  // so this appended a status-log row dated a day that had not happened yet
+  // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
+  // time-between-stages, so a future-dated transition skews the interval it
+  // measures rather than just looking odd in the file.
+  const eventDate = flags.on ?? localToday();
   try {
     appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\tset-status\t\n`);
     statusLogged = true;
