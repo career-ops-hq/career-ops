@@ -394,7 +394,7 @@ const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
   if (!company || company === '?') continue;
-  const key = `${company.toLowerCase().replace(/[^a-z0-9]/g, '')}::${String(e.role || '').trim().toLowerCase()}`;
+  const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
   if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
   const channels = channelsByRole.get(key);
   const norm = normalizeChannel(e.via);
