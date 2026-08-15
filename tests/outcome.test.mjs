@@ -274,6 +274,32 @@ try {
   check('An explicit --cv outside output/ is left untouched', existsSync(outsideCv));
   check('No removal or refusal recorded for a --cv outside output/', cvOutsideRes.cleanup.removed.length === 0 && cvOutsideRes.cleanup.refused.length === 0);
 
+  // Test 15: a manifest (pdf-index.tsv) HTML path escaping output/ must never be
+  // treated as cleanup-eligible, even though its paired PDF resolves fine (CodeRabbit
+  // finding on #2911 — the html column was trusted without its own containment check).
+  // The PDF still resolves and cleans up normally; only the escaping HTML is excluded.
+  const gammaPdfContent = 'GAMMA-CUSTOM-CV-CONTENT';
+  writeFileSync(join(testDir, 'output', 'gamma.pdf'), gammaPdfContent);
+  const escapingHtml = join(testDir, 'gamma-outside.html');
+  writeFileSync(escapingHtml, 'ESCAPING-HTML-NEVER-TOUCH');
+  writeFileSync(join(testDir, 'data', 'pdf-index.tsv'),
+    '# report\tpdf\thtml\tformat\tdate\n' +
+    '003\toutput/gamma.pdf\tgamma-outside.html\ta4\t2026-07-03\n');
+
+  const escapeRes = JSON.parse(execFileSync(NODE, [
+    OUTCOME_SCRIPT, '3', 'offer_declined', '--clean-output', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  const touchedPaths = [...escapeRes.cleanup.removed, ...escapeRes.cleanup.refused.map(r => r.path)];
+  check('A manifest HTML path escaping output/ is never deleted', existsSync(escapingHtml));
+  check('Escaping HTML path is never archived as submitted_cv.html', !existsSync(join(escapeRes.outcomeDir, 'submitted_cv.html')));
+  check('Cleanup never records a path outside output/', !touchedPaths.some(p => p.endsWith('gamma-outside.html')));
+  check('The contained PDF still resolves and cleans up normally (containment check still recognizes real output/ files)',
+    !existsSync(join(testDir, 'output', 'gamma.pdf')) && escapeRes.cleanup.removed.some(p => p.endsWith('output/gamma.pdf')));
+
 } finally {
   rmSync(testDir, { recursive: true, force: true });
 }

@@ -19,7 +19,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
-import { join, dirname, resolve, extname } from 'path';
+import { join, dirname, resolve, relative, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -262,31 +262,45 @@ if (flags.cv) {
 // explicit --cv pointing outside output/ (e.g. into the user's home directory)
 // is never a candidate, and neither is the cv.md fallback (Case D), since it
 // never sets isPdf.
+//
+// The containment check is path.relative-based (not a string-prefix check)
+// so it works regardless of the platform's path separator, and it is applied
+// to BOTH the PDF and its manifest-sourced HTML companion — the manifest is
+// host-writable data, so a malformed or manipulated html column must never
+// be trusted to point outside output/ without being re-checked here too.
+function isInsideOutputDir(candidatePath, outputDir) {
+  const rel = relative(outputDir, resolve(candidatePath));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolutePathLike(rel));
+}
+function isAbsolutePathLike(p) {
+  return p.startsWith('/') || /^[A-Za-z]:/.test(p);
+}
+
 let cvFromOutputDir = false;
 let htmlResolvedPath = null;
 const outputDir = resolve(repoRoot, 'output');
-if (isPdf && cvResolvedPath) {
+if (isPdf && cvResolvedPath && isInsideOutputDir(cvResolvedPath, outputDir)) {
+  cvFromOutputDir = true;
   const resolvedAbs = resolve(cvResolvedPath);
-  if (resolvedAbs === outputDir || resolvedAbs.startsWith(outputDir + '/')) {
-    cvFromOutputDir = true;
-    const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
-    if (existsSync(manifestPath)) {
-      try {
-        const manifestText = readFileSync(manifestPath, 'utf-8');
-        for (const line of manifestText.split('\n')) {
-          if (!line.trim() || line.startsWith('#')) continue;
-          const fields = line.split('\t');
-          if (!fields[1]) continue;
-          const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
-          if (rowPdfPath === resolvedAbs && fields[2]) {
-            const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
-            if (existsSync(htmlFull)) htmlResolvedPath = htmlFull;
-            break;
+  const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+  if (existsSync(manifestPath)) {
+    try {
+      const manifestText = readFileSync(manifestPath, 'utf-8');
+      for (const line of manifestText.split('\n')) {
+        if (!line.trim() || line.startsWith('#')) continue;
+        const fields = line.split('\t');
+        if (!fields[1]) continue;
+        const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
+        if (rowPdfPath === resolvedAbs && fields[2]) {
+          const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
+          if (existsSync(htmlFull) && isInsideOutputDir(htmlFull, outputDir)) {
+            htmlResolvedPath = htmlFull;
           }
+          break;
         }
-      } catch (err) {
-        // Fallback gracefully on parsing issues
       }
+    } catch (err) {
+      // Fallback gracefully on parsing issues
     }
   }
 }
