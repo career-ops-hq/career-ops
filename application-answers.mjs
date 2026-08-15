@@ -191,7 +191,7 @@ function sliceGroups(body) {
 }
 
 /** `1. **Label**` followed by a `>` quote block. */
-function parseQaEntries(block, labelKey, valueKey) {
+function parseQaEntries(block, labelKey, valueKey, onSkip) {
   if (!block || block === NONE_CAPTURED) return [];
   const lines = block.split('\n');
   const entries = [];
@@ -218,7 +218,13 @@ function parseQaEntries(block, labelKey, valueKey) {
     }
     if (current !== null && /^>/.test(line)) {
       quoted.push(line.replace(/^>\s?/, ''));
+      continue;
     }
+    // Anything else is unreadable: a heading that lost its numbering, or a
+    // quote line with no heading to own it. The second case is the dangerous
+    // one — those lines are either dropped (no current entry) or absorbed into
+    // the PREVIOUS answer, which corrupts an answer the user really did give.
+    if (line.trim()) onSkip?.(line);
   }
   flush();
   return entries;
@@ -295,7 +301,7 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   const snapshot = {
     date: dateHit ? dateHit[1].trim() : '',
     state: stateHit ? stateHit[1].trim().toLowerCase() : '',
-    freeText: parseQaEntries(groups.freeText, 'question', 'answer'),
+    freeText: parseQaEntries(groups.freeText, 'question', 'answer', onSkip),
     selections: parseCompactEntries(groups.selections, 'question', 'selection', onSkip),
     fieldValues: parseCompactEntries(groups.fieldValues, 'question', 'answer', onSkip),
     files: parseFileEntries(groups.files, onSkip),

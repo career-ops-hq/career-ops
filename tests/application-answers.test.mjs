@@ -315,6 +315,73 @@ try {
     fail(`strict mode contract broken:\n  ${strictBroken.join('\n  ')}`);
   }
 
+  // ── 7c. strict mode covers FREE TEXT too ─────────────────────────────────
+  // Raised by @coderabbitai on the strict-mode commit: onSkip was threaded into
+  // the selection, field-value and file parsers but not parseQaEntries, so the
+  // one group carrying the user's longest prose stayed silently lossy.
+  //
+  // Free text fails in two ways the compact groups cannot:
+  //   (a) a heading that lost its numbering is unreadable, and
+  //   (b) its quote lines are then orphaned — absorbed into the PREVIOUS
+  //       answer when one is open, dropped entirely when none is.
+  // (b) is the worse half: it corrupts an answer the user really did give.
+  const freeTextHeadMangled = clean
+    .replace('1. **Why this role?**', '**Why this role?**');
+  const freeTextMidMangled = clean
+    .replace('2. **Describe a failure**', '- **Describe a failure**');
+
+  const lenientHead = parseApplicationAnswersSection(freeTextHeadMangled);
+  const lenientMid  = parseApplicationAnswersSection(freeTextMidMangled);
+
+  let freeTextStrictThrew = null;
+  try {
+    parseApplicationAnswersSection(freeTextHeadMangled, { strict: true });
+  } catch (e) {
+    freeTextStrictThrew = e.message;
+  }
+  let midStrictThrew = null;
+  try {
+    parseApplicationAnswersSection(freeTextMidMangled, { strict: true });
+  } catch (e) {
+    midStrictThrew = e.message;
+  }
+
+  const freeTextChecks = [
+    [
+      lenientHead.freeText.length === 2,
+      `default must still drop the unreadable free-text entry (unchanged), got ` +
+      `${lenientHead.freeText.length} entries`,
+    ],
+    [
+      lenientMid.freeText[0]?.answer.includes('Line three after a blank.'),
+      'the (b) corruption path is not being exercised: orphaned quote lines ' +
+      'should be absorbed into the previous answer under the default parser',
+    ],
+    [
+      freeTextStrictThrew !== null,
+      'strict did not throw on a mangled free-text heading',
+    ],
+    [
+      freeTextStrictThrew && freeTextStrictThrew.includes('Why this role?'),
+      `strict message must name the unreadable heading, got: ${freeTextStrictThrew}`,
+    ],
+    [
+      midStrictThrew !== null,
+      'strict did not throw on a free-text heading that lost its numbering mid-block',
+    ],
+    [
+      midStrictThrew && midStrictThrew.includes('Describe a failure'),
+      `strict message must name the mid-block heading, got: ${midStrictThrew}`,
+    ],
+  ];
+
+  const freeTextBroken = freeTextChecks.filter(([ok]) => !ok).map(([, detail]) => detail);
+  if (freeTextBroken.length === 0) {
+    pass('strict: true covers free-text answers, not just the compact groups');
+  } else {
+    fail(`free-text strict contract broken:\n  ${freeTextBroken.join('\n  ')}`);
+  }
+
   // ── 8. the existing formatter contract is untouched ──────────────────────
   // The prompt layer (modes/apply.md) is coupled to this exact rendering and is
   // CI-blind, so a reader PR must not perturb a single byte of output.
