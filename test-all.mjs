@@ -964,6 +964,10 @@ try {
   // the whole section off the network.
   const restoreHostResolver = setHostResolver(async (hostname) => {
     if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // A shut-down analytics vendor: the name still appears in the page, but it
+    // resolves to nothing at all. Distinct from the loopback case above, which
+    // resolves fine and is blocked for being private.
+    if (hostname === 'dead-analytics-vendor.invalid') return [];
     // Every other host in this section is a stand-in for a normal public site.
     return ['93.184.216.34'];
   });
