@@ -2204,7 +2204,7 @@ for (const mode of expectedModes) {
     ],
     [
       '<!-- guardrail:human-approval -->',
-      '**RULE: Never submit, send, or click Apply/Send on the user\'s behalf.** Draft and prepare only; the user makes the final decision.',
+      '**RULE: Never submit, send, or click Apply/Send on the user\'s behalf.** Draft and prepare only; the user must review and approve the completed materials before any Submit/Send/Apply action.',
     ],
   ];
   const expectedLocalizedModes = [
