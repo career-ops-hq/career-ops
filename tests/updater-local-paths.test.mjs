@@ -262,6 +262,23 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   } else {
     fail(`#14 precedence rule broken, got ${JSON.stringify(override)}`);
   }
+
+  // ── 15. A file declaration is not a prefix ──
+  //    Without a trailing `/` the entry names one file. `startsWith` let it
+  //    claim every neighbour sharing those bytes, so a declared
+  //    run-nightly.ps1 also swallowed run-nightly.ps1.old and
+  //    run-nightly.ps1.bak — files upstream may legitimately write, reported
+  //    as violations the user never asked for.
+  const neighbours = userLayerViolations(
+    ['run-nightly.ps1.old', 'run-nightly.ps1-notes.md', 'qa-fixtures-old/stale.md'],
+    [],
+    declared,
+  );
+  if (eq(neighbours, [])) {
+    pass('a file declaration does not claim prefix-sharing neighbours');
+  } else {
+    fail(`#15 expected no violations, got ${JSON.stringify(neighbours)}`);
+  }
 }
 
 for (const dir of roots) rmSync(dir, { recursive: true, force: true });

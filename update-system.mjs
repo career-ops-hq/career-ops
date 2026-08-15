@@ -522,13 +522,19 @@ export function effectiveUserPaths(root = ROOT) {
  *   An explicit entry here wins over a user-layer prefix match, e.g.
  *   writing-samples/README.md is a system-owned doc inside a user directory.
  * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ *   A trailing `/` means directory prefix; anything else matches exactly. Bare
+ *   `startsWith` over-matched neighbours that merely share a prefix —
+ *   `cv.md` claimed `cv.md.bak`, and a declared `run-nightly.ps1` claimed
+ *   `run-nightly.ps1.old` — reporting files the user never declared as
+ *   violations. The declaration syntax has always said trailing `/` is what
+ *   makes an entry a prefix; this makes the matcher agree with it.
  * @returns {string[]} Violating files, each listed once.
  */
 export function userLayerViolations(changedFiles, updatePaths, userPaths) {
   const violations = [];
   for (const file of changedFiles) {
     if (updatePaths.includes(file)) continue;
-    if (userPaths.some((userPath) => file.startsWith(userPath))) {
+    if (userPaths.some((userPath) => (userPath.endsWith('/') ? file.startsWith(userPath) : file === userPath))) {
       violations.push(file);
     }
   }
