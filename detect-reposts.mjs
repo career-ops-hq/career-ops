@@ -218,26 +218,38 @@ export function companyKey(row) {
 // sandboxed test, CI). Absent, unreadable or malformed all degrade to "no
 // aggregators", which is exactly the behaviour before this existed — the
 // detector must never fail because an optional config is missing.
+// Returns a Map of key -> the raw name as written in portals.yml, not a bare
+// Set. The key is what the detector matches on; the raw name is what a reader
+// has to see. company-history.mjs renders a card for a flagged company even
+// when it has no tracker rows and no clusters, and without the original name
+// that card would be titled with the normalized key — "joinupch" rather than
+// "joinup.ch". Map.has() is identical to Set.has() on the matching path.
 export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
-  const keys = new Set();
+  const found = new Map();
   try {
-    if (!existsSync(portalsPath)) return keys;
+    if (!existsSync(portalsPath)) return found;
     const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
     const entries = doc?.tracked_companies;
-    if (!Array.isArray(entries)) return keys;
+    if (!Array.isArray(entries)) return found;
     for (const entry of entries) {
       if (!entry || entry.aggregator !== true) continue;
       const raw = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (!raw) continue;
       const key = normalizeCompanyName(raw) || raw.toLowerCase();
-      if (key) keys.add(key);
+      if (key && !found.has(key)) found.set(key, raw);
     }
   } catch {
     // A malformed portals.yml is scan.mjs's problem to report, not this
     // script's problem to crash on.
-    return keys;
+    return found;
   }
-  return keys;
+  return found;
+}
+
+// Set or Map — both answer .has(key), and every caller only asks that. Keeps a
+// hand-built Set working in tests while the loader returns a Map.
+export function isKeyLookup(value) {
+  return value instanceof Set || value instanceof Map;
 }
 
 // Canonical identity of a role TITLE, for deciding whether two listings are the
@@ -343,7 +355,7 @@ export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS, minSpan = 
     byCompany.get(key).push(row);
   }
 
-  const skip = aggregators instanceof Set ? aggregators : null;
+  const skip = isKeyLookup(aggregators) ? aggregators : null;
 
   const clusters = [];
   for (const [key, groupRows] of byCompany) {

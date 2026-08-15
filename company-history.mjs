@@ -53,7 +53,7 @@ import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import * as yaml from 'js-yaml';
 
-import { parseScanHistory, detectReposts, loadAggregatorCompanies } from './detect-reposts.mjs';
+import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
@@ -550,13 +550,34 @@ export function buildCompanyCards(sources, opts = {}) {
 
   const keys = new Set([...trackerByKey.keys(), ...clustersByKey.keys()]);
 
+  // A flagged aggregator normally has neither tracker rows nor clusters — the
+  // detector skipped it, and you rarely apply to a board — so it would fall out
+  // of the union above and vanish from --summary entirely. That is the exact
+  // failure the aggregator-not-evaluated label exists to prevent: a company
+  // that is missing from the report reads as "nothing to say about it", which
+  // is indistinguishable from a clean result. Worse, it is a REGRESSION —
+  // before the flag the company appeared, with (wrong) clusters.
+  //
+  // So seed the key set from the flagged companies too, keyed the way the cards
+  // are keyed (normalizeCompany), while membership is still tested with the
+  // function that built the lookup (see isAggregatorCompany).
+  const aggregatorNameByCardKey = new Map();
+  if (sources.aggregators instanceof Map) {
+    for (const rawName of sources.aggregators.values()) {
+      const cardKey = normalizeCompany(String(rawName || ''));
+      if (!cardKey) continue;
+      aggregatorNameByCardKey.set(cardKey, rawName);
+      keys.add(cardKey);
+    }
+  }
+
   const cards = [];
   const hygieneAgedApplied = [];
 
   for (const key of keys) {
     const trackerGroup = trackerByKey.get(key);
     const clusterGroup = clustersByKey.get(key);
-    const companyName = trackerGroup?.company || clusterGroup?.company || key;
+    const companyName = trackerGroup?.company || clusterGroup?.company || aggregatorNameByCardKey.get(key) || key;
 
     const responsiveness = computeResponsiveness(trackerGroup?.rows || [], followupCountsByAppNum, {
       now: opts.now,
@@ -594,14 +615,14 @@ export function buildCompanyCards(sources, opts = {}) {
       // Surfaced so "no aggregators configured" is distinguishable from
       // "configured and applied" — a flag that matches nothing otherwise looks
       // exactly like a working one.
-      aggregatorCompanies: sources.aggregators instanceof Set ? sources.aggregators.size : 0,
+      aggregatorCompanies: isKeyLookup(sources.aggregators) ? sources.aggregators.size : 0,
       sources: sourcesLoaded,
     },
     hygiene: { agedApplied: hygieneAgedApplied },
     companies: cards,
     // Carried on the result so getCompanyCard can answer for a company that has
     // no card at all (an aggregator never applied to).
-    aggregators: sources.aggregators instanceof Set ? sources.aggregators : new Set(),
+    aggregators: isKeyLookup(sources.aggregators) ? sources.aggregators : new Map(),
     dataQuality: { unjoinable },
   };
 }
@@ -616,7 +637,7 @@ export function buildCompanyCards(sources, opts = {}) {
 // correctly while the card still claimed `none-detected`. So re-derive the key
 // from the raw display name with the SAME function that built the Set.
 export function isAggregatorCompany(companyName, aggregators) {
-  if (!(aggregators instanceof Set) || aggregators.size === 0) return false;
+  if (!isKeyLookup(aggregators) || aggregators.size === 0) return false;
   const raw = String(companyName || '').trim();
   if (!raw) return false;
   return aggregators.has(normalizeCompanyName(raw) || raw.toLowerCase());
@@ -1273,6 +1294,43 @@ async function runSelfTest() {
     const regular = getCompanyCard(result, 'RegularCo');
     check(regular.postingChurn.label === 'reposts-detected', 'a non-aggregator company is unaffected');
     check(result.metadata.aggregatorCompanies === 1, 'metadata reports how many aggregators were configured');
+
+    // A flagged board with NO tracker rows and NO clusters — the normal case,
+    // since the detector skips it and you rarely apply to a board. It must
+    // still get a card and still appear in --summary. It fell out of the
+    // tracker-union-clusters key set and vanished from the report entirely,
+    // which is the same silence the label exists to prevent, and a regression
+    // against the unflagged behaviour where the company did appear.
+    const boardOnly = buildCompanyCards(
+      {
+        trackerRows: [],
+        followupRows: [],
+        repostClusters: [],
+        aggregators: new Map([[normalizeCompanyName('joinup.ch'), 'joinup.ch']]),
+        sourcesLoaded,
+      },
+      { now: NOW, silenceWindowDays: 28 },
+    );
+    check(boardOnly.companies.length === 1, 'a flagged board with no tracker rows and no clusters still gets a card');
+    check(
+      boardOnly.companies[0]?.company === 'joinup.ch',
+      'that card is titled with the name from portals.yml, not the normalized key',
+    );
+    check(
+      boardOnly.companies[0]?.postingChurn.label === 'aggregator-not-evaluated',
+      'the card-less board still reports aggregator-not-evaluated',
+    );
+    check(/joinup\.ch/.test(renderSummary(boardOnly)), 'the flagged board appears in --summary rather than vanishing from it');
+
+    // The loader hands back a Map; a hand-built Set must keep working.
+    const viaSet = buildCompanyCards(
+      {
+        trackerRows: [], followupRows: [], repostClusters: [],
+        aggregators: new Set([normalizeCompanyName('joinup.ch')]), sourcesLoaded,
+      },
+      { now: NOW, silenceWindowDays: 28 },
+    );
+    check(viaSet.metadata.aggregatorCompanies === 1, 'a Set of keys is still accepted alongside the loader\'s Map');
 
     // Same fixture with no aggregators configured: the ONLY difference is the
     // Set, so this proves the label above comes from the flag and not from the
