@@ -189,10 +189,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(f),
       });
-      if (isScannerMissing(r.status)) {
+      // Every non-OK response is decided from the parsed body, not the status.
+      // A failed response never carries a scan stream, so reading one would
+      // parse a JSON error object as scan events and report "no readable
+      // output" instead of the server's actual message.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "The scanner isn't available.";
-        sawScannerMissing = true;
+        sawScannerMissing = isScannerMissing(d);
+        sawError = d.error || (sawScannerMissing ? "The scanner isn't available." : `Discovery failed (${r.status}).`);
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -464,10 +468,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         setPhase("blocked");
         return;
       }
-      if (isScannerMissing(r.status)) {
+      // Same rule as the scan path, and this is the call site the status-based
+      // check actually broke: /api/explore/ai returns three different 400s
+      // (malformed JSON, missing parameters, MODE_MISSING), and all three were
+      // reported as "this checkout has no scanner". MODE_MISSING carries its own
+      // copy about AI search, which the scanner panel overwrote.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "AI search isn't available.";
-        sawScannerMissing = true;
+        sawScannerMissing = isScannerMissing(d);
+        sawError = d.error || (sawScannerMissing ? "AI search isn't available." : `AI search failed (${r.status}).`);
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
