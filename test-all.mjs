@@ -3338,11 +3338,15 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
 }
 
-// Per fence, not a total: a count over the whole file passes when one fence
-// carries the key twice and the other carries it not at all.
-const step2SchemaFence = batchPromptDoc.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
-const step3ReportTemplate = batchPromptDoc.split('### Step 3 \u2014 Save the Report')[1] ?? '';
-if (/^reports_to:/m.test(step2SchemaFence) && /^reports_to:/m.test(step3ReportTemplate)) {
+// One YAML fence at a time, each bounded to its own step. A count over the
+// whole file passes when one fence carries the key twice and the other carries
+// it not at all, and an unbounded tail lets any later line stand in for the
+// Step 3 fence.
+const step2SchemaSection = batchPromptDoc.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
+const step2SchemaFence = step2SchemaSection.match(/```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+const step3Section = batchPromptDoc.match(/### Step 3 \u2014 Save the Report[\s\S]*?### Step 4 \u2014/)?.[0] ?? '';
+const step3SummaryFence = step3Section.match(/## Machine Summary\s*\n+```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+if (/^reports_to:/m.test(step2SchemaFence) && /^reports_to:/m.test(step3SummaryFence)) {
   pass('batch prompt carries reports_to in both Machine Summary fences');
 } else {
   fail('batch prompt missing reports_to in one or both Machine Summary fences');
