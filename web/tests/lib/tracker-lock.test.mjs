@@ -37,13 +37,25 @@ let skipCore = false;
 try {
   core = await import(pathToFileURL(coreLock).href);
 } catch (err) {
-  // Skipping is only correct where the core genuinely is not installed. If the
-  // root deps ARE there and the import still fails, that is a real break, and
-  // swallowing it here would hide it exactly as the old guard hid this one.
-  if (err.code !== "ERR_MODULE_NOT_FOUND" || fs.existsSync(path.join(CORE, "node_modules"))) throw err;
-  skipCore = fs.existsSync(coreLock)
-    ? `core dependencies are not installed at ${CORE} (web-only checkout)`
-    : `no core checkout at ${CORE}`;
+  // Skipping is only correct where the core genuinely is not installed: no core
+  // file here at all, or an unresolvable package in a checkout whose root deps
+  // were never installed, which is what a web-only install looks like.
+  //
+  // Node names the missing path in err.url when a FILE is unresolvable and
+  // leaves it unset when a bare package is, which separates "js-yaml was never
+  // installed" from "tracker-parse.mjs is missing from this core". The second is
+  // a broken checkout, and skipping it would report a real break as an
+  // uninstalled dependency, which is the failure this guard exists to stop.
+  // Anything unrecognized rethrows for the same reason: a loud failure here is
+  // recoverable, a silent skip is not.
+  const coreAbsent = !fs.existsSync(coreLock);
+  const packageUnresolvable = err.url == null;
+  const depsAbsent = !fs.existsSync(path.join(CORE, "node_modules"));
+
+  if (err.code !== "ERR_MODULE_NOT_FOUND") throw err;
+  if (coreAbsent) skipCore = `no core checkout at ${CORE}`;
+  else if (packageUnresolvable && depsAbsent) skipCore = `core dependencies are not installed at ${CORE} (web-only checkout)`;
+  else throw err;
 }
 
 function makeTracker() {
