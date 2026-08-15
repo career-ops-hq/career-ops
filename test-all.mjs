@@ -402,16 +402,30 @@ try {
     const parts = name.split(' ');
     const scriptFile = parts[0];
     const args = parts.slice(1);
-    // Only an entry that declares `timeoutMs` overrides run()'s shared budget,
-    // and it is spread in rather than defaulted so an absent value cannot
-    // quietly become `timeout: undefined` — execFileSync reads that as "no
-    // timeout at all", which would turn a hung script into a hung CI job.
-    const budgetMs = timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
+    // A declared budget is resolved ONCE, so the override and the warning below
+    // cannot disagree about what it means. They did in the first draft: `??`
+    // accepts 0 while the spread below rejects it as falsy, so `timeoutMs: 0`
+    // gave a 0ms budget to divide by and a 30s budget to actually run under —
+    // one value, two meanings, in adjacent lines.
+    //
+    // A declared-but-unusable value fails loudly rather than falling back. This
+    // list is hand-edited, so a bad entry is a typo in the suite's own
+    // definition, and silently substituting the default would hide it behind
+    // the very budget it was trying to set.
+    const declaredMs = timeoutMs === undefined ? null : timeoutMs;
+    if (declaredMs !== null && (!Number.isFinite(declaredMs) || declaredMs <= 0)) {
+      fail(`${name} declares an unusable timeoutMs (${String(declaredMs)}) — must be a positive, finite number of milliseconds`);
+      continue;
+    }
+    const budgetMs = declaredMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
     const startedAt = Date.now();
+    // Spread rather than defaulted: `{ timeout: undefined }` reads to
+    // execFileSync as "no timeout at all", which would turn a hung script into
+    // a hung CI job. Absent means absent, so run()'s own default stands.
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
-      ...(timeoutMs ? { timeout: timeoutMs } : {}),
+      ...(declaredMs === null ? {} : { timeout: declaredMs }),
     });
     const elapsedMs = Date.now() - startedAt;
     // A budget a script can raise for itself is a place to hide in, unless
@@ -14926,6 +14940,27 @@ console.log('\n59b. Pipeline lock (pipeline-lock.mjs)');
   const unit = run(NODE, ['--test', 'test/pipeline-lock.test.mjs']);
   if (unit !== null) pass('pipeline-lock unit tests pass');
   else fail('pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)');
+}
+
+console.log('\n59c. The exported script budget matches the one run() enforces');
+{
+  // DEFAULT_SCRIPT_TIMEOUT_MS and the `timeout: 30000` literal inside run() are
+  // the same number held in two places, because that execFileSync call is kept
+  // byte-identical on purpose — editing it makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // the line. A comment asks the two to stay in step, and a comment is not a
+  // mechanism: if they drift, the slow-script warning starts measuring against
+  // a budget nobody is enforcing, and the first sign is a script killed at a
+  // limit the suite never mentioned. Read the literal back and compare.
+  const helpersSrc = readFileSync(join(ROOT, 'tests', 'helpers.mjs'), 'utf-8');
+  const enforced = /execFileSync\([^)]*?timeout:\s*(\d+)/s.exec(helpersSrc);
+  if (!enforced) {
+    fail('could not find the timeout literal in run() — if execFileSync was refactored, update this check with it');
+  } else if (Number(enforced[1]) === DEFAULT_SCRIPT_TIMEOUT_MS) {
+    pass(`run()'s enforced timeout (${enforced[1]}ms) matches the exported DEFAULT_SCRIPT_TIMEOUT_MS`);
+  } else {
+    fail(`budget drift: run() enforces ${enforced[1]}ms but DEFAULT_SCRIPT_TIMEOUT_MS is ${DEFAULT_SCRIPT_TIMEOUT_MS}ms`);
+  }
 }
 
 console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
