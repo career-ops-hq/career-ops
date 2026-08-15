@@ -73,10 +73,26 @@ test("the render ceiling is always finite, whatever the caller asks for", () => 
   // Infinity.
   assert.equal(resolveOfferLimit("all"), DEFAULT_OFFER_LIMIT);
   assert.equal(resolveOfferLimit("Infinity"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("-Infinity"), DEFAULT_OFFER_LIMIT);
   assert.equal(resolveOfferLimit("NaN"), DEFAULT_OFFER_LIMIT);
-  assert.equal(resolveOfferLimit("1e9"), 1); // parseInt stops at the exponent
   assert.equal(resolveOfferLimit("100000"), MAX_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("1e9"), MAX_OFFER_LIMIT);
   assert.equal(resolveOfferLimit(String(MAX_OFFER_LIMIT)), MAX_OFFER_LIMIT);
+});
+
+test("a partially numeric limit falls back instead of under-fetching", () => {
+  // parseInt would read a numeric *prefix* — "24junk" as 24, "1e9" as 1 — so a
+  // malformed limit would quietly become a real one (and "1e9" would return a
+  // single offer, the opposite of what it asks for).
+  assert.equal(resolveOfferLimit("24junk"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("200px"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("12 34"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("24.7"), DEFAULT_OFFER_LIMIT);
+});
+
+test("surrounding whitespace is tolerated, not treated as malformed", () => {
+  assert.equal(resolveOfferLimit(" 50 "), 50);
+  assert.equal(resolveOfferLimit("\t200\n"), MAX_OFFER_LIMIT);
 });
 
 test("in-range limits pass through and degenerate ones clamp up to 1", () => {

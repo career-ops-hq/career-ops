@@ -13,12 +13,21 @@ export const MAX_OFFER_LIMIT = 200;
 
 /**
  * Resolve the `?limit=` query value into a finite render ceiling. Anything
- * missing, non-numeric or out of range degrades to a bounded default rather
- * than to an unbounded list.
+ * missing, malformed or out of range degrades to a bounded default rather than
+ * to an unbounded list.
+ *
+ * The whole trimmed value has to be an integer — `Number`, not `parseInt`,
+ * because parseInt accepts a numeric *prefix*: it would read "24junk" as 24 and
+ * "1e9" as 1, letting a malformed limit silently under-fetch instead of falling
+ * back. `Number.isInteger` also rejects Infinity, so the unbounded sentinel
+ * cannot slip back in through the query string.
  */
 export function resolveOfferLimit(raw) {
-  const requested = Number.parseInt(raw ?? "", 10);
-  if (!Number.isFinite(requested)) return DEFAULT_OFFER_LIMIT;
+  if (raw == null) return DEFAULT_OFFER_LIMIT;
+  const text = String(raw).trim();
+  if (text === "") return DEFAULT_OFFER_LIMIT;
+  const requested = Number(text);
+  if (!Number.isInteger(requested)) return DEFAULT_OFFER_LIMIT;
   return Math.min(MAX_OFFER_LIMIT, Math.max(1, requested));
 }
 
