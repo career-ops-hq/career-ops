@@ -30,6 +30,13 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # web/tests/lib/tracker-lock.test.mjs imports the core tracker lock from
+      # the repo root to assert the real primitive rather than a copy of it —
+      # which is what lets that test survive a change of caller. The root module
+      # pulls in js-yaml, so the root install has to happen or the dynamic
+      # import throws and every web PR shows a failure that is not its own.
+      - run: npm ci --ignore-scripts
+        working-directory: .
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit
