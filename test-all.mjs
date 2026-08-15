@@ -398,26 +398,31 @@ try {
     'utf-8'
   );
 
-  for (const { name, allowFail, timeoutMs } of scripts) {
+  for (const script of scripts) {
+    const { name, allowFail, timeoutMs } = script;
     const parts = name.split(' ');
     const scriptFile = parts[0];
     const args = parts.slice(1);
-    // A declared budget is resolved ONCE, so the override and the warning below
-    // cannot disagree about what it means. They did in the first draft: `??`
-    // accepts 0 while the spread below rejects it as falsy, so `timeoutMs: 0`
-    // gave a 0ms budget to divide by and a 30s budget to actually run under —
-    // one value, two meanings, in adjacent lines.
+    // WHETHER a budget was declared is read from the key's presence, never
+    // inferred from its value. Every in-band sentinel here is also a value
+    // somebody could write, and each one costs a bug: the first draft used
+    // `??` for the budget and truthiness for the override, so `timeoutMs: 0`
+    // meant "no budget" to one line and "default" to the next; the second used
+    // `null` as its absent-marker, so an explicit `timeoutMs: null` skipped
+    // validation and silently took the default. `hasOwn` cannot be spoofed by
+    // a value, so the question has one answer.
     //
-    // A declared-but-unusable value fails loudly rather than falling back. This
-    // list is hand-edited, so a bad entry is a typo in the suite's own
-    // definition, and silently substituting the default would hide it behind
-    // the very budget it was trying to set.
-    const declaredMs = timeoutMs === undefined ? null : timeoutMs;
-    if (declaredMs !== null && (!Number.isFinite(declaredMs) || declaredMs <= 0)) {
-      fail(`${name} declares an unusable timeoutMs (${String(declaredMs)}) — must be a positive, finite number of milliseconds`);
+    // A declared-but-unusable value then fails loudly rather than falling back.
+    // This list is hand-edited, so a bad entry is a typo in the suite's own
+    // definition, and quietly substituting the default would hide it behind the
+    // very budget it was trying to set. `timeoutMs: undefined` is caught too —
+    // writing the key at all is a claim, and an unusable claim is a mistake.
+    const declared = Object.hasOwn(script, 'timeoutMs');
+    if (declared && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+      fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive, finite number of milliseconds`);
       continue;
     }
-    const budgetMs = declaredMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
+    const budgetMs = declared ? timeoutMs : DEFAULT_SCRIPT_TIMEOUT_MS;
     const startedAt = Date.now();
     // Spread rather than defaulted: `{ timeout: undefined }` reads to
     // execFileSync as "no timeout at all", which would turn a hung script into
@@ -425,7 +430,7 @@ try {
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
-      ...(declaredMs === null ? {} : { timeout: declaredMs }),
+      ...(declared ? { timeout: timeoutMs } : {}),
     });
     const elapsedMs = Date.now() - startedAt;
     // A budget a script can raise for itself is a place to hide in, unless
