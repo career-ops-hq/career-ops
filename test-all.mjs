@@ -417,9 +417,14 @@ try {
     // definition, and quietly substituting the default would hide it behind the
     // very budget it was trying to set. `timeoutMs: undefined` is caught too —
     // writing the key at all is a claim, and an unusable claim is a mistake.
+    // Integer, not merely finite: execFileSync rejects a fractional timeout with
+    // ERR_OUT_OF_RANGE, so `timeoutMs: 0.5` would pass a "looks like a number"
+    // check here and then blow up inside the run with an error about neither
+    // this list nor this script. Validation that stops short of what the
+    // consumer accepts just moves the failure somewhere less legible.
     const declared = Object.hasOwn(script, 'timeoutMs');
-    if (declared && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
-      fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive, finite number of milliseconds`);
+    if (declared && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+      fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive integer number of milliseconds`);
       continue;
     }
     const budgetMs = declared ? timeoutMs : DEFAULT_SCRIPT_TIMEOUT_MS;
@@ -14957,14 +14962,23 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
   // mechanism: if they drift, the slow-script warning starts measuring against
   // a budget nobody is enforcing, and the first sign is a script killed at a
   // limit the suite never mentioned. Read the literal back and compare.
+  // Anchored on run()'s own `(exe, args, …)` call signature rather than on
+  // `execFileSync` alone: that file has six other execFileSync calls, and a
+  // pattern that takes the FIRST match would start comparing against whichever
+  // one grows a `timeout:` first — a guard quietly measuring the wrong number,
+  // which is worse than no guard because it still reports green.
+  //
+  // Zero or several matches is therefore a failure in its own right, not a
+  // reason to fall back to a best guess.
   const helpersSrc = readFileSync(join(ROOT, 'tests', 'helpers.mjs'), 'utf-8');
-  const enforced = /execFileSync\([^)]*?timeout:\s*(\d+)/s.exec(helpersSrc);
-  if (!enforced) {
-    fail('could not find the timeout literal in run() — if execFileSync was refactored, update this check with it');
-  } else if (Number(enforced[1]) === DEFAULT_SCRIPT_TIMEOUT_MS) {
-    pass(`run()'s enforced timeout (${enforced[1]}ms) matches the exported DEFAULT_SCRIPT_TIMEOUT_MS`);
+  const enforced = [...helpersSrc.matchAll(/execFileSync\(\s*exe\s*,\s*args\s*,\s*\{[^}]*?timeout:\s*(\d+)/g)];
+  if (enforced.length !== 1) {
+    fail(`expected exactly one timeout literal in run()'s execFileSync call, found ${enforced.length}`
+      + ' — if that call was refactored or duplicated, update this check alongside it');
+  } else if (Number(enforced[0][1]) === DEFAULT_SCRIPT_TIMEOUT_MS) {
+    pass(`run()'s enforced timeout (${enforced[0][1]}ms) matches the exported DEFAULT_SCRIPT_TIMEOUT_MS`);
   } else {
-    fail(`budget drift: run() enforces ${enforced[1]}ms but DEFAULT_SCRIPT_TIMEOUT_MS is ${DEFAULT_SCRIPT_TIMEOUT_MS}ms`);
+    fail(`budget drift: run() enforces ${enforced[0][1]}ms but DEFAULT_SCRIPT_TIMEOUT_MS is ${DEFAULT_SCRIPT_TIMEOUT_MS}ms`);
   }
 }
 
