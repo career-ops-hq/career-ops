@@ -225,12 +225,12 @@ function parseQaEntries(block, labelKey, valueKey) {
 }
 
 /** `1. **Label:** value` on one line. */
-function parseCompactEntries(block, labelKey, valueKey) {
+function parseCompactEntries(block, labelKey, valueKey, onSkip) {
   if (!block || block === NONE_CAPTURED) return [];
   const entries = [];
   for (const line of block.split('\n')) {
     const hit = /^\d+\.\s+\*\*(.+):\*\*\s*(.*)$/.exec(line);
-    if (!hit) continue;
+    if (!hit) { if (line.trim()) onSkip?.(line); continue; }
     const value = hit[2].trim();
     entries.push({
       [labelKey]: hit[1].trim(),
@@ -241,12 +241,12 @@ function parseCompactEntries(block, labelKey, valueKey) {
 }
 
 /** `1. **Label:** path` or `1. **Label:** path (version)`. */
-function parseFileEntries(block) {
+function parseFileEntries(block, onSkip) {
   if (!block || block === NONE_CAPTURED) return [];
   const entries = [];
   for (const line of block.split('\n')) {
     const hit = /^\d+\.\s+\*\*(.+):\*\*\s*(.*)$/.exec(line);
-    if (!hit) continue;
+    if (!hit) { if (line.trim()) onSkip?.(line); continue; }
     const raw = hit[2].trim();
     const versioned = /^(.*\S)\s+\(([^()]*)\)$/.exec(raw);
     const file = versioned ? versioned[1].trim() : raw;
@@ -274,7 +274,9 @@ function parseFileEntries(block) {
  *            fieldValues: object[], files: object[]} | null}
  *          `null` when the report has no Application Answers section.
  */
-export function parseApplicationAnswersSection(reportText) {
+export function parseApplicationAnswersSection(reportText, { strict = false } = {}) {
+  const skipped = [];
+  const onSkip = strict ? (line) => skipped.push(line.trim()) : undefined;
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const heading = /^## Application Answers\s*$/m.exec(report);
   if (!heading) return null;
@@ -290,14 +292,22 @@ export function parseApplicationAnswersSection(reportText) {
   const stateHit = /^\*\*State:\*\*\s*(.*)$/m.exec(body);
   const groups = sliceGroups(body);
 
-  return {
+  const snapshot = {
     date: dateHit ? dateHit[1].trim() : '',
     state: stateHit ? stateHit[1].trim().toLowerCase() : '',
     freeText: parseQaEntries(groups.freeText, 'question', 'answer'),
-    selections: parseCompactEntries(groups.selections, 'question', 'selection'),
-    fieldValues: parseCompactEntries(groups.fieldValues, 'question', 'answer'),
-    files: parseFileEntries(groups.files),
+    selections: parseCompactEntries(groups.selections, 'question', 'selection', onSkip),
+    fieldValues: parseCompactEntries(groups.fieldValues, 'question', 'answer', onSkip),
+    files: parseFileEntries(groups.files, onSkip),
   };
+
+  if (strict && skipped.length) {
+    throw new Error(
+      `Application Answers section has ${skipped.length} unreadable ` +
+      `${skipped.length === 1 ? 'entry' : 'entries'}: ${skipped.join(' | ')}`,
+    );
+  }
+  return snapshot;
 }
 
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {

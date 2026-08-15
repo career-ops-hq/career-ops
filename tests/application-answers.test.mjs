@@ -265,6 +265,56 @@ try {
     fail('missing section did not parse to null');
   }
 
+  // ── 7b. strict mode refuses rather than silently dropping ────────────────
+  // Raised by @santifer in review: for apply-mode recovery of the user's own
+  // previous answers, a partial parse that silently drops one is worse than a
+  // refusal, because the missing answer looks like an answer they never gave.
+  // The default stays total — the fixed point above depends on it — so the
+  // refusal is opt-in, for the one caller that needs it.
+  const clean = upsertApplicationAnswersSection(report, corpus[0].snapshot);
+  const mangled = clean
+    .replace('2. **Notice period: current:** 30 days', '- **Notice period: current:** 30 days')
+    .replace('1. **CV:** output/acme-cv.pdf (v3)', '1. CV: output/acme-cv.pdf (v3)');
+
+  const lenient = parseApplicationAnswersSection(mangled);
+  let strictThrew = null;
+  try {
+    parseApplicationAnswersSection(mangled, { strict: true });
+  } catch (e) {
+    strictThrew = e.message;
+  }
+  let strictOnCleanThrew = null;
+  try {
+    parseApplicationAnswersSection(clean, { strict: true });
+  } catch (e) {
+    strictOnCleanThrew = e.message;
+  }
+
+  const strictChecks = [
+    [
+      lenient.selections.length === 2 && lenient.files.length === 2,
+      `default must keep dropping silently (unchanged behaviour), got ` +
+      `${lenient.selections.length} selections / ${lenient.files.length} files`,
+    ],
+    [strictThrew !== null, 'strict did not throw on a mangled section'],
+    [
+      strictThrew && /2 unreadable entries/.test(strictThrew),
+      `strict message must count what it refused, got: ${strictThrew}`,
+    ],
+    [
+      strictThrew && strictThrew.includes('Notice period') && strictThrew.includes('CV:'),
+      `strict message must name the offending lines, got: ${strictThrew}`,
+    ],
+    [strictOnCleanThrew === null, `strict threw on a well-formed section: ${strictOnCleanThrew}`],
+  ];
+
+  const strictBroken = strictChecks.filter(([ok]) => !ok).map(([, detail]) => detail);
+  if (strictBroken.length === 0) {
+    pass('strict: true refuses an unreadable section; the default is unchanged');
+  } else {
+    fail(`strict mode contract broken:\n  ${strictBroken.join('\n  ')}`);
+  }
+
   // ── 8. the existing formatter contract is untouched ──────────────────────
   // The prompt layer (modes/apply.md) is coupled to this exact rendering and is
   // CI-blind, so a reader PR must not perturb a single byte of output.
