@@ -64,6 +64,24 @@ function writeGitConfig(work, mirror) {
   return cfg;
 }
 
+/** Environment for a subprocess that must see ONLY the temp gitconfig.
+ *
+ *  GIT_CONFIG_GLOBAL alone does not make the run hermetic, which the header
+ *  comment above claims it does. Two other channels survive it: a system
+ *  /etc/gitconfig (or the Git-for-Windows equivalent), and any inherited
+ *  GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n triple, which git
+ *  applies at higher precedence than every config file. Either can rewrite a
+ *  URL out from under the mirror, and the failure looks like a real regression
+ *  rather than a poisoned harness. Close both. */
+function hermeticEnv(cfg) {
+  return {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: cfg,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '0',
+  };
+}
+
 /** A system file whose blob differs between oldTag and target — the non-vacuity
  *  oracle. Restricted to files `apply` actually manages (SYSTEM_PATHS: an exact
  *  entry, or any file under a `dir/` prefix entry); a changed USER-layer or
@@ -140,7 +158,7 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     try {
       output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: { ...process.env, GIT_CONFIG_GLOBAL: cfg },
+        env: hermeticEnv(cfg),
       });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
 
@@ -332,7 +350,7 @@ function localPathsLeg() {
     try {
       output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: { ...process.env, GIT_CONFIG_GLOBAL: cfg },
+        env: hermeticEnv(cfg),
       });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
 

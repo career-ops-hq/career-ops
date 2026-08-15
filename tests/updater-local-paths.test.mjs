@@ -185,8 +185,15 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
 {
   const dir = mkdtempSync(join(tmpdir(), 'co-local-paths-repo-'));
   roots.push(dir);
+  // The throwaway repo is only throwaway if git ignores the ambient
+  // environment. GIT_CONFIG_COUNT/KEY_n/VALUE_n outrank every config file, so
+  // an inherited triple would override the `g('config', ...)` calls below —
+  // and a system gitconfig can still redirect a URL or install a hooksPath.
+  // Neutralize both, and hand the same environment to the guard subprocess,
+  // which shells out to git itself.
+  const env = { ...process.env, GIT_CONFIG_COUNT: '0', GIT_CONFIG_NOSYSTEM: '1' };
   const g = (...args) =>
-    spawnSync('git', args, { cwd: dir, encoding: 'utf-8' });
+    spawnSync('git', args, { cwd: dir, encoding: 'utf-8', env });
 
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
@@ -206,6 +213,7 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
     spawnSync(process.execPath, [join(dir, 'validate-system-paths-coverage.mjs')], {
       cwd: dir,
       encoding: 'utf-8',
+      env,
     });
 
   const before = runGuard();
