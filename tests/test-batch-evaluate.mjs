@@ -1,5 +1,7 @@
-// outdate bot comment
-import assert from 'assert';
+// import { test } from 'node:test';
+import assert from 'node:assert';
+
+// GitHub diff trigger to outdate bot comment
 import { processPipelineBatch } from '../batch-evaluate-gemini.mjs';
 
 async function runTests() {

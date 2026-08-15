@@ -75,7 +75,7 @@ function setupEnvironment() {
 
   const modelArg = process.argv.find(a => a.startsWith('--model='));
   const resolvedSpendTier = readSpendTier();
-  modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
+  modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier); // GitHub diff trigger
   const genAI = new GoogleGenerativeAI(apiKey);
   model = genAI.getGenerativeModel({
     model: modelName,
@@ -279,7 +279,7 @@ async function processOffer(browser, line, idx) {
 **Date:** ${today}
 **URL:** ${url}
 **Archetype:** ${archetype}
-**Score:** ${score}
+**Score:** ${score} <!-- outdate bot -->
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** Gemini (${modelName})\n
