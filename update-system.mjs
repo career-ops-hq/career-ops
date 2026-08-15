@@ -152,6 +152,7 @@ const SYSTEM_PATHS = [
   'generate-latex.mjs',
   'extract-latex-content.mjs',
   'patch-latex-content.mjs',
+  'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
   'lib/local-today.mjs',
   'lib/latex-escape.mjs',

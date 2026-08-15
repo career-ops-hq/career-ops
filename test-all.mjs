@@ -4806,6 +4806,42 @@ try {
     fail(`verify-portals adopted another employer's board: ${JSON.stringify(nimbus.suggested)}`);
   }
 
+  // ── ASCII fold (#2930) ──
+  // The bug: `[^a-z0-9\s]` turned an accented letter into a SEPARATOR, so
+  // "Telefónica" became the two words "telef nica" and never produced
+  // "telefonica" — the slug the board actually uses. --add then reported a live
+  // board as missing. "Société Générale" shattered into four fragments, so even
+  // the first-word heuristic yielded "soci" instead of "societe".
+  const accented = [
+    ['Telefónica', 'telefonica'],
+    ['Société Générale', 'societegenerale'],
+    ['Nestlé', 'nestle'],
+    ['Ørsted', 'orsted'],   // ø does not decompose under NFD
+    ['Æon', 'aeon'],        // æ expands to two letters
+  ];
+  const missedFold = accented.filter(([name, want]) => !deriveSlugCandidates(name).includes(want));
+  if (missedFold.length === 0) {
+    pass('verify-portals ASCII-folds accented names to the slug the board actually uses');
+  } else {
+    fail(`verify-portals slug fold missed: ${missedFold.map(([n, w]) => `${n}->${w}`).join(', ')}`);
+  }
+
+  // The fold must not turn every name into a match: a distinct company must
+  // still derive a distinct slug. Without this, returning a constant passes.
+  if (!deriveSlugCandidates('Telefónica').includes('vodafone') && deriveSlugCandidates('Société Générale').includes('societe')) {
+    pass('verify-portals fold keeps distinct names distinct and preserves the first-word candidate');
+  } else {
+    fail('verify-portals fold collapsed distinct names or lost the first-word candidate');
+  }
+
+  // A name with no Latin content folds to '' — a real answer (ATS slugs are
+  // ASCII), which runAdd now reports as such instead of "needs a company name".
+  if (deriveSlugCandidates('楽天').length === 0 && deriveSlugCandidates('Сбербанк').length === 0) {
+    pass('verify-portals derives no slug from a name with no Latin content');
+  } else {
+    fail('verify-portals derived an ASCII slug from a non-Latin name');
+  }
+
   if (
     classifyFetchError({ status: 404 }) === 'slug_gone' &&
     classifyFetchError({ name: 'AbortError' }) === 'network' &&
