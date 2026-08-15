@@ -18,10 +18,11 @@
  * Synchronizes tracker status using set-status.mjs under shared tracker lock.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
 import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
@@ -79,6 +80,7 @@ const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options
   --cv "..."         Path to submitted CV (defaults to cv.md)
   --cover "..."      Path to submitted cover letter
   --url "..."        Job posting URL (overrides auto-detection from tracker notes)
+  --clean-output     Remove the tailored PDF/HTML from output/ once archived to data/outcomes/
   --dry-run          Preview outcome logging without writing
   --json             Machine-readable JSON output`;
 
@@ -92,6 +94,7 @@ const flags = {
   cv: null,
   cover: null,
   url: null,
+  cleanOutput: false,
   dryRun: false,
   json: rawArgs.includes('--json'),
 };
@@ -115,6 +118,8 @@ for (let i = 0; i < rawArgs.length; i++) {
     const key = a.slice(2);
     flags[key] = val;
     i++;
+  } else if (a === '--clean-output') {
+    flags.cleanOutput = true;
   } else if (a === '--dry-run') {
     flags.dryRun = true;
   } else if (a === '--json') {
@@ -204,31 +209,9 @@ const outcomeDir = join(trackerDir, 'outcomes', `${matchedRow.num}_${companySlug
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 
-if (flags.dryRun) {
-  const dryRunResult = {
-    dryRun: true,
-    num: matchedRow.num,
-    company: matchedRow.company,
-    role: matchedRow.role,
-    outcomeType: normalizedOutcomeKey,
-    canonicalState: outcomeConfig.state,
-    stage: flags.stage,
-    feedback: flags.feedback,
-    note: noteToAppend,
-    outcomeDir,
-  };
-  if (flags.json) {
-    console.log(JSON.stringify(dryRunResult, null, 2));
-  } else {
-    console.log(`🔍 Dry-run: would record outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
-  }
-  process.exit(EXIT_OK);
-}
-
-mkdirSync(outcomeDir, { recursive: true });
-
-// 1. Snapshot submitted CV
-// Try to locate a tailored generated PDF CV first, to ensure we capture the EXACT submitted CV.
+// Resolve the submitted CV artifact up front (read-only lookups) so both the
+// --dry-run preview and the real run agree on exactly what would be archived
+// and, if --clean-output is set, what would be removed from output/ afterward.
 let cvResolvedPath = null;
 let isPdf = false;
 
@@ -273,13 +256,88 @@ if (flags.cv) {
   }
 }
 
+// Any resolved PDF — auto-detected (Cases B/C) or an explicit --cv (Case A) —
+// is eligible for cleanup as long as it resolves inside output/: that boundary,
+// not which case found it, is what keeps deletion scoped to generated CVs. An
+// explicit --cv pointing outside output/ (e.g. into the user's home directory)
+// is never a candidate, and neither is the cv.md fallback (Case D), since it
+// never sets isPdf.
+let cvFromOutputDir = false;
+let htmlResolvedPath = null;
+const outputDir = resolve(repoRoot, 'output');
+if (isPdf && cvResolvedPath) {
+  const resolvedAbs = resolve(cvResolvedPath);
+  if (resolvedAbs === outputDir || resolvedAbs.startsWith(outputDir + '/')) {
+    cvFromOutputDir = true;
+    const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+    if (existsSync(manifestPath)) {
+      try {
+        const manifestText = readFileSync(manifestPath, 'utf-8');
+        for (const line of manifestText.split('\n')) {
+          if (!line.trim() || line.startsWith('#')) continue;
+          const fields = line.split('\t');
+          if (!fields[1]) continue;
+          const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
+          if (rowPdfPath === resolvedAbs && fields[2]) {
+            const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
+            if (existsSync(htmlFull)) htmlResolvedPath = htmlFull;
+            break;
+          }
+        }
+      } catch (err) {
+        // Fallback gracefully on parsing issues
+      }
+    }
+  }
+}
+
+if (flags.dryRun) {
+  const cleanupCandidates = flags.cleanOutput
+    ? [cvFromOutputDir ? cvResolvedPath : null, htmlResolvedPath].filter(Boolean)
+    : [];
+  const dryRunResult = {
+    dryRun: true,
+    num: matchedRow.num,
+    company: matchedRow.company,
+    role: matchedRow.role,
+    outcomeType: normalizedOutcomeKey,
+    canonicalState: outcomeConfig.state,
+    stage: flags.stage,
+    feedback: flags.feedback,
+    note: noteToAppend,
+    outcomeDir,
+    cleanOutput: flags.cleanOutput,
+    cleanupCandidates,
+  };
+  if (flags.json) {
+    console.log(JSON.stringify(dryRunResult, null, 2));
+  } else {
+    console.log(`🔍 Dry-run: would record outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
+    if (flags.cleanOutput) {
+      if (cleanupCandidates.length) {
+        console.log(`🔍 Dry-run: would archive then remove from output/ (after verifying the archive):`);
+        for (const p of cleanupCandidates) console.log(`   - ${p}`);
+      } else {
+        console.log(`🔍 Dry-run: --clean-output requested but no matching output/ PDF/HTML found for this row`);
+      }
+    }
+  }
+  process.exit(EXIT_OK);
+}
+
+mkdirSync(outcomeDir, { recursive: true });
+
+// 1. Snapshot submitted CV
 // Write or copy resolved CV artifact to outcomeDir, preserving existing files instead of overwriting.
+let archivedCvPdfPath = null;
+let archivedCvHtmlPath = null;
 if (cvResolvedPath && existsSync(cvResolvedPath)) {
   const destName = isPdf ? 'submitted_cv.pdf' : 'submitted_cv.md';
   const cvDestPath = join(outcomeDir, destName);
   if (!existsSync(cvDestPath)) {
     copyFileSync(cvResolvedPath, cvDestPath);
   }
+  if (isPdf) archivedCvPdfPath = cvDestPath;
 } else {
   // Case D: Fallback to the master root cv.md.
   const masterCv = resolve(repoRoot, 'cv.md');
@@ -291,6 +349,16 @@ if (cvResolvedPath && existsSync(cvResolvedPath)) {
       writeFileSync(cvDestPath, `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
     }
   }
+}
+
+// 1b. Snapshot the companion HTML CV — only archived (and thus only eligible for
+// cleanup) when --clean-output is set, since it isn't needed by any other outcome.
+if (flags.cleanOutput && htmlResolvedPath && existsSync(htmlResolvedPath)) {
+  const htmlDestPath = join(outcomeDir, 'submitted_cv.html');
+  if (!existsSync(htmlDestPath)) {
+    copyFileSync(htmlResolvedPath, htmlDestPath);
+  }
+  archivedCvHtmlPath = htmlDestPath;
 }
 
 // 2. Snapshot submitted cover letter if provided, preserving existing files instead of overwriting.
@@ -420,6 +488,42 @@ try {
   failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
 }
 
+// 6. Clean up output/ — only ever removes a file whose archived copy in
+// data/outcomes/ has already been verified byte-for-byte (sha256) against the
+// original. Never a bare unlink: archiving comes first, deletion is refused
+// if it can't be confirmed the only copy would survive. Size alone isn't
+// enough here — two renders of the same CV can coincidentally match in size,
+// so this hashes the same way tracker.mjs and seed-fixture.mjs do.
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function archivedCopyVerified(srcPath, destPath) {
+  if (!srcPath || !destPath || !existsSync(srcPath) || !existsSync(destPath)) return false;
+  return sha256(srcPath) === sha256(destPath);
+}
+
+const cleanup = { requested: flags.cleanOutput, removed: [], refused: [] };
+if (flags.cleanOutput) {
+  const cleanupTargets = [
+    [cvFromOutputDir ? cvResolvedPath : null, archivedCvPdfPath],
+    [htmlResolvedPath, archivedCvHtmlPath],
+  ];
+  for (const [srcPath, destPath] of cleanupTargets) {
+    if (!srcPath) continue;
+    if (!archivedCopyVerified(srcPath, destPath)) {
+      cleanup.refused.push({ path: srcPath, reason: 'archived copy in data/outcomes/ missing or does not match (sha256)' });
+      continue;
+    }
+    try {
+      rmSync(srcPath);
+      cleanup.removed.push(srcPath);
+    } catch (err) {
+      cleanup.refused.push({ path: srcPath, reason: err.message });
+    }
+  }
+}
+
 const result = {
   success: true,
   num: matchedRow.num,
@@ -433,12 +537,20 @@ const result = {
   outcomeDir,
   postingArchived,
   setStatusResult,
+  cleanup,
 };
 
 if (flags.json) {
   console.log(JSON.stringify(result, null, 2));
 } else {
   console.log(`✅ Recorded outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
+  if (flags.cleanOutput) {
+    for (const p of cleanup.removed) console.log(`🗑️  Removed from output/ (archived copy verified): ${p}`);
+    for (const r of cleanup.refused) console.log(`⚠️  Left in output/ (${r.reason}): ${r.path}`);
+    if (!cleanup.removed.length && !cleanup.refused.length) {
+      console.log(`ℹ️  --clean-output requested but no matching output/ PDF/HTML found for this row`);
+    }
+  }
 }
 
 process.exit(EXIT_OK);

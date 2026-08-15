@@ -188,6 +188,92 @@ try {
   check('No missing-posting stub when a capture resolved', !existsSync(join(resKeyed.outcomeDir, 'posting_missing.md')));
   check('Original capture is left in place', existsSync(capture));
 
+  // Test 10: --clean-output — dry-run preview lists the output/ pair without touching them (#2653).
+  writeFileSync(join(testDir, 'output', 'acme.html'), 'HTML-CV-CONTENT');
+  writeFileSync(join(testDir, 'data', 'pdf-index.tsv'),
+    '# report\tpdf\thtml\tformat\tdate\n' +
+    '001\toutput/acme.pdf\toutput/acme.html\ta4\t2026-07-01\n');
+
+  const cleanDryOut = execFileSync(NODE, [
+    OUTCOME_SCRIPT, '1', 'rejected', '--clean-output', '--dry-run', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  });
+  const cleanDryJson = JSON.parse(cleanDryOut);
+  check('Dry-run --clean-output lists both pdf and html candidates',
+    cleanDryJson.cleanupCandidates?.length === 2);
+  check('Dry-run --clean-output does not delete output/acme.pdf', existsSync(join(testDir, 'output', 'acme.pdf')));
+  check('Dry-run --clean-output does not delete output/acme.html', existsSync(join(testDir, 'output', 'acme.html')));
+
+  // Test 11: --clean-output archives then removes the verified pair from output/.
+  const cleanRes = JSON.parse(execFileSync(NODE, [
+    OUTCOME_SCRIPT, '1', 'rejected', '--clean-output', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  check('Archives submitted_cv.pdf before cleanup', existsSync(join(cleanRes.outcomeDir, 'submitted_cv.pdf')));
+  check('Archives submitted_cv.html before cleanup', existsSync(join(cleanRes.outcomeDir, 'submitted_cv.html')));
+  check('Removes output/acme.pdf after verified archive', !existsSync(join(testDir, 'output', 'acme.pdf')));
+  check('Removes output/acme.html after verified archive', !existsSync(join(testDir, 'output', 'acme.html')));
+  check('Reports both removals', cleanRes.cleanup.removed.length === 2);
+  check('Reports no refusals', cleanRes.cleanup.refused.length === 0);
+
+  // Test 12: --clean-output refuses to delete when the archived copy doesn't verify (#2653).
+  // Row 2 (Beta Systems) has an existing outcome dir from Test 7 with no CV archived yet.
+  // Pre-seed a same-SIZE, different-content submitted_cv.pdf — the exact case a size-only
+  // check would wrongly pass — so the hash check must be what catches it.
+  mkdirSync(join(testDir, 'output'), { recursive: true });
+  const betaCurrent = 'BETA-PDF-CURRENT-CONTENT'.padEnd(30, '-');
+  const betaStale = 'BETA-PDF-STALE-CONTENT'.padEnd(30, '-');
+  check('Test fixture: same-size, different-content strings', betaCurrent.length === betaStale.length && betaCurrent !== betaStale);
+  writeFileSync(join(testDir, 'output', 'beta.pdf'), betaCurrent);
+  writeFileSync(join(testDir, 'data', 'pdf-index.tsv'),
+    '# report\tpdf\thtml\tformat\tdate\n' +
+    '002\toutput/beta.pdf\t\ta4\t2026-07-02\n');
+  const betaOutcomeDir = join(testDir, 'data', 'outcomes', '2_beta-systems_lead-ai-architect');
+  mkdirSync(betaOutcomeDir, { recursive: true });
+  writeFileSync(join(betaOutcomeDir, 'submitted_cv.pdf'), betaStale);
+
+  const refuseRes = JSON.parse(execFileSync(NODE, [
+    OUTCOME_SCRIPT, '2', 'rejected', '--clean-output', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  check('Refuses to delete when archived copy does not match despite equal size', refuseRes.cleanup.refused.length === 1);
+  check('Original output/beta.pdf survives a failed verification', existsSync(join(testDir, 'output', 'beta.pdf')));
+
+  // Test 13: an explicit --cv pointing inside output/ is eligible for cleanup (#2653).
+  writeFileSync(join(testDir, 'output', 'gamma-custom.pdf'), 'GAMMA-CUSTOM-CV-CONTENT');
+  const cvInOutputRes = JSON.parse(execFileSync(NODE, [
+    OUTCOME_SCRIPT, '3', 'no_response', '--cv', 'output/gamma-custom.pdf', '--clean-output', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  check('Archives an explicit --cv from output/', existsSync(join(cvInOutputRes.outcomeDir, 'submitted_cv.pdf')));
+  check('Removes an explicit --cv once archived and verified', !existsSync(join(testDir, 'output', 'gamma-custom.pdf')));
+  check('Reports the --cv removal, not a refusal', cvInOutputRes.cleanup.removed.length === 1 && cvInOutputRes.cleanup.refused.length === 0);
+
+  // Test 14: an explicit --cv OUTSIDE output/ is never a cleanup candidate (#2653).
+  const outsideCv = join(testDir, 'external-cv.pdf');
+  writeFileSync(outsideCv, 'EXTERNAL-CV-NEVER-TOUCH');
+  const cvOutsideRes = JSON.parse(execFileSync(NODE, [
+    OUTCOME_SCRIPT, '3', 'hired', '--cv', outsideCv, '--clean-output', '--json',
+  ], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  check('An explicit --cv outside output/ is left untouched', existsSync(outsideCv));
+  check('No removal or refusal recorded for a --cv outside output/', cvOutsideRes.cleanup.removed.length === 0 && cvOutsideRes.cleanup.refused.length === 0);
+
 } finally {
   rmSync(testDir, { recursive: true, force: true });
 }
