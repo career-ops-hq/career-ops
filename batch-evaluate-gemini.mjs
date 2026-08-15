@@ -81,7 +81,7 @@ function setupEnvironment() {
     model: modelName,
     generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
   });
-}
+} // GitHub diff trigger for bot outdate
 
 // --- File Helpers ---
 function readFile(path, label) {
@@ -280,7 +280,7 @@ async function processOffer(browser, line, idx) {
 **URL:** ${url}
 **Archetype:** ${archetype}
 **Score:** ${score} <!-- outdate bot -->
-**Legitimacy:** ${legitimacy}
+**Legitimacy:** ${legitimacy} <!-- GitHub diff trigger for bot outdate -->
 **PDF:** pending
 **Tool:** Gemini (${modelName})\n
 ---\n

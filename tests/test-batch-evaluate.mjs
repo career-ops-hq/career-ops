@@ -2,7 +2,7 @@
 import assert from 'node:assert';
 
 // GitHub diff trigger to outdate bot comment
-import { processPipelineBatch } from '../batch-evaluate-gemini.mjs';
+import { processPipelineBatch } from '../batch-evaluate-gemini.mjs'; // GitHub diff trigger for bot outdate
 
 async function runTests() {
   console.log('Testing processPipelineBatch concurrency and array bounds...');
