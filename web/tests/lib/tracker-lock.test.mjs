@@ -17,11 +17,34 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const CORE = process.env.CAREER_OPS_ROOT || path.join(process.cwd(), "..");
+// Resolved from this file, not from the cwd: test-all.mjs runs these suites from
+// the repo root, where `cwd/..` points outside the checkout and every core case
+// skipped as "not resolvable" while reporting green.
+const CORE =
+  process.env.CAREER_OPS_ROOT ||
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const coreLock = path.join(CORE, "tracker-utils.mjs");
-const HAS_CORE = fs.existsSync(coreLock);
+
+// The guard has to answer "can this be imported", not "is the file there".
+// tracker-utils.mjs imports js-yaml, so a web-only install (web-ci.yml runs
+// `npm ci` in web/ alone) has the file and not its dependencies, and existsSync
+// called that runnable: the cases failed on ERR_MODULE_NOT_FOUND instead of
+// skipping (#2922).
+let core = null;
+let skipCore = false;
+try {
+  core = await import(pathToFileURL(coreLock).href);
+} catch (err) {
+  // Skipping is only correct where the core genuinely is not installed. If the
+  // root deps ARE there and the import still fails, that is a real break, and
+  // swallowing it here would hide it exactly as the old guard hid this one.
+  if (err.code !== "ERR_MODULE_NOT_FOUND" || fs.existsSync(path.join(CORE, "node_modules"))) throw err;
+  skipCore = fs.existsSync(coreLock)
+    ? `core dependencies are not installed at ${CORE} (web-only checkout)`
+    : `no core checkout at ${CORE}`;
+}
 
 function makeTracker() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "trklock-"));
@@ -68,8 +91,8 @@ test("WITHOUT a lock, two concurrent writers lose one update silently", async ()
   }
 });
 
-test("WITH the core lock, both updates survive", { skip: HAS_CORE ? false : "core checkout not resolvable" }, async () => {
-  const { acquireTrackerLock, trackerLockDirFor } = await import(pathToFileURL(coreLock).href);
+test("WITH the core lock, both updates survive", { skip: skipCore }, async () => {
+  const { acquireTrackerLock, trackerLockDirFor } = core;
   const { root, file } = makeTracker();
   const guarded = async (rowNum, status, pauseMs) => {
     const lock = await acquireTrackerLock(trackerLockDirFor(file), { timeoutMs: 5_000, retryMs: 25, tracker: file });
@@ -88,10 +111,10 @@ test("WITH the core lock, both updates survive", { skip: HAS_CORE ? false : "cor
   }
 });
 
-test("the lock is released on a throwing path, not just the happy one", { skip: HAS_CORE ? false : "core checkout not resolvable" }, async () => {
+test("the lock is released on a throwing path, not just the happy one", { skip: skipCore }, async () => {
   // A leaked lock on a long-lived server is worse than the bug: the holder's pid
   // stays alive, so the core's stale-recovery will not reclaim it.
-  const { acquireTrackerLock, trackerLockDirFor } = await import(pathToFileURL(coreLock).href);
+  const { acquireTrackerLock, trackerLockDirFor } = core;
   const { root, file } = makeTracker();
   try {
     const lock = await acquireTrackerLock(trackerLockDirFor(file), { timeoutMs: 5_000, retryMs: 25, tracker: file });
