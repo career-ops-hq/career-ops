@@ -3338,7 +3338,11 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
 }
 
-if ((batchPromptDoc.match(/^reports_to:/gm) || []).length >= 2) {
+// Per fence, not a total: a count over the whole file passes when one fence
+// carries the key twice and the other carries it not at all.
+const step2SchemaFence = batchPromptDoc.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
+const step3ReportTemplate = batchPromptDoc.split('### Step 3 \u2014 Save the Report')[1] ?? '';
+if (/^reports_to:/m.test(step2SchemaFence) && /^reports_to:/m.test(step3ReportTemplate)) {
   pass('batch prompt carries reports_to in both Machine Summary fences');
 } else {
   fail('batch prompt missing reports_to in one or both Machine Summary fences');
