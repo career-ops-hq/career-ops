@@ -23,6 +23,16 @@
 //
 // Plain .mjs (not .ts) so the root test suite can import it with no build step
 // and no `@/` alias loader, mirroring tracker-table.mjs.
+//
+// The author-letter prefix is stripped by report-sections.mjs's cleanHeading,
+// not by a second regex here. splitSections() leaves the letter ON the heading
+// ("A) Role Summary") and reports it separately, so a lettered
+// `## H) Recommendation` has to be normalized before it can be matched — and
+// #2324 is exactly the bug of two copies of that range drifting apart, so this
+// file reads the same definition rather than restating it. cleanHeading also
+// drops a trailing "(lead)"/"(verdict)"; the optional parenthetical below stays
+// because it covers every other qualifier ("Risk Summary (detailed)").
+import { cleanHeading } from '../report-sections.mjs';
 
 // Each pattern matches the whole normalized heading, not a prefix of it. A
 // prefix match promoted anything merely starting with a candidate word, so a
@@ -46,23 +56,9 @@ const LEAD_PREFERENCE = [
   bounded('risk summary', 'risk summaries'),
 ];
 
-// splitSections() leaves the author-letter ON the heading ("A) Role Summary")
-// and reports the letter separately, so a lettered `## H) Recommendation` must be
-// matched here or it falls through to Risk Summary or null.
-//
-// Any single letter, not the A-G the report contract documents: the corpus
-// already carries `## H) Draft Application Answers`, so an A-G range is a list
-// that reality has outgrown. What makes this safe is the required `)`, `.`, or
-// `:` delimiter, not the narrow range — "A Recommendation Was Requested" has no
-// delimiter and is left alone.
-const AUTHOR_LETTER = /^\s*(?:Block\s+)?[A-Z][).:]\s*/i;
-
 /** @param {unknown} heading */
 function normalizeHeading(heading) {
-  return String(heading ?? '')
-    .trim()
-    .replace(AUTHOR_LETTER, '')
-    .trim();
+  return cleanHeading(String(heading ?? '').trim());
 }
 
 /**
