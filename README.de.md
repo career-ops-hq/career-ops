@@ -116,26 +116,6 @@ Gebaut von jemandem, der damit 740+ Stellenanzeigen bewertet, 100+ personalisier
 
 ## Schnellstart
 
-**Der schnellste Weg -- ein Befehl:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> `npx` wird mit [Node.js](https://nodejs.org) ausgeliefert. Es führt den Installer einmal aus, ohne global etwas zu installieren. Noch kein Node? Installiere es zuerst. Wenn du bereits Claude Code, Gemini oder Codex nutzt, hast du Node wahrscheinlich schon.
-
-Das klont die neueste Version nach `./career-ops` und installiert die Abhängigkeiten. Danach:
-
-```bash
-cd career-ops
-claude   # oder gemini / codex / qwen / opencode / agy / grok -- öffne deine KI-CLI hier
-```
-
-**Beim ersten Start führt dich career-ops per Chat durch die Einrichtung: Lebenslauf, Profil und Zielrollen. Du musst nichts von Hand bearbeiten.**
-
-<details>
-<summary><b>Lieber manuell einrichten? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
@@ -152,10 +132,24 @@ cp templates/portals.example.yml portals.yml       # Unternehmen anpassen
 # Erstelle cv.md im Projekt-Root mit deinem Lebenslauf in Markdown
 
 # 5. KI-CLI in diesem Verzeichnis öffnen
-claude   # oder codex / opencode / gemini / qwen / agy / grok
+claude   # oder codex / opencode / qwen / agy / grok
+
+# Dann bitte deine CLI, das System auf dich anzupassen:
+# "Ändere die Archetypen zu Backend Engineering-Rollen"
+# "Übersetze die Modi ins Deutsche"
+# "Füge diese 5 Unternehmen zu portals.yml hinzu"
+# "Aktualisiere mein Profil mit diesem CV, den ich gerade einfüge"
+
+# 6. Beginne zu nutzen
+# Füge eine Stellenanzeigen-URL oder Stellenbeschreibung ein, um die Auto-Pipeline zu starten
+# Wenn deine CLI Slash-Befehle unterstützt, nutze /career-ops (oder den CLI-spezifischen Alias)
+# In Codex bitte um denselben Modus in normaler Sprache, z.B.:
+# "Starte den career-ops scan mode"
+# "Starte den career-ops pipeline mode für data/pipeline.md"
+# "Starte den career-ops pdf mode für die neueste bewertete Rolle"
+# "Starte den career-ops tracker mode und fasse die aktuellen Statuse zusammen"
 ```
 
-</details>
 
 > **Das System ist darauf ausgelegt, von deiner KI-Coding-CLI selbst angepasst zu werden.** Modi, Archetypen, Scoring-Gewichte, Verhandlungsskripte -- frag einfach danach. Die CLI liest dieselben Dateien, die sie nutzt, und weiß daher genau, was zu ändern ist.
 

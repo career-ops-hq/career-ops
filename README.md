@@ -129,28 +129,6 @@ career-ops is the first reference implementation of [the CareerOps Manifesto](ht
 
 ## Quick Start
 
-**Fastest way — one command:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` ships with [Node.js](https://nodejs.org) — it runs the installer once,
-> without installing anything globally. No Node yet? Install it first.
-> (Already using a Claude Code / Gemini / Codex CLI? Then you already have it.)
-
-This clones the latest release into `./career-ops` and installs dependencies. Then:
-
-```bash
-cd career-ops
-claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
-```
-
-**On first launch, career-ops walks you through setup — your CV, profile and target roles — just by chatting. Nothing to edit by hand.**
-
-<details>
-<summary><b>Prefer to set it up manually? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
@@ -185,19 +163,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
-
-### Global install
-
-```bash
-npm i -g @santifer/career-ops
-```
-
-This installs the `career-ops` binary globally so you can run it directly instead of via `npx`. Unlike `npx @santifer/career-ops init` (which bootstraps a project directory), the global install gives you a persistent `career-ops` command available anywhere in your terminal.
-
-**Which one should you use?**
-- `npx @santifer/career-ops init` — best for first use; creates a dedicated project folder.
-- `npm i -g @santifer/career-ops` — best once you have a project folder and want to run career-ops commands directly.
+**On first launch, career-ops walks you through setup — your CV, profile and target roles — just by chatting. Nothing to edit by hand.**
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 

@@ -49,8 +49,6 @@
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Unete_a_la_comunidad-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a>
 </p>
 
 <p align="center">
@@ -107,46 +105,41 @@ Construido por alguien que lo usó para evaluar 740+ ofertas, generar 100+ CVs p
 
 ## Inicio rápido
 
-**La forma más rápida — un solo comando:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` viene incluido con [Node.js](https://nodejs.org) — ejecuta el instalador una vez, sin instalar nada de forma global. ¿No tienes Node? Instálalo primero. (¿Ya usas un CLI como Claude Code / Gemini / Codex? Entonces ya lo tienes.)
-
-Esto clona la última release en `./career-ops` e instala las dependencias. Después:
-
-```bash
-cd career-ops
-claude   # o gemini / codex / qwen / opencode — abre tu CLI de IA aquí
-```
-
-**En el primer arranque, career-ops te guía en la configuración — tu CV, tu perfil y los roles que buscas — simplemente conversando. No hay nada qué editar a mano.**
-
-<details>
-<summary><b>¿Prefieres instalarlo manualmente? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # solo para generar PDFs
-claude   # abre tu CLI de IA — te guiará en el primer arranque
+
+# 2. Verificar configuración
+npm run doctor                     # Valida todas las dependencias
+
+# 3. Configurar
+cp config/profile.example.yml config/profile.yml  # Edita con tus datos
+cp templates/portals.example.yml portals.yml       # Personaliza empresas
+
+# 4. Añade tu CV
+# Crea cv.md en la raíz del proyecto con tu CV en markdown
+
+# 5. Abre tu CLI de IA aquí
+claude   # o codex / opencode / qwen / agy / grok
+
+# Luego pídele a tu CLI que te personalice el sistema:
+# "Cambia los arquetipos a roles de backend engineering"
+# "Traduce los modos a español"
+# "Añade estas 5 empresas a portals.yml"
+# "Actualiza mi perfil con este CV que te pego"
+
+# 6. Empieza a usar
+# Pega una URL de oferta o descripción para trigger el auto-pipeline
+# Si tu CLI soporta slash commands, usa /career-ops (o su alias)
+# En Codex, pide el mismo modo en lenguaje natural, p.ej:
+# "Ejecuta el modo scan de career-ops"
+# "Ejecuta el modo pipeline de career-ops para data/pipeline.md"
+# "Ejecuta el modo pdf de career-ops para el rol más reciente"
+# "Ejecuta el modo tracker de career-ops y resume los estados"
 ```
 
-</details>
-
-### Instalación global
-
-```bash
-npm i -g @santifer/career-ops
-```
-
-Esto instala el binario `career-ops` de forma global para que puedas ejecutarlo directamente en lugar de usar `npx`. A diferencia de `npx @santifer/career-ops init` (que prepara un directorio de proyecto), la instalación global te da un comando `career-ops` persistente disponible en cualquier terminal.
-
-**¿Cuál deberías usar?**
-- `npx @santifer/career-ops init` — mejor para el primer uso; crea una carpeta de proyecto dedicada.
-- `npm i -g @santifer/career-ops` — mejor una vez que tienes una carpeta de proyecto y quieres ejecutar comandos de career-ops directamente.
+**En el primer arranque, career-ops te guía en la configuración — tu CV, tu perfil y los roles que buscas — simplemente conversando. No hay nada qué editar a mano.**
 
 > **El sistema está diseñado para que Claude lo personalice.** Modes, arquetipos, scoring, scripts de negociación -- solo pídelo. Claude lee los mismos archivos que usa, así que sabe exactamente qué editar.
 

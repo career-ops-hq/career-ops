@@ -38,9 +38,7 @@
 
 <p align="center"><strong>740件以上の求人を評価 · 100件以上のパーソナライズCVを生成 · 理想のポジションを獲得</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/コミュニティに参加-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/コミュニティに参加-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
@@ -98,36 +96,41 @@ career-opsはエージェンティックです: Claude CodeがPlaywrightで求�
 
 ## クイックスタート
 
-**最速の方法 — コマンド1つ:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` は [Node.js](https://nodejs.org) に付属しています — グローバルに何もインストールせず、
-> インストーラーを一度だけ実行します。まだNodeがない場合は、先にインストールしてください。
-> （すでにClaude Code / Gemini / Codex CLIを使っているなら、もう持っています。）
-
-これにより最新リリースが `./career-ops` にクローンされ、依存関係がインストールされます。その後:
-
-```bash
-cd career-ops
-claude   # or gemini / codex / qwen / opencode — ここでAI CLIを起動
-```
-
-**初回起動時、career-opsが対話するだけでセットアップ（CV、プロフィール、対象ロール）をご案内します。手で編集するものは何もありません。**
-
-<details>
-<summary><b>手動でセットアップしたいですか？（git clone）</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # PDF生成にのみ必要
-claude   # AI CLIを起動 — 初回起動時にオンボーディングします
+
+# 2. セットアップ確認
+npm run doctor                     # すべての前提条件を検証
+
+# 3. 設定
+cp config/profile.example.yml config/profile.yml  # 詳細情報を入力
+cp templates/portals.example.yml portals.yml       # 企業をカスタマイズ
+
+# 4. CVを追加
+# プロジェクト root に cv.md を作成（Markdown形式のCV）
+
+# 5. このディレクトリでAI CLIを起動
+claude   # or codex / opencode / qwen / agy / grok
+
+# その後、CLIにシステムを調整するよう依頼:
+# "Change the archetypes to backend engineering roles"
+# "Translate the modes to English"
+# "Add these 5 companies to portals.yml"
+# "Update my profile with this CV I'm pasting"
+
+# 6. 利用開始
+# 求人URLまたは記述を貼り付けると自動パイプラインが起動
+# CLIがスラッシュコマンドに対応している場合は /career-ops を使用
+# Codexの場合は、以下のように依頼:
+# "Run the career-ops scan mode"
+# "Run the career-ops pipeline mode for data/pipeline.md"
+# "Run the career-ops pdf mode for the latest evaluated role"
+# "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
+**初回起動時、career-opsが対話するだけでセットアップ（CV、プロフィール、対象ロール）をご案内します。**
 
 > **このシステムはClaude自身がカスタマイズする前提で設計されています。** モード、アーキタイプ、スコアリング重み、交渉スクリプト -- すべてClaudeに依頼すれば変更してくれます。Claudeは自分が使うのと同じファイルを読むので、どこを編集すればよいか正確に把握しています。
 

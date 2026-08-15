@@ -123,28 +123,6 @@ career-ops, [CareerOps Manifestosu](https://career-ops.org/manifesto?utm_source=
 
 ## Hızlı Başlangıç
 
-**En hızlı yol — tek komut:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx`, [Node.js](https://nodejs.org) ile birlikte gelir — herhangi bir şeyi global olarak
-> kurmadan yükleyiciyi bir kez çalıştırır. Node yoksa önce onu kurun.
-> (Zaten bir Claude Code / Gemini / Codex CLI kullanıyor musunuz? O zaman zaten sahipsiniz.)
-
-Bu, en güncel sürümü `./career-ops` içine klonlar ve bağımlılıkları kurar. Ardından:
-
-```bash
-cd career-ops
-claude   # veya codex / qwen / opencode / agy / grok — yapay zekâ CLI'nizi burada açın
-```
-
-**İlk açılışta career-ops sizi kurulum boyunca yönlendirir — CV'niz, profiliniz ve hedef rolleriniz — sadece sohbet ederek. Elle düzenlenecek hiçbir şey yok.**
-
-<details>
-<summary><b>Elle kurmayı mı tercih edersiniz? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
@@ -179,7 +157,7 @@ claude   # veya codex / opencode / qwen / agy / grok
 # "career-ops tracker modunu çalıştır ve mevcut durumları özetle"
 ```
 
-</details>
+**İlk açılışta career-ops sizi kurulum boyunca yönlendirir — CV'niz, profiliniz ve hedef rolleriniz — sadece sohbet ederek. Elle düzenlenecek hiçbir şey yok.**
 
 > **Sistem, yapay zekâ kodlama CLI'nizin kendisi tarafından özelleştirilmek üzere tasarlanmıştır.** Modlar, arketipler, puanlama ağırlıkları, pazarlık senaryoları -- onlardan bunları değiştirmesini istemeniz yeterli. Kullandığı dosyaların aynılarını okur, bu yüzden tam olarak neyi düzenleyeceğini bilir.
 

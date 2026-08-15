@@ -38,9 +38,7 @@
 
 <p align="center"><strong>740개 이상의 채용 공고 평가 · 100개 이상의 맞춤형 이력서 생성 · 꿈의 직장 1곳 합격</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/커뮤니티_참여하기-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/커뮤니티_참여하기-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
@@ -95,39 +93,43 @@ career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwrig
 | **Dashboard TUI**      | 터미널 UI에서 파이프라인 탐색, 필터링, 정렬                                                                                         |
 | **Human-in-the-Loop**  | AI가 평가하고 추천하면, 당신이 판단하고 행동합니다. 시스템은 절대 지원서를 자동 제출하지 않습니다 -- 최종 결정은 항상 당신의 몫     |
 | **파이프라인 무결성**  | 자동 병합, 중복 제거, 상태 정규화, 헬스 체크                                                                                        |
-
 ## 빠른 시작
-
-**가장 빠른 방법 — 명령어 하나:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx`는 [Node.js](https://nodejs.org)에 함께 제공됩니다 — 전역으로 아무것도
-> 설치하지 않고 인스톨러를 한 번만 실행합니다. 아직 Node가 없다면 먼저 설치하세요.
-> (이미 Claude Code / Gemini / Codex CLI를 사용 중이라면 이미 가지고 있습니다.)
-
-이 명령어는 최신 릴리스를 `./career-ops`에 클론하고 의존성을 설치합니다. 그다음:
-
-```bash
-cd career-ops
-claude   # or gemini / codex / qwen / opencode — open your AI CLI here
-```
-
-**처음 실행하면 career-ops가 대화만으로 설정 과정을 안내합니다 — 이력서, 프로필, 목표 직무까지. 손으로 편집할 것이 없습니다.**
-
-<details>
-<summary><b>수동으로 설정하고 싶으신가요? (git clone)</b></summary>
 
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
-claude   # open your AI CLI — it onboards you on first launch
+
+# 2. Check setup
+npm run doctor                     # Validates all prerequisites
+
+# 3. Configure
+cp config/profile.example.yml config/profile.yml  # Edit with your details
+cp templates/portals.example.yml portals.yml       # Customize companies
+
+# 4. Add your CV
+# Create cv.md in the project root with your CV in markdown
+
+# 5. Open your AI CLI in this directory
+claude   # or codex / opencode / qwen / agy / grok
+
+# Then ask your CLI to adapt the system to you:
+# "Change the archetypes to backend engineering roles"
+# "Translate the modes to English"
+# "Add these 5 companies to portals.yml"
+# "Update my profile with this CV I'm pasting"
+
+# 6. Start using
+# Paste a job URL or JD text to trigger auto-pipeline
+# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
+# In Codex, ask for the same mode in plain language, e.g.:
+# "Run the career-ops scan mode"
+# "Run the career-ops pipeline mode for data/pipeline.md"
+# "Run the career-ops pdf mode for the latest evaluated role"
+# "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
+**처음 실행하면 career-ops가 대화만으로 설정 과정을 안내합니다 — 이력서, 프로필, 목표 직무까지. 손으로 편집할 것이 없습니다.**
 
 > **이 시스템은 Claude가 직접 커스터마이즈하도록 설계되었습니다.** 모드, 아키타입, 스코어링 가중치, 협상 스크립트 -- 그냥 요청하세요. Claude가 사용하는 파일을 직접 읽기 때문에, 무엇을 수정해야 하는지 정확히 알고 있습니다.
 

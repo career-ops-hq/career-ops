@@ -104,26 +104,6 @@ Conçu par quelqu'un qui l'a utilisé pour évaluer plus de 740 offres d'emploi,
 
 ## Démarrage rapide
 
-**La méthode la plus rapide — une seule commande :**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` est fourni avec [Node.js](https://nodejs.org) — il exécute l'installateur une seule fois, sans rien installer globalement. Si vous n'avez pas encore Node, installez-le d'abord. (Si vous utilisez déjà un CLI Claude Code / Gemini / Codex, vous l'avez déjà.)
-
-Cette commande clone la dernière version dans `./career-ops` et installe les dépendances. Ensuite :
-
-```bash
-cd career-ops
-claude   # ou gemini / codex / qwen / opencode — ouvrez votre CLI d'IA ici
-```
-
-**Lors du premier lancement, career-ops vous guide à travers la configuration — votre CV, votre profil et vos rôles cibles — simplement par chat. Rien à modifier à la main.**
-
-<details>
-<summary><b>Vous préférez le configurer manuellement ? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
@@ -131,7 +111,7 @@ npx playwright install chromium   # requis uniquement pour la génération de PD
 claude   # ouvrez votre CLI d'IA — il vous guidera au premier lancement
 ```
 
-</details>
+**Lors du premier lancement, career-ops vous guide à travers la configuration — votre CV, votre profil et vos rôles cibles — simplement par chat. Rien à modifier à la main.**
 
 > **Le système est conçu pour être personnalisé par Claude lui-même.** Modes, archétypes, pondérations des scores, scripts de négociation — demandez simplement à Claude de les modifier. Il lit les mêmes fichiers qu'il utilise, il sait donc exactement quoi modifier.
 

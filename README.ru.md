@@ -40,8 +40,6 @@
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Присоединиться_к_сообществу-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a>
 </p>
 
 <p align="center">
@@ -94,36 +92,38 @@ career-ops превращает любой AI-CLI в полноценный ко
 
 ## Быстрый старт
 
-**Самый быстрый способ — одна команда:**
-
 ```bash
-npx @santifer/career-ops init
-```
+git clone https://github.com/santifer/career-ops.git
+cd career-ops && npm install
+npx playwright install chromium   # только для генерации PDF
 
-> 💡 `npx` поставляется вместе с [Node.js](https://nodejs.org) — он один раз запускает
-> установщик, ничего не устанавливая глобально. Ещё нет Node? Установи его сначала.
-> (Уже используешь Claude Code / Gemini / Codex CLI? Значит, он у тебя уже есть.)
+# 2. Проверь настройку
+npm run doctor                     # Проверяет все зависимости
 
-Это клонирует последний релиз в `./career-ops` и устанавливает зависимости. Затем:
+# 3. Конфигурация
+cp config/profile.example.yml config/profile.yml  # Отредактируй с твоими данными
+cp templates/portals.example.yml portals.yml       # Добавь нужные компании
 
-```bash
-cd career-ops
-claude   # или gemini / codex / qwen / opencode — открой здесь свой AI-CLI
+# 4. Загрузи свое резюме
+# Создай cv.md в корне проекта с резюме в markdown
+
+# 5. Открой свой AI-CLI в этой директории
+claude   # или codex / opencode / qwen / agy / grok
+
+# Затем попроси свой CLI адаптировать систему к себе:
+# "Измени архетипы на backend engineering роли"
+# "Переведи режимы на английский"
+# "Добавь эти 5 компаний в portals.yml"
+# "Обнови мой профиль с этим CV"
+
+# 6. Начни использовать
+# Вставь URL вакансии или текст JD — сработает авто-пайплайн
+# Если твой CLI поддерживает slash-команды, используй /career-ops (или его аналог)
 ```
 
 **При первом запуске career-ops проведёт тебя через настройку — твоё CV, профиль и целевые роли — просто через диалог. Ничего не нужно править вручную.**
 
-<details>
-<summary><b>Предпочитаешь настроить вручную? (git clone)</b></summary>
-
-```bash
-git clone https://github.com/santifer/career-ops.git
-cd career-ops && npm install
-npx playwright install chromium   # нужно только для генерации PDF
-claude   # открой свой AI-CLI — он проведёт онбординг при первом запуске
-```
-
-</details>
+> **Система разработана для кастомизации твоим AI-командным центром.** Попроси своего CLI переводить режимы, адаптировать архетипы и управлять опциями через диалог.
 
 ## Использование
 

@@ -38,9 +38,7 @@
 
 <p align="center"><strong>740+ vagas avaliadas · 100+ CVs personalizados · 1 vaga dos sonhos conquistada</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-&nbsp;
-<a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
@@ -94,40 +92,43 @@ Construído por alguém que usou isso para avaliar 740+ vagas, gerar 100+ CVs pe
 | **Processamento em lote**            | Avaliação paralela com workers `claude -p`                                                                                                     |
 | **Dashboard TUI**                    | Interface no terminal para navegar, filtrar e ordenar seu pipeline                                                                             |
 | **Humano no loop**                   | A IA avalia e recomenda, você decide e age. O sistema nunca envia candidatura automaticamente -- a decisão final é sempre sua                  |
-| **Integridade do pipeline**          | Merge automatizado, deduplicação, normalização de status e health checks                                                                       |
-
 ## Início rápido
-
-**Forma mais rápida — um único comando:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` já vem com o [Node.js](https://nodejs.org) — ele roda o instalador uma vez,
-> sem instalar nada globalmente. Ainda não tem Node? Instale-o primeiro.
-> (Já usa uma CLI Claude Code / Gemini / Codex? Então você já tem.)
-
-Isso clona o último release em `./career-ops` e instala as dependências. Depois:
-
-```bash
-cd career-ops
-claude   # ou gemini / codex / qwen / opencode — abra sua CLI de IA aqui
-```
-
-**No primeiro uso, o career-ops conduz você pela configuração — seu CV, perfil e vagas-alvo — apenas conversando. Nada para editar à mão.**
-
-<details>
-<summary><b>Prefere configurar manualmente? (git clone)</b></summary>
 
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # necessário apenas para geração de PDF
-claude
+
+# 2. Verificar configuração
+npm run doctor                     # Valida todos os pré-requisitos
+
+# 3. Configurar
+cp config/profile.example.yml config/profile.yml  # Edite com seus dados
+cp templates/portals.example.yml portals.yml       # Customize as empresas
+
+# 4. Adicionar seu CV
+# Crie cv.md na raiz do projeto com seu CV em markdown
+
+# 5. Abra sua CLI de IA neste diretório
+claude   # ou codex / opencode / qwen / agy / grok
+
+# Então peça para sua CLI adaptar o sistema para você:
+# "Mude os arquétipos para funções de backend engineering"
+# "Traduza os modos para Português"
+# "Adicione estas 5 empresas no portals.yml"
+# "Atualize meu perfil com este CV que estou colando"
+
+# 6. Comece a usar
+# Cole uma URL de vaga ou texto com JD para disparar o auto-pipeline
+# Se sua CLI suporta slash commands, use /career-ops (ou seu alias)
+# No Codex, peça o mesmo modo em linguagem natural, ex:
+# "Execute o career-ops scan mode"
+# "Execute o career-ops pipeline mode para data/pipeline.md"
+# "Execute o career-ops pdf mode para a vaga mais recente avaliada"
+# "Execute o career-ops tracker mode e resuma os status atuais"
 ```
 
-</details>
+**No primeiro uso, o career-ops conduz você pela configuração — seu CV, perfil e vagas-alvo — apenas conversando. Nada para editar à mão.**
 
 > **O sistema foi projetado para ser customizado pelo próprio Claude.** Modos, arquétipos, pesos de pontuação, scripts de negociação -- é só pedir para ele alterar. Ele lê os mesmos arquivos que usa, então sabe exatamente o que editar.
 

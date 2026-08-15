@@ -94,35 +94,41 @@ Zbudowany przez kogoś, kto użył go do oceny 740+ ofert pracy, wygenerowania 1
 
 ## Szybki start
 
-**Najszybszy sposób — jedno polecenie:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` jest dołączone do [Node.js](https://nodejs.org) — uruchamia instalator jednorazowo, bez instalowania czegokolwiek globalnie. Nie masz jeszcze Node.js? Najpierw go zainstaluj.
-> (Używasz już Claude Code / Gemini / Codex CLI? To już go masz.)
-
-To sklonuje najnowszą wersję do `./career-ops` i zainstaluje zależności. Następnie:
-
-```bash
-cd career-ops
-claude   # lub gemini / codex / qwen / opencode — otwórz tutaj swój AI CLI
-```
-
-**Przy pierwszym uruchomieniu career-ops przeprowadza Cię przez konfigurację — CV, profil i docelowe stanowiska — wyłącznie przez rozmowę. Nic nie trzeba edytować ręcznie.**
-
-<details>
-<summary><b>Wolisz skonfigurować ręcznie? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # wymagane tylko do generowania PDF
-claude   # otwórz swój AI CLI — przy pierwszym uruchomieniu przeprowadzi Cię przez onboarding
+
+# 2. Check setup
+npm run doctor                     # Validates all prerequisites
+
+# 3. Configure
+cp config/profile.example.yml config/profile.yml  # Edit with your details
+cp templates/portals.example.yml portals.yml       # Customize companies
+
+# 4. Add your CV
+# Create cv.md in the project root with your CV in markdown
+
+# 5. Open your AI CLI in this directory
+claude   # lub gemini / codex / qwen / opencode — otwórz tutaj swój AI CLI
+
+# Then ask your CLI to adapt the system to you:
+# "Change the archetypes to backend engineering roles"
+# "Translate the modes to English"
+# "Add these 5 companies to portals.yml"
+# "Update my profile with this CV I'm pasting"
+
+# 6. Start using
+# Paste a job URL or JD text to trigger auto-pipeline
+# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
+# In Codex, ask for the same mode in plain language, e.g.:
+# "Run the career-ops scan mode"
+# "Run the career-ops pipeline mode for data/pipeline.md"
+# "Run the career-ops pdf mode for the latest evaluated role"
+# "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
+**Przy pierwszym uruchomieniu career-ops przeprowadza Cię przez konfigurację — CV, profil i docelowe stanowiska — wyłącznie przez rozmowę. Nic nie trzeba edytować ręcznie.**
 
 > **System jest zaprojektowany tak, żeby Claude go dostosowywał.** Tryby, archetypy, wagi oceniania, skrypty negocjacyjne — po prostu poproś Claude o zmiany. Czyta te same pliki, których używa, więc wie dokładnie, co edytować.
 

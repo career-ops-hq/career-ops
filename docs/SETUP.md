@@ -3,18 +3,18 @@
 ## Prerequisites
 
 - An AI coding CLI — [Claude Code](https://claude.ai/code), Gemini CLI, Codex, Qwen Code, OpenCode, GitHub Copilot CLI, Antigravity CLI, or Grok Build CLI (see [Supported CLIs](SUPPORTED_CLIS.md))
-- [Node.js](https://nodejs.org) 18+ and `git` (`npx` ships with Node — the installer refuses to run without them) — note: the Gemini CLI integration requires Node.js 20+
+- [Node.js](https://nodejs.org) 18+ and `git` — note: the Gemini CLI integration requires Node.js 20+
 - (Optional) Go 1.21+ (for the dashboard TUI)
 
 ## Quick Start
 
-### Recommended — one command
-
 ```bash
-npx @santifer/career-ops init
+git clone https://github.com/santifer/career-ops.git
+cd career-ops
+npm install
 ```
 
-`npx` ships with Node.js — it runs the installer once without installing anything globally. This clones the latest release into `./career-ops` and installs dependencies. Then move into the workspace and open your AI CLI:
+Then move into the workspace and open your AI CLI:
 
 ```bash
 cd career-ops
@@ -44,21 +44,6 @@ codex exec "Run career-ops pdf mode for the latest evaluated role."
 codex exec "Run career-ops email mode for the latest evaluated role. Draft only; do not send, submit, or click anything."
 codex exec "Run career-ops tracker mode and summarize the current statuses."
 ```
-
-### Advanced — clone manually
-
-<details>
-<summary>Prefer to clone the repo yourself?</summary>
-
-```bash
-git clone https://github.com/santifer/career-ops.git
-cd career-ops
-npm install
-```
-
-Then open your AI CLI in the folder — the same first-run onboarding applies. Use this path if you want to track a specific branch, contribute, or audit the code before installing dependencies.
-
-</details>
 
 ### PDF rendering (one-time)
 

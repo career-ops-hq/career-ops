@@ -40,8 +40,7 @@
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Приєднатися_до_спільноти-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a>
+
 </p>
 
 <p align="center">
@@ -100,37 +99,41 @@ career-ops працює агентно: Claude Code переходить на к
 
 ## Швидкий старт
 
-**Найшвидший спосіб — одна команда:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` постачається разом із [Node.js](https://nodejs.org) — він запускає
-> інсталятор один раз, нічого не встановлюючи глобально. Ще немає Node?
-> Спочатку встановіть його.
-> (Уже користуєтеся Claude Code / Gemini / Codex CLI? Тоді він у вас уже є.)
-
-Це клонує останній реліз у `./career-ops` та встановлює залежності. Потім:
-
-```bash
-cd career-ops
-claude   # or gemini / codex / qwen / opencode — open your AI CLI here
-```
-
-**Під час першого запуску career-ops проведе вас через налаштування — ваше резюме, профіль і цільові ролі — просто у форматі діалогу. Нічого не треба редагувати вручну.**
-
-<details>
-<summary><b>Бажаєте налаштувати вручну? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
-claude
+
+# 2. Check setup
+npm run doctor                     # Validates all prerequisites
+
+# 3. Configure
+cp config/profile.example.yml config/profile.yml  # Edit with your details
+cp templates/portals.example.yml portals.yml       # Customize companies
+
+# 4. Add your CV
+# Create cv.md in the project root with your CV in markdown
+
+# 5. Open your AI CLI in this directory
+claude   # or codex / opencode / qwen / agy / grok
+
+# Then ask your CLI to adapt the system to you:
+# "Change the archetypes to backend engineering roles"
+# "Translate the modes to English"
+# "Add these 5 companies to portals.yml"
+# "Update my profile with this CV I'm pasting"
+
+# 6. Start using
+# Paste a job URL or JD text to trigger auto-pipeline
+# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
+# In Codex, ask for the same mode in plain language, e.g.:
+# "Run the career-ops scan mode"
+# "Run the career-ops pipeline mode for data/pipeline.md"
+# "Run the career-ops pdf mode for the latest evaluated role"
+# "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
+**Під час першого запуску career-ops проведе вас через налаштування — ваше резюме, профіль і цільові ролі — просто у форматі діалогу.**
 
 > **Система створена для налаштування самим Claude.** Режими, архетипи, оцінювання, скрипти переговорів — просто попросіть Claude їх змінити. Він читає ті самі файли, які використовує, тому точно знає, що редагувати.
 

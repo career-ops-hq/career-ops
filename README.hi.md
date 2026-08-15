@@ -116,28 +116,6 @@ career-ops agentic है: जो भी AI coding CLI आप चुनें �
 
 ## Quick Start
 
-**सबसे तेज़ तरीका — एक command:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` [Node.js](https://nodejs.org) के साथ आता है — यह installer एक बार run करता है,
-> globally कुछ install किए बिना। Node नहीं है? पहले install करें।
-> (Claude Code / Gemini / Codex CLI पहले से use कर रहे हैं? तो आपके पास पहले से है।)
-
-यह latest release को `./career-ops` में clone करता है और dependencies install करता है। फिर:
-
-```bash
-cd career-ops
-claude   # या gemini / codex / qwen / opencode / agy / grok — यहाँ अपना AI CLI खोलें
-```
-
-**पहले launch पर, career-ops setup के through walk करता है — आपका CV, profile और target roles — simply chatting करके। कुछ manually edit नहीं करना।**
-
-<details>
-<summary><b>Manually setup करना पसंद करते हैं? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
@@ -154,7 +132,7 @@ cp templates/portals.example.yml portals.yml       # Companies customize कर�
 # project root में cv.md बनाएं अपने CV के साथ markdown में
 
 # 5. इस directory में अपना AI CLI खोलें
-claude   # या codex / opencode / gemini / qwen / agy / grok
+claude   # या codex / opencode / qwen / agy / grok
 
 # फिर CLI से system को आप पर adapt करने को कहें:
 # "Archetypes को backend engineering roles में change करो"
@@ -172,7 +150,7 @@ claude   # या codex / opencode / gemini / qwen / agy / grok
 # "Run the career-ops tracker mode and summarize the current statuses"
 ```
 
-</details>
+**पहले launch पर, career-ops setup के through walk करता है — आपका CV, profile और target roles — simply chatting करके। कुछ manually edit नहीं करना।**
 
 > **System को आपका AI coding CLI खुद customize करने के लिए design किया गया है।** Modes, archetypes, scoring weights, negotiation scripts -- बस उसे change करने को कहें। वह वही files पढ़ता है जो वह use करता है, इसलिए उसे exactly पता है क्या edit करना है।
 

@@ -94,35 +94,41 @@ Bygget af en, der brugte det til at vurdere 740+ stillinger, generere 100+ skræ
 
 ## Hurtig start
 
-**Hurtigste måde — én kommando:**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` følger med [Node.js](https://nodejs.org) — det kører installationsprogrammet én gang uden at installere noget globalt. Har du ikke Node.js endnu? Installer det først.
-> (Bruger du allerede Claude Code / Gemini / Codex CLI? Så har du det allerede.)
-
-Dette kloner den nyeste version til `./career-ops` og installerer afhængighederne. Derefter:
-
-```bash
-cd career-ops
-claude   # eller gemini / codex / qwen / opencode — åbn dit AI-CLI her
-```
-
-**Ved første kørsel guider career-ops dig gennem opsætningen — CV, profil og målstillinger — udelukkende via samtale. Intet skal redigeres manuelt.**
-
-<details>
-<summary><b>Foretrækker du manuel opsætning? (git clone)</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # kun nødvendigt til PDF-generering
-claude   # åbn dit AI-CLI — første kørsel guider dig gennem onboarding
+
+# 2. Tjek opsætning
+npm run doctor                     # Validerer alle forudsætninger
+
+# 3. Konfigurér
+cp config/profile.example.yml config/profile.yml  # Rediger med dine oplysninger
+cp templates/portals.example.yml portals.yml       # Tilpas virksomheder
+
+# 4. Tilføj dit CV
+# Opret cv.md i projektets rod med dit CV i markdown
+
+# 5. Åbn dit AI-CLI i denne mappe
+claude   # eller codex / opencode / qwen / agy / grok
+
+# Bed derefter dit CLI om at tilpasse systemet til dig:
+# "Skift arkhetyperne til backend engineering-roller"
+# "Oversæt tilstandene til dansk"
+# "Tilføj disse 5 virksomheder til portals.yml"
+# "Opdater min profil med dette CV, jeg indsætter"
+
+# 6. Begynd at bruge det
+# Indsæt en job-URL eller JD-tekst for at udløse auto-pipeline
+# Hvis dit CLI understøtter slash-kommandoer, skal du bruge /career-ops (eller dets CLI-specifikke alias)
+# I Codex kan du bede om samme tilstand på almindeligt dansk, f.eks.:
+# "Kør career-ops scan-tilstand"
+# "Kør career-ops pipeline-tilstand for data/pipeline.md"
+# "Kør career-ops pdf-tilstand for den seneste evaluerede rolle"
+# "Kør career-ops tracker-tilstand og opsummer de aktuelle statusser"
 ```
 
-</details>
+**Ved første kørsel guider career-ops dig gennem opsætningen — CV, profil og målstillinger — udelukkende via samtale. Intet skal redigeres manuelt.**
 
 > **Systemet er designet til, at Claude tilpasser det.** Tilstande, arketyper, vurderingsvægte, forhandlingsscripts — bed blot Claude om ændringer. Den læser de samme filer, den bruger, så den ved præcis, hvad der skal redigeres.
 

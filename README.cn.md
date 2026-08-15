@@ -38,9 +38,7 @@
 
 <p align="center"><strong>评估超过 740 个职位 · 生成超过 100 份个性化简历 · 成功拿下理想职位</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社区-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  &nbsp;
-  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社区-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
@@ -98,36 +96,41 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 
 ## 快速开始
 
-**最快的方式 —— 一条命令：**
-
-```bash
-npx @santifer/career-ops init
-```
-
-> 💡 `npx` 随 [Node.js](https://nodejs.org) 一起提供 —— 它只运行一次安装程序，
-> 不会全局安装任何东西。还没有 Node？请先安装它。
-> （已经在用 Claude Code / Gemini / Codex CLI？那你已经有它了。）
-
-这会把最新版本克隆到 `./career-ops` 并安装依赖。然后：
-
-```bash
-cd career-ops
-claude   # 或 gemini / codex / qwen / opencode —— 在这里打开你的 AI CLI
-```
-
-**首次启动时，career-ops 会通过对话带你完成设置 —— 你的简历、个人档案和目标职位 —— 完全无需手动编辑任何文件。**
-
-<details>
-<summary><b>更喜欢手动设置？（git clone）</b></summary>
-
 ```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # 仅生成 PDF 时需要
-claude   # 打开你的 AI CLI —— 它会在首次启动时引导你完成设置
+
+# 2. 检查设置
+npm run doctor                     # 验证所有前置条件
+
+# 3. 配置
+cp config/profile.example.yml config/profile.yml  # 编辑你的信息
+cp templates/portals.example.yml portals.yml       # 自定义公司列表
+
+# 4. 添加你的简历
+# 在项目根目录创建 cv.md，用 markdown 格式写你的简历
+
+# 5. 在这个目录打开你的 AI CLI
+claude   # 或 codex / opencode / qwen / agy / grok
+
+# 然后告诉 AI CLI 怎么定制系统：
+# "把职业原型改成后端工程师职位"
+# "把所有模式翻译成英文"
+# "在 portals.yml 中添加这 5 家公司"
+# "用我这份简历更新我的个人档案"
+
+# 6. 开始使用
+# 粘贴一个职位 URL 或职位描述，启动自动流程
+# 如果你的 CLI 支持斜杠命令，使用 /career-ops（或对应 CLI 的别名）
+# 在 Codex 中，用自然语言请求相同的模式，例如：
+# "运行 career-ops 扫描模式"
+# "为 data/pipeline.md 运行 career-ops 流程模式"
+# "为最新评估的职位运行 career-ops PDF 生成模式"
+# "运行 career-ops 追踪器模式并总结当前状态"
 ```
 
-</details>
+**首次启动时，career-ops 会通过对话带你完成设置 —— 你的简历、个人档案和目标职位 —— 完全无需手动编辑任何文件。**
 
 > **这个系统本来就是设计给 Claude 直接定制的。** modes、职业原型、评分权重、谈判脚本，直接告诉 Claude 要改什么就行。Claude 读取的正是它自己会使用的那些文件，所以它知道该改哪里。
 
