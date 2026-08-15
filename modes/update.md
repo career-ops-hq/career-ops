@@ -42,7 +42,7 @@ Present to the user as a clear summary:
 > - Other: {N} files changed
 >
 > **Changelog:**
-> {changelog from update-system.mjs check output}
+> [Render in {language.output}: {changelog from update-system.mjs check output}]
 >
 > Your personal files (CV, profile, tracker, reports) will NOT be touched.
 

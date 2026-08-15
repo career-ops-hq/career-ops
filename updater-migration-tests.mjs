@@ -8,6 +8,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { spawnSync } from 'child_process';
 
 let passed = 0;
 let failed = 0;
@@ -45,12 +46,44 @@ const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
-if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)/.test(source) &&
+if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,120}isReexec/.test(source) &&
     /Installation requires explicit confirmation/.test(source) &&
     /CAREER_OPS_UPDATE_CONFIRM: '1'/.test(source)) {
   pass('apply requires explicit confirmation and carries it through self-reexec');
 } else {
   fail('apply can install without an explicit confirmation flag');
+}
+
+function runApplyWithEnv(env) {
+  return spawnSync(process.execPath, ['update-system.mjs', 'apply'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+}
+
+const envOnlyConfirmation = runApplyWithEnv({
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+  CAREER_OPS_UPDATE_REEXEC: '',
+});
+if (envOnlyConfirmation.status !== 0 &&
+    /Installation requires explicit confirmation/.test(envOnlyConfirmation.stderr) &&
+    !existsSync('.update-lock')) {
+  pass('environment-only confirmation cannot authorize initial apply');
+} else {
+  fail('environment-only confirmation can authorize initial apply');
+}
+
+const envOnlyForce = runApplyWithEnv({
+  CAREER_OPS_UPDATE_FORCE: '1',
+  CAREER_OPS_UPDATE_REEXEC: '',
+});
+if (envOnlyForce.status !== 0 &&
+    /Installation requires explicit confirmation/.test(envOnlyForce.stderr) &&
+    !existsSync('.update-lock')) {
+  pass('environment-only force cannot authorize initial apply');
+} else {
+  fail('environment-only force can authorize initial apply');
 }
 
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or

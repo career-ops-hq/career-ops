@@ -1898,21 +1898,23 @@ export function reconcileGitignore(localText, upstreamText) {
 async function apply() {
   assertOwnGitToplevel();
   const local = localVersion();
-  // --force overwrites system files this install edited locally (#2337). The
-  // env var carries the flag across the self-reexec, which re-invokes the
-  // TARGET updater as `update-system.mjs apply` with a fixed argv.
-  const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
-  const updateConfirmed = process.argv.includes('--confirm') || process.env.CAREER_OPS_UPDATE_CONFIRM === '1';
+  // Environment variables are a private one-use channel for the self-reexec;
+  // they must not authorize the initial invocation (#2866).
+  const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
+  const updateForce = process.argv.includes('--force') ||
+    (isReexec && process.env.CAREER_OPS_UPDATE_FORCE === '1');
+  const updateConfirmed = process.argv.includes('--confirm') ||
+    (isReexec && process.env.CAREER_OPS_UPDATE_CONFIRM === '1');
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
   // Backups created by this apply run are expected updater output, not user
   // files the checkout modified. Record only successful copies so an unrelated
   // pre-existing .bak can never receive this exemption.
   const generatedBackupPaths = new Set();
-  const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
 
   if (!updateConfirmed) {
     throw new Error(
-      `Installation requires explicit confirmation. Re-run with --confirm${updateForce ? ' --force --confirm' : ''}. ` +
+      `Installation requires explicit confirmation. Re-run with ` +
+      `\`node update-system.mjs apply${updateForce ? ' --force' : ''} --confirm\`. ` +
       'A scheduled update check never installs files.',
     );
   }
