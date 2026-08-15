@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
 
@@ -136,6 +137,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
 
+  // The web can run against a CAREER_OPS_ROOT that holds data and no scripts.
+  // Delegation needs a defined answer there, and "spawn it and see" is not one:
+  // the child's failure is a Node module-resolution stack trace, which is both
+  // useless to the caller and an absolute-path disclosure if echoed. Same
+  // existsSync feature-detection /api/followups already uses.
+  const script = rootScript("set-status");
+  if (!fs.existsSync(script)) {
+    return NextResponse.json(
+      {
+        error: "status updates need the career-ops scripts; this root has data only",
+        code: "core-script-missing",
+      },
+      { status: 503 },
+    );
+  }
+
   // --row: `n` is the tracker's # column, the same key this route has always
   // matched on. It is NOT a report number — the two counters diverge
   // permanently — so naming the number space is required, not cosmetic.
@@ -150,10 +167,10 @@ export async function POST(req: Request) {
   const parsed = parseCliJson(stdout);
 
   if (spawnFailed) {
-    return NextResponse.json(
-      { error: "status update failed to run", detail: stderr.trim() || undefined },
-      { status: 500 },
-    );
+    // Child stderr is a Node stack trace carrying absolute server paths. It
+    // belongs in the server log, never in the response body.
+    console.error(`/api/status: set-status.mjs failed to run: ${stderr.trim()}`);
+    return NextResponse.json({ error: "status update failed to run" }, { status: 500 });
   }
 
   // Killed by our own timeout. The child gets a shorter lock wait than this, so
