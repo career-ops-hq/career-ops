@@ -1,9 +1,10 @@
 // tests/outcome.test.mjs — Unit test suite for outcome.mjs (#1722).
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, utimesSync } from 'fs';
-import { join } from 'path';
+import { join, win32 as win32Path, posix as posixPath } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { pathIsInside } from '../tracker-utils.mjs';
 
 const OUTCOME_SCRIPT = join(ROOT, 'outcome.mjs');
 
@@ -299,6 +300,27 @@ try {
   check('Cleanup never records a path outside output/', !touchedPaths.some(p => p.endsWith('gamma-outside.html')));
   check('The contained PDF still resolves and cleans up normally (containment check still recognizes real output/ files)',
     !existsSync(join(testDir, 'output', 'gamma.pdf')) && escapeRes.cleanup.removed.some(p => p.endsWith('output/gamma.pdf')));
+
+  // Test 17: Windows UNC path containment (CodeRabbit finding on PR #2911).
+  // This calls the actual pathIsInside() from tracker-utils.mjs — the same
+  // function outcome.mjs's --clean-output uses at runtime (it already existed
+  // there for lock-directory validation; #2911 reused rather than duplicated
+  // it) — passing path.win32/path.posix explicitly so the Windows and POSIX
+  // branches are both exercised deterministically regardless of which OS runs
+  // this test suite. A UNC path (\\server\share\...) has no drive letter and
+  // its relative() output doesn't start with '..', so only a real isAbsolute()
+  // check (not a hand-rolled regex) classifies it as outside output/.
+  check('Windows UNC path is correctly rejected as outside output/',
+    pathIsInside('\\\\server\\share\\cv.pdf', 'C:\\career-ops\\output', win32Path) === false);
+
+  check('A UNC path actually inside a UNC output/ is still correctly accepted',
+    pathIsInside('\\\\server\\share\\output\\cv.pdf', '\\\\server\\share\\output', win32Path) === true);
+
+  check('POSIX path traversal outside output/ is still correctly rejected',
+    pathIsInside('/repo/output/../etc/passwd', '/repo/output', posixPath) === false);
+
+  check('A real POSIX path inside output/ is still correctly accepted',
+    pathIsInside('/repo/output/acme.pdf', '/repo/output', posixPath) === true);
 
 } finally {
   rmSync(testDir, { recursive: true, force: true });

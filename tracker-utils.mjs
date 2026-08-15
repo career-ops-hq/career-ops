@@ -166,14 +166,21 @@ export function canonicalizeTrackerPath(path) {
  *
  * This protects recursive lock cleanup from accepting paths that escape the
  * system temp directory through `..` segments or unrelated absolute roots.
+ * Also the shared boundary check for outcome.mjs's --clean-output (#2653,
+ * #2911), where an output/ path must be validated before ever being deleted.
  *
  * @param {string} childPath - Candidate path to validate.
  * @param {string} parentDir - Required parent directory boundary.
+ * @param {{relative: Function, isAbsolute: Function, sep: string}} [pathMod] -
+ *   Path primitives to use, defaulting to the platform's own. Tests pass
+ *   `path.win32` or `path.posix` to deterministically exercise one platform's
+ *   separator and absolute-path rules (drive letters, UNC paths) regardless
+ *   of the host OS running the suite.
  * @returns {boolean} True when childPath is inside parentDir or equal to it.
  */
-function pathIsInside(childPath, parentDir) {
-  const relativePath = relative(parentDir, childPath);
-  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
+export function pathIsInside(childPath, parentDir, pathMod = { relative, isAbsolute, sep }) {
+  const relativePath = pathMod.relative(parentDir, childPath);
+  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${pathMod.sep}`) && !pathMod.isAbsolute(relativePath));
 }
 
 /**

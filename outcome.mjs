@@ -19,13 +19,13 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
-import { join, dirname, resolve, relative, extname } from 'path';
+import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
+import { resolveTrackerPath, normalizeCompany, pathIsInside } from './tracker-utils.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
 
@@ -261,27 +261,16 @@ if (flags.cv) {
 // not which case found it, is what keeps deletion scoped to generated CVs. An
 // explicit --cv pointing outside output/ (e.g. into the user's home directory)
 // is never a candidate, and neither is the cv.md fallback (Case D), since it
-// never sets isPdf.
-//
-// The containment check is path.relative-based (not a string-prefix check)
-// so it works regardless of the platform's path separator, and it is applied
-// to BOTH the PDF and its manifest-sourced HTML companion — the manifest is
-// host-writable data, so a malformed or manipulated html column must never
-// be trusted to point outside output/ without being re-checked here too.
-function isInsideOutputDir(candidatePath, outputDir) {
-  const rel = relative(outputDir, resolve(candidatePath));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolutePathLike(rel));
-}
-function isAbsolutePathLike(p) {
-  return p.startsWith('/') || /^[A-Za-z]:/.test(p);
-}
-
+// never sets isPdf. pathIsInside() (tracker-utils.mjs) is applied to BOTH the
+// PDF and its manifest-sourced HTML companion — the manifest is host-writable
+// data, so a malformed or manipulated html column must never be trusted to
+// point outside output/ without being re-checked here too.
 let cvFromOutputDir = false;
 let htmlResolvedPath = null;
 const outputDir = resolve(repoRoot, 'output');
-if (isPdf && cvResolvedPath && isInsideOutputDir(cvResolvedPath, outputDir)) {
+const resolvedCvAbs = cvResolvedPath ? resolve(cvResolvedPath) : null;
+if (isPdf && resolvedCvAbs && pathIsInside(resolvedCvAbs, outputDir)) {
   cvFromOutputDir = true;
-  const resolvedAbs = resolve(cvResolvedPath);
   const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
   if (existsSync(manifestPath)) {
     try {
@@ -291,9 +280,9 @@ if (isPdf && cvResolvedPath && isInsideOutputDir(cvResolvedPath, outputDir)) {
         const fields = line.split('\t');
         if (!fields[1]) continue;
         const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
-        if (rowPdfPath === resolvedAbs && fields[2]) {
+        if (rowPdfPath === resolvedCvAbs && fields[2]) {
           const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
-          if (existsSync(htmlFull) && isInsideOutputDir(htmlFull, outputDir)) {
+          if (existsSync(htmlFull) && pathIsInside(resolve(htmlFull), outputDir)) {
             htmlResolvedPath = htmlFull;
           }
           break;
