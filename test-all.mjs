@@ -2048,8 +2048,10 @@ const patternsMachineFields = readFile('analyze-patterns.mjs').match(/const MACH
 if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
+  /^reports_to:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
-  /['"]company_confidential['"]/.test(patternsMachineFields)
+  /['"]company_confidential['"]/.test(patternsMachineFields) &&
+  /['"]reports_to['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
@@ -3334,6 +3336,12 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   pass('batch prompt carries advertised_comp in both Machine Summary fences');
 } else {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
+}
+
+if ((batchPromptDoc.match(/^reports_to:/gm) || []).length >= 2) {
+  pass('batch prompt carries reports_to in both Machine Summary fences');
+} else {
+  fail('batch prompt missing reports_to in one or both Machine Summary fences');
 }
 
 // ── upskill Learning Plan trust model (#1740, phase 2b) ──
