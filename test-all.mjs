@@ -31,7 +31,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 /**
@@ -253,6 +253,12 @@ mjsFiles.forEach((f, i) => {
 
 console.log('\n2. Script execution (graceful on empty data)');
 
+// How much of its budget a script may consume before the suite says so. High
+// enough that ordinary CI variance stays quiet, low enough to leave room to act
+// before the kill: at 0.75 a 30s script warns at 22.5s, nearly a full run of
+// headroom.
+const SLOW_SCRIPT_WARN_FRACTION = 0.75;
+
 const scripts = [
   { name: 'cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
   { name: 'verify-pipeline.mjs', expectExit: 0 },
@@ -400,11 +406,29 @@ try {
     // and it is spread in rather than defaulted so an absent value cannot
     // quietly become `timeout: undefined` — execFileSync reads that as "no
     // timeout at all", which would turn a hung script into a hung CI job.
+    const budgetMs = timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
+    const startedAt = Date.now();
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(timeoutMs ? { timeout: timeoutMs } : {}),
     });
+    const elapsedMs = Date.now() - startedAt;
+    // A budget a script can raise for itself is a place to hide in, unless
+    // something still notices it creeping. Nothing did: the reason
+    // tracker-writer-lock-tests.mjs was killed rather than flagged is that
+    // spending 29 of its 30 seconds looked exactly like spending 2 — the suite
+    // reported "runs OK" either way, right up to the run where it did not.
+    //
+    // So the ceiling is not the only signal any more. A script that eats most
+    // of its budget says so while it is still passing, which is the point at
+    // which someone can act. This is a WARNING rather than a failure on
+    // purpose: a loaded runner is a normal reason to be slow, and turning that
+    // into a red run would trade one false failure for another.
+    if (result !== null && elapsedMs > budgetMs * SLOW_SCRIPT_WARN_FRACTION) {
+      warn(`${name} used ${(elapsedMs / 1000).toFixed(1)}s of its ${(budgetMs / 1000).toFixed(0)}s budget `
+        + `(${Math.round((elapsedMs / budgetMs) * 100)}%) — it is passing, but it is close to being killed for time`);
+    }
     if (result !== null) {
       pass(`${name} runs OK`);
     } else if (allowFail) {
