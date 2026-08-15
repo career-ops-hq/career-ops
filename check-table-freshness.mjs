@@ -53,8 +53,8 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
-import { flagValue } from './lib/cli-flags.mjs';
+import * as yaml from 'js-yaml';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = join(CAREER_OPS, 'templates');
@@ -62,6 +62,25 @@ const DEFAULT_MAX_AGE_MONTHS = 12;
 
 // --- CLI args ---
 const args = process.argv.slice(2);
+
+// --help fell through to a full freshness scan and printed the report (#2855).
+// Handled via lib/cli-flags.mjs's validateFlags() (#2775), which also rejects
+// unrecognized flags before --help so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--summary', '--self-test', '--max-age-months', '--today', '--help', '-h'];
+
+// Both take their value as the next argv token.
+const VALUE_FLAGS = ['--max-age-months', '--today'];
+
+const USAGE = `Usage:
+  node check-table-freshness.mjs                       # JSON freshness report
+  node check-table-freshness.mjs --summary             # human-readable table
+  node check-table-freshness.mjs --max-age-months <n>  # review-due threshold (default: 12)
+  node check-table-freshness.mjs --today <YYYY-MM-DD>  # evaluate as of a fixed date
+  node check-table-freshness.mjs --self-test           # run the inline self-test
+  node check-table-freshness.mjs --help                # show this message
+
+Exits 1 when any row is expired (past next_effective without re-verification).`;
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const maxAgeRaw = flagValue(args, '--max-age-months') ?? null;
@@ -104,23 +123,37 @@ export function addMonthsUTC(date, deltaMonths) {
 }
 
 // --- Row extraction ---
-// Given a parsed YAML document of any shape, find its jurisdiction row-sets:
-// arrays (top-level, or under any top-level key) where at least one object
-// row carries an `as_of` field. Once an array qualifies as a row-set, EVERY
-// object row in it is returned — rows missing the mandatory `as_of` are
-// tagged `missingAsOf: true` so checkFreshness can warn about them instead of
-// letting them silently vanish from validation. Arrays with no `as_of` rows
-// at all (states.yml's state list, portals.example.yml's companies) never
-// qualify, so unrelated templates stay silently skipped.
-// A file qualifies as a jurisdiction table iff this returns at least one row.
+// Given a parsed YAML document of any shape, find its jurisdiction row-sets.
+// Two shapes qualify, both keyed off the same signal — at least one member
+// carries `as_of`:
+//   1. Arrays (top-level, or under any top-level key) whose items are object
+//      rows, e.g. `rows: [{ jurisdiction: "CA-ON", as_of: ... }, ...]`.
+//   2. Mappings under a top-level key whose VALUES are themselves object
+//      rows, e.g. `jurisdictions: { CA-ON: { as_of: ..., ... }, US-CO: {...} }`
+//      (a mapping-shaped table keyed by jurisdiction code rather than an
+//      array of rows — the jurisdiction code is the map key rather than a
+//      `jurisdiction` field, so it is synthesized onto the row when the row
+//      doesn't already declare its own).
+// Once a row-set qualifies, EVERY row in it is returned — rows missing the
+// mandatory `as_of` are tagged `missingAsOf: true` so checkFreshness can warn
+// about them instead of letting them silently vanish from validation.
+// Row-sets with no `as_of` rows at all (states.yml's state list,
+// portals.example.yml's companies) never qualify, so unrelated templates
+// stay silently skipped. A file qualifies as a jurisdiction table iff this
+// returns at least one row.
 export function extractRows(doc) {
   const isObjectRow = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const arrays = [];
+  const mappings = [];
   if (Array.isArray(doc)) {
     arrays.push({ container: '(top-level)', items: doc });
   } else if (doc !== null && typeof doc === 'object') {
     for (const [key, value] of Object.entries(doc)) {
-      if (Array.isArray(value)) arrays.push({ container: key, items: value });
+      if (Array.isArray(value)) {
+        arrays.push({ container: key, items: value });
+      } else if (isObjectRow(value)) {
+        mappings.push({ container: key, entries: value });
+      }
     }
   }
   const rows = [];
@@ -129,6 +162,14 @@ export function extractRows(doc) {
     items.forEach((item, index) => {
       if (!isObjectRow(item)) return;
       rows.push({ row: item, container, index, missingAsOf: !Object.hasOwn(item, 'as_of') });
+    });
+  }
+  for (const { container, entries } of mappings) {
+    const children = Object.entries(entries).filter(([, v]) => isObjectRow(v));
+    if (!children.some(([, v]) => Object.hasOwn(v, 'as_of'))) continue;
+    children.forEach(([key, item], index) => {
+      const row = Object.hasOwn(item, 'jurisdiction') ? item : { jurisdiction: key, ...item };
+      rows.push({ row, container, index, missingAsOf: !Object.hasOwn(item, 'as_of') });
     });
   }
   return rows;
@@ -379,19 +420,41 @@ function runSelfTest() {
     'notes: "no as_of anywhere"',
   ].join('\n'));
 
+  // Mapping-shaped row-set: a top-level key whose value is an OBJECT keyed
+  // by jurisdiction code, not an array. The jurisdiction code is the map
+  // key, not a `jurisdiction` field on the row — extractRows must
+  // synthesize it. (This shape has no real-world table consumer at present
+  // — kept as generic, self-tested discovery support for any future
+  // mapping-keyed jurisdiction table.)
+  const MAPPING_TABLE = yaml.load([
+    'jurisdictions:',
+    '  QQ-TEST:',
+    '    rule: "test mapping-shaped fresh row"',
+    '    as_of: "2026-06-20"',
+    '  PP-TEST:',
+    '    rule: "test another mapping-shaped fresh row"',
+    '    as_of: "2026-06-10"',
+  ].join('\n'));
+
   const tables = [
     { file: 'jurisdiction-fixture.yml', doc: NESTED_TABLE },
     { file: 'flat-fixture.yml', doc: TOP_LEVEL_ARRAY_TABLE },
     { file: 'states-fixture.yml', doc: NOT_A_TABLE },
+    { file: 'mapping-fixture.yml', doc: MAPPING_TABLE },
   ];
   const result = checkFreshness(tables, today, DEFAULT_MAX_AGE_MONTHS);
 
-  // Discovery: both table shapes found, non-table ignored.
-  check(result.tablesScanned === 2, `both table shapes discovered, non-table skipped (got ${result.tablesScanned})`);
+  // Discovery: all qualifying table shapes found, non-table ignored.
+  check(result.tablesScanned === 3, `all qualifying table shapes discovered, non-table skipped (got ${result.tablesScanned})`);
   check(extractRows(NESTED_TABLE).length === 8, 'nested-under-key shape: all rows in the qualifying row-set extracted (incl. the missing-as_of one)');
   check(extractRows(TOP_LEVEL_ARRAY_TABLE).length === 1, 'top-level-array shape: as_of row extracted');
   check(extractRows(NOT_A_TABLE).length === 0, 'file without as_of rows yields no rows');
-  check(result.rowsChecked === 6, `6 rows checked (2 malformed + 1 missing as_of skipped), got ${result.rowsChecked}`);
+  const mappingRows = extractRows(MAPPING_TABLE);
+  check(mappingRows.length === 2, 'mapping-shaped row-set: both keyed rows extracted');
+  check(mappingRows.every(r => typeof r.row.jurisdiction === 'string'), 'mapping-shaped rows get their jurisdiction synthesized from the map key');
+  check(mappingRows.some(r => r.row.jurisdiction === 'QQ-TEST') && mappingRows.some(r => r.row.jurisdiction === 'PP-TEST'),
+    'mapping-shaped row jurisdiction matches its map key');
+  check(result.rowsChecked === 8, `8 rows checked (2 malformed + 1 missing as_of skipped), got ${result.rowsChecked}`);
 
   // expired
   const expired = result.findings.filter(f => f.type === 'expired');
@@ -428,6 +491,15 @@ function runSelfTest() {
   check(hasExpired(result.findings) === true, 'expired finding present -> exit 1 path');
   check(hasExpired(result.findings.filter(f => f.type !== 'expired')) === false,
     'review-due alone -> exit 0 path (CI-friendly)');
+
+  // mapping-shaped row-set: freshness logic (not just extraction) applies —
+  // a stale as_of on a keyed jurisdiction row is still flagged review-due.
+  const mappingStale = checkFreshness([{
+    file: 'mapping-stale.yml',
+    doc: { jurisdictions: { 'OO-TEST': { rule: 'test stale mapping row', as_of: '2024-01-01' } } },
+  }], today, DEFAULT_MAX_AGE_MONTHS);
+  check(mappingStale.findings.some(f => f.type === 'review-due' && f.jurisdiction === 'OO-TEST'),
+    'mapping-shaped row with stale as_of is flagged review-due (freshness logic, not just extraction, covers this shape)');
 
   // boundary: today exactly == next_effective counts as expired
   const boundary = checkFreshness([{
@@ -486,6 +558,7 @@ function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) {
     runSelfTest();
   }

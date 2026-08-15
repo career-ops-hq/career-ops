@@ -40,13 +40,16 @@ Parse the JSON output. It contains:
 | `funnel` | Count per status stage (evaluated, applied, interview, offer, etc.) |
 | `scoreComparison` | Avg/min/max score per outcome group (positive, negative, self_filtered, pending) |
 | `archetypeBreakdown` | Per-archetype: total, positive, negative, self_filtered, conversion rate |
-| `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite |
+| `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite; each `percentage` is a share of `blockerBase` |
+| `blockerBase` | Entries carrying a non-empty gaps array — the denominator for `blockerAnalysis[].percentage` |
 | `remotePolicy` | Per-policy bucket: total, positive, negative, conversion rate |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
 | `viaChannelAnalysis` | Via channel analysis (#1596): per-agency advance rate + agency-vs-direct aggregate (see below) |
 | `scoreThreshold` | Recommended minimum score + reasoning |
 | `techStackGaps` | Most frequent tech gaps in negative outcomes |
+| `discardReasonStats` | User-committed skip/discard reasons; each `percentage` is a share of `discardReasonBase` |
+| `discardReasonBase` | Self-filtered or negative entries — the denominator for `discardReasonStats[].percentage` and its recommendation threshold |
 | `recommendations` | Top 5 actionable items with reasoning and impact level |
 
 If the script returns `error`, display the error message and exit.
@@ -104,7 +107,7 @@ If compensation observations exist (report `advertised_comp` keys or `data/salar
 
 Run `node company-history.mjs --summary` as an additional lens. Zero tokens.
 
-**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs <num> <state> --note "responded <date>"` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
+**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs --row <num> <state> --on <response-date>` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
 
 Then present the cards, sorted silent-first (the script already orders them this way).
 
@@ -185,7 +188,8 @@ Highlight the best-performing archetype and the worst.
 ## Top Blockers
 
 Frequency table of recurring hard blockers (geo-restriction, stack-mismatch, etc.).
-Note the percentage of all applications affected by each.
+Show each frequency against `blockerBase`; its percentage is the share of
+gap-bearing entries, not the share of all applications.
 
 ## Remote Policy Patterns
 

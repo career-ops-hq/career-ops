@@ -385,6 +385,38 @@ If matched, append a short, warn-only note to the report:
 
 This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately. It never blocks or discourages an application on its own; the candidate decides what to do with the information.
 
+**13. Pay-Transparency Range-Width Check** (from JD text only — self-computed from the `advertised_comp` this mode already parses for Block B; no jurisdiction table, no external data file):
+
+This signal is pure arithmetic on the posting's own stated numbers — no jurisdiction lookup, no legal threshold, no statute. It requires: the posting states a compensation range (both a bottom and a top bound); explicit, unambiguous, matching currency and period on the `advertised_comp` bounds (a bare `$` with no stated currency, or a range with no stated period, is ambiguous — do not guess); and both bounds normalized to the same period (e.g. monthly to annual) before subtracting. If either bound is missing, or currency/period is missing or ambiguous, skip this signal — never guess a currency or period. The two normalized bounds must also use the **same currency** and the normalized lower bound must be **strictly greater than zero (positive)** — if the bounds use mismatched currencies, or the normalized lower bound is zero or negative, skip this signal entirely; do not compute or flag it.
+
+**"Unusually wide" heuristic (general, not jurisdiction-specific):** flag the range when its width (top minus bottom) exceeds **half of the range's own bottom bound** (i.e. `top - bottom > 0.5 × bottom`) — a fictional Acme Corp posting advertising "$60,000–$150,000/year" has a $90K width against a $30K half-of-bottom threshold, so it fires; "$90,000–$110,000/year" ($20K width against a $45K threshold) does not. This is a generic ratio heuristic the agent applies to any posting, in any jurisdiction — it is **not** a legal cap, and it does not imply any jurisdiction's disclosure law was consulted. State this plainly in the finding so it is never mistaken for a compliance check.
+
+If the ratio fires, append a short, non-alarmist note to the report:
+
+> ⚠️ **Pay-transparency range-width signal:** [Render in {language.output}: state the arithmetic fact only — e.g. "this advertised range is $90K wide on a $60K floor, more than half the floor" — then note that unusually wide ranges often mean the actual band for the level is undecided or the posting is templated/aggregated, and suggest asking the recruiter for the real band for this level. Make explicit that this is a general heuristic the agent applied to the posting's own numbers, not a jurisdiction-specific legal threshold. Close with a note that this is an observation about the posting, not legal advice.]
+
+**Phrasing discipline (mandatory):** state only observable facts — the computed range width and the ratio that triggered the flag. Never render this finding as "the employer is breaking the law," an "illegal" posting, or a "violation," and never imply any jurisdiction's disclosure statute was checked — this signal has no legal basis and this mode never gives legal advice.
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and is reported separately.
+
+**14. Minimum-Wage Lawyer Question** (from `advertised_comp`; jurisdiction from the JD's stated location ONLY — NEVER from `config/profile.yml` → `location`, which describes the candidate, not the job; remote, relocation, and multi-location postings make that substitution wrong):
+
+This system has no reliable way to keep a jurisdiction's statutory minimum wage current — general rates are CPI-indexed annually in many jurisdictions and move on legislated schedules this tool has no way to notice or verify. So this signal never asserts or compares against a minimum-wage figure of any kind. It does only the part that needs no legal table at all — converting the offer's own stated compensation into a comparable hourly rate — and routes the actual compliance question to a lawyer or an official source, using the same `[ask your lawyer]` pattern `modes/offer-prep.md` uses for jurisdiction-dependent questions.
+
+**Comparable-amount gate (mandatory):** only convert when `advertised_comp` resolves to a **guaranteed, fixed cash amount**. Exclude: ranges (e.g. "$16-18/hour" has no single figure to convert), and any variable or non-cash component — bonuses, commissions, allowances, overtime pay, 13th-month/holiday pay, and benefits. If `advertised_comp` is `null`, a non-numeric phrase ("competitive"), a range, or otherwise not a guaranteed fixed cash figure, skip this signal — absence or non-fixed comp is the pay-transparency signal's territory, not this one's.
+
+**Rate normalization:** when the fixed cash amount is already hourly, use it directly as the comparable figure. When it is annual or monthly, convert to hourly using the JD's own stated working hours whenever the JD gives one; only fall back to the conservative assumption of **2080 hours/year** (52 weeks × 40 hours; monthly × 12 first) when the JD is silent on hours, and **always disclose in the output which hours figure was used** (JD-stated or the 2080-hour fallback). If no usable hours figure or currency is available to complete the conversion, skip this signal rather than converting on an unreliable assumption.
+
+**Jurisdiction resolution (mandatory):** resolve the posting's governing jurisdiction strictly from the JD's own stated work location — never from `config/profile.yml` → `location`. If the JD does not state a work location precisely enough to name a jurisdiction, skip this signal entirely: the lawyer question needs a named jurisdiction to be useful, and this system does not guess one.
+
+**This fires whenever the gates above all pass.** It is a routing signal, not a red flag, and is never conditioned on whether the resulting figure looks high or low — this system does not compare it to anything, so it has no basis to judge. Append a short, neutral note to the report:
+
+> **[ask your lawyer]** — [Render in {language.output}, filling in the computed hourly figure, the hours basis used for any conversion (JD-stated or the 2080-hour fallback), and the resolved jurisdiction name: "This offer works out to {X}/hour ({disclose the hours basis used}). Is that at or above the statutory minimum for my role in {jurisdiction_name}, and are any of the special rates (student, homeworker) relevant to me?"]
+
+**Phrasing discipline (mandatory):** state only the arithmetic — the advertised figure, the hours basis used, and the resulting hourly rate. Never state, imply, or look up what the current statutory minimum wage is in any jurisdiction, and never claim the offer does or does not comply with it — this mode carries no jurisdiction table and gives no legal advice. Special/reduced rates (student, homeworker, etc.) are named only as a generic prompt for the lawyer to check; never assert that one applies or doesn't, since there is no table here to judge eligibility from.
+
+This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is reported separately as its own finding, and (having nothing to compare the figure against) it is never a legitimacy corroborator either.
+
 ### Output format:
 
 **Assessment:** One of three tiers:
@@ -587,6 +619,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
 - Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)
+- Notes — when the pipeline entry carries a `| posted: {YYYY-MM-DD}` segment (written by the scanner from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it through as its own trailing segment: `…; posted: 2026-08-07`. This is the only path by which the posting date reaches the tracker, and the dashboard's POSTED column — requisition age, "is this still plausibly being worked?" — reads it from the note. Copy it verbatim; when the entry has no segment, write nothing rather than inferring a date, since the column renders an absent date as `—` and a guessed one would report a months-old req as fresh.
 
 **Tracker format:**
 

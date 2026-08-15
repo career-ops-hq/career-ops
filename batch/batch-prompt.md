@@ -460,10 +460,10 @@ Write exactly one TSV line to:
 batch/tracker-additions/{{ID}}.tsv
 ```
 
-Format, no header, 9 tab-separated columns:
+Format, no header, 9 tab-separated columns plus an optional trailing `url`:
 
 ```text
-{{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}
+{{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}\t{url}
 ```
 
 Column order is important:
@@ -481,6 +481,8 @@ Column order is important:
 | 9 | notes | string | one concise sentence |
 
 **Important:** TSV order has status BEFORE score. `applications.md` displays score before status. `merge-tracker.mjs` handles the conversion.
+
+**Posting date in notes:** when the pipeline entry for this offer carries a `| posted: {YYYY-MM-DD}` segment (the scanner writes it from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it into `notes` as its own trailing segment — `…the sentence; posted: 2026-08-07`. It is the only path by which requisition age reaches the tracker, and the dashboard's POSTED column reads it from there. Copy the date verbatim; never infer one when the pipeline entry has no segment, and never write today's date as a stand-in — an absent date renders as `—`, which is honest, while a guessed one silently reports a stale req as fresh. Keep it a segment (`;`-separated, `posted:` first): prose like "recruiter posted an update 2026-07-20" is a contact date, not a posting date, and is read as such.
 
 **Optional fields (column ≥ 10):** if the offer came through an agency/recruiter (#1596), append a labeled field `via={Agency}` (for example `via=Hays`) — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 

@@ -364,7 +364,12 @@ export function injectPrintPageCss(html, format = 'a4') {
   const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: var(--page-margin, ${PDF_PAGE_MARGIN}); }\n</style>`;
 
   if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+    // Replacer function, matching the <html> branch just below. `pageStyle`
+    // interpolates only internal constants today, so this is hardening rather
+    // than a live bug — but the two branches sat in one function disagreeing
+    // about it, and the safe spelling is the one that stays correct if a
+    // configurable value is ever interpolated here (#2596).
+    return html.replace(/<\/head>/i, () => `${pageStyle}\n</head>`);
   }
 
   if (/<html\b[^>]*>/i.test(html)) {
@@ -615,7 +620,28 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
-    const page = await browser.newPage();
+    // A CV is static markup, so the renderer needs neither scripts nor the network.
+    // Both are denied because this HTML is not fully trusted: it is built from
+    // cv.md, the job posting and the evaluation report, and postings are untrusted
+    // input (AGENTS.md). With JS off an injected <script> cannot run; with
+    // non-local requests aborted an injected <img src="https://…"> cannot beacon
+    // out. file:/data: subresources still load, which is all a template needs.
+    //
+    // newContext(), not newPage(): javaScriptEnabled is a Playwright context
+    // option with no per-page equivalent. Guarded so an injected test double that
+    // only implements newPage() still works.
+    const context = browser.newContext
+      ? await browser.newContext({ javaScriptEnabled: false })
+      : null;
+    const page = context ? await context.newPage() : await browser.newPage();
+    if (page.route) {
+      await page.route('**/*', (route) => {
+        const url = route.request().url();
+        return url.startsWith('file:') || url.startsWith('data:')
+          ? route.continue()
+          : route.abort();
+      });
+    }
 
     // Load from file:// so the page origin allows local subresources
     await page.goto(pathToFileURL(tmpHtmlPath).href, {

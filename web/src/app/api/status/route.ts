@@ -4,6 +4,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { withTrackerLock, TrackerBusyError } from "@/lib/core/tracker-lock";
 
 // Writeback: UPDATE the status cell of an EXISTING tracker row only. Never adds
 // rows — per the core data contract, new rows go through the TSV + merge flow.
@@ -30,6 +31,25 @@ export async function POST(req: Request) {
   }
 
   const file = path.join(careerOpsRoot(), "data", "applications.md");
+
+  // The read AND the write happen inside the lock. Holding it for the write
+  // alone would fix nothing: the lost update comes from reading a snapshot that
+  // another writer replaces before we rename ours over it (#2900).
+  try {
+    return await withTrackerLock(file, () => setStatusLocked(file, n, canon));
+  } catch (e) {
+    if (e instanceof TrackerBusyError) {
+      return NextResponse.json(
+        { error: "The tracker is being written right now (CLI or another tab). Try again." },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ error: "write failed" }, { status: 500 });
+  }
+}
+
+/** The read-modify-write itself. Called ONLY under the tracker lock. */
+function setStatusLocked(file: string, n: unknown, canon: string) {
   let md: string;
   try {
     md = fs.readFileSync(file, "utf8");
@@ -65,10 +85,6 @@ export async function POST(req: Request) {
   }
   if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
 
-  try {
-    atomicWrite(file, lines.join("\n"));
-  } catch {
-    return NextResponse.json({ error: "write failed" }, { status: 500 });
-  }
+  atomicWrite(file, lines.join("\n"));
   return NextResponse.json({ ok: true, status: canon });
 }
