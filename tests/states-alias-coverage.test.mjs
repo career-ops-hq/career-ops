@@ -45,34 +45,32 @@ try {
     }
   }
 
-  // Rules of the second shape normalize-statuses.mjs also uses:
-  //   if (['evaluada'].includes(lower)) return { status: 'Evaluated' };
-  // A plain list-membership check against the already-lowercased `lower`,
-  // rather than an anchored regex. RULE_RE above never matches these, so
-  // without this pass a missing alias here (e.g. dropping 'evaluada' from
-  // states.yml) would sail through the test undetected.
-  const LIST_RULE_RE = /\[((?:'[^']*'|"[^"]*")(?:\s*,\s*(?:'[^']*'|"[^"]*"))*)\]\.includes\(lower\)\)\s*return\s*\{\s*status:\s*'([^']+)'/g;
-  const fromListRules = [];
-  for (const m of src.matchAll(LIST_RULE_RE)) {
-    for (const lit of m[1].matchAll(/'([^']*)'|"([^"]*)"/g)) {
-      const a = (lit[1] ?? lit[2] ?? '').trim();
-      if (a) fromListRules.push({ alias: a, expected: m[2] });
-    }
-  }
-  extracted.push(...fromListRules);
+  // normalize-statuses.mjs used to carry a SECOND rule shape — plain
+  // `['evaluada'].includes(lower)` alias lists — and this file extracted those
+  // too. Those lists are gone (#2704): the function now resolves the remaining
+  // aliases through states.yml itself, so there is no second vocabulary left to
+  // scrape. The assertion below inverted with it — instead of proving the lists
+  // are extractable, it proves they have not come back.
 
   // Each extractor is asserted separately on purpose. A combined
   // `extracted.length > 0` passes on the regex arm alone, so if
   // normalize-statuses.mjs reshapes its list rules and LIST_RULE_RE stops
   // matching, that arm silently checks nothing while the test stays green —
   // exactly the kind of quiet drift this file exists to catch.
-  extracted.length > fromListRules.length
-    ? pass(`extracted ${extracted.length - fromListRules.length} anchored alias rule(s) from normalize-statuses.mjs`)
+  extracted.length > 0
+    ? pass(`extracted ${extracted.length} anchored alias rule(s) from normalize-statuses.mjs`)
     : fail("extracted no anchored alias rules — RULE_RE no longer matches normalize-statuses.mjs and is checking nothing");
 
-  fromListRules.length > 0
-    ? pass(`extracted ${fromListRules.length} list-membership alias rule(s) from normalize-statuses.mjs`)
-    : fail("extracted no list-membership alias rules — LIST_RULE_RE no longer matches normalize-statuses.mjs and is checking nothing");
+  // Derivation guard, replacing the extractor that has nothing left to extract.
+  // Two halves, because either alone can go quietly wrong: the derivation must
+  // still be wired, and a hardcoded alias list must not reappear beside it.
+  const derives = /resolveCanonicalState\(/.test(src);
+  const hasListRule = /\]\.includes\(lower\)\)\s*return\s*\{\s*status:/.test(src);
+  derives && !hasListRule
+    ? pass('normalize-statuses derives its remaining aliases from states.yml rather than listing them (#2704)')
+    : fail(derives
+      ? 'a hardcoded alias list reappeared in normalize-statuses.mjs — resolve through states.yml instead (#2704)'
+      : 'normalize-statuses no longer calls resolveCanonicalState — the states.yml derivation was removed (#2704)');
 
   const orphans = extracted.filter(({ alias, expected }) => {
     const resolved = resolveCanonicalState(alias, states);
