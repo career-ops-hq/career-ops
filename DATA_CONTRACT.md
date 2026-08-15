@@ -58,7 +58,7 @@ The two lists above describe *this project*. A fork usually carries files the pr
 
 `config/local-paths.txt` moves the declaration outside that blast radius. It is gitignored, read at runtime, and merged into the user layer for both the updater's safety check and `validate-system-paths-coverage.mjs`:
 
-```
+```text
 # one repo-relative path per line; blank lines and # comments ignored
 run-nightly.ps1
 .mcp.json
