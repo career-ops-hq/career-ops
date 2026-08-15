@@ -223,28 +223,37 @@ console.log('8. the lock is never held by two processes at once');
   mkdirSync(outDir);
   const N = 30;
   const HOLD_MS = 8;
-  // Every child waits for a shared wall-clock start before it even tries to
-  // acquire, so all N contend at once.
+  // Every child signals readiness and then blocks until the PARENT releases
+  // them, so all N are provably at the start line before any of them acquires.
   //
-  // This barrier is the difference between a test and a decoration. Without it
+  // This barrier is the difference between a test and a decoration. Without one
   // the children simply start when `spawn` gets round to them — hundreds of
-  // milliseconds apart — and a short hold then never overlaps ANOTHER hold even
-  // when there is no lock at all. Verified: with mutual exclusion removed
-  // outright, the un-barriered version of this case still passed. Staggered
-  // starts were doing the serialising, not the lock.
-  const startAt = Date.now() + 1200;
+  // milliseconds apart — and a short hold never overlaps ANOTHER hold even when
+  // there is no lock at all. Verified: with mutual exclusion removed outright,
+  // the un-barriered version of this case still PASSED. Staggered starts were
+  // doing the serialising, not the lock.
+  //
+  // A fixed wall-clock start was the first fix and is not enough either: it
+  // assumes every child is up within the window, and a loaded runner can start
+  // one after the earlier holds have already finished. That reintroduces the
+  // same false green in the one environment this case exists to explain, so
+  // readiness is counted rather than assumed.
+  const readyDir = join(dir, 'ready');
+  const goFile = join(dir, 'go');
+  mkdirSync(readyDir);
 
   // Small enough to be obviously correct, and it drives the SAME
   // withPipelineLock that add() uses — this is the real lock, not a model of it.
   const holder = join(dir, 'hold-once.mjs');
   writeFileSync(holder, `
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
 import { withPipelineLock } from ${JSON.stringify(pathToFileURL(join(ROOT, 'pipeline-lock.mjs')).href)};
-const [,, target, out, id, startAt] = process.argv;
-// Spin to the barrier rather than sleeping to it: a timer would return control
-// to the loop and let this process drift behind the others by a scheduling
-// slice, which is exactly the stagger the barrier exists to remove.
-while (Date.now() < Number(startAt)) { /* wait for the others */ }
+const [,, target, out, id, readyFile, goFile] = process.argv;
+writeFileSync(readyFile, '1');
+// Spin on the release rather than sleeping: a timer would hand control back to
+// the loop and let this process drift a scheduling slice behind the others,
+// which is the stagger the barrier exists to remove.
+while (!existsSync(goFile)) { /* wait for the others to line up */ }
 try {
   await withPipelineLock(target, () => {
     const enter = process.hrtime.bigint();
@@ -261,12 +270,32 @@ try {
 `, 'utf8');
 
   const target = join(dir, 'pipeline.md');
-  await Promise.all(Array.from({ length: N }, (_, i) => new Promise((res) => {
-    const p = spawn(NODE, [holder, target, join(outDir, `${i}.json`), String(i), String(startAt)], {
-      cwd: dir, stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    p.on('exit', () => res());
-  })));
+  const exits = await new Promise((resolveAll) => {
+    const codes = [];
+    let done = 0;
+    for (let i = 0; i < N; i++) {
+      const p = spawn(NODE, [holder, target, join(outDir, `${i}.json`), String(i), join(readyDir, `${i}`), goFile], {
+        cwd: dir, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      p.on('exit', (code) => {
+        codes.push({ id: i, code });
+        if (++done === N) resolveAll(codes);
+      });
+    }
+    // Release only once every child is provably parked on the barrier. The
+    // deadline is a backstop, not the mechanism: if a child never checks in the
+    // case must fail on the assertions below rather than quietly measuring a
+    // smaller herd than it claims.
+    const deadline = Date.now() + 20_000;
+    const waitForReady = () => {
+      if (readdirSync(readyDir).length >= N || Date.now() > deadline) {
+        writeFileSync(goFile, '1');
+        return;
+      }
+      setTimeout(waitForReady, 10);
+    };
+    waitForReady();
+  });
 
   const holds = [];
   const errored = [];
@@ -276,18 +305,35 @@ try {
     else holds.push({ id: rec.id, enter: BigInt(rec.enter), exit: BigInt(rec.exit) });
   }
 
+  // A child that died before writing its record leaves no error file either, so
+  // counting only what turned up would let a crash shrink the herd and still
+  // report a clean run — fewer holders contending, no overlap found, green.
+  // Exit status and record count are both required, or the case can pass by
+  // measuring less than it claims to.
+  const crashed = exits.filter((e) => e.code !== 0).map((e) => `#${e.id}:exit=${e.code}`);
+  check(`all ${N} holder processes exited cleanly`, crashed.length === 0, crashed.join(', '));
+  check(`all ${N} holders recorded an interval`, holds.length + errored.length === N,
+    `${holds.length} intervals + ${errored.length} errors = ${holds.length + errored.length} of ${N}`);
+
   // An acquire that failed outright is a different fault from a double-hold,
   // and folding them together would make this case lie about which happened.
   check(`all ${N} holders acquired the lock`, errored.length === 0, errored.join(', '));
 
   holds.sort((a, b) => (a.enter < b.enter ? -1 : a.enter > b.enter ? 1 : 0));
   const overlaps = [];
+  // Compare against the interval with the LATEST exit so far, not simply the
+  // previous one. Sorted by entry, a long hold can span several later ones, and
+  // adjacent-only comparison still turns the case red — the first contained
+  // interval overlaps its predecessor — but it under-reports which holders were
+  // involved. For a case whose whole job is to explain a red run, the roster
+  // has to be complete.
+  let widest = holds[0];
   for (let i = 1; i < holds.length; i++) {
-    const prev = holds[i - 1];
     const cur = holds[i];
-    if (cur.enter < prev.exit) {
-      overlaps.push(`#${prev.id} held until ${prev.exit}, #${cur.id} entered ${cur.enter}`);
+    if (widest && cur.enter < widest.exit) {
+      overlaps.push(`#${widest.id} held until ${widest.exit}, #${cur.id} entered ${cur.enter}`);
     }
+    if (!widest || cur.exit > widest.exit) widest = cur;
   }
   check(
     'no two holders were inside the critical section at the same time',
