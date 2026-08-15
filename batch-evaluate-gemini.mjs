@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * batch-evaluate.mjs — Robust batch evaluator using Gemini SDK natively.
+ * batch-evaluate-gemini.mjs — Robust batch evaluator using Gemini SDK natively.
  * 
  * Replaces the fragile bash array + CLI agent approach.
  * Features:
@@ -39,11 +39,8 @@ const PATHS = {
   pipeline:    join(ROOT, 'data', 'pipeline.md')
 };
 
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  console.error("❌ GEMINI_API_KEY not found in .env");
-  process.exit(1);
-}
+let apiKey;
+let model;
 
 function readSpendTier() {
   try {
@@ -68,14 +65,22 @@ function spendTierToModel(tier) {
   }
 }
 
-const modelArg = process.argv.find(a => a.startsWith('--model='));
-const resolvedSpendTier = readSpendTier();
-const modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
-const genAI = new GoogleGenerativeAI(apiKey);
-const model = genAI.getGenerativeModel({
-  model: modelName,
-  generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
-});
+function setupEnvironment() {
+  apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("❌ GEMINI_API_KEY not found in .env");
+    process.exit(1);
+  }
+
+  const modelArg = process.argv.find(a => a.startsWith('--model='));
+  const resolvedSpendTier = readSpendTier();
+  const modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
+  const genAI = new GoogleGenerativeAI(apiKey);
+  model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+  });
+}
 
 // --- File Helpers ---
 function readFile(path, label) {
@@ -105,15 +110,17 @@ function normalizedTrackerScore(value) {
   return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
 }
 
-// Load Context
-console.log('📂 Loading context files...');
-const sharedContext  = readFile(PATHS.shared, '_shared.md');
-const ofertaLogic    = readFile(PATHS.oferta, 'oferta.md');
-const cvContent      = readFile(PATHS.cv, 'cv.md');
-const profileContent = readFile(PATHS.profile, '_profile.md');
-const profileYml     = readFile(PATHS.profileYml, 'profile.yml');
+let systemPromptTemplate;
 
-const systemPromptTemplate = `You are career-ops, an AI-powered job search assistant.
+function loadContext() {
+  console.log('📂 Loading context files...');
+  const sharedContext  = readFile(PATHS.shared, '_shared.md');
+  const ofertaLogic    = readFile(PATHS.oferta, 'oferta.md');
+  const cvContent      = readFile(PATHS.cv, 'cv.md');
+  const profileContent = readFile(PATHS.profile, '_profile.md');
+  const profileYml     = readFile(PATHS.profileYml, 'profile.yml');
+
+  systemPromptTemplate = `You are career-ops, an AI-powered job search assistant.
 You evaluate job offers against the user's CV using a structured A-G scoring system.
 
 ═══════════════════════════════════════════════════════
@@ -156,6 +163,7 @@ ARCHETYPE: <detected archetype>
 LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 ---END_SUMMARY---
 `;
+}
 
 async function scrapeUrl(browser, url) {
   const rejected = rejectPrivateOrInvalid(url);
@@ -300,6 +308,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
 }
 
 async function main() {
+  setupEnvironment();
+  loadContext();
+
   const limitArg = process.argv.find(a => a.startsWith("--limit="));
   const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
   
@@ -324,39 +335,11 @@ async function main() {
     console.log("No pending [-] offers found in pipeline.md.");
     return;
   }
-
   console.log(`Found ${pendingIndices.length} pending offers.`);
   const browser = await chromium.launch({ headless: true });
   
-  // Concurrency queue
-  let active = 0;
-  let index = 0;
-  
-  const results = new Map();
-
-  await new Promise((resolve) => {
-    function next() {
-      if (index >= pendingIndices.length && active === 0) {
-        resolve();
-        return;
-      }
-      while (active < CONCURRENCY && index < pendingIndices.length) {
-        active++;
-        const currentIndex = index++;
-        const lineIdx = pendingIndices[currentIndex];
-        
-        processOffer(browser, pipelineLines[lineIdx], currentIndex + 1)
-          .then(res => {
-            results.set(lineIdx, res);
-          })
-          .catch(() => {})
-          .finally(() => {
-            active--;
-            next();
-          });
-      }
-    }
-    next();
+  const results = await processPipelineBatch(pendingIndices, CONCURRENCY, (lineIdx, runIdx) => {
+    return processOffer(browser, pipelineLines[lineIdx], runIdx);
   });
 
   await browser.close();
@@ -378,7 +361,42 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch(err => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+export async function processPipelineBatch(pendingIndices, concurrency, processorFn) {
+  let active = 0;
+  let index = 0;
+  const results = new Map();
+
+  await new Promise((resolve) => {
+    function next() {
+      if (index >= pendingIndices.length && active === 0) {
+        resolve();
+        return;
+      }
+      while (active < concurrency && index < pendingIndices.length) {
+        active++;
+        const currentIndex = index++;
+        const lineIdx = pendingIndices[currentIndex];
+        
+        processorFn(lineIdx, currentIndex + 1)
+          .then(res => {
+            results.set(lineIdx, res);
+          })
+          .catch(() => {})
+          .finally(() => {
+            active--;
+            next();
+          });
+      }
+    }
+    next();
+  });
+
+  return results;
+}
