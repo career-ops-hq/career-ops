@@ -41,6 +41,7 @@ const PATHS = {
 
 let apiKey;
 let model;
+let modelName;
 
 function readSpendTier() {
   try {
@@ -74,7 +75,7 @@ function setupEnvironment() {
 
   const modelArg = process.argv.find(a => a.startsWith('--model='));
   const resolvedSpendTier = readSpendTier();
-  const modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
+  modelName = modelArg ? modelArg.split('=')[1] : spendTierToModel(resolvedSpendTier);
   const genAI = new GoogleGenerativeAI(apiKey);
   model = genAI.getGenerativeModel({
     model: modelName,
@@ -278,7 +279,7 @@ async function processOffer(browser, line, idx) {
 **Date:** ${today}
 **URL:** ${url}
 **Archetype:** ${archetype}
-**Score:** ${score}/5
+**Score:** ${score}
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** Gemini (${modelName})\n
