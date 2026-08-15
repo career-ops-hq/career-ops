@@ -146,10 +146,23 @@ async function add() {
   // Checking the last byte still happens INSIDE the lock: it decides whether a
   // separating newline is needed, and reading it outside would race with
   // another writer's append between the check and the write.
+  //
+  // timeoutMs is raised from the shared 8s default because this queue's whole
+  // point is bursty concurrent writers (a dashboard, a script, cron all drop
+  // items at once), and lock acquisition is a retry lottery, not a fair queue.
+  // Serving N herded waiters is the coupon-collector problem: ~N·H(N) rounds,
+  // so 30 concurrent adds need ~120 rounds while 8000/80 = 100 only affords
+  // ~100. On the slow, contended windows-latest runner that shortfall makes one
+  // waiter time out and its item is LOST, the exact #2777 drop, reappearing as
+  // a loud LockTimeoutError instead of a silent overwrite. Jitter in
+  // pipeline-lock.mjs cuts the collision rate ~6x but is explicitly "not a
+  // cure"; the fit-for-purpose budget for a burst-write queue is the contained
+  // fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
+  // while the critical section itself is a single sub-millisecond append.
   await withPipelineLock(PATH, () => {
     const separator = needsLeadingNewline(PATH) ? '\n' : '';
     appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
-  });
+  }, { timeoutMs: 30_000 });
   process.stdout.write(`Queued: ${text}\n`);
 }
 

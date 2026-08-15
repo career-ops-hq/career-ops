@@ -1,7 +1,9 @@
 import { hardMismatch, jaccardSimilarity, recommendCvReuse, tokenize } from './jd-similarity.mjs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 let passed = 0;
 let failed = 0;
 
@@ -31,6 +33,58 @@ try {
   ok('CLI reports missing files cleanly', false);
 } catch (error) {
   ok('CLI reports missing files cleanly', /Unable to read input files/.test(error.stderr));
+}
+
+// --- CLI flag parsing ---
+
+const cliPath = fileURLToPath(new URL('./jd-similarity.mjs', import.meta.url));
+const runCli = (...args) =>
+  execFileSync(process.execPath, [cliPath, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+try {
+  ok('--help prints usage and exits 0', /Usage:/.test(runCli('--help')));
+} catch {
+  ok('--help prints usage and exits 0', false);
+}
+
+try {
+  runCli('--bogus', 'a.md', 'b.md');
+  ok('unknown flag exits non-zero and names the flag', false);
+} catch (error) {
+  ok('unknown flag exits non-zero and names the flag', /--bogus/.test(String(error.stderr)));
+}
+
+try {
+  runCli('only-one-path.txt');
+  ok('a single positional path exits 1 with the arity error', false);
+} catch (error) {
+  ok('a single positional path exits 1 with the arity error',
+    error.status === 1 && String(error.stderr).includes('Error: expected two file paths.'));
+}
+
+try {
+  runCli('a.md', 'b.md', 'c.md');
+  ok('a third positional path exits 1 with the arity error', false);
+} catch (error) {
+  ok('a third positional path exits 1 with the arity error',
+    error.status === 1 && /expected two file paths/.test(String(error.stderr)));
+}
+
+const tmpDir = mkdtempSync(join(tmpdir(), 'jd-similarity-test-'));
+try {
+  const NEW_JD = 'Senior React TypeScript Node.js platform engineer, distributed systems';
+  const PREVIOUS = 'Senior React TypeScript Node.js platform engineer, Vue, GraphQL';
+  const newJdPath = join(tmpDir, 'new-jd.txt');
+  const previousPath = join(tmpDir, 'previous-cv.txt');
+  writeFileSync(newJdPath, NEW_JD);
+  writeFileSync(previousPath, PREVIOUS);
+
+  ok('two real paths produce the same output as before',
+    runCli(newJdPath, previousPath).trim() === JSON.stringify(recommendCvReuse(NEW_JD, PREVIOUS), null, 2));
+} catch {
+  ok('two real paths produce the same output as before', false);
+} finally {
+  rmSync(tmpDir, { recursive: true, force: true });
 }
 
 console.log(`jd-similarity: ${passed} passed, ${failed} failed`);

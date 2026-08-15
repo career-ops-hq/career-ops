@@ -2046,25 +2046,72 @@ job_boards:
 
   # ── Getro — VC portfolio "talent network" boards ───────────────────
   # One board aggregates jobs across a fund's portfolio companies (each job
-  # belongs to the portfolio company, not the fund). Set `getro_collection` to
-  # the board's numeric network id (the `network.id` in the board page's
-  # __NEXT_DATA__). `careers_url` is reference-only. Optional knobs:
-  # `getro_max_pages` (default 40), `getro_max_age_days` (default 90, a
-  # pagination bound — newest-first, stops once postings cross the age).
+  # belongs to the portfolio company, not the fund). `careers_url` is
+  # required — it also supplies the referer header the search API needs.
+  # `getro_collection` (the board's numeric network id, the `network.id` in
+  # the board page's __NEXT_DATA__) is optional: omit it and the id
+  # auto-resolves from `careers_url` on first fetch; set it to skip that
+  # lookup. Optional knobs: `getro_max_pages` (default 40, hard-capped at
+  # 1500), `getro_max_age_days` (default 90, a pagination bound — newest-first,
+  # stops once postings cross the age).
 
   - name: b2venture (portfolio)
-    careers_url: https://jobs.b2venture.vc
+    careers_url: https://jobs.b2venture.vc/jobs
     provider: getro
     getro_collection: 4283
     enabled: false
     notes: "Swiss VC portfolio board (Getro)"
 
   - name: Cherry Ventures (portfolio)
-    careers_url: https://jobs.cherry.vc
+    careers_url: https://talent.cherry.vc/jobs
     provider: getro
     getro_collection: 44081
     enabled: false
     notes: "VC portfolio board (Getro)"
+
+  - name: Atomico (portfolio)          # London. Pan-European growth-stage VC, $5B+ AUM,
+                                        # 200+ portfolio companies (Klarna, Lime, Hinge Health among alumni).
+    careers_url: https://careers.atomico.com/jobs
+    provider: getro
+    # getro_collection left out on purpose — auto-resolves from careers_url on first fetch
+    enabled: false
+    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+
+  - name: Earlybird Venture Capital (portfolio)   # Berlin. Founded 1997, ~€2.5B AUM across fund streams,
+                                                   # one of Europe's oldest and most active VCs (fintech/insurtech, enterprise software, deep tech).
+    careers_url: https://jobs.earlybird.com/jobs
+    provider: getro
+    enabled: false
+    notes: "German VC portfolio board (Getro), collection_id auto-resolved"
+
+  - name: Speedinvest (portfolio)      # Vienna. Pan-European/CEE early-stage VC, ~€1B+ AUM,
+                                        # ~250 portfolio companies (wikifolio, Bitmovin, byrd) — strong DACH presence.
+    careers_url: https://careers.speedinvest.com/jobs
+    provider: getro
+    enabled: false
+    notes: "DACH-region VC portfolio board (Getro), collection_id auto-resolved"
+
+  - name: HV Capital (portfolio)       # Munich/Berlin. One of Europe's largest early-to-growth VCs,
+                                        # ~€2.8B AUM, 200+ portfolio companies (Zalando, HelloFresh, Delivery Hero, FlixBus).
+    careers_url: https://hv.getro.com/jobs
+    provider: getro
+    enabled: false
+    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+
+  - name: Point Nine (portfolio)       # Berlin. Early-stage "angel-VC" for B2B SaaS/AI, smaller fund (~$550M AUM),
+                                        # ~90 portfolio companies (early Zendesk, Algolia, Contentful, Revolut rounds).
+    careers_url: https://jobs.pointnine.com/jobs
+    provider: getro
+    enabled: false
+    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+
+  - name: Insight Partners (portfolio)  # New York. Global growth-equity/VC, one of the largest tech-focused funds,
+                                         # 500+ portfolio companies worldwide.
+    careers_url: https://jobs.insightpartners.com/jobs
+    provider: getro
+    getro_max_pages: 700   # large global board — raise the default page cap to reach deeper pages
+    enabled: false
+    notes: "VC portfolio board (Getro), collection_id auto-resolved"
 
   # ── Consider (getconsider.com) — VC portfolio boards ───────────────
   # JS board backed by a same-origin JSON API. Set `consider_board` to the

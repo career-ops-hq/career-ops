@@ -20,6 +20,7 @@ type CareerApplication struct {
 	PayRange    string  // first $-range found in the notes, e.g. "$140-210K"
 	PayMax      float64 // top of PayRange in dollars (sort key), 0 when unknown
 	PaySource   string  // "POSTED" when the JD listed it, "est" for estimates, "" unknown
+	PostedOn    string  // YYYY-MM-DD from a "posted <date>" note — when the req went live, "" unknown
 	LastContact string  // max YYYY-MM-DD found in notes (falls back to applied date)
 	// Enrichment (lazy loaded from report)
 	Archetype    string
