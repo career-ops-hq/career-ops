@@ -140,3 +140,23 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   eq(added.length, 0, 'the shipped .gitignore reconciled against itself adds nothing');
   eq(text, shipped, 'and is returned byte-identical');
 }
+
+// ── The upstream blob is read untrimmed ──────────────────────────────────────
+// reconcileGitignore()'s verbatim guarantee is only as good as its input. The
+// updater's general-purpose git helpers call .trim() on stdout, which is right
+// for SHAs and pathspecs and wrong for file content: it strips a significant
+// backslash-escaped trailing space off the blob's LAST line, which is exactly
+// where a freshly appended upstream rule sits. Every assertion above would
+// still pass with a trimming read, so this is a source-level guard, matching
+// tests/js-yaml-import-form.test.mjs and tests/source-no-nul-bytes.test.mjs.
+{
+  const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+
+  const readCall = src.match(/const upstreamGitignore = (\w+)\(/);
+  if (!readCall) fail('could not find the upstreamGitignore read in update-system.mjs — update this test');
+  else eq(readCall[1], 'gitShowRaw', 'the upstream .gitignore is read with gitShowRaw, not a trimming helper');
+
+  const body = src.match(/function gitShowRaw\([^)]*\) \{[\s\S]*?\n\}/);
+  if (!body) fail('could not find gitShowRaw() in update-system.mjs — update this test');
+  else ok(!/\.trim\(\)/.test(body[0]), 'gitShowRaw() does not trim, so the blob reaches the reconciler byte-exact');
+}

@@ -1134,6 +1134,34 @@ const GITIGNORE_BLOCK_HEADER = [
 ];
 
 /**
+ * Read a blob from a git ref verbatim, with no trimming.
+ *
+ * `gitQuiet()` calls `.trim()` on stdout, which is right for the SHAs and
+ * pathspecs every other caller reads and wrong for file CONTENT: it strips a
+ * significant backslash-escaped trailing space from the blob's final line, and
+ * the final newline with it. For .gitignore that silently defeats the verbatim
+ * guarantee reconcileGitignore() is built on, at the one line most likely to be
+ * a freshly appended rule.
+ *
+ * @param {string} spec - A `<ref>:<path>` blob spec, e.g. `FETCH_HEAD:.gitignore`.
+ * @returns {string} The blob's exact bytes as UTF-8, untrimmed.
+ */
+function gitShowRaw(spec) {
+  const args = ['show', spec];
+  const timeout = gitTimeoutMs(args);
+  try {
+    return execFileSync('git', args, {
+      cwd: ROOT, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
+    }
+    throw err;
+  }
+}
+
+/**
  * Write .gitignore atomically: temp file on the same filesystem, then rename.
  *
  * writeFileSync opens with O_TRUNC, so a crash or I/O error partway through
@@ -1485,7 +1513,7 @@ async function apply() {
     // and what it could only prevent inside this repository.
     try {
       const gitignorePath = join(ROOT, '.gitignore');
-      const upstreamGitignore = gitQuiet('show', 'FETCH_HEAD:.gitignore');
+      const upstreamGitignore = gitShowRaw('FETCH_HEAD:.gitignore');
       // Uncommitted local edits to .gitignore are the user's, and that is a
       // routine state rather than an exotic one: agent-inbox.mjs's own
       // ensureGitignored() appends a rule without committing it. Such a file
@@ -1509,7 +1537,11 @@ async function apply() {
       if (!existsSync(gitignorePath)) {
         // No local file at all (deleted by hand, or a checkout predating it).
         // Nothing is co-owned yet, so the upstream copy can be written whole.
-        writeGitignoreAtomic(gitignorePath, `${upstreamGitignore}\n`);
+        // Written exactly as upstream has it. The read is untrimmed, so the blob
+        // already carries its own final newline; the guard is only for a blob that
+        // somehow lacks one.
+        const seed = upstreamGitignore.endsWith('\n') ? upstreamGitignore : `${upstreamGitignore}\n`;
+        writeGitignoreAtomic(gitignorePath, seed);
         trackGitignore();
         console.log('Restored .gitignore (it was missing).');
       } else {
