@@ -122,12 +122,37 @@ export function parseAtsSlug(url) {
  * boards use just the brand, e.g. 'Acme Corp' → 'acme'). Order is deterministic
  * and duplicates are removed so `--add` probes each distinct candidate once.
  *
+ * SUFFIXES ON THE FIRST WORD ARE PROBE-ONLY (#2937). Every other candidate here
+ * either reformats the whole name ('nimbus-data'), abbreviates it without
+ * adding anything ('nimbus'), or extends it ('nimbusdataai'). Building a suffix
+ * on the FIRST WORD is the one rule that both drops part of the name AND
+ * substitutes a token for what it dropped, so what comes out is not a form of
+ * this company's name, it is a different company's: 'Nimbus Data' yields
+ * 'nimbusai', 'nimbustech', 'nimbuslabs'. The rule has no legitimate yield to
+ * lose either. When the name already ends in a suffix word ('Scale AI'), it
+ * just reproduces words.join('') and is deduped away, so every candidate it
+ * contributes uniquely belongs to somebody else.
+ *
+ * Offering those to `--add` is fine: an operator reads the slug beside the
+ * company name and picks one, and a wrong guess costs a 404. Offering them to
+ * discoverAlternates is not. That result is attached as `suggested`, and
+ * `fix-slugs --fix` writes it into portals.yml with no further identity check,
+ * after which scan.mjs labels the other employer's postings with this
+ * company's name. Pass `firstWordSuffixes: false` on any path that writes.
+ *
+ * The bare first word stays on both paths deliberately: many boards really are
+ * just the brand ('Acme Corp' → 'acme'), and it adds no token that the company
+ * does not have. It is a narrower risk than this change addresses, not a
+ * blessed one.
+ *
  * @param {string} name - Company display name.
+ * @param {{firstWordSuffixes?: boolean}} [opts] - `false` omits the suffix
+ *   variants built on the first word alone.
  * @returns {string[]} Distinct candidate slugs, most-specific first.
  */
 const SLUG_SUFFIXES = ['ai', 'tech', 'io', 'hq', 'labs'];
 
-export function deriveSlugCandidates(name) {
+export function deriveSlugCandidates(name, { firstWordSuffixes = true } = {}) {
   if (!String(name ?? '').trim()) return [];
   // ASCII-fold BEFORE splitting. The previous `[^a-z0-9\s]` pass turned an
   // accented letter into a SEPARATOR, so "Telefónica" became the two words
@@ -142,7 +167,7 @@ export function deriveSlugCandidates(name) {
     words.join('_'), // acme_corp
     words[0], // acme
   ];
-  const bases = [words.join(''), words[0]].filter(Boolean);
+  const bases = (firstWordSuffixes ? [words.join(''), words[0]] : [words.join('')]).filter(Boolean);
   for (const base of bases) {
     for (const suf of SLUG_SUFFIXES) candidates.push(`${base}${suf}`);
     candidates.push(`${base}.tech`, `${base}.io`);
@@ -232,10 +257,19 @@ export async function probeSlug(
   }
 }
 
-/** Probe slug variants across all ATSes; prefer live boards over empty ones. */
+/**
+ * Probe slug variants across all ATSes; prefer live boards over empty ones.
+ *
+ * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
+ * the winner is attached as `suggested` and `fix-slugs --fix` writes it into
+ * portals.yml, so 'Nimbus Data' adopting the live board 'nimbusai' silently
+ * relabels Nimbus AI's postings. Those candidates are never this company's name
+ * to begin with, so dropping them here costs nothing and they stay available to
+ * `--add`, where an operator sees the slug beside the name before adopting it.
+ */
 async function discoverAlternates(name, { fetchJson }) {
   let bestEmpty = null;
-  for (const slug of deriveSlugCandidates(name)) {
+  for (const slug of deriveSlugCandidates(name, { firstWordSuffixes: false })) {
     for (const ats of Object.keys(ATS)) {
       // Lever no longer has a separate 'lever-eu' registry key (unified into a
       // single 'lever' + eu flag), so both instances must be probed explicitly

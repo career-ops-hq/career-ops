@@ -5175,6 +5175,49 @@ try {
     fail('verify-portals derived an ASCII slug from a non-Latin name');
   }
 
+  // ── First-word suffixes are probe-only, never repair candidates (#2937) ──
+  // Crossing the bare first word with an invented suffix does not build a
+  // variant of the company's name, it builds a DIFFERENT company's name:
+  // "Nimbus Data" yields `nimbusai`, `nimbustech`, `nimbuslabs`. That is fine
+  // for `--add`, where a human reads the slug next to the name and picks one.
+  // It is not fine for discoverAlternates, whose `suggested` fix-slugs --fix
+  // writes into portals.yml unreviewed. The bare first word stays on BOTH sets
+  // on purpose: it adds no token the company lacks, and boards really are often
+  // just the brand (the "Diabolocom EU Discovery" row below relies on it).
+  const probeSet = deriveSlugCandidates('Nimbus Data');
+  const repairSet = deriveSlugCandidates('Nimbus Data', { firstWordSuffixes: false });
+  const coined = ['nimbusai', 'nimbustech', 'nimbusio', 'nimbushq', 'nimbuslabs', 'nimbus.tech', 'nimbus.io'];
+  const ownName = ['nimbusdata', 'nimbus-data', 'nimbus_data', 'nimbus', 'nimbusdataai', 'nimbusdata.io'];
+  if (
+    coined.every((s) => probeSet.includes(s)) &&
+    ownName.every((s) => probeSet.includes(s)) &&
+    coined.every((s) => !repairSet.includes(s)) &&
+    ownName.every((s) => repairSet.includes(s))
+  ) {
+    pass('verify-portals keeps first-word suffixes for --add and drops them from the repair set');
+  } else {
+    fail(`verify-portals first-word-suffix split wrong: probe=${JSON.stringify(probeSet)} repair=${JSON.stringify(repairSet)}`);
+  }
+
+  // End to end: the tracked company is "Nimbus Data" and its board has 404'd.
+  // The only live board belongs to "Nimbus AI". Nothing on the repair path
+  // checks identity, so a coined candidate becomes a portals.yml write that
+  // relabels another employer's postings. It must go unresolved instead.
+  const wrongEmployerBoard = 'https://boards-api.greenhouse.io/v1/boards/nimbusai/jobs';
+  const nimbusFetch = async (url) => {
+    if (url === wrongEmployerBoard) return { jobs: [{ id: 7788, title: 'VP Marketing' }] };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [nimbus] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: nimbusFetch },
+  );
+  if (nimbus.status === 'missing' && !nimbus.suggested) {
+    pass('verify-portals does not suggest a board matched only by a truncation of the name');
+  } else {
+    fail(`verify-portals adopted another employer's board: ${JSON.stringify(nimbus.suggested)}`);
+  }
+
   if (
     classifyFetchError({ status: 404 }) === 'slug_gone' &&
     classifyFetchError({ name: 'AbortError' }) === 'network' &&
