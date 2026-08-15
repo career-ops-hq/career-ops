@@ -46,6 +46,7 @@ import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -226,28 +227,13 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  // A value-taking flag's space-separated value (e.g. the `-tmp` in
-  // `--md-out -tmp`) must not be mistaken for an unrecognized flag just
-  // because it happens to start with `-`. Mirrors valueOf()'s own adjacency
-  // rule below so `--flag value` and `--flag=value` are validated consistently.
-  const consumedValueIndices = new Set();
-  args.forEach((a, idx) => {
-    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
-      consumedValueIndices.add(idx + 1);
-    }
-  });
-
-  const unknownFlags = args.filter((a, idx) =>
-    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    process.exit(1);
-  }
+  // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
+  // lib/cli-flags.mjs (#2775). This also fixes a latent ordering bug this
+  // script had before the pattern was consolidated: the unrecognized-flag
+  // check now runs BEFORE --help, so `--help --bogus` still errors instead
+  // of exiting 0 having never looked at `--bogus` (the same ordering
+  // CodeRabbit flagged on #2745/#2746).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);

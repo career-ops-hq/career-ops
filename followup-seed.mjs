@@ -19,9 +19,16 @@
  * always safe — it just appends a fresh pin.
  *
  * Apply-date resolution order (see resolveAppliedDate): explicit --date, then
- * "Applied YYYY-MM-DD" in the row's notes, then today. The tracker's `date`
- * column is NEVER used as a fallback — it is usually the evaluation date, not
- * the date the application actually went out.
+ * "Applied YYYY-MM-DD" in the row's notes, then the tracker's `date` column,
+ * then today. Every result carries an `appDateSource` saying which of those it
+ * came from, so a measured date is never mistaken for a guessed one.
+ *
+ * The `date` column used to be excluded here as "the evaluation date, not the
+ * submission date". It is — but the fallback it was being excluded in favour of
+ * was `today`, which is worse: an early date makes a follow-up fire early
+ * (visible), while today makes an old application look new and silently resets
+ * its follow-up clock (not visible). Preferring the labelled proxy over the
+ * unlabelled guess is the trade that replaced it (#2607).
  *
  * Idempotency: by default, seeding a given appNum is a NO-OP FOREVER once
  * either a pin or a follow-up table row exists for it (exit 0, seeded:false).
@@ -91,7 +98,21 @@ export class SeedError extends Error {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  // LOCAL date, never UTC. `toISOString()` returns the UTC day, so anywhere
+  // west of Greenwich an evening run answers "today" with tomorrow: at 20:00
+  // US Eastern this returned the next calendar day. That lands in two places
+  // that both matter — the fallback applied date when a row carries no
+  // "Applied YYYY-MM-DD" note, and the `(set …)` stamp on the pin — so an
+  // application seeded on a US evening got a follow-up schedule built off a
+  // day that had not happened yet.
+  //
+  // Only "what day is it here" changes. Date ARITHMETIC elsewhere in this file
+  // and in followup-cadence.mjs stays on UTC-midnight parsing, which is
+  // internally consistent and unaffected: `parseDate('2026-06-20')` and
+  // `isValidCalendarDate()` round-trip through UTC on purpose.
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /**
@@ -113,30 +134,56 @@ export function isValidCalendarDate(str) {
 }
 
 /**
- * Resolve the date an application was actually submitted, in strict priority
- * order: explicit `--date` > "Applied YYYY-MM-DD" in the tracker row's notes >
- * today. The tracker's `date` column is never consulted — it is usually the
- * evaluation date, not the submission date (see followup-cadence.mjs).
+ * Resolve the date an application was actually submitted, AND say where that
+ * date came from: explicit `--date` > "Applied YYYY-MM-DD" in the row's notes >
+ * the tracker's `date` column > today.
+ *
+ * The `date` column used to be excluded on the grounds that it is the
+ * evaluation date, not the submission date. True, but it was the wrong
+ * conclusion, because the alternative was `todayStr()` — and today is not a
+ * neutral default here, it is the single most damaging guess available:
+ *
+ *   - the evaluation date is early by however long the user took to apply,
+ *     which makes a follow-up fire early. Visible, and harmless.
+ *   - today makes the application look brand new, which silently RESETS the
+ *     follow-up clock. Someone who applied three weeks ago drops out of the
+ *     chase queue, and the pin looks exactly like a normal fresh entry.
+ *
+ * A wrong date you can see beats a wrong date you cannot, so the proxy is now
+ * preferred over the guess and `appDateSource` says which one you got. That
+ * matches followup-cadence.mjs's `resolveAppliedDate` (same fallback, same
+ * labelling) and company-history.mjs's `dateBasis`, so all three agree.
+ *
+ * `today` remains the last resort for a row whose `date` column is missing or
+ * unusable — but it is now labelled too, rather than being indistinguishable
+ * from a measured date.
  *
  * A notes date that isn't a real calendar date (e.g. "Applied 2026-02-31")
  * throws rather than falling through: `parseDate` would return null for it and
  * the pin would be written with a literal "null" next-date.
  *
- * @param {{num?: number, notes?: string}} row - Parsed tracker row (or any object with `notes`).
+ * @param {{num?: number, notes?: string, date?: string}} row - Parsed tracker row.
  * @param {string|null|undefined} explicitDate - `--date` value, already validated.
- * @returns {string} YYYY-MM-DD
+ * @returns {{appliedDate: string, appDateSource: 'explicit'|'notes'|'evaluation-date'|'today'}}
  * @throws {SeedError} INVALID_DATE when the notes carry an impossible date.
  */
 export function resolveAppliedDate(row, explicitDate) {
-  if (explicitDate) return explicitDate;
+  if (explicitDate) return { appliedDate: explicitDate, appDateSource: 'explicit' };
   const notesDate = parseAppliedDate(row?.notes);
   if (notesDate) {
     if (!isValidCalendarDate(notesDate)) {
       throw new SeedError('INVALID_DATE', `Application #${row?.num ?? '?'} notes carry an impossible "Applied ${notesDate}" date; fix the notes or pass --date`);
     }
-    return notesDate;
+    return { appliedDate: notesDate, appDateSource: 'notes' };
   }
-  return todayStr();
+  // Only a usable calendar date qualifies: a blank or malformed `date` cell
+  // must not become a pin with a "null" next-date, which is the same failure
+  // the notes branch throws over.
+  const columnDate = String(row?.date ?? '').trim();
+  if (isValidCalendarDate(columnDate)) {
+    return { appliedDate: columnDate, appDateSource: 'evaluation-date' };
+  }
+  return { appliedDate: todayStr(), appDateSource: 'today' };
 }
 
 /**
@@ -435,7 +482,10 @@ export async function seedFollowup(appNum, options = {}) {
     throw new SeedError('NOT_APPLIED', `Application #${appNum} is not Applied (status: "${row.status.trim()}"); use --force to seed anyway`);
   }
 
-  const appliedDate = resolveAppliedDate(row, options.date);
+  // appDateSource travels with the result so a caller can tell a measured apply
+  // date from a proxy or a guess — the same contract followup-cadence.mjs and
+  // company-history.mjs already expose.
+  const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date);
   const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
   const setDate = todayStr();
@@ -444,9 +494,9 @@ export async function seedFollowup(appNum, options = {}) {
   if (options.dryRun) {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : '';
     if (isAlreadySeeded(existingContent, appNum) && !options.force) {
-      return { seeded: false, appNum, pin: null, nextDate, appliedDate, setDate, reason: 'already-seeded', dryRun: true };
+      return { seeded: false, appNum, pin: null, nextDate, appliedDate, appDateSource, setDate, reason: 'already-seeded', dryRun: true };
     }
-    return { seeded: true, appNum, pin, nextDate, appliedDate, setDate, dryRun: true };
+    return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate, dryRun: true };
   }
 
   const lockDir = resolveLockDir(options.lockDir, followupsPath);
@@ -459,12 +509,12 @@ export async function seedFollowup(appNum, options = {}) {
   try {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : null;
     if (existingContent != null && isAlreadySeeded(existingContent, appNum) && !options.force) {
-      return { seeded: false, appNum, pin: null, nextDate, appliedDate, setDate, reason: 'already-seeded' };
+      return { seeded: false, appNum, pin: null, nextDate, appliedDate, appDateSource, setDate, reason: 'already-seeded' };
     }
 
     mkdirSync(dirname(followupsPath), { recursive: true });
     writeFileAtomic(followupsPath, appendPins(existingContent, [pin]));
-    return { seeded: true, appNum, pin, nextDate, appliedDate, setDate };
+    return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate };
   } finally {
     lock.release();
   }
@@ -493,9 +543,9 @@ export async function seedBackfill(options = {}) {
   const setDate = todayStr();
 
   function planFor(row) {
-    const appliedDate = resolveAppliedDate(row, null);
+    const { appliedDate, appDateSource } = resolveAppliedDate(row, null);
     const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
-    return { appNum: row.num, pin: formatPinLine(row.num, nextDate, setDate), nextDate, appliedDate, setDate };
+    return { appNum: row.num, pin: formatPinLine(row.num, nextDate, setDate), nextDate, appliedDate, appDateSource, setDate };
   }
 
   if (options.dryRun) {
@@ -625,6 +675,21 @@ function failWith(exitCode, code, message, json) {
   process.exit(exitCode);
 }
 
+/**
+ * How the apply date was arrived at, for the human-readable line — empty for a
+ * date that was actually measured.
+ *
+ * The whole point of tracking the source is that the user can see when a
+ * cadence is being counted from a proxy rather than from the real submission
+ * date, so an unmeasured date has to say so where they will actually look. In
+ * --json it travels as `appDateSource`.
+ */
+function appDateNote(source) {
+  if (source === 'evaluation-date') return ', from the evaluation date — notes carry no apply date';
+  if (source === 'today') return ', assumed today — no apply date and no evaluation date';
+  return '';
+}
+
 function reportSingle(result, json) {
   if (json) {
     console.log(JSON.stringify(result));
@@ -632,7 +697,7 @@ function reportSingle(result, json) {
   }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   if (result.seeded) {
-    console.log(`✅ Seeded #${result.appNum}: next follow-up ${result.nextDate} (applied ${result.appliedDate}, set ${result.setDate})${dryTag}`);
+    console.log(`✅ Seeded #${result.appNum}: next follow-up ${result.nextDate} (applied ${result.appliedDate}${appDateNote(result.appDateSource)}, set ${result.setDate})${dryTag}`);
   } else {
     console.log(`⏭️  #${result.appNum} already seeded — no-op (${result.reason})${dryTag}`);
   }
@@ -645,7 +710,7 @@ function reportBackfill(result, json) {
   }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   console.log(`✅ Backfill${dryTag}: seeded ${result.seeded.length}, skipped ${result.skipped.length}`);
-  for (const s of result.seeded) console.log(`  + #${s.appNum}: next ${s.nextDate}`);
+  for (const s of result.seeded) console.log(`  + #${s.appNum}: next ${s.nextDate}${appDateNote(s.appDateSource)}`);
   for (const s of result.skipped) console.log(`  - #${s.appNum}: ${s.reason}`);
 }
 
