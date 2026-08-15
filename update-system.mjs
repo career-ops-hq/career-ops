@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, writeSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -1017,26 +1017,150 @@ function rebuildDashboardBinaryIfNeeded() {
 
 // ── CHECK ───────────────────────────────────────────────────────
 
+// Session-start latency budget for check(): AGENTS.md runs the check on the
+// first message of every session, so its worst case is user-visible dead time
+// before the first interaction. The two curl legs run in parallel (one
+// wall-clock leg) and the git probe runs after them, so worst case =
+// max(CHECK_CURL_MAX_TIME_S, its +1s JS backstop) + CHECK_GIT_PROBE_TIMEOUT_MS
+// ≤ 16s. That ceiling is the acknowledged price of the 10s curl budget, and
+// it is paid ONLY when curl hangs (black-hole egress that swallows packets):
+// deterministic failures — DNS, connection refused, curl missing from PATH —
+// exit immediately regardless of the budget, so shortening it buys those
+// paths nothing. A 5s budget was tried here and rejected in review: on a
+// slow-but-working connection with the git transport blocked, it hung up on
+// a curl that was about to answer and turned a correct ~7s result into a
+// false "offline" — recreating the exact bug this fallback exists to kill,
+// one network over. Healthy networks never come near either cap. (The stderr
+// retry notice below serves direct terminal invocation; agent harnesses
+// buffer stderr and surface it only after the process exits.)
+const CHECK_CURL_MAX_TIME_S = 10;
+const CHECK_GIT_PROBE_TIMEOUT_MS = 5000;
+
 // curl helper used by check() — curl works inside the Claude Code sandbox
 // where Node's built-in fetch() fails (ENOTFOUND) because the sandbox
 // routes network traffic through an HTTP/HTTPS proxy that fetch() does
 // not respect but curl handles transparently.  The --silent / --fail flags
 // match the failure-handling already used throughout apply().
-function curlGet(url, extraArgs = []) {
+// Exported for tests (like highestSemverTag): the broken-curl guard is
+// verified behaviorally by invoking this with a sabotaged PATH.
+export function curlGet(url, extraArgs = []) {
   return new Promise((resolve) => {
-    execFile(
-      'curl',
-      ['--silent', '--fail', '--max-time', '10', ...extraArgs, url],
-      { encoding: 'utf-8', timeout: 12000 },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-        } else {
-          resolve(stdout.trim());
+    // Keep the failure reason on every path: "offline" must be diagnosable.
+    // ENOENT (curl not on PATH), HTTP 403 (--fail, e.g. API rate limit), a
+    // proxy/TLS failure, and a real network outage all land in the callback
+    // and are handled by the fallback below. A corrupt or non-executable
+    // curl on PATH additionally makes execFile throw synchronously on
+    // Windows (spawn EFTYPE) instead of calling back — catch that too so a
+    // broken curl degrades to the fallback instead of crashing check().
+    try {
+      execFile(
+        'curl',
+        ['--silent', '--fail', '--max-time', String(CHECK_CURL_MAX_TIME_S), ...extraArgs, url],
+        { encoding: 'utf-8', timeout: CHECK_CURL_MAX_TIME_S * 1000 + 1000 },
+        (error, stdout) => {
+          if (error) {
+            // A curl that hangs past its own --max-time gets killed by the JS
+            // backstop; error.code is null then and the message is the whole
+            // command line — map it to a terse 'timeout' instead. curl hitting
+            // its own --max-time exits 28: map that too, or the rendered
+            // offline detail is a bare "28" with no unit and nothing greppable.
+            const detail = error.killed
+              ? `timeout (${CHECK_CURL_MAX_TIME_S + 1}s)`
+              : error.code === 28
+                ? `timeout (${CHECK_CURL_MAX_TIME_S}s)`
+                : error.code || error.message.split('\n')[0];
+            resolve({ ok: false, detail });
+          } else {
+            resolve({ ok: true, body: stdout.trim() });
+          }
         }
-      }
-    );
+      );
+    } catch (error) {
+      resolve({ ok: false, detail: error.code || error.message.split('\n')[0] });
+    }
   });
+}
+
+// Fallback for the both-curl-failed path: query upstream over the SAME
+// transport apply() uses. curl failing is not proof of being offline — curl
+// may be missing from PATH (ENOENT), the proxy may be configured only in git
+// config (http.proxy) with no HTTPS_PROXY env var, raw.githubusercontent.com
+// or api.github.com may be filtered while github.com itself is reachable, or
+// the request may simply exceed curl's short budget (apply's git fetch gets
+// minutes). In all of those, `apply` would succeed, so `check` must not
+// report "offline".
+
+// Pure tag-parsing half of the fallback, exported for tests: given raw
+// `git ls-remote --tags` output, return the highest semver among the tags
+// (peeled ^{} refs collapse onto their tag; non-semver tags are ignored;
+// a stray \r survives a CRLF-translating wrapper and would defeat
+// SEMVER_RE's $ anchor, so it is stripped). When tagPrefix is given, only
+// tags starting with it count, and the ENTIRE remainder after the prefix
+// must be the version — SEMVER_RE's (?:^|-) anchor would otherwise let a
+// tag like career-ops-v1.25.0-preview-v99.0.0 report 99.0.0.
+const PREFIXED_SEMVER_RE = /^v?(\d+\.\d+\.\d+)$/i;
+export function highestSemverTag(lsRemoteOutput, tagPrefix = '') {
+  let best = '';
+  for (const line of String(lsRemoteOutput || '').split('\n')) {
+    const tag = (line.split('\t')[1] || '')
+      .replace(/\r$/, '')
+      .replace('refs/tags/', '')
+      .replace(/\^\{\}$/, '');
+    if (tagPrefix && !tag.startsWith(tagPrefix)) continue;
+    const candidate = tagPrefix ? tag.slice(tagPrefix.length) : tag;
+    const match = candidate.match(tagPrefix ? PREFIXED_SEMVER_RE : SEMVER_RE);
+    if (match && (!best || compareVersions(match[1], best) > 0)) best = match[1];
+  }
+  return best;
+}
+
+// Probes upstream over git. Returns { ok: true, version } on success —
+// version is '' when upstream is reachable but carries no matching release
+// tag — and { ok: false, detail } when the git transport failed too
+// (genuinely offline), with detail carrying error.code or the first
+// error-message line, mirroring curlGet()'s convention, so offline
+// payloads stay diagnosable on the git side as well.
+// Exported for tests; repoUrl exists solely for fixture injection (a
+// deterministic failing remote) — the production caller in check() always
+// uses the CANONICAL_REPO default.
+export function gitRemoteVersion(repoUrl = CANONICAL_REPO) {
+  try {
+    // Direct execFileSync rather than gitQuiet: this probe runs on every
+    // session start, so it shares the check's tight latency budget (see
+    // CHECK_GIT_PROBE_TIMEOUT_MS) instead of the general 120s git timeout.
+    // GIT_TERMINAL_PROMPT=0 suppresses terminal credential prompts, but on
+    // Windows Git Credential Manager pops a GUI dialog that flag does not
+    // cover — `-c credential.helper=` disables helpers entirely (safe: this
+    // is an anonymous read of a public repo) and GCM_INTERACTIVE=never is a
+    // belt-and-braces for gitconfigs that force GCM some other way.
+    const out = execFileSync('git', ['-c', 'credential.helper=', 'ls-remote', '--tags', repoUrl], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: CHECK_GIT_PROBE_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    // Upstream is a release-please monorepo (career-ops-v*, web-v*,
+    // manifesto-v*, plus historical bare tags): filter to this component's
+    // prefix, or a foreign component overtaking career-ops' version number
+    // would fabricate a permanent false update-available on exactly the
+    // curl-blocked machines this fallback serves.
+    return { ok: true, version: highestSemverTag(out, 'career-ops-v') };
+  } catch (error) {
+    // Unreachable over git too — genuinely offline. Keep the REASON, in
+    // priority order:
+    //   1. First stderr line — when git runs and exits non-zero (DNS, proxy,
+    //      TLS: the common real cases), execFileSync puts the exit code in
+    //      error.status and leaves error.code undefined, so the old
+    //      error.code || error.message fallback printed the tautological
+    //      "Command failed: git …" while the actual diagnosis ("fatal:
+    //      unable to access …: Could not resolve host: …") sat in stderr.
+    //   2. error.code — spawn-level failures where stderr is empty: ENOENT
+    //      (no git on PATH) and ETIMEDOUT (probe budget kill).
+    //   3. First message line — last resort so detail is never empty.
+    const stderrLine = String(error.stderr || '').trim().split('\n')[0].replace(/\r$/, '');
+    return { ok: false, detail: stderrLine || error.code || String(error.message || error).split('\n')[0] };
+  }
 }
 
 async function check() {
@@ -1062,9 +1186,9 @@ async function check() {
     ]),
   ]);
 
-  if (rawVersion !== null) {
+  if (rawVersion.ok) {
     try {
-      const raw = parseVersionFile(rawVersion);
+      const raw = parseVersionFile(rawVersion.body);
       const match = raw.match(SEMVER_RE);
       remote = match ? match[1] : '';
     } catch {
@@ -1072,9 +1196,9 @@ async function check() {
     }
   }
 
-  if (releaseRaw !== null) {
+  if (releaseRaw.ok) {
     try {
-      const release = JSON.parse(releaseRaw);
+      const release = JSON.parse(releaseRaw.body);
       changelog = release.body || '';
       const rawTag = String(release.tag_name || '').trim();
       const match = rawTag.match(SEMVER_RE);
@@ -1085,14 +1209,49 @@ async function check() {
   }
 
   if (!remote && !releaseVersion) {
-    // Both curl calls returned null → genuine network failure.
-    // If one returned non-null but unparseable, remote/releaseVersion are
-    // empty strings, which still reaches the offline branch — that's the
-    // right conservative behaviour (no version = can't determine status).
-    const bothNetworkFailed = rawVersion === null && releaseRaw === null;
-    const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
-    console.log(JSON.stringify({ status, local }));
-    return;
+    // Both curl calls failed → curl-level network failure. But check() and
+    // apply() use different transports (curl vs git), so before declaring
+    // the machine offline, ask upstream over git — the transport apply()
+    // will actually use. If git can see the remote, report the version it
+    // found instead of a false "offline" (which contradicts an apply that
+    // succeeds seconds later).
+    // If one call succeeded but was unparseable, remote/releaseVersion are
+    // empty strings and we fall through to no-remote-version — the right
+    // conservative behaviour (no version = can't determine status).
+    const bothNetworkFailed = !rawVersion.ok && !releaseRaw.ok;
+    let gitProbe = null;
+    if (bothNetworkFailed) {
+      // Progress goes to stderr: stdout carries the single JSON line the
+      // agent parses, and a silent multi-second retry looks like a hang.
+      // writeSync, not console.error: on Windows, stderr writes to a pipe
+      // are async, and the execFileSync probe below blocks the event loop —
+      // a queued console.error would flush only AFTER the wait it is meant
+      // to announce.
+      writeSync(
+        process.stderr.fd,
+        `career-ops update check: GitHub unreachable over curl (VERSION: ${rawVersion.detail}; ` +
+        `releases: ${releaseRaw.detail}) — retrying over git, ≤${Math.round(CHECK_GIT_PROBE_TIMEOUT_MS / 1000)}s…\n`
+      );
+      gitProbe = gitRemoteVersion();
+      if (gitProbe.ok && gitProbe.version) remote = gitProbe.version;
+    }
+    if (!remote) {
+      // gitProbe.ok === false → the git transport failed too: genuinely
+      // offline. gitProbe.ok with an empty version → git reached upstream
+      // but found no career-ops release tag: the network is fine, we just
+      // cannot determine a version — no-remote-version, not offline.
+      const gitFailed = gitProbe !== null && !gitProbe.ok;
+      const status = bothNetworkFailed && gitFailed ? 'offline' : 'no-remote-version';
+      const payload = { status, local };
+      if (bothNetworkFailed) {
+        payload.detail = `curl VERSION: ${rawVersion.detail}; curl releases: ${releaseRaw.detail}; ` +
+          (gitFailed
+            ? `git ls-remote also failed: ${gitProbe.detail}`
+            : 'git ls-remote reachable but returned no career-ops release tags');
+      }
+      console.log(JSON.stringify(payload));
+      return;
+    }
   }
 
   // Use the higher version between VERSION file and GitHub Release

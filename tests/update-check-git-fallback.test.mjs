@@ -1,0 +1,335 @@
+/**
+ * update-check-git-fallback.test.mjs — check() must not report "offline"
+ * when apply() would succeed.
+ *
+ * check() probes over curl while apply() fetches over git; on machines where
+ * only curl fails (curl missing from PATH, proxy configured only in git
+ * config, raw/api hosts filtered while github.com is reachable, TLS
+ * interception trusted by git but not curl), check() used to emit a false
+ * {"status":"offline"} seconds before a successful apply. The fix falls back
+ * to `git ls-remote --tags` — apply()'s transport — before declaring offline.
+ *
+ * The tag-parsing half is a pure export (highestSemverTag), tested
+ * behaviorally. The wiring inside check()/curlGet() is ROOT-bound with
+ * subprocess side effects, so it is verified by source-pattern assertions —
+ * the updater test convention for such paths (see
+ * updater-rollback-behavior.test.mjs's header note).
+ */
+
+import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs';
+import { join, dirname } from 'path';
+import { tmpdir } from 'os';
+import { fileURLToPath } from 'url';
+import { pass, fail } from './helpers.mjs';
+import { highestSemverTag, SEMVER_RE, curlGet, gitRemoteVersion } from '../update-system.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+console.log('\n🧪 Testing update-check git fallback...');
+
+// ── highestSemverTag: release-please tag shape ──────────────────────────
+{
+  const out = [
+    'aaaa\trefs/tags/career-ops-v1.3.0',
+    'bbbb\trefs/tags/career-ops-v1.25.0',
+    'cccc\trefs/tags/career-ops-v1.9.0',
+  ].join('\n');
+  if (highestSemverTag(out) === '1.25.0') {
+    pass('highestSemverTag picks the semver-highest release-please tag (1.25.0 > 1.9.0, not lexical)');
+  } else {
+    fail(`highestSemverTag release-please shape = ${JSON.stringify(highestSemverTag(out))}`);
+  }
+}
+
+// ── peeled refs and non-semver tags ─────────────────────────────────────
+{
+  const out = [
+    'aaaa\trefs/tags/career-ops-v1.24.0',
+    'bbbb\trefs/tags/career-ops-v1.24.0^{}',
+    'cccc\trefs/tags/snapshot-before-migration',
+    'dddd\trefs/tags/v20260801',
+  ].join('\n');
+  if (highestSemverTag(out) === '1.24.0') {
+    pass('highestSemverTag collapses peeled ^{} refs and ignores non-semver tags');
+  } else {
+    fail(`highestSemverTag peeled/non-semver = ${JSON.stringify(highestSemverTag(out))}`);
+  }
+}
+
+// ── monorepo tag pollution: the prefix filter is load-bearing ───────────
+// Upstream is a release-please monorepo (career-ops-v*, web-v*,
+// manifesto-v*, historical bare tags). Without the prefix filter, the
+// first foreign tag to exceed career-ops' version would be reported as
+// the career-ops remote — a permanent false update-available on exactly
+// the curl-blocked machines the fallback serves.
+{
+  const out = [
+    'aaaa\trefs/tags/career-ops-v1.25.0',
+    'bbbb\trefs/tags/web-v9.9.9',
+    'cccc\trefs/tags/manifesto-v8.0.0',
+    'dddd\trefs/tags/backup-pre-update-9.9.8',
+    'eeee\trefs/tags/v7.7.7',
+  ].join('\n');
+  if (highestSemverTag(out, 'career-ops-v') === '1.25.0') {
+    pass('highestSemverTag("career-ops-v") ignores foreign monorepo components with higher versions');
+  } else {
+    fail(`highestSemverTag monorepo pollution = ${JSON.stringify(highestSemverTag(out, 'career-ops-v'))}`);
+  }
+  if (highestSemverTag('aaaa\trefs/tags/web-v9.9.9', 'career-ops-v') === '') {
+    pass('highestSemverTag("career-ops-v") returns "" when only foreign tags exist (reachable ≠ has releases)');
+  } else {
+    fail('highestSemverTag prefix-only-foreign case failed');
+  }
+}
+
+// ── prefix mode anchors the ENTIRE remainder ────────────────────────────
+// career-ops-v1.25.0-preview-v99.0.0 passes the startsWith check, and
+// SEMVER_RE's (?:^|-) anchor would match its trailing -v99.0.0 — the
+// remainder after the prefix must be exactly the version, nothing more.
+{
+  const malformed = 'aaaa\trefs/tags/career-ops-v1.25.0-preview-v99.0.0';
+  if (highestSemverTag(malformed, 'career-ops-v') === '') {
+    pass('highestSemverTag("career-ops-v") rejects a prefix-matching tag with trailing content (no 99.0.0 fabrication)');
+  } else {
+    fail(`highestSemverTag malformed remainder = ${JSON.stringify(highestSemverTag(malformed, 'career-ops-v'))}`);
+  }
+  const mixed = `${malformed}\nbbbb\trefs/tags/career-ops-v1.25.0`;
+  if (highestSemverTag(mixed, 'career-ops-v') === '1.25.0') {
+    pass('highestSemverTag("career-ops-v") still picks the real release next to a malformed sibling tag');
+  } else {
+    fail(`highestSemverTag malformed+real = ${JSON.stringify(highestSemverTag(mixed, 'career-ops-v'))}`);
+  }
+}
+
+// ── plain v-prefixed and bare tags (SEMVER_RE's shapes, unfiltered mode) ─
+{
+  if (highestSemverTag('aaaa\trefs/tags/v2.0.0\nbbbb\trefs/tags/1.9.9') === '2.0.0') {
+    pass('highestSemverTag (no prefix) accepts plain v-prefixed and bare semver tags');
+  } else {
+    fail('highestSemverTag plain-tag shapes failed');
+  }
+}
+
+// ── CRLF-translated wrapper output ──────────────────────────────────────
+{
+  if (highestSemverTag('aaaa\trefs/tags/career-ops-v1.25.0\r\nbbbb\trefs/tags/career-ops-v1.24.0\r', 'career-ops-v') === '1.25.0') {
+    pass('highestSemverTag strips a trailing \\r so CRLF-translated output still matches');
+  } else {
+    fail('highestSemverTag CRLF hardening failed');
+  }
+}
+
+// ── degenerate inputs ───────────────────────────────────────────────────
+{
+  const empties = [highestSemverTag(''), highestSemverTag(null), highestSemverTag('garbage no tabs')];
+  if (empties.every((v) => v === '')) {
+    pass('highestSemverTag returns "" on empty/null/tag-less input');
+  } else {
+    fail(`highestSemverTag degenerate inputs = ${JSON.stringify(empties)}`);
+  }
+}
+
+// ── SEMVER_RE anchor sanity: the shapes above depend on (?:^|-) ─────────
+{
+  if (SEMVER_RE.test('career-ops-v1.25.0') && SEMVER_RE.test('v1.2.3') && !SEMVER_RE.test('v1.2.3-beta')) {
+    pass('SEMVER_RE anchors release-please and plain tags, rejects suffixed prereleases');
+  } else {
+    fail('SEMVER_RE anchor expectations changed — revisit highestSemverTag');
+  }
+}
+
+// ── source-pattern wiring assertions ────────────────────────────────────
+{
+  const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+
+  // Guard-slice extraction, replacing a {0,700} character-window regex whose
+  // ~26 chars of slack meant an ordinary comment inside the guard turned CI
+  // red with a message accusing the author of removing the gating. Each
+  // extraction stage fails with its OWN message naming the real problem, so
+  // a rename or a reformat is never misreported as a behavior break.
+  // Locator rule: the slice ends at the FIRST `\n    }` (newline + exactly
+  // four spaces + closing brace) after the marker — the guard sits at
+  // 4-space indent and everything nested inside closes deeper, so this finds
+  // the guard's own close. Coupling to watch: a multi-line template literal
+  // inside the guard must never contain a line that is exactly `    }` (keep
+  // continuation lines at 8-space indent).
+  const guardMarker = 'if (bothNetworkFailed) {';
+  const guardStart = src.indexOf(guardMarker);
+  let guardSlice = '';
+  if (guardStart === -1) {
+    fail(`guard marker ${JSON.stringify(guardMarker)} not found — if the guard was renamed or refactored, update this test's anchor; this is not necessarily a behavior break`);
+  } else {
+    const guardEnd = src.indexOf('\n    }', guardStart);
+    if (guardEnd === -1) {
+      fail('guard closing brace (newline + 4-space indent + }) not found — a reformat, or a `\\n    }` sequence inside a template literal, broke slice extraction; fix the extraction, the gating itself may be intact');
+    } else {
+      guardSlice = src.slice(guardStart, guardEnd);
+    }
+  }
+  const probeCallSites = (src.match(/(?<!function )gitRemoteVersion\(\)/g) || []).length;
+  if (guardSlice && guardSlice.includes('gitProbe = gitRemoteVersion()') && probeCallSites === 1) {
+    pass('check() consults gitRemoteVersion() only inside the both-curls-failed guard (never on the parseable-failure path)');
+  } else if (guardSlice) {
+    fail(`the git fallback is no longer gated on bothNetworkFailed (probe in guard slice: ${guardSlice.includes('gitProbe = gitRemoteVersion()')}, call sites: ${probeCallSites}) — it must not run on the no-remote-version path`);
+  }
+
+  // repoUrl is a test-injection param; its DEFAULT binds the production
+  // probe to CANONICAL_REPO — both halves are load-bearing here.
+  if (/gitRemoteVersion\(repoUrl = CANONICAL_REPO\)/.test(src)
+    && /ls-remote', '--tags', repoUrl/.test(src)
+    && /highestSemverTag\(out, 'career-ops-v'\)/.test(src)) {
+    pass('gitRemoteVersion() defaults to CANONICAL_REPO and filters to the career-ops-v tag prefix');
+  } else {
+    fail('gitRemoteVersion() lost the CANONICAL_REPO default or the career-ops-v prefix filter (monorepo tag pollution)');
+  }
+
+  if (/GIT_TERMINAL_PROMPT: '0'/.test(src)) {
+    pass('the ls-remote probe suppresses interactive credential prompts (GIT_TERMINAL_PROMPT=0)');
+  } else {
+    fail('GIT_TERMINAL_PROMPT=0 missing — a captive portal can pop a GUI prompt from a silent check');
+  }
+
+  if (/payload\.detail = `curl VERSION: /.test(src) && /git ls-remote reachable but returned no career-ops release tags/.test(src)) {
+    pass('offline/no-remote-version JSON distinguishes git-failed from git-reachable-but-tagless in detail');
+  } else {
+    fail('detail field no longer distinguishes git transport failure from a tagless remote');
+  }
+
+  // Wiring only: this proves gitProbe.detail is interpolated into
+  // payload.detail — the QUALITY of that detail (real git reason, not a
+  // "Command failed: …" tautology) is asserted behaviorally below.
+  if (/git ls-remote also failed: \$\{gitProbe\.detail\}/.test(src)) {
+    pass('the git-side detail is wired into payload.detail (quality of the detail is asserted behaviorally below)');
+  } else {
+    fail('gitProbe.detail is no longer interpolated into payload.detail — offline payloads lose the git-side diagnosis');
+  }
+
+  if (/console\.log\(JSON\.stringify\(payload\)\);\s*return;/.test(src)) {
+    pass('the offline/no-remote-version branch returns after emitting — single-JSON-line contract holds');
+  } else {
+    fail('the offline branch no longer returns immediately — check may emit two JSON lines');
+  }
+
+  // (curlGet's broken-curl guard is verified BEHAVIORALLY below, outside
+  // this source-pattern block — a position-based regex for it broke on an
+  // unrelated edit when the function grew past the character window.)
+
+  // ── session-start latency budget ceiling ──────────────────────────────
+  // AGENTS.md runs check() at session start; its worst case is dead time
+  // before the user's first interaction. The curl legs run in parallel and
+  // chain into the git probe, so the two constants below bound the whole
+  // check: the three terms (parallel curl legs, +1s JS backstop, git probe)
+  // must stay ≤16s wall clock. The 10s curl budget matches the pre-fallback
+  // main and is paid only when curl HANGS — deterministic failures exit
+  // immediately regardless of budget. A 5s budget was tried and rejected in
+  // review: it hung up on a slow-but-answering curl and fabricated a false
+  // "offline" on git-blocked networks (round 7). Raising any constant past
+  // the ceiling is a session-start regression; lowering the curl budget
+  // re-opens the round-7 false offline — change either only with numbers.
+  const curlBudget = src.match(/const CHECK_CURL_MAX_TIME_S = (\d+);/);
+  const gitBudget = src.match(/const CHECK_GIT_PROBE_TIMEOUT_MS = (\d+);/);
+  // Worst case sums ALL three timeout terms: curl --max-time (parallel legs =
+  // one wall-clock leg), curl's +1s JS execFile backstop (fires only when a
+  // hung curl ignores --max-time), and the git probe.
+  const worstCaseS = curlBudget && gitBudget
+    ? Number(curlBudget[1]) + 1 + Number(gitBudget[1]) / 1000
+    : Infinity;
+  if (worstCaseS <= 16) {
+    pass(`check() worst case stays bounded: ${curlBudget[1]}s curl (parallel legs) + 1s JS backstop + ${Number(gitBudget[1]) / 1000}s git probe = ${worstCaseS}s ≤ 16s`);
+  } else {
+    fail(`check() latency budget exceeded: CHECK_CURL_MAX_TIME_S=${curlBudget ? curlBudget[1] : '?'}s + 1s JS backstop + CHECK_GIT_PROBE_TIMEOUT_MS=${gitBudget ? Number(gitBudget[1]) / 1000 : '?'}s = ${worstCaseS}s > 16s — name which constant grew and why the new ceiling is safe (session-start dead time)`);
+  }
+
+  if (/--max-time', String\(CHECK_CURL_MAX_TIME_S\)/.test(src)
+    && /timeout: CHECK_CURL_MAX_TIME_S \* 1000 \+ 1000/.test(src)
+    && /timeout: CHECK_GIT_PROBE_TIMEOUT_MS/.test(src)) {
+    pass('all transport timeouts (curl --max-time, its JS backstop, git probe) are wired to the named budget constants');
+  } else {
+    fail('a transport timeout no longer derives from the named budget constants — the ceiling is unenforced');
+  }
+
+  // writeSync, not console.error: on Windows stderr-to-pipe writes are async
+  // and the sync git probe blocks the event loop, so a console.error here
+  // would flush AFTER the wait it announces. Pin the sync form and the
+  // notice content as separate slice-membership checks (window-free — the
+  // previous {0,220} character window was the same brittleness class as the
+  // {0,700} one replaced above).
+  const noticeSync = /writeSync\(\s*process\.stderr\.fd,\s*`career-ops update check: GitHub unreachable over curl/.test(guardSlice);
+  const noticeNamesRetry = guardSlice.includes('retrying over git');
+  if (noticeSync && noticeNamesRetry) {
+    pass('the git retry announces itself via a SYNCHRONOUS stderr write before the blocking probe (async console.error would flush after the wait on Windows)');
+  } else {
+    fail(`the retry notice broke (sync writeSync form in guard: ${noticeSync}, names the git retry: ${noticeNamesRetry}) — on Windows an async write would appear only after the probe finishes`);
+  }
+
+  // curl exit 28 (its own --max-time firing — the normal hang-topology
+  // failure) must render as a readable timeout, not the bare code "28",
+  // in the offline detail the update mode now shows verbatim.
+  if (/error\.code === 28\s*\?\s*`timeout \(\$\{CHECK_CURL_MAX_TIME_S\}s\)`/.test(src)) {
+    pass('curl exit 28 maps to a readable timeout detail (offline payloads never render a bare "28")');
+  } else {
+    fail('the exit-28 → timeout detail mapping is gone — offline detail would render "curl VERSION: 28" on hang topologies');
+  }
+}
+
+// ── curlGet() broken-curl guard (BEHAVIORAL) ──────────────────────────────
+// The contract: curlGet NEVER rejects or throws. A missing curl (ENOENT,
+// delivered async via the execFile callback) and a corrupt/non-executable
+// curl on PATH (delivered as a SYNCHRONOUS spawn throw on Windows — e.g.
+// EFTYPE — or an ENOEXEC-style async error on POSIX) must both resolve
+// { ok: false, detail }. This runs the code instead of pattern-matching the
+// source: the previous regex counted characters from the function head and
+// broke when an unrelated edit grew the function past its window.
+{
+  const realPath = process.env.PATH;
+  const emptyDir = mkdtempSync(join(tmpdir(), 'uc-curl-missing-'));
+  const brokenDir = mkdtempSync(join(tmpdir(), 'uc-curl-broken-'));
+  // Garbage bytes: not a valid executable image on Windows (curl.exe) and
+  // no shebang on POSIX (curl) — each platform resolves its own file.
+  writeFileSync(join(brokenDir, 'curl.exe'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+  writeFileSync(join(brokenDir, 'curl'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+  try { chmodSync(join(brokenDir, 'curl'), 0o755); } catch { /* windows: no-op */ }
+
+  const cases = [
+    ['missing curl on PATH (ENOENT callback path)', emptyDir],
+    ['corrupt curl binary on PATH (sync-throw path on Windows)', brokenDir],
+  ];
+  for (const [label, dir] of cases) {
+    process.env.PATH = dir;
+    try {
+      const res = await curlGet('http://127.0.0.1:9/unreachable');
+      if (res && res.ok === false && res.detail) {
+        pass(`curlGet() resolves { ok: false, detail: ${JSON.stringify(String(res.detail).slice(0, 24))} } with ${label} — never throws`);
+      } else {
+        fail(`curlGet() with ${label} resolved with an unexpected shape: ${JSON.stringify(res)}`);
+      }
+    } catch (error) {
+      fail(`curlGet() with ${label} THREW (${error.code || String(error.message).split('\n')[0]}) — check() would crash on this machine`);
+    } finally {
+      process.env.PATH = realPath;
+    }
+  }
+  rmSync(emptyDir, { recursive: true, force: true });
+  rmSync(brokenDir, { recursive: true, force: true });
+}
+
+// ── gitRemoteVersion() failing-git detail quality (BEHAVIORAL) ────────────
+// When git RUNS and exits non-zero (DNS/proxy/TLS — the common real
+// failures), execFileSync puts the exit code in error.status, not
+// error.code — so an error.code || error.message fallback yields the
+// tautology "Command failed: git …" (what ran) instead of git's own reason
+// (which sits in error.stderr). This invokes the real git against an
+// RFC 2606 `.invalid` host — DNS for that TLD fails locally and
+// deterministically, no network needed — and asserts the detail carries a
+// real reason. Git's wording is locale-dependent, so the assertion is the
+// tautology's ABSENCE, not any English phrase.
+{
+  const res = gitRemoteVersion('https://this-host-does-not-exist.invalid/repo.git');
+  if (res && res.ok === false && res.detail && !/^Command failed/.test(String(res.detail))) {
+    pass(`gitRemoteVersion() surfaces git's own failure reason, not the command-line tautology (detail: ${JSON.stringify(String(res.detail).slice(0, 60))})`);
+  } else if (res && res.ok === false) {
+    fail(`gitRemoteVersion() failing-git detail is a tautology or empty: ${JSON.stringify(res.detail)}`);
+  } else {
+    fail(`gitRemoteVersion() against a .invalid host returned unexpectedly: ${JSON.stringify(res)}`);
+  }
+}
