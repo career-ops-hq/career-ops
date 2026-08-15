@@ -3,7 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
 import type { DiscoveredOffer } from "@/lib/explore";
-import { collectWhatsNew } from "@/lib/whats-new.mjs";
+import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,9 +21,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const searchParams = new URL(req.url).searchParams;
   const days = Math.min(30, Math.max(1, Number(searchParams.get("days")) || 7));
-  // Home only needs enough offers for its cards. Explore's explicit “See all”
-  // hand-off opts into the complete list, while `count` is always complete.
-  const offerLimit = searchParams.get("limit") === "all" ? Number.POSITIVE_INFINITY : 24;
+  // Home only needs enough offers for its cards; Explore's “See all” hand-off
+  // asks for more. Both stay finite — `count` is always complete, so the true
+  // total is free while the rendered list keeps a ceiling (see MAX_OFFER_LIMIT).
+  const offerLimit = resolveOfferLimit(searchParams.get("limit"));
   const cutoff = Date.now() - days * 86_400_000;
   let rows: string[];
   try {

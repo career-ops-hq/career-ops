@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectWhatsNew } from "../../src/lib/whats-new.mjs";
+import {
+  DEFAULT_OFFER_LIMIT,
+  MAX_OFFER_LIMIT,
+  collectWhatsNew,
+  resolveOfferLimit,
+} from "../../src/lib/whats-new.mjs";
 
 const header = "url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation";
 const toOffer = ([url, , , title, company]) => (url ? { url, title, company } : null);
@@ -53,4 +58,47 @@ test("legacy append-order fallback also reports the complete count", () => {
 
   assert.equal(result.offers.length, 12);
   assert.equal(result.count, 15);
+});
+
+test("a missing or blank limit falls back to the card default", () => {
+  assert.equal(resolveOfferLimit(null), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit(undefined), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit(""), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("   "), DEFAULT_OFFER_LIMIT);
+});
+
+test("the render ceiling is always finite, whatever the caller asks for", () => {
+  // explorer-view has no virtualisation, so an unbounded list is an unbounded
+  // DOM. The legacy `all` sentinel must degrade to a bounded default, never to
+  // Infinity.
+  assert.equal(resolveOfferLimit("all"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("Infinity"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("NaN"), DEFAULT_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit("1e9"), 1); // parseInt stops at the exponent
+  assert.equal(resolveOfferLimit("100000"), MAX_OFFER_LIMIT);
+  assert.equal(resolveOfferLimit(String(MAX_OFFER_LIMIT)), MAX_OFFER_LIMIT);
+});
+
+test("in-range limits pass through and degenerate ones clamp up to 1", () => {
+  assert.equal(resolveOfferLimit("1"), 1);
+  assert.equal(resolveOfferLimit("50"), 50);
+  assert.equal(resolveOfferLimit("0"), 1);
+  assert.equal(resolveOfferLimit("-10"), 1);
+});
+
+test("the Explore limit still returns the complete count", () => {
+  const rows = [
+    header,
+    ...Array.from({ length: MAX_OFFER_LIMIT + 40 }, (_, i) =>
+      `https://example.com/${i}\t2026-08-10\ttest\tRole ${i}\tCompany ${i}\tadded\tRemote`,
+    ),
+  ];
+  const result = collectWhatsNew(rows, {
+    cutoff: Date.parse("2026-08-03"),
+    toOffer,
+    offerLimit: resolveOfferLimit(String(MAX_OFFER_LIMIT)),
+  });
+
+  assert.equal(result.offers.length, MAX_OFFER_LIMIT);
+  assert.equal(result.count, MAX_OFFER_LIMIT + 40);
 });

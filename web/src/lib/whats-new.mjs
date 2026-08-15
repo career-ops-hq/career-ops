@@ -1,10 +1,34 @@
+/** Cards the home dashboard renders when no explicit limit is asked for. */
+export const DEFAULT_OFFER_LIMIT = 24;
+
+/**
+ * Ceiling for a caller-requested limit, and what Explore's "See all" hand-off
+ * asks for. The payload stays bounded on purpose: explorer-view renders every
+ * offer it receives (no virtualisation, no pagination), and a default
+ * portals.yml — ~120 companies against a catch-all title_filter — can leave
+ * thousands of un-evaluated rows inside a 7-day window. `count` is complete
+ * regardless, so the UI shows an honest total without an unbounded render.
+ */
+export const MAX_OFFER_LIMIT = 200;
+
+/**
+ * Resolve the `?limit=` query value into a finite render ceiling. Anything
+ * missing, non-numeric or out of range degrades to a bounded default rather
+ * than to an unbounded list.
+ */
+export function resolveOfferLimit(raw) {
+  const requested = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(requested)) return DEFAULT_OFFER_LIMIT;
+  return Math.min(MAX_OFFER_LIMIT, Math.max(1, requested));
+}
+
 /**
  * Collect fresh, unique offers while keeping the response payload bounded.
  * `count` always represents the full result set; `offers` is only the slice the
  * caller asked to render. This prevents a UI card limit from masquerading as
  * the number of matches found.
  */
-export function collectWhatsNew(rows, { cutoff, toOffer, offerLimit = 24, fallbackLimit = 12 }) {
+export function collectWhatsNew(rows, { cutoff, toOffer, offerLimit = DEFAULT_OFFER_LIMIT, fallbackLimit = 12 }) {
   const seen = new Set();
   const offers = [];
   let count = 0;

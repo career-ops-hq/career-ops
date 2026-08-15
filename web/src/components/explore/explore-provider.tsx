@@ -16,6 +16,7 @@ import {
   type ScanEvent,
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
+import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 
 export type Phase =
   | "idle"
@@ -300,7 +301,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources({});
     setError("");
     try {
-      const r = await fetch("/api/whats-new?limit=all");
+      // A finite ceiling, not `all`: explorer-view renders every offer it gets,
+      // so an unbounded list would be an unbounded DOM. `count` below stays the
+      // complete total, which is what the header actually reports.
+      const r = await fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`);
       if (!r.ok) {
         setError(`Couldn't load fresh matches (${r.status}).`);
         setPhase("failed");
