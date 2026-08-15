@@ -20,7 +20,10 @@
 //
 //   - the four sentinels. '- None captured.' must read back as an empty array,
 //     not as an entry titled 'None captured'; the two 'Not recorded' spellings
-//     must read back as empty, not as literal answers;
+//     must read back as empty, not as literal answers. The INLINE spelling is
+//     the one path that FABRICATES content rather than dropping it, so it is
+//     asserted directly rather than left to the fixed point, which is blind to
+//     any sentinel that survives its own re-render;
 //
 //   - section boundaries. parse must agree with upsert about where the section
 //     starts and ends, so a report with sections after Application Answers does
@@ -64,13 +67,21 @@ try {
         selections: [
           { field: 'Technical areas', selected: ['Node.js', 'Go', 'LLM evaluation'] },
           { question: 'Notice period: current', selection: '30 days' },
+          // Appended, not inserted: the index assertions in section 3 pin
+          // selections[0]/[1] and files[0]/[1]. Each of these three renders the
+          // INLINE sentinel — an entry that EXISTS with an empty value, which
+          // compactLines (:74) and fileLines (:84) spell 'Not recorded' and
+          // which no other fixture produces.
+          { question: 'Work authorization', selection: '' },
         ],
         fieldValues: [
           { field: 'Compensation expectation', value: '$150k base' },
+          { question: 'Earliest start date', answer: '' },
         ],
         files: [
           { field: 'CV', path: 'output/acme-cv.pdf', version: 'v3' },
           { field: 'Cover letter', path: 'output/acme-cover-letter.pdf' },
+          { field: 'Portfolio', path: '' },
         ],
       },
     },
@@ -179,6 +190,44 @@ try {
     );
   }
 
+  // ── 5b. the inline sentinel, on entries that exist with empty values ─────
+  // Distinct from 5, where the GROUP is absent and the BLOCK sentinels render.
+  // This is the one sentinel path that fabricates content rather than dropping
+  // it: strip either branch and an empty selection round-trips to the literal
+  // answer 'Not recorded', which nobody typed. The fixed-point property cannot
+  // see that — 'Not recorded' re-renders to 'Not recorded', stable and wrong —
+  // so it needs a direct assertion.
+  const renderedInline = formatApplicationAnswersSection(corpus[0].snapshot);
+  const inlineChecks = [
+    [
+      renderedInline.includes('**Work authorization:** Not recorded'),
+      'formatter did not render the inline sentinel for an empty selection',
+    ],
+    [
+      parsed.selections[2]?.question === 'Work authorization' && parsed.selections[2]?.selection === '',
+      `empty selection: ${JSON.stringify(parsed.selections[2])}`,
+    ],
+    [
+      parsed.fieldValues[1]?.question === 'Earliest start date' && parsed.fieldValues[1]?.answer === '',
+      `empty field value: ${JSON.stringify(parsed.fieldValues[1])}`,
+    ],
+    [
+      parsed.files[2]?.field === 'Portfolio' && parsed.files[2]?.path === '',
+      `empty file path: ${JSON.stringify(parsed.files[2])}`,
+    ],
+    [
+      parsed.files[2] && !('version' in parsed.files[2]),
+      `an empty path must not acquire a version: ${JSON.stringify(parsed.files[2])}`,
+    ],
+  ];
+
+  const inlineBroken = inlineChecks.filter(([ok]) => !ok).map(([, detail]) => detail);
+  if (inlineBroken.length === 0) {
+    pass('inline "Not recorded" reads back as an empty value, and the entry survives');
+  } else {
+    fail(`inline sentinel leaked into data:\n  ${inlineBroken.join('\n  ')}`);
+  }
+
   // ── 6. parse agrees with upsert on the section boundary ──────────────────
   const report = [
     '# Evaluation: Acme - Staff Engineer',
@@ -199,7 +248,7 @@ try {
     JSON.stringify(bounded).includes('later content') ||
     JSON.stringify(bounded).includes('Keywords extracted');
 
-  if (!leaked && bounded.files.length === 2 && bounded.date === '2026-06-30') {
+  if (!leaked && bounded.files.length === 3 && bounded.date === '2026-06-30') {
     pass('parse stops at the next ## heading, matching upsert\'s own boundary probe');
   } else {
     fail(`section boundary disagreement — leaked=${leaked}, files=${bounded.files.length}`);
