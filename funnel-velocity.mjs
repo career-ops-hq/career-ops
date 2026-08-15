@@ -51,10 +51,13 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const VALID_SOURCES = new Set(['set-status', 'correction', 'backfill', 'manual']);
+const VALID_SOURCES = new Set(['set-status', 'correction', 'backfill', 'manual', 'web']);
 // Sources whose dates are trusted for day-math. backfill/manual are parsed and
 // counted but excluded: they are reconstructed after the fact, not observed.
-const DAY_MATH_SOURCES = new Set(['set-status', 'correction']);
+// `web` IS observed: it is the same event as a `set-status`, recorded live at
+// the moment the user changes the status, just entering through the web app
+// instead of the CLI. By the rule above it belongs in both sets.
+const DAY_MATH_SOURCES = new Set(['set-status', 'correction', 'web']);
 
 // The hops a candidate can measure from their own tracker. Applied→Rejected is
 // tracked separately from the forward hops — a "days to terminal" number that
@@ -484,6 +487,23 @@ function selfTest() {
   check(unparseable.some(u => u.reason.includes('unknown to-state')), 'parser: non-canonical state reported');
   check(unknownSources.length === 1 && unknownSources[0].source === 'future-import', 'parser: unknown source counted');
   check(observations.find(o => o.source === 'future-import')?.dayMath === false, 'parser: unknown source excluded from day-math');
+  // The writer and the reader must agree on the source string, and nothing
+  // asserted that: the web app records 'web' and this parser did not know it,
+  // so every web-driven transition landed in unknownSources and out of
+  // day-math. Counted, flagged as suspect, and silently absent from the one
+  // number this file exists to produce.
+  //
+  // Fixture APARTE a propósito: dentro del compartido, sus dos transiciones
+  // entraban en la mediana de velocidad y ponían en rojo tres checks ajenos que
+  // no tenían nada que ver. Un caso nuevo no debe mover el de los que ya están.
+  const WEB_FIXTURE = [
+    '9\t2026-06-01\tEvaluated\tApplied\tweb\tobserved live, from the web app',
+    '9\t2026-06-06\tApplied\tResponded\tweb\t',
+  ].join('\n');
+  const web = parseStatusLog(WEB_FIXTURE, states);
+  check(web.observations.length === 2, 'parser: web source parsed');
+  check(web.observations.every(o => o.dayMath === true), 'parser: web source counts for day-math (observed live, not reconstructed)');
+  check(web.unknownSources.length === 0, 'parser: web is a known source');
   check(observations.find(o => o.num === 2 && o.from === null), 'parser: "-" from-state parses as null');
 
   // -- fold --
