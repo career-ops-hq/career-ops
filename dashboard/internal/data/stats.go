@@ -132,6 +132,11 @@ func CanonicalizeLocation(raw string) string {
 		if city == "" {
 			return ""
 		}
+		// Trailing comma produces an empty state component (e.g. "Berlin,").
+		// Return just the canonical city rather than appending a bare ", ".
+		if state == "" {
+			return city
+		}
 		if len(state) <= 2 {
 			state = strings.ToUpper(state)
 		} else {

@@ -69,8 +69,11 @@ func (m StatsModel) Update(msg tea.Msg) (StatsModel, tea.Cmd) {
 		case "pgup", "ctrl+u":
 			m.scrollOffset = max(0, m.scrollOffset-m.height/2)
 		} // end inner key switch
-		// Clamp to content maximum so scrolling down stops at the last valid position.
-		contentLines := strings.Count(m.View(), "\n") + 1
+		// Clamp against the full untruncated body height so panels beyond
+		// the first screen-full remain reachable regardless of terminal size.
+		// Using m.View() would measure the already-truncated render and
+		// produce a maxOffset of ~2, making content below the fold unreachable.
+		contentLines := strings.Count(m.renderBody(), "\n") + 1
 		maxOffset := contentLines - (m.height - 4)
 		if maxOffset < 0 {
 			maxOffset = 0
@@ -84,11 +87,15 @@ func (m StatsModel) Update(msg tea.Msg) (StatsModel, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the stats screen.
-func (m StatsModel) View() string {
-	header := m.renderHeader()
+// renderBody builds the full untruncated body string used both by View (for
+// display after slicing) and by Update (to measure true content height for
+// scroll clamping). Keeping it separate prevents Update from measuring the
+// already-truncated View output, which previously capped maxOffset at ~2.
+func (m StatsModel) renderBody() string {
 	insights := m.renderInsights()
 	archetypes := m.renderArchetypeChart()
+	// showQualityBadge=true for the Fit Quality pie (score metric belongs there),
+	// false for Seniority Mix (the badge would be semantically meaningless).
 	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers, []lipgloss.Color{
 		m.theme.Green,  // Elite (>=4.5)
 		m.theme.Sky,    // Strong (4.0-4.4)
@@ -96,7 +103,7 @@ func (m StatsModel) View() string {
 		m.theme.Peach,  // Moderate (3.0-3.4)
 		m.theme.Red,    // Below Bar (<3.0)
 		m.theme.Mauve,
-	})
+	}, true)
 	seniorityPieChart := m.renderPieChart(i18n.Current.SeniorityMix, i18n.Current.SeniorityMix, m.metrics.SeniorityMix, []lipgloss.Color{
 		m.theme.Mauve,
 		m.theme.Peach,
@@ -104,15 +111,12 @@ func (m StatsModel) View() string {
 		m.theme.Green,
 		m.theme.Yellow,
 		m.theme.Red,
-	})
+	}, false)
 	workModes := m.renderLabelCountTable(i18n.Current.WorkModeTitle, m.metrics.WorkModes)
 	locations := m.renderLabelCountTable(i18n.Current.LocationTitle, m.metrics.Locations)
 	pay := m.renderPay()
-	help := m.renderHelp()
 
-	var body string
 	if m.width >= 110 {
-		// Side-by-side 2-column layout when terminal is wide enough
 		leftColWidth := m.width/2 - 2
 		rightColWidth := m.width - leftColWidth - 4
 
@@ -138,31 +142,37 @@ func (m StatsModel) View() string {
 			),
 		)
 
-		body = lipgloss.JoinVertical(lipgloss.Left,
+		return lipgloss.JoinVertical(lipgloss.Left,
 			"",
 			lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "  ", rightCol),
 			"",
 		)
-	} else {
-		// Single-column stacked layout on smaller terminals
-		body = lipgloss.JoinVertical(lipgloss.Left,
-			"",
-			insights,
-			"",
-			pieChart,
-			"",
-			seniorityPieChart,
-			"",
-			archetypes,
-			"",
-			workModes,
-			"",
-			locations,
-			"",
-			pay,
-			"",
-		)
 	}
+	// Single-column stacked layout on smaller terminals
+	return lipgloss.JoinVertical(lipgloss.Left,
+		"",
+		insights,
+		"",
+		pieChart,
+		"",
+		seniorityPieChart,
+		"",
+		archetypes,
+		"",
+		workModes,
+		"",
+		locations,
+		"",
+		pay,
+		"",
+	)
+}
+
+// View renders the stats screen.
+func (m StatsModel) View() string {
+	header := m.renderHeader()
+	help := m.renderHelp()
+	body := m.renderBody()
 
 	bodyLines := strings.Split(body, "\n")
 	offset := m.scrollOffset
@@ -241,7 +251,10 @@ func (m StatsModel) renderInsights() string {
 }
 
 // renderPieChart draws a high-definition radial terminal pie chart with aspect ratio correction and legend.
-func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.LabelCountStat, sliceColors []lipgloss.Color) string {
+// showQualityBadge controls whether the ">=4.0 quality bar" summary badge is appended to the legend;
+// it should be true only for the Fit Quality Distribution chart (where the metric is meaningful)
+// and false for the Seniority Mix chart (where it would be semantically out of place).
+func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.LabelCountStat, sliceColors []lipgloss.Color, showQualityBadge bool) string {
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render(i18n.PieChartSectionTitle(title))
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
@@ -324,7 +337,7 @@ func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.La
 		legendLines = append(legendLines, bullet+lbl+cnt)
 	}
 
-	if m.metrics.QualityBarPct > 0 {
+	if showQualityBadge && m.metrics.QualityBarPct > 0 {
 		summaryBadge := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Green).
 			Render(fmt.Sprintf(i18n.Current.MeetQualityBar, m.metrics.QualityBarPct))
 		legendLines = append(legendLines, "", summaryBadge)

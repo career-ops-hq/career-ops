@@ -64,6 +64,12 @@ func TestCanonicalizeLocation(t *testing.T) {
 		// Non-ASCII UTF-8 titleCase inputs
 		{raw: "ΑΘΉΝΑ", expected: "Αθήνα"},
 		{raw: "élan", expected: "Élan"},
+		// Trailing-comma regression: "City," should canonicalize to just the city
+		{raw: "Berlin,", expected: "Berlin"},
+		{raw: "berlin,", expected: "Berlin"},
+		{raw: "munich,", expected: "Munich"},
+		// Trailing-comma with whitespace: "Berlin, " -> state trims to "" -> return city
+		{raw: "Berlin, ", expected: "Berlin"},
 	}
 
 	for _, tt := range tests {
