@@ -86,17 +86,37 @@ test("toolScopeFor: research is read-only too, but is NOT pdf's scope", () => {
   assert.equal(research, TOOL_SCOPES.networkReadOnly);
   assert.equal(pdf, TOOL_SCOPES.localReadOnly);
   assert.notEqual(research, pdf);
+
+  // Assert the CONTENTS, not just which object was selected. Identity alone would
+  // still pass if TOOL_SCOPES.networkReadOnly lost WebFetch or localReadOnly
+  // gained it — a regression on precisely the axis this test exists to protect.
+  assert.ok(toolNames(research.allowed).includes("WebFetch"), "research fetches its target");
+  assert.ok(!toolNames(pdf.allowed).includes("WebFetch"), "pdf reads local files only");
+  assert.ok(!toolNames(pdf.allowed).includes("WebSearch"), "pdf reads local files only");
+
+  // And the same through the shipped argv, since that is what actually reaches
+  // the CLI — a scope is only as good as the command line built from it.
+  assert.ok(claudeCliArgs({ kind: "research", prompt: "x" }).join(" ").includes("WebFetch"));
+  assert.ok(!toolNames(argValue(claudeCliArgs({ kind: "pdf", prompt: "x" }), "--allowedTools")).includes("WebFetch"));
 });
 
-test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
-  // Given a kind nobody has taught this map about
-  // When resolving its scope
-  const scope = toolScopeFor("some-future-kind");
+test("toolScopeFor: an unknown kind falls back to the narrowest scope", () => {
+  // Given a kind nobody has taught this map about, including inherited property
+  // names. Note this case CANNOT catch a regression to a bare
+  // `KIND_CAPABILITIES[kind]` on its own: destructuring {writes, network} off the
+  // resulting function yields undefined for both, which is falsy, so the scope
+  // still lands here by accident (verified by mutation). The discriminating
+  // assertion is record identity, in worker-capabilities.test.mjs; this one pins
+  // the scope that a correct capabilitiesFor must produce.
+  for (const kind of ["some-future-kind", "constructor", "toString", "valueOf", "__proto__"]) {
+    // When resolving its scope
+    const scope = toolScopeFor(kind);
 
-  // Then it is the NARROWEST scope — no write tool and no network tool. Granting
-  // either to a worker nobody has classified is the unrecoverable mistake here,
-  // and the fallback must be the strictest arm, not merely a non-writing one.
-  assert.equal(scope, TOOL_SCOPES.localReadOnly);
+    // Then it is the NARROWEST scope — no write tool and no network tool. Granting
+    // either to a worker nobody has classified is the unrecoverable mistake here,
+    // and the fallback must be the strictest arm, not merely a non-writing one.
+    assert.equal(scope, TOOL_SCOPES.localReadOnly, `${kind} must fall back to the narrowest scope`);
+  }
 });
 
 test("toolScopeFor: evaluate and fix-portal keep Write and Bash on purpose", () => {

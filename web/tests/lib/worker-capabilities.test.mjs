@@ -37,15 +37,22 @@ test("every known kind has an explicit capability record", () => {
 });
 
 test("an unreviewed kind gets the least-capable record", () => {
-  // Given a kind nobody has classified — a typo, or one added to the route but
-  // not here
-  const caps = capabilitiesFor("kind-that-does-not-exist");
+  // Given a kind nobody has classified — a typo, one added to the route but not
+  // here, or an INHERITED property name. A bare `KIND_CAPABILITIES[kind]` resolves
+  // "constructor" to Object itself, which is truthy and so survives a `??`
+  // fallback; this must assert record IDENTITY to catch that. Asserting only that
+  // the result behaves read-only does NOT discriminate — destructuring
+  // {writes, network} off a function yields undefined for both, which is falsy, so
+  // the scope-level test downstream passes either way (verified by mutation).
+  for (const kind of ["kind-that-does-not-exist", "constructor", "toString", "valueOf", "__proto__"]) {
+    const caps = capabilitiesFor(kind);
 
-  // Then it can neither write nor reach the network. Granting write access to a
-  // worker nobody reviewed is the one unrecoverable default.
-  assert.equal(caps.writes, false);
-  assert.equal(caps.network, false);
-  assert.equal(caps, CAPS.localReadOnly);
+    // Then it can neither write nor reach the network, and it is the declared
+    // record rather than something merely falsy in both fields.
+    assert.equal(caps.writes, false, `${kind} must not write`);
+    assert.equal(caps.network, false, `${kind} must not fetch`);
+    assert.equal(caps, CAPS.localReadOnly, `${kind} must resolve to the declared least-capable record`);
+  }
 });
 
 test("pdf needs neither writes nor the network", () => {
