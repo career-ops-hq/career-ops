@@ -1,0 +1,502 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+  "basics": {
+    "name": "Gittaveni Sidhartha",
+    "label": "AI Engineer | Generative AI & LLM Systems | Data Scientist",
+    "email": "sidharthay74@gmail.com",
+    "phone": "+1 (717) 461-3574",
+    "location": {
+      "city": "Maryland",
+      "region": "MD",
+      "countryCode": "US"
+    },
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "username": "sidharthay74",
+        "url": "https://www.linkedin.com/in/sidharthay74/"
+      },
+      {
+        "network": "GitHub",
+        "username": "zentrium74",
+        "url": "https://github.com/zentrium74"
+      },
+      {
+        "network": "GitHub (alt)",
+        "username": "sidharthay74",
+        "url": "https://github.com/sidharthay74"
+      }
+    ],
+    "summary": "ML Research Engineer with 5 years of experience implementing and shipping deep learning systems that bridge research prototypes and production deployments across LLM, RAG, and agentic AI stacks. Hands-on track record implementing research algorithms, optimizing models through quantization and efficient inference, and integrating novel methods with infrastructure via MLOps pipelines on Azure, AWS, and GCP. Collaborative researcher-engineer who pairs with applied scientists and product teams to translate novel methods into reliable, reproducible, monitored systems serving hundreds of concurrent users.",
+    "visa": {
+      "status": "Sponsorship required (H-1B)",
+      "sponsorship_required": true,
+      "notes": "Currently on F-1 OPT (STEM) valid until November 2027. H-1B cap-exempt possible via university/nonprofit. Open to TN (Canada/Mexico) and E-3 (Australia) if applicable. No EAD-only roles."
+    }
+  },
+  "work": [
+    {
+      "name": "AstraZeneca",
+      "position": "AI Engineer",
+      "location": "DE, USA",
+      "startDate": "2025-03",
+      "endDate": "",
+      "url": "",
+      "highlights": [
+        "Lexi — Agentic RAG Assistant for Regulated Documents: Architected an end-to-end RAG system delivering accurate, traceable answers from large internal regulated document repositories (SOPs, work instructions, policies), replacing unreliable keyword-based search across the organization.",
+        "Engineered a multi-signal hybrid retrieval pipeline (fuzzy matching, BPE token-based search, vector similarity) that reliably resolves document IDs, partial filenames, and natural-language queries.",
+        "Built a hierarchical document preprocessing framework converting raw files into structured, section-chunked markdown for precise context injection into LLMs.",
+        "Implemented deterministic section injection, resolving LLM-generated reference tags to exact source text at runtime for 100% response grounding and full audit traceability.",
+        "Deployed a scalable, container-based architecture on Azure — Azure OpenAI, Azure AI Search, Blob Storage, and LangGraph orchestration — supporting hundreds of concurrent users.",
+        "Impact: Reduced regulatory document search time by 90%, projected to save 3,750 hours/week at full scale with zero compliance violations and a 30–40% reduction in SME interruption overhead.",
+        "HCP Summarization & Insights with LLMs: Evaluated LLaMA, Phi-3, and Claude 3.7 Sonnet for HCP-level summarization across commercial, behavioral, and publication data; shipped a production insights dashboard generating actionable summaries for sales teams.",
+        "Data Engineering for Model Deployment: Built production pipelines automating data processing and model deployment on AWS, integrated with BI tools for real-time decision-making and reporting.",
+        "Impact: Sharpened understanding of HCP behavior and engagement drivers, enabling more effective field strategies and targeting.",
+        "HCP Early Adoption Modeling (Saphnelo): Designed adoption propensity models (clustering, classification, regression) by analyzing competitor prescribing patterns and forecasting SubQ uptake. Developed production-ready data pipelines using Spark and Python for real-time data processing and model inference."
+      ]
+    },
+    {
+      "name": "Freedom Mortgage",
+      "position": "Data Scientist, Generative AI (RAG Chatbot for Internal Business Teams)",
+      "location": "NJ, USA",
+      "startDate": "2024-09",
+      "endDate": "2025-02",
+      "highlights": [
+        "Architected and deployed an enterprise Generative AI RAG chatbot for the Mortgage & Loan Portfolio department using Snowflake Cortex and Claude Sonnet 3.7.",
+        "Built an automated end-to-end pipeline ingesting 720+ unstructured documents from the Confluence API into Snowflake, using Weaviate for vector storage and semantic retrieval and Gemini Flash 2.5 for high-quality, context-aware responses.",
+        "Impact: Delivered a 95% reduction in resolution time with an estimated $5.28M in annual productivity gains."
+      ]
+    },
+    {
+      "name": "Stealth AI Startup (VoiceLink — Voice AI Automation Platform)",
+      "position": "AI Product Engineer",
+      "location": "London, UK",
+      "startDate": "2024-05",
+      "endDate": "2024-09",
+      "highlights": [
+        "Architected and shipped a production-grade voice AI platform for restaurants deployed on GCP, integrating Deepgram (ASR), Claude/Gemini Vertex AI (LLM), and ElevenLabs/Gemini/Chirp 3 (TTS) to automate inbound/outbound calls — achieving sub-2-second response latency and a 95% call success rate.",
+        "Implemented RAG using Vertex AI over restaurant-specific data for accurate order handling and menu understanding, with full POS system integration for end-to-end automation.",
+        "Impact: Eliminated human dependency for restaurant order management, saving an estimated $19,200/year per location — a model scalable across enterprise restaurant chains for millions in potential annual savings."
+      ]
+    },
+    {
+      "name": "John Deere Financial (NBFC)",
+      "position": "Data Scientist (Self-Pay Collections Optimization)",
+      "location": "Pune, India",
+      "startDate": "2020-09",
+      "endDate": "2022-08",
+      "highlights": [
+        "Led the Self-Pay collection optimization project, developing risk/channel propensity models to assign customers to lower-cost channels and improve collection efficiency.",
+        "Conducted Design of Experiments (DOEs) to enhance pre-field operations, driving process improvements and optimizing CBC charge collections.",
+        "Impact: Achieved a 70–80% improvement in collections and early payments, reduced cost-to-collect, and grew digital repayment retention by 22% while optimizing direct-to-bank settlement cycles."
+      ]
+    },
+    {
+      "name": "Samsung R&D",
+      "position": "AI/ML Intern",
+      "location": "Bengaluru, India",
+      "startDate": "2019-12",
+      "endDate": "2020-08",
+      "highlights": [
+        "Bixby Intelligent Capsules (voice-AI): Improved Bixby Intelligent Capsules for expense tracking and crime data analysis, increasing user retention by 22% by implementing NLP and reinforced learning based on 30+ user interviews."
+      ]
+    },
+    {
+      "name": "Wawasan Pvt Ltd",
+      "position": "Java Backend Intern",
+      "location": "Hyderabad, India",
+      "startDate": "2019-05",
+      "endDate": "2019-07",
+      "url": "",
+      "highlights": [
+        "Developed backend modules for an e-commerce platform using Spring Boot, REST APIs, and MySQL."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Indiana Wesleyan University",
+      "area": "Information Technology and Project Management",
+      "studyType": "Master of Science",
+      "location": "Marion, IN",
+      "startDate": "2023-01",
+      "endDate": "2024-08",
+      "score": ""
+    },
+    {
+      "institution": "VNR Vignana Jyothi Institute of Engineering and Technology",
+      "area": "Civil & IT Engineering",
+      "studyType": "Bachelor of Technology",
+      "location": "India",
+      "startDate": "2016-06",
+      "endDate": "2020-06",
+      "score": ""
+    }
+  ],
+  "skills": [
+    {
+      "name": "Generative AI & Agentic Systems",
+      "level": "Senior",
+      "keywords": [
+        "LLM Fine-tuning (LoRA, QLoRA, PEFT)",
+        "RAG",
+        "Agentic RAG",
+        "Hybrid Search",
+        "Vector Similarity",
+        "LangChain",
+        "LangGraph",
+        "AutoGen",
+        "A2A",
+        "MCP",
+        "OpenAI",
+        "LLaMA",
+        "Phi-3",
+        "Claude",
+        "Gemini",
+        "BERT",
+        "Transformers",
+        "Attention"
+      ]
+    },
+    {
+      "name": "Machine Learning",
+      "level": "Senior",
+      "keywords": [
+        "Decision Trees",
+        "Ensemble Learning (XGBoost, Boosting)",
+        "SVM",
+        "Clustering",
+        "RNN",
+        "LSTM",
+        "NLP",
+        "Reinforcement Learning",
+        "Credit Risk Modeling",
+        "Propensity Modeling",
+        "Sentiment Analysis",
+        "Anomaly Detection",
+        "Time Series"
+      ]
+    },
+    {
+      "name": "Frameworks & Libraries",
+      "level": "Senior",
+      "keywords": [
+        "TensorFlow",
+        "PyTorch",
+        "Keras",
+        "Scikit-learn",
+        "Hugging Face Transformers",
+        "NLTK",
+        "spaCy",
+        "Gensim"
+      ]
+    },
+    {
+      "name": "Cloud & MLOps",
+      "level": "Senior",
+      "keywords": [
+        "AWS (S3, EC2, SageMaker, Bedrock)",
+        "Azure",
+        "GCP",
+        "Snowflake",
+        "Databricks",
+        "Docker",
+        "Kubernetes",
+        "Git",
+        "GitHub"
+      ]
+    },
+    {
+      "name": "Programming Languages",
+      "level": "Senior",
+      "keywords": [
+        "Python",
+        "TypeScript",
+        "Java",
+        "SQL",
+        "R"
+      ]
+    },
+    {
+      "name": "Data Engineering",
+      "level": "Senior",
+      "keywords": [
+        "Hadoop",
+        "Apache Spark",
+        "Kafka",
+        "Hive",
+        "Apache Airflow",
+        "Azure Data Factory",
+        "Neo4j"
+      ]
+    },
+    {
+      "name": "Data Science Tools",
+      "level": "Senior",
+      "keywords": [
+        "Pandas",
+        "NumPy",
+        "SciPy",
+        "OpenCV",
+        "Matplotlib",
+        "Seaborn",
+        "Power BI"
+      ]
+    },
+    {
+      "name": "AI Productivity Tools",
+      "level": "Senior",
+      "keywords": [
+        "Cursor AI",
+        "Claude Code",
+        "Antigravity",
+        "n8n",
+        "Bolt.new",
+        "Fireflies.ai",
+        "Whisper",
+        "OpenClaw",
+        "Hermes"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Cognizant (via Forage)",
+      "description": "Engaged on end-to-end ML lifecycle, including EDA, predictive modeling, and Machine Learning Production (MLOps) to deliver actionable business insights.",
+      "highlights": [],
+      "_migratedFromWork": true,
+      "_originalIdx": 0
+    },
+    {
+      "name": "Personal Autonomous Agent (\"Jerry\")",
+      "description": "Self-directed agentic orchestration system in n8n implementing planning, tool-calling, and task routing across personal workflows — a research-style prototype translating multi-agent methods into a running automation stack.",
+      "highlights": [],
+      "keywords": [
+        "agentic AI",
+        "n8n",
+        "orchestration",
+        "tool-calling"
+      ],
+      "url": ""
+    },
+    {
+      "name": "AIG's Summit (Co-Founder)",
+      "description": "Built a 200+ member community running weekly live sessions on AI tools and automation for builders and enthusiasts.",
+      "highlights": [],
+      "keywords": [
+        "community",
+        "AI education"
+      ],
+      "url": ""
+    }
+  ],
+  "meta": {
+    "version": "1.0.0",
+    "lastModified": "2026-08-12",
+    "source": "docx + cv.md",
+    "notes": "Augmented 2026-08-12 with Wawasan + Cognizant work entries. Augmented 2026-08-12 with profile.yml data: narrative (headline, exit_story, superpowers, proof_points), target_roles, compensation, visa. tailor-resume.mjs now reads these. LoRA/QLoRA/PEFT and Reinforcement Learning used ~2 years ago."
+  },
+  "narrative": {
+    "headline": "ML Research Engineer | LLM & Deep Learning Systems | Model Optimization (Quantization, Pruning) | MLOps & Distributed Training | Python, PyTorch, Hugging Face",
+    "exit_story": "I combine 5 years of ML experience with a product mindset to take AI solutions from zero-to-one in a week. I focus on building things people love and automating workflows, avoiding repetitive work with low impact.",
+    "superpowers": [
+      "Bridging the gap between AI technology and business problems with a product mindset",
+      "Fast prototyping (taking ideas from scratch to user-tested prototypes in a week)",
+      "Multi-layered Agentic RAG & ground-truth evaluation (reduced search time by 90%)",
+      "Taking ownership and quickly adapting to new LLMs/technologies"
+    ],
+    "proof_points": [
+      {
+        "name": "Agentic RAG Platform (AstraZeneca)",
+        "hero_metric": "Multi-layered agentic RAG delivering 100% grounded answers; reduced search time by 90%"
+      },
+      {
+        "name": "OpenAI/Gemini Case Studies",
+        "hero_metric": "Product management case studies demonstrating strong product sense in AI"
+      }
+    ]
+  },
+  "target_roles": {
+    "primary": [
+      "AI Engineer",
+      "Applied AI Engineer",
+      "Data Scientist",
+      "Gen AI Engineer",
+      "LLM Engineer",
+      "RAG Engineer",
+      "AI Product Engineer",
+      "LLMOps Engineer",
+      "Solutions Engineer (AI)",
+      "Automation Engineer",
+      "Workflow Automation Engineer",
+      "Low-Code Engineer",
+      "n8n Engineer",
+      "AI Automation Engineer",
+      "Integration Engineer",
+      "AI Workflow Engineer",
+      "AI Product Manager",
+      "Technical Product Manager",
+      "AI Solutions Architect",
+      "AI Platform Engineer"
+    ],
+    "archetypes": [
+      {
+        "name": "RAG / Retrieval Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Agentic AI Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Applied AI — Pharma/Health",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Voice AI Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "LLMOps / MLOps",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Automation Builder",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Product Manager",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Technical Product Manager",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Solutions Architect",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Platform / LLMOps Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Agentic Workflows / Automation",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Transformation Lead",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Low-Code Automation Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "Integration Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      },
+      {
+        "name": "AI Workflow Engineer",
+        "level": "Mid",
+        "fit": "primary"
+      }
+    ]
+  },
+  "compensation": {
+    "target_range": "$180K",
+    "currency": "USD",
+    "minimum": "$95K",
+    "equity": true,
+    "location_flexibility": "Open to relocate anywhere within the USA; open to remote, hybrid, or onsite in any US city (Atlanta, Texas, NYC, SF, etc.)."
+  },
+  "additional_profile_detail": {
+    "source_file": "my-data/ai-platform-profile.md",
+    "note": "User-provided capabilities; use for JD tailoring when supported. Do not infer employer, dates, or employment status from this section.",
+    "domains": [
+      "medical claims review",
+      "HIPAA",
+      "PHI",
+      "PII",
+      "prior authorization",
+      "document intelligence",
+      "multimodal AI",
+      "AI platform engineering",
+      "GPU and inference engineering",
+      "regulated environments"
+    ],
+    "capabilities": {
+      "document_intelligence": [
+        "OCR",
+        "document splitting",
+        "DistilBERT page classification",
+        "rules-based classification",
+        "YOLO layout detection",
+        "region cropping",
+        "field extraction",
+        "human-in-the-loop evidence traceability"
+      ],
+      "healthcare_ai": [
+        "RAG with citations",
+        "nurse review decision support",
+        "Azure Document Intelligence",
+        "custom-trained OCR models",
+        "VLM accuracy optimization"
+      ],
+      "models_and_inference": [
+        "LLaMA",
+        "Mistral",
+        "Phi-3",
+        "BioBERT",
+        "BioMedBERT",
+        "Bio-Mistral",
+        "PyTorch",
+        "ONNX Runtime",
+        "llama.cpp",
+        "4-bit quantization",
+        "CUDA",
+        "NVCC",
+        "custom kernels"
+      ],
+      "infrastructure": [
+        "microservices",
+        "RHEL",
+        "RPM packaging",
+        "systemd",
+        "containers",
+        "Kubernetes",
+        "ACR",
+        "Azure DevOps CI/CD",
+        "on-premises",
+        "cloud",
+        "government cloud"
+      ],
+      "reliability_security": [
+        "Telegraf",
+        "InfluxDB",
+        "Chronograf",
+        "GPU metrics",
+        "Uvicorn tuning",
+        "CPU/I/O concurrency",
+        "database pooling",
+        "HTTPS",
+        "certificate-based authentication",
+        "mTLS"
+      ]
+    }
+  }
+}

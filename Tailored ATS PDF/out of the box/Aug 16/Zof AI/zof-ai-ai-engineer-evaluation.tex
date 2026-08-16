@@ -1,0 +1,158 @@
+%-------------------------
+% Career-Ops CV Template — Classic ATS-Friendly Single Column
+%-------------------------
+\documentclass[letterpaper,9.5pt]{article}
+
+\usepackage[empty]{fullpage}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[parfill]{parskip}
+
+\usepackage[hidelinks]{hyperref}
+
+% Professional blue links: visible, clickable, and still ATS-readable.
+\definecolor{linkblue}{HTML}{1B4F72}
+\hypersetup{
+  colorlinks=true,
+  urlcolor=linkblue,
+  linkcolor=linkblue,
+  citecolor=linkblue,
+  pdfborder={0 0 0}
+}
+\urlstyle{same}
+\pdfgentounicode=1
+\raggedbottom
+\raggedright
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+% Tight margins for 2-page fit with dense rewrites.
+\addtolength{\oddsidemargin}{-0.55in}
+\addtolength{\evensidemargin}{-0.55in}
+\addtolength{\textwidth}{1.1in}
+\addtolength{\topmargin}{-0.65in}
+\addtolength{\textheight}{1.3in}
+
+% Navy section labels with a subtle divider. A custom macro avoids fragile
+% title-format hooks and keeps the generated PDF predictable for ATS parsers.
+\newcommand{\resumeSection}[1]{%
+  \vspace{3pt}\noindent{\large\bfseries\color{linkblue}#1}\par
+  \vspace{-3pt}\noindent{\color{linkblue}\rule{\textwidth}{0.45pt}}\vspace{1pt}%
+}
+
+% Left heading, right-aligned dates/location using \hfill.
+\newcommand{\resumeHeader}[2]{%
+  \vspace{1.5pt}\noindent{\bfseries #1}\hfill{\bfseries #2}\par\vspace{0.5pt}%
+}
+\newcommand{\resumeSub}[2]{%
+  \noindent{\itshape #1}\hfill{\itshape #2}\par\vspace{0.5pt}%
+}
+
+% Real itemize lists—not manually spaced pseudo-bullets.
+% Tightened spacing (2026-08-14) to fit 2 pages with detailed rewrites.
+\newenvironment{resumeItems}{%
+  \begin{itemize}[leftmargin=0.15in, label=\textbullet, itemsep=0.25pt, parsep=0pt, topsep=0.15pt, partopsep=0pt]
+}{%
+  \end{itemize}\vspace{0.15pt}
+}
+\newenvironment{projectItems}{%
+  \begin{itemize}[leftmargin=0.15in, label=\textbullet, itemsep=0.25pt, parsep=0pt, topsep=0.15pt, partopsep=0pt]
+}{%
+  \end{itemize}\vspace{0.15pt}
+}
+
+\begin{document}
+
+\begin{center}
+  {\Huge\bfseries Gittaveni Sidhartha}\\[2pt]
+  {\large AI Evals | Verification Harnesses | LLM Quality Gates | Test Automation | RAG Evaluation | CI-Integrated Testing}\\[4pt]
+  {\small
+    \href{mailto:sidharthay74@gmail.com}{sidharthay74@gmail.com}\enspace|\enspace
+    \href{tel:+17174613574}{+1 (717) 461-3574}\enspace|\enspace
+    \href{https://www.linkedin.com/in/sidharthay74/}{LinkedIn}\enspace|\enspace
+    \href{https://github.com/zentrium74}{GitHub}
+  }
+\end{center}
+\vspace{-3pt}
+
+\resumeSection{Summary}
+AI Engineer with 5 years of experience building production LLM, agentic, and RAG systems, with a disciplined focus on evaluation, verification, and quality gates that confirm AI output before it reaches users. Skeptical by default, I design eval suites, verification harnesses, and CI-wired automated checks that turn 'it seems to work' into defensible evidence across retrieval, summarization, and voice-agent workflows. Track record of measurable impact --- from 90\% faster regulated-document search to a \$5.28M productivity lift --- by raising the standard for what 'working' means.
+
+\resumeSection{Professional Experience}
+\resumeHeader{AstraZeneca}{Mar 2025 -- Present}
+\resumeSub{AI Engineer | DE, USA}{}
+\begin{resumeItems}
+\item Lexi --- Agentic RAG Assistant for Regulated Documents: Architected an end-to-end RAG system delivering accurate, traceable answers from large internal regulated document repositories (SOPs, work instructions, policies), replacing unreliable keyword-based search across the organization.
+\item Engineered a multi-signal hybrid retrieval pipeline (fuzzy matching, BPE token-based search, vector similarity) that reliably resolves document IDs, partial filenames, and natural-language queries.
+\item Built a hierarchical document preprocessing framework converting raw files into structured, section-chunked markdown for precise context injection into LLMs.
+\item Implemented deterministic section injection, resolving LLM-generated reference tags to exact source text at runtime for 100\% response grounding and full audit traceability.
+\item Deployed a scalable, container-based architecture on Azure --- Azure OpenAI, Azure AI Search, Blob Storage, and LangGraph orchestration --- supporting hundreds of concurrent users.
+\item Impact: Reduced regulatory document search time by 90\%, projected to save 3,750 hours/week at full scale with zero compliance violations and a 30--40\% reduction in SME interruption overhead.
+\item HCP Summarization \& Insights with LLMs: Evaluated LLaMA, Phi-3, and Claude 3.7 Sonnet for HCP-level summarization across commercial, behavioral, and publication data; shipped a production insights dashboard generating actionable summaries for sales teams.
+\item Data Engineering for Model Deployment: Built production pipelines automating data processing and model deployment on AWS, integrated with BI tools for real-time decision-making and reporting.
+\item Impact: Sharpened understanding of HCP behavior and engagement drivers, enabling more effective field strategies and targeting.
+\item HCP Early Adoption Modeling (Saphnelo): Designed adoption propensity models (clustering, classification, regression) by analyzing competitor prescribing patterns and forecasting SubQ uptake. Developed production-ready data pipelines using Spark and Python for real-time data processing and model inference.
+\end{resumeItems}
+\resumeHeader{Freedom Mortgage}{Sep 2024 -- Feb 2025}
+\resumeSub{Data Scientist, Generative AI (RAG Chatbot for Internal Business Teams) | NJ, USA}{}
+\begin{resumeItems}
+\item Architected and deployed an enterprise Generative AI RAG chatbot for the Mortgage \& Loan Portfolio department using Snowflake Cortex and Claude Sonnet 3.7.
+\item Built an automated end-to-end pipeline ingesting 720+ unstructured documents from the Confluence API into Snowflake, using Weaviate for vector storage and semantic retrieval and Gemini Flash 2.5 for high-quality, context-aware responses.
+\item Impact: Delivered a 95\% reduction in resolution time with an estimated \$5.28M in annual productivity gains.
+\end{resumeItems}
+\resumeHeader{Stealth AI Startup (VoiceLink --- Voice AI Automation Platform)}{May 2024 -- Sep 2024}
+\resumeSub{AI Product Engineer | London, UK}{}
+\begin{resumeItems}
+\item Architected and shipped a production-grade voice AI platform for restaurants deployed on GCP, integrating Deepgram (ASR), Claude/Gemini Vertex AI (LLM), and ElevenLabs/Gemini/Chirp 3 (TTS) to automate inbound/outbound calls --- achieving sub-2-second response latency and a 95\% call success rate.
+\item Implemented RAG using Vertex AI over restaurant-specific data for accurate order handling and menu understanding, with full POS system integration for end-to-end automation.
+\item Impact: Eliminated human dependency for restaurant order management, saving an estimated \$19,200/year per location --- a model scalable across enterprise restaurant chains for millions in potential annual savings.
+\end{resumeItems}
+\resumeHeader{John Deere Financial (NBFC)}{Sep 2020 -- Aug 2022}
+\resumeSub{Data Scientist (Self-Pay Collections Optimization) | Pune, India}{}
+\begin{resumeItems}
+\item Led the Self-Pay collection optimization project, developing risk/channel propensity models to assign customers to lower-cost channels and improve collection efficiency.
+\item Conducted Design of Experiments (DOEs) to enhance pre-field operations, driving process improvements and optimizing CBC charge collections.
+\item Impact: Achieved a 70--80\% improvement in collections and early payments, reduced cost-to-collect, and grew digital repayment retention by 22\% while optimizing direct-to-bank settlement cycles.
+\end{resumeItems}
+\resumeHeader{Samsung R\&D}{Dec 2019 -- Aug 2020}
+\resumeSub{AI/ML Intern | Bengaluru, India}{}
+\begin{resumeItems}
+\item Bixby Intelligent Capsules (voice-AI): Improved Bixby Intelligent Capsules for expense tracking and crime data analysis, increasing user retention by 22\% by implementing NLP and reinforced learning based on 30+ user interviews.
+\end{resumeItems}
+\resumeHeader{Wawasan Pvt Ltd}{May 2019 -- Jul 2019}
+\resumeSub{Java Backend Intern | Hyderabad, India}{}
+\begin{resumeItems}
+\item Developed backend modules for an e-commerce platform using Spring Boot, REST APIs, and MySQL.
+\end{resumeItems}
+\resumeSection{Selected Projects}
+
+\resumeHeader{Cognizant (via Forage)}{}
+Engaged on end-to-end ML lifecycle, including EDA, predictive modeling, and Machine Learning Production (MLOps) to deliver actionable business insights.
+
+\resumeHeader{Personal Autonomous Agent (''Jerry'')}{}
+Self-directed agentic orchestration system in n8n designed with eval hooks to verify planning correctness and tool-call fidelity across personal workflows --- functionally similar to Claude Cowork but built earlier.
+
+\resumeHeader{Lead Generation \& Qualification Automation}{}
+End-to-end n8n pipeline scraping and enriching prospect data from Apollo and Apify, with qualification logic and CI-style verification checks asserting data quality and routing correctness before outreach.
+
+\resumeSection{Technical Skills}
+\textbf{Generative AI \& Agentic Systems}: LLM Fine-tuning (LoRA, QLoRA, PEFT), RAG, Agentic RAG, Hybrid Search, Vector Similarity, LangChain, LangGraph, AutoGen, A2A, MCP, OpenAI, LLaMA, Phi-3, Claude, Gemini, BERT, Transformers, Attention\\
+\textbf{Cloud \& MLOps}: AWS (S3, EC2, SageMaker, Bedrock), Azure, GCP, Snowflake, Databricks, Docker, Kubernetes, Git, GitHub\\
+\textbf{Programming Languages}: Python, TypeScript, Java, SQL, R\\
+\textbf{Machine Learning}: Decision Trees, Ensemble Learning (XGBoost, Boosting), SVM, Clustering, RNN, LSTM, NLP, Reinforcement Learning, Credit Risk Modeling, Propensity Modeling, Sentiment Analysis, Anomaly Detection, Time Series\\
+\textbf{Frameworks \& Libraries}: TensorFlow, PyTorch, Keras, Scikit-learn, Hugging Face Transformers, NLTK, spaCy, Gensim\\
+\textbf{Data Engineering}: Hadoop, Apache Spark, Kafka, Hive, Apache Airflow, Azure Data Factory, Neo4j\\
+\textbf{Data Science Tools}: Pandas, NumPy, SciPy, OpenCV, Matplotlib, Seaborn, Power BI\\
+\textbf{AI Productivity Tools}: Cursor AI, Claude Code, Antigravity, n8n, Bolt.new, Fireflies.ai, Whisper, OpenClaw, Hermes\\
+
+\resumeSection{Education}
+\resumeHeader{Indiana Wesleyan University, Marion, IN}{Jan 2023 -- Aug 2024}
+\resumeSub{Master of Science in Information Technology and Project Management}{}
+\resumeHeader{VNR Vignana Jyothi Institute of Engineering and Technology, India}{Jun 2016 -- Jun 2020}
+\resumeSub{Bachelor of Technology in Civil \& IT Engineering}{}
+
+\end{document}
