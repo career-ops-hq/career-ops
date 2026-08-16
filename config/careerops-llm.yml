@@ -1,0 +1,8 @@
+# Single source of truth for CareerOps automation LLM calls.
+# This is independent of the active chat-session model.
+provider: minimax-oauth
+model: MiniMax-M3
+api: anthropic-messages
+profile: careeropsjob
+max_tokens: 4096
+request_timeout_ms: 180000
