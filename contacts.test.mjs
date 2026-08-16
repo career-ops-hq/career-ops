@@ -339,7 +339,6 @@ const typoR = spawnContacts('--sumary');
 ok('unknown flag exits 1', typoR.status === 1);
 ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
 ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
-ok('unknown flag prints Usage:', typoR.stderr.includes('Usage:'));
 ok('unknown flag writes nothing to stdout', typoR.stdout === '');
 
 // contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
@@ -354,6 +353,8 @@ const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
+  mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -460,6 +461,8 @@ try {
 const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);

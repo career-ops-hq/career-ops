@@ -44,6 +44,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstat
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
@@ -62,19 +63,7 @@ const USAGE = `Usage:
   node contacts.mjs --help              # print this usage block and exit`;
 
 const args = process.argv.slice(2);
-
-if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-}
-
-const unknownFlags = args.filter((a, idx) =>
-  a.startsWith('-') && !KNOWN_FLAGS.includes(a.split("=")[0]));
-if (unknownFlags.length) {
-  console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-  console.error(USAGE);
-  process.exit(1);
-}
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const callerIdMode = args.includes('--caller-id');
