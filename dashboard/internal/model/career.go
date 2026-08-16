@@ -86,14 +86,14 @@ type WeekActivity struct {
 // dimension-based tables: what kinds of roles convert, where they are, and
 // what they pay.
 type StatsMetrics struct {
-	Archetypes   []ArchetypeStat
-	WorkModes    []LabelCountStat
-	Locations    []LabelCountStat
-	Pay          PayStats
-	PayHistogram []LabelCountStat
-	ScoreTiers   []LabelCountStat
-	SeniorityMix []LabelCountStat
-	Insights     []string
+	Archetypes    []ArchetypeStat
+	WorkModes     []LabelCountStat
+	Locations     []LabelCountStat
+	Pay           PayStats
+	PayHistogram  []LabelCountStat
+	ScoreTiers    []LabelCountStat
+	SeniorityMix  []LabelCountStat
+	QualityBarPct float64 // percentage of scored apps with score >= 4.0
 }
 
 // ArchetypeStat aggregates applications by report-derived archetype.

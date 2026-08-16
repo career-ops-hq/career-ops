@@ -46,7 +46,13 @@ func (m *appModel) reloadPipelineData() {
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
-	m.evaluatedCount = len(apps)
+	// Count only apps with a score so the header reflects evaluated offers.
+	m.evaluatedCount = 0
+	for _, a := range apps {
+		if a.Score > 0 {
+			m.evaluatedCount++
+		}
+	}
 }
 
 // enrichArchetypes lazy-loads each app's report-derived archetype (used by
@@ -59,7 +65,11 @@ func enrichArchetypes(careerOpsPath string, apps []model.CareerApplication, pm *
 			continue
 		}
 		archetype, tldr, remote, comp := data.LoadReportSummary(careerOpsPath, apps[i].ReportPath)
-		apps[i].Archetype = archetype
+		// Only overwrite when the report actually supplies a non-empty archetype;
+		// preserve any value already derived from the tracker.
+		if archetype != "" {
+			apps[i].Archetype = archetype
+		}
 		if archetype != "" || tldr != "" || remote != "" || comp != "" {
 			pm.EnrichReport(apps[i].ReportPath, archetype, tldr, remote, comp)
 		}
@@ -340,7 +350,15 @@ func main() {
 		theme:           t,
 		progressMetrics: progressMetrics,
 		statsMetrics:    statsMetrics,
-		evaluatedCount:  len(apps),
+		evaluatedCount:  func() int {
+			n := 0
+			for _, a := range apps {
+				if a.Score > 0 {
+					n++
+				}
+			}
+			return n
+		}(),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

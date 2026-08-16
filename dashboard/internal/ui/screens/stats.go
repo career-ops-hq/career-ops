@@ -69,6 +69,15 @@ func (m StatsModel) Update(msg tea.Msg) (StatsModel, tea.Cmd) {
 		case "pgup", "ctrl+u":
 			m.scrollOffset = max(0, m.scrollOffset-m.height/2)
 		} // end inner key switch
+		// Clamp to content maximum so scrolling down stops at the last valid position.
+		contentLines := strings.Count(m.View(), "\n") + 1
+		maxOffset := contentLines - (m.height - 4)
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		if m.scrollOffset > maxOffset {
+			m.scrollOffset = maxOffset
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = keyEvent.Width, keyEvent.Height
 	} // end outer msg switch
@@ -80,7 +89,7 @@ func (m StatsModel) View() string {
 	header := m.renderHeader()
 	insights := m.renderInsights()
 	archetypes := m.renderArchetypeChart()
-	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, m.metrics.ScoreTiers, []lipgloss.Color{
+	pieChart := m.renderPieChart(i18n.Current.FitQualityDistribution, i18n.Current.QualityBreakdown, m.metrics.ScoreTiers, []lipgloss.Color{
 		m.theme.Green,  // Elite (>=4.5)
 		m.theme.Sky,    // Strong (4.0-4.4)
 		m.theme.Yellow, // Viable (3.5-3.9)
@@ -88,7 +97,7 @@ func (m StatsModel) View() string {
 		m.theme.Red,    // Below Bar (<3.0)
 		m.theme.Mauve,
 	})
-	seniorityPieChart := m.renderPieChart(i18n.Current.SeniorityMix, m.metrics.SeniorityMix, []lipgloss.Color{
+	seniorityPieChart := m.renderPieChart(i18n.Current.SeniorityMix, i18n.Current.SeniorityMix, m.metrics.SeniorityMix, []lipgloss.Color{
 		m.theme.Mauve,
 		m.theme.Peach,
 		m.theme.Sky,
@@ -231,10 +240,10 @@ func (m StatsModel) renderInsights() string {
 	return padStyle.Render(boxStyle.Render(strings.Join(bulletLines, "\n")))
 }
 
-// renderPieChart draws a high-definition radial terminal pie chart with aspect ratio correction and legend
-func (m StatsModel) renderPieChart(title string, stats []model.LabelCountStat, sliceColors []lipgloss.Color) string {
+// renderPieChart draws a high-definition radial terminal pie chart with aspect ratio correction and legend.
+func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.LabelCountStat, sliceColors []lipgloss.Color) string {
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
-	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render(i18n.Current.PieChartSectionTitle(title))
+	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Mauve).Render(i18n.PieChartSectionTitle(title))
 	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
 	if len(stats) == 0 {
@@ -302,7 +311,7 @@ func (m StatsModel) renderPieChart(title string, stats []model.LabelCountStat, s
 
 	// Build Legend lines
 	var legendLines []string
-	legendLines = append(legendLines, lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text).Render(i18n.Current.QualityBreakdown))
+	legendLines = append(legendLines, lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text).Render(legendHeading))
 	for i, s := range stats {
 		color := m.theme.Text
 		if i < len(sliceColors) {
@@ -315,15 +324,9 @@ func (m StatsModel) renderPieChart(title string, stats []model.LabelCountStat, s
 		legendLines = append(legendLines, bullet+lbl+cnt)
 	}
 
-	eliteAndStrong := 0.0
-	for _, s := range stats {
-		if strings.Contains(s.Label, "Elite") || strings.Contains(s.Label, "Strong") {
-			eliteAndStrong += s.Pct
-		}
-	}
-	if eliteAndStrong > 0 {
+	if m.metrics.QualityBarPct > 0 {
 		summaryBadge := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Green).
-			Render(fmt.Sprintf(i18n.Current.MeetQualityBar, eliteAndStrong))
+			Render(fmt.Sprintf(i18n.Current.MeetQualityBar, m.metrics.QualityBarPct))
 		legendLines = append(legendLines, "", summaryBadge)
 	}
 

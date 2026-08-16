@@ -66,6 +66,20 @@ func isFalseCityState(city, state string) bool {
 	return false
 }
 
+// titleCase returns a simple title-cased version of s without using the
+// deprecated strings.Title: it upper-cases the first letter of each
+// space-separated word and lower-cases the rest.
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) == 0 {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+	}
+	return strings.Join(words, " ")
+}
+
 // CanonicalizeLocation normalizes casing and eliminates noise strings from location data.
 func CanonicalizeLocation(raw string) string {
 	loc := strings.TrimSpace(raw)
@@ -105,10 +119,10 @@ func CanonicalizeLocation(raw string) string {
 		case "vienna", "wien":
 			return "Vienna"
 		default:
-			return strings.Title(c)
+			return titleCase(c)
 		}
 	} else if len(parts) == 2 {
-		city := strings.Title(strings.ToLower(strings.TrimSpace(parts[0])))
+		city := titleCase(strings.ToLower(strings.TrimSpace(parts[0])))
 		state := strings.ToUpper(strings.TrimSpace(parts[1]))
 		if isFalseCityState(city, state) {
 			return ""
@@ -116,7 +130,28 @@ func CanonicalizeLocation(raw string) string {
 		return city + ", " + state
 	}
 
-	return loc
+	// 3+ parts: normalize each component and filter false positives.
+	var normalized []string
+	for i, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			continue
+		}
+		if i == 0 {
+			// First part is city — run it through the single-part alias map.
+			single := CanonicalizeLocation(trimmed)
+			if single == "" {
+				return ""
+			}
+			normalized = append(normalized, single)
+		} else {
+			normalized = append(normalized, strings.TrimSpace(trimmed))
+		}
+	}
+	if len(normalized) == 0 {
+		return ""
+	}
+	return strings.Join(normalized, ", ")
 }
 
 // ComputeStatsMetrics builds dimension-based breakdowns (archetype, work
@@ -305,6 +340,7 @@ func ComputeStatsMetrics(apps []model.CareerApplication) model.StatsMetrics {
 			"Moderate (3.0-3.4)",
 			"Below Bar (<3.0)",
 		}
+		qualityBarCount := 0
 		for _, t := range orderedTiers {
 			count := tierCounts[t]
 			if count > 0 {
@@ -314,17 +350,22 @@ func ComputeStatsMetrics(apps []model.CareerApplication) model.StatsMetrics {
 					Pct:   safePct(count, scoreTotal),
 				})
 			}
+			// Elite and Strong together = score >= 4.0
+			if t == "Elite (≥4.5)" || t == "Strong (4.0-4.4)" {
+				qualityBarCount += count
+			}
 		}
+		sm.QualityBarPct = safePct(qualityBarCount, scoreTotal)
 	}
-	
+
 	// 5.5 Seniority Mix Pie Chart
 	seniorityCounts := map[string]int{
-		"Executive": 0,
+		"Executive":         0,
 		"Staff / Principal": 0,
-		"Lead / Manager": 0,
-		"Senior": 0,
-		"Mid-Level": 0,
-		"Junior / Entry": 0,
+		"Lead / Manager":    0,
+		"Senior":            0,
+		"Mid-Level":         0,
+		"Junior / Entry":    0,
 	}
 	seniorityTotal := 0
 	for _, app := range apps {
@@ -349,8 +390,8 @@ func ComputeStatsMetrics(apps []model.CareerApplication) model.StatsMetrics {
 		}
 	}
 
-	// 6. Automated Insight Captions
-	sm.Insights = GenerateInsights(sm)
+	// Insights are generated at render time (renderInsights) to respect the
+	// active language toggle; do not store them here.
 
 	return sm
 }

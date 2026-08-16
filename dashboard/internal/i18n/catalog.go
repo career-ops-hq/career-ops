@@ -259,7 +259,7 @@ func (c *Catalog) FormatTimeAgo(dateStr string) string {
 }
 
 // PieChartSectionTitle formats a section title with the standard pie chart icon.
-func (c *Catalog) PieChartSectionTitle(title string) string {
+func PieChartSectionTitle(title string) string {
 	return "🎯 " + title
 }
 
@@ -523,7 +523,7 @@ var Tr = Catalog{
 	InsightVolumeFit:       "En yüksek hacim %s alanında (%d ilan, %%%.0f) · En yüksek uyum %s alanında (ort. %.1f/5)",
 	InsightVolumePrimary:   "Ana arketip %s (%d ilan, değerlendirilen hattın %%%.0f'i)",
 	InsightWorkMode:        "Çalışma yeri dağılımı: ilanların %%%.0f'i %s olarak çalışıyor",
-	InsightPayBenchmark:    "Ücret karşılaştırması: %d veri noktasında medyan üst maaş $%.0fK (en yüksek $%.0fK)",
+	InsightPayBenchmark:    "Ücret karşılaştırması: medyan üst maaş $%.0fK (en yüksek $%.0fK) — %d veri noktası",
 
 	// Seniority levels
 	SeniorityExecutive:      "Yönetici",

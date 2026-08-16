@@ -55,6 +55,10 @@ func TestCanonicalizeLocation(t *testing.T) {
 		{raw: "lisbon", expected: "Lisbon"},
 		{raw: "", expected: ""},
 		{raw: "—", expected: ""},
+		// 3-part: first part alias-resolved, rest preserved verbatim
+		{raw: "berlin, de, remote", expected: "Berlin, de, remote"},
+		// 3-part where first part does not resolve -> empty
+		{raw: "Req, ID, extra", expected: ""},
 	}
 
 	for _, tt := range tests {
@@ -183,6 +187,9 @@ func TestComputeStatsMetrics(t *testing.T) {
 		"Moderate (3.0-3.4)": 1, // 3.2
 		"Below Bar (<3.0)":   1, // 2.1
 	}
+	if len(metrics.ScoreTiers) != len(expectedTierCounts) {
+		t.Fatalf("expected %d ScoreTiers, got %d: %v", len(expectedTierCounts), len(metrics.ScoreTiers), metrics.ScoreTiers)
+	}
 	for _, tier := range metrics.ScoreTiers {
 		expectedCount, ok := expectedTierCounts[tier.Label]
 		if !ok {
@@ -207,6 +214,9 @@ func TestComputeStatsMetrics(t *testing.T) {
 		"Staff / Principal": 1, // Staff ML Engineer
 		"Junior / Entry":    2, // Junior Machine Learning Engineer, Intern AI Researcher
 	}
+	if len(metrics.SeniorityMix) != len(expectedSeniorityCounts) {
+		t.Fatalf("expected %d SeniorityMix entries, got %d: %v", len(expectedSeniorityCounts), len(metrics.SeniorityMix), metrics.SeniorityMix)
+	}
 	for _, mix := range metrics.SeniorityMix {
 		expectedCount, ok := expectedSeniorityCounts[mix.Label]
 		if !ok {
@@ -222,8 +232,8 @@ func TestComputeStatsMetrics(t *testing.T) {
 		}
 	}
 
-	// Test Insights
-	if len(metrics.Insights) == 0 {
-		t.Errorf("expected non-empty insights, got 0")
+	// QualityBarPct: Elite (1) + Strong (1) = 2 out of 4 scored = 50%
+	if metrics.QualityBarPct < 49.99 || metrics.QualityBarPct > 50.01 {
+		t.Errorf("expected QualityBarPct ~50.0, got %f", metrics.QualityBarPct)
 	}
 }
