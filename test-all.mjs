@@ -6214,6 +6214,49 @@ try {
     fail('mixed-type keyword lists should not crash and should still match string entries');
   }
 
+  // Case 9b: block_hard beats always_allow — a European city name that is a whole
+  // word inside a non-European location. Word-boundary matching (#2087) cannot
+  // catch these because both sides are genuine whole words, and the pre-existing
+  // `always_allow`-wins rule discarded the user's own country-level block entry.
+  const hardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+    block_hard: ['brazil', 'usa'],
+  });
+  const homonyms = [
+    ['Porto Alegre, Rio Grande do Sul, Brazil', 'city name shared with a Portuguese city'],
+    ['USA - Example State - Malta', 'city name shared with a European country'],
+  ];
+  const leaks = homonyms.filter(([loc]) => hardFilter(loc) !== false);
+  if (leaks.length === 0) {
+    pass('block_hard rejects a non-European location whose city name matches always_allow');
+  } else {
+    fail(`block_hard failed to reject: ${leaks.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9c: block_hard does NOT widen rejection — a genuine multi-location
+  // posting must still survive a plain `block` entry, which is the whole reason
+  // always_allow exists (#650). This is the regression guard for that feature.
+  if (hardFilter('Amsterdam, Netherlands') === true) {
+    pass('block_hard leaves a genuine always_allow hit untouched');
+  } else {
+    fail('block_hard must not reject a location that only matches always_allow');
+  }
+
+  // Case 9d: additive and backward compatible — the same config with no
+  // block_hard key behaves exactly as it did before this tier existed.
+  const noHardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+  });
+  if (noHardFilter('Porto Alegre, Rio Grande do Sul, Brazil') === true) {
+    pass('without block_hard, always_allow still wins over block (unchanged semantics)');
+  } else {
+    fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
+  }
+
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
   const allBadFilter = buildLocationFilter({ block: [null, 42, undefined], allow: ['remote'] });
   if (allBadFilter('Remote') === true) {
