@@ -115,7 +115,17 @@ export async function POST(req: Request) {
           /* ignore */
         }
       };
+      // Idempotent, like the `closed` guard the sibling routes carry. fail() closes
+      // the controller, and there is more than one path to it: a fencing refusal
+      // reports through fail() and then resolves with an empty buffer, which the
+      // empty-output branch below reports through fail() a second time. Closing an
+      // already-closed controller throws "Invalid state", and that throw escapes
+      // the async start() as an unhandled rejection — a worse failure than the one
+      // being reported.
+      let failed = false;
       const fail = (m: string, raw?: string) => {
+        if (failed) return;
+        failed = true;
         log(`ERROR: ${m}`);
         emit({ t: "error", m, raw });
         controller.close();

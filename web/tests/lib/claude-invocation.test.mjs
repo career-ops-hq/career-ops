@@ -19,7 +19,7 @@ import {
   toolNames,
 } from "../../src/lib/claude-invocation.mjs";
 // KNOWN_KINDS lives with the policy both CLIs read, not on Claude's path (#2507).
-import { KNOWN_KINDS } from "../../src/lib/worker-capabilities.mjs";
+import { KNOWN_KINDS, capabilitiesFor } from "../../src/lib/worker-capabilities.mjs";
 
 test("toolScopeFor: pdf gets no write-capable tool at all", () => {
   // Given the pdf kind, whose agent only tailors content and emits it inline
@@ -101,8 +101,11 @@ test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
 
 test("toolScopeFor: evaluate and fix-portal keep Write and Bash on purpose", () => {
   // Given these kinds genuinely run reserve-report-num.mjs / merge-tracker.mjs /
-  // verify-portals.mjs and persist canonical artifacts
-  for (const kind of ["evaluate", "fix-portal"]) {
+  // verify-portals.mjs and persist canonical artifacts. Derived from the policy
+  // rather than named, so a newly-added writing kind is covered automatically.
+  const writingKinds = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
+  assert.ok(writingKinds.length > 0, "the policy must classify at least one kind as writing");
+  for (const kind of writingKinds) {
     // When resolving their scope
     const allowed = toolNames(toolScopeFor(kind).allowed);
 
@@ -198,7 +201,11 @@ test("claudeCliArgs: MCP is locked for non-writing kinds, kept for writing ones"
   // gap for the other kinds" — now closed. A deny list describes only NATIVE tools,
   // so without --strict-mcp-config a user's MCP server could hand a `writes: false`
   // worker a write tool while the fencing certified the run as restricted.
-  for (const kind of ["pdf", "research"]) {
+  const nonWriting = KNOWN_KINDS.filter((k) => !capabilitiesFor(k).writes);
+  const writing = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
+  assert.ok(nonWriting.length > 0 && writing.length > 0, "both partitions must be non-empty");
+
+  for (const kind of nonWriting) {
     assert.ok(
       claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
       `${kind} declares writes:false, so its tool list must describe everything it can reach`,
@@ -209,7 +216,7 @@ test("claudeCliArgs: MCP is locked for non-writing kinds, kept for writing ones"
   // would silently stop a user's configured server (the optional Canva one, say)
   // from loading. Those kinds legitimately write, so MCP grants them nothing their
   // capability record does not already allow.
-  for (const kind of ["evaluate", "fix-portal"]) {
+  for (const kind of writing) {
     assert.ok(
       !claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
       `${kind} writes by design — locking its MCP config is a behaviour change nobody asked for`,
