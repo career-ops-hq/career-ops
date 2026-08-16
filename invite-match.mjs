@@ -62,7 +62,8 @@ const USAGE = `Usage:
   node invite-match.mjs --summary             # human-readable summary instead of JSON
   node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
   node invite-match.mjs --self-test           # run the built-in self-test suite
-  node invite-match.mjs --help                # print this usage block and exit`;
+  node invite-match.mjs --help                # print this usage block and exit
+  node invite-match.mjs -h                    # same as --help`;
 
 // Only when invoked as a CLI, not when another script (scan.mjs,
 // detect-reposts.mjs) imports a helper like normalizeCompanyName — otherwise
