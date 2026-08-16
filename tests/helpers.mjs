@@ -2,7 +2,8 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -417,4 +418,61 @@ export async function captureConsoleErrors(fn) {
   } finally {
     console.error = original;
   }
+}
+
+/**
+ * Build a throwaway git repository for the updater suites that assert on
+ * ignore resolution (`updater-add-paths`, `updater-is-tracked`).
+ *
+ * The pins below are the reason this is shared rather than copied. Each one is
+ * load-bearing, and each protects an assertion whose subject IS ignore
+ * resolution — so a stray setting on the contributor's machine changes the
+ * result instead of failing loudly:
+ *
+ *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
+ *     what these suites measure (the failure mode reported in #2269).
+ *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
+ *     inherited from the environment breaks every commit the fixtures make,
+ *     reddening the suites for a reason unrelated to the code under test.
+ *
+ * Point `core.excludesFile` at an empty file rather than /dev/null: git on
+ * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
+ * exclude file".
+ *
+ * Kept as one body so that deleting a pin fails both suites together. Two
+ * copies drift — a pin added to one leaves the other silently unprotected
+ * (CodeRabbit review, #2531). The two other `makeRepo` fixtures under tests/
+ * are deliberately NOT folded in here: `updater-local-system-edits` pins
+ * line endings instead of excludes and seeds a base commit plus an `upstream`
+ * branch, and `updater-rollback-behavior` pins nothing. They are different
+ * fixtures that share a name, not copies of this one.
+ *
+ * `gitIn` is injected rather than imported so this module keeps depending on
+ * nothing but Node builtins — every suite imports it, and none of them should
+ * pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ *
+ * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
+ * @param {object} [options]
+ * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
+ *   temp dir names the suite that made it.
+ * @param {boolean} [options.includeRoot=false] - Add `root` to the returned ctx.
+ *   `addPaths` resolves paths against it to decide what is a directory; without
+ *   it the guard would lstat the real career-ops checkout instead of the
+ *   fixture. `isTracked` never reads it.
+ * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
+ */
+export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const g = (...args) => gitIn(dir, ...args);
+  g('init', '-q', '-b', 'main', '.');
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
+  writeFileSync(emptyExcludes, '');
+  mkdirSync(emptyHooks, { recursive: true });
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.excludesFile', emptyExcludes);
+  g('config', 'core.hooksPath', emptyHooks);
+  return { dir, g, ctx: includeRoot ? { git: g, root: dir } : { git: g } };
 }

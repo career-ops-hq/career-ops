@@ -26,34 +26,15 @@
  * rather than the source merely pattern-matched.
  */
 
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
+import { writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, makeUpdaterRepo } from './helpers.mjs';
 import { gitIn, isTracked } from '../update-system.mjs';
 
-function makeRepo() {
-  const dir = mkdtempSync(join(tmpdir(), 'co-istracked-'));
-  const g = (...args) => gitIn(dir, ...args);
-  g('init', '-q', '-b', 'main', '.');
-  g('config', 'user.email', 'test@example.com');
-  g('config', 'user.name', 'Test');
-  // Isolate the fixture from the contributor's global git config. A global
-  // core.excludesFile is the one that matters here — these assertions turn on
-  // ignore resolution, so a stray global rule silently changes the result (the
-  // failure mode reported in #2269). Signing and hooks would break the commits.
-  //
-  // Point at an empty file/dir rather than /dev/null: git on Windows maps that
-  // to `nul` and dies with "fatal: cannot use nul as an exclude file".
-  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
-  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
-  writeFileSync(emptyExcludes, '');
-  mkdirSync(emptyHooks, { recursive: true });
-  g('config', 'commit.gpgsign', 'false');
-  g('config', 'core.excludesFile', emptyExcludes);
-  g('config', 'core.hooksPath', emptyHooks);
-  return { dir, g, ctx: { git: g } };
-}
+// Shared with updater-add-paths.test.mjs so the git-isolation pins live in one
+// body: dropping one has to redden both suites, not leave this one quietly
+// unprotected. `root` is omitted because isTracked never reads it.
+const makeRepo = () => makeUpdaterRepo(gitIn, { prefix: 'co-istracked-' });
 
 console.log('\n🧪 Testing isTracked (ignored-but-tracked vs never-tracked)...');
 
