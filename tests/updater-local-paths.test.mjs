@@ -20,8 +20,10 @@ import { join } from 'path';
 import { ROOT, pass, fail } from './helpers.mjs';
 import {
   LOCAL_PATHS_FILE,
+  USER_PATHS,
   parseLocalPaths,
   localUserPaths,
+  effectiveUserPaths,
   userLayerViolations,
 } from '../update-system.mjs';
 
@@ -286,6 +288,41 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
     pass('a file declaration does not claim prefix-sharing neighbours');
   } else {
     fail(`#15 expected no violations, got ${JSON.stringify(neighbours)}`);
+  }
+}
+
+// ── 16-18. The path union apply() actually consumes ──
+//    Every case above drives localUserPaths() or userLayerViolations() with a
+//    hand-built array. apply() uses neither directly — it calls
+//    effectiveUserPaths(), and that union is the value a regression would
+//    corrupt. Byte-identity of the union was only proven in the real-apply CI
+//    leg, so a change dropping or reordering USER_PATHS would leave every
+//    unit test green. Pin the union itself.
+{
+  const untouched = effectiveUserPaths(root(undefined));
+  if (eq(untouched, USER_PATHS)) {
+    pass('no declaration file → the union is USER_PATHS, byte for byte');
+  } else {
+    fail(`#16 union drifted from USER_PATHS: ${JSON.stringify(untouched)}`);
+  }
+
+  const declared = ['run-nightly.ps1', 'qa-fixtures/'];
+  const widened = effectiveUserPaths(root(`# mine\n${declared.join('\n')}\n`));
+  if (eq(widened, [...USER_PATHS, ...declared])) {
+    pass('a declaration widens the union without disturbing USER_PATHS');
+  } else {
+    fail(`#17 expected USER_PATHS + ${JSON.stringify(declared)}, got ${JSON.stringify(widened)}`);
+  }
+
+  // Widening is additive in the direction that matters: the safety check must
+  // still flag a built-in user-layer file, not just the declared ones. A union
+  // that replaced USER_PATHS instead of extending it would pass #17's length
+  // check on a reordering but silently stop protecting cv.md here.
+  const builtin = userLayerViolations(['cv.md'], [], widened);
+  if (eq(builtin, ['cv.md'])) {
+    pass('a built-in user-layer file is still protected under a widened union');
+  } else {
+    fail(`#18 expected cv.md flagged, got ${JSON.stringify(builtin)}`);
   }
 }
 
