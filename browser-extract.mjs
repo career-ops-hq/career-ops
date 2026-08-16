@@ -35,7 +35,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -198,6 +198,12 @@ async function main() {
     console.error(JSON.stringify({ error: guard.reason, code: guard.code }));
     process.exit(1);
   }
+  try {
+    await validateUrlSecurity(url);
+  } catch (err) {
+    console.error(JSON.stringify({ error: err.message, code: 'restricted_ip' }));
+    process.exit(1);
+  }
 
   let chromium;
   try {
@@ -215,9 +221,15 @@ async function main() {
     // private/loopback/link-local or non-http(s) host. Guarding only the initial
     // URL isn't enough once we return page CONTENT: a server-side redirect could
     // otherwise steer the browser at internal infrastructure (SSRF).
-    await context.route('**/*', (route) => {
-      if (rejectPrivateOrInvalid(route.request().url())) return route.abort('blockedbyclient');
-      return route.continue();
+    await context.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      if (rejectPrivateOrInvalid(requestUrl)) return route.abort('blockedbyclient');
+      try {
+        await validateUrlSecurity(requestUrl);
+        return route.continue();
+      } catch (err) {
+        return route.abort('blockedbyclient');
+      }
     });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
@@ -228,6 +240,13 @@ async function main() {
     const finalGuard = rejectPrivateOrInvalid(finalUrl);
     if (finalGuard) {
       console.error(JSON.stringify({ error: `blocked final URL: ${finalGuard.reason}`, code: finalGuard.code }));
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      await validateUrlSecurity(finalUrl);
+    } catch (err) {
+      console.error(JSON.stringify({ error: `blocked final URL: ${err.message}`, code: 'restricted_ip' }));
       process.exitCode = 1;
       return;
     }

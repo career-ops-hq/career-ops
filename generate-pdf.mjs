@@ -27,9 +27,9 @@
  */
 
 import { chromium } from 'playwright';
-import { resolve, dirname, relative, sep, isAbsolute } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename, join } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, lstatSync, realpathSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
@@ -484,6 +484,27 @@ async function generatePDF() {
   // would have allowed writes anywhere under an arbitrary cwd.
   const relOut = relative(__dirname, outputPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
+    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+    process.exit(1);
+  }
+
+  mkdirSync(dirname(outputPath), { recursive: true });
+  let isSymlink = false;
+  try {
+    isSymlink = lstatSync(outputPath).isSymbolicLink();
+  } catch {
+    isSymlink = false;
+  }
+  if (isSymlink) {
+    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+    process.exit(1);
+  }
+  const repoReal = realpathSync(__dirname);
+  const canonicalTarget = existsSync(outputPath)
+    ? realpathSync(outputPath)
+    : join(realpathSync(dirname(outputPath)), basename(outputPath));
+  const relReal = relative(repoReal, canonicalTarget);
+  if (relReal === '' || relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
     console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
     process.exit(1);
   }
