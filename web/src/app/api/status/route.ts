@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
+import { parseCliJson, trackerRowArg } from "@/lib/status-cli.mjs";
 
 export const runtime = "nodejs"; // delegates to the core CLI via child_process
 
@@ -100,16 +101,8 @@ function runSetStatus(args: string[]): Promise<CliResult> {
 
 // --json puts a single JSON object on stdout on both the success and the error
 // path. Anything printed before it (a ledger-append warning, say) is not part
-// of the document.
-function parseCliJson(stdout: string): Record<string, unknown> | null {
-  const start = stdout.indexOf("{");
-  if (start === -1) return null;
-  try {
-    return JSON.parse(stdout.slice(start)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+// of the document, and can contain a brace of its own — so status-cli.mjs reads
+// the document from the end rather than from the first `{`.
 
 export async function POST(req: Request) {
   let body: { n?: string; status?: string };
@@ -136,6 +129,14 @@ export async function POST(req: Request) {
   if (!canon) {
     return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
+  // Same reason the status is checked above: answer a bad request before paying
+  // for a process spawn and a tracker lock. `n` is typed as a string but arrives
+  // from untrusted JSON, so it can be an array or an object, and `String(n)`
+  // would send "[object Object]" to --row and return the CLI's usage text.
+  const row = trackerRowArg(n);
+  if (!row) {
+    return NextResponse.json({ error: "n must be a tracker row number" }, { status: 400 });
+  }
 
   // The web can run against a CAREER_OPS_ROOT that holds data and no scripts.
   // Delegation needs a defined answer there, and "spawn it and see" is not one:
@@ -158,7 +159,7 @@ export async function POST(req: Request) {
   // permanently — so naming the number space is required, not cosmetic.
   const { code, stdout, stderr, spawnFailed, timedOut } = await runSetStatus([
     "--row",
-    String(n),
+    row,
     canon,
     "--source",
     "web",
