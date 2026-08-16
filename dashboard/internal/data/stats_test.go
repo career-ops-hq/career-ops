@@ -55,10 +55,15 @@ func TestCanonicalizeLocation(t *testing.T) {
 		{raw: "lisbon", expected: "Lisbon"},
 		{raw: "", expected: ""},
 		{raw: "—", expected: ""},
-		// 3-part: first part alias-resolved, rest preserved verbatim
-		{raw: "berlin, de, remote", expected: "Berlin, de, remote"},
+		// 3-part: first part alias-resolved, remaining parts normalized with stable casing rule
+		{raw: "berlin, de, remote", expected: "Berlin, DE, Remote"},
+		{raw: "BERLIN, DE, REMOTE", expected: "Berlin, DE, Remote"},
+		{raw: "Berlin, de, Remote", expected: "Berlin, DE, Remote"},
 		// 3-part where first part does not resolve -> empty
 		{raw: "Req, ID, extra", expected: ""},
+		// Non-ASCII UTF-8 titleCase inputs
+		{raw: "ΑΘΉΝΑ", expected: "Αθήνα"},
+		{raw: "élan", expected: "Élan"},
 	}
 
 	for _, tt := range tests {

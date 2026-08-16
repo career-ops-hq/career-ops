@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/model"
@@ -66,16 +67,17 @@ func isFalseCityState(city, state string) bool {
 	return false
 }
 
-// titleCase returns a simple title-cased version of s without using the
-// deprecated strings.Title: it upper-cases the first letter of each
-// space-separated word and lower-cases the rest.
+// titleCase returns a UTF-8 rune-aware title-cased version of s:
+// each word is lowercased and its first rune is converted with unicode.ToUpper.
 func titleCase(s string) string {
 	words := strings.Fields(s)
 	for i, w := range words {
-		if len(w) == 0 {
+		runes := []rune(strings.ToLower(w))
+		if len(runes) == 0 {
 			continue
 		}
-		words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		runes[0] = unicode.ToUpper(runes[0])
+		words[i] = string(runes)
 	}
 	return strings.Join(words, " ")
 }
@@ -122,15 +124,23 @@ func CanonicalizeLocation(raw string) string {
 			return titleCase(c)
 		}
 	} else if len(parts) == 2 {
-		city := titleCase(strings.ToLower(strings.TrimSpace(parts[0])))
-		state := strings.ToUpper(strings.TrimSpace(parts[1]))
+		city := CanonicalizeLocation(parts[0])
+		state := strings.TrimSpace(parts[1])
 		if isFalseCityState(city, state) {
 			return ""
+		}
+		if city == "" {
+			return ""
+		}
+		if len(state) <= 2 {
+			state = strings.ToUpper(state)
+		} else {
+			state = titleCase(state)
 		}
 		return city + ", " + state
 	}
 
-	// 3+ parts: normalize each component and filter false positives.
+	// 3+ parts: normalize every component using the stable casing rule and filter false positives.
 	var normalized []string
 	for i, p := range parts {
 		trimmed := strings.TrimSpace(p)
@@ -138,15 +148,21 @@ func CanonicalizeLocation(raw string) string {
 			continue
 		}
 		if i == 0 {
-			// First part is city — run it through the single-part alias map.
-			single := CanonicalizeLocation(trimmed)
-			if single == "" {
+			city := CanonicalizeLocation(trimmed)
+			if city == "" {
 				return ""
 			}
-			normalized = append(normalized, single)
+			normalized = append(normalized, city)
 		} else {
-			normalized = append(normalized, strings.TrimSpace(trimmed))
+			if len(trimmed) <= 2 {
+				normalized = append(normalized, strings.ToUpper(trimmed))
+			} else {
+				normalized = append(normalized, titleCase(trimmed))
+			}
 		}
+	}
+	if len(normalized) >= 2 && isFalseCityState(normalized[0], normalized[1]) {
+		return ""
 	}
 	if len(normalized) == 0 {
 		return ""
