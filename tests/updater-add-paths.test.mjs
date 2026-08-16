@@ -576,6 +576,7 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   const { dir, g, ctx } = makeRepo();
   mkdirSync(join(dir, 'docs'));
   writeFileSync(join(dir, 'docs/README.md'), 'shipped upstream');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'shipped once, deleted by the update');
   writeFileSync(join(dir, '.gitignore'), 'career-dashboard\n*.env\n');
   g('add', '-A');
   g('commit', '-qm', 'base');
@@ -599,21 +600,29 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   g('reset', '-q');
 
   // The converse has to hold too, or the guard would reject ordinary work: a
-  // tracked file, a staged deletion, and a brand-new file (the materialized-
-  // entrypoint shape) must all pass through.
+  // modified tracked file, a DELETED tracked file (what the prune step feeds
+  // it), and a brand-new file (the materialized-entrypoint shape) must all pass
+  // through. The deletion is the one worth spelling out — it is the only shape
+  // here whose path does not exist on disk when the guard lstats it, which is
+  // precisely the question the guard asks, so a guard that refused "missing"
+  // instead of "is a directory" would still pass the other two.
   writeFileSync(join(dir, 'docs/README.md'), 'updated');
   writeFileSync(join(dir, 'NEWFILE.md'), 'never tracked before');
+  unlinkSync(join(dir, 'docs/RETIRED.md'));
   let wrongly = null;
   try {
-    addPaths(['docs/README.md', 'NEWFILE.md'], ctx);
+    addPaths(['docs/README.md', 'docs/RETIRED.md', 'NEWFILE.md'], ctx);
   } catch (err) {
     wrongly = err;
   }
   const ok = stagedPaths(g);
-  if (!wrongly && ok.has('docs/README.md') && ok.has('NEWFILE.md')) {
-    pass('tracked files and brand-new files still stage');
+  const deleted = new Set(
+    g('diff', '--cached', '--name-only', '-z', '--diff-filter=D', 'HEAD').split('\0').filter(Boolean),
+  );
+  if (!wrongly && ok.has('docs/README.md') && ok.has('NEWFILE.md') && deleted.has('docs/RETIRED.md')) {
+    pass('modified, deleted and brand-new tracked paths all still stage');
   } else {
-    fail(`guard rejected legitimate paths: ${wrongly?.message.split('\n')[0] ?? [...ok].join(', ')}`);
+    fail(`guard rejected legitimate paths: ${wrongly?.message.split('\n')[0] ?? `staged=${[...ok].join(', ')} deleted=${[...deleted].join(', ') || 'none'}`}`);
   }
   rmSync(dir, { recursive: true, force: true });
 }

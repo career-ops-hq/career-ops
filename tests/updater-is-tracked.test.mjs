@@ -13,9 +13,12 @@
  *
  *   - false (not tracked) is the common path. The upgrade-tests.mjs PR gate
  *     covers it end to end by seeding a marker into the fixture install.
- *   - true (force-tracked) is rare and the PR gate CANNOT reach it. Without the
- *     assertion below, a hardcoded `return false` would pass CI while silently
- *     dropping the deletion for a user who had force-added the marker.
+ *   - true (force-tracked) is rare. The PR gate reaches it as of the two-leg
+ *     gate folded in from #2591 (`dismiss=tracked`), but only end to end, and
+ *     only for a marker force-added before the upgrade. The assertion below is
+ *     the direct one: without it, a hardcoded `return false` would still have
+ *     to be caught downstream by whether a deletion reached the commit, which
+ *     names the symptom rather than the probe that produced it.
  *   - a throwing probe must PROPAGATE, not report "untracked". `ls-files` exits
  *     0 with empty output when nothing matches, so a throw is an abnormal git
  *     failure and answering "untracked" for a tracked marker would drop its
