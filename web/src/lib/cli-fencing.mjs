@@ -197,6 +197,13 @@ export function isFencingNotice(label) {
  * @returns {{args: string[]}}
  */
 export function fenceArgs({ cliId, args, capabilities }) {
-  const fence = FENCERS[cliId];
-  return { args: fence ? fence(args, capabilities) : args };
+  // Object.hasOwn, exactly as fencingReport does. A bare `FENCERS[cliId]` also
+  // resolves inherited Object.prototype members, so a cliId of "toString" or
+  // "constructor" yields a truthy function that would then be CALLED as a fencer
+  // — returning a string or the argv untouched, either way silently unfenced.
+  // Not reachable while routes resolve through resolveCli, but this module's
+  // claim is that membership in FENCERS is the whole answer, so both entry
+  // points have to agree on what membership means.
+  if (!Object.hasOwn(FENCERS, cliId)) return { args };
+  return { args: FENCERS[cliId](args, capabilities) };
 }

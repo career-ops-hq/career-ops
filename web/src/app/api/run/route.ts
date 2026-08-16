@@ -149,12 +149,26 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(
-    binPath,
-    args,
-    { cwd: careerOpsRoot(), env: process.env },
-    { cliId, capabilities: capabilitiesFor(kind) },
-  );
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: capabilitiesFor(kind) },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record, so nothing
+    // spawned and the stream below — which owns releaseWriteTokenOnce — is never
+    // constructed. Release the tracker guard HERE or it is held for the lifetime
+    // of the process and acquireTrackerWrite blocks every later evaluate/pdf run:
+    // a refused argv would take the tracker down with it.
+    if (writeToken !== null) releaseTrackerWrite(writeToken);
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "failed to start the CLI" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes

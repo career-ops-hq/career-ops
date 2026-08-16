@@ -22,7 +22,10 @@ const codexArgv = (prompt = "PROMPT") => ["exec", "--json", "--color", "never", 
  *  the allow list, so nothing forbidden is left merely unmentioned. */
 const claudeArgv = (allowed = "Read,Glob,Grep") => {
   const scope = scopeFrom(allowed);
-  return ["-p", "PROMPT", "--allowedTools", scope.allowed, "--disallowedTools", scope.disallowed];
+  // --strict-mcp-config included: verification requires it for a non-writing record,
+  // because a deny list describes only native tools and an MCP server could supply
+  // a write tool beside them.
+  return ["-p", "PROMPT", "--strict-mcp-config", "--allowedTools", scope.allowed, "--disallowedTools", scope.disallowed];
 };
 
 /** Read a `-c key=value` override back out of a built argv. */
@@ -230,7 +233,7 @@ test("a forbidden tool that is merely unmentioned is refused, not certified", ()
     () =>
       fenceArgs({
         cliId: "claude",
-        args: ["-p", "PROMPT", "--permission-mode", "acceptEdits", "--disallowedTools", "Task"],
+        args: ["-p", "PROMPT", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--disallowedTools", "Task"],
         capabilities: CAPS.localReadOnly,
       }),
     /does not deny/,
@@ -240,13 +243,15 @@ test("a forbidden tool that is merely unmentioned is refused, not certified", ()
       fenceArgs({
         cliId: "claude",
         // The pre-fix advisor deny list, verbatim: MultiEdit missing.
-        args: ["-p", "PROMPT", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"],
+        args: ["-p", "PROMPT", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"],
         capabilities: CAPS.localReadOnly,
       }),
     /does not deny MultiEdit/,
   );
   assert.throws(
-    () => fenceArgs({ cliId: "claude", args: ["-p", "PROMPT"], capabilities: CAPS.localReadOnly }),
+    // No deny list at all — the flag is present so this exercises the tool rule
+    // rather than the MCP one, which the case below covers on its own.
+    () => fenceArgs({ cliId: "claude", args: ["-p", "PROMPT", "--strict-mcp-config"], capabilities: CAPS.localReadOnly }),
     /does not deny/,
   );
 });
@@ -327,5 +332,45 @@ test("fencingReport answers for the runtimes the routes actually ask about", () 
   }
   for (const cliId of ["claude", "codex"]) {
     assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "full");
+  }
+});
+
+test("a non-writing claude argv without --strict-mcp-config is refused", () => {
+  // Given a deny list describes only NATIVE tools. Without --strict-mcp-config the
+  // run also loads the user's own MCP servers, any of which may expose a write
+  // tool — so a worker declared writes:false could still write while this module
+  // certified the run as fenced. The native flags alone are not a complete
+  // description of what the agent can reach.
+  const scope = scopeFrom("Read,Glob,Grep");
+  const args = ["-p", "PROMPT", "--allowedTools", scope.allowed, "--disallowedTools", scope.disallowed];
+
+  // When such an argv is presented for a non-writing worker
+  // Then it is refused, however complete its native deny list is.
+  assert.throws(
+    () => fenceArgs({ cliId: "claude", args, capabilities: CAPS.localReadOnly }),
+    /--strict-mcp-config/,
+  );
+
+  // And a writing worker is unaffected: MCP grants it nothing its capability
+  // record does not already allow, and locking it would silently break a user's
+  // configured server on an evaluation.
+  const writeScope = scopeFrom("Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep");
+  const writeArgs = ["-p", "PROMPT", "--allowedTools", writeScope.allowed, "--disallowedTools", writeScope.disallowed];
+  assert.doesNotThrow(() => fenceArgs({ cliId: "claude", args: writeArgs, capabilities: CAPS.workspaceWrite }));
+});
+
+test("a prototype-inherited cliId is not mistaken for a fencer", () => {
+  // Given `FENCERS[cliId]` also resolves inherited Object.prototype members, so
+  // "toString" or "constructor" yields a truthy function that would then be CALLED
+  // as a fencer — returning a string or the argv untouched, either way silently
+  // unfenced while reporting otherwise.
+  for (const cliId of ["toString", "constructor", "valueOf", "__proto__"]) {
+    const args = ["-p", "PROMPT"];
+    const { args: out } = fenceArgs({ cliId, args, capabilities: CAPS.localReadOnly });
+
+    // Then it is treated as an unknown runtime: argv untouched, and graded "none"
+    // so both entry points agree on what membership in FENCERS means.
+    assert.deepEqual(out, args, `${cliId} must not resolve to a fencer`);
+    assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "none");
   }
 });

@@ -35,11 +35,13 @@ function isAuthError(job: Job): boolean {
 // produces any output — and this card renders only the newest step, so it would be
 // displaced within a second of the run starting. Scan the whole list instead, and
 // render it in the sticky slot below, the same shape isAuthError already uses.
-// The predicate comes from cli-fencing.mjs so the emitter and this detector cannot
-// drift apart on a reworded sentence, and so a second notice shape (a partly
-// restricted run) is caught without editing this file (#2507).
-function isUnfenced(job: Job): boolean {
-  return job.steps.some((s) => isFencingNotice(s.label));
+// Returns the notice ITSELF, not a boolean. There are two shapes — a runtime that
+// cannot be restricted at all, and one only partly restricted — and a card that
+// matched either then printed one hardcoded sentence told a sandboxed Codex run it
+// "ran with its default access", which is false. Rendering what the route emitted
+// keeps one source for the wording and cannot misdescribe a level (#2507).
+function fencingNotice(job: Job): string | undefined {
+  return job.steps.find((s) => isFencingNotice(s.label))?.label;
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -98,7 +100,7 @@ export function WorkerCard({
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
-  const unfenced = isUnfenced(job);
+  const fencing = fencingNotice(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -144,9 +146,9 @@ export function WorkerCard({
           Sign your CLI in from Config, then re-run.
         </div>
       )}
-      {unfenced && (
+      {fencing && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          This CLI can&apos;t be permission-restricted — the agent ran with its default access.
+          {fencing}
         </div>
       )}
       {tokens > 0 && (

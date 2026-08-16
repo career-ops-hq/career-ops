@@ -162,14 +162,14 @@ export function claudeCliArgs({ kind, prompt }) {
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", "acceptEdits",
-    // pdf only, deliberately. --strict-mcp-config with no --mcp-config loads ZERO
+    // Every non-writing kind, not just pdf. --strict-mcp-config with no --mcp-config loads ZERO
     // MCP servers, so the tool lists below describe everything the agent can
     // reach — without it an MCP server from the user's own config could supply a
     // write tool that appears in neither list. #2185 is about pdf, and applying
     // this to every kind would silently stop a configured MCP server (e.g. the
     // optional Canva server) from loading on evaluate/research runs. The same gap
     // for the other kinds is #2507.
-    ...(kind === "pdf" ? ["--strict-mcp-config"] : []),
+    ...(capabilitiesFor(kind).writes ? [] : ["--strict-mcp-config"]),
     "--allowedTools", scope.allowed,
     "--disallowedTools", scope.disallowed,
   ];
@@ -229,6 +229,20 @@ export function verifyClaudeArgs(args, capabilities) {
   ];
   const denied = toolNames(argValue(args, "--disallowedTools"));
   const unmentioned = forbidden.filter((tool) => !denied.includes(tool));
+
+  // A deny list only describes NATIVE tools. Without --strict-mcp-config the run
+  // also loads the user's own MCP servers, any of which may expose a write tool —
+  // so a worker declared `writes: false` could still write, and this function
+  // would certify it as fenced. --strict-mcp-config with no --mcp-config loads
+  // ZERO servers, which is what makes the tool lists a complete description of
+  // what the agent can reach (the reasoning claudeCliArgs already applies to pdf).
+  if (!capabilities.writes && !args.includes("--strict-mcp-config")) {
+    throw new Error(
+      "cli-fencing: claude argv for a non-writing worker omits --strict-mcp-config, so a " +
+        "user-configured MCP server could supply a write tool the capability record forbids. " +
+        "Native tool flags alone cannot describe what this agent can reach.",
+    );
+  }
 
   if (unmentioned.length > 0) {
     throw new Error(

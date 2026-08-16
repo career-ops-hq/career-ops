@@ -110,6 +110,11 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // --strict-mcp-config with no --mcp-config loads ZERO MCP servers, so the
+        // tool lists here describe everything this agent can reach. Required for a
+        // non-writing worker: without it a user MCP server could supply a write tool
+        // the capability record forbids, and cli-fencing refuses to certify that (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
         ADVISOR_SCOPE.allowed,
       "--disallowedTools",
@@ -120,12 +125,20 @@ export async function POST(req: Request) {
   // The advisor reads and fetches but must never write — the same intent the
   // Claude branch spells as Read,WebFetch,Glob,Grep with Bash/Write/Edit denied.
   // networkReadOnly, not localReadOnly, because WebFetch is in that allow list.
-  const child = spawnHeadlessCli(
-    binPath,
-    args,
-    { cwd: careerOpsRoot(), env: process.env },
-    { cliId, capabilities: CAPS.networkReadOnly },
-  );
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: CAPS.networkReadOnly },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record. Report it
+    // in this route's own error shape rather than letting the throw escape POST
+    // as an unhandled rejection and an unstructured 500.
+    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+  }
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before

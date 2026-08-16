@@ -175,15 +175,25 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
         // Drafts answers from local files only: the Claude branch allows
         // Read,Glob,Grep and denies WebFetch/WebSearch along with every write
         // tool, so Codex gets a true read-only sandbox here.
-        const child = spawnHeadlessCli(
-          binPath,
-          args,
-          { cwd: careerOpsRoot(), env: process.env },
-          // spec.id, not the request's cliId: same value once resolveCli has
-          // accepted it, but typed as the canonical id rather than the caller's
-          // optional string.
-          { cliId: spec.id, capabilities: CAPS.localReadOnly },
-        );
+        let child;
+        try {
+          child = spawnHeadlessCli(
+            binPath,
+            args,
+            { cwd: careerOpsRoot(), env: process.env },
+            // spec.id, not the request's cliId: same value once resolveCli has
+            // accepted it, but typed as the canonical id rather than the caller's
+            // optional string.
+            { cliId: spec.id, capabilities: CAPS.localReadOnly },
+          );
+        } catch (e) {
+          // Fencing refuses an argv that contradicts the capability record. Route
+          // it through fail() so the NDJSON stream reports the reason and closes;
+          // an escaping throw inside this executor would leave the promise pending
+          // and the client waiting on a stream that never ends.
+          fail(e instanceof Error ? e.message : "failed to start the planner");
+          return resolve({ buf: "", code: null, signal: null });
+        }
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {

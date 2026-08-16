@@ -118,6 +118,8 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // Required for a non-writing worker — see cli-fencing.mjs (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
         ADVISOR_SCOPE.allowed,
       "--disallowedTools",

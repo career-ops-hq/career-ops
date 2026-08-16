@@ -81,5 +81,8 @@ const KIND_CAPABILITIES = Object.freeze({
  * @returns {Capabilities}
  */
 export function capabilitiesFor(kind) {
-  return KIND_CAPABILITIES[kind] ?? CAPS.localReadOnly;
+  // Object.hasOwn, not `?? fallback`: a bare lookup resolves inherited
+  // Object.prototype members, so a kind of "constructor" or "toString" returns a
+  // truthy non-record instead of falling back to the least-capable default.
+  return Object.hasOwn(KIND_CAPABILITIES, kind) ? KIND_CAPABILITIES[kind] : CAPS.localReadOnly;
 }

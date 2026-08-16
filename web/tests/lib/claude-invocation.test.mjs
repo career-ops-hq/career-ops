@@ -150,7 +150,7 @@ test("grantsWriteCapability: catches Bash and MultiEdit, not just Write/Edit", (
   assert.equal(grantsWriteCapability({ allowed: "Read,Write", disallowed: "" }), true);
 
   // And a genuinely read-only scope is not a false positive
-  assert.equal(grantsWriteCapability(TOOL_SCOPES.readOnly), false);
+  assert.equal(grantsWriteCapability(TOOL_SCOPES.localReadOnly), false);
 });
 
 test("grantsWriteCapability: a substring of a tool name is not a match", () => {
@@ -193,15 +193,26 @@ test("claudeCliArgs: loads no MCP servers", () => {
   assert.ok(!args.includes("--mcp-config"), "no MCP server may be loaded");
 });
 
-test("claudeCliArgs: other kinds keep their MCP servers", () => {
-  // Given #2185 is about pdf. Locking MCP config for every kind would silently stop
-  // a user's configured server (the optional Canva one, say) from loading on an
-  // evaluation — a behaviour change the issue never asked for. #2507 covers the
-  // same gap for the other kinds.
-  for (const kind of ["research", "evaluate", "fix-portal"]) {
+test("claudeCliArgs: MCP is locked for non-writing kinds, kept for writing ones", () => {
+  // Given the gap this test's earlier version pointed at — "#2507 covers the same
+  // gap for the other kinds" — now closed. A deny list describes only NATIVE tools,
+  // so without --strict-mcp-config a user's MCP server could hand a `writes: false`
+  // worker a write tool while the fencing certified the run as restricted.
+  for (const kind of ["pdf", "research"]) {
+    assert.ok(
+      claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
+      `${kind} declares writes:false, so its tool list must describe everything it can reach`,
+    );
+  }
+
+  // And the caution that version raised still holds: locking MCP on an evaluation
+  // would silently stop a user's configured server (the optional Canva one, say)
+  // from loading. Those kinds legitimately write, so MCP grants them nothing their
+  // capability record does not already allow.
+  for (const kind of ["evaluate", "fix-portal"]) {
     assert.ok(
       !claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
-      `${kind} must not have its MCP config locked down by a pdf-scoped fix`,
+      `${kind} writes by design — locking its MCP config is a behaviour change nobody asked for`,
     );
   }
 });

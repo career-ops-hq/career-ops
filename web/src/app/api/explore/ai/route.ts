@@ -220,6 +220,11 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // --strict-mcp-config with no --mcp-config loads ZERO MCP servers, so the
+        // tool lists here describe everything this agent can reach. Required for a
+        // non-writing worker: without it a user MCP server could supply a write tool
+        // the capability record forbids, and cli-fencing refuses to certify that (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
         ADVISOR_SCOPE.allowed,
       "--disallowedTools",
@@ -248,16 +253,9 @@ export async function POST(req: Request) {
   const useCodexProcessGroup =
     isCodex && process.platform !== "win32";
 
-  // Proposer-not-writer, as the Claude branch above spells it: Read + WebFetch +
-  // WebSearch allowed, every write tool denied. WebFetch/WebSearch is why this is
-  // networkReadOnly rather than the stricter localReadOnly.
-  const child = spawnHeadlessCli(
-    binPath,
-    args,
-    { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
-    { cliId, capabilities: CAPS.networkReadOnly },
-  );
-
+  // Declared BEFORE the spawn: fencing can refuse the argv, and the temporary
+  // workspace already exists by then. Without this the refusal path would leak
+  // one directory per rejected request.
   const cleanupChildCwd = () => {
     if (!isCodex) return;
     try {
@@ -266,6 +264,25 @@ export async function POST(req: Request) {
       /* best-effort temporary-directory cleanup */
     }
   };
+
+  // Proposer-not-writer, as the Claude branch above spells it: Read + WebFetch +
+  // WebSearch allowed, every write tool denied. WebFetch/WebSearch is why this is
+  // networkReadOnly rather than the stricter localReadOnly.
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
+      { cliId, capabilities: CAPS.networkReadOnly },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record. Report it
+    // in this route's own error shape rather than letting the throw escape POST
+    // as an unhandled rejection and an unstructured 500.
+    cleanupChildCwd();
+    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+  }
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
