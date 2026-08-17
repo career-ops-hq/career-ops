@@ -3,9 +3,9 @@
  * discover-ats.mjs — Company-list → scannable ATS board resolver for career-ops
  *
  * Takes a list of companies and resolves each to a scannable ATS board by
- * probing the public JSON APIs career-ops already supports (Greenhouse, Ashby,
- * Lever) via the existing providers/ layer — zero LLM tokens, zero auth. A
- * company "resolves" when a vendor's board exists AND currently lists ≥1 job.
+ * probing the public JSON APIs career-ops already supports (see VENDOR_ORDER)
+ * via the existing providers/ layer — zero LLM tokens, zero auth. A company
+ * "resolves" when a vendor's board exists AND currently lists ≥1 job.
  *
  * portals.yml is a USER-LAYER file, so by DEFAULT this command is preview-only:
  * it prints the entries it WOULD add (pendingEntries) and writes nothing. Pass
@@ -127,8 +127,10 @@ const USAGE = `Usage:
 portals.yml is a user-layer file: this command NEVER writes it unless you pass
 --write. The default previews the entries it would add (see pendingEntries).
 
-Vendors: gh, ashby, lever (resolve from a name/slug) and workday (resolves from
-a coordinate hint — a name alone can't locate a Workday site). Default: all four.
+Vendors: gh, ashby, lever, workable, smartrecruiters, recruitee, bamboohr,
+breezy, pinpoint, rippling, join (all resolve from a name/slug) and workday
+(resolves from a coordinate hint — a name alone can't locate a Workday site).
+Default: all of them, probed in that order, first match wins.
 
 Input YAML shape:
   companies:
@@ -231,15 +233,19 @@ export function parseCompanyInput(rawYaml, cliNames = []) {
  * Build the candidate {vendor, slug, careers_url} probes for one company.
  * SLUG_RE is enforced before every interpolation — the SSRF choke point.
  * A vendor whose slug fails the guard is skipped (recorded in `skipped`).
+ * A vendor that CAN'T represent this slug at all — the URL is well-formed and
+ * on the right host, but the provider's own contract rejects its shape — is
+ * recorded in `unsupported` and never becomes a candidate (see below).
  *
  * @param {{name:string, slug?:string}} company
  * @param {string[]} [vendors]  Subset of VENDOR_ORDER.
- * @returns {{candidates: {vendor:string, slug:string, careers_url:string}[], skipped: string[]}}
+ * @returns {{candidates: {vendor:string, slug:string, careers_url:string}[], skipped: string[], unsupported: string[]}}
  */
 export function buildCandidateUrls(company, vendors = VENDOR_ORDER) {
   const slug = company.slug || deriveSlug(company.name);
   const candidates = [];
   const skipped = [];
+  const unsupported = [];
   for (const vendor of vendors) {
     const cfg = VENDORS[vendor];
     if (!cfg) continue;
@@ -264,9 +270,30 @@ export function buildCandidateUrls(company, vendors = VENDOR_ORDER) {
       skipped.push(vendor);
       continue;
     }
+    // Last gate, and the only one that knows each vendor's REAL slug contract:
+    // ask the provider itself whether it can derive an API URL from this URL.
+    // detect() is pure and local (a URL parse, no network, no side effects).
+    //
+    // The host assertion above can't catch this: `expected` is built by the same
+    // concatenation as the URL, so for a subdomain vendor a dotted slug like
+    // `foo.bar` yields host === expected === `foo.bar.bamboohr.com` and sails
+    // through — the suffix is always appended, so nothing escapes the vendor
+    // domain (no SSRF), but that host cannot exist. Every subdomain provider
+    // pins a SINGLE tenant label (`^[a-z0-9][a-z0-9-]*\.bamboohr\.com$`), and
+    // several path vendors have their own slug shape too, so their detect()
+    // returns null. Left in, such a candidate is recorded as a probe ERROR
+    // ("no API URL derivable") indistinguishable from a transient network
+    // failure, which drags resolveCompany's reason to "board status unknown —
+    // re-run" and invites a retry that can never succeed. Deriving the rule from
+    // the provider rather than re-declaring a slug regex here means the
+    // discovery guard and the provider contract cannot drift apart.
+    if (!cfg.provider.detect({ name: company.name, careers_url })) {
+      unsupported.push(vendor);
+      continue;
+    }
     candidates.push({ vendor, slug, careers_url });
   }
-  return { candidates, skipped };
+  return { candidates, skipped, unsupported };
 }
 
 // Coordinate token guard — tenant/instance/site segments interpolated into a
@@ -522,7 +549,7 @@ export async function resolveWorkday(company, coords, ctx) {
  * probe Workday. Returns either a resolved record or an unresolved record.
  */
 export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, includeWorkday = true } = {}) {
-  const { candidates, skipped } = buildCandidateUrls(company, vendors);
+  const { candidates, skipped, unsupported } = buildCandidateUrls(company, vendors);
   const triedVendors = [];
   const emptyBoards = [];
   const errors = [];
@@ -585,13 +612,23 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
         ? 'Workday hint given but rejected (invalid/missing tenant or site) — check the `workday` field and re-run'
         : coords
           ? 'Workday coordinates given but no live board with open jobs found at the probed host(s).'
-          : 'no Greenhouse/Ashby/Lever board found. If this company uses Workday, add a hint — '
-            + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
-            + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
+          // Nothing was probeable: every vendor's own contract rejected this
+          // slug's shape, so no board was ruled out — say that, rather than
+          // implying we looked and found nothing.
+          : (!candidates.length && unsupported.length)
+            ? `slug "${company.slug || deriveSlug(company.name)}" is not a valid board slug for any probed vendor `
+              + `(${unsupported.join(', ')}) — nothing was probed; fix the \`slug\` field and re-run.`
+            // VENDOR_ORDER covers eleven vendors now, so name none of them here.
+            : 'no supported ATS board found. If this company uses Workday, add a hint — '
+              + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
+              + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
 
   /** @type {any} */
   const unresolved = { name: company.name, triedVendors, reason };
   if (skipped.length) unresolved.skippedUnsafeSlug = skipped;
+  // Well-formed URL on the right host, but the vendor's own slug contract
+  // rejects its shape — reported separately so it isn't read as a probe failure.
+  if (unsupported.length) unresolved.unsupportedSlugShape = unsupported;
   if (emptyBoards.length) unresolved.emptyBoards = emptyBoards;
   if (errors.length) unresolved.errors = errors;
   if (company.website) unresolved.website = company.website;
@@ -719,6 +756,39 @@ function runSelfTest() {
   check(mixed.ashby === 'https://jobs.ashbyhq.com/DeepL', 'buildCandidateUrls preserves slug case for Ashby');
   check(mixed.recruitee === 'https://deepl.recruitee.com', 'buildCandidateUrls lowercases a subdomain host');
   check(bMixed.skipped.length === 0, 'a mixed-case slug is not skipped by the host assertion');
+
+  // Dotted slug. SLUG_RE allows dots (path vendors accept them), but a subdomain
+  // vendor turns `foo.bar` into `foo.bar.bamboohr.com` — two tenant labels, which
+  // every subdomain provider's `<tenant>.<vendor>` regex rejects. The host
+  // assertion can't catch it (expected is built by the same concatenation), so
+  // the provider-contract gate is what keeps it out of the probe loop.
+  const SUBDOMAIN_VENDORS = ['recruitee', 'breezy', 'bamboohr', 'pinpoint'];
+  const bDot = buildCandidateUrls({ name: 'X', slug: 'foo.bar' });
+  const dotCandidates = new Set(bDot.candidates.map((c) => c.vendor));
+  check(
+    SUBDOMAIN_VENDORS.every((v) => !dotCandidates.has(v) && bDot.unsupported.includes(v)),
+    'a dotted slug is unsupported for every subdomain vendor, never a candidate',
+  );
+  check(bDot.skipped.length === 0, 'a dotted slug is an unsupported shape, not an unsafe-slug skip');
+  check(
+    bDot.candidates.length > 0
+      && bDot.candidates.every((c) => !!VENDORS[c.vendor].provider.detect({ name: 'X', careers_url: c.careers_url })),
+    'a dotted slug still probes the vendors whose contract accepts it',
+  );
+  // The security property, asserted rather than argued: buildUrl always appends
+  // the vendor suffix, so no slug can move the host off the vendor's own domain.
+  // A dotted slug is a wasted-probe/reporting problem, not an SSRF one.
+  const SUBDOMAIN_SUFFIX = {
+    recruitee: '.recruitee.com', breezy: '.breezy.hr', bamboohr: '.bamboohr.com', pinpoint: '.pinpointhq.com',
+  };
+  let offDomain = 0;
+  for (const s of ['foo.bar', 'evil.com', 'a.b.c.d', '..evil.com', 'x.bamboohr.com', '169.254.169.254']) {
+    for (const c of buildCandidateUrls({ name: 'X', slug: s }, SUBDOMAIN_VENDORS).candidates) {
+      if (!new URL(c.careers_url).hostname.endsWith(SUBDOMAIN_SUFFIX[c.vendor])) offDomain += 1;
+    }
+  }
+  check(offDomain === 0, 'no slug can move a subdomain-vendor host off the vendor domain');
+
   const b3 = buildCandidateUrls({ name: 'Adyen' }, ['ashby']);
   check(b3.candidates.length === 1 && b3.candidates[0].vendor === 'ashby', 'buildCandidateUrls honors vendor subset');
 

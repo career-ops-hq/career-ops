@@ -4,7 +4,8 @@
  * Tests the pure, network-free functions with inline fixtures:
  * - deriveSlug (lowercasing, punctuation, edge cases)
  * - parseCompanyInput (shape, bare-name merge, malformed YAML, dedup, drops)
- * - buildCandidateUrls (vendor order, subset, SLUG_RE rejection, explicit slug)
+ * - buildCandidateUrls (vendor order, subset, SLUG_RE rejection, explicit slug,
+ *   dotted slugs vs subdomain vendors, host-never-leaves-vendor-domain)
  * - yamlScalar / renderPortalEntry (GH api line, quoting)
  * - dedupeAgainstPortals (name/url/api hits, trailing-slash norm, self-dedup)
  * - insertIntoTrackedCompanies (splice correctness, byte-preservation, empty
@@ -131,6 +132,36 @@ eq('honors vendor subset', b3.candidates.map(c => c.vendor), ['ashby']);
 
 const b4 = buildCandidateUrls({ name: 'Some Co', slug: 'DeepL' });
 eq('explicit mixed-case slug preserved', b4.candidates[1].careers_url, 'https://jobs.ashbyhq.com/DeepL');
+
+// --- dotted slugs vs subdomain vendors -------------------------------------
+// SLUG_RE allows dots and path vendors accept them, but a subdomain vendor
+// interpolates the slug into the HOSTNAME: `foo.bar` → `foo.bar.bamboohr.com`,
+// two tenant labels, which every subdomain provider's `<tenant>.<vendor>` regex
+// rejects. The host assertion cannot catch this (the expected host is built by
+// the same concatenation), so buildCandidateUrls asks the provider itself.
+const SUBDOMAIN_VENDORS = ['recruitee', 'breezy', 'bamboohr', 'pinpoint'];
+const bDot = buildCandidateUrls({ name: 'X', slug: 'foo.bar' });
+const dotCandidates = bDot.candidates.map(c => c.vendor);
+for (const v of SUBDOMAIN_VENDORS) {
+  ok(`dotted slug is not a ${v} candidate`, !dotCandidates.includes(v));
+  ok(`dotted slug reported unsupported for ${v}`, bDot.unsupported.includes(v));
+}
+eq('dotted slug is an unsupported shape, not an unsafe-slug skip', bDot.skipped, []);
+ok('dotted slug still probes the vendors whose contract accepts it', bDot.candidates.length > 0);
+
+// The security property, asserted rather than argued: buildUrl always appends the
+// vendor suffix, so no slug can move the host off the vendor's own domain. A
+// dotted slug is a wasted-probe/reporting problem, not an SSRF one.
+const SUBDOMAIN_SUFFIX = {
+  recruitee: '.recruitee.com', breezy: '.breezy.hr', bamboohr: '.bamboohr.com', pinpoint: '.pinpointhq.com',
+};
+const offDomain = [];
+for (const s of ['foo.bar', 'evil.com', 'a.b.c.d', '..evil.com', 'x.bamboohr.com', '169.254.169.254', 'localhost']) {
+  for (const c of buildCandidateUrls({ name: 'X', slug: s }, SUBDOMAIN_VENDORS).candidates) {
+    if (!new URL(c.careers_url).hostname.endsWith(SUBDOMAIN_SUFFIX[c.vendor])) offDomain.push(c.careers_url);
+  }
+}
+eq('no slug moves a subdomain-vendor host off the vendor domain', offDomain, []);
 
 // ============================================================================
 // 4. yamlScalar / renderPortalEntry
@@ -280,6 +311,18 @@ ok('workday entry has no api line', !wdRender.includes('api:'));
 const noWd = await resolveCompany({ name: 'Whatever', slug: 'bad/slug' }, { vendors: [], includeWorkday: false });
 ok('resolveCompany no-vendor no-workday → unresolved', !!noWd.unresolved);
 ok('resolveCompany unresolved names workday hint path', /Workday/.test(noWd.unresolved.reason));
+// VENDOR_ORDER probes eleven vendors now, so the fallback must not name three of
+// them as if they were the whole list.
+ok('fallback reason is provider-neutral', !/Greenhouse|Ashby|Lever/i.test(noWd.unresolved.reason));
+
+// A slug no vendor's contract can represent must be reported as such — NOT as a
+// probe error, which would read as transient and invite a pointless re-run.
+// Subdomain vendors only → nothing is probeable → network-free.
+const dotResolve = await resolveCompany({ name: 'X', slug: 'foo.bar' }, { vendors: SUBDOMAIN_VENDORS, includeWorkday: false });
+eq('dotted slug → nothing tried', dotResolve.unresolved.triedVendors, []);
+eq('dotted slug → reported as unsupported shape', dotResolve.unresolved.unsupportedSlugShape, SUBDOMAIN_VENDORS);
+ok('dotted slug → no probe errors recorded', !dotResolve.unresolved.errors);
+ok('dotted slug → reason says the slug is invalid, not that a board is missing', /not a valid board slug/i.test(dotResolve.unresolved.reason));
 
 // A rejected Workday hint (bad tenant/site) must produce a "fix your hint" reason,
 // NOT the "add a hint" message. No slug vendors → network-free.
