@@ -111,14 +111,17 @@ ok('non-list doc → warning about companies key', p9.warnings.some(w => w.inclu
 console.log('\n--- 3. buildCandidateUrls ---');
 
 const b1 = buildCandidateUrls({ name: 'Adyen' });
-eq('3 candidates in vendor order', b1.candidates.map(c => c.vendor), ['gh', 'ashby', 'lever']);
+// The three highest-hit-rate vendors must stay FIRST: resolveCompany returns on
+// the first match, so this ordering is what keeps a common company at three
+// requests even though the long tail is now probed too.
+eq('common vendors probed first', b1.candidates.slice(0, 3).map(c => c.vendor), ['gh', 'ashby', 'lever']);
 eq('GH careers_url', b1.candidates[0].careers_url, 'https://job-boards.greenhouse.io/adyen');
 eq('Ashby careers_url', b1.candidates[1].careers_url, 'https://jobs.ashbyhq.com/adyen');
 eq('Lever careers_url', b1.candidates[2].careers_url, 'https://jobs.lever.co/adyen');
 
 const b2 = buildCandidateUrls({ name: 'X', slug: 'bad/slug' });
 eq('unsafe slug builds NO candidate URLs (SSRF guard)', b2.candidates.length, 0);
-eq('unsafe slug records all vendors as skipped', b2.skipped, ['gh', 'ashby', 'lever']);
+eq('unsafe slug records every vendor as skipped', b2.skipped.length, b1.candidates.length);
 
 const b2b = buildCandidateUrls({ name: 'X', slug: 'has space' });
 eq('slug with space rejected', b2b.candidates.length, 0);
