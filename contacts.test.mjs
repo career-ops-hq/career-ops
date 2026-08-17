@@ -341,6 +341,11 @@ ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
 ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
 ok('unknown flag writes nothing to stdout', typoR.stdout === '');
 
+const helpBogusR = spawnContacts('--help', '--bogus');
+ok('--help --bogus exits 1 (unknown flag checked before --help)', helpBogusR.status === 1);
+ok('--help --bogus names the bad flag in stderr', helpBogusR.stderr.includes('--bogus'));
+ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
+
 // contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
 // copy of the script into a temp dir is a fully isolated career-ops root:
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
@@ -393,6 +398,13 @@ try {
 
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
+
+  // Regression: --vcf=path (attached form) must be honored — the path was
+  // previously ignored because indexOf('--vcf') returned -1 for that token.
+  const eqFormOut = execFileSync('node', [tmpScript, '--vcf=output/eq-form.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
+  ok('--vcf=path (attached =) writes to the specified path', existsSync(join(tmpRoot, 'output/eq-form.vcf')));
+  ok('--vcf=path confirmation message names the eq-form path', eqFormOut.includes('eq-form.vcf'));
+  ok('--vcf=path file contains valid vCard content', readFileSync(join(tmpRoot, 'output/eq-form.vcf'), 'utf-8').includes('BEGIN:VCARD'));
 
   // Path-traversal guard: the escaped target must never be written. Anchor it in
   // a UNIQUE sibling temp dir (outside tmpRoot, i.e. outside the project) so the
