@@ -46,12 +46,13 @@ const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
-if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,120}isReexec/.test(source) &&
+if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,160}isReexec/.test(source) &&
     /Installation requires explicit confirmation/.test(source) &&
-    /CAREER_OPS_UPDATE_CONFIRM: '1'/.test(source)) {
-  pass('apply requires explicit confirmation and carries it through self-reexec');
+    /'apply',\s*'--confirm'/.test(source) &&
+    /CAREER_OPS_UPDATE_REEXEC_MARKER/.test(source)) {
+  pass('apply requires explicit confirmation and carries it through argv plus authenticated self-reexec');
 } else {
-  fail('apply can install without an explicit confirmation flag');
+  fail('apply does not require explicit confirmation or propagate it safely through self-reexec');
 }
 
 function runApplyWithEnv(env, args = ['apply']) {
@@ -207,7 +208,7 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply re-execs through the current Node binary',
-    pattern: /execFileSync\(process\.execPath,\s*\[\s*'update-system\.mjs',\s*'apply'\s*\]/,
+    pattern: /execFileSync\(process\.execPath,\s*\[[\s\S]*?'update-system\.mjs',\s*'apply',\s*'--confirm'/,
   },
   {
     name: 'apply carries the original backup branch across re-exec',
