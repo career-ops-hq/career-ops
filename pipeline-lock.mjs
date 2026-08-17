@@ -38,6 +38,10 @@ const DEFAULT_STALE_MS = 30_000;
 export const OWNERLESS_GRACE_MS = 1_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
+// Ceiling on progress-extended waiting (see the deadline logic in
+// acquirePipelineLock). A multiple of timeoutMs rather than a constant, so a
+// caller that tunes one tunes both.
+const DEFAULT_MAX_WAIT_FACTOR = 10;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -187,15 +191,32 @@ function lockCanRecover(lockDir, staleMs) {
   }
 }
 
+// A cheap identity for "which holder currently has this lock". Used only to
+// tell a lock that is CHANGING HANDS (the system is making progress; this
+// caller is merely unlucky) from one that is WEDGED (a single holder is not
+// letting go, which is what the timeout exists to escape).
+function lockFingerprint(lockDir) {
+  try {
+    const st = statSync(lockDir);
+    const { owner } = readLockOwner(lockDir);
+    // ino is 0 on some Windows volumes, hence birthtime as the tiebreaker —
+    // the same pairing sameLockDirectory() already relies on.
+    return `${owner?.token ?? ''}|${st.ino}|${st.birthtimeMs}`;
+  } catch {
+    return null; // free or unobservable — no evidence either way
+  }
+}
+
 /**
  * Blocks until the lock on `pipelinePath` is held, then returns a handle whose
  * release() frees it. Throws LockTimeoutError if the lock stays busy.
  *
  * @param {string} pipelinePath - File the lock guards.
  * @param {object} [options]
- * @param {number} [options.timeoutMs=8000] - Max time to wait for the lock.
+ * @param {number} [options.timeoutMs=8000] - Max time a SINGLE holder may block this caller. Waiting is extended while the lock keeps changing hands (see below).
  * @param {number} [options.retryMs=80] - Delay between acquisition attempts.
  * @param {number} [options.staleMs=30000] - Age threshold for a lock with no readable owner, floored at OWNERLESS_GRACE_MS.
+ * @param {number} [options.maxWaitMs] - Absolute ceiling on waiting, however much progress the lock makes. Defaults to 10x timeoutMs.
  */
 export async function acquirePipelineLock(pipelinePath, options = {}) {
   // Env overrides let a caller several frames up the stack (a test driving
@@ -204,10 +225,44 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   const timeoutMs = options.timeoutMs ?? (Number(process.env.CAREER_OPS_PIPELINE_LOCK_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
   const retryMs = options.retryMs ?? (Number(process.env.CAREER_OPS_PIPELINE_LOCK_RETRY_MS) || DEFAULT_RETRY_MS);
   const staleMs = options.staleMs ?? (Number(process.env.CAREER_OPS_PIPELINE_LOCK_STALE_MS) || DEFAULT_STALE_MS);
+  // A ceiling that is not a number is not a ceiling. NaN compares false against
+  // everything, so a bad value would not fail loudly — it would silently remove
+  // the only bound on waiting, which is the single thing this option exists to
+  // provide. Only a usable ceiling is honoured; everything else takes the
+  // default, which is at least bounded.
+  //
+  // Read WITHOUT the `|| default` idiom its three siblings above use, because
+  // for this one 0 is a meaningful setting — "never wait past now" — and
+  // `0 || default` would turn a caller who asked for no waiting into one who
+  // waits DEFAULT_MAX_WAIT_FACTOR x timeoutMs, the exact opposite. timeoutMs
+  // and retryMs have no such reading, which is why the idiom is fine there and
+  // wrong here.
+  //
+  // Infinity is kept as written: an explicit, legible "no ceiling" is a choice,
+  // not a mistake. -Infinity and NaN are mistakes, so they take the default
+  // rather than being clamped into a silently different behaviour.
+  const defaultMaxWaitMs = timeoutMs * DEFAULT_MAX_WAIT_FACTOR;
+  const envMaxWait = process.env.CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS;
+  const requestedMaxWait = Number(
+    options.maxWaitMs ?? (envMaxWait === undefined || envMaxWait.trim() === '' ? defaultMaxWaitMs : envMaxWait),
+  );
+  const maxWaitMs = requestedMaxWait === Infinity ? Infinity
+    : Number.isFinite(requestedMaxWait) && requestedMaxWait >= 0 ? requestedMaxWait
+      : defaultMaxWaitMs;
   const lockDir = lockDirFor(pipelinePath);
   const recoverGuardDir = `${lockDir}.recover`;
   const token = randomUUID();
-  const deadline = Date.now() + timeoutMs;
+  let deadline = Date.now() + timeoutMs;
+  // Deliberately NOT floored at timeoutMs. A caller that asks for a ceiling
+  // below one per-holder window means it, and quietly raising it would make
+  // maxWaitMs a no-op in precisely the range where it was stated most
+  // explicitly. The ceiling wins; timeoutMs just stops mattering.
+  const hardDeadline = Date.now() + maxWaitMs;
+  // Lock identity as of the last time this caller ran out of patience, so the
+  // next timeout can ask "did anything move since?". Sampled lazily on the
+  // first failed acquisition, not here, so the very first deadline is measured
+  // against the state we actually started waiting on.
+  let lastFingerprint;
   // The last mkdir error this caller treated as contention. On POSIX it is
   // always EEXIST and says nothing; on Windows an EPERM/EACCES that persists
   // to the deadline is the difference between "crowded" and "this process
@@ -215,6 +270,38 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   // problem would present as a plain, unexplained timeout.
   let lastContentionError = null;
 
+  // Jittered backoff, never sleeping past the ceiling. An uncapped sleep can
+  // cross hardDeadline and let the NEXT mkdir succeed, returning a lock after
+  // the documented absolute limit — an overshoot of up to 1.5x retryMs. Waking
+  // exactly at the ceiling means the check at the top of the loop is what
+  // decides, rather than whichever of the two happened to be later.
+  const backoffMs = () => Math.max(0, Math.min(
+    retryMs * (0.5 + Math.random()),
+    hardDeadline - Date.now(),
+  ));
+
+  // The per-holder deadline, evaluated the SAME way everywhere: an expired
+  // deadline only means "give up" when the lock has not changed hands since we
+  // last looked. Otherwise the window is re-armed and the caller waits again.
+  //
+  // A helper rather than inline code because three separate paths can time a
+  // caller out — the main retry, a non-EEXIST guard refusal, and an ENOENT
+  // owner-write retry — and the progress rule holding on one while the other
+  // two throw directly is the same bug in two more places: a healthy lock
+  // being handed round briskly could still kill a caller through them.
+  const holderStillWedged = () => {
+    if (Date.now() <= deadline) return false;
+    const fingerprint = lockFingerprint(lockDir);
+    // Only a lock we can SEE, unchanged across a full window, is evidence that
+    // waiting longer is futile. A fingerprint that moved means the lock is
+    // being handed round. A null one means it was free or unobservable at the
+    // instant we looked — no evidence either way, and not to be mistaken for a
+    // wedged holder.
+    if (fingerprint !== null && fingerprint === lastFingerprint) return true;
+    lastFingerprint = fingerprint;
+    deadline = Date.now() + timeoutMs;
+    return false;
+  };
   // Built at the throw site so the diagnosis reflects the moment it gave up.
   // A timeout on a critical section that is a single sub-millisecond append
   // has more than one explanation, and the owner record separates them:
@@ -224,8 +311,11 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   //     its holder, because release()'s rmSync can fail on Windows while a
   //     handle is open and is swallowed by design.
   // Diagnostic only: it never changes whether the error is thrown.
-  const buildTimeoutError = () => {
-    const err = new LockTimeoutError(lockDir, timeoutMs);
+  // `expiredMs` is the bound that actually ran out, so the message names the
+  // limit that was applied. Reporting timeoutMs when the CEILING expired states
+  // a number that was never in force.
+  const buildTimeoutError = (expiredMs = timeoutMs) => {
+    const err = new LockTimeoutError(lockDir, expiredMs);
     try {
       const { inspected, owner } = readLockOwner(lockDir);
       err.owner = owner
@@ -256,11 +346,20 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   mkdirSync(dirname(lockDir), { recursive: true });
 
   for (;;) {
+    // The ceiling is tested FIRST, on its own, on every pass. Nesting it inside
+    // the per-holder deadline made it conditional on a branch that may never
+    // run: a caller whose maxWaitMs is below timeoutMs never reaches the inner
+    // check, a re-arm pushes the next look a whole window away, and the reclaim
+    // fast-path continues straight past both. A bound that holds only when
+    // another bound happens to fire is not a bound.
+    if (Date.now() > hardDeadline) throw buildTimeoutError(maxWaitMs);
+
     try {
       mkdirSync(lockDir);
     } catch (err) {
       if (!isMkdirContention(err)) throw err;
       lastContentionError = err;
+      if (lastFingerprint === undefined) lastFingerprint = lockFingerprint(lockDir);
 
       // Serialize stale-reclaim behind a second atomic guard so only one
       // caller can be inside the decide-then-delete window at a time.
@@ -276,8 +375,8 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         // reasoning about a directory it cannot even stat reliably. Back off to
         // the retry loop instead of judging it.
         if (guardErr.code !== 'EEXIST') {
-          if (Date.now() > deadline) throw buildTimeoutError();
-          await sleep(retryMs * (0.5 + Math.random()));
+          if (holderStillWedged()) throw buildTimeoutError();
+          await sleep(backoffMs());
           continue;
         }
         // A process killed between taking the guard and cleaning it up would
@@ -303,7 +402,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         }
       }
 
-      if (Date.now() > deadline) throw buildTimeoutError();
+      if (holderStillWedged()) throw buildTimeoutError();
       // Jitter, because a FIXED retry makes every waiter wake at the same
       // instant and re-race, and whoever loses is picked at random rather than
       // queued. With N waiters that is the coupon-collector problem: serving
@@ -325,7 +424,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
       // lottery. Left as a lottery because fairness needs an ordered wait and
       // that is a different lock; recorded here so nobody reads the jitter as
       // "the race is gone".
-      await sleep(retryMs * (0.5 + Math.random()));
+      await sleep(backoffMs());
       continue;
     }
 
@@ -344,7 +443,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
       // lost race, not a failure — re-enter the loop and compete again.
       // Dying here loses the caller's queued write (#2777, third face).
       if (ownerErr?.code === 'ENOENT') {
-        if (Date.now() > deadline) throw buildTimeoutError();
+        if (holderStillWedged()) throw buildTimeoutError();
         continue;
       }
       // Best-effort: a contended rm here must not mask ownerErr, and an
