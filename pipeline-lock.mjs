@@ -53,12 +53,35 @@ export function lockDirFor(pipelinePath) {
   return `${pipelinePath}.lock`;
 }
 
-/** Owner metadata for a lock directory, or null when missing/unreadable. */
+/**
+ * Owner metadata for a lock directory, plus whether its ABSENCE is a fact.
+ *
+ * `inspected` is the half that matters for safety, and it is the same
+ * distinction #2984 drew for `statSync` one line further down — applied to the
+ * read that happens first. ENOENT is a FACT: there is genuinely no stamp, which
+ * happens by construction for a lock between its mkdir and its owner.json
+ * write, and for the recover guard, which never carries one. The age rule is
+ * the right judge for both.
+ *
+ * Any other code is not a fact. On Windows a live holder's stamp is momentarily
+ * unreadable while the directory is churning under concurrent waiters, and
+ * collapsing that into the same `null` as "no stamp" lets the age rule condemn
+ * a lock that is very much alive. Absence we established, versus absence we
+ * merely failed to observe.
+ */
 function readLockOwner(lockDir) {
+  let raw;
   try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
+    raw = readFileSync(join(lockDir, 'owner.json'), 'utf-8');
+  } catch (err) {
+    return { inspected: err?.code === 'ENOENT', owner: null };
+  }
+  try {
+    return { inspected: true, owner: JSON.parse(raw) };
   } catch {
-    return null;
+    // A torn or corrupt stamp is readable but meaningless. Fall through to the
+    // age rule rather than pinning the lock as unrecoverable for ever.
+    return { inspected: true, owner: null };
   }
 }
 
@@ -144,7 +167,12 @@ function processIsAlive(pid) {
 // caller staleMs still wins, and a genuinely abandoned directory still ages
 // out, so a crash while holding the guard cannot disable recovery for good.
 function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
+  const { inspected, owner } = readLockOwner(lockDir);
+  // Unreadable is not ownerless. A stamp this process could not read proves
+  // nothing about whether its holder is alive, and falling through to the age
+  // rule on that basis is how a LIVE lock gets condemned — the same reasoning
+  // #2984 applied to the stat below, one step earlier in the same function.
+  if (!inspected) return false;
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
@@ -199,10 +227,20 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   const buildTimeoutError = () => {
     const err = new LockTimeoutError(lockDir, timeoutMs);
     try {
-      const owner = readLockOwner(lockDir);
+      const { inspected, owner } = readLockOwner(lockDir);
       err.owner = owner
         ? { pid: owner.pid, alive: processIsAlive(owner.pid), started_at: owner.started_at, heldMs: Date.parse(owner.started_at) ? Date.now() - Date.parse(owner.started_at) : null }
-        : { pid: null, alive: null, note: existsSync(lockDir) ? 'lock exists with no readable owner.json' : 'lock vanished before it could be read' };
+        // The note now separates the two cases the diagnosis could not tell
+        // apart before, because they point at different bugs: a stamp that is
+        // absent is an acquisition still in flight, while one that could not be
+        // read is the condition this change stops from condemning a live lock.
+        : {
+          pid: null,
+          alive: null,
+          note: !inspected ? 'owner.json exists but could not be read'
+            : existsSync(lockDir) ? 'lock exists with no owner.json'
+              : 'lock vanished before it could be read',
+        };
       err.message += ` — owner=${JSON.stringify(err.owner)}`;
       if (lastContentionError && lastContentionError.code !== 'EEXIST') {
         err.lastMkdirError = lastContentionError.code;
@@ -331,7 +369,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         } catch {
           return; // already gone
         }
-        const owner = readLockOwner(lockDir);
+        const { owner } = readLockOwner(lockDir);
         if (owner?.token !== token) return; // reclaimed by someone else — leave it alone
         let after;
         try {

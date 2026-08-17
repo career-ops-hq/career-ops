@@ -242,6 +242,63 @@ test('acquirePipelineLock: a recover guard abandoned by a crashed process still 
   }
 });
 
+test('lockCanRecover: a lock whose owner.json exists but cannot be read is never reclaimed (Windows contention)', async () => {
+  const root = fixtureRoot();
+  try {
+    const p = join(root, 'data', 'pipeline.md');
+    const lockDir = `${p}.lock`;
+
+    // A live holder whose stamp is momentarily unreadable. Simulated portably
+    // by making owner.json a directory, so readFileSync fails with something
+    // that is emphatically NOT ENOENT — exactly like the EPERM/EBUSY a real
+    // Windows holder's stamp returns while 29 other processes hammer the lock.
+    mkdirSync(lockDir, { recursive: true });
+    mkdirSync(join(lockDir, 'owner.json'));
+    // Old enough that the age rule would happily condemn it, so the ONLY thing
+    // protecting this live lock is refusing to judge what cannot be inspected.
+    backdate(lockDir, OWNERLESS_GRACE_MS * 5);
+
+    await assert.rejects(
+      () => acquirePipelineLock(p, { timeoutMs: 200, retryMs: 20, staleMs: 1 }),
+      (err) => err instanceof LockTimeoutError,
+    );
+    // Before the fix this reclaimed the lock: unreadable was conflated with
+    // ownerless, the age rule condemned it, and the real holder then died with
+    // ENOENT writing its own owner.json — losing that caller's queued item.
+    assert.ok(existsSync(lockDir), 'an unreadable owner stamp let a contender delete a live lock');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('LockTimeoutError carries the live holder it was blocked by (#2834 diagnostic survives)', async () => {
+  const root = fixtureRoot();
+  try {
+    const p = join(root, 'data', 'pipeline.md');
+    const held = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 20 });
+    try {
+      // The owner diagnostic is built inside a try/catch that must never mask
+      // the timeout, which also means a silently broken one changes nothing
+      // observable — exactly how changing readLockOwner()'s return shape
+      // degraded it to {alive:false, heldMs:null} without failing a single
+      // test. Pin the fields so the next shape change cannot do it quietly.
+      const err = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 20 }).then(
+        (lock) => { lock.release(); return null; },
+        (e) => e,
+      );
+      assert.ok(err instanceof LockTimeoutError, `expected a timeout, got ${err}`);
+      assert.equal(err.owner?.pid, process.pid, `the blocking holder's pid was not reported: ${JSON.stringify(err.owner)}`);
+      assert.equal(err.owner?.alive, true, `a live holder was reported as not alive: ${JSON.stringify(err.owner)}`);
+      assert.ok(Number.isFinite(err.owner?.heldMs), `hold duration missing: ${JSON.stringify(err.owner)}`);
+      assert.match(err.message, /owner=/, 'the owner record never reached the message');
+    } finally {
+      held.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('release(): a holder whose lock was reclaimed by another process must not delete the new owner\'s lock', async () => {
   const root = fixtureRoot();
   try {
