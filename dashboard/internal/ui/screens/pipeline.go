@@ -39,6 +39,12 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineOpenLaTeXMsg is emitted when a generated CV LaTeX file should be opened
+// with the OS default handler. Path is absolute.
+type PipelineOpenLaTeXMsg struct {
+	Path string
+}
+
 // PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
 // from the application's recorded source HTML. Paths are relative to
 // CareerOpsPath (as recorded in the manifest).
@@ -285,6 +291,11 @@ type PipelineModel struct {
 	pdfPicker  bool
 	pdfCursor  int
 	pdfChoices []string // root-relative paths, newest first
+	// LaTeX picker sub-state — shown when one application matches several
+	// generated LaTeX CVs (role variants from the same company).
+	latexPicker  bool
+	latexCursor  int
+	latexChoices []string // root-relative paths, newest first
 	// flash is a one-shot notice rendered in place of the help bar; any
 	// keypress clears it.
 	flash string
@@ -458,6 +469,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		}
 		if m.pdfPicker {
 			return m.handlePDFPicker(msg)
+		}
+		if m.latexPicker {
+			return m.handleLatexPicker(msg)
 		}
 		if m.searchInput {
 			return m.handleSearchInput(msg)
@@ -656,6 +670,20 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 					PDFPath:       pdf,
 					Format:        format,
 				}
+			}
+		}
+
+	case "x":
+		if app, ok := m.CurrentApp(); ok {
+			candidates := data.ResolveLaTeX(m.careerOpsPath, app)
+			if len(candidates) == 0 {
+				m.flash = "No LaTeX CV found for this application — generate one with /career-ops latex"
+			} else if len(candidates) == 1 {
+				return m, m.openLatexCmd(candidates[0]) // newest first
+			} else {
+				m.latexPicker = true
+				m.latexCursor = 0
+				m.latexChoices = candidates
 			}
 		}
 
@@ -878,6 +906,34 @@ func (m PipelineModel) handlePDFPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) 
 	return m, nil
 }
 
+// handleLatexPicker consumes keys while the LaTeX picker overlay is open.
+func (m PipelineModel) handleLatexPicker(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.latexPicker = false
+		return m, nil
+
+	case "down", "j":
+		m.latexCursor++
+		if m.latexCursor >= len(m.latexChoices) {
+			m.latexCursor = len(m.latexChoices) - 1
+		}
+
+	case "up", "k":
+		m.latexCursor--
+		if m.latexCursor < 0 {
+			m.latexCursor = 0
+		}
+
+	case "enter", "x":
+		m.latexPicker = false
+		if m.latexCursor >= 0 && m.latexCursor < len(m.latexChoices) {
+			return m, m.openLatexCmd(m.latexChoices[m.latexCursor])
+		}
+	}
+	return m, nil
+}
+
 // handleDiscardPicker consumes keys while the discard reason picker is open
 // (Issue 1380). When "Other…" is focused and Enter is pressed, it enters a
 // free-text sub-mode where the user types a custom reason and confirms with
@@ -1089,6 +1145,14 @@ func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
 	fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(relPath))
 	return func() tea.Msg {
 		return PipelineOpenPDFMsg{Path: fullPath}
+	}
+}
+
+// openLatexCmd emits a PipelineOpenLaTeXMsg for a root-relative LaTeX path.
+func (m PipelineModel) openLatexCmd(relPath string) tea.Cmd {
+	fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(relPath))
+	return func() tea.Msg {
+		return PipelineOpenLaTeXMsg{Path: fullPath}
 	}
 }
 
@@ -1328,6 +1392,11 @@ func (m PipelineModel) View() string {
 	// PDF picker overlay
 	if m.pdfPicker {
 		body = m.overlayPDFPicker(body)
+	}
+
+	// LaTeX picker overlay
+	if m.latexPicker {
+		body = m.overlayLatexPicker(body)
 	}
 
 	// Discard reason picker overlay
@@ -1879,7 +1948,7 @@ func (m PipelineModel) renderHelp() string {
 				keyStyle.Render("Esc/C") + descStyle.Render(i18n.Current.HelpClose))
 	}
 
-	if m.statusPicker || m.pdfPicker {
+	if m.statusPicker || m.pdfPicker || m.latexPicker {
 		return style.Render(
 			keyStyle.Render("↑↓/jk") + descStyle.Render(i18n.Current.HelpNavigate) +
 				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpConfirm) +
@@ -1910,6 +1979,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL) +
 		keyStyle.Render("d") + descStyle.Render(i18n.Current.HelpOpenPDF) +
 		keyStyle.Render("D") + descStyle.Render(i18n.Current.HelpRegenPDF) +
+		keyStyle.Render("x") + descStyle.Render(i18n.Current.HelpOpenLaTeX) +
 		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) +
 		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
 		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +
@@ -2028,6 +2098,41 @@ func (m PipelineModel) overlayPDFPicker(body string) string {
 		}
 		prefix := "  "
 		if i == m.pdfCursor {
+			prefix = "> "
+		}
+		name := truncateRunes(filepath.Base(filepath.FromSlash(choice)), pickerWidth-2)
+		picker = append(picker, padStyle.Render(style.Render(prefix+name)))
+	}
+
+	bodyLines = append(bodyLines, picker...)
+	return strings.Join(bodyLines, "\n")
+}
+
+// overlayLatexPicker renders the LaTeX chooser inline at the bottom of the body,
+// mirroring overlayPDFPicker. Choices show the LaTeX filename only — the
+// directory is always output/ and the role variant lives in the name.
+func (m PipelineModel) overlayLatexPicker(body string) string {
+	bodyLines := strings.Split(body, "\n")
+
+	pickerWidth := m.width - 8
+	if pickerWidth < 30 {
+		pickerWidth = 30
+	}
+	padStyle := lipgloss.NewStyle().Padding(0, 2)
+	borderStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Blue).
+		Bold(true)
+
+	var picker []string
+	picker = append(picker, padStyle.Render(borderStyle.Render("Open CV LaTeX:")))
+
+	for i, choice := range m.latexChoices {
+		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
+		if i == m.latexCursor {
+			style = style.Background(m.theme.Overlay).Bold(true)
+		}
+		prefix := "  "
+		if i == m.latexCursor {
 			prefix = "> "
 		}
 		name := truncateRunes(filepath.Base(filepath.FromSlash(choice)), pickerWidth-2)
