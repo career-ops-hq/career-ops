@@ -12,6 +12,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/profile.yml` | Your identity, targets, comp range |
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |
+| `config/local-paths.txt` | Files *this clone* owns that upstream does not ship — one repo-relative path per line (optional; copy `config/local-paths.example.txt` here and edit). See [Fork-local paths](#fork-local-paths) below |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
 | `modes/_brief.md` | Your compact profile brief (~1.5–2K tokens) read by the two-pass triage first pass |
@@ -50,6 +51,29 @@ These files contain your personal data, customizations, and work product. Update
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+
+### Fork-local paths
+
+The two lists above describe *this project*. A fork usually carries files the project has never heard of — a nightly runner, an `.mcp.json`, a private fixtures directory. Those files are in the user layer by every definition that matters, but they cannot be added to `USER_PATHS`: that array lives in `update-system.mjs`, which `apply` overwrites and which git re-merges on every sync. The declaration would be erased by the process it exists to constrain.
+
+`config/local-paths.txt` moves the declaration outside that blast radius. It is gitignored, read at runtime, and merged into the user layer for both the updater's safety check and `validate-system-paths-coverage.mjs`:
+
+```text
+# one repo-relative path per line; blank lines and # comments ignored
+run-nightly.ps1
+.mcp.json
+qa-fixtures/          # trailing slash = everything under this directory
+```
+
+Absent file means no extra paths — identical to the behaviour of every install that never creates one.
+
+Three declarations are refused, loudly, naming the entry:
+
+| Refused | Why |
+|---------|-----|
+| An absolute path, or one containing `..` | Would extend "never touch" over files outside the checkout |
+| A path the system layer already ships | The file would silently stop receiving updates, with no other signal that it had been frozen |
+| `config/local-paths.txt` itself | It is gitignored, so nothing updates it; listing it protects against a threat that does not exist and reads as though it did |
 
 ## System Layer (safe to auto-update)
 
