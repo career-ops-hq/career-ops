@@ -1,0 +1,253 @@
+// tests/title-filter-word-prefix.test.mjs — a `word:` keyword must match the
+// whole word only, and the shipped config must not carry a positive that some
+// negative permanently vetoes.
+//
+// The bug this guards: `title_filter.negative` held a bare "Intern", and
+// compileKeyword only anchors 2-3 letter keywords, so a 6-letter one stayed a
+// plain substring. It therefore vetoed every "Internal" and "International"
+// title, and killed the "Internal Tools" POSITIVE outright — no title could
+// ever satisfy an entry that the negative list matches inside its own text.
+//
+// The cost was not measurable from data/scan-history.tsv, and that is worth
+// stating: the history records only titles that PASSED the filter, so every
+// title this veto removed was never written there. A count over stored rows
+// would have read as zero damage for a healthy filter and a broken one alike.
+// The dead-positive check below needs no observed titles, which is exactly why
+// it is the assertion worth pinning.
+
+import { pass, fail, ROOT } from './helpers.mjs';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import * as yaml from 'js-yaml';
+import { buildTitleFilter, compileKeyword } from '../scan.mjs';
+import { parsePortals } from '../openrouter-runner.mjs';
+
+console.log('\ntitle filter — `word:` prefix and dead-positive guard');
+
+// ── 1. The matcher itself ────────────────────────────────────────────
+const intern = compileKeyword('word:intern');
+if (intern('operations intern') && intern('intern, platform') && intern('intern')) {
+  pass('`word:intern` matches the standalone word at the end, start and alone');
+} else {
+  fail('`word:intern` failed to match a standalone "intern"');
+}
+if (!intern('internal tools engineer') && !intern('international partnerships manager')) {
+  pass('`word:intern` does not match inside "internal" or "international"');
+} else {
+  fail('`word:intern` still matches mid-word');
+}
+// Hyphens and slashes are word separators in titles, not letters.
+if (intern('intern/graduate programme') && intern('summer-intern')) {
+  pass('`word:intern` treats "/" and "-" as boundaries');
+} else {
+  fail('`word:intern` should match across "/" and "-" boundaries');
+}
+// Digits must not glue either, or "intern2026" would slip through as a word.
+if (!intern('intern2026') && !intern('x_intern')) {
+  pass('`word:intern` is not glued to an adjacent digit or underscore');
+} else {
+  fail('`word:intern` matched across a digit or underscore boundary');
+}
+
+// A plain keyword must be untouched by all of this.
+if (compileKeyword('intern')('internal tools') === true) {
+  pass('a keyword WITHOUT the prefix keeps plain substring behaviour');
+} else {
+  fail('an unprefixed keyword changed behaviour — not backward compatible');
+}
+
+// Regex metacharacters in the keyword are literal, not pattern syntax.
+const dotnet = compileKeyword('word:.net');
+if (dotnet('senior .net developer') && !dotnet('anet developer')) {
+  pass('`word:` escapes regex metacharacters (".net" is not "any char + net")');
+} else {
+  fail('`word:` leaked regex metacharacters into the pattern');
+}
+
+// A bare `word:` is a typo. It must match NOTHING: an empty pattern would match
+// every title, and as a negative that would veto an entire scan.
+if (compileKeyword('word:')('customer success manager') === false) {
+  pass('a bare `word:` matches nothing rather than everything');
+} else {
+  fail('a bare `word:` matched a title — one stray colon would veto every scan');
+}
+
+// ── 2. Through the filter, positive and negative sides ───────────────
+const neg = buildTitleFilter({ positive: ['internal tools', 'operations'], negative: ['word:intern'] });
+if (neg('Internal Tools Engineer') === true) {
+  pass('an anchored negative no longer kills the "internal tools" positive');
+} else {
+  fail('"Internal Tools Engineer" is still rejected');
+}
+if (neg('Operations Intern') === false) {
+  pass('an anchored negative still rejects a real internship');
+} else {
+  fail('"Operations Intern" leaked through — the veto stopped working');
+}
+// Word-anchoring works inside an AND-group too, since terms keep compileKeyword.
+const group = buildTitleFilter({ positive: ['word:intern + operations'] });
+if (group('Operations Intern') === true && group('Internal Operations') === false) {
+  pass('a `word:` term inside an AND-group keeps its anchoring');
+} else {
+  fail('a `word:` term lost its anchoring inside an AND-group');
+}
+
+// ── 3. Anchoring loses the suffix forms, so the config must cover them ──
+// "word:intern" deliberately does not reach "Internship" or "Interns", which
+// the loose substring caught by accident. That is the trade the prefix makes,
+// and it is only safe if the list says so explicitly. Assert against the
+// SHIPPED config, not a local literal, or the guard proves nothing about what
+// actually runs. That config is templates/portals.example.yml. portals.yml is
+// the user's own copy: gitignored, absent from a clean checkout, and different
+// on every install — a test asserting against it fails for everyone but the
+// author, and passes in CI only by never running there.
+const shippedCfg = yaml.load(readFileSync(join(ROOT, 'templates/portals.example.yml'), 'utf-8'));
+const shipped = buildTitleFilter(shippedCfg.title_filter);
+const mustReject = [
+  'Operations Intern',
+  'Customer Success Intern',
+  'Implementation Internship',
+  'Customer Success Internship Programme',
+  'Operations Interns (2 positions)',
+];
+const leaked = mustReject.filter((t) => shipped(t) !== false);
+if (leaked.length === 0) {
+  pass('the shipped config rejects intern, interns and internship titles');
+} else {
+  fail(`internship titles leaked through the shipped config: ${JSON.stringify(leaked)}`);
+}
+// Assert on the NEGATIVE list alone, not on the overall verdict. A title is also
+// rejected when no positive covers it, and which roles a config seeks is a user's
+// choice this fix says nothing about: the example ships no "partnerships" positive,
+// so "International Partnerships Manager" is correctly dropped there for a reason
+// that has nothing to do with anchoring. Folding both causes into one boolean would
+// make the guard pass or fail on edits to the positive list.
+const shippedNegatives = (shippedCfg.title_filter?.negative || [])
+  .filter((k) => typeof k === 'string')
+  .map((k) => k.trim().toLowerCase());
+const mustNotBeVetoed = [
+  'Manager, Internal Tools',
+  'International Partnerships Manager',
+  'Director, International Operations',
+];
+const vetoed = mustNotBeVetoed
+  .map((t) => [t, shippedNegatives.filter((k) => compileKeyword(k)(t.toLowerCase()))])
+  .filter(([, hits]) => hits.length > 0);
+if (vetoed.length === 0) {
+  pass('no negative in the shipped config vetoes an internal or international title');
+} else {
+  fail(`vetoed by the shipped negatives: ${JSON.stringify(vetoed)}`);
+}
+
+// ── 4. Both title-filtering paths must agree ─────────────────────────
+// openrouter-runner.mjs cannot import scan.mjs (scan.mjs creates data/ at
+// import time), so it used to keep a second copy of the matching rules. The two
+// had drifted in three ways, none of which the shipped config can expose,
+// because it has positives and no malformed entries. Each case below is a
+// config where the old copy answered differently from buildTitleFilter:
+//
+//   negative-only   scan: no positive constraint, keep    copy: rejected everything
+//   AND-group       scan: both terms must appear          copy: literal " + " text
+//   junk entry      scan: dropped as non-string           copy: coerced to "123"
+//
+// Comparing verdicts against the shared predicate is the assertion; agreeing on
+// the shipped config alone would have passed throughout the drift.
+const driftCases = [
+  {
+    name: 'negative-only config',
+    filter: { negative: ['word:intern'] },
+    titles: ['Operations Manager', 'Warehouse Associate', 'Operations Intern'],
+  },
+  {
+    name: 'AND-group positive',
+    filter: { positive: ['director + engineering'] },
+    titles: ['Director of Engineering', 'Director of Sales', 'Engineering Lead'],
+  },
+  {
+    name: 'malformed entries',
+    filter: { positive: ['operations', null, 123, '   '], negative: [] },
+    titles: ['Operations Manager', '123 Widgets Coordinator', 'Warehouse Associate'],
+  },
+  {
+    name: 'no title_filter at all',
+    filter: undefined,
+    titles: ['Operations Manager', 'Anything At All'],
+  },
+];
+const drifted = [];
+for (const { name, filter, titles } of driftCases) {
+  const yamlText = yaml.dump(filter === undefined ? {} : { title_filter: filter });
+  const runner = parsePortals(yamlText).titleMatches;
+  const canonical = buildTitleFilter(filter);
+  for (const t of titles) {
+    if (runner(t) !== canonical(t)) {
+      drifted.push(`${name}: "${t}" runner=${runner(t)} scan=${canonical(t)}`);
+    }
+  }
+}
+if (drifted.length === 0) {
+  pass('openrouter-runner matches buildTitleFilter on every drift case');
+} else {
+  fail(`the two title-filter paths disagree: ${JSON.stringify(drifted)}`);
+}
+
+// The shipped config too, since that is what actually runs for a new install.
+const runnerYaml = readFileSync(join(ROOT, 'templates/portals.example.yml'), 'utf-8');
+const { titleMatches } = parsePortals(runnerYaml);
+const bothPaths = [
+  'Operations Intern',
+  'Implementation Internship',
+  'Manager, Internal Tools',
+  'International Partnerships Manager',
+  'Customer Success Manager',
+  'Warehouse Associate',
+];
+const disagreed = bothPaths.filter((t) => titleMatches(t) !== shipped(t));
+if (disagreed.length === 0) {
+  pass('scan.mjs and openrouter-runner agree on every intern/internal title');
+} else {
+  fail(`the two title-filter paths disagree on: ${JSON.stringify(disagreed)}`);
+}
+
+// ── 5. No config may carry a permanently-vetoed positive ─────────────
+// A positive the negative list matches INSIDE its own text can never be
+// satisfied by any title. This needs no observed titles, which is why it is the
+// assertion that catches the original bug.
+//
+// Run against templates/portals.example.yml: it is what every new install
+// starts from, and it shipped with "Internal Tools" in positive and a bare
+// "Intern" in negative, so the default carried a dead keyword and handed the
+// bug to the next user.
+function deadPositives(titleFilter) {
+  const positives = (titleFilter?.positive || []).filter((k) => typeof k === 'string');
+  const negatives = (titleFilter?.negative || []).filter((k) => typeof k === 'string');
+  const out = [];
+  for (const p of positives) {
+    const text = p.toLowerCase().replace(/\bword:/g, '');
+    const killers = negatives.filter((n) => compileKeyword(n.trim().toLowerCase())(text));
+    if (killers.length) out.push(`${p} <- ${killers.join(', ')}`);
+  }
+  return out;
+}
+
+const dead = deadPositives(shippedCfg.title_filter);
+if (dead.length === 0) {
+  pass('no positive in templates/portals.example.yml is permanently vetoed by a negative');
+} else {
+  fail(`templates/portals.example.yml positives that can never match: ${JSON.stringify(dead)}`);
+}
+
+// The example config is what a new user inherits, so assert its BEHAVIOUR too,
+// not only that it parses without a contradiction.
+const example = shipped;
+const exampleKeep = ['Internal Tools Engineer', 'International AI Program Manager'];
+const exampleDrop = ['AI Engineer Intern', 'Machine Learning Internship'];
+const exampleWrong = [
+  ...exampleKeep.filter((t) => example(t) !== true),
+  ...exampleDrop.filter((t) => example(t) !== false),
+];
+if (exampleWrong.length === 0) {
+  pass('the example config keeps internal/international and still drops internships');
+} else {
+  fail(`example config verdicts wrong for: ${JSON.stringify(exampleWrong)}`);
+}
