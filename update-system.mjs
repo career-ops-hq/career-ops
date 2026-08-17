@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -226,6 +226,7 @@ const SYSTEM_PATHS = [
   'company-history.test.mjs',
   'rejection-latency.mjs',
   'salary-gap.mjs',
+  'negotiation-roi.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
@@ -281,6 +282,7 @@ const SYSTEM_PATHS = [
   'fonts/',
   'examples/',
   'config/profile.example.yml',
+  'config/local-paths.example.txt',
   '.env.example',
   '.editorconfig',
   '.agents/',
@@ -426,6 +428,119 @@ export const USER_PATHS = [
   '.claude/settings.json',
   '.claude/hooks/',
 ];
+
+// Local user layer — a fork's own files, declared OUTSIDE the system layer.
+//
+// USER_PATHS lives in this file, which `apply` overwrites and which git
+// re-merges on every sync, so "this file is mine" was previously a statement
+// you could only make inside the thing that keeps overwriting it (#2421). The
+// declaration file is gitignored and read at runtime instead: one repo-relative
+// path per line, `#` comments, trailing `/` for a directory prefix — the same
+// shape as the arrays above. Absent file means no extra paths, which is the
+// behaviour every existing install already has.
+export const LOCAL_PATHS_FILE = 'config/local-paths.txt';
+
+/**
+ * Parse a declaration file's contents into a de-duplicated path list.
+ * Pure and tolerant of CRLF: Windows forks are the population this exists
+ * for, and a stray \r would make every entry miss its match.
+ * @param {string} text - Raw file contents.
+ * @returns {string[]} Declared paths, in file order, without duplicates.
+ */
+export function parseLocalPaths(text) {
+  const seen = new Set();
+  for (const rawLine of String(text).split('\n')) {
+    const line = rawLine.replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    seen.add(line);
+  }
+  return [...seen];
+}
+
+/**
+ * Read + validate the local declaration file.
+ *
+ * Refuses rather than honours anything ambiguous: a path the system layer
+ * already ships would silently stop updating, and a path that escapes the
+ * checkout would widen the "never touch" set over files the updater does not
+ * own. Both throw, naming the offending entry.
+ *
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Extra user-layer paths. Empty when the file is absent.
+ */
+export function localUserPaths(root = ROOT) {
+  const file = join(root, LOCAL_PATHS_FILE);
+  if (!existsSync(file)) return [];
+
+  const declared = parseLocalPaths(readFileSync(file, 'utf-8'));
+  const reject = (path, why) => {
+    throw new Error(`${LOCAL_PATHS_FILE}: refusing "${path}" — ${why}`);
+  };
+
+  for (const path of declared) {
+    if (path === LOCAL_PATHS_FILE) {
+      reject(path, 'the declaration file cannot list itself (it is gitignored, so nothing updates it)');
+    }
+    if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\')) {
+      reject(path, 'paths must be repo-relative, not absolute');
+    }
+    if (path.split(/[\\/]/).includes('..')) {
+      reject(path, 'paths must stay inside the repo');
+    }
+    const collision = SYSTEM_PATHS.find((sys) =>
+      sys.endsWith('/') ? path.startsWith(sys) : path === sys,
+    );
+    if (collision) {
+      reject(
+        path,
+        `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
+        + 'Declaring it would stop updates to it with no other signal',
+      );
+    }
+  }
+  return declared;
+}
+
+/**
+ * USER_PATHS plus whatever the local declaration file adds. This is what the
+ * safety check compares against — the built-in list alone would report a
+ * fork's own files as violations.
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Every path the updater must never touch.
+ */
+export function effectiveUserPaths(root = ROOT) {
+  return [...USER_PATHS, ...localUserPaths(root)];
+}
+
+/**
+ * Which of the files an update touched belong to the user layer.
+ *
+ * Pure so the rule can be pinned without driving apply(), which is ROOT-bound
+ * and full of side effects.
+ *
+ * @param {string[]} changedFiles - Paths the update modified.
+ * @param {string[]} updatePaths - Paths this update was allowed to write.
+ *   An explicit entry here wins over a user-layer prefix match, e.g.
+ *   writing-samples/README.md is a system-owned doc inside a user directory.
+ * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ *   A trailing `/` means directory prefix; anything else matches exactly. Bare
+ *   `startsWith` over-matched neighbours that merely share a prefix —
+ *   `cv.md` claimed `cv.md.bak`, and a declared `run-nightly.ps1` claimed
+ *   `run-nightly.ps1.old` — reporting files the user never declared as
+ *   violations. The declaration syntax has always said trailing `/` is what
+ *   makes an entry a prefix; this makes the matcher agree with it.
+ * @returns {string[]} Violating files, each listed once.
+ */
+export function userLayerViolations(changedFiles, updatePaths, userPaths) {
+  const violations = [];
+  for (const file of changedFiles) {
+    if (updatePaths.includes(file)) continue;
+    if (userPaths.some((userPath) => (userPath.endsWith('/') ? file.startsWith(userPath) : file === userPath))) {
+      violations.push(file);
+    }
+  }
+  return violations;
+}
 
 function parseVersionFile(raw) {
   // VERSION may carry a release-please marker, e.g. "1.6.0 # x-release-please-version".
@@ -1117,6 +1232,157 @@ async function check() {
   }));
 }
 
+// ── .gitignore RECONCILE ────────────────────────────────────────
+
+// The header the appended block is written under. Purely cosmetic: the
+// reconciler keys off pattern presence, never off this marker, so a user who
+// deletes or moves it loses nothing.
+const GITIGNORE_BLOCK_HEADER = [
+  '# Added by career-ops update-system.mjs.',
+  '# System-owned ignore rules that were missing from this file. Your own rules',
+  '# are never modified, reordered or removed: the updater only appends patterns',
+  '# it cannot already find somewhere in this file. Reordering these lines, or',
+  '# moving them elsewhere in the file, is safe and will not bring them back.',
+  '# Deleting or commenting one out is not: they are system-owned, several of',
+  '# them guard files holding personal data, and the next update re-adds any',
+  '# that is no longer present as a live pattern.',
+];
+
+/**
+ * Read a blob from a git ref verbatim, with no trimming.
+ *
+ * `gitQuiet()` calls `.trim()` on stdout, which is right for the SHAs and
+ * pathspecs every other caller reads and wrong for file CONTENT: it strips a
+ * significant backslash-escaped trailing space from the blob's final line, and
+ * the final newline with it. For .gitignore that silently defeats the verbatim
+ * guarantee reconcileGitignore() is built on, at the one line most likely to be
+ * a freshly appended rule.
+ *
+ * @param {string} spec - A `<ref>:<path>` blob spec, e.g. `FETCH_HEAD:.gitignore`.
+ * @returns {string} The blob's exact bytes as UTF-8, untrimmed.
+ */
+function gitShowRaw(spec) {
+  const args = ['show', spec];
+  const timeout = gitTimeoutMs(args);
+  try {
+    return execFileSync('git', args, {
+      cwd: ROOT, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Write .gitignore atomically: temp file on the same filesystem, then rename.
+ *
+ * writeFileSync opens with O_TRUNC, so a crash or I/O error partway through
+ * leaves the file empty or half-written. For most files that is an annoyance.
+ * For this one it un-ignores everything the truncated portion covered, turning
+ * a failed update into exactly the exposure the file exists to prevent, and
+ * doing it silently. Mirrors discover-ats.mjs and followup-seed.mjs.
+ *
+ * @param {string} filePath - Absolute path to write.
+ * @param {string} content - Full file content.
+ * @returns {void}
+ */
+function writeGitignoreAtomic(filePath, content) {
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmpPath, content);
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    // The original is still intact: the rename either happened or it did not.
+    try { rmSync(tmpPath, { force: true }); } catch { /* already gone */ }
+    throw err;
+  }
+}
+
+/**
+ * Reconcile a local .gitignore against the upstream one by appending only the
+ * system-owned patterns it is missing.
+ *
+ * .gitignore cannot join SYSTEM_PATHS: unlike every other system file it is
+ * co-owned. Users add their own rules to it, and the raw `git checkout` the
+ * update stage performs would delete those silently, which is a worse bug than
+ * the one this fixes. So it gets the append-if-missing treatment
+ * agent-inbox.mjs:ensureGitignored() already applies to its own single rule,
+ * generalized to the whole upstream rule set.
+ *
+ * Deliberately append-only. An upstream rule that was REMOVED or REWRITTEN
+ * (e.g. `*.bak` becoming `*.bak*`) leaves the superseded line in place, because
+ * there is no way to tell a stale system rule from a user rule the same shape.
+ * A redundant ignore rule is harmless; deleting a user's is not.
+ *
+ * Ordering caveat: missing patterns are appended at the end in upstream order,
+ * which preserves each negation's position relative to the pattern it negates
+ * *within the appended block*. A user-authored negation earlier in the file can
+ * still be overridden by a newly appended pattern, since later lines win in
+ * .gitignore. That is the correct precedence for a system rule, and it is the
+ * only ordering that does not require rewriting lines we do not own.
+ *
+ * @param {string} localText - Current .gitignore content.
+ * @param {string} upstreamText - Upstream .gitignore content (FETCH_HEAD).
+ * @returns {{ text: string, added: string[] }} Reconciled content and the
+ *   patterns appended. `added` is empty and `text` is byte-identical to
+ *   `localText` when nothing was missing, which is what makes repeated runs
+ *   idempotent and keeps a no-op update out of the commit.
+ */
+export function reconcileGitignore(localText, upstreamText) {
+  // One set for both patterns and comments. A comment can never collide with a
+  // pattern (only comments start with '#'), so membership answers both "does
+  // this install already have this rule?" and "has this rationale block already
+  // been copied by an earlier update?" with no second structure to keep in sync.
+  const seen = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+
+  const block = [];
+  const added = [];
+  let pendingComments = [];
+  for (const raw of upstreamText.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') { pendingComments = []; continue; }
+    if (line.startsWith('#')) { pendingComments.push([raw, line]); continue; }
+    if (seen.has(line)) { pendingComments = []; continue; }
+    // Carry the rule's own rationale across with it. Several of these comments
+    // are the only record of WHY a path is ignored (which ones hold PII, why a
+    // glob has a trailing `*`), and an install that gets the pattern without
+    // the reason is one edit away from removing it as noise.
+    for (const [rawComment, comment] of pendingComments) {
+      if (!seen.has(comment)) { block.push(rawComment); seen.add(comment); }
+    }
+    pendingComments = [];
+    // Emitted verbatim, compared normalized. A pattern whose trailing space is
+    // backslash-escaped (`secret\ `) is significant in .gitignore and would be
+    // corrupted by writing back the trimmed form used for matching.
+    block.push(raw);
+    added.push(line);
+    // Guard against an upstream file that lists the same pattern twice.
+    seen.add(line);
+  }
+
+  if (added.length === 0) return { text: localText, added };
+
+  // Match the local file's dominant line ending. A checkout on Windows under
+  // `core.autocrlf=true` leaves CRLF on disk, and appending LF-only lines to it
+  // makes `git diff` show the whole file as changed.
+  const crlfCount = (localText.match(/\r\n/g) || []).length;
+  const lfCount = (localText.match(/\n/g) || []).length - crlfCount;
+  const eol = crlfCount > lfCount ? '\r\n' : '\n';
+  const body = [...GITIGNORE_BLOCK_HEADER, ...block].join(eol);
+  // localText is concatenated verbatim, never trimmed. A local rule whose
+  // trailing space is backslash-escaped is significant, and stripping it would
+  // MODIFY a user's line, which is the one thing this function promises not to
+  // do. Only the separator varies: none for an empty file, one EOL when the
+  // file already ends in a newline, two when it does not.
+  const separator = localText === ''
+    ? ''
+    : (/\r?\n$/.test(localText) ? eol : `${eol}${eol}`);
+  return { text: `${localText}${separator}${body}${eol}`, added };
+}
+
 // ── APPLY ───────────────────────────────────────────────────────
 
 async function apply() {
@@ -1351,6 +1617,63 @@ async function apply() {
       }
     }
 
+    // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
+    // above; this one cannot be, because it is the one system file users also
+    // write to. A raw checkout would delete their rules silently — the same
+    // failure shape as the bug being fixed. Append what is missing, touch
+    // nothing else. The consequence of skipping it entirely for 43 releases was
+    // that new ignore rules never reached an existing install, so a candidate's
+    // CV or tracker could sit unignored in a fork after a reflexive `git add .`
+    // — exactly what tests/user-layer-gitignored.test.mjs exists to prevent,
+    // and what it could only prevent inside this repository.
+    try {
+      const gitignorePath = join(ROOT, '.gitignore');
+      const upstreamGitignore = gitShowRaw('FETCH_HEAD:.gitignore');
+      // Uncommitted local edits to .gitignore are the user's, and that is a
+      // routine state rather than an exotic one: agent-inbox.mjs's own
+      // ensureGitignored() appends a rule without committing it. Such a file
+      // must stay OUT of `updated`, for the two reasons #2337 established for
+      // system files. `updated` is the rollback pathspec, and revertPaths()
+      // runs a bare `git checkout HEAD -- <path>` whose protectedPaths guard
+      // covers only newly ADDED files, so a tracked .gitignore would be hard
+      // reset and the user's uncommitted rules destroyed. `updated` is also the
+      // commit pathspec, so their edit would be swept in under an "auto-update
+      // system files" message. The reconciled rules are live on disk either
+      // way, which is all that ignoring actually requires.
+      const gitignoreWasDirty = initialStatusPaths.has('.gitignore');
+      const trackGitignore = () => {
+        if (!gitignoreWasDirty) {
+          updated.push('.gitignore');
+          return;
+        }
+        console.log('.gitignore had uncommitted local changes. The new rules are applied but left');
+        console.log('  unstaged, so they land in your own commit rather than in this update.');
+      };
+      if (!existsSync(gitignorePath)) {
+        // No local file at all (deleted by hand, or a checkout predating it).
+        // Nothing is co-owned yet, so the upstream copy can be written whole.
+        // Written exactly as upstream has it. The read is untrimmed, so the blob
+        // already carries its own final newline; the guard is only for a blob that
+        // somehow lacks one.
+        const seed = upstreamGitignore.endsWith('\n') ? upstreamGitignore : `${upstreamGitignore}\n`;
+        writeGitignoreAtomic(gitignorePath, seed);
+        trackGitignore();
+        console.log('Restored .gitignore (it was missing).');
+      } else {
+        const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
+        if (added.length > 0) {
+          writeGitignoreAtomic(gitignorePath, text);
+          trackGitignore();
+          console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      // Never abort an update over this, but never swallow it either: a silent
+      // skip here is precisely how the original bug stayed invisible.
+      console.error(`Could not reconcile .gitignore: ${err.message}`);
+      console.error('Your own rules were left untouched. Compare manually with: git diff FETCH_HEAD -- .gitignore');
+    }
+
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
     // note). scaffolder/ was just checked out by the update stage above, so the
     // module resolves here even on a pre-#1245 old→new re-exec.
@@ -1369,18 +1692,16 @@ async function apply() {
     // can exclude them from the revert and log what was preserved.
     const violatedUserPaths = new Set();
     try {
-      for (const entry of gitStatusEntries()) {
-        const file = entry.path;
-        if (initialStatusPaths.has(file)) continue;
-        // Explicit SYSTEM_PATHS entries override USER_PATHS prefix matches.
-        // (e.g. writing-samples/README.md is system-owned doc inside a user dir.)
-        if (updatePaths.includes(file)) continue;
-        for (const userPath of USER_PATHS) {
-          if (file.startsWith(userPath)) {
-            console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
-            violatedUserPaths.add(file);
-          }
-        }
+      // effectiveUserPaths(), not USER_PATHS: a fork's own files are declared
+      // in the gitignored local file (#2421) and are just as untouchable as
+      // cv.md. Explicit SYSTEM_PATHS entries still override a prefix match
+      // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
+      const changed = gitStatusEntries()
+        .map((entry) => entry.path)
+        .filter((file) => !initialStatusPaths.has(file));
+      for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
+        console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
+        violatedUserPaths.add(file);
       }
     } catch (err) {
       // Fail closed: if we can't validate the safety invariant we must
