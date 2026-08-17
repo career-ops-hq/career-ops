@@ -228,8 +228,19 @@ function resolveReportUrl(reportField) {
   // [ \t]* NOT \s*: \s matches newlines, so an empty `**URL:**` header swallowed
   // the line break and captured the NEXT header's text. Every such report then
   // minted the same bogus key (`**Legitimacy:**`), and the backfill counted it
-  // as a successful fill.
-  const m = readFileSync(reportPath, 'utf-8').match(/^\*\*URL:\*\*[ \t]*(\S+)/m);
+  // as a successful fill. `\S+` cannot cross a newline, so an empty header now
+  // just fails to match at that position instead of reaching into the next line.
+  //
+  // Deliberately NOT anchored to line start. AGENTS.md requires `**URL:**` "in
+  // the header (between Score and PDF)" — that is, INLINE:
+  //   **Score:** 4.1/5 | **URL:** https://… | **Legitimacy:** High | **PDF:** …
+  // which a `^`-anchored pattern cannot see. Every report written in the
+  // documented format reported "no **URL:** header" and silently fell back to
+  // fuzzy company+role dedup — the exact matching that let a new Google req
+  // overwrite a different, concurrently-live one. Checked against all 399
+  // reports: 376 match both ways and agree on the URL 376/376, so dropping the
+  // anchor cannot change a URL that already resolved.
+  const m = readFileSync(reportPath, 'utf-8').match(/\*\*URL:\*\*[ \t]*(\S+)/);
   if (!m) return { url: '', reason: 'no-url' };
   // Strip a markdown autolink wrapper and trailing punctuation, then require a
   // real http(s) URL. `**URL:** N/A` is legitimate for recruiter-sourced roles,

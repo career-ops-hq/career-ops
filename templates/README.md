@@ -7,6 +7,7 @@ System-layer template files used by career-ops scripts and modes. These files ar
 | File | Used By | Purpose |
 |------|---------|---------|
 | `cv-template.html` | `generate-pdf.mjs` | HTML/CSS template for ATS-optimized CV PDFs |
+| `cv-template.{compact,executive,jake,leadership,modern}.html` | `generate-pdf.mjs`, `build-cv-html.mjs` (via `cv-templates.mjs`) | Named CV variants selectable per CV or as a `cv.template` default. Same placeholder tokens and ATS rules as `cv-template.html`. See detailed section below. |
 | `resume-template.html` | `generate-pdf.mjs` (via `--template`) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section (but keeps Awards & Honors), targets 1–2 page US/industry format. See detailed section below. |
 | `cv-template.tex` | `generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
 | `portals.example.yml` | Onboarding | Example portal scanner configuration (copy to `portals.yml` to activate) |
@@ -31,6 +32,34 @@ The HTML template rendered by Playwright into PDF. Uses placeholder tokens (`{{N
 **The `<!-- END -->` sentinel (custom templates, read this):** Skills is the last section in the shipped templates, so it has no following section marker for the strip to stop at. A template that renders a Skills section must therefore place a literal `<!-- END -->` comment immediately after it (`%%%%  END  %%%%` in the LaTeX template) — that sentinel is what bounds the strip.
 
 Getting this wrong is safe, by design. If the sentinel is missing, the empty-Skills strip simply does not run: the template is left byte-for-byte untouched and the Skills section renders as a bare header. That is a cosmetic bug, deliberately chosen over the alternative — without the sentinel *and* without this fail-safe, the strip would run to end-of-file and delete the closing `</div></body></html>` (`\end{document}`), producing a truncated document. Custom templates are validated only for `{{NAME}}`, `{{EXPERIENCE}}`, and `{{EDUCATION}}` (see `cv-templates.mjs`); the sentinel is not required, precisely because its absence degrades gracefully.
+
+### Named CV templates
+
+Five alternatives to the base design, discovered by filename (`cv-template.<name>.html`) and resolved by `cv-templates.mjs`:
+
+| Name | Design | Suits |
+|------|--------|-------|
+| `modern` | Oversized name, accent-bar section headings, tinted summary panel, accent-coloured role titles | Product and tech roles |
+| `compact` | Tight leading, small type, left-rail label column so headings cost vertical space once | Fitting a two-page history onto one page |
+| `executive` | Serif, centred header, ruled small-caps headings, no colour fills | Banks, funds, traditional enterprises |
+| `leadership` | Executive hybrid: short leadership summary, competencies block ahead of the chronology | Senior and leadership applications |
+| `jake` | HTML port of the widely used "Jake's Resume" LaTeX layout: two-row job headers, full-width ruled headings | Engineering roles expecting the familiar format |
+
+Pick one for a single CV, or set a default in `config/profile.yml`:
+
+```yaml
+cv:
+  template: modern
+```
+
+```bash
+node cv-templates.mjs list cv            # names + display names
+node cv-templates.mjs resolve cv modern  # absolute path to fill
+```
+
+**These are not "just CSS".** Each carries the same contract as the base template, and `tests/cv-named-templates.test.mjs` enforces it: the `{{NAME}}`/`{{EXPERIENCE}}`/`{{EDUCATION}}` placeholders, every optional-section marker plus the `<!-- END -->` sentinel described above, a static system font stack (no bundled woff2), and ligatures disabled. Copy an existing variant when adding a sixth — a template that only looks right will drop a candidate's awards or leave a bare Skills heading.
+
+**Single column, always.** All colour in these variants is decoration over a strictly top-to-bottom text flow, so PDF extraction order is unaffected. Multi-column page layouts are the classic ATS parse failure and none of these use one.
 
 ### resume-template.html
 

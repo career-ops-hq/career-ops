@@ -8,9 +8,13 @@
  */
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
 import { matchInvite, normalizeCompanyName, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from './invite-match.mjs';
+
+const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'invite-match.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -358,6 +362,57 @@ const redundancyFullEmail = 'Hi team,\n\nWe regret to inform everyone that, foll
 const redundancyFullResult = classifyEmail(redundancyFullEmail);
 eq('unrelated company-wide redundancy announcement does not classify as rejection', redundancyFullResult.classification === 'rejection', false);
 eq('unrelated company-wide redundancy announcement does not report phraseStrength "strong"', redundancyFullResult.phraseStrength === 'strong', false);
+
+// --- CLI flag-handling & help regression tests (#2854) ---
+
+function runCli(args = []) {
+  try {
+    const stdout = execFileSync(process.execPath, [SCRIPT_PATH, ...args], {
+      encoding: 'utf-8',
+      timeout: 10000,
+      cwd: dirname(SCRIPT_PATH),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      input: '',
+    });
+    return { status: 0, stdout, stderr: '', error: null };
+  } catch (err) {
+    return {
+      status: err.status ?? 1,
+      stdout: err.stdout ? String(err.stdout) : '',
+      stderr: err.stderr ? String(err.stderr) : '',
+      error: err,
+    };
+  }
+}
+
+// 1. --help prints usage, documents both --help and -h, and exits 0
+const helpResult = runCli(['--help']);
+eq('CLI: --help exits with code 0', helpResult.status, 0);
+eq('CLI: --help stdout contains Usage block', helpResult.stdout.includes('Usage:\n  node invite-match.mjs'), true);
+eq('CLI: --help stdout documents --help', helpResult.stdout.includes('--help'), true);
+eq('CLI: --help stdout documents -h', helpResult.stdout.includes('-h'), true);
+
+// 2. -h prints the exact same usage block and exits 0
+const hResult = runCli(['-h']);
+eq('CLI: -h exits with code 0', hResult.status, 0);
+eq('CLI: -h stdout matches --help stdout', hResult.stdout, helpResult.stdout);
+
+// 3. --bogus exits non-zero and error output names --bogus
+const bogusResult = runCli(['--bogus']);
+eq('CLI: --bogus exits non-zero (code 1)', bogusResult.status, 1);
+eq('CLI: --bogus stderr names the unrecognized flag', bogusResult.stderr.includes('--bogus'), true);
+eq('CLI: --bogus stderr contains unrecognized flag message', bogusResult.stderr.includes('unrecognized flag(s)'), true);
+
+// 4. --help --bogus exits non-zero and error output names --bogus (unknown-flag check before help exit)
+const helpBogusResult = runCli(['--help', '--bogus']);
+eq('CLI: --help --bogus exits non-zero (code 1)', helpBogusResult.status, 1);
+eq('CLI: --help --bogus stderr names the unrecognized flag', helpBogusResult.stderr.includes('--bogus'), true);
+eq('CLI: --help --bogus does not print usage on error', helpBogusResult.stdout.includes('Usage:'), false);
+
+// 5. mistyped flag (e.g. --sumary) is rejected with exit code 1
+const mistypedResult = runCli(['--sumary']);
+eq('CLI: mistyped flag (--sumary) exits non-zero (code 1)', mistypedResult.status, 1);
+eq('CLI: mistyped flag stderr names the mistyped flag', mistypedResult.stderr.includes('--sumary'), true);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
