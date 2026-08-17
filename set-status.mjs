@@ -70,16 +70,22 @@
  * because it always has a real prior status and always writes its own source.
  * Any other producer does have to, so they are stated here:
  *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
- *     funnel-velocity.mjs treats "-" as "no prior state" and sends anything
- *     else through resolveCanonicalState, so an empty cell is rejected as
- *     `unknown from-state ""` and the row is dropped.
+ *     funnel-velocity.mjs reads the two columns differently: a from of "-"
+ *     parses to null, meaning no prior state, while a to of "-" is preserved
+ *     as the literal "-", meaning an unknown target. Any other value goes
+ *     through resolveCanonicalState, so an empty cell is rejected as
+ *     `unknown from-state ""` or `unknown to-state ""` for its own column,
+ *     and the row is dropped.
  *   - The source column is a closed set, and VALID_SOURCES in
  *     funnel-velocity.mjs is the authority on its members. Deliberately not
  *     enumerated here: a copy of that list in prose is wrong the first time a
  *     writer is added, and it would be wrong in three files at once.
- *     A value outside the set parses but is counted as an unknown source and
- *     excluded from the funnel. Namespacing a source (say "backfill:notes")
- *     therefore silently loses the row; put that detail in the note column.
+ *     A value outside the set parses but is excluded from day-math. The row
+ *     is not lost and the exclusion is not silent: it is kept as an
+ *     observation, recorded in unknownSources, and printed with its line
+ *     number under dataQuality. Namespacing a source (say "backfill:notes")
+ *     therefore keeps the row out of the day-math figures; put that detail in
+ *     the note column.
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';
