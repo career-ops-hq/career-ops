@@ -1197,6 +1197,23 @@ const windowJson = JSON.parse(windowOut);
 ok('--window produces valid JSON output', typeof windowJson === 'object' && 'metadata' in windowJson);
 eq('--window sets windowDays in metadata', windowJson.metadata.windowDays, 30);
 
+// Test --min-span flag.
+//
+// This asserts on the VALUE reaching metadata, not merely on a zero exit,
+// because the failure this guards against exits non-zero for a reason that has
+// nothing to do with the flag's logic: validateFlags reads KNOWN_FLAGS, which
+// lives in a different block from every line that consumes --min-span. Adding
+// the flag everywhere else and forgetting that list produces "unrecognized
+// flag(s): --min-span" from code that is otherwise complete and correct — and
+// two branches can each append to that list and merge without git ever
+// reporting a conflict, so nothing outside a running CLI catches it.
+const minSpanOut = execFileSync('node', [scriptPath, '--min-span', '3'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+const minSpanJson = JSON.parse(minSpanOut);
+eq('--min-span sets minSpanDays in metadata', minSpanJson.metadata.minSpanDays, 3);
+
 // Test --summary flag
 const summaryOut = execFileSync('node', [scriptPath, '--summary'], {
   encoding: 'utf-8', timeout: 10000,

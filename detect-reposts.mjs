@@ -68,8 +68,14 @@ const MIN_REPOST_SPAN_DAYS = 1;
 
 // --- CLI args ---
 
-const KNOWN_FLAGS = ['--window', '--summary', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--window'];
+// ADDING A FLAG: add it to BOTH lists below, and to USAGE. validateFlags reads
+// these, not the code that consumes the flag, so a new flag wired up everywhere
+// else still exits 1 with "unrecognized flag(s)". Appending to a list is also
+// the shape git merges most willingly: two branches can each add a flag here and
+// merge without a conflict, leaving whichever landed second working in every
+// file except this one. That is how --min-span arrived rejected (#2919).
+const KNOWN_FLAGS = ['--window', '--min-span', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--window', '--min-span'];
 
 const USAGE = `Usage:
   node detect-reposts.mjs                       # full JSON repost clusters to stdout
