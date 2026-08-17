@@ -1001,9 +1001,11 @@ async function searchForNewUrl(page, offer) {
       Array.from(document.querySelectorAll('a.result__a'))
         .map((a) => a.getAttribute('href'))
         .filter(Boolean),
+      { timeout: 10000 }
     );
     return pickRediscoveredUrl(hrefs, domain);
-  } catch {
+  } catch (err) {
+    console.warn(`[scan] searchForNewUrl failed: ${err.message || err}`);
     return null;
   } finally {
     try {

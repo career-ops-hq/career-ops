@@ -26,8 +26,8 @@
 //   compatibility.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
-import { existsSync, readFileSync } from 'fs';
-import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
+import { existsSync, readFileSync, lstatSync, realpathSync } from 'fs';
+import { resolve, dirname, basename, join, extname, isAbsolute, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
@@ -649,8 +649,31 @@ function countBullets(payload) {
 }
 
 async function writeAndReport(html, absOutput, payload, extra = {}) {
+  const relOut = relative(__dirname, absOutput);
+  if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
+    throw new Error(`Refusing to write HTML outside the project directory: ${absOutput}`);
+  }
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+
+  let isSymlink = false;
+  try {
+    isSymlink = lstatSync(absOutput).isSymbolicLink();
+  } catch {
+    isSymlink = false;
+  }
+  if (isSymlink) {
+    throw new Error(`Refusing to write HTML outside the project directory: ${absOutput}`);
+  }
+  const repoReal = realpathSync(__dirname);
+  const canonicalTarget = existsSync(absOutput)
+    ? realpathSync(absOutput)
+    : join(realpathSync(outDir), basename(absOutput));
+  const relReal = relative(repoReal, canonicalTarget);
+  if (relReal === '' || relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
+    throw new Error(`Refusing to write HTML outside the project directory: ${absOutput}`);
+  }
+
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);
