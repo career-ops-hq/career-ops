@@ -1241,5 +1241,53 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   }
 }
 
+// ── --source: attribution for a caller that delegates here (#2900) ──────────
+// The web status route writes through this CLI rather than touching the tracker
+// itself, so the ledger row it produces has to stay distinguishable from a CLI
+// one. One value feeds the ledger; it must be legal there.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = new Date().toISOString().slice(0, 10);
+
+  const r = runSetStatus(['2', 'Applied', '--source', 'web', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tweb\t\n`) {
+    pass('--source web: ledger row carries web, not set-status');
+  } else {
+    fail(`--source web: expected web in the source column, got ${JSON.stringify(log)}\n${r.stdout}${r.stderr}`);
+  }
+}
+
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = new Date().toISOString().slice(0, 10);
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
+    pass('--source omitted: still defaults to set-status');
+  } else {
+    fail(`--source default: expected set-status, got ${JSON.stringify(log)}`);
+  }
+}
+
+// Fails closed. The value is written to a file another tool parses positionally
+// and gates on an allow-list, so an unrecognized label would be persisted and
+// then silently dropped by the reader. Reject it at the boundary instead.
+for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['2', 'Applied', '--source', bad, '--json'], sb);
+  let wrote = true;
+  try { readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8'); } catch { wrote = false; }
+  if (r.code !== 0 && !wrote) {
+    pass(`--source ${bad}: rejected non-zero and nothing written`);
+  } else {
+    fail(`--source ${bad}: expected rejection, got code=${r.code} wrote=${wrote}`);
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
