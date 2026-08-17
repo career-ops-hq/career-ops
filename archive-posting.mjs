@@ -26,8 +26,9 @@ import { chromium } from 'playwright';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
+import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const JDS_DIR = join(ROOT, 'jds');
@@ -35,10 +36,7 @@ const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
-const args = process.argv.slice(2);
-
-if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-  console.log(`
+const HELP_TEXT = `
 ╔══════════════════════════════════════════════════════════════════╗
 ║           career-ops — Job Posting Archiver                     ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -77,9 +75,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     node archive-posting.mjs "https://jobs.lever.co/acme/xyz" --report=42
     node archive-posting.mjs --pipeline
     npm run archive -- "https://jobs.lever.co/elevenlabs/abc"
-`);
-  process.exit(0);
-}
+`;
 
 let targetUrl = null;
 let overrideCompany = null;
@@ -88,49 +84,59 @@ let pipelineMode = false;
 let dryRun = false;
 let reportNum = null;
 
-for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-  if (arg === '--pipeline') {
-    pipelineMode = true;
-  } else if (arg === '--dry-run') {
-    dryRun = true;
-  } else if (arg.startsWith('--company=')) {
-    overrideCompany = arg.slice('--company='.length).trim();
-  } else if (arg === '--company' && args[i + 1]) {
-    overrideCompany = args[++i].trim();
-  } else if (arg.startsWith('--role=')) {
-    overrideRole = arg.slice('--role='.length).trim();
-  } else if (arg === '--role' && args[i + 1]) {
-    overrideRole = args[++i].trim();
-  } else if (arg.startsWith('--report=')) {
-    reportNum = arg.slice('--report='.length).trim();
-  } else if (arg === '--report') {
-    // Consume the value explicitly. Left unconsumed it would fall through to the
-    // bare-argument branch below and be mistaken for the URL. Consume it even
-    // when absent: a trailing `--report` used to be dropped silently, archiving
-    // the posting with no report prefix — unfindable, which is the failure this
-    // flag exists to prevent. The empty string reaches the validator below and
-    // exits non-zero instead.
-    reportNum = args[++i]?.trim() ?? '';
-  } else if (!arg.startsWith('--') && !targetUrl) {
-    targetUrl = arg;
+// Parsing lives in a function, not at module scope, so importing this file for
+// its exports doesn't read process.argv or call process.exit — the repo's
+// standard direct-run guard at the bottom is what invokes it.
+function parseCliArgs(args) {
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    console.log(HELP_TEXT);
+    process.exit(0);
   }
-}
 
-if (reportNum !== null) {
-  if (!/^\d+$/.test(reportNum) || Number(reportNum) <= 0) {
-    console.error(`Invalid --report value: "${reportNum}". Expected a positive report number.`);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--pipeline') {
+      pipelineMode = true;
+    } else if (arg === '--dry-run') {
+      dryRun = true;
+    } else if (arg.startsWith('--company=')) {
+      overrideCompany = arg.slice('--company='.length).trim();
+    } else if (arg === '--company' && args[i + 1]) {
+      overrideCompany = args[++i].trim();
+    } else if (arg.startsWith('--role=')) {
+      overrideRole = arg.slice('--role='.length).trim();
+    } else if (arg === '--role' && args[i + 1]) {
+      overrideRole = args[++i].trim();
+    } else if (arg.startsWith('--report=')) {
+      reportNum = arg.slice('--report='.length).trim();
+    } else if (arg === '--report') {
+      // Consume the value explicitly. Left unconsumed it would fall through to the
+      // bare-argument branch below and be mistaken for the URL. Consume it even
+      // when absent: a trailing `--report` used to be dropped silently, archiving
+      // the posting with no report prefix — unfindable, which is the failure this
+      // flag exists to prevent. The empty string reaches the validator below and
+      // exits non-zero instead.
+      reportNum = args[++i]?.trim() ?? '';
+    } else if (!arg.startsWith('--') && !targetUrl) {
+      targetUrl = arg;
+    }
+  }
+
+  if (reportNum !== null) {
+    if (!/^\d+$/.test(reportNum) || Number(reportNum) <= 0) {
+      console.error(`Invalid --report value: "${reportNum}". Expected a positive report number.`);
+      process.exit(1);
+    }
+    if (pipelineMode) {
+      console.error('--report applies to a single posting; it cannot be combined with --pipeline.');
+      process.exit(1);
+    }
+  }
+
+  if (!pipelineMode && !targetUrl) {
+    console.error('No URL provided. Run with --help for usage.');
     process.exit(1);
   }
-  if (pipelineMode) {
-    console.error('--report applies to a single posting; it cannot be combined with --pipeline.');
-    process.exit(1);
-  }
-}
-
-if (!pipelineMode && !targetUrl) {
-  console.error('No URL provided. Run with --help for usage.');
-  process.exit(1);
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -249,14 +255,63 @@ async function extractPipelineEntries() {
 
 // ── Core archive function ────────────────────────────────────────────────────
 
-async function archiveUrl(browser, url, { company: companyHint, role: roleHint } = {}) {
+/**
+ * Register the egress guard on a Playwright context.
+ *
+ * Registered on the *context* rather than the page: a route bound to a single
+ * page doesn't cover requests the flow makes outside it, and the context is
+ * what owns the whole navigation. Both layers of the shared guard run here —
+ * the literal-host check first (cheap, no network), then the DNS re-check that
+ * catches a public hostname resolving into private space.
+ *
+ * @param {import('playwright').BrowserContext} context - Context to guard.
+ */
+export async function installEgressGuard(context) {
+  await context.route('**/*', async (route) => {
+    const requestUrl = route.request().url();
+
+    const verdict = rejectPrivateOrInvalid(requestUrl);
+    if (verdict) {
+      console.warn(`   Blocked request to restricted destination: ${requestUrl} (${verdict.reason})`);
+      return route.abort('blockedbyclient');
+    }
+
+    try {
+      await validateUrlSecurity(requestUrl);
+      return route.continue();
+    } catch (err) {
+      console.warn(`   Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
+      return route.abort('blockedbyclient');
+    }
+  });
+}
+
+export async function archiveUrl(browser, url, { company: companyHint, role: roleHint } = {}) {
   console.log(`\n🔗  ${url}`);
 
-  const page = await browser.newPage();
+  // Refuse before launching any navigation, so an obviously-internal target
+  // never reaches Playwright at all.
+  const preGuard = rejectPrivateOrInvalid(url);
+  if (preGuard) {
+    throw new Error(`refusing to archive restricted destination: ${preGuard.reason}`);
+  }
+
+  const context = await browser.newContext();
+  await installEgressGuard(context);
+  const page = await context.newPage();
 
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const httpStatus = response?.status() ?? 0;
+
+    // Re-check where we actually landed. The route guard already inspects every
+    // redirect hop, so this is defence-in-depth: a first-hop-only check is the
+    // classic miss here, and asserting on the settled URL costs nothing.
+    const landedUrl = page.url();
+    const postGuard = rejectPrivateOrInvalid(landedUrl);
+    if (postGuard) {
+      throw new Error(`refusing to archive restricted destination after redirect: ${postGuard.reason}`);
+    }
 
     // Give SPAs (Ashby, Lever, Workday) time to hydrate
     await page.waitForTimeout(2000);
@@ -305,7 +360,7 @@ async function archiveUrl(browser, url, { company: companyHint, role: roleHint }
     return { filename, reference, url, size: pdfBuffer.length };
 
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 
@@ -389,7 +444,10 @@ async function main() {
   if (failed > 0) process.exit(1);
 }
 
-main().catch(err => {
-  console.error('❌  Fatal:', err.message);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  parseCliArgs(process.argv.slice(2));
+  main().catch(err => {
+    console.error('❌  Fatal:', err.message);
+    process.exit(1);
+  });
+}

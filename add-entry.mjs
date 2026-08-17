@@ -41,6 +41,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -55,9 +56,22 @@ const USAGE = `Usage:
   node add-entry.mjs --help                    # print this usage block and exit (-h is an alias)`;
 
 // Normalize a title/heading for duplicate detection: lowercase, collapse to
-// alphanumerics only. "FraudShield", "Fraud-Shield", "fraud shield" all match.
+// letters and digits. "FraudShield", "Fraud-Shield", "fraud shield" all match.
+//
+// Delegates to the shared normalizeTextKey rather than keeping a private
+// `[^a-z0-9]` strip. That strip deleted every non-Latin character, so a CV
+// written in Japanese, Russian or Hindi keyed EVERY heading and dedup key to
+// '' — which made `add` unusable rather than inaccurate: the non-empty-dedupKey
+// guard below rejected a key the user had actually supplied ("payload.cv
+// requires a non-empty dedupKey"), and two different section headings both
+// keying to '' matched each other, so an entry could land under the wrong
+// heading (#2849).
+//
+// Latin behaviour is unchanged except that an accented word now keys
+// faithfully: "Café" was truncated to "caf" (it never matched "Cafe" either
+// way), and now keys as "café".
 export function normalizeKey(s) {
-  return typeof s === 'string' ? s.toLowerCase().replace(/[^a-z0-9]+/g, '') : '';
+  return typeof s === 'string' ? normalizeTextKey(s) : '';
 }
 
 // Split a markdown doc into the block belonging to a `## <section>` heading:
