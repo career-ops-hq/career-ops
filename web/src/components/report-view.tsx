@@ -2,15 +2,16 @@ import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Application } from "@/lib/career-ops";
+import type { Application, SortKey } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
-import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
+import { scoreTone, scoreNum, legitimacyTone, parseReport, canonStatus } from "@/lib/format";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { getFilteredApplicationsWithPosition, pipelineSummary } from "@/lib/career-ops";
 
 // Progressive disclosure of the report. The core writes prose blocks
 // "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
@@ -22,6 +23,13 @@ import { DeleteFromTracker } from "@/components/delete-from-tracker";
 // (native <details>, no client JS — this stays a server component).
 
 type Section = { heading: string; letter: string | null; content: string };
+
+type FilterParams = {
+  tab?: string;
+  min?: number;
+  searchQuery?: string;
+  sort?: { key: SortKey; dir: 1 | -1 };
+};
 
 function cleanHeading(h: string): string {
   const stripped = h
@@ -76,6 +84,7 @@ export function ReportView({
   app,
   report,
   canDelete = false,
+  filterParams,
 }: {
   id: string;
   app: Application | null;
@@ -84,8 +93,27 @@ export function ReportView({
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
   canDelete?: boolean;
+  filterParams?: FilterParams;
 }) {
   const meta = report ? parseReport(report) : null;
+
+  // Calculate navigation data for prev/next buttons
+  const { applications } = pipelineSummary();
+  const { applications: filteredApps, position, prevId, nextId } = filterParams
+    ? getFilteredApplicationsWithPosition(applications, id, filterParams)
+    : { applications: [], position: -1, prevId: null, nextId: null };
+
+  // Build the filter query string for navigation links
+  const filterQueryString = filterParams
+    ? new URLSearchParams(
+        Object.entries({
+          ...(filterParams.tab && { tab: filterParams.tab }),
+          ...(filterParams.min != null && { min: filterParams.min.toString() }),
+          ...(filterParams.searchQuery && { q: filterParams.searchQuery }),
+          ...(filterParams.sort && { sort: filterParams.sort.key, dir: filterParams.sort.dir.toString() }),
+        })
+      ).toString()
+    : "";
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
   const date = app?.date || field("Date");
@@ -94,12 +122,41 @@ export function ReportView({
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
-      <Link
-        href="/pipeline"
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
-      >
-        <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          href={`/pipeline${filterQueryString ? `?${filterQueryString}` : ""}`}
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="size-4" /> Pipeline
+        </Link>
+
+        {/* Prev/Next navigation */}
+        {(prevId || nextId) && (
+          <div className="flex items-center gap-1">
+            {prevId && (
+              <Link
+                href={`/pipeline/${prevId}${filterQueryString ? `?${filterQueryString}` : ""}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px]"
+                title="Previous application"
+              >
+                ← Previous
+              </Link>
+            )}
+            <span className="px-2 text-xs text-faint tabular-nums">
+              {position >= 0 ? `${position + 1} / ${filteredApps.length}` : "—"}
+            </span>
+            {nextId && (
+              <Link
+                href={`/pipeline/${nextId}${filterQueryString ? `?${filterQueryString}` : ""}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px]"
+                title="Next application"
+              >
+                Next →
+              </Link>
+            )}
+          </div>
+        )}
+      </div>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
@@ -121,7 +178,7 @@ export function ReportView({
             return n >= 4.0 ? <Badge tone="good">Recommended</Badge> : <Badge tone="muted">Below the apply line</Badge>;
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
-          {app && <StatusSelect n={id} current={app.status} />}
+          {app && <StatusSelect n={id} current={app.status} nextId={nextId} filterQueryString={filterQueryString} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
         </div>

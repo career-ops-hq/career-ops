@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { canonStatus, scoreNum } from "@/lib/format";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -272,6 +273,72 @@ export function readReport(n: string): ReportData | null {
 
 export function findApplication(n: string): Application | null {
   return readApplications().find((a) => a.n === n) ?? null;
+}
+
+export type SortKey = "company" | "role" | "score" | "status" | "date";
+
+/**
+ * Returns the filtered and sorted applications along with the position of a specific item.
+ * Used for prev/next navigation on detail pages.
+ */
+export function getFilteredApplicationsWithPosition(
+  applications: Application[],
+  targetId: string,
+  filters: {
+    tab?: string;
+    min?: number;
+    searchQuery?: string;
+    sort?: { key: SortKey; dir: 1 | -1 };
+  }
+): { applications: Application[]; position: number; prevId: string | null; nextId: string | null } {
+  // Apply same filtering logic as PipelineView component
+  let rows = applications;
+
+  // Tab filter - exactly match PipelineView logic: canonStatus(r.status).includes(tab)
+  if (filters.tab && filters.tab !== "ALL" && filters.tab !== "INBOX") {
+    rows = rows.filter((r) => {
+      const normalized = canonStatus(r.status);
+      const tabUpper = filters.tab!.toUpperCase();
+      return normalized.includes(tabUpper);
+    });
+  }
+
+  // Min score filter
+  if (filters.min != null) {
+    rows = rows.filter((r) => {
+      const n = scoreNum(r.score);
+      return !Number.isNaN(n) && n >= filters.min!;
+    });
+  }
+
+  // Search filter
+  if (filters.searchQuery?.trim()) {
+    const needle = filters.searchQuery.toLowerCase();
+    rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
+  }
+
+  // Sort
+  rows = [...rows].sort((a, b) => {
+    if (filters.sort?.key === "score") {
+      const an = scoreNum(a.score);
+      const bn = scoreNum(b.score);
+      const av = Number.isNaN(an) ? -Infinity : an;
+      const bv = Number.isNaN(bn) ? -Infinity : bn;
+      return (av - bv) * filters.sort.dir;
+    }
+    return (a[filters.sort!.key] || "").localeCompare(b[filters.sort!.key] || "") * (filters.sort?.dir ?? -1);
+  });
+
+  // Find position and calculate prev/next with circular navigation
+  const position = rows.findIndex((r) => r.n === targetId);
+  if (position === -1) {
+    return { applications: rows, position: -1, prevId: null, nextId: null };
+  }
+
+  const prevId = position > 0 ? rows[position - 1].n : rows[rows.length - 1]?.n ?? null;
+  const nextId = position < rows.length - 1 ? rows[position + 1].n : rows[0]?.n ?? null;
+
+  return { applications: rows, position, prevId, nextId };
 }
 
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the

@@ -8,7 +8,17 @@ import { CANONICAL_STATES } from "@/lib/format";
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
 // terminal-popup animation.
-export function StatusSelect({ n, current }: { n: string; current: string }) {
+export function StatusSelect({
+  n,
+  current,
+  nextId,
+  filterQueryString
+}: {
+  n: string;
+  current: string;
+  nextId?: string | null;
+  filterQueryString?: string;
+}) {
   const [status, setStatus] = useState(current);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,7 +38,13 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
       if (!res.ok) throw new Error("write failed");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      router.refresh();
+
+      // Navigate to next item or back to pipeline after status change
+      if (nextId) {
+        router.push(`/pipeline/${nextId}${filterQueryString ? `?${filterQueryString}` : ""}`);
+      } else {
+        router.push(`/pipeline${filterQueryString ? `?${filterQueryString}` : ""}`);
+      }
     } catch {
       setStatus(prev); // revert on failure
     } finally {

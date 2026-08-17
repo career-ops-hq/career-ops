@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
-    "start": "next start",
+    "start": "next build --webpack && next start",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/**/*.test.mjs\" test-stream-parse.mjs test-act-envelope.mjs"
   },
