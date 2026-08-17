@@ -58,6 +58,10 @@ writing-samples/*
 config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
+# Fork-local path declarations — this checkout's own files, read by
+# update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
+# project, and must survive the sync that overwrites update-system.mjs (#2421).
+config/local-paths.txt
 portals.yml
 modes/_profile.md
 modes/_custom.md

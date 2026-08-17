@@ -23,6 +23,20 @@ function makeRepo() {
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
+  // `gitIn` inherits the environment, so the contributor's GLOBAL git config
+  // applies inside this throwaway repo. With `commit.gpgsign = true` set
+  // globally (1Password's ssh signer, gpg-agent, a hardware key) every commit
+  // below fails, and because these are execFileSync calls the failure is not a
+  // red assertion: the process DIES here and every later section of the suite
+  // silently never runs, so `Results:` never prints (#2754). A global
+  // `core.hooksPath` breaks it the same way.
+  //
+  // The sibling fixture in updater-local-system-edits.test.mjs has carried
+  // these two lines since a CodeRabbit review flagged the same thing; this one
+  // was left behind, which is why the failure looks environment-specific
+  // instead of structural.
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   return { dir, g, ctx: { git: g, root: dir } };
 }
 
