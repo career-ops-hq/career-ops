@@ -54,8 +54,8 @@ if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,120}
   fail('apply can install without an explicit confirmation flag');
 }
 
-function runApplyWithEnv(env) {
-  return spawnSync(process.execPath, ['update-system.mjs', 'apply'], {
+function runApplyWithEnv(env, args = ['apply']) {
+  return spawnSync(process.execPath, ['update-system.mjs', ...args], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: { ...process.env, ...env },
@@ -84,6 +84,28 @@ if (envOnlyForce.status !== 0 &&
   pass('environment-only force cannot authorize initial apply');
 } else {
   fail('environment-only force can authorize initial apply');
+}
+
+const forceWithoutConfirmation = runApplyWithEnv({}, ['apply', '--force']);
+if (forceWithoutConfirmation.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forceWithoutConfirmation.stderr) &&
+    !existsSync('.update-lock')) {
+  pass('force without confirmation cannot authorize initial apply');
+} else {
+  fail('force without confirmation can authorize initial apply');
+}
+
+const forgedReexec = runApplyWithEnv({
+  CAREER_OPS_UPDATE_REEXEC_MARKER: '/tmp/career-ops-reexec-forged/marker',
+  CAREER_OPS_UPDATE_REEXEC_TOKEN: 'forged',
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+});
+if (forgedReexec.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forgedReexec.stderr) &&
+    !existsSync('.update-lock')) {
+  pass('forged reexec marker cannot authorize initial apply');
+} else {
+  fail('forged reexec marker can authorize initial apply');
 }
 
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
