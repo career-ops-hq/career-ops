@@ -677,7 +677,7 @@ search_queries:
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
+# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, senjob,
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
@@ -1012,6 +1012,10 @@ search_queries:
 #   provider: manfred
 #   lang: EN                              # EN or ES; the API rejects the call without it
 #   enabled: true
+#
+# - name: Senjob                          # Senegal (Dakar) — the first African board
+#   provider: senjob                      # listings only; robots.txt keeps CVs off-limits
+#   enabled: true                         # ~40 postings/page, tech roles are a thin slice
 #
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
