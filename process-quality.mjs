@@ -36,7 +36,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
@@ -316,7 +316,26 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
+const KNOWN_FLAGS = ['--file', '--min-threshold', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--file', '--min-threshold'];
+
+const USAGE = `Usage:
+  node process-quality.mjs                        # JSON report
+  node process-quality.mjs --summary              # human-readable table
+  node process-quality.mjs --file <path>          # a different active-interviews.md
+  node process-quality.mjs --min-threshold <N>    # minimum rounds before a company is reported (default 1)
+  node process-quality.mjs --self-test            # run the built-in fixtures
+  node process-quality.mjs --help                 # show this message`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // Inside the main-module guard, not at import time: rejection-latency.mjs
+  // imports parseActiveInterviews from here, so a top-level check would judge
+  // the IMPORTER's argv and reject its flags as unrecognized (#2919).
+  //
+  // A mistyped --file was previously ignored, so the script silently reported
+  // on data/active-interviews.md instead of the path that was asked for.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   if (selfTestMode) {
     runSelfTest();
   }
