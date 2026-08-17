@@ -589,7 +589,7 @@ function renderReport(payload, partials) {
     PAGE_WIDTH: pageWidth,
     NAME: escapeHtml(candidate.name || ''),
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
-    SUMMARY_TEXT: escapeHtml(payload.summary || ''),
+    SUMMARY_TEXT: escapeHtml(payload.summary ?? (() => { throw new Error('payload.summary is required — read cv.md § "Professional Summary" and populate this field'); })()),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
     COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),

@@ -152,6 +152,7 @@ async function main() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    SUMMARY: escapeLatex(payload.summary ?? (() => { throw new Error('payload.summary is required — read cv.md § "Professional Summary" and populate this field'); })()),
     EDUCATION: buildEducation(payload.education),
     EXPERIENCE: buildExperience(payload.experience),
     PROJECTS: buildProjects(payload.projects),
