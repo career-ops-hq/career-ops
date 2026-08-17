@@ -13,6 +13,12 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'pat
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import * as yaml from 'js-yaml';
+// One definition for both locks: this module and pipeline-lock.mjs implement
+// the same directory-lock protocol on purpose, and #2777 showed how the two
+// copies drift — pipeline-lock learned that Windows answers mkdir/rm with
+// EPERM/EACCES/EBUSY under contention while this file still treated anything
+// but EEXIST as fatal, killing a writer and losing its item.
+import { isMkdirContention, isRmContention, rmLockArtifactSync } from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -293,8 +299,12 @@ function lockCanRecover(lockDir, staleMs) {
 
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true;
+  } catch (err) {
+    // Mirrors pipeline-lock: only ENOENT means "vanished, nothing to
+    // recover". A Windows EPERM/EBUSY mid-flight stat is "could not look",
+    // and treating it as recoverable lets a caller delete a live lock
+    // created microseconds ago (#2777, third face).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -340,12 +350,18 @@ export async function acquireTrackerLock(lockDir, options = {}) {
           tracker: options.tracker ?? '',
         }, null, 2));
       } catch (ownerErr) {
+        // ENOENT writing owner.json means the just-won lock directory is
+        // gone: another caller (mis)judged it reclaimable and deleted it.
+        // A lost race, not a failure — re-enter the loop and compete again
+        // (mirrors pipeline-lock; dying here loses the caller's write).
+        if (ownerErr?.code === 'ENOENT') continue;
         // We created the dir but could not record ownership. An empty,
         // owner-less lock dir would block every future locker until the
         // staleMs age-out — remove what we just created before rethrowing.
-        // Scoped to the owner write only: the mkdir EEXIST contention path
-        // is still handled by the outer catch.
-        rmSync(lockDir, { recursive: true, force: true });
+        // Scoped to the owner write only: the mkdir contention path is still
+        // handled by the outer catch. Best-effort removal: a contended rm
+        // must not mask ownerErr, and the orphan ages out regardless.
+        rmLockArtifactSync(lockDir);
         throw ownerErr;
       }
 
@@ -409,39 +425,60 @@ export async function acquireTrackerLock(lockDir, options = {}) {
             ownerVerified = true;
             verifiedDir = afterRead;
           }
-          removeLock(lockDir);
+          // Best-effort, mirroring pipeline-lock's release: ownership was
+          // verified above, so a contended rm (Windows EPERM/EBUSY while
+          // another process stats the directory) must not kill a caller whose
+          // work already succeeded — the orphaned lock ages out via
+          // lockCanRecover. Injected removeLock hooks (fault tests) keep
+          // their errors: only the known contention codes are swallowed.
+          try {
+            removeLock(lockDir);
+          } catch (rmErr) {
+            if (!isRmContention(rmErr)) throw rmErr;
+          }
           released = true;
         },
       };
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
+      // Not just EEXIST: Windows reports a lock directory that is mid-create
+      // or mid-remove by another process as EPERM/EACCES. That is contention,
+      // not failure — treating it as fatal is how a concurrent writer dies and
+      // its write is lost (#2777, measured on windows-latest).
+      if (!isMkdirContention(err)) throw err;
 
       let hasRecoverGuard = false;
       try {
         mkdirSync(recoverGuardDir);
         hasRecoverGuard = true;
       } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
+        if (!isMkdirContention(guardErr)) throw guardErr;
         // A process killed between creating the guard and its cleanup leaves
         // the guard behind forever, permanently disabling stale-lock recovery
         // for every future writer. The guard normally lives for milliseconds,
         // so an old one is judged stale by the same age rule as a
         // metadata-free lock and removed; the next loop iteration can then
         // take the guard and run recovery.
-        if (lockCanRecover(recoverGuardDir, staleMs)) {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+        //
+        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
+        // the guard is mid-flight right now, and reasoning about the age of a
+        // directory we cannot even stat reliably would evict a live guard.
+        if (guardErr.code === 'EEXIST' && lockCanRecover(recoverGuardDir, staleMs)) {
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
           if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            staleRecovered = true;
-            continue;
+            if (rmLockArtifactSync(lockDir)) {
+              staleRecovered = true;
+              continue;
+            }
+            // rm hit contention: another process is touching the stale lock at
+            // this instant — back off instead of treating the collision as fatal.
           }
         } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 

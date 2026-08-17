@@ -87,8 +87,37 @@ function sameLockDirectory(left, right) {
 // A genuine permissions problem still surfaces: it simply stops being an
 // instant throw and becomes a timeout that names the last error it saw, which
 // is the correct trade when the alternative is silent data loss.
-function isMkdirContention(err) {
+export function isMkdirContention(err) {
   return err?.code === 'EEXIST' || err?.code === 'EPERM' || err?.code === 'EACCES';
+}
+
+// rm's Windows answer under contention mirrors mkdir's. Removing a directory
+// another process is inside of — mid-mkdir, mid-scan (antivirus, indexer), or
+// mid-rm — fails with EPERM/EACCES/EBUSY/ENOTEMPTY, and `force: true` only
+// silences ENOENT. Measured on windows-latest (#2777, run 32044401225): two of
+// 30 concurrent `agent-inbox add` processes died on
+// `EPERM … agent-inbox.md.lock.recover` thrown by a bare rmSync of the recover
+// guard, and their items were never appended — the same loss the mkdir half of
+// this handling removed, resurfacing one call later.
+export function isRmContention(err) {
+  return err?.code === 'EPERM' || err?.code === 'EACCES' || err?.code === 'EBUSY' || err?.code === 'ENOTEMPTY';
+}
+
+// Best-effort removal of a lock artifact (the lock dir or the recover guard).
+// Contention is swallowed and reported via the return value; anything else
+// (EROFS/ENOSPC-class breakage) still throws. Never fatal on contention
+// because every lock artifact ages out: an abandoned guard or lock is
+// reclaimed by lockCanRecover on a later attempt, so the worst case of
+// leaving one behind is one extra retry for some caller. Killing the writer
+// loses its item; waiting does not.
+export function rmLockArtifactSync(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch (err) {
+    if (isRmContention(err)) return false;
+    throw err;
+  }
 }
 
 function processIsAlive(pid) {
@@ -119,8 +148,14 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true; // vanished — nothing to recover, retry acquisition
+  } catch (err) {
+    // Only a genuinely vanished directory is "nothing to recover". Any other
+    // stat failure — Windows EPERM/EBUSY while the directory is mid-flight —
+    // is "could not look", and answering "recoverable" to that hands the
+    // caller an rmSync of a LIVE lock created microseconds ago: its winner
+    // then dies with ENOENT writing owner.json (#2777, third face — measured
+    // after the rm-contention fix exposed it).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -211,18 +246,22 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
         if (lockCanRecover(recoverGuardDir, staleMs)) {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
           if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            continue; // retry acquisition immediately, still holding the guard's decision
+            if (rmLockArtifactSync(lockDir)) {
+              continue; // retry acquisition immediately, still holding the guard's decision
+            }
+            // rm hit contention: another process is touching the stale lock at
+            // this instant, so fall through to the normal backoff instead of
+            // treating the collision as fatal.
           }
         } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
@@ -262,7 +301,17 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         pipeline: pipelinePath,
       }, null, 2));
     } catch (ownerErr) {
-      rmSync(lockDir, { recursive: true, force: true });
+      // ENOENT writing owner.json means the just-won lock directory is gone:
+      // another caller (mis)judged it reclaimable and deleted it. That is a
+      // lost race, not a failure — re-enter the loop and compete again.
+      // Dying here loses the caller's queued write (#2777, third face).
+      if (ownerErr?.code === 'ENOENT') {
+        if (Date.now() > deadline) throw buildTimeoutError();
+        continue;
+      }
+      // Best-effort: a contended rm here must not mask ownerErr, and an
+      // orphaned owner-less lock ages out via lockCanRecover anyway.
+      rmLockArtifactSync(lockDir);
       throw ownerErr;
     }
 
