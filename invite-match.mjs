@@ -384,7 +384,13 @@ export function extractPlatform(text) {
  * Whether the call platform detected in `text` is a CONFIRMED AI-interviewer
  * platform (#2673) — the candidate has a live conversation with an AI
  * system rather than a human panel. Currently true only for Alex/Apriora,
- * whose host is single-purpose and always AI-led by product design.
+ * and only when Alex is the pattern that WINS the same ordered scan
+ * extractPlatform() runs: the host is not exclusively AI-led, since Alex also
+ * sells a "Coordinator" product that sends invites for human-conducted rounds,
+ * so an invite carrying both a human link and an alex.com link resolves to the
+ * human platform and answers false here. See the comment above
+ * PLATFORM_URL_PATTERNS, which this line used to contradict by calling the
+ * host "single-purpose and always AI-led by product design" (#2676).
  * HireVue is deliberately excluded even though it's detected by
  * extractPlatform(): it's a multi-modal platform (on-demand recorded,
  * live human-conducted, and a separate AI Interviewer product all share the

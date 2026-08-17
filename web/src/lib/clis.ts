@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -10,8 +11,26 @@ export type CliSpec = {
   bin: string;
   run: string;
   url: string;
-  /** headless invocation args for a single prompt */
+  /** headless invocation args for a single prompt, emitting PLAIN TEXT on stdout.
+   * Every caller that reads the output itself (the `<<offer:>>`/`<<cv:>>` envelope
+   * routes, the apply planners) uses this, so it must stay unstructured. */
   args: (prompt: string) => string[];
+  /** Structured-output CLIs only: args for a run whose stdout the caller parses
+   * with `parseEvent` — i.e. /api/run's dashboard stream, the one consumer that
+   * understands events. Absent → that caller falls back to `args`.
+   *
+   * INVARIANT: `parseEvent` only applies to output produced by THIS argv (for
+   * claude, by claude-invocation.mjs's `claudeCliArgs`, which spells its own
+   * `--output-format stream-json`). Pairing one CLI's parser with a plain-text
+   * invocation yields a silent stream of unparseable lines. */
+  streamArgs?: (prompt: string) => string[];
+  /** Structured-output CLIs only: parse one stdout line into dashboard events.
+   * Absent → the route streams stdout as raw text (the default for every CLI
+   * without its own structured output format). */
+  parseEvent?: (line: string) => import("./run-cli-support.mjs").ParsedEvent | null;
+  /** Structured-output CLIs only: decide whether a stderr line is fatal.
+   * Absent → the route falls back to the shared generic error regex. */
+  stderrIsFatal?: (line: string) => boolean;
 };
 
 /**
@@ -38,8 +57,8 @@ export type CliSpec = {
  * lives in a comment is a rule the next contributor may never read.
  */
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
-  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p] },
+  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
+  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
   { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
