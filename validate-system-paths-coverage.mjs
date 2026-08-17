@@ -43,7 +43,6 @@ const EXCLUDES = [
   '.coderabbit.yaml',
   '.editorconfig',
   '.envrc',
-  '.gitignore',
   '.npmignore',
   '.release-please-manifest.json',
   'release-please-config.json',
@@ -55,6 +54,19 @@ const EXCLUDES = [
   'interview-prep/.gitkeep',
 ];
 
+// .gitignore is excluded from the manifest but NOT from installs, and the
+// difference is the whole of #2756. It cannot join SYSTEM_PATHS: it is the one
+// system file users also write to, so the raw `git checkout` that ships every
+// other path would delete their own rules. It reaches installs by a different
+// route instead — update-system.mjs's reconcileGitignore(), which appends the
+// system-owned rules an install is missing and touches nothing else.
+//
+// Kept in its own group rather than folded in above, because the entries above
+// genuinely never reach an install and this one does. Reading it as the same
+// kind of exclusion is what let 43 releases' worth of new ignore rules stay in
+// this repository only, leaving a candidate's CV stageable in every fork.
+const RECONCILED_NOT_CHECKED_OUT = ['.gitignore'];
+
 // Trees that live in the repo but deliberately OUTSIDE the updater's world:
 // web/ is the experimental web UI — its own release-please component, never
 // shipped by update-system.mjs, never in the npm package. Excluding it here is
@@ -64,6 +76,7 @@ const EXCLUDE_PREFIXES = ['web/'];
 function covered(file) {
   // If explicitly excluded, it is covered
   if (EXCLUDES.includes(file)) return true;
+  if (RECONCILED_NOT_CHECKED_OUT.includes(file)) return true;
   if (EXCLUDE_PREFIXES.some((p) => file.startsWith(p))) return true;
 
   return ALL_PATHS.some((path) =>
