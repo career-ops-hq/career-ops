@@ -27,6 +27,9 @@ copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 // theming, #1837); copy it into the sandbox too or the isolated script fails
 // to load with ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+// Same reason for ./cv-experience-order.mjs (reverse-chronological guard): it is a
+// local sibling import of generate-pdf.mjs, so the sandbox needs its own copy.
+copyFileSync(join(ROOT, 'cv-experience-order.mjs'), join(sandbox, 'cv-experience-order.mjs'));
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',
