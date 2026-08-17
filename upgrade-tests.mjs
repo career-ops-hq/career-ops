@@ -13,8 +13,9 @@
  * VERSION (apply has no version gate; equal-VERSION content drift is normal).
  *
  * Usage:
- *   node upgrade-tests.mjs --pr-gate    # newest old tag -> HEAD, one leg
- *   node upgrade-tests.mjs --canary     # planted user-file clobber must go RED
+ *   node upgrade-tests.mjs --pr-gate       # newest old tag -> HEAD, one leg
+ *   node upgrade-tests.mjs --canary        # planted user-file clobber must go RED
+ *   node upgrade-tests.mjs --all-versions  # release qualification: last 5 tags, own shims, rollback
  */
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -94,6 +95,19 @@ function isAncestor(cwd, tag, sha) {
   try { git(cwd, 'merge-base', '--is-ancestor', tag, sha); return true; } catch { return false; }
 }
 
+/** Shared per-leg scaffolding: redirect config, old-tag install, seeded fixture.
+ *  The caller owns the temp workdir and the already-built mirror — the canary
+ *  path mutates the mirror between buildMirror and this call. */
+function setupLeg(work, mirror, oldTag) {
+  const cfg = writeGitConfig(work, mirror);
+  const install = join(work, 'install');
+  git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+  git(install, 'remote', 'set-url', 'origin', CANONICAL);
+  const state = fixtureStateFor(oldTag);
+  const { manifest } = seedFixture(install, { state });
+  return { cfg, install, manifest, state };
+}
+
 export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null }) {
   const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-leg-')));
   const failures = [];
@@ -101,7 +115,7 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
   try {
     const mirror = buildMirror(work, targetSha);
     if (mutateMirror) targetSha = mutateMirror(mirror, work);
-    const cfg = writeGitConfig(work, mirror);
+    const { cfg, install, manifest, state } = setupLeg(work, mirror, oldTag);
 
     // The target's SYSTEM_PATHS — the set apply manages. Drives both the oracle
     // selection (a changed file apply actually rewrites) and the #1998-class
@@ -122,12 +136,6 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
       return { failures: [], skipped: true };
     }
     const oracleBlob = git(mirror, 'rev-parse', `${targetSha}:${oracle}`);
-
-    const install = join(work, 'install');
-    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
-    git(install, 'remote', 'set-url', 'origin', CANONICAL);
-    const state = fixtureStateFor(oldTag);
-    const { manifest } = seedFixture(install, { state });
 
     // New-path delta for the #1998-class assertion: concrete files in the
     // target's SYSTEM_PATHS that don't exist at the old tag but do at target.
@@ -258,9 +266,76 @@ function canary() {
   process.exit(1);
 }
 
+/** Layer 2: every supported old tag's own shim, end-to-end, plus a rollback leg.
+ *  Each leg is already the maximal jump (old -> HEAD in one hop) — the common
+ *  real-world upgrade shape. Deliberately not a PR gate (see #2007). */
+function allVersions() {
+  const targetSha = git(ROOT, 'rev-parse', 'HEAD');
+  const tags = releaseTags().filter((t) => isAncestor(ROOT, t, targetSha)).slice(-5);
+  if (!tags.length) { console.error('No ancestor release tags found — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+  console.log(`Release qualification: ${tags.join(', ')} -> ${targetSha.slice(0, 8)}`);
+  const results = [];
+  // A leg that THROWS (git failure, SYSTEM_PATHS not found, fixture error) must
+  // not abort the sweep — convert it to a reported failed result so every
+  // remaining tag and the rollback leg still run and appear in the summary
+  // (matches the in-leg discipline: report through ok(), never throw out).
+  const guard = (label, fn) => {
+    try { return fn(); }
+    catch (e) {
+      const msg = `leg threw: ${String((e && e.message) || e).split('\n')[0]}`;
+      console.log(`  FAIL [${label}] ${msg}`);
+      return { label, failures: [msg] };
+    }
+  };
+  for (const tag of tags) results.push(guard(tag, () => runLeg({ oldTag: tag, targetSha })));
+  results.push(guard(`rollback:${tags[0]}`, () => rollbackLeg(tags[0], targetSha)));
+  const red = results.filter((r) => r.failures.length);
+  for (const r of results) console.log(`${r.failures.length ? 'RED ' : 'GREEN'} ${r.label}`);
+  process.exit(red.length ? 1 : 0);
+}
+
+function rollbackLeg(oldTag, targetSha) {
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-rollback-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [rollback:${oldTag}] ${msg}`); if (!cond) failures.push(msg); };
+  try {
+    const mirror = buildMirror(work, targetSha);
+    const { cfg, install, manifest } = setupLeg(work, mirror, oldTag);
+    // An unreadable VERSION is a leg failure to report, not an exception to
+    // escape on — a throw here would abort the remaining legs of the sweep.
+    const readVersion = () => { try { return readFileSync(join(install, 'VERSION'), 'utf-8'); } catch { return null; } };
+    const versionBefore = readVersion();
+    ok(versionBefore !== null, 'VERSION readable before apply');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: cfg };
+    let phase = 'apply', exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], { cwd: install, encoding: 'utf-8', timeout: 300000, env });
+      phase = 'rollback';
+      output = execFileSync(process.execPath, ['update-system.mjs', 'rollback'], { cwd: install, encoding: 'utf-8', timeout: 120000, env });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+    ok(exitCode === 0, `${phase} exits 0 (got ${exitCode})`);
+    // versionBefore !== null is part of the assertion: null === null must
+    // not pass "restored" when VERSION was never readable to begin with.
+    const versionAfter = readVersion();
+    ok(versionBefore !== null && versionAfter === versionBefore, 'VERSION restored');
+    for (const [f, hash] of Object.entries(manifest)) {
+      const p = join(install, f);
+      ok(existsSync(p) && sha256(p) === hash, `user file intact after rollback: ${f}`);
+    }
+    if (failures.length && output) {
+      console.log(`  --- ${phase} output tail [rollback:${oldTag}] ---`);
+      console.log(output.split('\n').slice(-15).join('\n'));
+    }
+    return { label: `rollback:${oldTag}`, failures };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
   else if (mode === '--canary') canary();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary'); process.exit(1); }
+  else if (mode === '--all-versions') allVersions();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --all-versions'); process.exit(1); }
 }
