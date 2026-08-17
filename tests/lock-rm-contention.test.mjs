@@ -70,6 +70,26 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
   );
 }
 
+// ── 3b. "Could not look" is never "recoverable" ──────────────────────
+// The third face of #2777: lockCanRecover's stat catch answered `true`
+// (recoverable) to EVERY stat failure, so a Windows EPERM on a mid-flight
+// directory let a caller delete a live lock created microseconds ago — its
+// winner then died with ENOENT writing owner.json. Only ENOENT (genuinely
+// vanished) may answer "nothing to recover"; both locks must carry the guard.
+{
+  for (const file of ['pipeline-lock.mjs', 'tracker-utils.mjs']) {
+    const src = readFileSync(join(ROOT, file), 'utf-8');
+    ok(
+      /return err\?\.code === 'ENOENT';/.test(src),
+      `${file}: lockCanRecover's stat catch answers recoverable ONLY on ENOENT`,
+    );
+    ok(
+      !/catch\s*\{\s*\n\s*return true;/.test(src),
+      `${file}: no bare catch{return true} remains in a recovery judgment`,
+    );
+  }
+}
+
 // ── 4. No bare rmSync of a lock artifact in either acquisition path ──
 // The helper is the only code allowed to rmSync the recover guard, and the
 // only permitted direct rmSync(lockDir) is pipeline-lock's release(), which

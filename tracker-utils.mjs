@@ -299,8 +299,12 @@ function lockCanRecover(lockDir, staleMs) {
 
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true;
+  } catch (err) {
+    // Mirrors pipeline-lock: only ENOENT means "vanished, nothing to
+    // recover". A Windows EPERM/EBUSY mid-flight stat is "could not look",
+    // and treating it as recoverable lets a caller delete a live lock
+    // created microseconds ago (#2777, third face).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -346,6 +350,11 @@ export async function acquireTrackerLock(lockDir, options = {}) {
           tracker: options.tracker ?? '',
         }, null, 2));
       } catch (ownerErr) {
+        // ENOENT writing owner.json means the just-won lock directory is
+        // gone: another caller (mis)judged it reclaimable and deleted it.
+        // A lost race, not a failure — re-enter the loop and compete again
+        // (mirrors pipeline-lock; dying here loses the caller's write).
+        if (ownerErr?.code === 'ENOENT') continue;
         // We created the dir but could not record ownership. An empty,
         // owner-less lock dir would block every future locker until the
         // staleMs age-out — remove what we just created before rethrowing.

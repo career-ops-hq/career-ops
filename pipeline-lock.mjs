@@ -148,8 +148,14 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true; // vanished — nothing to recover, retry acquisition
+  } catch (err) {
+    // Only a genuinely vanished directory is "nothing to recover". Any other
+    // stat failure — Windows EPERM/EBUSY while the directory is mid-flight —
+    // is "could not look", and answering "recoverable" to that hands the
+    // caller an rmSync of a LIVE lock created microseconds ago: its winner
+    // then dies with ENOENT writing owner.json (#2777, third face — measured
+    // after the rm-contention fix exposed it).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -295,6 +301,14 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         pipeline: pipelinePath,
       }, null, 2));
     } catch (ownerErr) {
+      // ENOENT writing owner.json means the just-won lock directory is gone:
+      // another caller (mis)judged it reclaimable and deleted it. That is a
+      // lost race, not a failure — re-enter the loop and compete again.
+      // Dying here loses the caller's queued write (#2777, third face).
+      if (ownerErr?.code === 'ENOENT') {
+        if (Date.now() > deadline) throw buildTimeoutError();
+        continue;
+      }
       // Best-effort: a contended rm here must not mask ownerErr, and an
       // orphaned owner-less lock ages out via lockCanRecover anyway.
       rmLockArtifactSync(lockDir);
