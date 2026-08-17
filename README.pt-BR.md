@@ -252,6 +252,26 @@ career-ops/
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)** -- O site de portfólio (santifer.io) com chatbot de IA, dashboard de LLMOps e estudos de caso. Se você precisa de um portfólio para acompanhar sua busca por vagas, faça um fork e adapte para você.
 
+## FAQ
+
+**O que é o career-ops?**
+O career-ops é um centro de comando para busca de emprego de código aberto e independente de CLI. Ele transforma qualquer CLI de programação com IA em um pipeline que avalia vagas de emprego com base no seu currículo, gera PDFs otimizados para ATS, encontra o contato ideal e rastreia tudo em um só lugar — enquanto você mantém a decisão final. É a primeira implementação de referência do CareerOps Manifesto. Saiba mais em [career-ops.org](https://career-ops.org).
+
+**Posso rodar o career-ops de graça ou em um modelo local / mais barato?**
+Sim. O career-ops é independente de CLI e roda em modelos gratuitos e locais — via modelos gratuitos do OpenRouter, Ollama ou qualquer endpoint compatível com OpenAI — para que você não fique preso a uma assinatura paga. Veja o arquivo [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) para a configuração completa.
+
+**Com quais CLIs de IA o career-ops funciona?**
+O career-ops roda em qualquer uma das principais CLIs de programação com IA — Claude Code, Codex, Gemini / Antigravity, OpenCode, Grok, Qwen e mais — por meio do padrão aberto Agent Skill Standard, evitando que você fique preso a um único fornecedor. Use a CLI que você já tem.
+
+**Como faço para instalar o career-ops no Windows?**
+O career-ops roda no Windows. Se o carregamento de habilidades falhar com um erro de symlink durante a instalação, a correção está em [docs/FAQ.md](docs/FAQ.md). O passo a passo completo está em [docs/SETUP.md](docs/SETUP.md).
+
+**O career-ops se candidata automaticamente às vagas por mim?**
+Não. O career-ops é um filtro, não um disparador automático de candidaturas em massa. A IA avalia, ranqueia e cria rascunhos; você revisa e decide. Ele nunca envia, encaminha ou clica em nada — a palavra final é sempre sua. Esse design com o humano no controle (human-in-the-loop) é o objetivo central do projeto.
+
+**O career-ops é gratuito e de código aberto?**
+Sim. O career-ops é gratuito e de código aberto, e sempre será para o candidato — é a primeira implementação de referência do [CareerOps Manifesto](https://career-ops.org). Leia e, se ele disser o que você acredita, assine.
+
 ## Sobre o autor
 
 Sou o [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) -- Head of Applied AI, ex-fundador (criei e vendi uma empresa que ainda opera com meu nome). Eu construí o career-ops para gerenciar minha própria busca de emprego. Funcionou: usei o sistema para conquistar meu cargo atual.

@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { decodeEntities } from './_html-entities.mjs';
 
 // Radancy (TalentBrew) provider — the career sites Radancy hosts for large
 // employers (careers.munichre.com and its ERGO brands, plus many others). The
@@ -64,23 +65,6 @@ const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential r
 // Page size for the JSON fragment transport. 100 is honored live by both known
 // legacy tenants (UHG, Kaiser); the HTML page hard-codes 15.
 const FRAGMENT_RECORDS_PER_PAGE = 100;
-
-// Minimal HTML entity decoder — mirrors the other HTML-scraping providers.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      // String.fromCodePoint throws RangeError outside 0..0x10FFFF or on a lone
-      // surrogate half — a malformed/adversarial entity must degrade to the
-      // original text, never crash the whole parse.
-      const valid = Number.isFinite(code) && code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
-      return valid ? String.fromCodePoint(code) : m;
-    }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
-  });
-}
 
 /** @param {string} s */
 function clean(s) {
@@ -278,6 +262,10 @@ export default {
     const maxJobs = resolveMaxJobs(entry);
     const jobs = [];
     const seen = new Set();
+    // Proof of life across BOTH transports: any resolved request — including a
+    // fragment 200 that parses to zero rows — proves the tenant is reachable,
+    // so a later HTML page-1 failure must not read as "unreachable".
+    let succeededOnce = false;
 
     // ── Preferred transport: the JSON results fragment ───────────────────────
     // Tried first because on legacy-markup tenants the ?p=N HTML page carries a
@@ -289,8 +277,15 @@ export default {
         const first = await ctx.fetchJson(buildFragmentUrl(listUrl, 1), {
           headers: { accept: 'application/json', 'x-requested-with': 'XMLHttpRequest' },
         });
-        const firstHtml = typeof first?.results === 'string' ? first.results : '';
+        const firstIsString = typeof first?.results === 'string';
+        const firstHtml = firstIsString ? first.results : '';
         const firstRows = firstHtml ? parseResults(firstHtml, origin) : [];
+        // Proof of life only for a WELL-FORMED fragment response: a string
+        // `results` — even "" (zero rows) — counts, but a missing/non-string
+        // `results` or a response that crashes parsing leaves this false, so
+        // a failing HTML fallback still surfaces the malformed initial
+        // response instead of returning [].
+        if (firstIsString) succeededOnce = true;
         if (firstRows.length) {
           const { totalResults, totalPages } = readFragmentTotals(firstHtml);
           // Bound by the server's own page count when it gives one; the local
@@ -345,15 +340,22 @@ export default {
       }
     }
 
+    // A page-1 failure on the fallback transport — when NO request on either
+    // transport ever resolved — means the board is unreachable, not empty:
+    // THROW so scan/portal-health record a failure instead of "live but empty"
+    // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
+    // failure here, keeps partials instead.
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await wait(PAGE_DELAY_MS);
       let rows;
       try {
         const html = await ctx.fetchText(`${listUrl}?p=${page}`, { headers: { accept: 'text/html' } });
         rows = parseResults(html, origin);
-      } catch {
+      } catch (err) {
+        if (!succeededOnce) throw err;
         break; // keep jobs collected so far — a transient mid-scan failure shouldn't discard earlier pages
       }
+      succeededOnce = true;
       if (rows.length === 0) break; // past the last page
 
       let fresh = 0;

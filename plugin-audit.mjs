@@ -35,6 +35,33 @@ const DYN_IMPORT_RE = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const REQUIRE_RE = /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g;
 const firewallRe = new RegExp('\\b(' + ['revenue', 'pricing', 'paywall', 'monetiz\\w*', 'moat'].join('|') + ')\\b', 'i');
 
+// --- CLI args ---
+const KNOWN_FLAGS = ['--help', '-h'];
+
+const USAGE = `Usage:
+  node plugin-audit.mjs <plugin-dir>
+  node plugin-audit.mjs --help`;
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  return {
+    dir: args.find(a => !a.startsWith('-'))
+  };
+}
+
 function collectSpecifiers(src) {
   const specs = [];
   for (const re of [IMPORT_RE, DYN_IMPORT_RE, REQUIRE_RE]) {
@@ -87,8 +114,8 @@ export function auditPlugin(dir) {
 
 // CLI: node plugin-audit.mjs <dir>
 if (import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1] || '').href) {
-  const dir = process.argv[2];
-  if (!dir) { console.error('Usage: node plugin-audit.mjs <plugin-dir>'); process.exit(2); }
+  const { dir } = parseArgs(process.argv);
+  if (!dir) { console.error(USAGE); process.exit(2); }
   let result;
   try { result = auditPlugin(path.resolve(dir)); } catch (e) { console.error('audit failed:', e.message); process.exit(2); }
   if (result.ok) { console.log('✓ audit clean'); process.exit(0); }
