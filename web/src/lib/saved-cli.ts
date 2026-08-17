@@ -34,10 +34,14 @@ export function pickSoleInstalled(
 export async function resolveCliId(): Promise<string | null> {
   const saved = readSavedCliId();
   if (saved) return saved;
-  const r = await fetch("/api/clis");
-  const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
-  const sole = pickSoleInstalled(d.clis);
-  if (!sole) return null;
-  persistCliId(sole);
-  return sole;
+  try {
+    const r = await fetch("/api/clis");
+    const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
+    const sole = pickSoleInstalled(d.clis);
+    if (!sole) return null;
+    persistCliId(sole);
+    return sole;
+  } catch {
+    return null;
+  }
 }
