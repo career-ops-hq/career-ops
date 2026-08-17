@@ -72,7 +72,9 @@ Vendor keywords for `--vendors`: `gh`, `ashby`, `lever`, `workable`,
 `smartrecruiters`, `recruitee`, `bamboohr`, `breezy`, `pinpoint`, `rippling`,
 `join` (all slug-resolvable) and `workday` (fires only for companies carrying a
 hint). Default is all of them; `gh`, `ashby` and `lever` are probed first and the
-first match wins, so a common company still costs three requests.
+first match wins, so a company on one of them is resolved within at most three
+probes (one on `gh`, two on `ashby`, three on `lever`) before any long-tail
+vendor is tried. Only a company none of the three can resolve pays for the rest.
 
 Parse the JSON envelope:
 

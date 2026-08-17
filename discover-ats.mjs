@@ -100,12 +100,15 @@ const VENDORS = {
   pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: (s) => `https://${lower(s)}.pinpointhq.com` },
 };
 // Slug-resolvable vendors, probed in order for each company (first match wins).
-// Probe order is also a cost decision. resolveCompany returns on the FIRST match,
-// so keeping the three highest-hit-rate vendors first means the common case still
-// costs the same three requests it always did, and the long tail is only paid for
-// by a company none of them could resolve. A company on no supported board now
-// costs one request per vendor before giving up, which is the honest price of the
-// extra coverage.
+// Probe order is also a cost decision. resolveCompany probes candidates in this
+// order and returns on the FIRST match, so a resolvable company pays only for the
+// vendors ahead of its own: one probe on Greenhouse, two on Ashby, three on
+// Lever. Keeping the three highest-hit-rate vendors first therefore leaves every
+// company they can resolve costing exactly what it did before this list grew, and
+// the long tail is paid for only by a company none of the three could resolve.
+// A company on no supported board is the case that got more expensive: it now
+// probes every vendor before giving up, which is the honest price of the extra
+// coverage.
 const VENDOR_ORDER = ['gh', 'ashby', 'lever', 'workable', 'smartrecruiters', 'recruitee', 'bamboohr', 'breezy', 'pinpoint', 'rippling', 'join'];
 
 // Workday instance subdomains, most common first. Used only when the user gives
@@ -726,7 +729,8 @@ function runSelfTest() {
   check(b1.candidates.length === VENDOR_ORDER.length, 'buildCandidateUrls emits one candidate per vendor');
   check(b1.candidates[0].vendor === 'gh' && b1.candidates[0].careers_url === 'https://job-boards.greenhouse.io/adyen', 'buildCandidateUrls GH url');
   // The three highest-hit-rate vendors stay first: resolveCompany returns on the
-  // first match, so this ordering is what keeps the common case at three requests.
+  // first match, so this ordering is what caps a company they can resolve at
+  // three probes (one on gh, two on ashby, three on lever) rather than eleven.
   check(b1.candidates.slice(0, 3).map((c) => c.vendor).join(',') === 'gh,ashby,lever', 'buildCandidateUrls probes the common vendors first');
   const b2 = buildCandidateUrls({ name: 'X', slug: 'bad/slug' });
   check(b2.candidates.length === 0 && b2.skipped.length === VENDOR_ORDER.length, 'buildCandidateUrls SLUG_RE rejects unsafe slug (no URL built)');

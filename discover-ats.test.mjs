@@ -113,8 +113,9 @@ console.log('\n--- 3. buildCandidateUrls ---');
 
 const b1 = buildCandidateUrls({ name: 'Adyen' });
 // The three highest-hit-rate vendors must stay FIRST: resolveCompany returns on
-// the first match, so this ordering is what keeps a common company at three
-// requests even though the long tail is now probed too.
+// the first match, so this ordering is what caps a company they can resolve at
+// three probes (one on gh, two on ashby, three on lever) even though the long
+// tail is now probed too.
 eq('common vendors probed first', b1.candidates.slice(0, 3).map(c => c.vendor), ['gh', 'ashby', 'lever']);
 eq('GH careers_url', b1.candidates[0].careers_url, 'https://job-boards.greenhouse.io/adyen');
 eq('Ashby careers_url', b1.candidates[1].careers_url, 'https://jobs.ashbyhq.com/adyen');
