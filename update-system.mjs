@@ -49,12 +49,22 @@ function createReexecMarker() {
 }
 
 function consumeReexecMarker() {
-  const path = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+  const suppliedPath = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
   const token = process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
-  if (!path || !token || !path.startsWith(join(tmpdir(), 'career-ops-reexec-')) || basename(path) !== 'marker') {
+  if (!suppliedPath || !token) {
     return false;
   }
   try {
+    const tmpRoot = realpathSync(tmpdir());
+    const path = resolve(suppliedPath);
+    const parent = dirname(path);
+    if (dirname(parent) !== tmpRoot || !basename(parent).startsWith('career-ops-reexec-') || basename(path) !== 'marker') {
+      return false;
+    }
+    if (realpathSync(parent) !== parent || !lstatSync(parent).isDirectory() ||
+        realpathSync(path) !== path || !lstatSync(path).isFile()) {
+      return false;
+    }
     const expected = readFileSync(path, 'utf8');
     const expectedBuffer = Buffer.from(expected);
     const tokenBuffer = Buffer.from(token);
