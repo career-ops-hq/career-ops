@@ -125,6 +125,7 @@ export function parseApplications(md, rootDir) {
       if (!/^\d+$/.test(at("n"))) continue; // header / separator / malformed
       rows.push({
         n: at("n"), date: at("date"), company: at("company"), via: at("via"), role: at("role"),
+        location: at("location"),
         score: at("score"), status: at("status"), pdf: at("pdf"), report: at("report"),
         notes: at("notes"),
       });
@@ -132,7 +133,7 @@ export function parseApplications(md, rootDir) {
       // Legacy fixed order; tolerate the 8-cell variant where Notes is absent.
       if (!/^\d+$/.test(cells[0])) continue; // header / separator / malformed
       const [n, date, company, role, score, status, pdf, report, ...rest] = cells;
-      rows.push({ n, date, company, via: "", role, score, status, pdf, report, notes: rest.join(" | ") });
+      rows.push({ n, date, company, via: "", role, location: "", score, status, pdf, report, notes: rest.join(" | ") });
     }
   }
   return rows;

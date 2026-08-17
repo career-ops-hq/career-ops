@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, Trash2 } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -190,7 +190,7 @@ export function PipelineView({
         )
       ) : filtered.length > 0 ? (
         /* ── Tracker table ── */
-        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
@@ -218,7 +218,10 @@ export function PipelineView({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                    <Link href={`/pipeline/${r.n}`}>
+                      <span className="block">{r.role}</span>
+                      {r.location && <span className="block text-xs text-faint">{r.location}</span>}
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
@@ -229,7 +232,12 @@ export function PipelineView({
                       {r.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="px-4 py-3">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-faint tabular-nums">{r.date}</span>
+                      <DiscardButton n={r.n} status={r.status} />
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -242,6 +250,41 @@ export function PipelineView({
         </div>
       )}
     </div>
+  );
+}
+
+function DiscardButton({ n, status }: { n: string; status: string }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const isDiscarded = canonStatus(status).includes("DISCARDED");
+
+  if (isDiscarded) return null;
+
+  async function handleDiscard() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n, status: "Discarded" }),
+      });
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleDiscard}
+      disabled={pending}
+      title="Mark as Discarded"
+      className="inline-flex items-center justify-center rounded p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+    >
+      <Trash2 className="size-3.5" />
+    </button>
   );
 }
 

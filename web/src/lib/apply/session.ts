@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
+import type { Browser, BrowserContext, Page, Frame, Response } from "playwright-core";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
@@ -123,6 +123,7 @@ declare global {
 const SESSIONS: Map<string, Session> = (globalThis.__coApplySessions ??= new Map());
 
 async function headedBrowser(): Promise<Browser> {
+  const { chromium } = await import("playwright-core");
   const b = globalThis.__coHeadedBrowser;
   if (b && b.isConnected()) return b;
   let nb: Browser;

@@ -127,6 +127,7 @@ export type Application = {
   /** Intermediary channel (#1596): agency/recruiter firm, "—" for direct, "" when the tracker has no Via column. */
   via: string;
   role: string;
+  location?: string;
   score: string;
   status: string;
   pdf: string;
@@ -246,13 +247,16 @@ export function findReportFile(n: string): string | null {
   return containedRealpath(p, root) ? p : null;
 }
 
-/** True containment check: resolves symlinks before comparing, so a link
- *  planted under data/ or reports/ can't leak files outside the project. */
+/** Containment check: normalises ".." traversal without following symlinks, so
+ *  a hand-crafted link like "../../../../etc/passwd" is still blocked, but a
+ *  legitimate symlink (e.g. reports/ → external storage) is allowed. */
 function containedRealpath(p: string, root: string): boolean {
   try {
-    return fs.realpathSync(p).startsWith(fs.realpathSync(root) + path.sep);
+    const resolved = path.resolve(p);
+    const resolvedRoot = path.resolve(root);
+    return resolved.startsWith(resolvedRoot + path.sep) && fs.existsSync(p);
   } catch {
-    return false; // missing file or unresolvable link — treat as not found
+    return false;
   }
 }
 
