@@ -14,6 +14,9 @@
  *      the personal queue isn't accidentally tracked.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
+ *   7c. When a writer in 7 dies, the line 7 prints names the cause. It did not:
+ *      a macOS failure reported `Node.js v24.18.0` — the last-line fallback —
+ *      on the one crash that had a cause to give.
  *   8. The lock underneath 7 is never held by two processes at once. 7 reports
  *      WHAT was lost; 8 reports whether the lock is WHY, so a red run separates
  *      "two writers got in" from "a write went missing" without a round trip.
@@ -41,6 +44,41 @@ function check(name, cond, detail = '') {
 
 function tmp(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
+}
+
+// Reduce a crashed child's stderr to the one line that names the cause.
+//
+// Node prints the offending SOURCE LINE before the error itself, so taking the
+// first lines verbatim buries the one fact worth having. Anchor on Node's own
+// caret rather than guessing at error NAMES: the uncaught-exception preamble is
+// <file>:<line> / <source> / ^ / <the error>, so the line after the caret is the
+// failure whatever its shape. Name-matching cannot be the primary route — a
+// promise rejected with a non-Error prints the bare VALUE (`plain string`,
+// `undefined`) with no name to match at all.
+//
+// This is not hypothetical. macOS run 32166774680 reported
+// `item-4 exited 1: Node.js v24.18.0` — the last-line fallback, meaning both
+// the name and errno routes missed everything, on the one §7 failure so far
+// that had a cause to give. §7c below locks each route against real captured
+// output so that cannot recur silently.
+export function causeOf(stderr) {
+  const lines = String(stderr).trim().split('\n').map((s) => s.trim()).filter(Boolean);
+  const caret = lines.findIndex((s) => /^\^+$/.test(s));
+  const afterCaret = caret >= 0 && lines[caret + 1] && !/^Node\.js v/.test(lines[caret + 1])
+    ? lines[caret + 1]
+    : null;
+  return afterCaret
+    // No mandatory leading character. This class was `^[A-Za-z_$][\w$]*`, which
+    // consumed the `E` and left `(Error|Exception)` needing a SECOND literal
+    // `Error` after it — so it matched `TypeError:` and `LockTimeoutError:` and
+    // never plain `Error:`, the commonest shape there is.
+    || lines.find((s) => /^[\w$]*(Error|Exception):/.test(s))
+    // ENOTEMPTY is the one that matters for a lock-directory removal racing
+    // another process's owner.json write. It prints as a bare `Error:` line, so
+    // with the class above it fell through both routes at once.
+    || lines.find((s) => /\b(EPERM|EBUSY|EACCES|ENOENT|EEXIST|ENOTEMPTY|EMFILE|EAGAIN|EPIPE)\b/.test(s))
+    || lines.slice(-1)[0]
+    || '(no stderr)';
 }
 
 // Run agent-inbox.mjs against a provisioned queue file; returns stdout.
@@ -166,15 +204,7 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const failedSpawn = losers.length;
   check('every concurrent add exited cleanly', failedSpawn === 0, `${failedSpawn} non-zero exits`);
   for (const l of losers) {
-    // Node prints the offending SOURCE LINE before the error itself, so taking
-    // the first lines verbatim buries the one fact worth having. Pull out the
-    // `SomeError: message` line, which is what separates the hypotheses, and
-    // keep a truncated tail as a fallback when nothing matches.
-    const lines = l.err.trim().split('\n').map((s) => s.trim()).filter(Boolean);
-    const cause = lines.find((s) => /^[A-Za-z_$][\w$]*(Error|Exception):/.test(s))
-      || lines.find((s) => /\b(EPERM|EBUSY|EACCES|ENOENT|EEXIST)\b/.test(s))
-      || lines.slice(-1)[0]
-      || '(no stderr)';
+    const cause = causeOf(l.err);
     // Generous, because the owner record pipeline-lock.mjs appends to a
     // LockTimeoutError is the diagnostic payload; truncating it away would
     // leave the same symptom-without-mechanism this instrumentation exists
@@ -189,6 +219,81 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
   const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
   check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('7c. a crashed writer\'s cause survives extraction');
+{
+  // §7 only helps if the line it prints names the failure. It did not: macOS
+  // run 32166774680 crashed a writer and reported `Node.js v24.18.0`, the
+  // last-line fallback. So the reporting path gets its own coverage, against
+  // REAL child stderr rather than hand-written fixtures — hand-written ones
+  // cannot drift when Node changes its crash format, which is exactly the
+  // drift that would put us back to printing a banner.
+  const dir = tmp('inbox-cause-');
+  const shape = (name, src) => {
+    writeFileSync(join(dir, `${name}.mjs`), src);
+    return execFileSync(NODE, ['-e', `
+      const {spawn} = require('child_process');
+      const p = spawn(process.execPath, [${JSON.stringify(join(dir, `${name}.mjs`))}], {stdio:['pipe','pipe','pipe']});
+      let e = ''; p.stderr.on('data', (c) => { e += c; });
+      p.on('close', () => process.stdout.write(e));
+    `], { encoding: 'utf8' });
+  };
+
+  // Every shape a writer can die in. The four marked LOST below all reduced to
+  // the Node banner before this fix; `undefined` is the harshest — a rejection
+  // with no name, no message and no errno to match on.
+  const SHAPES = [
+    ['bare Error       ', `throw new Error('boom');`,                                    'Error: boom'],
+    ['async bare Error ', `async function f(){ throw new Error('boom'); } await f();`,   'Error: boom'],
+    ['non-Error reject ', `await Promise.reject('plain string');`,                       'plain string'],
+    ['undefined reject ', `await Promise.reject();`,                                     'undefined'],
+    ['typed Error      ', `throw new TypeError('typed');`,                               'TypeError: typed'],
+    ['custom Error     ', `class LockTimeoutError extends Error{}\nthrow new LockTimeoutError('held 30s');`, 'LockTimeoutError: held 30s'],
+  ];
+  for (const [label, src, want] of SHAPES) {
+    const got = causeOf(shape(label.trim().replace(/\W+/g, '-'), src));
+    check(`cause survives: ${label.trim()}`, got.startsWith(want), `got "${got.slice(0, 70)}"`);
+  }
+
+  // The errno route, exercised through a real syscall rather than a string. A
+  // lock directory that still holds owner.json is precisely the release-vs-write
+  // race, and ENOTEMPTY was absent from the old list.
+  writeFileSync(join(dir, 'notempty.mjs'), [
+    `import {mkdirSync, writeFileSync, rmdirSync} from 'node:fs';`,
+    `mkdirSync(${JSON.stringify(join(dir, 'lockdir'))}, {recursive:true});`,
+    `writeFileSync(${JSON.stringify(join(dir, 'lockdir', 'owner.json'))}, '{}');`,
+    `rmdirSync(${JSON.stringify(join(dir, 'lockdir'))});`,
+  ].join('\n'));
+  const enotempty = causeOf(shape('notempty', readFileSync(join(dir, 'notempty.mjs'), 'utf8')));
+  check('cause survives: ENOTEMPTY on a non-empty lock dir', /ENOTEMPTY/.test(enotempty), `got "${enotempty.slice(0, 70)}"`);
+
+  // Pin the two defects directly, so a future tidy-up of the patterns above
+  // fails here with the reason rather than silently restoring the banner.
+  const NAME_ROUTE = /^[\w$]*(Error|Exception):/;
+  check('the name route matches a BARE Error:, not just prefixed classes',
+    NAME_ROUTE.test('Error: boom') && NAME_ROUTE.test('TypeError: x'),
+    'a leading [A-Za-z_$] here consumes the E and requires a second literal Error');
+  check('the errno route covers ENOTEMPTY, not only the five it shipped with',
+    ['EPERM', 'EBUSY', 'EACCES', 'ENOENT', 'EEXIST', 'ENOTEMPTY']
+      .every((c) => /\b(EPERM|EBUSY|EACCES|ENOENT|EEXIST|ENOTEMPTY|EMFILE|EAGAIN|EPIPE)\b/.test(`Error: ${c}: x`)));
+
+  // Negative control: without it the six assertions above prove nothing, since
+  // a fallback that returns the banner still "returns a string". Confirm the
+  // shipped extractor really did lose these, on this same captured output.
+  const SHIPPED = (stderr) => {
+    const lines = String(stderr).trim().split('\n').map((s) => s.trim()).filter(Boolean);
+    return lines.find((s) => /^[A-Za-z_$][\w$]*(Error|Exception):/.test(s))
+      || lines.find((s) => /\b(EPERM|EBUSY|EACCES|ENOENT|EEXIST)\b/.test(s))
+      || lines.slice(-1)[0] || '(no stderr)';
+  };
+  const lost = SHAPES
+    .filter(([, src]) => /^Node\.js v/.test(SHIPPED(shape('ctl', src))))
+    .map(([label]) => label.trim());
+  check('negative control: the previous extractor lost the bare-Error shapes',
+    lost.length === 4 && lost.every((l) => /bare Error|reject/.test(l)),
+    `lost=[${lost.join(', ')}]`);
 }
 
 // ---------------------------------------------------------------------------
