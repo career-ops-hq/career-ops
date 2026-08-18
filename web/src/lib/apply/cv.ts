@@ -17,15 +17,23 @@ import { careerOpsRoot } from "@/lib/career-ops";
  * and Barcelona, both resolved to whichever was generated last). Returns an
  * absolute path, or null when the report has no indexed PDF.
  */
-export function resolveCvByReport(report?: string | number): string | null {
+export type CvByReport =
+  /** The index names a PDF for this report and the file is there. */
+  | { status: 'ok'; path: string }
+  /** The index names a PDF for this report but the file is gone. */
+  | { status: 'missing-file'; path: string }
+  /** No index row for this report — generated before the index existed. */
+  | { status: 'no-entry' };
+
+export function resolveCvByReport(report?: string | number): CvByReport {
   const n = String(report ?? "").trim();
-  if (!/^\d+$/.test(n)) return null;
+  if (!/^\d+$/.test(n)) return { status: 'no-entry' };
   const root = careerOpsRoot();
   let rows: string[];
   try {
     rows = fs.readFileSync(path.join(root, "data", "pdf-index.tsv"), "utf8").split("\n");
   } catch {
-    return null;
+    return { status: 'no-entry' };
   }
   // Last wins: the index is append-only, so a regenerated CV is a later row.
   let rel: string | null = null;
@@ -34,11 +42,14 @@ export function resolveCvByReport(report?: string | number): string | null {
     const col = row.split("\t");
     if (col[0]?.trim() === n && col[1]?.trim()) rel = col[1].trim();
   }
-  if (!rel) return null;
+  if (!rel) return { status: 'no-entry' };
   const abs = path.resolve(root, rel);
   // Never let an index row escape the project root.
-  if (!abs.startsWith(path.resolve(root) + path.sep)) return null;
-  return fs.existsSync(abs) ? abs : null;
+  if (!abs.startsWith(path.resolve(root) + path.sep)) return { status: 'no-entry' };
+  // A named-but-missing file must NOT fall through to company matching: that is
+  // exactly the defect this function exists to fix, and the caller would serve
+  // another role's CV for the same employer.
+  return fs.existsSync(abs) ? { status: 'ok', path: abs } : { status: 'missing-file', path: abs };
 }
 
 export function resolveTailoredCv(company?: string): string | null {

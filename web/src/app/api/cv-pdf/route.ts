@@ -16,14 +16,20 @@ export async function GET(req: NextRequest) {
   // the same file (Zurich vs Barcelona at ANYbotics). Company stays as the
   // fallback for rows generated before the index existed.
   const byReport = resolveCvByReport(req.nextUrl.searchParams.get("report") ?? undefined);
-  if (byReport) {
+  // An indexed report whose file has since been deleted must 404 rather than
+  // fall back: company matching would hand back another role's CV at the same
+  // employer, which is the bug this endpoint is being fixed for.
+  if (byReport.status === "missing-file") {
+    return new Response("the tailored CV for this report is indexed but missing from output/", { status: 404 });
+  }
+  if (byReport.status === "ok") {
     try {
-      const buf = fs.readFileSync(byReport);
+      const buf = fs.readFileSync(byReport.path);
       return new Response(new Uint8Array(buf), {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${path.basename(byReport)}"`,
+          "Content-Disposition": `inline; filename="${path.basename(byReport.path)}"`,
           "Cache-Control": "no-store",
         },
       });
