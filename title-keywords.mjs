@@ -26,6 +26,17 @@ function escapeForRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// One definition of "inside a word", used by BOTH branches below. Anything else
+// reintroduces, inside this module, exactly the drift the module exists to
+// prevent: the acronym branch used ASCII \b while the `word:` branch had been
+// made Unicode-aware, so `vp` still matched inside an accented word.
+//
+// String.raw, not a plain template literal: `\p` is not a recognised string
+// escape, so an ordinary template drops the backslash and the class degenerates
+// to the literal characters p, {, L, } — no error, and the anchor is simply off.
+const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
+const anchoredPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}(?!${WORD_CHAR})`, 'u');
+
 /**
  * Compile a lowercased keyword into a matcher.
  *
@@ -51,21 +62,19 @@ export function compileKeyword(kw) {
     // Explicit alphanumeric lookarounds rather than \b, because \b's meaning
     // depends on the characters at the keyword's own edges: for `word:c++` a
     // trailing \b would sit after "+" and assert the opposite of the intent.
-    // Unicode-aware boundaries, not [a-z0-9_]: an ASCII-only lookaround treats
-    // every accented letter as a separator, so `word:intern` matched inside
+    // WORD_CHAR rather than [a-z0-9_]: an ASCII-only lookaround treats every
+    // accented letter as a separator, so `word:intern` matched inside
     // "preintern" spelled with an accent and vetoed exactly the international
     // titles this prefix exists to protect. \p{M} covers combining marks, so a
     // decomposed "é" does not split a word either.
-    // String.raw, not a plain template literal: `\p` is not a recognised string
-    // escape, so an ordinary template drops the backslash and the class
-    // silently degenerates to the literal characters p, {, L, } — which matches
-    // almost nothing and turns the anchor off without any error.
-    const boundary = String.raw`[\p{L}\p{M}\p{N}_]`;
-    const re = new RegExp(`(?<!${boundary})${escapeForRegExp(bare)}(?!${boundary})`, 'u');
+    const re = anchoredPattern(escapeForRegExp(bare));
     return (lower) => re.test(lower);
   }
   if (/^[a-z]{2,3}$/.test(kw)) {
-    const re = new RegExp(`\\b${kw}\\b`);
+    // The same boundary as above, not \b: \b is ASCII-only, so "vp" matched
+    // inside an accented word while `word:vp` did not. Two spellings of one
+    // rule in one file is the drift this module was extracted to end.
+    const re = anchoredPattern(kw);
     return (lower) => re.test(lower);
   }
   return (lower) => lower.includes(kw);
@@ -91,7 +100,11 @@ export function compileKeyword(kw) {
 // The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
 // would turn the perfectly ordinary keyword "C++" into "c", which matches
 // almost every title — trading a silent drop for a silent flood.
-const AND_SEPARATOR = /\s+\+\s+/;
+// Exported because a caller that must reason about the TERMS of a group — the
+// dead-positive guard in tests/title-filter-word-prefix.test.mjs — has to split
+// them exactly as this file does, and a second copy of the rule is the drift
+// this module was extracted to end.
+export const AND_SEPARATOR = /\s+\+\s+/;
 
 /**
  * Compile one `positive` entry into a matcher.

@@ -20,6 +20,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as yaml from 'js-yaml';
 import { buildTitleFilter, compileKeyword } from '../scan.mjs';
+import { AND_SEPARATOR } from '../title-keywords.mjs';
 import { parsePortals } from '../openrouter-runner.mjs';
 
 console.log('\ntitle filter — `word:` prefix and dead-positive guard');
@@ -231,6 +232,12 @@ if (disagreed.length === 0) {
 //
 // So an anchored negative only kills an anchored positive over the same term,
 // where every match of one is a match of the other.
+//
+// An AND-group is judged term by term, not as one string. Every term of a group
+// must appear for the group to match, so killing ANY term kills the whole entry:
+// `word:director + engineering` cannot be satisfied while `word:director` is a
+// negative, even though the negative does not match the group's full text.
+// Splitting uses the module's own AND_SEPARATOR rather than a local copy.
 function deadPositives(titleFilter) {
   const positives = (titleFilter?.positive || []).filter((k) => typeof k === 'string');
   const negatives = (titleFilter?.negative || []).filter((k) => typeof k === 'string');
@@ -238,12 +245,18 @@ function deadPositives(titleFilter) {
   const anchored = (k) => k.trim().toLowerCase().startsWith('word:');
   const out = [];
   for (const p of positives) {
-    const text = bare(p);
-    const killers = negatives.filter((n) => {
-      if (!compileKeyword(n.trim().toLowerCase())(text)) return false;
-      return anchored(n) ? (anchored(p) && bare(n) === text) : true;
-    });
-    if (killers.length) out.push(`${p} <- ${killers.join(', ')}`);
+    const terms = p.split(AND_SEPARATOR).map((t) => t.trim()).filter(Boolean);
+    const killers = new Set();
+    for (const term of terms) {
+      const text = bare(term);
+      if (!text) continue;
+      for (const n of negatives) {
+        if (!compileKeyword(n.trim().toLowerCase())(text)) continue;
+        if (anchored(n) && !(anchored(term) && bare(n) === text)) continue;
+        killers.add(n);
+      }
+    }
+    if (killers.size) out.push(`${p} <- ${[...killers].join(', ')}`);
   }
   return out;
 }
@@ -320,4 +333,48 @@ if (reallyDead.length === 1) {
   pass('an anchored negative still kills the same anchored positive');
 } else {
   fail(`guard missed a genuinely dead anchored positive: ${JSON.stringify(reallyDead)}`);
+}
+
+// (d) The 2-3 char acronym branch shares the word: branch's boundary. It used
+// ASCII \b, so `vp` matched inside an accented word while `word:vp` did not —
+// two spellings of one rule inside the module that exists to have one.
+const vp = compileKeyword('vp');
+const acronymWrong = [
+  ...['prévp', 'vpn gateway', 'révpn'].filter((t) => vp(t) !== false),
+  ...['vp engineering', 'senior vp', 'vp, platform'].filter((t) => vp(t) !== true),
+];
+if (acronymWrong.length === 0) {
+  pass('an acronym keyword uses the same Unicode boundary as a word: entry');
+} else {
+  fail(`acronym boundary wrong for: ${JSON.stringify(acronymWrong)}`);
+}
+
+// (e) An AND-group is dead when ANY of its terms is dead: every term must
+// appear, so vetoing one makes the whole entry unsatisfiable even though the
+// negative never matches the group's full text.
+const groupDead = deadPositives({
+  positive: ['word:director + engineering'],
+  negative: ['word:director'],
+});
+const groupFilter = buildTitleFilter({
+  positive: ['word:director + engineering'],
+  negative: ['word:director'],
+});
+const anySurvives = ['Director of Engineering', 'Senior Director, Engineering', 'Directorship Engineering']
+  .some((t) => groupFilter(t) === true);
+if (groupDead.length === 1 && anySurvives === false) {
+  pass('an anchored negative kills the AND-group whose term it vetoes');
+} else {
+  fail(`AND-group veto not detected: flagged=${JSON.stringify(groupDead)} anySurvives=${anySurvives}`);
+}
+
+// …and a group whose terms are all safe is still not flagged.
+const groupAlive = deadPositives({
+  positive: ['word:director + engineering'],
+  negative: ['word:intern'],
+});
+if (groupAlive.length === 0) {
+  pass('a group with no vetoed term is left alone');
+} else {
+  fail(`false alarm on a live AND-group: ${JSON.stringify(groupAlive)}`);
 }
