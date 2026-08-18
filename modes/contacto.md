@@ -90,9 +90,12 @@ not quote the note verbatim in a public-facing message.
 - **LinkedIn's connection-request character limit varies by account tier: 200 characters on a free account, 300 on Premium/Sales Navigator.** Live-confirmed via the actual compose box on both tiers — a flat "300" assumption produces a message that gets silently truncated (or rejected) for a free-tier account. Default to the safer 200-char budget unless the user has confirmed they're on Premium/Sales Navigator; count and trim to whichever limit actually applies.
 - NO corporate-speak
 - NO "I'm passionate about..."
-- Something that makes them want to respond
 - NEVER share phone number
 - The contact type changes the EMPHASIS, not the structure
+- **End on a question, not a statement.** "Happy to share my CV if this aligns" is a dead end — it puts the entire next move on them and gives them nothing specific to react to. A real question about their team, their approach to a named problem, or a detail from their own work is what actually gets a reply. Reserve "happy to share my CV" for the Recruiter persona ONLY, where it functions as a real answer to their next question, not the message's ending.
+- **Ban the templated opener.** Never start with "Saw the [role] at [company]" or any close paraphrase — it is the single most recognizable mass-outreach tell and reads as a template before the recipient finishes the first clause. Open on the specific thing (a problem their team is visibly solving, something they shipped, a detail from the posting that's actually interesting) instead of announcing that you found the job.
+- **No resume-bullet phrasing mid-sentence.** "5 years in RN, sole app ownership shipping a 50k-install logistics app" is a CV line pasted into a DM, not something a person would say to another person. Say the same fact the way you'd say it out loud.
+- **Vary the rhythm.** Three uniform-length, uniformly-structured sentences is itself an AI tell, independent of the words used. Let sentence length vary; it's allowed to be two sentences if the second one is doing enough work.
 
 ---
 

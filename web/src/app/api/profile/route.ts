@@ -22,6 +22,7 @@ type ProfilePatch = {
   compMax?: number;
   currency?: string;
   remote?: string;
+  modesDir?: string;
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -50,9 +51,29 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
   if (p.currency) comp.currency = p.currency;
   if (p.remote) comp.location_flexibility = p.remote;
   if (Object.keys(comp).length) out.compensation = comp;
+  if (p.modesDir) out.language = { modes_dir: p.modesDir };
   // seniority intentionally not written (no canonical home in profile.yml);
   // archetypes/narrative live in modes/_profile.md — this writer never touches them.
   return out;
+}
+
+// GET is read-only and narrow on purpose: just the one field the Settings UI's
+// Market Mode picker needs to show the currently-saved value back to the user.
+export async function GET() {
+  const root = careerOpsRoot();
+  const file = path.join(root, "config", "profile.yml");
+  let profile: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    try {
+      const parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      profile = isObj(parsed) ? parsed : {};
+    } catch {
+      /* ignore */
+    }
+  }
+  const language = isObj(profile.language) ? profile.language : {};
+  const modesDir = typeof language.modes_dir === "string" ? language.modes_dir : "modes/";
+  return Response.json({ modesDir });
 }
 
 export async function POST(req: Request) {

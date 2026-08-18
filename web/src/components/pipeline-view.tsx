@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { QuickEvaluate } from "@/components/quick-evaluate";
+import { TrainingEvaluate } from "@/components/training-evaluate";
 import { cn } from "@/lib/cn";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
@@ -139,6 +141,9 @@ export function PipelineView({
           </div>
         )}
       </div>
+
+      <QuickEvaluate />
+      <TrainingEvaluate />
 
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">

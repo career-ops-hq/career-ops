@@ -2,21 +2,24 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, RotateCcw } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
+import { SaveContactForm } from "@/components/save-contact-form";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { jobs } = useJobs();
+  const { jobs, startJob } = useJobs();
+  const router = useRouter();
   const job = jobs.find((j) => j.id === id);
 
   if (!job) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-4xl px-6 py-10">
         <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
           <ArrowLeft className="size-4" /> Pipeline
         </Link>
@@ -28,7 +31,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <div className="mx-auto max-w-4xl px-6 py-8">
       <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
         <ArrowLeft className="size-4" /> Pipeline
       </Link>
@@ -45,8 +48,25 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <><X className="size-3 text-red-400" /> error</>
             )}
           </p>
-          <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{job.title}</h1>
-          {job.subtitle && <p className="mt-1 text-sm text-muted">{job.subtitle}</p>}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{job.title}</h1>
+              {job.subtitle && <p className="mt-1 text-sm text-muted">{job.subtitle}</p>}
+            </div>
+            {job.status !== "running" && job.kind && job.input && (
+              <button
+                type="button"
+                onClick={() => {
+                  const newId = startJob({ title: job.title, subtitle: job.subtitle, kind: job.kind!, input: job.input!, page: job.page });
+                  if (newId) router.push(`/jobs/${newId}`);
+                }}
+                title="Run this again to check for anything new — the result above stays as-is until you do"
+                className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+              >
+                <RotateCcw className="size-3.5" /> Check again
+              </button>
+            )}
+          </div>
           {job.result?.score != null && (
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>
@@ -83,6 +103,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{job.text}</ReactMarkdown>
           </div>
         </div>
+      )}
+
+      {job.kind === "contacto" && job.status === "done" && job.input && (
+        <SaveContactForm
+          defaultCompany={job.title.split(" · ").slice(1).join(" · ")}
+          trackerNum={job.input}
+          defaultMessage={job.text.match(/```(?:[a-z]*\n)?([\s\S]*?)```/)?.[1]?.trim() ?? ""}
+        />
       )}
     </div>
   );

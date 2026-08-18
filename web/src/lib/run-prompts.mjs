@@ -51,8 +51,98 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
-export function buildPrompt({ kind, input, memory, today, postedAt }) {
-  const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
+export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
+  // AGENTS.md "Output Language vs Market Modes" composition rule: language.output
+  // governs prose, language.modes_dir only supplies market vocabulary/context. The
+  // CLI picks this up interactively by reading AGENTS.md + profile.yml itself, but
+  // this route hands the agent a single one-shot prompt — so the directive (and,
+  // for "evaluate", the market-specific mode FILE) must be injected explicitly or
+  // a configured market mode silently does nothing in a web-triggered run. `lang`
+  // is optional (readLanguageConfig() touches the filesystem, so callers that
+  // can't/don't provide it — e.g. a future test — get the English/global default
+  // rather than this module reaching for fs itself).
+  const resolvedLang = lang ?? { output: "en", modesDir: "modes", evalModeFile: "modes/oferta.md" };
+  const marketNote =
+    resolvedLang.modesDir !== "modes"
+      ? ` Also read ${resolvedLang.modesDir}/_shared.md for this market's vocabulary, benefits, and legal concepts, and keep those terms (explained in the output language) where relevant.`
+      : "";
+  const languageDirective = `\n\nWrite all human-facing output in "${resolvedLang.output}" regardless of the language of these instructions or the job description.${marketNote}\n`;
+  // Every file path given below is already exact — some agent CLIs default to a
+  // cautious "look around first" habit (list directories, run a find/grep)
+  // before reading a named file, which is pure wasted latency here since the
+  // path never needed discovering. Cheap to state, and it's the one lever
+  // available regardless of which CLI backend the run is spawned through.
+  const noSearchDirective = `\n\nEvery file path given in these instructions is already exact except the one \`*\` wildcard (the report filename, whose date/slug suffix is genuinely unknown) — read exact paths directly and resolve the wildcarded one with a single targeted glob. Do not otherwise search, list directories, or explore the workspace "to be safe"; that only adds latency for no benefit.\n`;
+  const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective + noSearchDirective;
+  // The evaluate/pdf/research report formats are long BY DESIGN (that's the
+  // actual deliverable) — this directive is scoped only to the assistant-
+  // drafted-message kinds below, where the failure mode is the opposite:
+  // echoing back the mode file's own authoring framework (sentence-by-sentence
+  // breakdowns, restated reasoning) instead of just the usable result.
+  const concise = " Be concise: give the answer, not a writeup of how you got there — no restating your own methodology, no repeating the same content in two different formats.";
+  if (kind === "contacto") {
+    return `You are running the career-ops "contacto" mode, headless, on the user's own machine, for application #${input}. Follow modes/contacto.md's persona logic (LinkedIn power move variant, unless the report context clearly calls for the Greeting variant) — but the OUTPUT must stay lean and directly usable, not a methodology writeup.
+
+1. Read modes/contacto.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md for company/role context.
+2. SPEED MATTERS — this only needs to end with ONE well-chosen primary target, not a full roster, so don't search like it does. Try the hiring manager/team lead first (usually the strongest primary at this stage) with 1-2 targeted WebSearch calls; only search for a recruiter or peer as a fallback if that comes up empty. Stop searching the moment you have ONE confirmed, useful target — do not keep searching to round out a complete list nobody asked for. 3 WebSearch calls total is a hard ceiling; best-effort and no login, so state plainly when a target can't be confirmed instead of guessing a name.
+3. Per modes/contacto.md's own selection step, pick ONE primary target (whoever benefits most from this candidate) and write their FULL ready-to-send message.
+4. List any other genuinely viable targets as ONE line each (name/role + the single reason to reach them) — do NOT draft a full message or sentence-by-sentence breakdown for every contact type found; that is authoring guidance for you, not something to echo back to the user.
+5. Enforce modes/contacto.md's Message rules strictly — this is the part people actually notice: no "Saw the [role] at [company]" opener (the single most recognizable mass-outreach tell), no resume-bullet phrasing pasted mid-sentence, vary the sentence rhythm instead of three uniform robotic sentences, and end on a genuine question the recipient can answer in one line — not a flat "happy to share my CV" statement that gives them nothing to react to.
+
+OUTPUT FORMAT — keep it to exactly this, nothing more:
+- Primary target: name, role, one-line why them.
+- The message itself, ready to copy-paste as-is, then its character count against the platform limit.
+- Other targets worth trying, one line each (omit this line entirely if there's only one real target).${mem}${concise}
+
+This is DRAFT-ONLY: do NOT write to data/contacts.tsv or any other file, do NOT send, submit, connect, or open anything.
+
+End with EXACTLY one final line: VERDICT: {0-5 confidence you found a real, useful contact}/5 — {who to message first, ≤12 words}`;
+  }
+  if (kind === "deep") {
+    return `You are running the career-ops "deep" mode, headless, on the user's own machine, for application #${input}. modes/deep.md defines 6 research axes — ACTUALLY RESEARCH and ANSWER them yourself using WebSearch/WebFetch; do not just emit a prompt for another tool to run later.
+
+1. Read modes/deep.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md for company/role context.
+2. Research and answer all 6 axes (AI Strategy, Recent moves, Engineering culture, Likely challenges, Competitors & differentiation, Candidate angle) with SPECIFIC, current findings. If something can't be found, say so plainly rather than inventing it.
+3. Ground axis 6 (Candidate angle) ONLY in real experience already present in cv.md/config/profile.yml — never fabricate a claim.${mem}${concise}
+
+End with EXACTLY one final line: VERDICT: {0-5 how much this changes interview prep}/5 — {the single sharpest insight, ≤12 words}`;
+  }
+  if (kind === "cover") {
+    return `You are running the career-ops "cover" mode, headless, on the user's own machine, for application #${input}. Follow modes/cover.md's structure and rules, but SKIP its interactive confirmation checkpoints (Step 3 research sync, Step 4 keyword list, Step 5 gap conversation) since no one is present to answer them — proceed with your own best-effort synthesis/defaults instead, and flag any assumption or unresolved gap in a short "Assumptions" line right before the letter.
+
+1. Read modes/cover.md, modes/_writing.md, cv.md, config/profile.yml, modes/_profile.md (if present), article-digest.md (if present), and the evaluation report at reports/${input}-*.md for JD + company context.
+2. Run the Step 3 company research (3 WebSearch queries) and synthesize 2-3 sentences.
+3. Extract JD keywords (Step 4) and mirror them per the rules — never invent skills, only reword real experience already in cv.md.
+4. Draft the full cover letter per modes/cover.md's template, length, and tone rules.${mem}${concise}
+
+This is DRAFT-ONLY: do not write any file, do not send or submit anything.
+
+End with EXACTLY one final line: VERDICT: {0-5 how ready-to-send this draft is}/5 — {one thing worth double-checking, ≤12 words}`;
+  }
+  if (kind === "email") {
+    return `You are running the career-ops "email" mode, headless, on the user's own machine, for application #${input} — draft ONLY the standard application email variant (not "stuck" or "noshow").
+
+1. Read modes/email.md, modes/_writing.md, cv.md, config/profile.yml, modes/_profile.md (if present), modes/_custom.md (if present), voice-dna.md (if present), and the evaluation report at reports/${input}-*.md for company/role/PDF-status context.
+2. Check data/pdf-index.tsv (or the report's PDF column) — if a tailored CV already exists, name it as the attachment; otherwise say the CV needs generating first (via "Generate tailored CV") or attaching manually.
+3. Draft the subject line, email body, a short attachment checklist, and a contact block, per modes/email.md's structure.${mem}${concise}
+
+This is DRAFT-ONLY: never send, never submit, never click send.
+
+End with EXACTLY one final line: VERDICT: {0-5 how ready-to-send this draft is}/5 — {one thing worth double-checking, ≤12 words}`;
+  }
+  if (kind === "training") {
+    return `You are running the career-ops "training" mode, headless, on the user's own machine, evaluating a course or certification for their job search. Follow modes/training.md's 6-dimension framework EXACTLY (North Star alignment, Recruiter signal, Time and effort, Opportunity cost, Risks, Portfolio deliverable) and give exactly one of its three verdicts (DO / DON'T DO / DO WITH TIMEBOX).
+
+1. Read modes/training.md, cv.md, config/profile.yml, and modes/_profile.md (if present) to ground this in the user's actual target roles, timeline, and existing skills.
+2. If the input below is a URL, use WebFetch to read the course page; otherwise treat it as a course/cert name and use WebSearch to find its syllabus, provider reputation, and typical time commitment.
+3. Score all 6 dimensions with a short justification each, then give ONE clear verdict: a 4-12 week plan with weekly deliverables (DO), a condensed essentials-only plan with a max-week cap (DO WITH TIMEBOX), or a better alternative with justification (DON'T DO).${mem}${concise}
+
+This is evaluation only — do not enroll, purchase, or submit anything.
+
+End with EXACTLY one final line: VERDICT: {0-5 how worth doing this is}/5 — {DO / DON'T DO / DO WITH TIMEBOX, ≤12 words}
+
+Course/certification to evaluate: ${input}`;
+  }
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
 
@@ -122,7 +212,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // precisely so they can't be misread as the row's LOCATION.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
+1. Read ${resolvedLang.evalModeFile} — the market-appropriate evaluation mode resolved from config/profile.yml's language.modes_dir — and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary; if this file uses different block letters/labels than the default modes/oferta.md, keep ITS labels, don't force English ones). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,8 @@ import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { AiActionsMenu } from "@/components/ai-actions-menu";
+import { OutcomeButton } from "@/components/outcome-button";
 
 // Progressive disclosure of the report. The core writes prose blocks
 // "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
@@ -29,6 +31,19 @@ import { DeleteFromTracker } from "@/components/delete-from-tracker";
 
 // Machine artifacts (collapsed because they're for devs, not the mainstream) vs
 // human content C–G (collapsed only for length) — ux's "honest for devs" tier.
+// Evaluation-table rows (STAR+R Story, Match with CV, ...) run 5-7 columns of
+// real prose, not short data cells — squeezed to the prose column's reading
+// width they crush to one word per line. Give the table its own horizontal
+// scroll container instead of forcing the whole page (and its actual prose)
+// wide just to fit a handful of tables.
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="my-4 overflow-x-auto rounded-lg border border-border">
+      <table className="w-full min-w-[900px]">{children}</table>
+    </div>
+  ),
+};
+
 function isMachine(heading: string): boolean {
   return /machine summary|submitted|submit[-\s]?log/i.test(heading);
 }
@@ -68,7 +83,7 @@ export function ReportView({
   const url = field("URL");
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <div className="mx-auto max-w-5xl px-6 py-8">
       <Link
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
@@ -99,6 +114,9 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          <span className="mx-0.5 h-5 w-px bg-border" />
+          <AiActionsMenu n={id} company={app?.company ?? meta?.title ?? id} />
+          {app && <OutcomeButton n={id} />}
         </div>
 
         {app && canDelete && (
@@ -134,7 +152,7 @@ export function ReportView({
             if (sections.length === 0) {
               return (
                 <article className="report-prose mt-8">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{meta?.body ?? report}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{meta?.body ?? report}</ReactMarkdown>
                 </article>
               );
             }
@@ -151,7 +169,7 @@ export function ReportView({
               <div className="mt-8">
                 {intro && (
                   <article className="report-prose">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{intro}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{intro}</ReactMarkdown>
                   </article>
                 )}
 
@@ -159,7 +177,7 @@ export function ReportView({
                   <div className="rounded-2xl border border-brand/25 bg-brand-soft/50 px-5 py-4">
                     <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Verdict</p>
                     <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{verdict.content}</ReactMarkdown>
                     </article>
                   </div>
                 )}
@@ -169,7 +187,7 @@ export function ReportView({
                   if (expanded) {
                     return (
                       <article key={i} className="report-prose mt-6">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{`## ${cleanHeading(s.heading)}\n\n${s.content}`}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{`## ${cleanHeading(s.heading)}\n\n${s.content}`}</ReactMarkdown>
                       </article>
                     );
                   }
@@ -181,7 +199,7 @@ export function ReportView({
                         <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
                       </summary>
                       <div className="report-prose border-t border-border px-4 py-3">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{s.content}</ReactMarkdown>
                       </div>
                     </details>
                   );
@@ -201,7 +219,7 @@ export function ReportView({
                           <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
                         </summary>
                         <div className="report-prose border-t border-border/60 px-4 py-3 opacity-80">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{s.content}</ReactMarkdown>
                         </div>
                       </details>
                     ))}

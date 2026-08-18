@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
@@ -346,4 +347,54 @@ export function rememberFact(fact: string): "ok" | "deduped" | "error" {
   } catch {
     return "error";
   }
+}
+
+// AGENTS.md "Language Modes" table (SSOT) — each localized modes/ subdir has
+// its own evaluation-mode filename (angebot.md, fursah.md, ...), not oferta.md.
+// A headless web run gets its market vocabulary ONLY if this route resolves
+// the right file itself: language.modes_dir is a convention the CLI's own
+// AGENTS.md read-through picks up interactively, but the web's spawned agent
+// is handed a fixed one-shot prompt with no chance to "notice" the setting on
+// its own — so the caller of buildPrompt must inject the resolved path
+// explicitly (run-prompts.mjs itself stays a plain, dependency-free module).
+const MARKET_EVAL_MODE: Record<string, string> = {
+  "modes/de": "angebot.md",
+  "modes/fr": "offre.md",
+  "modes/ar": "fursah.md",
+  "modes/ja": "kyujin.md",
+  "modes/tr": "is-ilani.md",
+  "modes/hi": "naukri.md",
+};
+
+export type LanguageConfig = {
+  /** language.output — human-facing prose language, e.g. "en". Default "en". */
+  output: string;
+  /** language.modes_dir normalized WITHOUT trailing slash, e.g. "modes/de". Default "modes". */
+  modesDir: string;
+  /** The market-appropriate evaluation-mode file to read, relative to the repo root. */
+  evalModeFile: string;
+};
+
+/** Reads config/profile.yml's `language` block (never throws — a missing/malformed
+ *  profile just falls back to English/global defaults, same as the CLI would). */
+export function readLanguageConfig(): LanguageConfig {
+  let modesDirRaw = "modes";
+  let output = "en";
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const language = (parsed as Record<string, unknown>).language;
+      if (language && typeof language === "object" && !Array.isArray(language)) {
+        const l = language as Record<string, unknown>;
+        if (typeof l.modes_dir === "string" && l.modes_dir.trim()) modesDirRaw = l.modes_dir.trim();
+        if (typeof l.output === "string" && l.output.trim()) output = l.output.trim();
+      }
+    }
+  } catch {
+    /* no profile yet, or malformed — use defaults */
+  }
+  const modesDir = modesDirRaw.replace(/\/+$/, "");
+  const evalFile = MARKET_EVAL_MODE[modesDir];
+  const evalModeFile = evalFile ? `${modesDir}/${evalFile}` : "modes/oferta.md";
+  return { output, modesDir, evalModeFile };
 }
