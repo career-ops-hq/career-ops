@@ -212,6 +212,17 @@ export function lastRunFailure() {
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
  *
+ * Over-long streams keep BOTH ENDS rather than the head. A failing script's
+ * diagnostic line can be at either end: an early case that blew up, or — for
+ * the suites here, which print a tick per assertion — the `Results:` summary
+ * and the newest cases at the very bottom. Keeping only the head means the
+ * later a case was added, the more certain it is to be truncated away, which
+ * is exactly backwards for something read only when a run goes red.
+ *
+ * That is not hypothetical: `agent-inbox-tests.mjs` grew past this cap, and a
+ * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
+ * verdict — the assertion added specifically to attribute that failure (#3035).
+ *
  * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
  * @returns {string}
  */
@@ -219,8 +230,13 @@ export function formatRunFailure(maxChars = 2000) {
   if (!lastFailure) return '';
   const clip = (s) => {
     const t = String(s ?? '').trim();
-    if (!t) return '';
-    return t.length > maxChars ? `${t.slice(0, maxChars)}\n    ... (${t.length - maxChars} more chars)` : t;
+    if (!t || t.length <= maxChars) return t;
+    // Weighted to the tail, which is where a suite that prints per-assertion
+    // puts its summary, but never zero head — an early stack trace is the
+    // other common shape and dropping it entirely would just invert the bug.
+    const head = Math.floor(maxChars * 0.35);
+    const tail = maxChars - head;
+    return `${t.slice(0, head)}\n    ... (${t.length - maxChars} more chars elided)\n${t.slice(-tail)}`;
   };
   const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
   const out = clip(lastFailure.stdout);

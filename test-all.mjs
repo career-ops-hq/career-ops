@@ -16274,6 +16274,64 @@ try {
   fail(`rejection-latency wiring check: ${e.message}`);
 }
 
+// ---------------------------------------------------------------------------
+console.log('\n72. formatRunFailure keeps the END of an over-long stream (#3035)');
+
+try {
+  // A red run is the only time this output is read, so what it keeps decides
+  // whether a CI failure is actionable. It kept the head. For the suites here,
+  // which print a tick per assertion, the head is the setup that PASSED and the
+  // tail carries the `Results:` line and the newest cases — so the later a case
+  // was added, the more certain it was to be cut. windows-latest cut
+  // agent-inbox-tests.mjs mid-word, one assertion short of the §8 verdict added
+  // specifically to attribute that failure.
+  //
+  // Drive it through a real failing run() rather than by reaching into the
+  // module's private lastFailure, so this covers the path CI actually takes.
+  const BIG = 8000;
+  const marker = 'TAIL-MARKER-THE-ANSWER-IS-HERE';
+  const okOut = run(NODE, ['-e', `
+    process.stdout.write('HEAD-MARKER\\n' + 'x'.repeat(${BIG}) + '\\n${marker}\\n');
+    process.exit(1);
+  `]);
+
+  if (okOut !== null) {
+    fail('formatRunFailure fixture: the child was expected to exit non-zero');
+  } else {
+    const rendered = formatRunFailure();
+
+    if (rendered.includes(marker)) {
+      pass('formatRunFailure keeps the tail of an over-long stdout (the failure summary)');
+    } else {
+      fail('formatRunFailure dropped the tail — a red run loses its newest assertions and its Results line');
+    }
+
+    // Never zero head: an early stack trace is the other common shape, and
+    // keeping only the tail would just invert the bug rather than fix it.
+    if (rendered.includes('HEAD-MARKER')) {
+      pass('formatRunFailure still keeps the head (an early stack trace survives too)');
+    } else {
+      fail('formatRunFailure dropped the head — tail-only inverts the original defect');
+    }
+
+    if (/\.\.\. \(\d+ more chars elided\)/.test(rendered)) {
+      pass('formatRunFailure marks the elision with the dropped-character count');
+    } else {
+      fail('formatRunFailure elides silently — a reader cannot tell output is missing');
+    }
+
+    // The cap is the point; both ends together must still respect it.
+    const shown = rendered.replace(/\n\s*\.\.\. \(\d+ more chars elided\)\n/, '');
+    if (shown.length < BIG) {
+      pass('formatRunFailure still caps the stream rather than printing it whole');
+    } else {
+      fail(`formatRunFailure no longer caps output (${shown.length} chars of a ${BIG}-char stream)`);
+    }
+  }
+} catch (e) {
+  fail(`formatRunFailure clipping check: ${e.message}`);
+}
+
 await runDiscovered();
 
 finish();
