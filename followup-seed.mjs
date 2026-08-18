@@ -59,6 +59,12 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync,
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash, randomUUID } from 'crypto';
+// Third copy of the directory-lock protocol in this repo, and the one #2984
+// missed: that fix declared "one definition, no sibling drift" while patching
+// pipeline-lock.mjs and tracker-utils.mjs, and this file was carrying all three
+// faces of #2777 the whole time. The classifiers come from pipeline-lock now,
+// so the next Windows-contention finding lands in one place instead of three.
+import { isMkdirContention, isRmContention, rmLockArtifactSync } from './pipeline-lock.mjs';
 import { tmpdir } from 'os';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
@@ -328,8 +334,12 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true;
+  } catch (err) {
+    // Only a genuinely vanished directory means "nothing to recover". Any other
+    // stat failure — a Windows EPERM/EBUSY while the directory is mid-flight —
+    // is "could not look", and answering "recoverable" to that hands the caller
+    // an rmSync of a LIVE lock created microseconds ago (#2777, third face).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -369,19 +379,33 @@ async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
           released = true;
           const owner = readLockOwner(lockDir);
           if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
+            // Best-effort: ownership is verified, so a contended rm (Windows
+            // EPERM/EBUSY while another process stats it) must not kill a caller
+            // whose work already succeeded. The orphan ages out via lockCanRecover.
+            rmLockArtifactSync(lockDir);
           }
         },
       };
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
+      // Not just EEXIST: Windows reports a directory that is mid-create or
+      // mid-remove by another process as EPERM/EACCES. That is contention, not
+      // failure — treating it as fatal kills a concurrent writer and loses its
+      // write (#2777, measured on windows-latest).
+      if (!isMkdirContention(err)) throw err;
 
       let hasRecoverGuard = false;
       try {
         mkdirSync(recoverGuardDir);
         hasRecoverGuard = true;
       } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
+        if (!isMkdirContention(guardErr)) throw guardErr;
+        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
+        // the guard is mid-flight right now, and reasoning about the age of a
+        // directory we cannot stat reliably would evict a live guard.
+        if (guardErr.code !== 'EEXIST') {
+          await sleep(retryMs);
+          continue;
+        }
         // A process killed between creating the guard and its cleanup leaves
         // the guard behind forever, permanently disabling stale-lock recovery
         // for every future writer. The guard normally lives for milliseconds,
@@ -391,18 +415,19 @@ async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
         // instead let two writers recover the same lock at once, which is
         // exactly what the guard exists to prevent.
         if (lockCanRecover(recoverGuardDir, staleMs)) {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
           if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            continue;
+            if (rmLockArtifactSync(lockDir)) continue;
+            // rm hit contention: another process is touching the stale lock at
+            // this instant — back off instead of treating the collision as fatal.
           }
         } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
