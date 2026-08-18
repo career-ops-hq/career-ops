@@ -5261,18 +5261,34 @@ try {
 
   // Token-prefix, not substring: "Apex" must not match "Apexon", but a trailing
   // legal or descriptive word is the same company under a longer name.
-  if (
-    boardIdentityMatches('Stripe Inc', 'Stripe') &&
-    boardIdentityMatches('Nimbus Data', 'Nimbus') &&
-    boardIdentityMatches('Acme', 'Acme Corp') &&
-    !boardIdentityMatches('Nimbus Data', 'Nimbus AI') &&
-    !boardIdentityMatches('Apex', 'Apexon') &&
-    !boardIdentityMatches('Nimbus Data', '') &&
-    !boardIdentityMatches('', 'Nimbus')
-  ) {
-    pass('verify-portals boardIdentityMatches compares whole tokens, not substrings');
+  // Canonical equality, not prefix. A shorter tracked name is NOT evidence that a
+  // longer board name is the same company: Mercury and Mercury Systems, Scale and
+  // Scale AI, Northrop and Northrop Grumman are all real, distinct employers. Only
+  // tokens that carry no identity (leading article, trailing legal designator) may
+  // be dropped before comparing.
+  const identityCases = [
+    ['Stripe Inc', 'Stripe', true],           // trailing legal designator
+    ['Acme', 'Acme Corp', true],              // designator on the other side
+    ['Acme S.A.', 'Acme', true],              // punctuated designator
+    ['The Trade Desk', 'Trade Desk', true],   // leading article
+    ['The Walt Disney Company', 'Walt Disney', true],
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced ampersand reads as a word
+    ['AT&T', 'ATT', true],                    // unspaced ampersand is punctuation
+    ['Café Corp', 'Cafe', true],              // accents fold
+    ['Mercury', 'Mercury Systems', false],    // real, different employer
+    ['Scale', 'Scale AI', false],
+    ['Northrop', 'Northrop Grumman', false],
+    ['Nimbus Data', 'Nimbus', false],         // prefix only: send it to --add
+    ['Nimbus Data', 'Nimbus AI', false],
+    ['Apex', 'Apexon', false],                // substring, not a token
+    ['Nimbus Data', '', false],
+    ['', 'Nimbus', false],
+  ];
+  const identityBad = identityCases.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (identityBad.length === 0) {
+    pass('verify-portals boardIdentityMatches requires canonical equality, not a token prefix');
   } else {
-    fail('verify-portals boardIdentityMatches mismatched on the token-prefix contract');
+    fail(`verify-portals boardIdentityMatches wrong on: ${JSON.stringify(identityBad)}`);
   }
 
   if (

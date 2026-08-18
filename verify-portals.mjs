@@ -262,55 +262,100 @@ export async function probeSlug(
   }
 }
 
+// Tokens that carry no identity. A leading article and a trailing legal designator
+// can differ between how a company writes its name and how its ATS board is titled,
+// so they are dropped before comparing. Nothing else is: 'Systems', 'AI', 'Airlines'
+// and 'Grumman' are exactly what distinguishes Mercury Systems from Mercury.
+const NAME_ARTICLES = new Set(['the']);
+const NAME_DESIGNATORS = new Set([
+  'inc', 'incorporated', 'llc', 'llp', 'lp', 'ltd', 'limited', 'plc', 'corp',
+  'corporation', 'co', 'company', 'gmbh', 'ag', 'kg', 'sa', 'sas', 'sarl', 'srl',
+  'spa', 'bv', 'nv', 'ab', 'as', 'oy', 'aps', 'pty', 'pte', 'kk', 'kft',
+]);
+
+/**
+ * Reduce a company or board name to the tokens that actually identify it.
+ *
+ * Accents fold (Café -> cafe). A spaced ampersand is a word ('Hims & Hers' ->
+ * hims and hers); an unspaced one is punctuation ('AT&T' -> att). Remaining
+ * punctuation is dropped, then a leading article and any trailing legal
+ * designators are removed.
+ *
+ * @param {string} name
+ * @returns {string[]} Canonical identifying tokens.
+ */
+function canonicalNameTokens(name) {
+  const words = String(name || '')
+    // NFKD splits an accented character into base + combining mark, and the
+    // punctuation strip below then drops the mark, so 'Café' folds to 'cafe'.
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/\s+&\s+/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+  let start = 0;
+  if (words.length > 1 && NAME_ARTICLES.has(words[0])) start = 1;
+  let end = words.length;
+  while (end - start > 1 && NAME_DESIGNATORS.has(words[end - 1])) end -= 1;
+  return words.slice(start, end);
+}
+
 /**
  * Does a discovered board's owner name refer to the company we are repairing?
  *
- * Token-prefix, not substring. A trailing word is the same company under a
- * longer name ('Stripe' vs 'Stripe Inc', 'Nimbus Data' vs 'Nimbus'), but a
- * DIFFERENT word in the same position is a different company ('Nimbus Data' vs
- * 'Nimbus AI'). Substring matching would accept 'Apex' for 'Apexon', which is
- * the same class of error this check exists to stop.
+ * Canonical equality, deliberately not a prefix. A shorter tracked name is not
+ * evidence that a longer board name is the same company: Mercury and Mercury
+ * Systems, Scale and Scale AI, Northrop and Northrop Grumman are all real and
+ * distinct. A prefix-only match ('Nimbus Data' against a board named 'Nimbus')
+ * may well be the same company, but this path writes portals.yml unreviewed, so
+ * it goes to `--add` where a human can judge it rather than being adopted here.
  *
  * @param {string} companyName - The tracked company being repaired.
  * @param {string} boardName - The name the ATS reports for the probed board.
- * @returns {boolean} True when one name's tokens prefix the other's.
+ * @returns {boolean} True only when both canonicalize to the same tokens.
  */
 export function boardIdentityMatches(companyName, boardName) {
-  const tokens = (s) =>
-    String(s || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(' ')
-      .filter(Boolean);
-  const a = tokens(companyName);
-  const b = tokens(boardName);
+  const a = canonicalNameTokens(companyName);
+  const b = canonicalNameTokens(boardName);
   if (!a.length || !b.length) return false;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  return short.every((tok, i) => tok === long[i]);
+  return a.length === b.length && a.every((tok, i) => tok === b[i]);
 }
 
 /**
  * Confirm a candidate board belongs to this company before it can be written.
  *
- * Fails CLOSED for any ATS that publishes an owner: if we cannot read the name,
- * we do not auto-adopt. A missed suggestion costs an operator one `--add`, where
- * they see the slug beside the company name; a wrong one is written into
- * portals.yml unreviewed and relabels another employer's postings in scan.mjs.
- * ATSes that publish no owner (lever, ashby) keep their existing behavior.
+ * Fails CLOSED for any ATS that publishes an owner, and does not distinguish
+ * "owned by someone else" from "could not ask": both mean unconfirmed, and an
+ * unconfirmed board must not be written into portals.yml unreviewed. A missed
+ * suggestion costs an operator one `--add`, where the slug is shown beside the
+ * company name; a wrong one relabels another employer's postings in scan.mjs.
+ * The reason is recorded so a transient outage is not read as a mismatch.
+ *
+ * ATSes that publish no owner (lever, ashby) keep their existing behavior, which
+ * is tracked separately rather than implied to be safe here.
  */
-async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false }) {
+async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false, cache }) {
   const spec = ATS[ats];
-  if (!spec?.ownerUrl) return true;
-  let boardName = null;
+  if (!spec?.ownerUrl) return { ok: true, reason: 'no-owner-endpoint' };
+  const key = `${ats}|${eu ? 'eu' : 'base'}|${slug}`;
+  if (cache?.has(key)) return cache.get(key);
+  let out;
   try {
-    boardName = spec.ownerName(await fetchJson(spec.ownerUrl(slug, { eu })));
-  } catch {
-    return false;
+    const boardName = spec.ownerName(await fetchJson(spec.ownerUrl(slug, { eu })));
+    if (!boardName) out = { ok: false, reason: 'owner-unnamed' };
+    else if (boardIdentityMatches(companyName, boardName)) out = { ok: true, reason: 'owner-match', boardName };
+    else out = { ok: false, reason: 'owner-mismatch', boardName };
+  } catch (err) {
+    // A 404 here means the board root is gone; anything else (429, 5xx, network)
+    // means we could not ask. Neither confirms identity, but they are different
+    // facts and the summary should not report an outage as somebody else's board.
+    out = { ok: false, reason: classifyFetchError(err) === 'slug_gone' ? 'owner-absent' : 'owner-unreachable' };
   }
-  if (!boardName) return false;
-  return boardIdentityMatches(companyName, boardName);
+  cache?.set(key, out);
+  return out;
 }
 
 /**
@@ -325,6 +370,9 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false })
  */
 async function discoverAlternates(name, { fetchJson }) {
   let bestEmpty = null;
+  // One owner lookup per (ats, eu, slug) per company, so the added identity check
+  // cannot multiply requests when candidates repeat across the probe order.
+  const cache = new Map();
   for (const slug of deriveSlugCandidates(name, { firstWordSuffixes: false })) {
     for (const ats of Object.keys(ATS)) {
       // Lever no longer has a separate 'lever-eu' registry key (unified into a
@@ -334,7 +382,8 @@ async function discoverAlternates(name, { fetchJson }) {
       for (const eu of euVariants) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status !== 'live' && r.status !== 'empty') continue;
-        if (!(await ownerConfirmed(ats, slug, name, { fetchJson, eu }))) continue;
+        const owner = await ownerConfirmed(ats, slug, name, { fetchJson, eu, cache });
+        if (!owner.ok) continue;
         if (r.status === 'live') return r;
         if (!bestEmpty) bestEmpty = r;
       }
