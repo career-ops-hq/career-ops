@@ -509,6 +509,13 @@
       Meiryo, 'MS PGothic', sans-serif;
   }
 
+  /* === Turkish (tr) — LTR, no font override === */
+  /* Turkish uses standard Latin characters with extras (ç ğ ı İ ö ş ü).
+     The default Liberation Sans / Helvetica stack covers these glyphs.
+     No direction or font-family override needed (LTR language).
+     Block kept intentionally empty — its presence signals Turkish support. */
+  html[lang="tr"] { /* Turkish localization placeholder */ }
+
   /* === Simplified Chinese typography ===
      Keep Latin-capable system fonts first for stable ATS extraction, then use
      platform-native and open-source Simplified Chinese faces for Han glyphs.

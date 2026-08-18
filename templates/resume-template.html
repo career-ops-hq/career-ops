@@ -474,6 +474,13 @@
       Meiryo, 'MS PGothic', sans-serif;
   }
 
+  /* === Turkish (tr) — LTR, no font override === */
+  /* Turkish uses standard Latin characters with extras (ç ğ ı İ ö ş ü).
+     The default Space Grotesk / DM Sans stacks cover these glyphs.
+     No direction or font-family override needed (LTR language).
+     Block kept intentionally empty — its presence signals Turkish support. */
+  html[lang="tr"] { /* Turkish localization placeholder */ }
+
   /* === Simplified Chinese typography === */
   html[lang="zh-CN"] body,
   html[lang="zh"] body,
