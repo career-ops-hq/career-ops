@@ -932,6 +932,102 @@ try {
     applyControls: ['Apply for this job'],
   });
 
+  // --- iframe-embedded postings -------------------------------------------
+  // Some ATS (iCIMS) render the posting inside a same-origin iframe and leave
+  // the top-level document as a ~13-character shell, which used to reach
+  // insufficient_content and return `expired` for a live job.
+  //
+  // `fillAfter` models the part that made the first attempt at this fix a
+  // no-op: the frame ATTACHES immediately but POPULATES late (measured 0 chars
+  // at 2000ms, 3887 at 4000ms), so a reader that does not wait sees an empty
+  // document and nothing changes.
+  const framedPage = ({ status = 200, finalUrl, shellText = 'Careers', frames = [] }) => {
+    const page = {};
+    const main = { __main: true };
+    const built = frames.map((spec) => {
+      let textReads = 0;
+      return {
+        url: () => spec.url,
+        async evaluate(fn) {
+          // Both extractors mention innerText, so discriminate on the selector
+          // call that only the apply-control extractor makes.
+          const isControls = String(fn).includes('querySelectorAll');
+          const filled = textReads >= (spec.fillAfter ?? 0);
+          if (!isControls) textReads += 1;
+          if (isControls) return filled ? (spec.controls ?? []) : [];
+          return filled ? spec.text : '';
+        },
+      };
+    });
+    let evalCall = 0;
+    Object.assign(page, {
+      async goto() { return { status: () => status }; },
+      async waitForTimeout() {},
+      url() { return finalUrl; },
+      frames() { return [main, ...built]; },
+      mainFrame() { return main; },
+      async evaluate() { evalCall += 1; return evalCall === 1 ? shellText : []; },
+    });
+    return page;
+  };
+
+  const SHELL = 'https://careers-example.icims.com/jobs/1/role/job';
+  const framedLive = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Senior Analyst. '.repeat(30), controls: ['Apply for this job online'], fillAfter: 2 }],
+  }), SHELL);
+  if (framedLive.result === 'active' && framedLive.code === 'apply_control_visible') {
+    pass('liveness reads a same-origin posting frame that populates late');
+  } else {
+    fail(`late-filling posting frame not read: ${JSON.stringify(framedLive)}`);
+  }
+
+  const crossOrigin = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: 'https://ads.example.net/widget', text: 'Sponsored. '.repeat(30), controls: ['Apply now'] }],
+  }), SHELL);
+  if (crossOrigin.result === 'expired' && crossOrigin.code === 'insufficient_content') {
+    pass('a cross-origin frame cannot make an empty shell look active');
+  } else {
+    fail(`cross-origin frame leaked into the verdict: ${JSON.stringify(crossOrigin)}`);
+  }
+
+  const goneWithFrame = await checkUrlLiveness(framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Job not found. '.repeat(30), controls: ['Apply for this job online'] }],
+  }), SHELL);
+  if (goneWithFrame.result === 'expired' && goneWithFrame.code === 'http_gone') {
+    pass('HTTP 410 still wins over a frame carrying an apply control');
+  } else {
+    fail(`410 precedence lost to frame aggregation: ${JSON.stringify(goneWithFrame)}`);
+  }
+
+  // A 410 must not pay the frame poll: the status already decided it, and a
+  // dead posting whose error page renders into an iframe would otherwise wait
+  // for that error page to fill before saying what it knew at byte one.
+  // Count only the 500ms poll waits; the 2000ms hydration wait always happens.
+  let pollWaits = 0;
+  const gonePage = framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: '', controls: [], fillAfter: 999 }],
+  });
+  gonePage.waitForTimeout = async (ms) => { if (ms === 500) pollWaits += 1; };
+  const goneFast = await checkUrlLiveness(gonePage, SHELL);
+  if (goneFast.result === 'expired' && goneFast.code === 'http_gone' && pollWaits === 0) {
+    pass('HTTP 410 short-circuits before the frame poll (no wait spent)');
+  } else {
+    fail(`410 did not short-circuit: ${JSON.stringify(goneFast)}, poll waits=${pollWaits}`);
+  }
+
+  const legacyDouble = await checkUrlLiveness(livePage(), URL);
+  if (legacyDouble.result === 'active') {
+    pass('a page object without frames()/mainFrame() still returns a top-level verdict');
+  } else {
+    fail(`frame aggregation broke a frameless page object: ${JSON.stringify(legacyDouble)}`);
+  }
+
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
       isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
       !isChallengeResult({ result: 'expired', code: 'http_gone' }) &&
