@@ -149,6 +149,12 @@ export function extractFriction(row) {
   return { hasFriction: true, reason: (match[1] || '').trim() };
 }
 
+// A cell carrying no letter and no digit is a PLACEHOLDER, not a value: `?` for
+// an undisclosed employer (#1596), and the tracker's `—`/`-` no-data sentinels.
+function isPlaceholder(value) {
+  return !/[\p{L}\p{N}]/u.test(value);
+}
+
 // --- Core aggregation ---
 //
 // Groups rows by company (case-insensitive, trimmed), counts total
@@ -169,11 +175,32 @@ export function aggregateProcessQuality(rows, minThreshold = 1) {
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const company = companyKey(row);
-    if (!company) continue;
 
-    const dedupeKey = company.toLowerCase();
+    // `?` is the documented marker for an undisclosed end employer (#1596), not
+    // a company name. Grouping on it merged every unrelated employer into ONE
+    // row and reported a friction rate averaged across all of them — the number
+    // a user acts on ("this company wastes my time") computed over companies
+    // they never dealt with. merge-tracker already refuses that merge; this
+    // aggregate has to refuse it too.
+    //
+    // The channel is what distinguishes those rows, so it becomes the bucket.
+    // A row naming neither employer nor channel supports no per-company claim
+    // at all and is dropped rather than given one.
+    let label = company;
+    if (isPlaceholder(company)) {
+      const via = findColumn(row, 'via').trim();
+      if (!via || isPlaceholder(via)) continue;
+      // The prefix is ALWAYS `?`, never the cell's own spelling. isPlaceholder
+      // accepts `?`, `—`, `-` and an empty cell, and every one of them means the
+      // same thing — but keeping them verbatim keys `— (via Hays)` apart from
+      // `? (via Hays)`, splitting one channel's totals. That is this function's
+      // own bug in miniature, so it gets the same answer: normalize, then group.
+      label = `? (via ${via})`;
+    }
+
+    const dedupeKey = label.toLowerCase();
     if (!byCompany.has(dedupeKey)) {
-      byCompany.set(dedupeKey, { company, total: 0, frictionCount: 0, reasons: [] });
+      byCompany.set(dedupeKey, { company: label, total: 0, frictionCount: 0, reasons: [] });
     }
     const entry = byCompany.get(dedupeKey);
     entry.total += 1;

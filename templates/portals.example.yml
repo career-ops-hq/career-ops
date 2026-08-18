@@ -1939,6 +1939,37 @@ tracked_companies:
     notes: "Istanbul. E-commerce marketplace (Doğuş Group)."
     enabled: false
 
+  # -- Africa (employers on already-supported ATS) --
+  #
+  # The scanner ships 74 providers and a regional section for the UK, the
+  # Nordics, Iberia, Türkiye and Indonesia — and none for Africa. That gap is
+  # not a missing provider: these employers already publish through Greenhouse
+  # and Ashby, whose public zero-auth APIs the scanner has always read.
+  #
+  # Every entry below was verified live on 2026-08-17: the API answered 200 and
+  # the posting locations were checked, because an African-founded company is
+  # not the same thing as a company hiring in Africa. The note on each says what
+  # it actually posts, so nobody enables one expecting a market it does not
+  # serve. Left `enabled: false` like every other example.
+
+  - name: Moniepoint
+    careers_url: https://job-boards.greenhouse.io/moniepoint
+    api: https://boards-api.greenhouse.io/v1/boards/moniepoint/jobs
+    notes: "Lagos. Fintech (business banking, payments). Verified 2026-08-17: 120 postings, the largest group in Lagos and Remote-Nigeria; also hires Remote in Bangalore, Poland and Spain."
+    enabled: false
+
+  - name: Jumia
+    careers_url: https://job-boards.greenhouse.io/jumia
+    api: https://boards-api.greenhouse.io/v1/boards/jumia/jobs
+    notes: "Pan-African e-commerce. Verified 2026-08-17: 25 postings across Nigeria, Ghana, Uganda, Egypt and Kenya — the widest continental spread of the three."
+    enabled: false
+
+  - name: Andela
+    careers_url: https://jobs.ashbyhq.com/andela
+    api: https://api.ashbyhq.com/posting-api/job-board/andela
+    notes: "African-founded talent marketplace. Verified 2026-08-17: 19 postings, but mostly North America and the UK with a single Kenya role — enable it for the company, not for African coverage."
+    enabled: false
+
 # ── Job Boards ────────────────────────────────────────────────────────
 # Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),
 # job boards return offers from many companies in a single API call.

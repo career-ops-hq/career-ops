@@ -103,6 +103,9 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
 | `upskill.mjs` | Weighted skill-gap map from tracked reports; known skills from `cv.md`/`config/profile.yml` excluded (JSON) |
 | `stats.mjs` | Lifetime pipeline stats: tracker roll-up, canonical `ever*` funnel, scan totals, portal coverage, follow-up compliance, scan-run trends (JSON or `--summary`) |
+| `data/status-log.tsv` | Append-only status transition ledger, sibling of the tracker file: `{tracker#}\t{date}\t{from}\t{to}\t{source}\t{note}`. Appended by `set-status.mjs` on every real status change; the tracker stays the source of truth for *state*, the ledger records *when*. An unknown from/to state is the sentinel `-`, and the source column is a closed set whose members are `VALID_SOURCES` in `funnel-velocity.mjs` — see `DATA_CONTRACT.md` before writing to it from anywhere else |
+| `funnel-velocity.mjs` | Funnel calibration vs market benchmarks + stage velocity, folded from `data/status-log.tsv` (JSON or `--summary`) |
+| `company-history.mjs` | Read-only per-company evidence card joining the tracker, follow-ups, scan history and the status-log (JSON or `--summary`) |
 | `followup-cadence.mjs` | Follow-up cadence calculator (JSON) |
 | `followup-seed.mjs` | Seeds `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied (JSON) |
 | `detect-reposts.mjs` | Flags roles re-listed 2+ times in 90 days from `scan-history.tsv` (JSON or `--summary`) |
@@ -277,7 +280,7 @@ Two separate axes:
 | Pastes JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
 | Asks to evaluate offer | `oferta` |
 | Asks to compare offers | `ofertas` |
-| Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a ≤300-char message tailored to the contact type (recruiter / hiring manager / peer / interviewer) |
+| Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a message tailored to the contact type (recruiter / hiring manager / peer / interviewer), within LinkedIn's connection-request character limit for the account's tier (200 free, 300 Premium/Sales Navigator) |
 | Wants a formal application email | `email` — draft-only subject, body, attachment checklist, and contact block from a report or JD; never sends, submits, or clicks anything |
 | Asks for company research | `deep` — structured 6-axis research prompt (AI strategy, recent moves, engineering culture, likely challenges, competitors, candidate's angle) |
 | Preps for interview at specific company | `interview-prep` |

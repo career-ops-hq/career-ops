@@ -66,6 +66,27 @@
  * happened earlier ("they replied Tuesday"). The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
+ *
+ * Two rules the reader enforces that this writer never has to think about,
+ * because it always has a real prior status and always writes its own source.
+ * Any other producer does have to, so they are stated here:
+ *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
+ *     funnel-velocity.mjs reads the two columns differently: a from of "-"
+ *     parses to null, meaning no prior state, while a to of "-" is preserved
+ *     as the literal "-", meaning an unknown target. Any other value goes
+ *     through resolveCanonicalState, so an empty cell is rejected as
+ *     `unknown from-state ""` or `unknown to-state ""` for its own column,
+ *     and the row is dropped.
+ *   - The source column is a closed set, and VALID_SOURCES in
+ *     funnel-velocity.mjs is the authority on its members. Deliberately not
+ *     enumerated here: a copy of that list in prose is wrong the first time a
+ *     writer is added, and it would be wrong in three files at once.
+ *     A value outside the set parses but is excluded from day-math. The row
+ *     is not lost and the exclusion is not silent: it is kept as an
+ *     observation, recorded in unknownSources, and printed with its line
+ *     number under dataQuality. Namespacing a source (say "backfill:notes")
+ *     therefore keeps the row out of the day-math figures; put that detail in
+ *     the note column.
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';

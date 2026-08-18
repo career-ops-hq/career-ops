@@ -349,7 +349,19 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
       }
       // Best-effort: a contended rm here must not mask ownerErr, and an
       // orphaned owner-less lock ages out via lockCanRecover anyway.
-      rmLockArtifactSync(lockDir);
+      //
+      // The try/catch is what makes that sentence true for EVERY failure, not
+      // just a contended one. rmLockArtifactSync deliberately rethrows the
+      // non-contention class (EROFS/ENOSPC), so without this an unwritable
+      // filesystem would propagate from the CLEANUP and the `throw ownerErr`
+      // below would never run — the caller would be told the lock could not be
+      // removed, and never learn why the owner stamp could not be written.
+      // A leftover lock ages out; a swallowed cause is recovered by nothing.
+      try {
+        rmLockArtifactSync(lockDir);
+      } catch {
+        /* cleanup must never outrank the reason we are here */
+      }
       throw ownerErr;
     }
 
