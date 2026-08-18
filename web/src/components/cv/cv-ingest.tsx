@@ -100,6 +100,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     // (PDF/DOCX still need a CLI below.)
     const id = cliId();
     if (!id) {
+      setSeed(null);
       setMd(trimmed);
       setPhase("review");
       return;
@@ -118,6 +119,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             setPhase("error");
             return;
           }
+          setSeed(null);
           setMd(t.trim());
           setPhase("review");
         })

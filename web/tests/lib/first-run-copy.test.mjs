@@ -16,4 +16,5 @@ test("pasted CV text can start without a CLI", () => {
   const src = readFileSync(join(root, "src/components/cv/cv-ingest.tsx"), "utf8");
   assert.match(src, /Pasted text is already readable/);
   assert.match(src, /setPhase\("review"\)/);
+  assert.match(src, /setSeed\(null\)/);
 });
