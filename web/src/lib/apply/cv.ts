@@ -3,6 +3,22 @@ import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { pdfPathForReport, reportNumberFromCell } from "./cv-selection.mjs";
 
+function containedRealpath(file: string, root: string): boolean {
+  try {
+    return fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep);
+  } catch {
+    return false;
+  }
+}
+
+function isRegularContainedFile(file: string, root: string): boolean {
+  try {
+    return fs.statSync(file).isFile() && containedRealpath(file, root);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Locate the tailored CV PDF for an application. When the tracker application
  * number is known, the report -> PDF manifest is authoritative, so an older
@@ -24,8 +40,8 @@ export function resolveTailoredCv(company?: string, applicationNumber?: string):
     const relativePdf = pdfPathForReport(indexText, reportNumber);
     if (!relativePdf) return null;
     const file = path.resolve(root, relativePdf);
-    const outputDir = path.resolve(root, "output") + path.sep;
-    if (!file.startsWith(outputDir) || !fs.existsSync(file)) return null;
+    const outputDir = path.resolve(root, "output");
+    if (!file.startsWith(outputDir + path.sep) || !isRegularContainedFile(file, outputDir)) return null;
     return file;
   }
 
@@ -44,7 +60,8 @@ export function resolveTailoredCv(company?: string, applicationNumber?: string):
   const first = slug.split("-")[0];
   const matches = files.filter((f) => {
     const l = f.toLowerCase();
-    return l.includes(slug) || (first.length > 2 && l.includes(first));
+    if (!(l.includes(slug) || (first.length > 2 && l.includes(first)))) return false;
+    return isRegularContainedFile(path.join(dir, f), dir);
   });
   if (!matches.length) return null;
   matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
