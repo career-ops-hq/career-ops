@@ -18,7 +18,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { extractArrayFromSource } from './update-system.mjs';
+import { extractArrayFromSource, localUserPaths, LOCAL_PATHS_FILE } from './update-system.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const sourcePath = join(ROOT, 'update-system.mjs');
@@ -37,7 +37,21 @@ if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
   console.error('FAIL: SYSTEM_PATHS or USER_PATHS not found in update-system.mjs');
   process.exit(1);
 }
-const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS];
+// Paths a fork declared as its own in the gitignored local file (#2421).
+// Without these, a tracked fork-local file (a nightly runner, an .mcp.json)
+// is an orphan here and fails the whole suite, and the only fix is to edit
+// USER_PATHS inside update-system.mjs — the file `apply` overwrites and git
+// re-merges on every sync. A malformed declaration fails loudly: this guard
+// exists to be trustworthy, so it must never fall back to a partial view.
+let LOCAL_PATHS;
+try {
+  LOCAL_PATHS = localUserPaths(ROOT);
+} catch (err) {
+  console.error(`FAIL: ${err.message}`);
+  process.exit(1);
+}
+
+const ALL_PATHS = [...SYSTEM_PATHS, ...USER_PATHS, ...LOCAL_PATHS];
 
 const EXCLUDES = [
   '.coderabbit.yaml',
