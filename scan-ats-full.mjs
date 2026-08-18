@@ -61,7 +61,21 @@ const CACHE_TTL_HOURS = 24;
 // careers_url and drops anything that doesn't resolve to the ATS's own host —
 // so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
+
+// Default fan-out. Correct for sources whose boards each live on their OWN
+// host — workday is {tenant}.{instance}.myworkdayjobs.com, so 20 in flight is
+// 20 different servers and the resolver, not any one vendor, is the limit.
 const CONCURRENCY = 20;
+
+// Greenhouse, Lever and Ashby each serve their ENTIRE directory from a single
+// hostname (boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com), so the
+// default is 20 sustained connections to ONE API across thousands of boards.
+// That earns an HTTP throttle, and a throttled sweep loses live boards rather
+// than failing loudly: two full sweeps an hour apart saw lever's unreachable
+// count go 2,436 -> 4,100 and ashby's 683 -> 1,675, then recover to 2,525 / 684
+// after a cooldown with no change to the dataset. The boards were never dead —
+// they were refused, and the matches on them were silently missed.
+const SINGLE_HOST_CONCURRENCY = 6;
 // A refusing resolver fails every lookup in milliseconds, so a sweep that
 // keeps going just feeds it (#2229). Stop after this many consecutive
 // resolver-level failures — high enough that a handful of unlucky boards
@@ -157,6 +171,8 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
@@ -164,6 +180,8 @@ export const SOURCES = {
   },
   lever: {
     provider: lever,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
@@ -171,6 +189,8 @@ export const SOURCES = {
   },
   ashby: {
     provider: ashby,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
@@ -773,7 +793,7 @@ async function main() {
     let lastDone = 0;
     let lastResumeAt = 0;
     const truncated = [];
-    await parallelEach(entries, CONCURRENCY, async (entry) => {
+    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
       try {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
