@@ -5114,7 +5114,7 @@ tracked_companies:
 console.log('\n10b. Portal slug validator');
 
 try {
-  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError } =
+  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError, boardIdentityMatches } =
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
@@ -5216,6 +5216,63 @@ try {
     pass('verify-portals does not suggest a board matched only by a truncation of the name');
   } else {
     fail(`verify-portals adopted another employer's board: ${JSON.stringify(nimbus.suggested)}`);
+  }
+
+  // The other half of #2937. The bare first word stays in the repair set on
+  // purpose, so "Nimbus Data" still probes `nimbus`, and narrowing the set
+  // further would break the "Diabolocom EU Discovery" row below. The candidate
+  // is not the problem; adopting it unchecked is. Greenhouse publishes the
+  // board owner's name at /v1/boards/{slug}, so the repair path can ask who
+  // owns the board instead of inferring identity from the slug it guessed.
+  const bareOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/nimbus';
+  const bareFetch = async (url) => {
+    if (url === `${bareOwnerUrl}/jobs`) return { jobs: [{ id: 991, title: 'VP Marketing' }] };
+    if (url === bareOwnerUrl) return { name: 'Nimbus AI', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [bare] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: bareFetch },
+  );
+  if (bare.status === 'missing' && !bare.suggested) {
+    pass('verify-portals refuses a live board whose Greenhouse owner is a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched owner: ${JSON.stringify(bare.suggested)}`);
+  }
+
+  // The check must not cost the legitimate repair it exists to protect: a
+  // board that really is the brand still resolves. "Stripe Inc" 404s on every
+  // whole-name form and the live `stripe` board is owned by "Stripe".
+  const stripeOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/stripe';
+  const stripeFetch = async (url) => {
+    if (url === `${stripeOwnerUrl}/jobs`) return { jobs: [{ id: 12, title: 'Engineer' }] };
+    if (url === stripeOwnerUrl) return { name: 'Stripe', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [stripeCo] = await verifyCompanies(
+    [{ name: 'Stripe Inc', careers_url: 'https://job-boards.greenhouse.io/stripe-inc' }],
+    { fetchJson: stripeFetch },
+  );
+  if (stripeCo.suggested?.ats === 'greenhouse' && stripeCo.suggested?.slug === 'stripe') {
+    pass('verify-portals still adopts a brand-only board when the owner matches');
+  } else {
+    fail(`verify-portals lost the legitimate brand repair: ${JSON.stringify(stripeCo.suggested)}`);
+  }
+
+  // Token-prefix, not substring: "Apex" must not match "Apexon", but a trailing
+  // legal or descriptive word is the same company under a longer name.
+  if (
+    boardIdentityMatches('Stripe Inc', 'Stripe') &&
+    boardIdentityMatches('Nimbus Data', 'Nimbus') &&
+    boardIdentityMatches('Acme', 'Acme Corp') &&
+    !boardIdentityMatches('Nimbus Data', 'Nimbus AI') &&
+    !boardIdentityMatches('Apex', 'Apexon') &&
+    !boardIdentityMatches('Nimbus Data', '') &&
+    !boardIdentityMatches('', 'Nimbus')
+  ) {
+    pass('verify-portals boardIdentityMatches compares whole tokens, not substrings');
+  } else {
+    fail('verify-portals boardIdentityMatches mismatched on the token-prefix contract');
   }
 
   if (

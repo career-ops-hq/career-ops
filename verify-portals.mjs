@@ -48,6 +48,11 @@ export const ATS = {
     probeUrl: (slug) =>
       `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
+    // The board root publishes its owner: {"name":"Stripe","content":""}. Lever
+    // returns a bare posting array and Ashby returns {jobs, apiVersion}, so
+    // neither can answer "whose board is this" and neither defines these.
+    ownerUrl: (slug) => `https://boards-api.greenhouse.io/v1/boards/${slug}`,
+    ownerName: (json) => (typeof json?.name === 'string' ? json.name.trim() : null),
   },
   ashby: {
     probeUrl: (slug) =>
@@ -258,6 +263,57 @@ export async function probeSlug(
 }
 
 /**
+ * Does a discovered board's owner name refer to the company we are repairing?
+ *
+ * Token-prefix, not substring. A trailing word is the same company under a
+ * longer name ('Stripe' vs 'Stripe Inc', 'Nimbus Data' vs 'Nimbus'), but a
+ * DIFFERENT word in the same position is a different company ('Nimbus Data' vs
+ * 'Nimbus AI'). Substring matching would accept 'Apex' for 'Apexon', which is
+ * the same class of error this check exists to stop.
+ *
+ * @param {string} companyName - The tracked company being repaired.
+ * @param {string} boardName - The name the ATS reports for the probed board.
+ * @returns {boolean} True when one name's tokens prefix the other's.
+ */
+export function boardIdentityMatches(companyName, boardName) {
+  const tokens = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean);
+  const a = tokens(companyName);
+  const b = tokens(boardName);
+  if (!a.length || !b.length) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.every((tok, i) => tok === long[i]);
+}
+
+/**
+ * Confirm a candidate board belongs to this company before it can be written.
+ *
+ * Fails CLOSED for any ATS that publishes an owner: if we cannot read the name,
+ * we do not auto-adopt. A missed suggestion costs an operator one `--add`, where
+ * they see the slug beside the company name; a wrong one is written into
+ * portals.yml unreviewed and relabels another employer's postings in scan.mjs.
+ * ATSes that publish no owner (lever, ashby) keep their existing behavior.
+ */
+async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false }) {
+  const spec = ATS[ats];
+  if (!spec?.ownerUrl) return true;
+  let boardName = null;
+  try {
+    boardName = spec.ownerName(await fetchJson(spec.ownerUrl(slug, { eu })));
+  } catch {
+    return false;
+  }
+  if (!boardName) return false;
+  return boardIdentityMatches(companyName, boardName);
+}
+
+/**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
  * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
@@ -277,8 +333,10 @@ async function discoverAlternates(name, { fetchJson }) {
       const euVariants = ats === 'lever' ? [false, true] : [false];
       for (const eu of euVariants) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
+        if (r.status !== 'live' && r.status !== 'empty') continue;
+        if (!(await ownerConfirmed(ats, slug, name, { fetchJson, eu }))) continue;
         if (r.status === 'live') return r;
-        if (r.status === 'empty' && !bestEmpty) bestEmpty = r;
+        if (!bestEmpty) bestEmpty = r;
       }
     }
   }
