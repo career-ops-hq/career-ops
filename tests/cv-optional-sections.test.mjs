@@ -39,7 +39,7 @@
 //     valid without the sentinel — cv-templates.mjs requires only
 //     NAME/EXPERIENCE/EDUCATION — so this case must degrade to the cosmetic
 //     bare-header bug, never to a truncated CV.
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { stripEmptySections } from '../cv-sections-core.mjs';
@@ -71,8 +71,44 @@ function check(label, actual, expected) {
 const TEMPLATES = [
   { file: 'templates/cv-template.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
   { file: 'templates/resume-template.html', format: 'html', after: '<!-- END -->', hasCertifications: false, hasCompetencies: true },
+  { file: 'templates/cv-template.zh-minimal.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.compact.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.executive.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.jake.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.leadership.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.modern.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
   { file: 'templates/cv-template.tex', format: 'tex', after: '%%%%  END  %%%%', hasCertifications: false, hasCompetencies: false },
 ];
+
+// --- Coverage guard: no shipped CV template may sit outside the matrix ------
+// The matrix above is hand-written, which is what makes it worth trusting —
+// `hasCertifications: false` is a claim about resume-template.html, not an
+// observation of it, so a template that loses its `<!-- CERTIFICATIONS -->`
+// marker fails instead of being quietly reclassified. The cost of a hand-
+// written list is that it silently goes stale: `cv-template.zh-minimal.html`
+// shipped a full marker set and was never covered here, and #2954 then added
+// five named templates at once. Neither omission could fail a test, because an
+// uncovered template runs no assertions at all.
+//
+// So the list of templates is declared, and membership is checked against
+// disk. A CV template is identified by the `{{EXPERIENCE}}` placeholder that
+// cv-templates.mjs requires of every one (see `required` there), which is why
+// cover-letter-template.html is correctly not swept up. Adding a template
+// without adding it here fails loudly, right here, naming the file.
+const shippedCvTemplates = readdirSync(join(ROOT, 'templates'))
+  .filter((f) => /\.(html|tex)$/.test(f))
+  .filter((f) => readFileSync(join(ROOT, 'templates', f), 'utf-8').includes('{{EXPERIENCE}}'))
+  .map((f) => `templates/${f}`)
+  .sort();
+const covered = new Set(TEMPLATES.map((t) => t.file));
+const uncovered = shippedCvTemplates.filter((f) => !covered.has(f));
+const phantom = [...covered].filter((f) => !shippedCvTemplates.includes(f));
+
+if (uncovered.length === 0) pass(`every shipped CV template is in the matrix (${shippedCvTemplates.length} on disk)`);
+else fail(`shipped CV templates missing from TEMPLATES — they run zero assertions: ${uncovered.join(', ')}`);
+
+if (phantom.length === 0) pass('every template in the matrix exists on disk');
+else fail(`TEMPLATES names templates that are not on disk: ${phantom.join(', ')}`);
 
 for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLATES) {
   const template = readFileSync(join(ROOT, file), 'utf-8');
