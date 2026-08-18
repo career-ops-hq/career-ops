@@ -18,9 +18,19 @@
  *   data, paths, etc.) is SKIPPED. A green `--only` run is NOT a green
  *   suite. Always run the full suite (no flags) before pushing.
  *
- * Provider tests live in tests/providers/{name}.test.mjs and are
- * auto-discovered — no registration needed. To add a test for a new
- * provider, create that one file; do not add a section to this file.
+ * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
+ * Anything matching tests/**\/*.test.mjs is auto-discovered — no registration,
+ * no section number. Provider tests are one case of this
+ * (tests/providers/{name}.test.mjs), not the only one.
+ *
+ * Why it matters beyond tidiness: a numbered section means editing the end of
+ * this file, and the section number is a global label picked by hand. Six
+ * contributors doing that at once in Aug-2026 all picked `60a` and each merge
+ * forced a rebase on the other five - about fifteen rebases and six serialized
+ * CI runs for six lines of test code. A new file collides with nobody, so
+ * those PRs can all land in parallel.
+ *
+ * The inline sections below are history, not a pattern to copy.
  */
 
 
@@ -275,6 +285,7 @@ const scripts = [
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
   { name: 'salary-gap.mjs --self-test', expectExit: 0 },
+  { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
@@ -395,6 +406,55 @@ try {
       // failure arrives as a bare `<name> crashed`: no stack, no assertion
       // text, no exit code, and nothing a reader can act on.
       fail(`${name} crashed${formatRunFailure()}`);
+    }
+  }
+
+  // assessment-log.mjs CLI contract (#2797): help aliases print one shared
+  // usage block, unknown leading-dash arguments fail loudly, and the existing
+  // add/summary paths still accept ordinary values that merely contain dashes.
+  {
+    const assessmentCli = (...argv) => spawnSync(NODE, [join(scriptTmp, 'assessment-log.mjs'), ...argv], {
+      cwd: scriptTmp,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const helpR = assessmentCli('--help');
+    const hR = assessmentCli('-h');
+    if (helpR.status === 0 && hR.status === 0 && helpR.stdout.includes('Usage:')
+        && helpR.stdout.includes('--self-test') && hR.stdout === helpR.stdout
+        && helpR.stderr === '' && hR.stderr === '') {
+      pass('assessment-log.mjs --help/-h print the shared usage block and exit 0 (#2797)');
+    } else {
+      fail(`assessment-log.mjs help handling broken: ${JSON.stringify({ help: { status: helpR.status, stdout: helpR.stdout, stderr: helpR.stderr }, h: { status: hR.status, stdout: hR.stdout, stderr: hR.stderr } })}`);
+    }
+
+    const typoR = assessmentCli('--sumary');
+    const misplacedAddFlagR = assessmentCli('--company', 'Acme-Co');
+    if (typoR.status === 1 && typoR.stderr.includes('unrecognized flag')
+        && typoR.stderr.includes('--sumary') && typoR.stderr.includes('Valid flags:')
+        && typoR.stderr.includes('Usage:') && typoR.stdout === ''
+        && misplacedAddFlagR.status === 1 && misplacedAddFlagR.stderr.includes('--company')) {
+      pass('assessment-log.mjs rejects and names an unrecognized leading-dash flag (#2797)');
+    } else {
+      fail(`assessment-log.mjs unknown flag handling broken: ${JSON.stringify({ typo: { status: typoR.status, stdout: typoR.stdout, stderr: typoR.stderr }, misplacedAddFlag: { status: misplacedAddFlagR.status, stdout: misplacedAddFlagR.stdout, stderr: misplacedAddFlagR.stderr } })}`);
+    }
+
+    const addR = assessmentCli(
+      'add', '--company', 'Acme-Co', '--platform', 'eSkill', '--subject',
+      '-Data-Analysis', '--threshold', '70', '--score', '85'
+    );
+    const summaryR = assessmentCli('--summary');
+    let added = null;
+    try { added = JSON.parse(addR.stdout); } catch {}
+    if (addR.status === 0 && added?.added === true
+        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === '-Data-Analysis'
+        && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
+        && summaryR.stdout.includes('Data-Analysis')) {
+      pass('assessment-log.mjs preserves add/summary flags and dash-containing values (#2797 regression)');
+    } else {
+      fail(`assessment-log.mjs existing CLI behavior regressed: ${JSON.stringify({ add: { status: addR.status, stdout: addR.stdout, stderr: addR.stderr }, summary: { status: summaryR.status, stdout: summaryR.stdout, stderr: summaryR.stderr } })}`);
     }
   }
 
@@ -7549,6 +7609,9 @@ try {
       // via tracker-utils, so the fixture has to carry both — same reason
       // tracker-aliases.json is copied for tracker-parse.mjs (#2704).
       copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(e2eTmp, 'tracker-utils.mjs'));
+      // ...and tracker-utils imports the shared lock-contention helpers
+      // (#2777 fix), so the fixture carries that import too.
+      copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(e2eTmp, 'pipeline-lock.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs
