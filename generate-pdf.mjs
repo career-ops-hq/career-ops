@@ -62,7 +62,7 @@ const __workspaceRoot = realpathSync(workspaceRoot);
  * p through realpath — the path itself when it exists, otherwise its nearest
  * existing ancestor with the not-yet-created tail re-appended (the output PDF and
  * its directory may not exist yet) — then checks containment against the
- * realpathed project root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
+ * realpathed workspace root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
  *
  * @param {string} absPath - Already-resolved absolute candidate path.
  * @param {string} label - 'input' | 'output', used in the thrown message.

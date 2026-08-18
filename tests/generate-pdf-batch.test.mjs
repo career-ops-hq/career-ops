@@ -266,7 +266,7 @@ try {
     escResults[2].ok === false && /output escapes/i.test(escResults[2].error || '') &&
     existsSync(join(sandbox, 'out', 'esc-ok.pdf'))
   ) {
-    pass('generate-pdf --batch rejects input/output paths that escape the project directory');
+    pass('generate-pdf --batch rejects input/output paths that escape the tracker workspace');
   } else {
     fail(`containment guard regressed: status=${escape.status} results=${JSON.stringify(escResults)}\n${escape.output.trim()}`);
   }
