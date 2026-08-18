@@ -5618,7 +5618,16 @@ function hermeticGitEnv(gitConfigPath, base = process.env) {
 
     gitRun(['init']);
     let seenName = '';
-    try { seenName = gitRun(['config', 'user.name']); } catch { seenName = ''; }
+    try {
+      seenName = gitRun(['config', 'user.name']);
+    } catch (err) {
+      // `git config <key>` exits 1 for "not set", which is the outcome this
+      // block asserts. Anything else means the probe never ran: 128 for a
+      // broken repo, 129 for a bad invocation. Swallowing those would turn a
+      // failed probe into evidence that the isolation works.
+      if (err?.status !== 1) throw err;
+      seenName = '';
+    }
     if (seenName === '') {
       pass('hermeticGitEnv keeps an ambient GIT_CONFIG_PARAMETERS / GIT_CONFIG out of git');
     } else {
