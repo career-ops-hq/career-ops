@@ -482,6 +482,61 @@ function appendPins(existingContent, pinLines) {
  * @param {number} [options.lockStaleMs]
  * @returns {Promise<object>}
  */
+/**
+ * Run `fn` while holding the cross-process lock on a follow-ups file.
+ *
+ * EXISTS BECAUSE "TAKE A LOCK" IS NOT ENOUGH HERE (#3034). The lock directory
+ * is DERIVED — sha256 of the resolved follow-ups path, under tmpdir — so two
+ * writers that each take "a lock" on separately computed directories exclude
+ * nothing at all. Any second implementation has to reproduce that derivation
+ * exactly, and a derivation copied into another codebase is a second body of
+ * the same truth: it works until the day one side changes.
+ *
+ * So the derivation never leaves this file. Callers outside the core (the web
+ * dashboard's follow-up log and override routes) import this function and get
+ * the same directory by construction.
+ *
+ * TWO PROPERTIES CALLERS DEPEND ON, both deliberate:
+ *
+ *   1. The lock is released on EVERY path, including a throw. A long-lived
+ *      process that returns a 500 without releasing would block the user's own
+ *      CLI until staleMs elapses, so the `finally` lives here rather than in
+ *      each caller's hands.
+ *
+ *   2. It is NOT reentrant. Holding this lock and then invoking a core script
+ *      that also takes it (`followup-seed.mjs` itself) self-deadlocks until the
+ *      timeout. Callers that write the file directly are safe; callers that
+ *      orchestrate core scripts must not wrap them in this.
+ *
+ * An in-process queue is not a substitute: it serialises one process against
+ * itself and is blind to every other one. The two compose — queue inside this
+ * lock — and neither replaces the other.
+ *
+ * @param {string} followupsPath - Path to the follow-ups file to guard.
+ * @param {() => Promise<T>|T} fn - Runs while the lock is held.
+ * @param {object} [options]
+ * @param {string} [options.lockDir] - Explicit lock directory (tests).
+ * @param {number} [options.timeoutMs=60000]
+ * @param {number} [options.retryMs=75]
+ * @param {number} [options.staleMs=600000]
+ * @returns {Promise<T>} Whatever `fn` returned.
+ * @template T
+ */
+export async function withFollowupsLock(followupsPath, fn, options = {}) {
+  const resolvedPath = resolveFollowupsPath(followupsPath);
+  const lockDir = resolveLockDir(options.lockDir, resolvedPath);
+  const lock = await acquireFollowupsLock(lockDir, resolvedPath, {
+    timeoutMs: options.timeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.retryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.staleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+
 export async function seedFollowup(appNum, options = {}) {
   if (!Number.isInteger(appNum) || appNum <= 0) {
     throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
