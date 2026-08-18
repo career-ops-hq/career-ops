@@ -170,14 +170,21 @@ try {
   }
 
   const withinBudgetPdf = join(sandbox, 'within-budget.pdf');
-  const withinBudget = runPdf([input, withinBudgetPdf, '--max-pages=2']);
+  // The common installation layout has the tracker workspace at the same
+  // directory as the installed script. Keep that path explicitly covered so
+  // workspace scoping remains a no-op for the default case.
+  const defaultTracker = join(sandbox, 'applications.md');
+  writeFileSync(defaultTracker, '# Applications\n', 'utf-8');
+  const withinBudget = runPdf([input, withinBudgetPdf, '--max-pages=2'], {
+    CAREER_OPS_TRACKER: defaultTracker,
+  });
   if (
     withinBudget.status === 0 &&
     existsSync(withinBudgetPdf) &&
     countPages(withinBudgetPdf) === 2 &&
     manifestHasPdf(withinBudgetPdf)
   ) {
-    pass('generate-pdf ignores page-like content and accepts the structural rendered page count');
+    pass('generate-pdf keeps default output working when tracker workspace equals install directory');
   } else {
     fail(`generate-pdf rejected a PDF inside its page budget: ${withinBudget.output.trim()}`);
   }
