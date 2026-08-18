@@ -65,7 +65,6 @@
 const SITE_ORIGIN = 'https://www.yourator.co';
 const FEED_BASE = `${SITE_ORIGIN}/api/v4/jobs`;
 const TRUSTED_HOST = 'www.yourator.co';
-const PER_PAGE = 20;
 // Safety bound only — the loop stops on payload.hasMore. The live board was 88
 // pages on 2026-08-18; this leaves room to grow without silently truncating.
 const DEFAULT_MAX_PAGES = 120;
@@ -194,8 +193,12 @@ export default {
         const normalized = normalizeYouratorJob(j, fallbackCompany);
         if (normalized) out.push(normalized);
       }
-      // Past the last page the API answers with an empty array and hasMore:false.
-      if (json.payload.hasMore !== true || jobs.length < PER_PAGE) break;
+      // `hasMore` is the API's own end-of-board signal and the only stop
+      // condition: past the last page it answers with an empty array and
+      // hasMore:false. A short-page heuristic is deliberately NOT used — it
+      // cannot help (maxPages already bounds a runaway walk) and a single short
+      // intermediate page would silently truncate the board.
+      if (json.payload.hasMore !== true) break;
       if (page < maxPages) {
         await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));
       }

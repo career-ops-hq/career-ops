@@ -148,6 +148,32 @@ try {
     fail(`yourator.fetch pagination = ${JSON.stringify({ count: jobs.length, urls, redirects: requested.map(r => r.redirect) })}`);
   }
 
+  // Regression: a SHORT intermediate page with hasMore:true must NOT stop the
+  // walk. hasMore is the API's own end-of-board signal; a page-length heuristic
+  // would silently truncate the board (CodeRabbit, PR #3030).
+  const shortPages = {
+    1: { payload: { hasMore: true, jobs: [mk(0), mk(1), mk(2)] } },   // 3 < 20, but hasMore:true
+    2: { payload: { hasMore: true, jobs: Array.from({ length: 20 }, (_, i) => mk(10 + i)) } },
+    3: { payload: { hasMore: false, jobs: [mk(90)] } },
+  };
+  const shortRequested = [];
+  const shortJobs = await yourator.fetch(
+    { name: 'Yourator' },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        shortRequested.push(url);
+        return shortPages[Number(new URL(url).searchParams.get('page'))];
+      },
+    },
+  );
+  if (shortRequested.length === 3 && shortJobs.length === 24) {
+    pass('yourator.fetch keeps walking past a short page while hasMore is true');
+  } else {
+    fail(`yourator.fetch short-page walk = ${JSON.stringify({ pages: shortRequested.length, jobs: shortJobs.length })}`);
+  }
+
   // ctx.maxPages (health probe) wins over max_pages on the entry.
   const probed = [];
   await yourator.fetch(
