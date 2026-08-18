@@ -14,7 +14,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
-const codexCapabilityCache = new Map<string, Promise<boolean>>();
+type CodexCapabilityCacheEntry = {
+  mtimeMs: number;
+  size: number;
+  probe: Promise<boolean>;
+};
+
+const codexCapabilityCache = new Map<string, CodexCapabilityCacheEntry>();
 
 function readCodexHelp(binPath: string, args: string[]): Promise<string> {
   return new Promise((resolve) => {
@@ -62,13 +68,27 @@ ${stderr}`));
 }
 
 function supportsSafeCodexExec(binPath: string): Promise<boolean> {
-  const cached = codexCapabilityCache.get(binPath);
-  if (cached) return cached;
+  let mtimeMs: number;
+  let size: number;
 
+  try {
+    ({ mtimeMs, size } = fs.statSync(binPath));
+  } catch {
+    return Promise.resolve(false);
+  }
+
+  const cached = codexCapabilityCache.get(binPath);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+    return cached.probe;
+  }
+
+  let entry: CodexCapabilityCacheEntry;
   const probe = Promise.all([
     readCodexHelp(binPath, ["--help"]),
     readCodexHelp(binPath, ["exec", "--help"]),
   ])
+    // Deliberately fail closed: help/flag drift means "unsupported", never a
+    // weaker Codex invocation that could bypass the required safety contract.
     .then(([globalHelp, execHelp]) =>
       globalHelp.includes("--ask-for-approval") &&
       globalHelp.includes("--search") &&
@@ -82,12 +102,18 @@ function supportsSafeCodexExec(binPath: string): Promise<boolean> {
     )
     .catch(() => false)
     .then((supported) => {
-      if (!supported) codexCapabilityCache.delete(binPath);
+      // Only successes stay cached. A transient/negative probe retries next time,
+      // but must not delete a newer entry installed after the binary changed.
+      if (!supported && codexCapabilityCache.get(binPath) === entry) {
+        codexCapabilityCache.delete(binPath);
+      }
       return supported;
     });
 
-  // Cache the in-flight Promise so concurrent cold requests share one probe.
-  codexCapabilityCache.set(binPath, probe);
+  // Concurrent cold requests share the same in-flight probe. mtime+size makes a
+  // Codex upgrade at the same path invalidate a previously successful result.
+  entry = { mtimeMs, size, probe };
+  codexCapabilityCache.set(binPath, entry);
   return probe;
 }
 
