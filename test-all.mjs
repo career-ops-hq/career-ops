@@ -5831,6 +5831,15 @@ try {
   } else {
     fail(`fix-slugs.mjs bad flag handling => status=${badFlagOut.status} stderr=${badFlagOut.stderr}`);
   }
+
+  const missingFileOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file'], { encoding: 'utf-8' });
+  const fileFlagNextOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', '--fix'], { encoding: 'utf-8' });
+  if (missingFileOut.status === 1 && missingFileOut.stderr.includes('--file requires a value') &&
+      fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
+    pass('fix-slugs.mjs rejects missing --file value with exit 1');
+  } else {
+    fail(`fix-slugs.mjs missing --file value handling => bare: ${missingFileOut.status} nextFlag: ${fileFlagNextOut.status}`);
+  }
 } catch (e) {
   fail(`slug auto-fixer tests crashed: ${e.message}`);
 }

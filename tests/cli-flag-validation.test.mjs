@@ -84,3 +84,25 @@ test('fix-slugs honours both --file <path> and --file=<path> syntax', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', () => {
+  const rBare = runScript('fix-slugs.mjs', '--file');
+  assert.equal(rBare.status, 1, 'bare --file must exit 1');
+  assert.match(rBare.all, /--file requires a value/);
+
+  const rEmpty = runScript('fix-slugs.mjs', '--file=');
+  assert.equal(rEmpty.status, 1, '--file= must exit 1');
+  assert.match(rEmpty.all, /--file requires a value/);
+
+  const rFlag = runScript('fix-slugs.mjs', '--file', '--fix');
+  assert.equal(rFlag.status, 1, '--file --fix must exit 1 without treating --fix as a filename');
+  assert.match(rFlag.all, /--file requires a value/);
+
+  const rApply = runScript('fix-slugs.mjs', '--file', '--apply');
+  assert.equal(rApply.status, 1, '--file --apply must exit 1');
+  assert.match(rApply.all, /--file requires a value/);
+
+  const rDryRun = runScript('fix-slugs.mjs', '--file', '--dry-run');
+  assert.equal(rDryRun.status, 1, '--file --dry-run must exit 1');
+  assert.match(rDryRun.all, /--file requires a value/);
+});

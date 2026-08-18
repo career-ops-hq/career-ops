@@ -35,7 +35,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 
@@ -334,6 +334,14 @@ function printDiff(fixes, { dryRun }) {
 async function main() {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
+  if (hasFlag(args, '--file')) {
+    const rawVal = flagValue(args, '--file');
+    if (rawVal === undefined || rawVal === '' || rawVal.startsWith('--')) {
+      console.error('Error: --file requires a value');
+      process.exit(1);
+    }
+  }
 
   const fix = args.includes('--fix') || args.includes('--apply');
   const dryRun = !fix; // default is always safe — writing requires an explicit flag
