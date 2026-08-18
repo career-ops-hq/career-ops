@@ -28,7 +28,7 @@ try {
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const PATHS = {
+export const PATHS = {
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
   cv:          join(ROOT, 'cv.md'),
@@ -225,7 +225,7 @@ async function evaluateWithRetry(jdText, retries = 5) {
   }
 }
 
-async function processOffer(browser, line, idx) {
+export async function processOffer(browser, line, idx, _evaluate = evaluateWithRetry) {
   const match = line.match(/- \[\s*\]\s+(https?:\/\/\S+)(?:\s*\|\s*([^|]+)\s*\|\s*(.+))?/);
   if (!match) return { line, processed: false };
 
@@ -244,7 +244,7 @@ async function processOffer(browser, line, idx) {
     }
 
     console.log(`🧠 Calling Gemini (${modelName})...`);
-    const evaluationText = await evaluateWithRetry(`URL: ${url}\n\n${jdText}`);
+    const evaluationText = await _evaluate(`URL: ${url}\n\n${jdText}`);
 
     // Parse output
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
