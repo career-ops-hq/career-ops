@@ -30,7 +30,7 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 
-import { fetchJson as defaultFetchJson, makeHttpCtx } from './providers/_http.mjs';
+import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 
@@ -52,18 +52,28 @@ export const ATS = {
     // returns a bare posting array and Ashby returns {jobs, apiVersion}, so
     // neither can answer "whose board is this" and neither defines these.
     ownerUrl: (slug) => `https://boards-api.greenhouse.io/v1/boards/${slug}`,
+    ownerKind: 'json',
     ownerName: (json) => (typeof json?.name === 'string' ? json.name.trim() : null),
   },
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
+    // The posting API returns only {jobs, apiVersion}; the board page titles
+    // itself with the owner ('deepset Jobs'), which is the only name either
+    // Ashby or Lever exposes publicly (#3019).
+    ownerUrl: (slug) => `https://jobs.ashbyhq.com/${slug}`,
+    ownerKind: 'html',
+    ownerName: (html) => boardTitleOwner(html),
   },
   lever: {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
+    ownerUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
+    ownerKind: 'html',
+    ownerName: (html) => boardTitleOwner(html),
   },
 };
 
@@ -262,6 +272,24 @@ export async function probeSlug(
   }
 }
 
+/**
+ * Pull the board owner's name out of a careers page <title>.
+ *
+ * Both providers title the board after its owner and append a jobs suffix:
+ * 'deepset Jobs' on Ashby, 'Diabolocom' or 'Lever Demo 2' on Lever. The suffix is
+ * stripped when present; everything else is left for canonicalNameTokens to judge.
+ *
+ * @param {string} html - The head of the board page.
+ * @returns {string|null} The owner name, or null when no title is present.
+ */
+export function boardTitleOwner(html) {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
+  if (!m) return null;
+  const title = m[1].replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  return title.replace(/\s+jobs$/i, '').trim() || null;
+}
+
 // Tokens that carry no identity. A leading article and a trailing legal designator
 // can differ between how a company writes its name and how its ATS board is titled,
 // so they are dropped before comparing. Nothing else is: 'Systems', 'AI', 'Airlines'
@@ -337,14 +365,16 @@ export function boardIdentityMatches(companyName, boardName) {
  * ATSes that publish no owner (lever, ashby) keep their existing behavior, which
  * is tracked separately rather than implied to be safe here.
  */
-async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false, cache }) {
+async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu = false, cache }) {
   const spec = ATS[ats];
   if (!spec?.ownerUrl) return { ok: true, reason: 'no-owner-endpoint' };
   const key = `${ats}|${eu ? 'eu' : 'base'}|${slug}`;
   if (cache?.has(key)) return cache.get(key);
   let out;
   try {
-    const boardName = spec.ownerName(await fetchJson(spec.ownerUrl(slug, { eu })));
+    const url = spec.ownerUrl(slug, { eu });
+    const raw = spec.ownerKind === 'html' ? await fetchText(url) : await fetchJson(url);
+    const boardName = spec.ownerName(raw);
     if (!boardName) out = { ok: false, reason: 'owner-unnamed' };
     else if (boardIdentityMatches(companyName, boardName)) out = { ok: true, reason: 'owner-match', boardName };
     else out = { ok: false, reason: 'owner-mismatch', boardName };
@@ -368,7 +398,7 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, eu = false, c
  * to begin with, so dropping them here costs nothing and they stay available to
  * `--add`, where an operator sees the slug beside the name before adopting it.
  */
-async function discoverAlternates(name, { fetchJson }) {
+async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
   // One owner lookup per (ats, eu, slug) per company, so the added identity check
   // cannot multiply requests when candidates repeat across the probe order.
@@ -382,7 +412,7 @@ async function discoverAlternates(name, { fetchJson }) {
       for (const eu of euVariants) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status !== 'live' && r.status !== 'empty') continue;
-        const owner = await ownerConfirmed(ats, slug, name, { fetchJson, eu, cache });
+        const owner = await ownerConfirmed(ats, slug, name, { fetchJson, fetchText, eu, cache });
         if (!owner.ok) continue;
         if (r.status === 'live') return r;
         if (!bestEmpty) bestEmpty = r;
@@ -502,7 +532,7 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -520,7 +550,7 @@ export async function verifyCompanies(
       }
       // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
       if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
-        const suggested = await discoverAlternates(name, { fetchJson });
+        const suggested = await discoverAlternates(name, { fetchJson, fetchText });
         if (suggested) {
           results.push({ name, ...probe, suggested });
           continue;

@@ -5114,7 +5114,7 @@ tracked_companies:
 console.log('\n10b. Portal slug validator');
 
 try {
-  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError, boardIdentityMatches } =
+  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError, boardIdentityMatches, boardTitleOwner } =
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
@@ -5183,7 +5183,7 @@ try {
   // It is not fine for discoverAlternates, whose `suggested` fix-slugs --fix
   // writes into portals.yml unreviewed. The bare first word stays on BOTH sets
   // on purpose: it adds no token the company lacks, and boards really are often
-  // just the brand (the "Diabolocom EU Discovery" row below relies on it).
+  // just the brand (the "Diabolocom" row below relies on it).
   const probeSet = deriveSlugCandidates('Nimbus Data');
   const repairSet = deriveSlugCandidates('Nimbus Data', { firstWordSuffixes: false });
   const coined = ['nimbusai', 'nimbustech', 'nimbusio', 'nimbushq', 'nimbuslabs', 'nimbus.tech', 'nimbus.io'];
@@ -5220,7 +5220,7 @@ try {
 
   // The other half of #2937. The bare first word stays in the repair set on
   // purpose, so "Nimbus Data" still probes `nimbus`, and narrowing the set
-  // further would break the "Diabolocom EU Discovery" row below. The candidate
+  // further would break the "Diabolocom" row below. The candidate
   // is not the problem; adopting it unchecked is. Greenhouse publishes the
   // board owner's name at /v1/boards/{slug}, so the repair path can ask who
   // owns the board instead of inferring identity from the slug it guessed.
@@ -5291,6 +5291,40 @@ try {
     fail(`verify-portals boardIdentityMatches wrong on: ${JSON.stringify(identityBad)}`);
   }
 
+  // #3019: Lever and Ashby answer "whose board is this" only through the board
+  // page title. Tracked "Nimbus Data" 404s, the live Lever board `nimbus` is
+  // titled "Nimbus AI", and the repair must refuse it exactly as Greenhouse does.
+  const leverJson = async (url) => {
+    if (url === 'https://api.lever.co/v0/postings/nimbus') return [{ id: 1 }];
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const leverText = async (url) => {
+    if (url === 'https://jobs.lever.co/nimbus') return '<title>Nimbus AI jobs</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [leverMismatch] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: leverJson, fetchText: leverText },
+  );
+  if (leverMismatch.status === 'missing' && !leverMismatch.suggested) {
+    pass('verify-portals refuses a Lever board whose page title names a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched Lever owner: ${JSON.stringify(leverMismatch.suggested)}`);
+  }
+
+  // The title suffix is stripped, not required: Lever titles the board with the
+  // bare name while Ashby appends "Jobs".
+  if (
+    boardTitleOwner('<title>deepset Jobs</title>') === 'deepset' &&
+    boardTitleOwner('<title>Diabolocom</title>') === 'Diabolocom' &&
+    boardTitleOwner('<title>  Lever Demo 2 jobs </title>') === 'Lever Demo 2' &&
+    boardTitleOwner('<html><body>no title</body></html>') === null
+  ) {
+    pass('verify-portals boardTitleOwner reads the owner out of a board page title');
+  } else {
+    fail('verify-portals boardTitleOwner mis-parsed a board page title');
+  }
+
   if (
     classifyFetchError({ status: 404 }) === 'slug_gone' &&
     classifyFetchError({ name: 'AbortError' }) === 'network' &&
@@ -5336,6 +5370,15 @@ try {
     if (url === 'https://api.eu.lever.co/v0/postings/diabolocom') return [{}, {}];
     const err = new Error('HTTP 404'); err.status = 404; throw err;
   };
+  // Lever and Ashby publish no owner in their posting APIs, so the repair path
+  // reads the board page title instead (#3019). Injected here so the suite never
+  // reaches the network: without this the defaults would fetch jobs.lever.co and
+  // jobs.ashbyhq.com for real, and the fixtures would pass or fail on live data.
+  const mockFetchText = async (url) => {
+    if (url === 'https://jobs.ashbyhq.com/deepsetai') return '<title>deepset Jobs</title>';
+    if (url === 'https://jobs.eu.lever.co/diabolocom') return '<title>Diabolocom</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
   const results = await verifyCompanies([
     { name: 'Live', careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Empty', careers_url: 'https://job-boards.greenhouse.io/empty' },
@@ -5345,8 +5388,8 @@ try {
     { name: 'Off', enabled: false, careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Lever Live', careers_url: 'https://jobs.lever.co/acme-lv' },
     { name: 'Lever EU Live', careers_url: 'https://jobs.eu.lever.co/acme-eu' },
-    { name: 'Diabolocom EU Discovery', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
-  ], { fetchJson: mockFetch });
+    { name: 'Diabolocom', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
+  ], { fetchJson: mockFetch, fetchText: mockFetchText });
   const byName = Object.fromEntries(results.map((r) => [r.name, r]));
   if (
     results.length === 8 &&
@@ -5356,9 +5399,9 @@ try {
     byName['Lever Live'].status === 'live' &&
     byName['Lever EU Live'].status === 'live' &&
     byName.Deepset.suggested?.ats === 'ashby' && byName.Deepset.suggested?.slug === 'deepsetai' &&
-    byName['Diabolocom EU Discovery'].suggested?.ats === 'lever' &&
-    byName['Diabolocom EU Discovery'].suggested?.slug === 'diabolocom' &&
-    byName['Diabolocom EU Discovery'].suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
+    byName.Diabolocom.suggested?.ats === 'lever' &&
+    byName.Diabolocom.suggested?.slug === 'diabolocom' &&
+    byName.Diabolocom.suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
   ) {
     pass('verify-portals classifies live / empty / unresolved / non-ATS (disabled excluded)');
   } else {
