@@ -122,7 +122,7 @@ try {
   const mk = (i) => ({ name: `Role ${i}`, path: `/companies/co/jobs/${i}`, location: '臺北市', company: { brand: `Co ${i}` } });
   const pages = {
     1: { payload: { hasMore: true, jobs: Array.from({ length: 20 }, (_, i) => mk(i)) } },
-    2: { payload: { hasMore: false, jobs: [mk(20), mk(21), { name: '', path: '/companies/co/jobs/bad' }] } },
+    2: { payload: { hasMore: false, jobs: [...Array.from({ length: 19 }, (_, i) => mk(20 + i)), { name: '', path: '/companies/co/jobs/bad' }] } },
     3: { payload: { hasMore: true, jobs: [mk(99)] } }, // must never be requested
   };
   const requested = [];
@@ -137,7 +137,7 @@ try {
   const jobs = await yourator.fetch({ name: 'Yourator' }, ctx);
   const urls = requested.map(r => r.url);
   if (
-    jobs.length === 22 &&
+    jobs.length === 39 &&
     urls.length === 2 &&
     urls[0] === 'https://www.yourator.co/api/v4/jobs?page=1' &&
     urls[1] === 'https://www.yourator.co/api/v4/jobs?page=2' &&
