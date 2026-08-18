@@ -102,6 +102,45 @@ export function matchesDomainList(hostname, domainList) {
   return false;
 }
 
+// Latin letters that do NOT decompose under NFD, so stripping combining marks
+// alone still deletes them. Lowercase only — the caller lowercases first.
+// A stroke or bar through a letter is part of the glyph, not a combining
+// mark, so NFD leaves these untouched and the [^a-z0-9] strip below then
+// DELETES them — the very failure this fold exists to stop. The Turkish
+// dotless ı is the one that actually bites: "Işık" scored no match against
+// isik.com.tr and was flagged for being on its own domain. ħ/ŋ/ŧ happened to
+// pass anyway on a word-level substring, which is luck, not correctness —
+// the same accidental pass "Nestlé" had before this fold existed.
+// (CodeRabbit, reviewing #2927.)
+const NON_DECOMPOSING_LATIN = [
+  [/ø/g, 'o'], [/æ/g, 'ae'], [/œ/g, 'oe'], [/ß/g, 'ss'],
+  [/đ/g, 'd'], [/ł/g, 'l'], [/þ/g, 'th'], [/ð/g, 'd'],
+  [/ħ/g, 'h'], [/ı/g, 'i'], [/ŋ/g, 'ng'], [/ŧ/g, 't'],
+  [/ĸ/g, 'k'], [/ſ/g, 's'],
+];
+
+/**
+ * ASCII-fold a company name for comparison against a hostname.
+ *
+ * NFD is the right tool HERE and the wrong one in foldStatusInput()
+ * (tracker-utils.mjs, #2705). There the fold must not collapse distinct
+ * identities — Żubr must never become Zubr. Here we are deliberately comparing
+ * against an ASCII hostname, so folding to the ASCII base letter is the whole
+ * point: "societegenerale.com" IS the ASCII folding of "Société Générale".
+ *
+ * The previous `[^a-z0-9 ]` strip DELETED accented letters instead of folding
+ * them, so "Société Générale" became "socit gnrale" and matched neither the
+ * slug nor any word of its own domain (#2924).
+ *
+ * @param {string} company
+ * @returns {string} Lowercased, space-separated ASCII, or '' when nothing Latin remains.
+ */
+export function asciiFoldForHostname(company) {
+  let out = String(company ?? '').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
+  for (const [re, to] of NON_DECOMPOSING_LATIN) out = out.replace(re, to);
+  return out.replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 /**
  * Heuristic: does the company name plausibly match the URL hostname?
  *
@@ -116,7 +155,12 @@ export function matchesDomainList(hostname, domainList) {
 export function companyMatchesHostname(company, hostname) {
   if (!company || !hostname) return true; // can't evaluate → no flag
 
-  const normalized = company.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  const normalized = asciiFoldForHostname(company);
+  // Nothing Latin survived (a CJK, Cyrillic, Greek, … name). Deliberate, not
+  // an oversight: hostnames are effectively ASCII, so such a name can never
+  // appear in one and the absence of a match proves nothing. "Working" here
+  // would flag every non-Latin company posting on its own legitimate domain —
+  // trading a silent skip for a systematic false positive (#2924).
   if (!normalized) return true;
 
   // Full slug check (all spaces removed)
