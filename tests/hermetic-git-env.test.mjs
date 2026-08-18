@@ -37,8 +37,19 @@ try {
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
 
+  // All three channels at once, each carrying a distinct value, so a failure
+  // names which one got through rather than only that something did.
+  //
+  // GIT_CONFIG_COUNT is the channel the pins were originally built for (#2567),
+  // and the only one closed by overwriting rather than deleting: setting it to 0
+  // makes KEY_n / VALUE_n inert without enumerating them. Injecting it here is
+  // what makes that pin load-bearing in this file — without this pair, removing
+  // `GIT_CONFIG_COUNT: '0'` from the helper leaves this test green.
   const gitEnv = hermeticGitEnv(pinned, {
     ...process.env,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'user.name',
+    GIT_CONFIG_VALUE_0: 'count-leak',
     GIT_CONFIG_PARAMETERS: "'user.name=parameters-leak'",
     GIT_CONFIG: ambient,
   });
