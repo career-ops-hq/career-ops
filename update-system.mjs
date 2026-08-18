@@ -493,6 +493,32 @@ export function localUserPaths(root = ROOT) {
     if (path.split(/[\\/]/).includes('..')) {
       reject(path, 'paths must stay inside the repo');
     }
+    // Canonical spelling, required BEFORE the collision check below.
+    //
+    // That check compares strings exactly (`path === sys`), and
+    // userLayerViolations() later compares against git's changed-path format,
+    // which is always canonical. A non-canonical spelling therefore matches
+    // NEITHER: `./merge-tracker.mjs` sails past the collision check, and is
+    // never recognised as the file it names when the safety check runs. The
+    // declaration silently protects nothing while the updater overwrites the
+    // file — the data loss this feature exists to prevent, reachable from a
+    // plausible typo.
+    //
+    // Rejected rather than normalised, deliberately. Normalising would accept
+    // several spellings for one path and leave this file disagreeing with what
+    // git reports; refusing keeps one path to one spelling, and says so.
+    if (path.includes('\\')) {
+      reject(path, 'paths use forward slashes, matching how git reports them');
+    }
+    // A single trailing slash is the documented directory-prefix form, so it is
+    // dropped before the segment check rather than read as an empty segment.
+    const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+    if (segments.includes('')) {
+      reject(path, 'paths must not contain an empty segment (a repeated separator)');
+    }
+    if (segments.includes('.')) {
+      reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
+    }
     const collision = SYSTEM_PATHS.find((sys) =>
       sys.endsWith('/') ? path.startsWith(sys) : path === sys,
     );
