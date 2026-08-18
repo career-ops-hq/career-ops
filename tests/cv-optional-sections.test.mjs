@@ -19,12 +19,13 @@
 // cv-sections-core.mjs for the failure modes exercised here.
 //
 // Skills carries one extra burden the other five do not. It is the LAST
-// section in every shipped template, so it has no following section marker to
-// stop at; with the shared `…|$` boundary, stripping it would run to
-// end-of-file and swallow the closing document skeleton. Its patterns
-// therefore match only up to an explicit `<!-- END -->` / `%%%% END %%%%`
-// sentinel, with NO end-of-input alternative, which produces two behaviours
-// this suite pins down:
+// section in every shipped template, so it may have no following section marker
+// to stop at; with the shared `…|$` boundary, stripping it would run to
+// end-of-file and swallow the closing document skeleton. Its patterns therefore
+// use the same marker shapes with NO end-of-input alternative — stopping at the
+// `<!-- END -->` / `%%%% END %%%%` sentinel when Skills is last, and at the next
+// section's marker when a custom template puts Skills higher up. That produces
+// two behaviours this suite pins down:
 //
 //   - with the sentinel: the section is stripped and the closing skeleton
 //     survives ("keeps the closing document skeleton" checks);
@@ -238,8 +239,15 @@ check('html: with no sentinel, empty skills is a no-op (fail-safe, bare header b
   withoutSentinel, SKILLS_NO_SENTINEL);
 check('html: with no sentinel, the closing skeleton survives', withoutSentinel.includes('</body></html>'), true);
 
-const TEX_WITH_SENTINEL = '%%%%  Technical Skills  %%%%\nskills\n%%%%  END  %%%%\n\\end{document}';
-const TEX_NO_SENTINEL = '%%%%  Technical Skills  %%%%\nskills\n\\end{document}';
+// Banners are the shipped 28-wide, NOT a minimal `%%%%`. Width matters: the
+// Skills lookahead has no end-of-input branch, so on a template with no
+// following banner the engine backtracks the opening banner's own greedy
+// trailing `%{4,}`. It can only give back enough `%` to fake a boundary when the
+// banner is wider than 8, so a narrow fixture passes while the real template
+// gets a stray `%%%%` left behind. See TEX_END_SENTINEL in cv-sections-core.mjs.
+const TEX_BANNER = '%'.repeat(28);
+const TEX_WITH_SENTINEL = `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}\nskills\n${TEX_BANNER}  END  ${TEX_BANNER}\n\\end{document}`;
+const TEX_NO_SENTINEL = `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}\nskills\n\\end{document}`;
 
 const texWith = stripEmptySections(TEX_WITH_SENTINEL, EMPTY, 'tex');
 check('tex: with the sentinel, empty skills is stripped', texWith.includes('Technical Skills'), false);
@@ -248,6 +256,64 @@ check('tex: with the sentinel, \\end{document} survives', texWith.includes('\\en
 const texWithout = stripEmptySections(TEX_NO_SENTINEL, EMPTY, 'tex');
 check('tex: with no sentinel, empty skills is a no-op (fail-safe)', texWithout, TEX_NO_SENTINEL);
 check('tex: with no sentinel, \\end{document} survives', texWithout.includes('\\end{document}'), true);
+// The two checks above are narrowing diagnostics under the exact-equality check
+// on the previous line, not independent coverage: that one already pins the
+// whole template byte for byte, so anything these catch it catches too. They
+// earn their place by naming WHICH half of the fail-safe broke, so a regression
+// reports "half-eaten banner" instead of only a full-template diff.
+// The substring is the right probe for that: when the boundary loses its `^`
+// anchor the engine backtracks the opening banner's own greedy trailing `%{4,}`
+// and consumes the heading with it, leaving `%%%%\nskills\n\end{document}`. The
+// heading text is gone in that state, so this assertion goes red.
+check('tex: with no sentinel, no half-eaten banner is left behind',
+  texWithout.includes('Technical Skills'), true);
+
+// --- Skills is not always the last section ---------------------------------
+// A custom template may put Skills above Education. The Skills boundary must
+// then stop at the NEXT section's marker, not run all the way to the trailing
+// sentinel: matching the sentinel only would delete every populated section in
+// between along with the empty Skills header — silent data loss in a CV that
+// still has an education block to show. Both formats, because both boundaries
+// have the same shape.
+
+const SKILLS_NOT_LAST_HTML = [
+  '<html><body><div>',
+  '<!-- SKILLS -->',
+  '<div>{{SKILLS}}</div>',
+  '<!-- EDUCATION -->',
+  '<div>keep my degree</div>',
+  '<!-- END -->',
+  '</div></body></html>',
+].join('\n');
+
+const skillsNotLast = stripEmptySections(
+  SKILLS_NOT_LAST_HTML, { ...FULL, skills: [] }, 'html');
+check('html: skills above education — the empty skills block goes',
+  skillsNotLast.includes('<!-- SKILLS -->'), false);
+check('html: skills above education — the populated education block survives',
+  skillsNotLast.includes('keep my degree'), true);
+check('html: skills above education — the sentinel survives',
+  skillsNotLast.includes('<!-- END -->'), true);
+check('html: skills above education — the closing skeleton survives',
+  skillsNotLast.trimEnd().endsWith('</div></body></html>'), true);
+
+const SKILLS_NOT_LAST_TEX = [
+  `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}`,
+  '{{SKILLS}}',
+  `${TEX_BANNER}  Education  ${TEX_BANNER}`,
+  'keep my degree',
+  `${TEX_BANNER}  END  ${TEX_BANNER}`,
+  '\\end{document}',
+].join('\n');
+
+const texSkillsNotLast = stripEmptySections(
+  SKILLS_NOT_LAST_TEX, { ...FULL, skills: [] }, 'tex');
+check('tex: skills above education — the empty skills block goes',
+  texSkillsNotLast.includes('Technical Skills'), false);
+check('tex: skills above education — the populated education block survives',
+  texSkillsNotLast.includes('keep my degree'), true);
+check('tex: skills above education — \\end{document} survives',
+  texSkillsNotLast.includes('\\end{document}'), true);
 
 // Stripping one section must not depend on the other still being present: a
 // lookahead naming `<!-- EDUCATION -->` breaks once education is removed.

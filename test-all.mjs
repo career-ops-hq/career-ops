@@ -18,9 +18,19 @@
  *   data, paths, etc.) is SKIPPED. A green `--only` run is NOT a green
  *   suite. Always run the full suite (no flags) before pushing.
  *
- * Provider tests live in tests/providers/{name}.test.mjs and are
- * auto-discovered — no registration needed. To add a test for a new
- * provider, create that one file; do not add a section to this file.
+ * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
+ * Anything matching tests/**\/*.test.mjs is auto-discovered — no registration,
+ * no section number. Provider tests are one case of this
+ * (tests/providers/{name}.test.mjs), not the only one.
+ *
+ * Why it matters beyond tidiness: a numbered section means editing the end of
+ * this file, and the section number is a global label picked by hand. Six
+ * contributors doing that at once in Aug-2026 all picked `60a` and each merge
+ * forced a rebase on the other five - about fifteen rebases and six serialized
+ * CI runs for six lines of test code. A new file collides with nobody, so
+ * those PRs can all land in parallel.
+ *
+ * The inline sections below are history, not a pattern to copy.
  */
 
 
@@ -921,6 +931,102 @@ try {
     bodyText: 'Administrator SAP Utilities. '.repeat(20),
     applyControls: ['Apply for this job'],
   });
+
+  // --- iframe-embedded postings -------------------------------------------
+  // Some ATS (iCIMS) render the posting inside a same-origin iframe and leave
+  // the top-level document as a ~13-character shell, which used to reach
+  // insufficient_content and return `expired` for a live job.
+  //
+  // `fillAfter` models the part that made the first attempt at this fix a
+  // no-op: the frame ATTACHES immediately but POPULATES late (measured 0 chars
+  // at 2000ms, 3887 at 4000ms), so a reader that does not wait sees an empty
+  // document and nothing changes.
+  const framedPage = ({ status = 200, finalUrl, shellText = 'Careers', frames = [] }) => {
+    const page = {};
+    const main = { __main: true };
+    const built = frames.map((spec) => {
+      let textReads = 0;
+      return {
+        url: () => spec.url,
+        async evaluate(fn) {
+          // Both extractors mention innerText, so discriminate on the selector
+          // call that only the apply-control extractor makes.
+          const isControls = String(fn).includes('querySelectorAll');
+          const filled = textReads >= (spec.fillAfter ?? 0);
+          if (!isControls) textReads += 1;
+          if (isControls) return filled ? (spec.controls ?? []) : [];
+          return filled ? spec.text : '';
+        },
+      };
+    });
+    let evalCall = 0;
+    Object.assign(page, {
+      async goto() { return { status: () => status }; },
+      async waitForTimeout() {},
+      url() { return finalUrl; },
+      frames() { return [main, ...built]; },
+      mainFrame() { return main; },
+      async evaluate() { evalCall += 1; return evalCall === 1 ? shellText : []; },
+    });
+    return page;
+  };
+
+  const SHELL = 'https://careers-example.icims.com/jobs/1/role/job';
+  const framedLive = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Senior Analyst. '.repeat(30), controls: ['Apply for this job online'], fillAfter: 2 }],
+  }), SHELL);
+  if (framedLive.result === 'active' && framedLive.code === 'apply_control_visible') {
+    pass('liveness reads a same-origin posting frame that populates late');
+  } else {
+    fail(`late-filling posting frame not read: ${JSON.stringify(framedLive)}`);
+  }
+
+  const crossOrigin = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: 'https://ads.example.net/widget', text: 'Sponsored. '.repeat(30), controls: ['Apply now'] }],
+  }), SHELL);
+  if (crossOrigin.result === 'expired' && crossOrigin.code === 'insufficient_content') {
+    pass('a cross-origin frame cannot make an empty shell look active');
+  } else {
+    fail(`cross-origin frame leaked into the verdict: ${JSON.stringify(crossOrigin)}`);
+  }
+
+  const goneWithFrame = await checkUrlLiveness(framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Job not found. '.repeat(30), controls: ['Apply for this job online'] }],
+  }), SHELL);
+  if (goneWithFrame.result === 'expired' && goneWithFrame.code === 'http_gone') {
+    pass('HTTP 410 still wins over a frame carrying an apply control');
+  } else {
+    fail(`410 precedence lost to frame aggregation: ${JSON.stringify(goneWithFrame)}`);
+  }
+
+  // A 410 must not pay the frame poll: the status already decided it, and a
+  // dead posting whose error page renders into an iframe would otherwise wait
+  // for that error page to fill before saying what it knew at byte one.
+  // Count only the 500ms poll waits; the 2000ms hydration wait always happens.
+  let pollWaits = 0;
+  const gonePage = framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: '', controls: [], fillAfter: 999 }],
+  });
+  gonePage.waitForTimeout = async (ms) => { if (ms === 500) pollWaits += 1; };
+  const goneFast = await checkUrlLiveness(gonePage, SHELL);
+  if (goneFast.result === 'expired' && goneFast.code === 'http_gone' && pollWaits === 0) {
+    pass('HTTP 410 short-circuits before the frame poll (no wait spent)');
+  } else {
+    fail(`410 did not short-circuit: ${JSON.stringify(goneFast)}, poll waits=${pollWaits}`);
+  }
+
+  const legacyDouble = await checkUrlLiveness(livePage(), URL);
+  if (legacyDouble.result === 'active') {
+    pass('a page object without frames()/mainFrame() still returns a top-level verdict');
+  } else {
+    fail(`frame aggregation broke a frameless page object: ${JSON.stringify(legacyDouble)}`);
+  }
 
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
       isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
@@ -2098,8 +2204,10 @@ const patternsMachineFields = readFile('analyze-patterns.mjs').match(/const MACH
 if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
+  /^reports_to:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
-  /['"]company_confidential['"]/.test(patternsMachineFields)
+  /['"]company_confidential['"]/.test(patternsMachineFields) &&
+  /['"]reports_to['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
@@ -3386,6 +3494,20 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
 }
 
+// One YAML fence at a time, each bounded to its own step. A count over the
+// whole file passes when one fence carries the key twice and the other carries
+// it not at all, and an unbounded tail lets any later line stand in for the
+// Step 3 fence.
+const step2SchemaSection = batchPromptDoc.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
+const step2SchemaFence = step2SchemaSection.match(/```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+const step3Section = batchPromptDoc.match(/### Step 3 \u2014 Save the Report[\s\S]*?### Step 4 \u2014/)?.[0] ?? '';
+const step3SummaryFence = step3Section.match(/## Machine Summary\s*\n+```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+if (/^reports_to:/m.test(step2SchemaFence) && /^reports_to:/m.test(step3SummaryFence)) {
+  pass('batch prompt carries reports_to in both Machine Summary fences');
+} else {
+  fail('batch prompt missing reports_to in one or both Machine Summary fences');
+}
+
 // ── upskill Learning Plan trust model (#1740, phase 2b) ──
 // The learning plan (Step 3) layers web-searched resources onto the phase-1 gap
 // heatmap. Its eight trust-model promises are load-bearing: each is frozen here
@@ -4650,6 +4772,50 @@ try {
     pass('verify-portals derives common slug suffixes (e.g. deepsetai)');
   } else {
     fail('verify-portals missing deepsetai suffix for Deepset');
+  }
+
+  // ── ASCII fold (#2930) ──
+  // The bug: `[^a-z0-9\s]` turned an accented letter into a SEPARATOR, so
+  // "Telefónica" became the two words "telef nica" and never produced
+  // "telefonica" — the slug the board actually uses. --add then reported a live
+  // board as missing. "Société Générale" shattered into four fragments, so even
+  // the first-word heuristic yielded "soci" instead of "societe".
+  const accented = [
+    ['Telefónica', 'telefonica'],
+    ['Société Générale', 'societegenerale'],
+    ['Nestlé', 'nestle'],
+    ['Ørsted', 'orsted'],   // ø does not decompose under NFD
+    ['Æon', 'aeon'],        // æ expands to two letters
+    // Letters NFD does not decompose: the stroke/bar is part of the glyph, so
+    // stripping combining marks leaves them and [^a-z0-9] deletes them
+    // (CodeRabbit, reviewing #2927). No substring luck here — "Işık" derived
+    // "isk" and never "isik", so --add probed a slug no board uses.
+    ['Işık', 'isik'],       // Turkish dotless ı
+    ['Ħamrun', 'hamrun'],   // Maltese ħ
+    ['Ŧorne', 'torne'],     // ŧ
+    ['Ŋaro', 'ngaro'],      // ŋ romanises as "ng", not "n"
+  ];
+  const missedFold = accented.filter(([name, want]) => !deriveSlugCandidates(name).includes(want));
+  if (missedFold.length === 0) {
+    pass('verify-portals ASCII-folds accented names to the slug the board actually uses');
+  } else {
+    fail(`verify-portals slug fold missed: ${missedFold.map(([n, w]) => `${n}->${w}`).join(', ')}`);
+  }
+
+  // The fold must not turn every name into a match: a distinct company must
+  // still derive a distinct slug. Without this, returning a constant passes.
+  if (!deriveSlugCandidates('Telefónica').includes('vodafone') && deriveSlugCandidates('Société Générale').includes('societe')) {
+    pass('verify-portals fold keeps distinct names distinct and preserves the first-word candidate');
+  } else {
+    fail('verify-portals fold collapsed distinct names or lost the first-word candidate');
+  }
+
+  // A name with no Latin content folds to '' — a real answer (ATS slugs are
+  // ASCII), which runAdd now reports as such instead of "needs a company name".
+  if (deriveSlugCandidates('楽天').length === 0 && deriveSlugCandidates('Сбербанк').length === 0) {
+    pass('verify-portals derives no slug from a name with no Latin content');
+  } else {
+    fail('verify-portals derived an ASCII slug from a non-Latin name');
   }
 
   if (
