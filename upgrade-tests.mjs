@@ -13,12 +13,13 @@
  * VERSION (apply has no version gate; equal-VERSION content drift is normal).
  *
  * Usage:
- *   node upgrade-tests.mjs --pr-gate    # newest old tag -> HEAD, one leg
- *   node upgrade-tests.mjs --canary     # planted user-file clobber must go RED
+ *   node upgrade-tests.mjs --pr-gate     # newest old tag -> HEAD, one leg
+ *   node upgrade-tests.mjs --canary      # planted user-file clobber must go RED
+ *   node upgrade-tests.mjs --local-paths # a declared fork-local path survives (#2421)
  */
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, realpathSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -61,6 +62,24 @@ function writeGitConfig(work, mirror) {
   const url = pathToFileURL(mirror).href;
   writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n[safe]\n\tdirectory = *\n`);
   return cfg;
+}
+
+/** Environment for a subprocess that must see ONLY the temp gitconfig.
+ *
+ *  GIT_CONFIG_GLOBAL alone does not make the run hermetic, which the header
+ *  comment above claims it does. Two other channels survive it: a system
+ *  /etc/gitconfig (or the Git-for-Windows equivalent), and any inherited
+ *  GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n triple, which git
+ *  applies at higher precedence than every config file. Either can rewrite a
+ *  URL out from under the mirror, and the failure looks like a real regression
+ *  rather than a poisoned harness. Close both. */
+function hermeticEnv(cfg) {
+  return {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: cfg,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '0',
+  };
 }
 
 /** A system file whose blob differs between oldTag and target — the non-vacuity
@@ -139,7 +158,7 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     try {
       output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: { ...process.env, GIT_CONFIG_GLOBAL: cfg },
+        env: hermeticEnv(cfg),
       });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
 
@@ -258,9 +277,108 @@ function canary() {
   process.exit(1);
 }
 
+/** Local-paths leg (#2421): a file a fork DECLARED as its own must not be
+ *  silently overwritten when upstream later starts shipping a file at that
+ *  same path.
+ *
+ *  Poisons the mirror so the target ships `run-nightly.ps1` AND lists it in
+ *  SYSTEM_PATHS — the future in which upstream adopts a filename some fork is
+ *  already using. The install declares that path in config/local-paths.txt,
+ *  which is what a fork does today under this feature.
+ *
+ *  Expected: `localUserPaths()` refuses the entry (it now collides with
+ *  SYSTEM_PATHS), apply fails closed rather than proceeding on a safety
+ *  invariant it could not evaluate, reverts the system-layer writes, and the
+ *  fork's own content is still on disk afterwards.
+ *
+ *  Note what this does NOT claim. Without #2421, the fork's file survives this
+ *  scenario anyway: apply's existing local-modification handling keeps the
+ *  user's version, writes a .bak, and prints "Keeping your versions". The
+ *  difference the feature makes here is honesty, not rescue — an unevaluable
+ *  declaration stops the update instead of letting it proceed while the user
+ *  believes a protection is in force that was never read.
+ *
+ *  Non-vacuity: on a tree WITHOUT #2421 this leg goes red — nothing reads the
+ *  declaration, so apply exits 0 and never mentions the declaration file. A leg
+ *  that cannot fail on the unfixed tree proves nothing about the fixed one.
+ */
+function localPathsLeg() {
+  const FORK_FILE = 'run-nightly.ps1';
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-localpaths-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [local-paths] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', msg);
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+
+    // Poison: upstream adopts the fork's filename as a managed system file.
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    writeFileSync(join(wt, FORK_FILE), '# UPSTREAM VERSION — must never land on top of the fork\n');
+    const updater = readFileSync(join(wt, 'update-system.mjs'), 'utf-8')
+      .replace(/const\s+SYSTEM_PATHS\s*=\s*\[/, `const SYSTEM_PATHS = [\n  '${FORK_FILE}',`);
+    if (!updater.includes(`'${FORK_FILE}',`)) throw new Error('Could not inject the poisoned SYSTEM_PATHS entry (constant renamed?)');
+    writeFileSync(join(wt, 'update-system.mjs'), updater);
+    git(wt, 'add', '-f', FORK_FILE, 'update-system.mjs');
+    commit(wt, 'poison: upstream adopts a path a fork already owns');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    // The fork's own file, tracked (that is the point — it is version
+    // controlled locally), plus the declaration that says it is theirs.
+    const forkContent = '# fork-local nightly runner — no upstream counterpart\n';
+    writeFileSync(join(install, FORK_FILE), forkContent);
+    mkdirSync(join(install, 'config'), { recursive: true });
+    writeFileSync(join(install, 'config', 'local-paths.txt'), `# mine, not upstream\n${FORK_FILE}\n`);
+    git(install, 'add', '-f', FORK_FILE);
+    commit(install, 'fork: local nightly runner');
+    const before = sha256(join(install, FORK_FILE));
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000,
+        env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+
+    ok(exitCode !== 0, `apply fails closed on an unevaluable declaration instead of proceeding (exit ${exitCode})`);
+    const survived = existsSync(join(install, FORK_FILE)) && sha256(join(install, FORK_FILE)) === before;
+    ok(survived, `declared fork-local file is byte-identical after apply: ${FORK_FILE}`);
+    // Names BOTH the declaration file and the offending entry. The declaration
+    // file is the half that flips: a tree without #2421 never reads it, so it
+    // can never appear in the output no matter how apply handles the path.
+    ok(output.includes('config/local-paths.txt'), 'apply names the declaration file as the reason');
+    ok(output.includes(FORK_FILE), `apply names the offending entry (${FORK_FILE})`);
+
+    if (failures.length && output) {
+      console.log('  --- apply output tail [local-paths] ---');
+      console.log(output.split('\n').slice(-15).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
   else if (mode === '--canary') canary();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary'); process.exit(1); }
+  else if (mode === '--local-paths') localPathsLeg();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths'); process.exit(1); }
 }

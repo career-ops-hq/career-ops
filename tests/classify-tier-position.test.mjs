@@ -100,6 +100,14 @@ try {
   check('Junior Talent Director', 'senior');
   check('Junior Talent Lead', 'senior');
   check('Entry-Level Program Director', 'senior');
+
+  // ── Guard (b) scoping: bridge noun present but NO trailing senior noun → stays at level marker ──
+  // These cases prove the guard does not overreach. Removing the trailing-noun
+  // requirement at classify-tier.mjs:119 would flip all three to 'senior' and
+  // a junior candidate would silently lose intern-programme roles.
+  check('Intern Program Coordinator', 'intern');
+  check('Graduate Scheme Analyst', 'intern');
+  check('Trainee Program Engineer', 'intern');
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);
 }
