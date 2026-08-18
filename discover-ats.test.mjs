@@ -29,7 +29,7 @@ import {
   buildWorkdayCandidates,
   resolveCompany,
 } from './discover-ats.mjs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -283,6 +283,53 @@ ok('resolveCompany unresolved names workday hint path', /Workday/.test(noWd.unre
 const badHint = await resolveCompany({ name: 'BadHint', workday: { tenant: 'a/b', site: 'S' } }, { vendors: [] });
 ok('rejected hint → "given but rejected" reason', /rejected/i.test(badHint.unresolved.reason));
 ok('rejected hint → NOT the "add a hint" message', !/add a hint/i.test(badHint.unresolved.reason));
+
+// ── #2883: a definitive 404 must not be reported as a transient error ──
+// Greenhouse/Ashby/Lever answering 404 means the board does not exist. Reporting
+// that as "board status unknown ... re-run" advises a retry guaranteed to give
+// the same answer, and erases the difference between "no board" and "the network
+// hiccuped" — the two states a user pruning portals.yml has to tell apart.
+const httpErrorCtx = (statusByVendor) => ({
+  fetchJson: async (url) => {
+    const vendor = /greenhouse/.test(url) ? 'gh' : /ashby/.test(url) ? 'ashby' : 'lever';
+    const status = statusByVendor[vendor] ?? 404;
+    const err = new Error(`HTTP ${status}${status === 404 ? ' Not Found' : ''}`);
+    err.status = status;
+    throw err;
+  },
+  fetchText: async () => { throw new Error('unused'); },
+});
+const SLUG_VENDORS = ['gh', 'ashby', 'lever'];
+
+const all404 = await resolveCompany({ name: 'Mercado Libre' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 404, ashby: 404, lever: 404 }) });
+ok('all-404 → not reported as unknown', !/status unknown/i.test(all404.unresolved.reason));
+// Precisely: no advice to re-run THE SAME PROBE. The fallback message does say
+// "add a Workday hint and re-run", which is a different and actionable
+// instruction — the user changes their input first. What must not survive is
+// the unconditional retry attached to an unknown status.
+ok('all-404 → no advice to re-run the same probe', !/errors\[\] and re-run/i.test(all404.unresolved.reason));
+ok('all-404 → says no board was found', /no .*board found/i.test(all404.unresolved.reason));
+ok('all-404 → each error is marked definitive',
+  all404.unresolved.errors.length === 3 && all404.unresolved.errors.every(e => e.definitive === true));
+
+// A 410 Gone is equally definitive.
+const all410 = await resolveCompany({ name: 'Gone Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 410, ashby: 410, lever: 410 }) });
+ok('all-410 → treated as definitive too', !/status unknown/i.test(all410.unresolved.reason));
+
+// Guard: a genuinely transient failure must KEEP the unknown/re-run wording.
+const all503 = await resolveCompany({ name: 'Flaky Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 503, ashby: 503, lever: 503 }) });
+ok('all-503 → still reported as unknown', /status unknown/i.test(all503.unresolved.reason));
+ok('all-503 → still advises a re-run', /re-run/i.test(all503.unresolved.reason));
+ok('all-503 → errors are not marked definitive', all503.unresolved.errors.every(e => e.definitive !== true));
+
+// Guard: ONE transient failure among 404s leaves the outcome unknown — that
+// vendor was never actually answered, so absence is not established.
+const mixed = await resolveCompany({ name: 'Mixed Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 404, ashby: 503, lever: 404 }) });
+ok('mixed 404/503 → still unknown, absence not established', /status unknown/i.test(mixed.unresolved.reason));
 
 // parseCompanyInput warns on a present-but-wrong-typed workday field (e.g. a number).
 const wrongType = parseCompanyInput('companies:\n  - name: X\n    workday: 42\n', []);

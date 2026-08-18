@@ -34,7 +34,7 @@
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -428,8 +428,29 @@ export async function probeVendor(company, candidate, ctx) {
     const jobCount = Array.isArray(jobs) ? jobs.length : 0;
     return { status: jobCount > 0 ? 'match' : 'empty', jobCount };
   } catch (err) {
-    return { status: 'error', jobCount: 0, error: err?.message || String(err) };
+    /** @type {any} */
+    const out = { status: 'error', jobCount: 0, error: err?.message || String(err) };
+    // _http.mjs attaches the numeric status to the thrown error; keeping it is
+    // what lets the caller tell a definitive 404 from a transient 5xx instead of
+    // re-parsing the message text (#2883).
+    if (Number.isInteger(err?.status)) out.httpStatus = err.status;
+    return out;
   }
+}
+
+/**
+ * Whether a probe failure ESTABLISHES that no board exists.
+ *
+ * 404 and 410 are answers: the vendor was reached and said the board is not
+ * there. Everything else — 5xx, a timeout, DNS, a rejected redirect, or a
+ * candidate whose API URL could not even be derived — leaves the question open,
+ * because nothing ever answered it.
+ *
+ * @param {{httpStatus?: number}} probeError
+ * @returns {boolean}
+ */
+export function isDefinitiveAbsence(probeError) {
+  return probeError?.httpStatus === 404 || probeError?.httpStatus === 410;
 }
 
 /**
@@ -509,7 +530,11 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
     if (result.status === 'empty') {
       emptyBoards.push({ vendor: candidate.vendor, careers_url: candidate.careers_url });
     } else {
-      errors.push({ vendor: candidate.vendor, error: result.error });
+      /** @type {any} */
+      const entry = { vendor: candidate.vendor, error: result.error };
+      if (Number.isInteger(result.httpStatus)) entry.httpStatus = result.httpStatus;
+      if (isDefinitiveAbsence(result)) entry.definitive = true;
+      errors.push(entry);
     }
   }
 
@@ -538,9 +563,17 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       : (company.workday && typeof company.workday === 'object'));
   const reason = emptyBoards.length
     ? 'board(s) found but currently list 0 jobs — re-run later or force-add manually'
-    // Every probe errored (transient network/HTTP), and nothing was confirmed
-    // absent or empty — don't claim "no board found", the status is unknown.
-    : (errors.length && !coords)
+    // Every probe errored and nothing was confirmed absent or empty — don't
+    // claim "no board found", the status is unknown.
+    //
+    // Unless every failure was DEFINITIVE. A 404 from Greenhouse/Ashby/Lever is
+    // an answer, not a hiccup: the board is not there and re-running will say so
+    // again. Advising a retry in that case erased the difference between "this
+    // company has no board" and "the network hiccuped", which is exactly the
+    // pair a user pruning portals.yml has to tell apart (#2883). One transient
+    // failure among them is enough to leave the question open — that vendor
+    // never answered, so absence is not established.
+    : (errors.length && !coords && !errors.every(isDefinitiveAbsence))
       ? 'probe error(s) occurred — board status unknown, see errors[] and re-run'
       // A hint was given but rejected by parseWorkdayHint (bad chars, missing
       // tenant/site): tell the user to fix it, not to add one.

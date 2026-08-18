@@ -2,11 +2,11 @@
 // Imports directly from stream-parse.mjs (the single source of truth) so the
 // test and production code can never drift out of sync.
 //
-// Run:  node --test test-stream-parse.mjs
+// Run:  node --test tests/lib/stream-parse.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pendingOpenerLen } from "./src/lib/stream-parse.mjs";
+import { pendingOpenerLen } from "../../src/lib/stream-parse.mjs";
 
 const OPEN = "<<offer:";
 

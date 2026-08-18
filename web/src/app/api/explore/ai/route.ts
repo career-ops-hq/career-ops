@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,9 +39,8 @@ function readCodexHelp(binPath: string, args: string[]): Promise<string> {
     const appendBounded = (current: string, chunk: Buffer) =>
       (current + chunk.toString()).slice(-64_000);
 
-    const child = spawn(binPath, args, {
+    const child = spawnHeadlessCli(binPath, args, {
       env: { ...process.env, NO_COLOR: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
     });
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -241,10 +240,9 @@ export async function POST(req: Request) {
   const useCodexProcessGroup =
     isCodex && process.platform !== "win32";
 
-  const child = spawn(binPath, args, {
+  const child = spawnHeadlessCli(binPath, args, {
     cwd: childCwd,
     env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
     detached: useCodexProcessGroup,
   });
 

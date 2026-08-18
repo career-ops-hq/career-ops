@@ -37,6 +37,45 @@ The actual model behind each tier depends on your CLI. See the mapping table in 
 
 ---
 
+## 2b. Already Paying for a Subscription? Make Sure You Are Using It
+
+If you pay for a plan (Claude Pro/Max, or the equivalent on another CLI) and you are *also* being charged per token, the usual cause is an API key sitting in your environment: **most CLIs prefer an explicit key over your logged-in subscription.** The tool cannot tell that you would rather spend the plan you already bought.
+
+This section is Claude Code specific because that is where the question comes up most. Other CLIs have their own precedence rules: check their docs, but the shape of the problem is the same.
+
+### Check which one you are on
+
+```bash
+echo $ANTHROPIC_API_KEY     # anything printed here is being billed per token
+```
+
+Inside Claude Code, `/status` reports the active login and shows an API-key row when a key is in use, and `/usage` shows plan usage on a subscription versus a session dollar cost on a key.
+
+### Switch to the subscription
+
+1. Remove the key from wherever it is exported (`~/.zshrc`, `~/.bashrc`, `~/.profile`, a project `.env`, or another tool that sets it for you). `unset ANTHROPIC_API_KEY` only affects the current shell, so edit the file too or it comes back on the next terminal.
+2. Restart the terminal.
+3. Run `/login` in Claude Code and sign in.
+
+`ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
+
+### The batch mode is the exception worth knowing
+
+`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+
+```bash
+claude setup-token          # requires an active Claude subscription
+```
+
+Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment the batch runs in. It is a credential: treat it like one, and never commit it.
+
+### Two things worth expecting
+
+- **Plan limits are windows, not balances.** On a subscription you get rolling usage windows rather than a credit balance, so a heavy scan can pause you until the window resets. `spend_tier: economy` and the pre-screen gate above exist precisely to make high-volume days cheaper.
+- **Details change.** Auth precedence and command names come from the CLI, not from career-ops. If something here does not match what you see, the vendor's own docs are the source of truth: [Claude Code authentication](https://code.claude.com/docs/en/authentication) and [managing costs](https://code.claude.com/docs/en/costs).
+
+---
+
 ## 3. Configuring Alternative CLI Setups
 
 Different CLIs offer different levels of flexibility for model routing. The two most common options for budget setups are **OpenCode** and **Qwen CLI**.
@@ -254,9 +293,28 @@ node openai-eval.mjs \
 ```
 
 **Approximate Token Usage:**
-- **Input:** ~3,500 tokens (System prompt + your `cv.md` + JD)
-- **Output:** ~1,000 tokens (The A-G evaluation report)
-- **Cost:** ~4,500 tokens total. At DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), this costs **less than $0.001** per evaluation.
+- **Input:** ~20,000 tokens. The static prefix alone is **17,728**: the script sends `modes/_shared.md` (4,127) plus `modes/oferta.md` (13,601) as the system prompt, and your `cv.md` and the JD come on top of that.
+- **Output:** ~1,000 tokens (the A-G evaluation report).
+- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.003 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
+
+Measure it yourself rather than trusting this paragraph, because these files grow with every release:
+
+```bash
+node --input-type=module -e "
+import { estimateTokens } from './lib/context-budget.mjs';
+import { readFileSync } from 'fs';
+for (const f of ['modes/_shared.md','modes/oferta.md','AGENTS.md'])
+  console.log(f, estimateTokens(readFileSync(f,'utf8')));"
+```
+
+### What the default path costs (this is the number most people are actually paying)
+
+The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (8,285) + `modes/_shared.md` (4,127) + `modes/oferta.md` (13,601) = about 26,000 tokens of instructions per evaluation**, before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
+
+Two things follow from that, and they are the cheapest wins available:
+
+- **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
+- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
 
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 

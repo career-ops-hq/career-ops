@@ -20,6 +20,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
 } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
@@ -208,8 +209,16 @@ async function updateTrackerStatuses(updates) {
   }
 }
 
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = 'Usage: node reply-watch.mjs [path/to/candidates.json]';
+
 async function main() {
-  const candidatesPath = process.argv[2] || DEFAULT_CANDIDATES_PATH;
+  const args = process.argv.slice(2);
+
+  const positional = args.filter(a => !a.startsWith('-'));
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+
+  const candidatesPath = positional[0] || DEFAULT_CANDIDATES_PATH;
   ensureCandidatesFile(candidatesPath);
 
   if (!fs.existsSync(candidatesPath)) {

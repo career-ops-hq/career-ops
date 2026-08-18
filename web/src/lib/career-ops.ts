@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+// One definition of the `{n}-RESERVED.md` convention, shared with
+// run-cli-support.mjs — see report-files.mjs for why it lives there.
+import { isReservedReportFile } from "@/lib/report-files.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -216,19 +219,59 @@ export function pipelineSummary(): PipelineSummary {
 
 export type ReportData = { content: string; file: string };
 
-/** Locate the evaluation report for an application number
- *  (reports/{n}-{slug}-{date}.md; the leading number may be zero-padded). */
+/** Locate the evaluation report for an application number.
+ *  The tracker row's own report link is authoritative: report FILE numbers can
+ *  differ from application numbers (e.g. app #309 → reports/308-…), so
+ *  resolving only by leading filename number misses those. Links are
+ *  normalized relative to the tracker file's directory (see #760). Falls back
+ *  to the filename scan (reports/{n}-{slug}-{date}.md, possibly zero-padded)
+ *  for rows without a parseable link.
+ *
+ *  Both the linked lookup and the fallback scan skip `{n}-RESERVED.md`
+ *  placeholder files.
+ *  `reserve-report-num.mjs` writes an empty `NNN-RESERVED.md` sentinel to
+ *  claim a report number before a worker has actually written the report;
+ *  it's normally deleted once the real report lands (or GC'd after 4h if
+ *  abandoned). But "RESERVED" sorts alphabetically before nearly every real
+ *  slug (company names start with lowercase/uppercase letters after the
+ *  number-dash, "R" often lands mid-alphabet or earlier), so if a sentinel
+ *  outlives its report — e.g. a worker was driven directly instead of
+ *  through the orchestrator that owns cleanup — `.find()` could return the
+ *  empty sentinel instead of the real report, making the report body and the
+ *  Apply/PDF-ready checks disappear. */
 export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
+  const root = careerOpsRoot();
+  const app = readApplications().find((a) => parseInt(a.n, 10) === target);
+  const linked = app?.report.match(/\]\(([^)]+)\)/)?.[1];
+  if (linked) {
+    const p = path.resolve(root, "data", linked);
+    // Containment: a hand-edited link must not resolve outside the project.
+    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
+  }
   let files: string[];
   try {
-    files = fs.readdirSync(path.join(careerOpsRoot(), "reports"));
+    files = fs.readdirSync(path.join(root, "reports"));
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
-  return match ? path.join(careerOpsRoot(), "reports", match) : null;
+  const match = files.find(
+    (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
+  );
+  if (!match) return null;
+  const p = path.join(root, "reports", match);
+  return containedRealpath(p, root) ? p : null;
+}
+
+/** True containment check: resolves symlinks before comparing, so a link
+ *  planted under data/ or reports/ can't leak files outside the project. */
+function containedRealpath(p: string, root: string): boolean {
+  try {
+    return fs.realpathSync(p).startsWith(fs.realpathSync(root) + path.sep);
+  } catch {
+    return false; // missing file or unresolvable link — treat as not found
+  }
 }
 
 export function readReport(n: string): ReportData | null {

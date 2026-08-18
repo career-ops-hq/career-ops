@@ -48,6 +48,9 @@ function runScript(script, args, sandbox) {
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_ADDITIONS: sandbox.additions,
     CAREER_OPS_TRACKER_LOCK: sandbox.lock,
+    // Pinned for the same reason as the tracker: keep the fixture isolated from
+    // the real reports/ dir. See makeSandbox.
+    ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
   };
   try {
     const stdout = execFileSync(NODE, [join(ROOT, script), ...args], {
@@ -75,12 +78,21 @@ function makeSandbox(trackerContent, additions = {}) {
   const tracker = join(dir, 'applications.md');
   const additionsDir = join(dir, 'tracker-additions');
   const lock = join(dir, 'lock');
+  // An empty reports dir belongs in the sandbox alongside the tracker. Without
+  // it verify-pipeline scans the REAL reports/ dir and emits one "Orphan report"
+  // warning per report not referenced by this fixture's tracker -- 213 of them
+  // at 256 reports. That made Test 2 slow enough to trip its own 30s timeout
+  // under full-suite load, failing ~2 runs in 5 as "tracker-columns-tests.mjs
+  // crashed" while passing 8/8 in isolation. Same fixture bug as the #1704 block
+  // in test-all.mjs (see PATCHES.md patch 10).
+  const reportsDir = join(dir, 'reports');
   mkdirSync(additionsDir, { recursive: true });
+  mkdirSync(reportsDir, { recursive: true });
   writeFileSync(tracker, trackerContent);
   for (const [name, content] of Object.entries(additions)) {
     writeFileSync(join(additionsDir, name), content);
   }
-  return { dir, tracker, additions: additionsDir, lock };
+  return { dir, tracker, additions: additionsDir, lock, reports: reportsDir };
 }
 
 // Pin scan.mjs's extra dedupe sources inside the sandbox. The module-level
@@ -626,6 +638,68 @@ if (!HAS_WEB) {
     fail(`merge: empty Notes cell shifted Location (code ${res.code}) row: ${baz}\n${res.stdout}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 18: web reader honors the core's row-shape contract (#2369) ────────
+// The web reader mirrors parseTrackerRow's LOGIC (not just its alias table),
+// so it must agree with the core on which rows are readable at all:
+//   a) a row missing an INTERIOR cell shifts every later column one left, so
+//      the core REJECTS it (dynamic width guard in parseTrackerRow). The web
+//      reader used to accept it and render Score in the Role column.
+//   b) a hand-edited row WITHOUT the trailing pipe is one part narrower but
+//      complete (tracker-utils rebuildRow supports them), so the core reads
+//      its last cell. The web reader used to drop it via slice(1, -1).
+// Realistic trigger for (a): a row written before `merge-tracker --migrate-via`
+// widened the header, so it carries no Via cell.
+if (!HAS_WEB) {
+  skipWeb('web reader: row-shape contract tests');
+} else {
+  const { parseApplications } = await import('./web/src/lib/tracker-table.mjs');
+  const { resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
+  const VIA_HEADER = [
+    '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|-----|------|-------|--------|-----|--------|-------|',
+  ];
+  const coreRows = (md) => {
+    const lines = md.split('\n');
+    const cm = resolveColumns(lines);
+    return lines.map(l => parseTrackerRow(l.trim(), cm)).filter(Boolean);
+  };
+
+  // (a) pre-migration row: 9 cells under a 10-column header.
+  const SHIFTED = [
+    ...VIA_HEADER,
+    '| 12 | 2026-01-01 | Acme | Hays | Engineer | 4.5/5 | Applied | ✅ | — | agency |',
+    '| 13 | 2026-01-02 | Globex | Engineer | 4.0/5 | Applied | ✅ | — | pre-migration |',
+  ].join('\n');
+  const shiftedWeb = parseApplications(SHIFTED, ROOT);
+  const shiftedCore = coreRows(SHIFTED);
+  if (shiftedWeb.length === shiftedCore.length && shiftedWeb.every(r => r.n !== '13')) {
+    pass('web reader: row missing an interior cell is rejected, like the core');
+  } else {
+    fail(`web reader: accepted a short row — web ${JSON.stringify(shiftedWeb.map(r => r.n))} vs core ${JSON.stringify(shiftedCore.map(r => String(r.num)))}`);
+  }
+  // The complete row next to it must still parse, unshifted.
+  const good = shiftedWeb.find(r => r.n === '12');
+  if (good && good.via === 'Hays' && good.role === 'Engineer' && good.score === '4.5/5' && good.status === 'Applied') {
+    pass('web reader: the complete Via row next to it stays unshifted');
+  } else {
+    fail(`web reader: complete Via row misread — got ${JSON.stringify(good)}`);
+  }
+
+  // (b) no trailing pipe — the last cell is data, not padding.
+  const NO_TRAILING_PIPE = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 5 | 2026-01-01 | Acme | Engineer | 4.5/5 | Applied | ✅ | — | last note',
+  ].join('\n');
+  const tailWeb = parseApplications(NO_TRAILING_PIPE, ROOT)[0];
+  const tailCore = coreRows(NO_TRAILING_PIPE)[0];
+  if (tailWeb && tailCore && tailWeb.notes === tailCore.notes && tailWeb.notes === 'last note') {
+    pass('web reader: row without a trailing pipe keeps its last cell');
+  } else {
+    fail(`web reader: dropped the last cell — web "${tailWeb && tailWeb.notes}" vs core "${tailCore && tailCore.notes}"`);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
