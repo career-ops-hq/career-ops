@@ -11,16 +11,22 @@ export function reportNumberFromCell(cell) {
 }
 
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */
-export function pdfPathForReport(indexText, reportNumber) {
-  if (!Number.isInteger(reportNumber)) return null;
+export function pdfIndexEntryForReport(indexText, reportNumber) {
+  if (!Number.isInteger(reportNumber)) return { found: false, path: null };
   for (const line of String(indexText ?? "").split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
     const columns = line.split("\t");
     const indexedReport = columns[0]?.trim() ?? "";
     if (/^\d+$/.test(indexedReport) && Number(indexedReport) === reportNumber) {
       const pdf = columns[1]?.trim();
-      return pdf || null;
+      return { found: true, path: pdf || null };
     }
   }
-  return null;
+  return { found: false, path: null };
+}
+
+/** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */
+export function pdfPathForReport(indexText, reportNumber) {
+  const entry = pdfIndexEntryForReport(indexText, reportNumber);
+  return entry.found ? entry.path : null;
 }

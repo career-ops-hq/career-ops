@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, pdfPathForReport } from "@/lib/career-ops";
+import { careerOpsRoot, isRegularContainedFile, pdfPathStatusForReport } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,19 +26,16 @@ export async function GET(req: NextRequest) {
   // apart and would open the wrong report's PDF.
   if (n) {
     // A malformed n (typo, tampered query string) must not silently fall
-    // through to the company heuristic below — pdfPathForReport returns null
-    // for both "malformed" and "valid but not indexed", and conflating them
-    // would let a bad n quietly serve the wrong report's PDF instead of
-    // surfacing the mistake.
     if (!/^\d+$/.test(n)) return new Response("invalid report number", { status: 400 });
-    const exact = await pdfPathForReport(n);
-    if (exact) {
+    const exact = await pdfPathStatusForReport(n);
+    if (exact.status === "found") {
       try {
-        return servePdf(exact);
+        return servePdf(exact.path);
       } catch {
         return new Response("could not read the PDF", { status: 500 });
       }
     }
+    if (exact.status === "rejected") return new Response("indexed tailored CV is unavailable", { status: 404 });
     // No index entry (e.g. a report generated before pdf-index.tsv existed) —
     // fall through to the company-slug heuristic below rather than 404 on a
     // real, existing tailored CV.
@@ -58,7 +55,8 @@ export async function GET(req: NextRequest) {
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => re.test(f.toLowerCase()));
+      .filter((f) => re.test(f.toLowerCase()))
+      .filter((f) => isRegularContainedFile(path.join(dir, f), dir));
   } catch {
     return new Response("no output directory", { status: 404 });
   }
