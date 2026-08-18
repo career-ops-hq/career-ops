@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, RotateCcw } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, RotateCcw, FileText } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>
               {job.result.summary && <span className="text-sm text-muted">{job.result.summary}</span>}
             </div>
+          )}
+          {job.kind === "evaluate" && job.status === "done" && job.reportNum && (
+            <Link
+              href={`/pipeline/${job.reportNum}`}
+              className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200"
+            >
+              <FileText className="size-4" /> View full report
+            </Link>
           )}
         </div>
       </section>

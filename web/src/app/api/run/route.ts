@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, newCompletedReportName, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -406,7 +406,11 @@ export async function POST(req: Request) {
           return close();
         }
 
-        const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
+        const newReportName = newCompletedReportName(reportsBefore, reportEntries());
+        const wroteReport = newReportName !== null;
+        // {num}-{company-slug}-{date}.md — the leading digits are the tracker
+        // number the client needs to link to /pipeline/{num}.
+        const reportNum = newReportName?.match(/^0*(\d+)-/)?.[1];
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
@@ -422,7 +426,7 @@ export async function POST(req: Request) {
           // instead of recording a confident score off a half-finished run.
           send({ type: "error", msg: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." });
         } else {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, reportNum });
         }
         close();
       });

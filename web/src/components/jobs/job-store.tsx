@@ -19,6 +19,10 @@ export type Job = {
   text: string;
   result?: JobResult;
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
+  /** For a completed "evaluate" run: the tracker # of the report it wrote, so
+   *  the job page can link straight to it (the streamed text is often just
+   *  the terse VERDICT line — the real report lives at /pipeline/{reportNum}). */
+  reportNum?: string;
   startedAt: number;
   endedAt?: number;
 };
@@ -125,6 +129,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
         let doneCostUsd: number | null = null;
+        let doneReportNum: string | undefined;
         const steps: JobStep[] = [];
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
@@ -134,6 +139,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             status,
             result,
             cost,
+            reportNum: status === "done" ? doneReportNum : j.reportNum,
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
@@ -190,9 +196,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   text = full.slice(-8000);
                   patch(id, (j) => ({ ...j, text }));
                 } else if (ev.type === "done") {
-                  // finish happens on stream-close; capture the per-run cost it carries
+                  // finish happens on stream-close; capture the per-run cost (and,
+                  // for evaluate, the report number) it carries
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                  if (typeof ev.reportNum === "string") doneReportNum = ev.reportNum;
                 } else if (ev.type === "error") {
                   finish("error", ev.msg || "Error");
                   return;

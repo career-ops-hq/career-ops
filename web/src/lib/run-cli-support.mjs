@@ -333,10 +333,27 @@ export function completedReportNames(entries) {
  * @returns {boolean}
  */
 export function hasNewCompletedReport(beforeEntries, afterEntries) {
+  return newCompletedReportName(beforeEntries, afterEntries) !== null;
+}
+
+/**
+ * The filename of the ONE new completed report this run produced, or null.
+ * Lets the client link straight to the report (`/pipeline/{num}`) instead of
+ * only knowing a report exists somewhere — the raw agent narration for
+ * "evaluate" is often just the terse VERDICT line (the real deliverable is
+ * the persisted report file + tracker row, not the streamed chat text), so
+ * without this the done job's own page had nothing to point the user at.
+ * Multiple new names (a very unusual run) return the first — better than
+ * guessing wrong across several, and a normal run only ever produces one.
+ * @param {string[]} beforeEntries
+ * @param {string[]} afterEntries
+ * @returns {string | null}
+ */
+export function newCompletedReportName(beforeEntries, afterEntries) {
   const before = completedReportNames(beforeEntries);
   const after = completedReportNames(afterEntries);
   for (const name of after) {
-    if (!before.has(name)) return true;
+    if (!before.has(name)) return name;
   }
-  return false;
+  return null;
 }
