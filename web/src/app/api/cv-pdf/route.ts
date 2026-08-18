@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { resolveCvByReport } from "@/lib/apply/cv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,27 @@ export const dynamic = "force-dynamic";
 // a given offer (matched by company slug, newest first). Inline so it opens in
 // the browser. Local-first: reads the user's own output/ dir.
 export async function GET(req: NextRequest) {
+  // Prefer the exact per-report mapping. Matching on company alone serves the
+  // newest PDF for that employer, so two roles at the same company resolve to
+  // the same file (Zurich vs Barcelona at ANYbotics). Company stays as the
+  // fallback for rows generated before the index existed.
+  const byReport = resolveCvByReport(req.nextUrl.searchParams.get("report") ?? undefined);
+  if (byReport) {
+    try {
+      const buf = fs.readFileSync(byReport);
+      return new Response(new Uint8Array(buf), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${path.basename(byReport)}"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch {
+      return new Response("could not read the PDF", { status: 500 });
+    }
+  }
+
   const company = (req.nextUrl.searchParams.get("company") ?? "").trim();
   if (!company) return new Response("company required", { status: 400 });
   // Token-extract instead of replace-then-trim: same slug, and no `-+$`-style
