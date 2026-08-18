@@ -6,7 +6,8 @@
 // the script reports a result for inputs nobody asked for at exit 0. Already
 // fixed in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
 // dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
-// check-table-freshness.mjs (#2873) and plugin-audit.mjs (#2813).
+// check-table-freshness.mjs (#2873), plugin-audit.mjs (#2813) and
+// upskill.mjs.
 //
 // rejection-latency.mjs is the sharpest case and gets its own fixture: its
 // output is a blacklist suggestion, so the silent failure is a FALSE ALL-CLEAR
@@ -45,6 +46,7 @@ const SCRIPTS = [
   ['process-quality.mjs', '--fiel'],
   ['detect-reposts.mjs', '--windo'],
   ['weekly-digest.mjs', '--dri'],
+  ['upskill.mjs', '--min-report'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
