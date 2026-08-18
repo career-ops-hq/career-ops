@@ -734,8 +734,13 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-function gitStatusEntries() {
-  const status = git('status', '--porcelain');
+// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
+// first `--porcelain` line of a worktree/index change begins with a space
+// (` M path`). Trimming rewrites it into `M path`, and the path parse below
+// then drops the first character — a mangled path that no longer matches the
+// real user file in the safety checks. gitRawIn keeps the leading space.
+export function gitStatusEntries(root = ROOT) {
+  const status = gitRawIn(root, 'status', '--porcelain');
   if (!status) return [];
 
   return status.split('\n')
