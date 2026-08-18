@@ -133,6 +133,55 @@ assert(companyMatchesHostname(null, 'example.com') === true, 'null company → n
 assert(companyMatchesHostname(undefined, 'example.com') === true, 'undefined company → no flag');
 assert(companyMatchesHostname('   ', 'example.com') === true, 'whitespace-only company → no flag');
 
+section('companyMatchesHostname — accented Latin folds to its own domain (#2924)');
+
+// The bug: `[^a-z0-9 ]` DELETED the accent instead of folding it, so
+// "Société Générale" became "socit gnrale" — not a substring of
+// "societegenerale" and neither are its words. Rule 4 then charged the posting
+// a 15-point company_domain_mismatch penalty, dropping a clean 100 to 85 and
+// crossing the high→medium boundary, purely because the company spells its
+// name with an accent.
+assert(companyMatchesHostname('Société Générale', 'careers.societegenerale.com') === true, 'Société Générale matches its own domain');
+assert(companyMatchesHostname('Telefónica', 'jobs.telefonica.com') === true, 'Telefónica matches its own domain');
+assert(companyMatchesHostname('Schrödinger', 'schrodinger.com') === true, 'Schrödinger matches its own domain');
+assert(companyMatchesHostname('Citroën', 'careers.citroen.com') === true, 'Citroën matches its own domain');
+
+// These two passed BEFORE the fix, but by luck rather than design: "nestl" is
+// a substring of "nestle" and "rsted" of "orsted". Pinned so the fold, not the
+// coincidence, is what keeps them passing.
+assert(companyMatchesHostname('Nestlé', 'www.nestle.com') === true, 'Nestlé matches (by fold now, not coincidence)');
+assert(companyMatchesHostname('Ørsted', 'orsted.com') === true, 'Ørsted: ø folds to o');
+assert(companyMatchesHostname('Æon', 'aeon.co.jp') === true, 'Æon: æ folds to ae');
+
+// Letters NFD does NOT decompose: a stroke or bar is part of the glyph, not a
+// combining mark, so stripping marks leaves them and [^a-z0-9] then deletes
+// them (CodeRabbit, reviewing #2927). The Turkish dotless ı is the one that
+// actually bit — "Işık" scored no match against its own isik.com.tr.
+assert(companyMatchesHostname('Işık', 'isik.com.tr') === true, 'Işık: dotless ı folds to i');
+assert(companyMatchesHostname('Ħamrun', 'hamrun.com.mt') === true, 'Ħamrun: ħ folds to h');
+assert(companyMatchesHostname('Ŧorne', 'torne.example') === true, 'Ŧorne: ŧ folds to t');
+// ŋ (eng) romanises as "ng", not "n" — mapping it to "n" made "Ŋaro" miss
+// ngaro.example, which is how this mapping got caught.
+assert(companyMatchesHostname('Ŋaro', 'ngaro.example') === true, 'Ŋaro: ŋ folds to ng');
+// Still a mismatch on a hostile host — the fold must not become "always true".
+assert(companyMatchesHostname('Işık', 'evil-phishing.example') === false, 'Işık still flags a hostile host');
+
+// The fold must not turn the check into "always true" — a hostile host is
+// still a mismatch. Without these, deleting the function body would pass.
+assert(companyMatchesHostname('Société Générale', 'evil-phishing.example') === false, 'accented name still flags a hostile host');
+assert(companyMatchesHostname('Telefónica', 'totally-unrelated.example') === false, 'accented name still flags an unrelated host');
+
+section('companyMatchesHostname — a non-Latin name cannot be evaluated (deliberate)');
+
+// NOT a hole to be closed. Hostnames are effectively ASCII, so a CJK or
+// Cyrillic name can never appear in one and the absence of a match proves
+// nothing. Making this "work" would flag every non-Latin company posting on
+// its own legitimate domain — a systematic false positive in place of a
+// silent skip.
+assert(companyMatchesHostname('楽天', 'evil-phishing.example') === true, 'CJK name → cannot evaluate, no flag');
+assert(companyMatchesHostname('Сбербанк', 'evil-phishing.example') === true, 'Cyrillic name → cannot evaluate, no flag');
+assert(companyMatchesHostname('Ελλάκτωρ', 'ellaktor.com') === true, 'Greek name → cannot evaluate, no flag');
+
 // ══════════════════════════════════════════════════════════════════════
 // PART 5: buildTrustValidator — disabled / no-op cases
 // ══════════════════════════════════════════════════════════════════════
