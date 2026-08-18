@@ -19,6 +19,20 @@
 // point of a shared decoder — the improvement should not have had to live in
 // one provider.
 //
+// A fourth round (#2790) migrated the seven RSS/XML providers — jobspresso,
+// higheredjobs, nodesk, larajobs, personio, teamtailor, weworkremotely — that
+// had never been in scope for any of the above. Their private copies guarded
+// only with a try/catch, which catches the RangeError above 0x10FFFF and
+// nothing else, so NUL, the C0 controls, lone surrogates and the
+// noncharacters decoded into job titles; the catch then returned '', deleting
+// the malformed reference rather than leaving it visible.
+//
+// Each round has migrated whichever copies were in front of the contributor at
+// the time, which is why there were four. tests/providers/rss-entity-decoding
+// .test.mjs now asserts at the source level that no importer of this module
+// also declares its own decoder, so the next re-introduction fails on the
+// commit that adds it instead of drifting quietly for a year.
+//
 // The hex/decimal alternatives are matched separately (not "#x?[0-9a-fA-F]+")
 // so a decimal entity can never absorb trailing hex letters — "&#1a2;" no
 // longer silently parses as codepoint 1 and drops "a2"; it just fails to
