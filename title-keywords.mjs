@@ -51,7 +51,17 @@ export function compileKeyword(kw) {
     // Explicit alphanumeric lookarounds rather than \b, because \b's meaning
     // depends on the characters at the keyword's own edges: for `word:c++` a
     // trailing \b would sit after "+" and assert the opposite of the intent.
-    const re = new RegExp(`(?<![a-z0-9_])${escapeForRegExp(bare)}(?![a-z0-9_])`);
+    // Unicode-aware boundaries, not [a-z0-9_]: an ASCII-only lookaround treats
+    // every accented letter as a separator, so `word:intern` matched inside
+    // "preintern" spelled with an accent and vetoed exactly the international
+    // titles this prefix exists to protect. \p{M} covers combining marks, so a
+    // decomposed "é" does not split a word either.
+    // String.raw, not a plain template literal: `\p` is not a recognised string
+    // escape, so an ordinary template drops the backslash and the class
+    // silently degenerates to the literal characters p, {, L, } — which matches
+    // almost nothing and turns the anchor off without any error.
+    const boundary = String.raw`[\p{L}\p{M}\p{N}_]`;
+    const re = new RegExp(`(?<!${boundary})${escapeForRegExp(bare)}(?!${boundary})`, 'u');
     return (lower) => re.test(lower);
   }
   if (/^[a-z]{2,3}$/.test(kw)) {
@@ -131,7 +141,12 @@ export function buildTitleFilter(titleFilter) {
   const negative = normalize(titleFilter?.negative, compileKeyword);
 
   return (title) => {
-    const lower = (title || '').toLowerCase();
+    // String(), not `title || ''`: openrouter-runner used String(title ?? '')
+    // before both paths were merged here, and scan.mjs threw on a truthy
+    // non-string. Consolidating on scan.mjs's version would have carried that
+    // throw onto a path that never had it, where it aborts jobs.filter and
+    // drops a whole company's results for one malformed title.
+    const lower = String(title ?? '').toLowerCase();
     // An empty positive list is "no positive constraint", not "match nothing":
     // a negative-only title_filter is a legitimate config that rejects a few
     // roles and keeps the rest.

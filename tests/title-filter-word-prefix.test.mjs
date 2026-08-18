@@ -218,13 +218,31 @@ if (disagreed.length === 0) {
 // starts from, and it shipped with "Internal Tools" in positive and a bare
 // "Intern" in negative, so the default carried a dead keyword and handed the
 // bug to the next user.
+// A positive is dead only when NO title can satisfy it — which depends on the
+// negative's shape, not just on whether it matches the positive's own text.
+//
+//   plain substring negative   every title containing the positive contains it
+//                              too, so the positive is unsatisfiable.
+//   word:-anchored negative    a title may carry the positive inside a LONGER
+//                              word, where the anchor no longer matches:
+//                              positive "director" with negative "word:director"
+//                              still admits "Directorship Programme". Flagging
+//                              that pair would reject a valid config.
+//
+// So an anchored negative only kills an anchored positive over the same term,
+// where every match of one is a match of the other.
 function deadPositives(titleFilter) {
   const positives = (titleFilter?.positive || []).filter((k) => typeof k === 'string');
   const negatives = (titleFilter?.negative || []).filter((k) => typeof k === 'string');
+  const bare = (k) => k.trim().toLowerCase().replace(/^word:/, '').trim();
+  const anchored = (k) => k.trim().toLowerCase().startsWith('word:');
   const out = [];
   for (const p of positives) {
-    const text = p.toLowerCase().replace(/\bword:/g, '');
-    const killers = negatives.filter((n) => compileKeyword(n.trim().toLowerCase())(text));
+    const text = bare(p);
+    const killers = negatives.filter((n) => {
+      if (!compileKeyword(n.trim().toLowerCase())(text)) return false;
+      return anchored(n) ? (anchored(p) && bare(n) === text) : true;
+    });
     if (killers.length) out.push(`${p} <- ${killers.join(', ')}`);
   }
   return out;
@@ -250,4 +268,56 @@ if (exampleWrong.length === 0) {
   pass('the example config keeps internal/international and still drops internships');
 } else {
   fail(`example config verdicts wrong for: ${JSON.stringify(exampleWrong)}`);
+}
+
+// ── 6. Regressions from the #2970 review ─────────────────────────────
+// Each of these was reproduced before it was fixed; each fails if its fix is
+// reverted.
+
+// (a) An ASCII-only lookaround treats every accented letter as a separator, so
+// `word:intern` matched inside an accented word — vetoing exactly the class of
+// international title the prefix exists to protect.
+const accent = compileKeyword('word:intern');
+const accentWrong = [
+  ...['préintern', 'internée', 'überintern'].filter((t) => accent(t) !== false),
+  ...['operations intern', 'intern'].filter((t) => accent(t) !== true),
+];
+if (accentWrong.length === 0) {
+  pass('word boundaries hold against adjacent non-ASCII letters');
+} else {
+  fail(`word: boundary wrong for: ${JSON.stringify(accentWrong)}`);
+}
+
+// (b) A truthy non-string title must not throw. scan.mjs used `(title || '')`
+// and openrouter-runner used `String(title ?? '')`; merging the two paths onto
+// the former would abort jobs.filter and lose a whole company's results.
+const anyTitle = buildTitleFilter({ positive: ['engineer'] });
+const threw = [];
+for (const v of [123, { a: 1 }, ['x'], true, null, undefined, '']) {
+  try { anyTitle(v); } catch { threw.push(JSON.stringify(v) ?? String(v)); }
+}
+if (threw.length === 0) {
+  pass('a malformed title is matched as text instead of throwing');
+} else {
+  fail(`buildTitleFilter threw on: ${JSON.stringify(threw)}`);
+}
+
+// (c) An anchored negative does not kill a plain positive: the positive can
+// still be satisfied inside a longer word, so flagging it would reject a
+// working config.
+const notDead = deadPositives({ positive: ['director'], negative: ['word:director'] });
+const stillWorks = buildTitleFilter({ positive: ['director'], negative: ['word:director'] });
+if (notDead.length === 0 && stillWorks('Directorship Programme') === true) {
+  pass('an anchored negative is not treated as killing a plain positive');
+} else {
+  fail(`dead-positive guard false alarm: ${JSON.stringify(notDead)}`);
+}
+
+// …but it does kill an anchored positive over the same term, where every match
+// of one is a match of the other.
+const reallyDead = deadPositives({ positive: ['word:director'], negative: ['word:director'] });
+if (reallyDead.length === 1) {
+  pass('an anchored negative still kills the same anchored positive');
+} else {
+  fail(`guard missed a genuinely dead anchored positive: ${JSON.stringify(reallyDead)}`);
 }
