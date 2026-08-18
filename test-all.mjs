@@ -5567,12 +5567,79 @@ console.log('\n12c. Materialized skill index mode');
  * dropped here, which is how the gap got in.
  */
 function hermeticGitEnv(gitConfigPath, base = process.env) {
-  return {
+  const env = {
     ...base,
     GIT_CONFIG_COUNT: '0',
     GIT_CONFIG_GLOBAL: gitConfigPath,
     GIT_CONFIG_SYSTEM: gitConfigPath,
   };
+  // These two DO have to be enumerated, because COUNT governs KEY_n / VALUE_n
+  // and nothing else, and neither of them is a config FILE that GLOBAL/SYSTEM
+  // could shadow. Both survive all three pins above:
+  //
+  //   GIT_CONFIG_PARAMETERS  the channel git uses to hand `-c` down to a
+  //                          subprocess, so it reaches every git invocation.
+  //                          Measured: with it set, a commit made through this
+  //                          env took its author from the ambient value.
+  //   GIT_CONFIG             redirects the `git config` command, reads AND
+  //                          writes. Both fixtures below call `git config` to
+  //                          set themselves up, so with it set that write lands
+  //                          in the ambient file instead of the fixture: the
+  //                          setting never takes effect, and the suite mutates
+  //                          a file outside its own temp dir.
+  delete env.GIT_CONFIG_PARAMETERS;
+  delete env.GIT_CONFIG;
+  return env;
+}
+
+// Asserted through hermeticGitEnv rather than around it, and on BEHAVIOUR rather
+// than on the absence of a key: a check that the returned object lacks the two
+// names would pass on any implementation that deletes them, including one that
+// deletes them after git has already been handed the environment. What matters
+// is that the injection does not reach git.
+{
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-env-'));
+  try {
+    const pinned = join(root, 'gitconfig');
+    writeFileSync(pinned, '');
+    const ambient = join(root, 'ambient-config');
+    writeFileSync(ambient, '[user]\n\tname = ambient-leak\n');
+    const repo = join(root, 'repo');
+    mkdirSync(repo, { recursive: true });
+
+    const gitEnv = hermeticGitEnv(pinned, {
+      ...process.env,
+      GIT_CONFIG_PARAMETERS: "'user.name=parameters-leak'",
+      GIT_CONFIG: ambient,
+    });
+    const gitRun = (args) => execFileSync('git', args, {
+      cwd: repo, encoding: 'utf-8', timeout: 30000, env: gitEnv,
+    }).trim();
+
+    gitRun(['init']);
+    let seenName = '';
+    try { seenName = gitRun(['config', 'user.name']); } catch { seenName = ''; }
+    if (seenName === '') {
+      pass('hermeticGitEnv keeps an ambient GIT_CONFIG_PARAMETERS / GIT_CONFIG out of git');
+    } else {
+      fail(`ambient config reached git through hermeticGitEnv: user.name = ${seenName}`);
+    }
+
+    // The write half. Both fixtures in this file configure themselves with
+    // `git config`, and under an ambient GIT_CONFIG that write leaves the
+    // fixture entirely - so the setting silently does not apply, and the suite
+    // edits a file it does not own.
+    gitRun(['config', 'core.excludesFile', join(root, 'excludes')]);
+    const landedLocally = readFileSync(join(repo, '.git', 'config'), 'utf-8').includes('excludesFile');
+    const escaped = readFileSync(ambient, 'utf-8').includes('excludesFile');
+    if (landedLocally && !escaped) {
+      pass("a fixture's own `git config` write stays inside the fixture");
+    } else {
+      fail(`git config write escaped the fixture: local=${landedLocally} ambient=${escaped}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 {
