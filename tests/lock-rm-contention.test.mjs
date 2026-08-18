@@ -9,11 +9,13 @@
 //
 // These tests pin three things:
 //   1. the contention classifiers agree on the measured Windows codes,
-//   2. both locks share ONE definition (the drift between the two parallel
-//      lock implementations is how this class survived two earlier fixes),
-//   3. no bare rmSync of a lock artifact remains in either acquisition path.
+//   2. EVERY copy of the protocol shares ONE definition — and the set of copies
+//      is derived from the repo, not listed here. #2984 patched two files and
+//      declared the drift dead; there were four, and the other two carried all
+//      three faces of the bug for weeks,
+//   3. no bare rmSync of a lock artifact remains in any acquisition path.
 
-import { readFileSync, mkdirSync, existsSync, rmSync, mkdtempSync } from 'fs';
+import { readFileSync, readdirSync, mkdirSync, existsSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -22,6 +24,14 @@ import { isMkdirContention, isRmContention, rmLockArtifactSync } from '../pipeli
 console.log('\n🔒 lock artifacts: rm contention is contention, not death (#2777)');
 
 const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
+
+// Quién implementa el protocolo se PREGUNTA al repo, nunca se escribe aquí: una
+// lista a mano envejece en silencio y así es como #2984 arregló dos copias
+// creyendo que eran todas. La firma es `recoverGuardDir`, el segundo directorio
+// atómico que no usa ningún otro código de este repo.
+const protocolImplementors = () => readdirSync(ROOT)
+  .filter((f) => f.endsWith('.mjs'))
+  .filter((f) => readFileSync(join(ROOT, f), 'utf-8').includes('recoverGuardDir'));
 const mkErr = (code) => Object.assign(new Error(code), { code });
 
 // ── 1. Classifier tables ─────────────────────────────────────────────
@@ -53,21 +63,41 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 3. One definition, two locks ─────────────────────────────────────
-// tracker-utils.mjs must IMPORT the classifiers from pipeline-lock.mjs, not
-// carry its own copy. Two parallel implementations of the same protocol is
-// exactly how the EEXIST-only check survived in one file after the other
-// learned better.
+// ── 3. One definition, EVERY copy of the protocol ────────────────────
+// The list is DERIVED, not written down. #2984 patched two files and said "one
+// definition, no sibling drift" — and there were four. followup-seed.mjs and
+// portal-health-lock.mjs had been carrying all three faces of #2777 the whole
+// time, invisible because nobody had asked the repo how many copies there were.
+// A hand-kept list would have aged the same way (lesson #52): so the test asks.
+//
+// The signature of the protocol is `recoverGuardDir`, the second atomic guard
+// no other code in this repo uses. Any file that has one is implementing this
+// lock and must derive the classifiers rather than re-deriving the rules.
 {
-  const tracker = readFileSync(join(ROOT, 'tracker-utils.mjs'), 'utf-8');
-  ok(
-    /import\s*\{[^}]*isMkdirContention[^}]*\}\s*from\s*'\.\/pipeline-lock\.mjs'/.test(tracker),
-    'tracker-utils imports the contention classifiers from pipeline-lock',
-  );
-  ok(
-    !/function isMkdirContention/.test(tracker) && !/function isRmContention/.test(tracker),
-    'tracker-utils defines no second copy of the classifiers',
-  );
+  const implementors = protocolImplementors();
+
+  ok(implementors.length >= 2, `found ${implementors.length} files implementing the lock protocol (${implementors.join(', ')})`);
+  ok(implementors.includes('pipeline-lock.mjs'), 'pipeline-lock.mjs is among them (it is the definition)');
+
+  for (const file of implementors.filter((f) => f !== 'pipeline-lock.mjs')) {
+    const src = readFileSync(join(ROOT, file), 'utf-8');
+    ok(
+      /import\s*\{[^}]*isMkdirContention[^}]*\}\s*from\s*'\.\/pipeline-lock\.mjs'/.test(src),
+      `${file} imports the contention classifiers from pipeline-lock`,
+    );
+    ok(
+      !/function isMkdirContention/.test(src) && !/function isRmContention/.test(src),
+      `${file} defines no second copy of the classifiers`,
+    );
+    ok(
+      !/if\s*\([^)]*code\s*!==\s*'EEXIST'\)\s*throw/.test(src),
+      `${file} does not treat a non-EEXIST mkdir answer as fatal (Windows says EPERM under contention)`,
+    );
+    ok(
+      /return err\?\.code === 'ENOENT';/.test(src),
+      `${file} answers "recoverable" only on ENOENT, never on "could not look"`,
+    );
+  }
 }
 
 // ── 3b. "Could not look" is never "recoverable" ──────────────────────
@@ -77,7 +107,7 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 // winner then died with ENOENT writing owner.json. Only ENOENT (genuinely
 // vanished) may answer "nothing to recover"; both locks must carry the guard.
 {
-  for (const file of ['pipeline-lock.mjs', 'tracker-utils.mjs']) {
+  for (const file of protocolImplementors()) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     ok(
       /return err\?\.code === 'ENOENT';/.test(src),
@@ -97,15 +127,12 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 // done by then). A bare call anywhere else reintroduces the crash one
 // refactor from now.
 {
-  for (const file of ['pipeline-lock.mjs', 'tracker-utils.mjs']) {
+  for (const file of protocolImplementors()) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const guardCalls = [...src.matchAll(/rmSync\(\s*recoverGuardDir\b/g)].length;
     ok(guardCalls === 0, `${file}: no bare rmSync(recoverGuardDir) remains (found ${guardCalls})`);
+    const lockCalls = [...src.matchAll(/rmSync\(\s*lockDir\b/g)].length;
+    const permitido = file === 'pipeline-lock.mjs' ? 1 : 0;  // release() de pipeline-lock lleva su propio catch deliberado
+    ok(lockCalls <= permitido, `${file}: bare rmSync(lockDir) within budget (found ${lockCalls}, allowed ${permitido})`);
   }
-  const trackerLockCalls = [...readFileSync(join(ROOT, 'tracker-utils.mjs'), 'utf-8')
-    .matchAll(/rmSync\(\s*lockDir\b/g)].length;
-  ok(trackerLockCalls === 0, `tracker-utils.mjs: no bare rmSync(lockDir) remains (found ${trackerLockCalls})`);
-  const pipelineLockCalls = [...readFileSync(join(ROOT, 'pipeline-lock.mjs'), 'utf-8')
-    .matchAll(/rmSync\(\s*lockDir\b/g)].length;
-  ok(pipelineLockCalls <= 1, `pipeline-lock.mjs: at most release()'s guarded rmSync(lockDir) remains (found ${pipelineLockCalls})`);
 }
