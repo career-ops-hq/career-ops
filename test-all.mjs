@@ -16349,6 +16349,31 @@ try {
         fail(`formatRunFailure overruns its own cap: ${clipped} chars returned for maxChars=${CAP} (marker not budgeted)`);
       }
     }
+
+    // Squeeze the content budget down to exactly two characters — the smallest
+    // that can still hold both ends. Math.floor(budget * 0.35) is 0 below
+    // budget 3, so without a floor the head vanishes here and the tail takes
+    // everything, which is the inversion this whole case exists to prevent.
+    //
+    // Own fixture with single-character boundaries that appear nowhere else in
+    // the rendered output — not in ` (exit 1)`, not in `stdout: `, not in the
+    // marker — so "both ends survived" is asserted precisely rather than by
+    // matching a letter that could have come from anywhere.
+    const TINY_FILL = 500;
+    const okTiny = run(NODE, ['-e',
+      `process.stdout.write('<' + 'x'.repeat(${TINY_FILL}) + '>', () => process.exit(1));`]);
+    if (okTiny !== null) {
+      fail('formatRunFailure tiny-budget fixture: the child was expected to exit non-zero');
+    } else {
+      const tinyLen = TINY_FILL + 2;
+      const tinyCap = `\n    ... (${tinyLen} more chars elided)\n`.length + 2;
+      const tiny = formatRunFailure(tinyCap);
+      if (tiny.includes('<') && tiny.includes('>')) {
+        pass('formatRunFailure keeps both ends even at a two-character content budget');
+      } else {
+        fail(`formatRunFailure drops an end at a two-character budget (head=${tiny.includes('<')}, tail=${tiny.includes('>')})`);
+      }
+    }
   }
 } catch (e) {
   fail(`formatRunFailure clipping check: ${e.message}`);

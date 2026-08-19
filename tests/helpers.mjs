@@ -247,7 +247,13 @@ export function formatRunFailure(maxChars = 2000) {
     // Weighted to the tail, which is where a suite that prints per-assertion
     // puts its summary, but never zero head — an early stack trace is the
     // other common shape and dropping it entirely would just invert the bug.
-    const head = Math.floor(budget * 0.35);
+    //
+    // Math.floor(budget * 0.35) rounds to 0 below budget 3, which would hand
+    // the whole allowance to the tail and quietly reinstate exactly that
+    // inversion. Floor the head at one character whenever there is room for
+    // two. A one-character budget is genuinely single-sided — there is no way
+    // to keep both ends of a string in one character — so it keeps the tail.
+    const head = budget >= 2 ? Math.max(1, Math.floor(budget * 0.35)) : 0;
     const tail = budget - head;
     return `${t.slice(0, head)}${mark(t.length - budget)}${t.slice(t.length - tail)}`;
   };
