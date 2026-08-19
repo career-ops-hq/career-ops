@@ -23,26 +23,31 @@
 // ── The Skills sentinel: part of the template contract ───────────────────────
 //
 // Skills is the LAST section in every shipped template, which makes it the one
-// optional section with no following section marker to stop at. Given the
-// shared `…|$` boundary the others use, stripping an empty Skills section
-// falls through to true end-of-file and takes the closing
+// optional section that may have no following section marker to stop at. Given
+// the shared `…|$` boundary the others use, stripping an empty trailing Skills
+// section falls through to true end-of-file and takes the closing
 // `</div></body></html>` (`\end{document}` in LaTeX) with it — a truncated,
 // unopenable document, which is far worse than the bare header this module
 // exists to remove.
 //
 // So the Skills patterns below deliberately do NOT use the shared boundary.
-// They match only up to an explicit `<!-- END -->` (`%%%% END %%%%` in LaTeX)
-// sentinel, with no end-of-input alternative. Two consequences, both
-// intentional:
+// They use the same marker shapes with the `|$` branch removed, so they stop at
+// the next marker and never at end-of-input. Because `END` is itself a marker,
+// that is the `<!-- END -->` (`%%%% END %%%%` in LaTeX) sentinel when Skills is
+// last, and the following section's marker when a custom template puts Skills
+// somewhere else. Matching the sentinel *only* would be wrong for that second
+// case: the lazy body would run past every section between Skills and the
+// sentinel and delete them along with the empty header, which is silent data
+// loss in a populated CV. Two consequences, both intentional:
 //
-//   1. **The sentinel is part of the template contract.** A template that
-//      renders a Skills section must place `<!-- END -->` / `%%%% END %%%%`
+//   1. **The sentinel is part of the template contract.** A template that ends
+//      on its Skills section must place `<!-- END -->` / `%%%% END %%%%`
 //      immediately after it. All four shipped templates do; do not remove it
 //      when editing a template's tail. This is documented for custom-template
 //      authors in templates/README.md.
-//   2. **A template without the sentinel FAILS SAFE.** The pattern simply
-//      does not match, `String.replace` is a no-op, and the template comes
-//      out untouched — the Skills section renders as a bare header. That is
+//   2. **A template with no marker after Skills FAILS SAFE.** The pattern
+//      simply does not match, `String.replace` is a no-op, and the template
+//      comes out untouched — the Skills section renders as a bare header. That is
 //      the original cosmetic bug, and it is the deliberate choice: a bare
 //      header beats a truncated CV by a wide margin, and the person it lands
 //      on (a third-party template pack with no sentinel and no skills listed)
@@ -74,11 +79,23 @@
 const HTML_BOUNDARY = String.raw`(?=<!--\s+[A-Z][A-Z ]*-->|$)`;
 const TEX_BOUNDARY = String.raw`(?=%{4,}\s|$)`;
 
-// Sentinel-only boundaries for Skills — no end-of-input alternative, so a
-// template lacking the sentinel is left untouched rather than truncated. See
-// "The Skills sentinel" above before changing these.
-const HTML_END_SENTINEL = String.raw`(?=<!--\s+END\s+-->)`;
-const TEX_END_SENTINEL = String.raw`(?=%{4,}\s+END\s+%{4,})`;
+// Marker-only boundaries for Skills — the same marker shapes as the shared
+// boundaries above, but with NO end-of-input alternative, so a template lacking
+// any following marker is left untouched rather than truncated. `END` is itself
+// a marker, so these stop at the `<!-- END -->` / `%%%% END %%%%` sentinel when
+// Skills is last and at the next section's marker when it is not. See "The
+// Skills sentinel" above before changing these, and never add an `|$` branch.
+//
+// The LaTeX one anchors the banner to the start of a line (hence the `m` flag on
+// the pattern that uses it). Without `^`, dropping the `|$` branch lets the
+// engine backtrack the opening banner's own greedy trailing `%{4,}`: with no
+// following banner to stop at it gives back `%` until the leftovers themselves
+// satisfy the lookahead, matching half the banner and leaving a stray `%%%%`
+// behind instead of no-opping. Only banners wider than 8 `%` can backtrack that
+// far, so a narrow fixture will not catch a regression here — the fixtures in
+// tests/cv-optional-sections.test.mjs use the shipped 28-wide banner on purpose.
+const HTML_END_SENTINEL = String.raw`(?=<!--\s+[A-Z][A-Z ]*-->)`;
+const TEX_END_SENTINEL = String.raw`(?=^%{4,}\s)`;
 
 const PATTERNS = {
   html: {
@@ -93,7 +110,7 @@ const PATTERNS = {
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     education: new RegExp(String.raw`%{4,}\s+Education\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     awards: new RegExp(String.raw`%{4,}\s+AWARDS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
-    skills: new RegExp(String.raw`%{4,}\s+Technical Skills\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL),
+    skills: new RegExp(String.raw`%{4,}\s+Technical Skills\s+%{4,}[\s\S]*?` + TEX_END_SENTINEL, 'm'),
   },
 };
 
