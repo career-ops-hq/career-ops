@@ -32,12 +32,11 @@ function loadKeywords() {
     try {
       configObj = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
     } catch (e) {
-      // ignore parse errors in user config
+      // ignore
     }
   }
 
   const keywords = configObj.hn_hiring?.keywords;
-  // Validation: Ensure keywords is an array of strings to prevent .join() crashes
   if (!Array.isArray(keywords) || !keywords.every(k => typeof k === 'string')) {
     return defaultKeywords;
   }
@@ -57,7 +56,6 @@ export async function extractWithAI(rawText, model) {
   
   let parsed;
   try {
-    // Validation: Catch malformed YAML from AI to prevent script crashes
     parsed = yaml.load(clean);
   } catch (e) {
     return null;
@@ -113,13 +111,15 @@ async function main() {
 
     if (!thread) throw new Error("Could not find recent hiring thread.");
     
-    // Security: Validate the URL before navigation (SSRF Protection)
+    // 🔒 Security: Strict URL validation (SSRF Protection)
     const isValidHnUrl = (u) => {
       try {
         const url = new URL(u);
         return url.protocol === 'https:' && 
                url.hostname === 'news.ycombinator.com' && 
-               url.pathname.startsWith('/item');
+               url.port === '' && // Ensure default HTTPS port
+               url.pathname === '/item' && // Exact path match
+               /^\d+$/.test(url.searchParams.get('id') ?? ''); // Numeric ID only
       } catch { return false; }
     };
 
@@ -140,15 +140,16 @@ async function main() {
     const newOffers = [];
 
     for (const post of jobPosts) {
-  // Security/Integrity: Skip if the ID or text is missing to prevent malformed URLs
-  if (!post.id || !post.text) continue;
+      // 🛡️ Data Integrity: Only process posts with numeric IDs and non-empty text
+      if (!/^\d+$/.test(post.id ?? '') || !post.text) continue;
+      
       const hnUrl = `https://news.ycombinator.com/item?id=${post.id}`;
       if (seen.has(hnUrl)) continue; 
 
       process.stdout.write(`  AI Analyzing post ${post.id}... `);
       try {
         const extracted = await extractWithAI(post.text, model);
-        seen.add(hnUrl); // Checkpoint successfully processed IDs
+        seen.add(hnUrl);
 
         if (extracted && extracted.company && extracted.title) {
           newOffers.push({
