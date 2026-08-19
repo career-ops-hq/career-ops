@@ -52,6 +52,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Work-authorization / visa-sponsorship tier from Block A (report + Machine
   // Summary only). Allowlisted so it round-trips; no consumer logic yet.
   'work_auth',
+  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
+  // Allowlisted so it round-trips; no consumer logic yet.
+  'reports_to',
 ]);
 
 // --- CLI args ---
