@@ -231,12 +231,25 @@ export function formatRunFailure(maxChars = 2000) {
   const clip = (s) => {
     const t = String(s ?? '').trim();
     if (!t || t.length <= maxChars) return t;
+    // The marker's own width comes OUT of the budget rather than on top of it,
+    // so maxChars is a promise about the string this returns. (Appending the
+    // marker after slicing to maxChars, as this did before, put every clipped
+    // stream over its documented cap.)
+    const mark = (n) => `\n    ... (${n} more chars elided)\n`;
+    // The dropped count is printed inside the marker, so the marker's width
+    // depends on the budget and the budget depends on its width. Break the
+    // circle with the widest that count can ever be — t.length — which can only
+    // over-reserve, never under.
+    const budget = maxChars - mark(t.length).length;
+    // Degenerate cap, narrower than the marker itself: honour the number rather
+    // than emit a marker that alone overruns it.
+    if (budget <= 0) return t.slice(0, maxChars);
     // Weighted to the tail, which is where a suite that prints per-assertion
     // puts its summary, but never zero head — an early stack trace is the
     // other common shape and dropping it entirely would just invert the bug.
-    const head = Math.floor(maxChars * 0.35);
-    const tail = maxChars - head;
-    return `${t.slice(0, head)}\n    ... (${t.length - maxChars} more chars elided)\n${t.slice(-tail)}`;
+    const head = Math.floor(budget * 0.35);
+    const tail = budget - head;
+    return `${t.slice(0, head)}${mark(t.length - budget)}${t.slice(t.length - tail)}`;
   };
   const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
   const out = clip(lastFailure.stdout);

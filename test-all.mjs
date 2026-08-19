@@ -16288,17 +16288,26 @@ try {
   //
   // Drive it through a real failing run() rather than by reaching into the
   // module's private lastFailure, so this covers the path CI actually takes.
-  const BIG = 8000;
-  const marker = 'TAIL-MARKER-THE-ANSWER-IS-HERE';
-  const okOut = run(NODE, ['-e', `
-    process.stdout.write('HEAD-MARKER\\n' + 'x'.repeat(${BIG}) + '\\n${marker}\\n');
-    process.exit(1);
-  `]);
+  const CAP = 1200;
+  const HEAD = 'HEAD-MARKER-AN-EARLY-STACK-WOULD-SIT-HERE';
+  const marker = 'TAIL-MARKER-THE-RESULTS-LINE-SITS-HERE';
+  const FILL = 8000;
+  // One line, no newlines. formatRunFailure re-indents every newline in the
+  // clipped text, which would inflate any length measured off the rendered
+  // string; a newline-free payload keeps the arithmetic below exact.
+  //
+  // Exit from the write CALLBACK, not the next statement: stdout to a pipe is
+  // async, and process.exit() discards whatever has not flushed — which would
+  // silently shrink the fixture and make the cap assertion pass for the wrong
+  // reason.
+  const okOut = run(NODE, ['-e',
+    `process.stdout.write('${HEAD}' + 'x'.repeat(${FILL}) + '${marker}', () => process.exit(1));`]);
+  const streamLen = HEAD.length + FILL + marker.length;
 
   if (okOut !== null) {
     fail('formatRunFailure fixture: the child was expected to exit non-zero');
   } else {
-    const rendered = formatRunFailure();
+    const rendered = formatRunFailure(CAP);
 
     if (rendered.includes(marker)) {
       pass('formatRunFailure keeps the tail of an over-long stdout (the failure summary)');
@@ -16308,7 +16317,7 @@ try {
 
     // Never zero head: an early stack trace is the other common shape, and
     // keeping only the tail would just invert the bug rather than fix it.
-    if (rendered.includes('HEAD-MARKER')) {
+    if (rendered.includes(HEAD)) {
       pass('formatRunFailure still keeps the head (an early stack trace survives too)');
     } else {
       fail('formatRunFailure dropped the head — tail-only inverts the original defect');
@@ -16320,12 +16329,25 @@ try {
       fail('formatRunFailure elides silently — a reader cannot tell output is missing');
     }
 
-    // The cap is the point; both ends together must still respect it.
-    const shown = rendered.replace(/\n\s*\.\.\. \(\d+ more chars elided\)\n/, '');
-    if (shown.length < BIG) {
-      pass('formatRunFailure still caps the stream rather than printing it whole');
+    // The cap is a promise about the returned string, so the marker's own
+    // width has to come out of the budget rather than sit on top of it.
+    //
+    // Measure via the reported dropped-count rather than off `rendered`: the
+    // caller re-indents newlines and prefixes ` (exit N)\n    stdout: `, so the
+    // rendered length is not the clipped length. kept = streamLen - dropped is
+    // exact, and this fixture has no newlines of its own to be re-indented.
+    const elided = rendered.match(/\.\.\. \((\d+) more chars elided\)/);
+    if (!elided) {
+      fail('formatRunFailure cap check: no elision marker to measure against');
     } else {
-      fail(`formatRunFailure no longer caps output (${shown.length} chars of a ${BIG}-char stream)`);
+      const dropped = Number(elided[1]);
+      const markerLen = `\n    ... (${dropped} more chars elided)\n`.length;
+      const clipped = (streamLen - dropped) + markerLen;
+      if (clipped <= CAP) {
+        pass(`formatRunFailure keeps the clipped stream within maxChars, marker included (${clipped} <= ${CAP})`);
+      } else {
+        fail(`formatRunFailure overruns its own cap: ${clipped} chars returned for maxChars=${CAP} (marker not budgeted)`);
+      }
     }
   }
 } catch (e) {
