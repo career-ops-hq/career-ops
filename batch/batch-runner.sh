@@ -763,7 +763,14 @@ process_offer() {
     # connects. --proto/--proto-redir restrict schemes but not destination IPs,
     # so a malicious offer URL could reach cloud metadata (169.254.169.254) or
     # internal services without this guard.
-    _url_safe=$(node -e "
+    local _url_safe
+    local current_url="$url"
+    local redirect_count=0
+    local curl_status=0
+    local redirect_headers
+    local redirect_location
+    while :; do
+      _url_safe=$(node -e "
       try {
         const u = new URL(process.argv[1]);
         const h = u.hostname.toLowerCase().replace(/\.\$/, '');
@@ -776,17 +783,51 @@ process_offer() {
           /^192\.168\./.test(h) || /^0\./.test(h);
         process.stdout.write(blocked ? '0' : '1');
       } catch (e) { process.stdout.write('0'); }
-    " "$url" 2>/dev/null)
-    if [[ "$_url_safe" != "1" ]]; then
-      echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($url)"
-    else
-      curl --silent --location --max-time 20 --connect-timeout 5 \
-        --fail --max-redirs 10 --compressed \
-        --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
-        --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
-        --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
-        --output "$jd_file" \
-        -- "$url" 2>/dev/null || true
+      " "$current_url" 2>/dev/null)
+      if [[ "$_url_safe" != "1" ]]; then
+        echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($current_url)"
+        : > "$jd_file"
+        break
+      else
+        redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
+        curl_status=0
+        curl --silent --show-error --location --max-redirs 0 \
+          --max-time 20 --connect-timeout 5 \
+          --fail --compressed \
+          --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
+          --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
+          --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
+          --dump-header "$redirect_headers" \
+          --output "$jd_file" \
+          -- "$current_url" 2>/dev/null || curl_status=$?
+        redirect_location=""
+        if [[ "$curl_status" -eq 47 ]]; then
+          redirect_location="$(awk 'tolower($1) == "location:" { $1=""; sub(/^[[:space:]]+/, ""); value=$0 } END { print value }' "$redirect_headers")"
+        fi
+        rm -f "$redirect_headers"
+        if [[ "$curl_status" -eq 47 && -n "$redirect_location" ]]; then
+          if [[ "$redirect_count" -ge 10 ]]; then
+            : > "$jd_file"
+            echo "    ℹ️  JD prefetch: too many redirects — worker will WebFetch"
+            break
+          fi
+          current_url="$(node -e "
+            try { process.stdout.write(new URL(process.argv[2], process.argv[1]).href); }
+            catch (e) { process.stdout.write(''); }
+          " "$current_url" "$redirect_location" 2>/dev/null)"
+          if [[ -z "$current_url" ]]; then
+            : > "$jd_file"
+            break
+          fi
+          redirect_count=$((redirect_count + 1))
+          continue
+        fi
+        if [[ "$curl_status" -ne 0 ]]; then
+          : > "$jd_file"
+        fi
+        break
+      fi
+    done
       # Strip HTML tags and count visible words to distinguish a real JD (hundreds
       # of words) from a JS shell (near zero visible text).
       jd_prefetch_words=$(node -e "
@@ -814,7 +855,6 @@ process_offer() {
       else
         echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
       fi
-    fi
   fi
 
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
