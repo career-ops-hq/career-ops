@@ -140,7 +140,8 @@ async function main() {
     const newOffers = [];
 
     for (const post of jobPosts) {
-      if (!post.text) continue;
+  // Security/Integrity: Skip if the ID or text is missing to prevent malformed URLs
+  if (!post.id || !post.text) continue;
       const hnUrl = `https://news.ycombinator.com/item?id=${post.id}`;
       if (seen.has(hnUrl)) continue; 
 
