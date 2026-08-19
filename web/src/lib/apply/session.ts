@@ -3,6 +3,7 @@ import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
+import { execFile } from "node:child_process";
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -534,4 +535,13 @@ export async function handoffSession(id: string): Promise<void> {
     /* CDP unavailable → bringToFront still raises it */
   }
   await s.page.bringToFront().catch(() => {});
+  // Playwright can focus a tab but macOS may keep the Job Tracking browser app
+  // above the separate Chrome window. Activate Chrome at the OS level so the
+  // user's click visibly lands on the real, pre-filled employer form.
+  if (process.platform === "darwin") {
+    await new Promise<void>((resolve) => {
+      execFile("/usr/bin/osascript", ["-e", 'tell application "Google Chrome" to activate'], () => resolve());
+    });
+    await s.page.bringToFront().catch(() => {});
+  }
 }
