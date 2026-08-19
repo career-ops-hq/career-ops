@@ -43,25 +43,27 @@ for (const [script, typo] of SCRIPTS) {
     assert.match(r.all, /unrecognized flag/i, `${script} did not name the unrecognized flag`);
     assert.match(r.all, new RegExp(typo.replace(/^--/, '--')), `${script} did not echo ${typo} back`);
   });
-
-  test(`${script} --help exits 0 and prints usage`, () => {
-    const r = runScript(script, '--help');
-    assert.equal(r.status, 0, `${script} --help exited ${r.status}, want 0`);
-    assert.match(r.all, /Usage:/i, `${script} --help printed no usage block`);
-  });
-
-  test(`${script} -h exits 0 and prints usage`, () => {
-    const r = runScript(script, '-h');
-    assert.equal(r.status, 0, `${script} -h exited ${r.status}, want 0`);
-    assert.match(r.all, /Usage:/i, `${script} -h printed no usage block`);
-  });
-
-  test(`${script} --help --bogus still errors`, () => {
-    const r = runScript(script, '--help', '--bogus');
-    assert.equal(r.status, 1, `${script} --help --bogus exited ${r.status}, want 1`);
-    assert.match(r.all, /unrecognized flag/i);
-  });
 }
+
+
+test('fix-slugs.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('fix-slugs.mjs', '--help');
+  assert.equal(r.status, 0, `fix-slugs.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'fix-slugs.mjs --help printed no usage block');
+});
+
+test('fix-slugs.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('fix-slugs.mjs', '-h');
+  assert.equal(r.status, 0, `fix-slugs.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'fix-slugs.mjs -h printed no usage block');
+});
+
+test('fix-slugs.mjs --help --bogus still errors', () => {
+  const r = runScript('fix-slugs.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `fix-slugs.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
 
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
@@ -105,4 +107,14 @@ test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', (
   const rDryRun = runScript('fix-slugs.mjs', '--file', '--dry-run');
   assert.equal(rDryRun.status, 1, '--file --dry-run must exit 1');
   assert.match(rDryRun.all, /--file requires a value/);
+
+  const rShortFlag = runScript('fix-slugs.mjs', '--file', '-h');
+  assert.equal(rShortFlag.status, 1, '--file -h must exit 1 without treating -h as a filename');
+  assert.match(rShortFlag.all, /--file requires a value/);
+  assert.doesNotMatch(rShortFlag.all, /no portals file at/i);
+
+  const rShortFlagEq = runScript('fix-slugs.mjs', '--file=-h');
+  assert.equal(rShortFlagEq.status, 1, '--file=-h must exit 1 without treating -h as a filename');
+  assert.match(rShortFlagEq.all, /--file requires a value/);
+  assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
 });

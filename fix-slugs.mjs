@@ -333,15 +333,16 @@ function printDiff(fixes, { dryRun }) {
 
 async function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   if (hasFlag(args, '--file')) {
     const rawVal = flagValue(args, '--file');
-    if (rawVal === undefined || rawVal === '' || rawVal.startsWith('--')) {
+    if (rawVal === undefined || rawVal === '' || rawVal.startsWith('-')) {
       console.error('Error: --file requires a value');
       process.exit(1);
     }
   }
+
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   const fix = args.includes('--fix') || args.includes('--apply');
   const dryRun = !fix; // default is always safe — writing requires an explicit flag
