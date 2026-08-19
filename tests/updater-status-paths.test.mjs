@@ -15,6 +15,11 @@
  * parser's `path: line.slice(3)` then drops the path's first character — for
  * ` M data/user-file.md` the resulting `ata/user-file.md` matches nothing.
  *
+ * The parser lives in parsePorcelainStatus() so its second disguise — a
+ * Windows git whose CRLF line endings would give every path a trailing `\r` —
+ * can be driven with a synthetic CRLF buffer instead of trusting whatever EOL
+ * the local git happens to emit.
+ *
  * These tests drive gitStatusEntries() against throwaway repos through the
  * same seam the production code uses (gitRawIn under a root), pinning the
  * whitespace-sensitive behaviour on both code shapes (` M` and `M `) and on the
@@ -25,7 +30,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, gitStatusEntries } from '../update-system.mjs';
+import { gitIn, gitStatusEntries, parsePorcelainStatus } from '../update-system.mjs';
 
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-status-paths-'));
@@ -172,6 +177,28 @@ console.log('\n🧪 Testing updater git-status path parsing...');
 }
 
 // ── 6. Entries carry no trailing CR (Windows line-ending robustness) ──────
+// The parser, not git's output, is what must be CRLF-robust: a Windows build
+// of git terminates `--porcelain` lines with CRLF (its native EOL), and the
+// CR is sliced off right where `path` begins. This has to be proven by feeding
+// a CRLF buffer straight through parsePorcelainStatus — on a machine where git
+// happens to emit LF the old test passed because git chose LF, not because the
+// parser handled CRLF. The direct input makes the assertion real.
+{
+  const crlf = ' M b.mjs\r\n?? run-now.mjs\r\n';
+  const want = [
+    { code: ' M', path: 'b.mjs' },
+    { code: '??', path: 'run-now.mjs' },
+  ];
+  const got = JSON.stringify(parsePorcelainStatus(crlf));
+  if (got === JSON.stringify(want)) {
+    pass('CRLF-terminated porcelain lines parse with no trailing carriage return');
+  } else {
+    fail(`CRLF porcelain damaged — parsed ${got}, expected ${JSON.stringify(want)}`);
+  }
+}
+
+// And the real seam against an actual repo (LF here, CRLF on Windows runners)
+// still round-trips a dirty worktree file byte-for-byte.
 {
   const { dir, g } = makeRepo();
   try {
@@ -182,7 +209,7 @@ console.log('\n🧪 Testing updater git-status path parsing...');
 
     const entries = gitStatusEntries(dir);
     if (entries.length === 1 && entries[0].path === 'b.mjs' && entries[0].code === ' M') {
-      pass('parsed paths carry no trailing carriage return');
+      pass('real git porcelain entries carry no trailing CR or mangled path');
     } else {
       fail(`parsed paths damaged: ${JSON.stringify(entries)}`);
     }
