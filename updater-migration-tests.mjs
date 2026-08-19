@@ -49,8 +49,9 @@ const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,160}isReexec/.test(source) &&
     /Installation requires explicit confirmation/.test(source) &&
     /'apply',\s*'--confirm'/.test(source) &&
-    /CAREER_OPS_UPDATE_REEXEC_MARKER/.test(source)) {
-  pass('apply requires explicit confirmation and carries it through argv plus authenticated self-reexec');
+    /CAREER_OPS_UPDATE_REEXEC_MARKER/.test(source) &&
+    /function isLegacyReexec/.test(source)) {
+  pass('apply requires explicit confirmation and carries it through authenticated and legacy self-reexec');
 } else {
   fail('apply does not require explicit confirmation or propagate it safely through self-reexec');
 }
@@ -107,6 +108,19 @@ if (forgedReexec.status !== 0 &&
   pass('forged reexec marker cannot authorize initial apply');
 } else {
   fail('forged reexec marker can authorize initial apply');
+}
+
+const forgedLegacyReexec = runApplyWithEnv({
+  CAREER_OPS_UPDATE_REEXEC: '1',
+  CAREER_OPS_UPDATE_BACKUP_BRANCH: 'backup-pre-update-1.26.0-20260818T120000Z',
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+});
+if (forgedLegacyReexec.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forgedLegacyReexec.stderr) &&
+    !existsSync('.update-lock')) {
+  pass('legacy reexec without an existing backup branch cannot authorize initial apply');
+} else {
+  fail('legacy reexec without an existing backup branch can authorize initial apply');
 }
 
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
