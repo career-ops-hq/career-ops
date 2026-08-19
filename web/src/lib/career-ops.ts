@@ -135,6 +135,7 @@ export type Application = {
   pdf: string;
   report: string;
   notes: string;
+  url?: string;
 };
 
 /**
@@ -147,7 +148,18 @@ export type Application = {
 export function readApplications(): Application[] {
   const md = read("data/applications.md");
   if (!md) return [];
-  return parseApplications(md, careerOpsRoot());
+  const root = careerOpsRoot();
+  return parseApplications(md, root).map((app: Application) => {
+    let files: string[] = [];
+    try { files = fs.readdirSync(path.join(root, "reports")); } catch { return app; }
+    const report = files.find(file => file.endsWith(".md") && parseInt(file, 10) === parseInt(app.n, 10));
+    if (!report) return app;
+    try {
+      const text = fs.readFileSync(path.join(root, "reports", report), "utf8");
+      const url = text.match(/^\*\*URL:\*\*\s*(https?:\/\/\S+)/m)?.[1]?.replace(/\s+$/, "");
+      return url ? { ...app, url } : app;
+    } catch { return app; }
+  });
 }
 
 /**

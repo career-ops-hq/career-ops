@@ -23,7 +23,18 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          /* stream already closed by the client */
+        }
+      };
       const emit = (o: unknown) => {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(JSON.stringify(o) + "\n"));
         } catch {
@@ -47,7 +58,7 @@ export async function POST(req: Request) {
           // to review + submit themselves. We never submit.
           if (result.reached) await handoffSession(s.id).catch(() => {});
           emit({ t: "done", filled: result.reached, turns: result.turns, reason: result.reason });
-          controller.close();
+          close();
           return;
         }
 
@@ -55,7 +66,7 @@ export async function POST(req: Request) {
           const fin = await finalizeDrivenSession(s.id, cliId);
           if (fin) {
             emit({ t: "done", reached: true, turns: result.turns, title: fin.title, fields: fin.fields, issues: fin.issues });
-            controller.close();
+            close();
             return;
           }
         }
@@ -65,7 +76,7 @@ export async function POST(req: Request) {
       } catch (e) {
         emit({ t: "error", message: e instanceof Error ? e.message.slice(0, 160) : "drive failed" });
       } finally {
-        controller.close();
+        close();
       }
     },
   });

@@ -1,14 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { inter, instrumentSerif, instrumentSerifItalic } from "@/lib/fonts";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
-  description: "The official, local-first web experience for career-ops.",
+  title: "Job Tracking — local application workspace",
+  description: "A private, local-first job application and follow-up tracker.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "career-ops" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Job Tracking" },
 };
 
 export const viewport: Viewport = {
@@ -33,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
       <body className="font-sans antialiased">
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <Script id="career-ops-theme" strategy="beforeInteractive">{THEME_SCRIPT}</Script>
         <AppShell>{children}</AppShell>
       </body>
     </html>

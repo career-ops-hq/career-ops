@@ -28,7 +28,7 @@ type ApplyCtx = {
   driveSteps: DriveStep[];
   error: string;
   open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
-  prefill: () => Promise<void>;
+  prefill: (fieldId?: string) => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
   fill: () => Promise<void>;
   agentFill: () => Promise<void>;
@@ -205,13 +205,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const prefill = useCallback(async () => {
+  const prefill = useCallback(async (fieldId?: string) => {
     if (!sessionId.current) return;
     const gen = generation.current;
-    if (!cliId()) {
-      setError("Configure a CLI in Config first, then pre-fill from your CV.");
-      return;
-    }
     setStatus("prefilling");
     setError("");
     setPrefillLog([]);
@@ -222,11 +218,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         a[id] = v?.value ?? "";
         m[id] = { needsConfirmation: !!v?.needs_confirmation };
       }
-      setAnswers(a);
-      setMeta(m);
+      setAnswers((prev) => (fieldId ? { ...prev, ...a } : a));
+      setMeta((prev) => (fieldId ? { ...prev, ...m } : m));
     };
     try {
-      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), fieldId }) });
       if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
@@ -320,7 +316,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
         });
       }
-      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
+      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (Job Tracking never submits for you).");
       setStatus("done");
       // ESCALATION ("si no va, full agente"): if deterministic fill clearly
       // didn't land (most fields failed / mismatched), let the agent fill it.

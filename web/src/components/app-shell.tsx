@@ -1,19 +1,17 @@
 "use client";
 
+import "@/lib/report/logbuf";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
-import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
 import { ExploreProvider } from "@/components/explore/explore-provider";
-import { FirstScoreView } from "@/components/explore/first-score-view";
-import { BetaBanner } from "@/components/beta/beta-banner";
-import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
@@ -31,7 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
-              career-ops
+              Job Tracking
             </span>
           </Link>
           <nav className="flex flex-col gap-1">
@@ -60,8 +58,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <WorkerPills />
-
           <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
             <div className="flex items-center justify-between px-1">
@@ -71,9 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
         <main className="flex-1 overflow-x-hidden">{children}</main>
-        <AssistantConsole />
-        <FirstScoreView />
-        <BetaBanner />
       </div>
       </ExploreProvider>
       </ApplyProvider>
