@@ -130,3 +130,5 @@ public commit with a stated reason.
 - @prajwalyb | 2026-08-18 | id:32199473 | src:https://github.com/santifer/career-ops/discussions/3012 | n:82
 - @hiteshjha24 | Hitesh Jha | 2026-08-18 | "Its a must have if u are in job search!!!!!" | id:143171761 | src:https://github.com/santifer/career-ops/discussions/3015 | n:83
 - @Ahmedmhassany | Ahmed Mohamed Hassany | 2026-08-18 | id:149591909 | src:https://github.com/santifer/career-ops/discussions/3041 | n:84
+- @katkurigopi05 | Gopi Krishna Reddy Katkuri | 2026-08-19 | "i have tried to build my own job hunter but i didn't go well so i am trying to use this awesome repo to fix mine" | id:231100182 | src:https://github.com/santifer/career-ops/discussions/3063 | n:85
+- @TMFNK | TMFNK | 2026-08-19 | id:235670256 | src:https://github.com/santifer/career-ops/discussions/3068 | n:86
