@@ -5,7 +5,7 @@ import { Search, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
-import { DiscoveryCard } from "./discovery-card";
+import { DiscoveryCard, sponsorshipSignal } from "./discovery-card";
 import { useExplore } from "./explore-provider";
 
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
@@ -20,9 +20,12 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     const needle = q.trim().toLowerCase();
     let list = offers;
     if (needle) list = list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
-    const sorted = [...list].sort((a, b) =>
-      sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
-    );
+    const sponsorRank = { yes: 0, unknown: 1, no: 2 } as const;
+    const sorted = [...list].sort((a, b) => {
+      const bySponsor = sponsorRank[sponsorshipSignal(a)] - sponsorRank[sponsorshipSignal(b)];
+      if (bySponsor) return bySponsor;
+      return sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company);
+    });
     return sorted;
   }, [offers, q, sort]);
 
