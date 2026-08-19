@@ -52,7 +52,6 @@ export async function extractWithAI(rawText, model) {
   const response = result.response.text();
   
   const clean = response.replace(/```yaml|```/g, '').trim();
-  if (clean.toLowerCase() === 'null') return null;
   
   let parsed;
   try {
