@@ -381,7 +381,16 @@ title_filter:
     # -- Support roles that match on "Agent" --
     # "Customer Care Agent" and its German equivalent otherwise pass the
     # "AI Agent" / "Agent" side of the positive list.
-    - "Customer Care"
+    #
+    # The ROLE, not the domain. A bare "Customer Care" is a substring, so it also
+    # rejected senior AI roles that name customer care as the area they serve -
+    # measured on a 2,399-title corpus: "AI Agents Manager: Customer Care" and
+    # "AI Support Delivery Manager: Customer Care". Both are AI roles for a
+    # support organisation, not support-agent jobs. The support titles the bare
+    # form was meant to catch - "Customer Care Onboarding", "Customer Care
+    # Operations" - carry no positive keyword at all, so they were already
+    # excluded and the shorter negative bought nothing for them.
+    - "Customer Care Agent"
     - "Kundenbetreuung"
   seniority_boost:
     # These prefixes add relevance but are not required
