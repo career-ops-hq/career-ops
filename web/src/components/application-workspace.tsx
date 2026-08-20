@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Copy, Download, FileText, Loader2, Sparkles } from "lucide-react";
+import { cn } from "@/lib/cn";
 
 type Outreach = {
   linkedinRecruiterNote?: string;
@@ -52,8 +53,15 @@ type InterviewIntel = {
   answerStrategy?: string;
 };
 
+type Answer = {
+  question: string;
+  answer: string;
+  needsConfirmation?: boolean;
+};
+
 type Kit = {
   id: string; company: string; role: string; createdAt: string; appliedAt: string | null;
+  jobDescription?: string; formQuestions?: string;
   fitSummary: string; matchScore: number; gaps: string[]; answers: Answer[];
   coverLetter: string; coverLetterUsed?: string; tailoredCvMarkdown: string; cvFile: string; cvFileUsed?: string;
   outreach?: Outreach;

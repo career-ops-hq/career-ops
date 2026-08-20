@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCli } from "@/lib/clis";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
@@ -288,7 +289,6 @@ ${kit.jobDescription || ""}
   try {
     const seedScript = path.join(root, "followup-seed.mjs");
     if (fs.existsSync(seedScript)) {
-      const { execFileSync } = require("child_process");
       execFileSync("node", [seedScript, String(rowNum), "--date", today, "--force"], { cwd: root });
     }
   } catch (err: any) {
