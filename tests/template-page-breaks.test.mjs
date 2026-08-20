@@ -32,16 +32,21 @@ console.log('\nCV template page-break control — no orphaned project tech line'
 /**
  * Innermost CSS rules as {selectors, declarations} pairs.
  *
- * Declarations never contain braces, so matching the innermost `… { … }` also
- * reaches rules nested inside `@media print` without needing to track at-rule
- * depth. Comments are stripped first so a commented-out rule can never satisfy
- * an assertion.
+ * Matching the innermost `… { … }` also reaches rules nested inside
+ * `@media print` without tracking at-rule depth — but only once two things that
+ * do put braces inside a declaration block are removed first. Comments go so a
+ * commented-out rule can never satisfy an assertion, and `{{PLACEHOLDER}}`
+ * interpolations go because templates use them inside declarations
+ * (`max-width: {{PAGE_WIDTH}};`), which would otherwise skip the rule holding
+ * one and absorb its text into the next rule's selector list.
  *
  * @param {string} css - Stylesheet text (a full template file is fine).
  * @returns {Array<{selectors: string[], decls: string}>}
  */
 function rules(css) {
-  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const clean = css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\{\{[^{}]*\}\}/g, 'PLACEHOLDER');
   const out = [];
   for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     out.push({
@@ -72,16 +77,19 @@ for (const t of templates) {
   const css = readFileSync(t.path, 'utf-8');
   const parsed = rules(css);
 
-  // A template that styles no tech line cannot orphan one.
-  if (!parsed.some((r) => r.selectors.some((s) => /(^|\s)\.project-tech(\s|$|:)/.test(s)))) {
-    pass(`${rel}: no .project-tech rule — nothing to orphan`);
-    continue;
-  }
+  // Every template is held to this, including one that styles no .project-tech.
+  // The markup is not the template's to opt out of: it comes from the shared
+  // templates/sections/projects.html, so a template emits that div whenever the
+  // payload carries `tech`, styled or not — and an unstyled block is still a
+  // block-level sibling that a page break can land in front of. Skipping on "no
+  // .project-tech rule" would pass such a template vacuously.
 
-  // Templates that keep a whole .project atomic move the block as a unit, so the
-  // break opportunity this file is about never exists for them.
+  // Keeping a whole .project atomic is the other valid way to satisfy the
+  // invariant: the block moves as a unit, so the opportunity never exists.
   const atomicProject = declares(parsed, '.project', 'break-inside', 'avoid');
 
+  // Either side of the break opportunity may declare it — the CSS fragmentation
+  // rules forbid the break if either does.
   const guarded = declares(parsed, '.project-tech', 'break-before', 'avoid')
     || declares(parsed, '.project-desc', 'break-after', 'avoid');
 
