@@ -138,6 +138,28 @@ const CODEX_PERMISSION_TOKENS = Object.freeze([
 const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze(["sandbox_mode", "sandbox_workspace_write."]);
 
 /**
+ * Strip a config option's own flag from a token, leaving the `key=value` payload.
+ *
+ * A `-c` payload usually arrives as its own argv element (`["-c",
+ * "sandbox_mode=…"]`), but codex also accepts it attached — `-csandbox_mode=…`
+ * and `--config=sandbox_mode=…`, both verified to exit 0 on 0.146.0. Those forms
+ * put the key somewhere the payload check would never look, which is the same
+ * miss the equals form was for option names.
+ *
+ * Returns the token unchanged when it is not a config option, so an unrelated
+ * key (`-cmodel=o3`) is examined and then found harmless by the key list rather
+ * than being refused for using `-c` at all.
+ *
+ * @param {string} arg
+ * @returns {string}
+ */
+function codexConfigPayload(arg) {
+  if (arg.startsWith("--config=")) return arg.slice("--config=".length);
+  if (arg.startsWith("-c") && arg.length > 2) return arg.slice(2);
+  return arg;
+}
+
+/**
  * Refuse an argv whose caller already fenced it.
  *
  * Scans everything but the LAST element: both Codex argv builders keep the prompt
@@ -166,9 +188,9 @@ function assertCodexArgvUnfenced(args) {
     .find(
       (arg) =>
         CODEX_PERMISSION_TOKENS.includes(arg.split("=")[0]) ||
-        // Raw, not the split name: a `-c` payload IS `key=value`, so its key is
-        // what precedes the `=` that the option name check above strips.
-        CODEX_PERMISSION_CONFIG_KEYS.some((key) => arg.startsWith(key)),
+        // The payload, not the split option name: a `-c` value IS `key=value`,
+        // so its key is what precedes the `=` that the check above strips.
+        CODEX_PERMISSION_CONFIG_KEYS.some((key) => codexConfigPayload(arg).startsWith(key)),
     );
   if (spelled !== undefined) {
     throw new Error(

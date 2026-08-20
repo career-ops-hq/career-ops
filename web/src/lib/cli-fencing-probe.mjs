@@ -27,9 +27,18 @@ import fs from "node:fs";
 import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "./cli-fencing.mjs";
 
 /**
+ * The stat fields that together say "this is still the same executable".
+ * @see readBothHelps for why size and mtime alone are not enough.
+ */
+const IDENTITY_FIELDS = Object.freeze(["mtimeMs", "ctimeMs", "size", "ino", "dev"]);
+
+/**
  * @typedef {Object} ProbeCacheEntry
  * @property {number} mtimeMs
+ * @property {number} ctimeMs
  * @property {number} size
+ * @property {number} ino
+ * @property {number} dev
  * @property {Promise<{globalHelp: string, execHelp: string}>} help
  */
 
@@ -134,6 +143,29 @@ function declaresFlag(help, flag) {
 }
 
 /**
+ * Does this pair of help texts satisfy the fencing contract?
+ *
+ * The POLICY half of this module, separated from the I/O half so it can be
+ * exercised without a binary. What a help text has to say is the same question
+ * on every platform, while producing one from a fixture is not: a script with a
+ * shebang is executable on POSIX and inert on Windows. Fusing the two made the
+ * flag-matching rules — the part a review has already found bugs in twice —
+ * testable only where a stub happens to run.
+ *
+ * @param {{globalHelp: string, execHelp: string}} help
+ * @param {string[]} [alsoRequiresInExec] - See codexFencingSupported.
+ * @returns {boolean}
+ */
+export function helpSatisfiesFencing({ globalHelp, execHelp }, alsoRequiresInExec = []) {
+  // Deliberately fail closed: help/flag drift means "unsupported", never a
+  // weaker Codex invocation that could bypass the required safety contract.
+  return (
+    CODEX_REQUIRED_GLOBAL_FLAGS.every((flag) => declaresFlag(globalHelp, flag)) &&
+    [...CODEX_REQUIRED_EXEC_FLAGS, ...alsoRequiresInExec].every((flag) => declaresFlag(execHelp, flag))
+  );
+}
+
+/**
  * Read both help texts for a binary, sharing and caching the process spawns.
  *
  * The SPAWNS are what cost anything here, so they are what is cached — not a
@@ -145,19 +177,24 @@ function declaresFlag(help, flag) {
  * What survives from #2361 is the distinction it was drawing, sharpened: a probe
  * that could not READ the help (spawn error, timeout, empty output) is transient
  * and is not cached, so the next request retries it. A help text that reads fine
- * but lacks a flag is a fact about that binary, and is cached — mtime+size evict
- * it the moment the user upgrades codex, which is the case the retry existed for.
- * Re-spawning two processes on every AI-search request for the life of an old
- * install was never the point.
+ * but lacks a flag is a fact about that binary, and is cached — the identity
+ * below evicts it the moment the user upgrades codex, which is the case the
+ * retry existed for. Re-spawning two processes on every AI-search request for
+ * the life of an old install was never the point.
+ *
+ * Identity is all five stat fields, not size+mtime: an executable replaced in
+ * place can preserve both — a build system writing the same-length binary, or a
+ * restore that puts the timestamp back — while being a different file. ctime and
+ * the inode move when it does. Cheap, and this cache decides whether an agent
+ * gets sandboxed.
  *
  * @param {string} binPath
- * @param {number} mtimeMs
- * @param {number} size
+ * @param {{mtimeMs: number, ctimeMs: number, size: number, ino: number, dev: number}} identity
  * @returns {Promise<{globalHelp: string, execHelp: string}>}
  */
-function readBothHelps(binPath, mtimeMs, size) {
+function readBothHelps(binPath, identity) {
   const cached = probeCache.get(binPath);
-  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+  if (cached && IDENTITY_FIELDS.every((field) => cached[field] === identity[field])) {
     return cached.help;
   }
 
@@ -178,9 +215,9 @@ function readBothHelps(binPath, mtimeMs, size) {
       return { globalHelp: "", execHelp: "" };
     });
 
-  // Concurrent cold requests share the same in-flight read. mtime+size makes a
-  // Codex upgrade at the same path invalidate a previously cached help text.
-  entry = { mtimeMs, size, help };
+  // Concurrent cold requests share the same in-flight read. The stat identity
+  // makes a Codex upgrade at the same path invalidate a cached help text.
+  entry = { ...identity, help };
   probeCache.set(binPath, entry);
   return help;
 }
@@ -196,20 +233,14 @@ function readBothHelps(binPath, mtimeMs, size) {
  * @returns {Promise<boolean>}
  */
 export function codexFencingSupported(binPath, { alsoRequiresInExec = [] } = {}) {
-  let mtimeMs;
-  let size;
+  let stats;
 
   try {
-    ({ mtimeMs, size } = fs.statSync(binPath));
+    stats = fs.statSync(binPath);
   } catch {
     return Promise.resolve(false);
   }
 
-  // Deliberately fail closed: help/flag drift means "unsupported", never a
-  // weaker Codex invocation that could bypass the required safety contract.
-  return readBothHelps(binPath, mtimeMs, size).then(
-    ({ globalHelp, execHelp }) =>
-      CODEX_REQUIRED_GLOBAL_FLAGS.every((flag) => declaresFlag(globalHelp, flag)) &&
-      [...CODEX_REQUIRED_EXEC_FLAGS, ...alsoRequiresInExec].every((flag) => declaresFlag(execHelp, flag)),
-  );
+  const identity = Object.fromEntries(IDENTITY_FIELDS.map((field) => [field, stats[field]]));
+  return readBothHelps(binPath, identity).then((help) => helpSatisfiesFencing(help, alsoRequiresInExec));
 }

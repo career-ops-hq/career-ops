@@ -6,6 +6,12 @@
 // verified "yes" come back as "unsupported"? A probe that guessed "supported"
 // would hand a user an unsandboxed agent while the UI reported a fenced one.
 //
+// The flag-semantics cases read helpSatisfiesFencing directly, over help text
+// written inline. That is not merely convenient: producing help from a fixture
+// needs an executable, and a shebang script is executable on POSIX and inert on
+// Windows, so fusing the two would leave the matching rules — the half a review
+// has already found bugs in — untested on the platform whose CI runs them.
+//
 // Run:  node --test tests/lib/cli-fencing-probe.test.mjs
 
 import { test } from "node:test";
@@ -13,18 +19,25 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { codexFencingSupported } from "../../src/lib/cli-fencing-probe.mjs";
+import { codexFencingSupported, helpSatisfiesFencing } from "../../src/lib/cli-fencing-probe.mjs";
 import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "../../src/lib/cli-fencing.mjs";
 
 const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 
+/** Help text that declares every token, one per line, as codex's own does. */
+const completeHelp = (overrides = {}) => ({
+  globalHelp: [...CODEX_REQUIRED_GLOBAL_FLAGS].join("\n"),
+  execHelp: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].join("\n"),
+  ...overrides,
+});
+
 /**
- * Write an executable stand-in for `codex` whose --help output we control, and
- * which records every invocation so a test can count actual process spawns.
+ * Write an executable stand-in for `codex`, and record every invocation so a
+ * test can count actual process spawns.
  *
- * A real codex is not installed on CI, and pinning these guards to whatever
- * version a developer happens to have would make them pass or fail for reasons
- * unrelated to the code under test.
+ * Only the caching cases need this. A real codex is not installed on CI, and
+ * pinning these guards to whatever version a developer happens to have would
+ * make them pass or fail for reasons unrelated to the code under test.
  */
 function stubCodex(t, { globalFlags, execFlags }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-"));
@@ -53,13 +66,15 @@ process.stdout.write((isExec ? help.execFlags : help.globalFlags).join("\\n") + 
   return { bin, spawnCount };
 }
 
-const fullySupported = (t) =>
-  stubCodex(t, {
-    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
-    execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS],
-  });
+// Windows has no shebang support, so a script stub cannot be spawned as a
+// binary there. Only the two spawn-counting cases below depend on one; every
+// rule they would otherwise cover is asserted against helpSatisfiesFencing,
+// which runs everywhere.
+const needsSpawnableStub = {
+  skip: process.platform === "win32" ? "Windows cannot spawn a shebang script as a binary" : false,
+};
 
-test("the flag lists these guards read still look like themselves", async () => {
+test("the flag lists these guards read still look like themselves", () => {
   // Given a suite that derives its fixtures from the exported requirement lists
   // When either is empty, "every required flag is present" holds vacuously
   // Then refuse that before any case below can pass by measuring nothing.
@@ -68,93 +83,78 @@ test("the flag lists these guards read still look like themselves", async () => 
   assert.ok(CODEX_REQUIRED_GLOBAL_FLAGS.includes("--search"), "web access must still be a requirement");
 });
 
-test("a binary documenting every required flag is supported", async (t) => {
-  // Given a codex whose help lists everything fencing emits and everything the
-  // AI-search route adds
-  const { bin } = fullySupported(t);
-
-  // When the probe runs
-  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-
+test("help declaring every required flag satisfies the contract", () => {
+  // Given help that names everything fencing emits and everything the AI-search
+  // route adds
+  // When it is evaluated
   // Then the run is allowed to proceed. Without this case the suite could pass
-  // with a probe hardwired to false, which fails closed but bans Codex entirely.
-  assert.equal(supported, true);
+  // with a check hardwired to false, which fails closed but bans Codex entirely.
+  assert.equal(helpSatisfiesFencing(completeHelp(), ROUTE_EXEC_FLAGS), true);
 });
 
-test("a binary missing any single required flag is refused", async (t) => {
+test("help missing any single required flag does not", () => {
   // Given every requirement in turn removed from an otherwise complete help —
   // flags move between releases, and one absence is all it takes for the fencing
   // flags to be accepted and ignored
   for (const missing of [...CODEX_REQUIRED_GLOBAL_FLAGS, ...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS]) {
-    const { bin } = stubCodex(t, {
-      globalFlags: CODEX_REQUIRED_GLOBAL_FLAGS.filter((f) => f !== missing),
-      execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].filter((f) => f !== missing),
-    });
+    const help = {
+      globalHelp: CODEX_REQUIRED_GLOBAL_FLAGS.filter((f) => f !== missing).join("\n"),
+      execHelp: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].filter((f) => f !== missing).join("\n"),
+    };
 
-    // When the probe runs
-    const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-
+    // When it is evaluated
     // Then it fails closed rather than running a weaker invocation.
-    assert.equal(supported, false, `dropping ${missing} must make the binary unsupported`);
+    assert.equal(
+      helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS),
+      false,
+      `dropping ${missing} must make the binary unsupported`,
+    );
   }
 });
 
-test("a flag whose name merely CONTAINS a requirement does not satisfy it", async (t) => {
+test("a flag whose name merely CONTAINS a requirement does not satisfy it", () => {
   // Given a codex that renamed --sandbox to --sandbox-mode: a substring check
   // reads the rename as support and hands the user an unsandboxed agent
-  const { bin } = stubCodex(t, {
-    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
-    execFlags: [
+  const help = completeHelp({
+    execHelp: [
       ...CODEX_REQUIRED_EXEC_FLAGS.filter((f) => f !== "--sandbox"),
       "--sandbox-mode <SANDBOX_MODE>",
       ...ROUTE_EXEC_FLAGS,
-    ],
+    ].join("\n"),
   });
 
-  // When the probe runs
-  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-
+  // When it is evaluated
   // Then the requirement is unmet: matching is on the declared token, not on
   // any text that happens to contain it.
-  assert.equal(supported, false);
+  assert.equal(helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS), false);
 });
 
-test("a required value is recognised inside codex's possible-values list", async (t) => {
+test("a required value is recognised inside codex's possible-values list", () => {
   // Given the sandbox MODES are documented only as `-s`'s accepted values, in
   // the bracketed comma-separated form codex actually prints
-  const { bin } = stubCodex(t, {
-    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
-    execFlags: [
+  const help = completeHelp({
+    execHelp: [
       "-c, --config <key=value>",
       "-s, --sandbox <SANDBOX_MODE>  [possible values: read-only, workspace-write, danger-full-access]",
       ...ROUTE_EXEC_FLAGS,
-    ],
+    ].join("\n"),
   });
 
-  // When the probe runs
-  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-
+  // When it is evaluated
   // Then brackets and commas count as boundaries — tightening the matcher must
   // not start rejecting the real help text, which would disable AI search.
-  assert.equal(supported, true);
+  assert.equal(helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS), true);
 });
 
-test("a flag the caller requires is checked even though fencing never emits it", async (t) => {
+test("a flag the caller requires is checked even though fencing never emits it", () => {
   // Given the route's own isolation and output flags, which fencing cannot know
   // about but which break the run just as thoroughly when absent
-  const { bin } = stubCodex(t, {
-    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
-    execFlags: [...CODEX_REQUIRED_EXEC_FLAGS],
-  });
+  const help = completeHelp({ execHelp: [...CODEX_REQUIRED_EXEC_FLAGS].join("\n") });
 
-  // When the same binary is probed with and without those extra requirements
-  const withExtras = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-  const withoutExtras = await codexFencingSupported(bin);
-
-  // Then the caller's list genuinely discriminates — it is not decoration, and
-  // the second answer is computed rather than inherited from the first.
-  assert.equal(withExtras, false, "a missing caller flag must fail the gate");
-  assert.equal(withoutExtras, true, "the same binary satisfies fencing's own requirements");
+  // When the same help is evaluated with and without those extra requirements
+  // Then the caller's list genuinely discriminates — it is not decoration.
+  assert.equal(helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS), false, "a missing caller flag must fail the gate");
+  assert.equal(helpSatisfiesFencing(help), true, "the same help satisfies fencing's own requirements");
 });
 
 test("a binary that cannot be inspected is refused", async () => {
@@ -167,9 +167,10 @@ test("a binary that cannot be inspected is refused", async () => {
   assert.equal(supported, false);
 });
 
-test("a binary that exists but cannot be executed is refused", async (t) => {
-  // Given a file that stats successfully and then fails at spawn (EACCES) —
-  // a half-finished install, and a different code path from the missing one
+test("a binary that exists but cannot be run is refused", async (t) => {
+  // Given a file that stats successfully and then fails at spawn — no execute
+  // permission on POSIX, an unrunnable script on Windows; either way a
+  // half-finished install, and a different code path from the missing one
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-noexec-"));
   const bin = path.join(dir, "codex-stub.mjs");
   fs.writeFileSync(bin, "#!/usr/bin/env node\n");
@@ -184,10 +185,13 @@ test("a binary that exists but cannot be executed is refused", async (t) => {
   assert.equal(supported, false);
 });
 
-test("help output is read once per binary, whatever the caller asks of it", async (t) => {
+test("help output is read once per binary, whatever the caller asks of it", needsSpawnableStub, async (t) => {
   // Given two process spawns per read, and a Scan tab that calls this on every
   // AI search
-  const { bin, spawnCount } = fullySupported(t);
+  const { bin, spawnCount } = stubCodex(t, {
+    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
+    execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS],
+  });
 
   // When the same binary is probed repeatedly, concurrently, and with different
   // requirement lists
@@ -204,7 +208,41 @@ test("help output is read once per binary, whatever the caller asks of it", asyn
   assert.equal(spawnCount(), 2, "one --help and one `exec --help`, shared by every caller");
 });
 
-test("a binary that says nothing is retried rather than remembered", async (t) => {
+test("a replaced binary is re-read even if size and mtime are restored", needsSpawnableStub, async (t) => {
+  // Given an executable swapped in place — a reinstall, a build writing the same
+  // length, a restore putting the timestamp back. Size and mtime can survive
+  // that; the file is still a different one.
+  const { bin, spawnCount } = stubCodex(t, {
+    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
+    execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS],
+  });
+  // Pinned to a whole millisecond, because utimesSync cannot restore the
+  // sub-millisecond part of a natural mtime — without this the cache would
+  // evict on the fractional difference and the case would pass without ever
+  // exercising the identity fields it exists for.
+  const pinned = new Date(1_700_000_000_000);
+  fs.utimesSync(bin, pinned, pinned);
+  assert.equal(await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS }), true);
+  const afterFirst = spawnCount();
+
+  const before = fs.statSync(bin);
+  const replacement = `${bin}.new`;
+  fs.writeFileSync(replacement, fs.readFileSync(bin));
+  fs.chmodSync(replacement, 0o755);
+  fs.renameSync(replacement, bin);
+  fs.utimesSync(bin, pinned, pinned);
+  assert.equal(fs.statSync(bin).size, before.size, "the fixture must keep its size to be worth asserting");
+  assert.equal(fs.statSync(bin).mtimeMs, before.mtimeMs, "and its mtime, or the cache would evict for that reason");
+
+  // When it is probed again
+  await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
+
+  // Then the help was re-read: identity is the whole stat, so a stale answer
+  // cannot outlive the binary it described.
+  assert.ok(spawnCount() > afterFirst, `expected a re-read, spawns stayed at ${afterFirst}`);
+});
+
+test("a binary that says nothing is retried rather than remembered", needsSpawnableStub, async (t) => {
   // Given a probe that produced no help at all: a spawn error, a timeout, a
   // binary killed mid-write. That is a transient condition, not a verdict about
   // the flags — caching it would strand a working Codex until the server

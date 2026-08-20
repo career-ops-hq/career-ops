@@ -3,12 +3,12 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
 // that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
 // then auto-approves (#2185, #2507).
 const ADVISOR_SCOPE = scopeFrom("Read,WebFetch,Glob,Grep");
-import { fencingReport } from "@/lib/cli-fencing.mjs";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";

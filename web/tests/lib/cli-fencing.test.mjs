@@ -187,6 +187,10 @@ test("an argv that already spells its own permissions is refused", () => {
     ["exec", "--sandbox=read-only", "PROMPT"],
     ["exec", "-s=workspace-write", "PROMPT"],
     ["--ask-for-approval=never", "exec", "PROMPT"],
+    // And the attached config forms, which put the key where a payload check
+    // looking at the whole token would never find it. Both exit 0 on 0.146.0.
+    ["exec", "--config=sandbox_mode=read-only", "PROMPT"],
+    ["exec", "-csandbox_mode=read-only", "PROMPT"],
   ]) {
     // When such an argv reaches fencing
     // Then it is refused, so "there is exactly one Codex permission path" is a
@@ -197,6 +201,21 @@ test("an argv that already spells its own permissions is refused", () => {
       `${spelled.join(" ")} must be refused`,
     );
   }
+});
+
+test("a config override that is not about permission passes through", () => {
+  // Given `-c` carries every kind of codex setting, not only sandbox policy
+  const { args } = fenceArgs({
+    cliId: "codex",
+    args: ["exec", "-cmodel=o3", "-c", "shell_environment_policy.inherit=all", "PROMPT"],
+    capabilities: CAPS.localReadOnly,
+  });
+
+  // Then the guard discriminates on the KEY rather than refusing every `-c`: a
+  // rule that banned config overrides outright would be enforced by callers
+  // routing around it, which is how the second sandboxing path appeared.
+  assert.ok(args.includes("-cmodel=o3"), "an unrelated config override must survive");
+  assert.equal(configValue(args, "sandbox_mode"), "read-only");
 });
 
 test("a prompt that merely mentions a permission flag is still fenceable", () => {
