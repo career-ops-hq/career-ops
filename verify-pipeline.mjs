@@ -28,6 +28,7 @@ import {
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { checkFollowupsSchema } from './stats.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -463,6 +464,40 @@ if (syncResult) {
     ok(syncResult.summary.total > 0
       ? 'applications.md and active-interviews.md are in sync'
       : 'No active-interviews.md rows to sync-check');
+  }
+}
+
+// --- Check 14: data/follow-ups.md table schema (#2971) ---
+// stats.mjs (computeFollowupStats) and followup-cadence.mjs both read this table
+// positionally, in the shape modes/followup.md documents, and both skip any row
+// whose num/appNum cells don't parse as integers. A table written with a
+// different column order therefore reports as ZERO follow-ups in both tools,
+// silently — indistinguishable from a file where nothing has been logged yet.
+// Follow-up compliance is exactly the number a user consults to decide whether
+// their follow-ups are working, so a silent zero is actively misleading. This is
+// the only place that difference is visible.
+//
+// Path resolution deliberately matches the two consumers (CAREER_OPS/data/...)
+// rather than APPS_FILE's directory: the check exists to predict what they will
+// do, so it has to read the same file they read.
+const FOLLOWUPS_FILE = join(CAREER_OPS, 'data', 'follow-ups.md');
+const FOLLOWUPS_COLUMNS = '| num | appNum | date | company | role | channel | contact | notes |';
+if (!existsSync(FOLLOWUPS_FILE)) {
+  ok('No follow-ups.md yet — nothing to schema-check');
+} else {
+  const fups = checkFollowupsSchema(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+  if (fups.pipeLines === 0) {
+    ok('follow-ups.md has no table rows yet');
+  } else if (!fups.sawSeparator) {
+    error(`follow-ups.md has table rows but no header delimiter row, so every row is skipped — expected ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.dataRows === 0) {
+    ok('follow-ups.md has no logged follow-ups yet');
+  } else if (fups.parsed === 0) {
+    error(`follow-ups.md: none of its ${fups.dataRows} row(s) parse, so stats.mjs and followup-cadence.mjs will both report zero follow-ups — expected column order ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.unparsedLines.length > 0) {
+    warn(`follow-ups.md: ${fups.unparsedLines.length} of ${fups.dataRows} rows will be skipped by stats.mjs and followup-cadence.mjs (line${fups.unparsedLines.length === 1 ? '' : 's'} ${fups.unparsedLines.join(', ')}) — expected ${FOLLOWUPS_COLUMNS}`);
+  } else {
+    ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
   }
 }
 

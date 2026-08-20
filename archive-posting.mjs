@@ -29,10 +29,14 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const JDS_DIR = join(ROOT, 'jds');
 const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
+
+const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
+const VALUE_FLAGS = ['--company', '--role', '--report'];
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -88,7 +92,17 @@ let reportNum = null;
 // its exports doesn't read process.argv or call process.exit — the repo's
 // standard direct-run guard at the bottom is what invokes it.
 function parseCliArgs(args) {
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  // Reject a mistyped flag (--comany, --reprot) before any work, and handle
+  // --help/-h wherever they appear. Inside the function, not at module scope:
+  // this file is imported for its exports (test-all.mjs does), and a
+  // module-scope call would read the IMPORTER's argv and exit(1) on flags that
+  // are perfectly valid for it.
+  validateFlags(args, KNOWN_FLAGS, HELP_TEXT, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
+
+  if (args.length === 0) {
     console.log(HELP_TEXT);
     process.exit(0);
   }
