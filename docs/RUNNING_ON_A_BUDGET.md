@@ -53,21 +53,32 @@ Inside Claude Code, `/status` reports the active login and shows an API-key row 
 
 ### Switch to the subscription
 
-1. Remove the key from wherever it is exported (`~/.zshrc`, `~/.bashrc`, `~/.profile`, a project `.env`, or another tool that sets it for you). `unset ANTHROPIC_API_KEY` only affects the current shell, so edit the file too or it comes back on the next terminal.
-2. Restart the terminal.
-3. Run `/login` in Claude Code and sign in.
+Remove the key from wherever it is exported (`~/.zshrc`, `~/.bashrc`, `~/.profile`, a project `.env`, or another tool that sets it for you). `unset ANTHROPIC_API_KEY` only affects the current shell, so edit the file too or it comes back on the next terminal.
+
+Check your Claude Code settings for `apiKeyHelper`. A configured helper re-injects an API key even after you clean your environment.
+
+1. Open `~/.claude/settings.json`.
+2. Remove or comment out the `apiKeyHelper` key.
+3. Restart the terminal.
+4. Run `/login` in Claude Code and sign in.
 
 `ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
 
-### The batch mode is the exception worth knowing
+### Authenticate for Headless or Batch Runs
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+For `claude -p` batch runs (cron, CI), headless paths do not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
 
 ```bash
 claude setup-token          # requires an active Claude subscription
 ```
 
-Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment the batch runs in. It is a credential: treat it like one, and never commit it.
+Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment the batch runs in:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="<your-generated-token>"
+```
+
+It is a credential: treat it like one, and never commit it.
 
 ### Two things worth expecting
 
