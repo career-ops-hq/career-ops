@@ -502,7 +502,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // Inside the main-module guard, not at import time: company-history.mjs
   // imports detectReposts/parseScanHistory from here, so a top-level check
   // would judge the IMPORTER's argv.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: without it, `--window --summary` reads --summary as the
+  // window value; flagValue() has no adjacency check, parseInt('--summary')
+  // is NaN, and windowDays silently falls back to DEFAULT_WINDOW_DAYS at exit
+  // 0 instead of reporting the malformed flag (#3087). Nothing more specific
+  // to say than the shared message.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   if (selfTestMode) {
     runSelfTest();
