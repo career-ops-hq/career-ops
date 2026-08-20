@@ -191,6 +191,10 @@ test("an argv that already spells its own permissions is refused", () => {
     // looking at the whole token would never find it. Both exit 0 on 0.146.0.
     ["exec", "--config=sandbox_mode=read-only", "PROMPT"],
     ["exec", "-csandbox_mode=read-only", "PROMPT"],
+    ["exec", "-sdanger-full-access", "PROMPT"],
+    ["exec", "--yolo", "PROMPT"],
+    ["exec", "--approve-for-me", "PROMPT"],
+    ["exec", "--not-so-yolo", "PROMPT"],
   ]) {
     // When such an argv reaches fencing
     // Then it is refused, so "there is exactly one Codex permission path" is a

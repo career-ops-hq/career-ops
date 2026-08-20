@@ -180,11 +180,12 @@ export async function POST(req: Request) {
   child.stderr.setEncoding("utf8");
   const enc = new TextEncoder();
 
-  // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
-  // flip `closed` before the child's late handlers run, and send() is try/catch'd —
-  // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
+  // Stream-lifetime state lives outside start() so cancel() (client disconnect)
+  // can stop every timer before the child's late handlers run. send() is also
+  // try/catch'd so a late enqueue cannot throw uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a client disconnect fires
   // cancel(). Track its promise so cancel() can defer releasing writeToken
@@ -230,9 +231,6 @@ export async function POST(req: Request) {
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
-      // Declared before send() so send() can clear it the moment it sees the
-      // client disconnect; assigned just below, once close() exists.
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
       const send = (obj: unknown) => {
         if (closed) return;
         try {
@@ -493,6 +491,7 @@ export async function POST(req: Request) {
     },
     cancel() {
       closed = true;
+      if (heartbeat) clearInterval(heartbeat);
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
       if (pdfRenderPromise) {

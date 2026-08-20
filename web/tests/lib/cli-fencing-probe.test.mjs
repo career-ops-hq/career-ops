@@ -24,10 +24,17 @@ import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "../../sr
 
 const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 
-/** Help text that declares every token, one per line, as codex's own does. */
+/** Render tokens in the two structured forms Codex's clap help uses. */
+const structuredHelp = (tokens) => {
+  const options = tokens.filter((token) => token.startsWith("-")).map((token) => `  ${token} <VALUE>`);
+  const values = tokens.filter((token) => !token.startsWith("-"));
+  return [...options, ...(values.length ? [`  [possible values: ${values.join(", ")}]`] : [])].join("\n");
+};
+
+/** Help text that declares every token as codex's own does. */
 const completeHelp = (overrides = {}) => ({
-  globalHelp: [...CODEX_REQUIRED_GLOBAL_FLAGS].join("\n"),
-  execHelp: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].join("\n"),
+  globalHelp: structuredHelp(CODEX_REQUIRED_GLOBAL_FLAGS),
+  execHelp: structuredHelp([...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS]),
   ...overrides,
 });
 
@@ -43,7 +50,10 @@ function stubCodex(t, { globalFlags, execFlags }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-"));
   const bin = path.join(dir, "codex-stub.mjs");
   const callLog = path.join(dir, "calls.log");
-  const help = JSON.stringify({ globalFlags, execFlags });
+  const help = JSON.stringify({
+    globalHelp: structuredHelp(globalFlags),
+    execHelp: structuredHelp(execFlags),
+  });
   fs.writeFileSync(
     bin,
     `#!/usr/bin/env node
@@ -51,7 +61,7 @@ import fs from "node:fs";
 const help = ${help};
 const isExec = process.argv[2] === "exec";
 fs.appendFileSync(${JSON.stringify(callLog)}, (isExec ? "exec" : "global") + "\\n");
-process.stdout.write((isExec ? help.execFlags : help.globalFlags).join("\\n") + "\\n");
+process.stdout.write((isExec ? help.execHelp : help.globalHelp) + "\\n");
 `,
   );
   fs.chmodSync(bin, 0o755);
@@ -98,8 +108,10 @@ test("help missing any single required flag does not", () => {
   // flags to be accepted and ignored
   for (const missing of [...CODEX_REQUIRED_GLOBAL_FLAGS, ...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS]) {
     const help = {
-      globalHelp: CODEX_REQUIRED_GLOBAL_FLAGS.filter((f) => f !== missing).join("\n"),
-      execHelp: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].filter((f) => f !== missing).join("\n"),
+      globalHelp: structuredHelp(CODEX_REQUIRED_GLOBAL_FLAGS.filter((f) => f !== missing)),
+      execHelp: structuredHelp(
+        [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].filter((f) => f !== missing),
+      ),
     };
 
     // When it is evaluated
@@ -146,10 +158,19 @@ test("a required value is recognised inside codex's possible-values list", () =>
   assert.equal(helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS), true);
 });
 
+test("required tokens mentioned only in prose do not satisfy the contract", () => {
+  const globalHelp = CODEX_REQUIRED_GLOBAL_FLAGS.map((flag) => `The ${flag} option was removed.`).join("\n");
+  const execHelp = [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS]
+    .map((flag) => `This build does not support ${flag}.`)
+    .join("\n");
+
+  assert.equal(helpSatisfiesFencing({ globalHelp, execHelp }, ROUTE_EXEC_FLAGS), false);
+});
+
 test("a flag the caller requires is checked even though fencing never emits it", () => {
   // Given the route's own isolation and output flags, which fencing cannot know
   // about but which break the run just as thoroughly when absent
-  const help = completeHelp({ execHelp: [...CODEX_REQUIRED_EXEC_FLAGS].join("\n") });
+  const help = completeHelp({ execHelp: structuredHelp(CODEX_REQUIRED_EXEC_FLAGS) });
 
   // When the same help is evaluated with and without those extra requirements
   // Then the caller's list genuinely discriminates — it is not decoration.

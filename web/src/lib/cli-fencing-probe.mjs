@@ -117,29 +117,25 @@ function readCliHelp(binPath, args) {
  * Is `flag` DECLARED in this help text, rather than merely contained in it?
  *
  * `help.includes("--sandbox")` is also satisfied by `--sandbox-mode`, and
- * `includes("workspace-write")` by `workspace-write-plus` — a binary whose flags
- * have been renamed would be reported as supported, which is the one direction
- * this gate must never fail in.
- *
- * The bounding characters are what codex's own help puts around these tokens:
- * whitespace and line ends for a flag on its own, `,` for the `-c, --config`
- * short/long pair, `=` and `(` for inline forms, and `[`/`]`/`,` for the bare
- * values inside `[possible values: read-only, workspace-write, …]`.
- *
- * It does NOT exclude prose — a sentence reading "removed --search support" has
- * spaces on both sides and still matches. Anchoring to a declaration's leading
- * indentation would fix that and buy a dependency on clap's help LAYOUT instead:
- * a reflow would then report every codex as unsupported and disable AI search
- * outright. A renamed flag is the failure worth catching; a help text that
- * discusses its own removed flags is not one codex writes.
+ * Flags count only in option declarations, and bare sandbox modes count only in
+ * clap's structured possible-values lists. Prose can discuss a removed option;
+ * treating that as proof of support would fail this security gate open.
  *
  * @param {string} help
  * @param {string} flag
  * @returns {boolean}
  */
 function declaresFlag(help, flag) {
-  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[\\s,=[(])${escaped}($|[\\s,\\])])`, "m").test(help);
+  for (const line of help.split(/\r?\n/)) {
+    const declaration = line
+      .trimStart()
+      .match(/^(-{1,2}[A-Za-z0-9?][A-Za-z0-9?-]*)(?:,\s*(-{1,2}[A-Za-z0-9?][A-Za-z0-9?-]*))?(?=$|[\s=<[])/);
+    if (declaration?.slice(1).includes(flag)) return true;
+
+    const values = line.match(/\[possible values:\s*([^\]]+)\]/i)?.[1];
+    if (values?.split(",").some((value) => value.trim() === flag)) return true;
+  }
+  return false;
 }
 
 /**

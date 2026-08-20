@@ -131,6 +131,9 @@ const CODEX_PERMISSION_TOKENS = Object.freeze([
   "--ask-for-approval",
   "--search",
   "--dangerously-bypass-approvals-and-sandbox",
+  "--yolo",
+  "--approve-for-me",
+  "--not-so-yolo",
   "--full-auto",
 ]);
 
@@ -188,6 +191,7 @@ function assertCodexArgvUnfenced(args) {
     .find(
       (arg) =>
         CODEX_PERMISSION_TOKENS.includes(arg.split("=")[0]) ||
+        (arg.startsWith("-s") && arg.length > 2) ||
         // The payload, not the split option name: a `-c` value IS `key=value`,
         // so its key is what precedes the `=` that the check above strips.
         CODEX_PERMISSION_CONFIG_KEYS.some((key) => codexConfigPayload(arg).startsWith(key)),
