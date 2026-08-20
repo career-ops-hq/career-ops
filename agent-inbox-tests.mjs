@@ -14,16 +14,20 @@
  *      the personal queue isn't accidentally tracked.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
+ *   8. The queue file is SEEDED under the lock too, not merely appended to under
+ *      it. Creating it is open() then write(), and a writer that observed the
+ *      gap appended into a zero-byte file and lost its item to the header.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -186,6 +190,62 @@ console.log('7. concurrent adds do not lose items (append, not rewrite)');
   const expected = new Set(Array.from({ length: N }, (_, i) => `item-${i}`));
   const complete = actual.size === expected.size && [...expected].every((item) => actual.has(item));
   check('no item is duplicated or truncated', complete, `actual=${[...actual].join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('8. the queue file is seeded under the lock, not before it');
+{
+  // §7 asserts the concurrent adds all survive. This asserts the reason they
+  // can: the file is created AND its header written while the lock is held, so
+  // no other writer can ever observe it mid-initialisation.
+  //
+  // The distinction is not academic. `wx` makes the CREATE atomic but not the
+  // INITIALISATION — writeFileSync is open() then write(), and between them the
+  // file exists at zero bytes. Measured on Windows, a second process polling
+  // existsSync saw it empty in 303 of 400 rounds. A writer that looked in that
+  // window skipped creation, appended into the empty file, and had its line
+  // overwritten when the 479-byte header landed at offset 0: every process
+  // exited 0 and the queue came out well-formed and one item short — §7's
+  // `kept=29 of 30` with nothing to show for it. Seeding OUTSIDE the lock is
+  // what made that window reachable.
+  //
+  // Asserted deterministically rather than by racing for it: the test holds the
+  // lock itself, so a seed that happens before acquisition shows up as a file
+  // existing at a moment when no writer can possibly be in the critical
+  // section. Racing would reproduce it only on a loaded multi-core runner,
+  // which is precisely the flake this replaces.
+  const dir = tmp('inbox-seed-');
+  const inbox = join(dir, 'agent-inbox.md');
+  const held = await acquirePipelineLock(inbox, { timeoutMs: 10_000 });
+
+  const child = spawn(NODE, [CLI, 'add', 'seeded under the lock'], {
+    cwd: ROOT, env: { ...process.env, CAREER_OPS_INBOX: inbox }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let childErr = '';
+  child.stderr.on('data', (c) => { childErr += c; });
+  const finished = new Promise((res) => child.on('exit', res));
+
+  // Generous, because a false green here is the one outcome worth avoiding: the
+  // pre-fix ensureFile() ran before the first lock attempt, so the file
+  // appeared as soon as the process finished booting.
+  const appearedWhileLocked = await new Promise((res) => {
+    const deadline = Date.now() + 2_000;
+    const poll = () => {
+      if (existsSync(inbox)) return res(true);
+      if (Date.now() > deadline) return res(false);
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
+  check('queue file is NOT created while another process holds the lock', appearedWhileLocked === false);
+
+  held.release();
+  const code = await finished;
+  check('the blocked add still completes once the lock frees', code === 0,
+    childErr.trim().split('\n').slice(-2).join(' | '));
+  const md = existsSync(inbox) ? readFileSync(inbox, 'utf8') : '';
+  check('header was seeded', /^# Agent Inbox/.test(md) && /Agent protocol:/.test(md), md.slice(0, 60));
+  check('the item landed after the header', /^- \[ \] .*seeded under the lock/m.test(md), md);
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
