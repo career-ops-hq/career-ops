@@ -1,4 +1,5 @@
 # Personal data (user fills these)
+MY_PROFILE.md
 cv.md
 article-digest.md
 local/
@@ -56,6 +57,7 @@ writing-samples/*
 
 # User config and customization (never auto-updated)
 config/profile.yml
+config/application-answers.json
 config/cv-facts.json
 config/benchmarks.yml
 portals.yml
