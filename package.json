@@ -30,7 +30,7 @@
     "sync-check": "node cv-sync-check.mjs",
     "update:check": "node update-system.mjs check",
     "update:test": "node updater-migration-tests.mjs",
-    "update": "node update-system.mjs apply",
+    "update": "node update-system.mjs apply --confirm",
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "extract": "node browser-extract.mjs",
