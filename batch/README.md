@@ -26,6 +26,19 @@ Process multiple job offers in parallel via headless workers. Each worker runs t
 
 4. **Results** are automatically merged into `data/applications.md`, processed offers are reconciled out of the `data/pipeline.md` inbox, and integrity is verified with `verify-pipeline.mjs` at the end of the run.
 
+## Polytoken-native runner
+
+When Claude Code/Codex is not installed as a shell CLI, use the Polytoken harness directly:
+
+```bash
+npm run batch:polytoken -- --start-from 113 --limit 1
+npm run batch:polytoken -- --resume-paused
+```
+
+This uses `polytoken exec` sequentially, reuses the same `batch-prompt.md`, `batch-state.tsv`, report allocator, tracker merge, pipeline reconciliation, and verification steps. It does not invoke subagents from a script—Polytoken does not expose a script-facing subagent API. The `polytoken` executable must be available in `PATH`; set `POLYTOKEN_BIN=/absolute/path/to/polytoken` when needed.
+
+Useful options include `--dry-run`, `--status`, `--skip-pdf`, `--model MODEL`, `--facet FACET`, and `--max-tool-turns N`. The native runner is intentionally sequential and fails closed if the Polytoken executable is unavailable.
+
 ## Options
 
 | Flag | Default | Description |
