@@ -202,8 +202,10 @@ const SYSTEM_PATHS = [
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'batch-evaluate-gemini.mjs',
   'providers/',
   'seeds/',
+  'scripts/check-syntax.mjs',
   'tests/',
   'user-agent.mjs',
   'doctor.mjs',
@@ -734,22 +736,175 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-function gitStatusEntries() {
-  const status = git('status', '--porcelain');
+// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
+// first `--porcelain` line of a worktree/index change begins with a space
+// (` M path`). Trimming rewrites it into `M path`, and the path parse below
+// then drops the first character — a mangled path that no longer matches the
+// real user file in the safety checks. gitRawIn keeps the leading space.
+//
+// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
+// be unit-tested without a real repo: Windows git terminates the last
+// `--porcelain` line with CRLF (its native EOL), and without stripping the
+// trailing CR the sliced `path` would carry a phantom `\r` that matches
+// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+export function parsePorcelainStatus(status) {
   if (!status) return [];
-
-  return status.split('\n')
+  return status
+    .split('\n')
     .filter(Boolean)
-    .map(line => ({
-      code: line.slice(0, 2),
-      path: line.slice(3),
-    }));
+    .map((line) => {
+      // git never writes a CR inside a path, so a line-terminal '\r' is always
+      // the CRLF half of the line ending, never a path character.
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
+      return {
+        code: clean.slice(0, 2),
+        path: clean.slice(3),
+      };
+    });
 }
 
+export function gitStatusEntries(root = ROOT) {
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
+}
+
+/**
+ * Characters that can legally precede a regex literal. A `/` after any of them
+ * opens a pattern; after an identifier, a closing bracket or a literal it is
+ * division. Nothing else distinguishes the two.
+ */
+const REGEX_LITERAL_PREDECESSORS = new Set(
+  ['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'],
+);
+
+/**
+ * Consume a quoted literal starting at `start`, returning its raw inner text
+ * and the offset just past the closing quote. Escapes are copied through
+ * verbatim, which keeps the previous contract (the entries are source text,
+ * not decoded values) while stopping `\'` from ending the literal early.
+ */
+function readStringLiteral(source, start, quote) {
+  let value = '';
+  let index = start + 1;
+  while (index < source.length && source[index] !== quote) {
+    if (source[index] === '\\') {
+      value += source.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    value += source[index];
+    index += 1;
+  }
+  return { value, end: index + 1 };
+}
+
+/**
+ * Consume a regex literal starting at `start` and return the offset just past
+ * it. An unterminated pattern, or one broken by a newline, was not a regex
+ * after all, so the scan resumes one character in rather than swallowing the
+ * rest of the file.
+ */
+function skipRegexLiteral(source, start) {
+  let index = start + 1;
+  let inCharacterClass = false;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === '\\') {
+      index += 2;
+      continue;
+    }
+    if (char === '\n') return start + 1;
+    if (char === '[') inCharacterClass = true;
+    else if (char === ']') inCharacterClass = false;
+    else if (char === '/' && !inCharacterClass) return index + 1;
+    index += 1;
+  }
+  return start + 1;
+}
+
+/**
+ * Read a string-literal array out of updater source text.
+ *
+ * The source is scanned left to right rather than pattern-matched, because a
+ * regex cannot tell code from prose. Comments, string literals, escapes and
+ * regex literals are each consumed whole, and the array ends at the bracket
+ * that returns depth to zero rather than at the first `];` in the text. So
+ * `//` inside `'https://host/file'` stays part of the path, an apostrophe in
+ * `// upstream's own files` does not open a string that eats the next entry,
+ * `// means "do not touch"` adds no phantom path, a `];` inside a comment does
+ * not end the array early, and a commented-out declaration is never selected.
+ * None of these threw before: the caller got a plausible-looking list that was
+ * wrong.
+ *
+ * That matters most where this reads a source we did not write: apply() calls
+ * it on the TARGET updater fetched from FETCH_HEAD, so one apostrophe added
+ * upstream would corrupt the manifest on every client that upgrades, not on
+ * the machine where it was typed (#3099).
+ *
+ * Known limit: template-literal interpolation is treated as ordinary text. A
+ * path manifest has no reason to contain one, and reading it properly would
+ * need a parser rather than a scanner.
+ *
+ * @param {string} source - Updater source text.
+ * @param {string} name - Array binding to read, e.g. 'SYSTEM_PATHS'.
+ * @returns {string[]} Declared entries, in source order. Empty when absent.
+ */
 export function extractArrayFromSource(source, name) {
-  const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
-  if (!match) return [];
-  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
+  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*\\[`, 'y');
+  const entries = [];
+  let depth = 0;
+  let previous = '';
+  let index = 0;
+
+  while (index < source.length) {
+    const char = source[index];
+    const pair = source.slice(index, index + 2);
+
+    if (pair === '//') {
+      const end = source.indexOf('\n', index);
+      index = end === -1 ? source.length : end;
+      continue;
+    }
+    if (pair === '/*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      const literal = readStringLiteral(source, index, char);
+      if (depth > 0) entries.push(literal.value);
+      previous = char;
+      index = literal.end;
+      continue;
+    }
+    if (char === '/' && REGEX_LITERAL_PREDECESSORS.has(previous)) {
+      index = skipRegexLiteral(source, index);
+      previous = '/';
+      continue;
+    }
+
+    if (depth > 0) {
+      if (char === '[') depth += 1;
+      else if (char === ']') {
+        depth -= 1;
+        if (depth === 0) return entries;
+      }
+    } else if (char === 'c') {
+      declaration.lastIndex = index;
+      if (declaration.test(source)) {
+        depth = 1;
+        index = declaration.lastIndex;
+        continue;
+      }
+    }
+
+    if (!/\s/.test(char)) previous = char;
+    index += 1;
+  }
+
+  // An array that never closes is malformed source. Report nothing rather than
+  // a partial manifest: `apply` merges an empty list away, but would act on a
+  // truncated one.
+  return [];
 }
 
 function mergePathLists(...lists) {
@@ -763,6 +918,26 @@ function mergePathLists(...lists) {
     }
   }
   return merged;
+}
+
+function normalizeRepoPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function pathMatchesManifest(file, entry) {
+  const normalizedFile = normalizeRepoPath(file);
+  const normalizedEntry = normalizeRepoPath(entry).replace(/\/$/, '');
+  return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  if (remote.size === 0) return [];
+  return [...localFiles]
+    .map(normalizeRepoPath)
+    .filter((file) => !remote.has(file))
+    .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
@@ -1171,6 +1346,8 @@ async function check() {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
+  let localCommit = '';
+  let remoteCommit = '';
 
   // Use curl instead of fetch() so the check works inside the Claude Code
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
@@ -1182,6 +1359,21 @@ async function check() {
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
   ]);
+
+  // VERSION is release metadata, not a complete description of the system
+  // tree. Compare the installed commit with main as well, so same-version
+  // manifest/file drift is visible (#2630). A failed commit lookup is
+  // deliberately conservative: version checks still work offline/behind a
+  // restricted git transport.
+  try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
+  const remoteRef = await curlGet('https://api.github.com/repos/santifer/career-ops/git/ref/heads/main', [
+    '--header', 'Accept: application/vnd.github+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (remoteRef !== null) {
+    try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
+  }
+  const systemTreeDrift = Boolean(localCommit && remoteCommit && localCommit !== remoteCommit);
 
   if (rawVersion !== null) {
     try {
@@ -1225,8 +1417,8 @@ async function check() {
     remote = releaseVersion;
   }
 
-  if (compareVersions(local, remote) >= 0) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
@@ -1234,6 +1426,9 @@ async function check() {
     status: 'update-available',
     local,
     remote,
+    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    local_commit: localCommit || undefined,
+    remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
 }
@@ -1569,6 +1764,37 @@ async function apply() {
     }
     if (skippedPaths.length > 0) {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
+    }
+
+    // All tracked system files need the same stale-file treatment. In
+    // particular, root-level system files removed upstream (for example an
+    // old plugins-registry.json) are not covered by a directory-only prune.
+    // Never infer a deletion from an empty/failed tree lookup, and never touch
+    // untracked files or paths explicitly classified as user data (#2532).
+    try {
+      let remoteFiles = new Set();
+      try {
+        remoteFiles = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // A failed tree lookup is not evidence that the target is empty.
+      }
+      if (remoteFiles.size > 0) {
+        const localFiles = git('ls-files').split('\n').filter(Boolean);
+        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+          try {
+            unlinkSync(join(ROOT, f));
+            updated.push(f);
+            console.log(`Pruned stale system file: ${f}`);
+          } catch (err) {
+            console.error(`Failed to prune stale system file ${f}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Stale system-file prune step failed: ${err.message}`);
     }
 
     // tests/ and test-fixtures/ are both auto-discovered and EXECUTED

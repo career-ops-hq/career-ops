@@ -35,13 +35,27 @@
 
 
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+
+// Windows keeps a handle open on a just-exited child process's working files
+// for a short window (antivirus and Search Indexer widen it), so removing a
+// fixture directory the suite created inside the repo can fail with EPERM even
+// though every assertion passed. `force: true` does not cover that — it
+// suppresses ENOENT, not EPERM — and most of these removals sit in `finally`
+// blocks, so one unlucky cleanup aborted the whole run with a stack trace and
+// a non-zero exit. That reads as a broken test suite on Windows when nothing
+// is broken, and it leaves the fixture dir behind for the next run to trip on.
+//
+// Node retries exactly this class of error (EBUSY/EMFILE/ENFILE/ENOTEMPTY/
+// EPERM) with linear backoff when given maxRetries, so default it everywhere
+// rather than at ~95 individual call sites. An explicit option still wins.
+const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 /**
@@ -263,6 +277,12 @@ mjsFiles.forEach((f, i) => {
 
 console.log('\n2. Script execution (graceful on empty data)');
 
+// How much of its budget a script may consume before the suite says so. High
+// enough that ordinary CI variance stays quiet, low enough to leave room to act
+// before the kill: at 0.75 a 30s script warns at 22.5s, nearly a full run of
+// headroom.
+const SLOW_SCRIPT_WARN_FRACTION = 0.75;
+
 const scripts = [
   { name: 'cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
   { name: 'verify-pipeline.mjs', expectExit: 0 },
@@ -304,7 +324,21 @@ const scripts = [
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
-  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0 },
+  // The one script in this list that genuinely needs longer than the shared
+  // budget. It spawns competing writer processes for 27 contention cases, and
+  // that cost is the behaviour under test rather than slack to be trimmed.
+  //
+  // Measured on current main on a 24-core Windows box, four consecutive runs:
+  // 13.4s, 17.8s, 19.8s, 20.1s — already 67% of the default 30s before a
+  // 2-core CI runner's load is added. On windows-latest it crossed the line and
+  // was killed mid-matrix (`exit null, signal SIGTERM`), while every other
+  // check on the same commit passed (#2906).
+  //
+  // Raised here rather than in run()'s default so the outlier is treated as an
+  // outlier: every other script keeps the 30s bound, and a NEW script that
+  // starts taking half a minute still fails loudly instead of inheriting a
+  // budget sized for this one.
+  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
@@ -389,14 +423,61 @@ try {
     'utf-8'
   );
 
-  for (const { name, allowFail } of scripts) {
+  for (const script of scripts) {
+    const { name, allowFail, timeoutMs } = script;
     const parts = name.split(' ');
     const scriptFile = parts[0];
     const args = parts.slice(1);
+    // WHETHER a budget was declared is read from the key's presence, never
+    // inferred from its value. Every in-band sentinel here is also a value
+    // somebody could write, and each one costs a bug: the first draft used
+    // `??` for the budget and truthiness for the override, so `timeoutMs: 0`
+    // meant "no budget" to one line and "default" to the next; the second used
+    // `null` as its absent-marker, so an explicit `timeoutMs: null` skipped
+    // validation and silently took the default. `hasOwn` cannot be spoofed by
+    // a value, so the question has one answer.
+    //
+    // A declared-but-unusable value then fails loudly rather than falling back.
+    // This list is hand-edited, so a bad entry is a typo in the suite's own
+    // definition, and quietly substituting the default would hide it behind the
+    // very budget it was trying to set. `timeoutMs: undefined` is caught too —
+    // writing the key at all is a claim, and an unusable claim is a mistake.
+    // Integer, not merely finite: execFileSync rejects a fractional timeout with
+    // ERR_OUT_OF_RANGE, so `timeoutMs: 0.5` would pass a "looks like a number"
+    // check here and then blow up inside the run with an error about neither
+    // this list nor this script. Validation that stops short of what the
+    // consumer accepts just moves the failure somewhere less legible.
+    const declared = Object.hasOwn(script, 'timeoutMs');
+    if (declared && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+      fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive integer number of milliseconds`);
+      continue;
+    }
+    const budgetMs = declared ? timeoutMs : DEFAULT_SCRIPT_TIMEOUT_MS;
+    const startedAt = Date.now();
+    // Spread rather than defaulted: `{ timeout: undefined }` reads to
+    // execFileSync as "no timeout at all", which would turn a hung script into
+    // a hung CI job. Absent means absent, so run()'s own default stands.
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(declared ? { timeout: timeoutMs } : {}),
     });
+    const elapsedMs = Date.now() - startedAt;
+    // A budget a script can raise for itself is a place to hide in, unless
+    // something still notices it creeping. Nothing did: the reason
+    // tracker-writer-lock-tests.mjs was killed rather than flagged is that
+    // spending 29 of its 30 seconds looked exactly like spending 2 — the suite
+    // reported "runs OK" either way, right up to the run where it did not.
+    //
+    // So the ceiling is not the only signal any more. A script that eats most
+    // of its budget says so while it is still passing, which is the point at
+    // which someone can act. This is a WARNING rather than a failure on
+    // purpose: a loaded runner is a normal reason to be slow, and turning that
+    // into a red run would trade one false failure for another.
+    if (result !== null && elapsedMs > budgetMs * SLOW_SCRIPT_WARN_FRACTION) {
+      warn(`${name} used ${(elapsedMs / 1000).toFixed(1)}s of its ${(budgetMs / 1000).toFixed(0)}s budget `
+        + `(${Math.round((elapsedMs / budgetMs) * 100)}%) — it is passing, but it is close to being killed for time`);
+    }
     if (result !== null) {
       pass(`${name} runs OK`);
     } else if (allowFail) {
@@ -2851,6 +2932,206 @@ if (
   }
 }
 
+// --- Block G AI-screening disclosure signal (#2892, jurisdiction-compliance-lens umbrella #2026) ---
+{
+  // 1. Jurisdiction table exists, parses as YAML, and all three verified
+  //    seeds (US-NY-NYC, US-IL, EU) are complete per the header schema.
+  const asdPath = join(ROOT, 'templates', 'jurisdiction-ai-screening-disclosure.yml');
+  if (!existsSync(asdPath)) {
+    fail('templates/jurisdiction-ai-screening-disclosure.yml missing (#2892)');
+  } else {
+    try {
+      const asdRaw = readFileSync(asdPath, 'utf-8');
+      const asd = yaml.load(asdRaw);
+      const j = asd?.jurisdictions || {};
+      const rowComplete = (row) =>
+        row &&
+        typeof row.jurisdiction_name === 'string' && row.jurisdiction_name.length > 0 &&
+        typeof row.law_name === 'string' && row.law_name.length > 0 &&
+        typeof row.effective === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.effective) &&
+        typeof row.requires === 'string' && row.requires.length > 0 &&
+        Array.isArray(row.disclosure_language_examples) && row.disclosure_language_examples.length > 0 &&
+        typeof row.official_source?.url === 'string' && row.official_source.url.length > 0 &&
+        typeof row.legal_basis === 'string' && row.legal_basis.length > 0 &&
+        Array.isArray(row.sources) && row.sources.length > 0 &&
+        Boolean(row.as_of);
+
+      // CodeRabbit finding 1 (#2896): a state-wide US-NY key is wrong — Local
+      // Law 144 splits into a job-location-keyed audit duty and a candidate-
+      // residency-keyed (five boroughs) notice duty. The row must be keyed
+      // city-specifically and carry BOTH condition fields explicitly, so a
+      // generic "New York, USA" profile can never be mistaken for a match.
+      const nyRow = j['US-NY-NYC'];
+      const nyRowCityKeyed =
+        !j['US-NY'] && // the old state-wide key must be gone, not just supplemented
+        rowComplete(nyRow) &&
+        String(nyRow.effective) === '2023-07-05' &&
+        nyRow.law_name.includes('Local Law 144') &&
+        typeof nyRow.job_location_condition === 'string' && nyRow.job_location_condition.length > 0 &&
+        typeof nyRow.candidate_residency_condition === 'string' &&
+        /five boroughs|Manhattan/i.test(nyRow.candidate_residency_condition) &&
+        /New York State|not\s+NYC|not\s+sufficient/i.test(nyRow.candidate_residency_condition);
+
+      // CodeRabbit finding 2 (#2896): the EU AI Act's high-risk obligations
+      // for stand-alone Annex III systems were provisionally deferred (May
+      // 2026 Digital Omnibus agreement) from 2026-08-02 to 2027-12-02, and
+      // official_source.url must point at an actual EU institutional source
+      // (EUR-Lex or a *.europa.eu page) — not a third-party summary site.
+      const euRow = j['EU'];
+      const euRowCorrected =
+        rowComplete(euRow) &&
+        String(euRow.effective) === '2027-12-02' &&
+        euRow.law_name.includes('2024/1689') &&
+        /europa\.eu/i.test(euRow.official_source.url) &&
+        /Digital Omnibus/i.test(euRow.enforcement_notes || '') &&
+        /2026-08-02/.test(euRow.enforcement_notes || '') &&
+        /provisional/i.test(euRow.enforcement_notes || '');
+
+      if (
+        nyRowCityKeyed &&
+        rowComplete(j['US-IL']) && j['US-IL'].law_name.includes('820 ILCS 42') &&
+        euRowCorrected
+      ) {
+        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the provisional Digital Omnibus deferral, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
+      } else {
+        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the provisional Digital Omnibus deferral from the original 2026-08-02 date) (#2896)');
+      }
+
+      if (
+        asdRaw.includes('CONTRIBUTION RULE') &&
+        asdRaw.includes('NEVER-ASSERT RULE') &&
+        asdRaw.includes('never a third-party mirror')
+      ) {
+        pass('jurisdiction-ai-screening-disclosure.yml header documents the contribution rule, the never-assert rule, and the official-source-only requirement (#2892)');
+      } else {
+        fail('jurisdiction-ai-screening-disclosure.yml header missing the contribution rule, never-assert rule, and/or official-source-only requirement (#2892)');
+      }
+    } catch (e) {
+      fail(`templates/jurisdiction-ai-screening-disclosure.yml does not parse as YAML: ${e.message} (#2892)`);
+    }
+  }
+
+  // 2. oferta.md carries Signal 15 with both the presence-based (a) and
+  //    corroborating-only (b) halves, the jurisdiction derivation mirroring
+  //    the agency-licensing/immigration-status pattern, and the not-legal-advice note.
+  const asdStart = ofertaMode.indexOf('**15. AI-Screening Disclosure**');
+  const asdEnd = ofertaMode.indexOf('### Output format:', Math.max(asdStart, 0));
+  const asdSection = asdStart >= 0 && asdEnd > asdStart ? ofertaMode.slice(asdStart, asdEnd) : '';
+  if (
+    asdSection &&
+    asdSection.includes('templates/jurisdiction-ai-screening-disclosure.yml') &&
+    asdSection.includes('config/profile.yml') &&
+    asdSection.includes('fires standalone') &&
+    asdSection.includes('corroborating-only') &&
+    asdSection.includes('never fires standalone') &&
+    asdSection.includes('No table row for the candidate') &&
+    asdSection.includes('not legal advice')
+  ) {
+    pass('oferta Block G Signal 15 pins the jurisdiction table reference, config/profile.yml jurisdiction derivation, presence-based standalone trigger, corroborating-only absence trigger, silent skip for no-row jurisdictions, not-legal-advice note (#2892)');
+  } else {
+    fail('oferta Block G missing/incomplete AI-screening disclosure section — needs table reference, config/profile.yml jurisdiction derivation, presence-based (a) firing standalone, absence-based (b) as corroborating-only (never standalone), silent skip for no-row jurisdictions, not-legal-advice note (#2892)');
+  }
+
+  // 2b. CodeRabbit finding 1 (#2896): a candidate profile that just says
+  //     "New York, USA" (state-level, no city) must NOT be treated as a
+  //     match for the NYC candidate-residency condition — the rule text
+  //     must say so explicitly, not leave it to inference.
+  if (
+    asdSection.includes('US-NY-NYC') &&
+    asdSection.includes('New York, USA" or "New York State" location string is NOT sufficient') &&
+    asdSection.includes('Buffalo or Albany') &&
+    asdSection.includes('candidate_residency_condition') &&
+    asdSection.includes('job_location_condition')
+  ) {
+    pass('oferta Block G Signal 15 explicitly rejects a state-wide "New York, USA"/"New York State" profile location as a match for the NYC candidate-residency condition, and distinguishes job_location_condition (not evaluated by this signal) from candidate_residency_condition (the only half this signal can check) (#2896 CodeRabbit finding 1)');
+  } else {
+    fail('oferta Block G Signal 15 must explicitly state that a generic "New York, USA"/"New York State" profile location does NOT satisfy the US-NY-NYC candidate-residency condition (Buffalo/Albany counter-example), and must distinguish job_location_condition from candidate_residency_condition (#2896 CodeRabbit finding 1)');
+  }
+
+  // 3. Hard rule: never fetches or scrapes official_source.url (zero-fetch pillar)
+  if (asdSection.includes('never fetches or scrapes anything')) {
+    pass('oferta AI-screening disclosure signal pins the never-fetch/scrape hard rule (#2892)');
+  } else {
+    fail('oferta AI-screening disclosure signal missing the never-fetch/scrape hard rule (#2892)');
+  }
+
+  // 4. Phrasing discipline holds in the report-facing text: the blockquote
+  //    templates describe the statutory fact + posting silence — never an
+  //    accusation that the employer skipped a required disclosure.
+  const asdQuoteLines = asdSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const asdAccusatory = asdQuoteLines.filter((l) =>
+    /(this|the)\s+employer\s+(is|was|are|were|failed|did\s+not)\s+(breaking|violating|skipped|non-compliant)/i.test(l)
+  );
+  if (asdSection && asdQuoteLines.length >= 2 && asdAccusatory.length === 0) {
+    pass('AI-screening disclosure report templates state statutory fact + posting silence only — no "employer failed/violated/non-compliant" assertions (#2892)');
+  } else {
+    fail(`AI-screening disclosure phrasing discipline broken: ${asdAccusatory.length ? `accusatory blockquote line(s): ${asdAccusatory[0].trim().slice(0, 80)}` : 'expected 2+ blockquote output templates (presence + corroborating-only) in the section'} (#2892)`);
+  }
+
+  // 5. Deferred follow-up (#2676 cross-reference, #1404/#1405 analytics layer)
+  //    is explicitly noted as out of scope, not silently absorbed.
+  if (asdSection.includes('#2676') && asdSection.includes('#1404/#1405')) {
+    pass('oferta AI-screening disclosure signal explicitly defers the #2676 cross-reference and #1404/#1405 analytics-layer follow-up (#2892)');
+  } else {
+    fail('oferta AI-screening disclosure signal should explicitly note the #2676 cross-reference and #1404/#1405 analytics-layer follow-up as deferred, not attempted here (#2892)');
+  }
+
+  // 6. Risk Summary row exists and follows the "activates automatically" pattern
+  const riskSummarySection = ofertaMode.slice(
+    ofertaMode.indexOf('## Risk Summary (after Block G)'),
+    ofertaMode.indexOf('Block format:')
+  );
+  if (
+    riskSummarySection.includes('AI-screening disclosure') &&
+    riskSummarySection.includes('activates automatically once the check exists')
+  ) {
+    pass('oferta Risk Summary table carries the AI-screening disclosure row, activating automatically once the check exists (#2892)');
+  } else {
+    fail('oferta Risk Summary table missing the AI-screening disclosure row (or missing the "activates automatically" phrasing) (#2892)');
+  }
+
+  // 7. templates/README.md documents the new table
+  const templatesReadme = readFile('templates/README.md');
+  if (templatesReadme.includes('jurisdiction-ai-screening-disclosure.yml')) {
+    pass('templates/README.md documents jurisdiction-ai-screening-disclosure.yml (#2892)');
+  } else {
+    fail('templates/README.md missing an entry for jurisdiction-ai-screening-disclosure.yml (#2892)');
+  }
+
+  // 8. batch/batch-prompt.md Machine Summary schema carries the new
+  //    ai_screening_disclosure risk_summary key (source of truth for downstream parsers)
+  const batchPrompt = readFile('batch/batch-prompt.md');
+  if (batchPrompt.includes('ai_screening_disclosure:')) {
+    pass('batch/batch-prompt.md Machine Summary schema includes the ai_screening_disclosure risk_summary key (#2892)');
+  } else {
+    fail('batch/batch-prompt.md Machine Summary schema missing the ai_screening_disclosure risk_summary key (#2892)');
+  }
+
+  // 9. check-table-freshness.mjs discovers the new table automatically —
+  //    schema-agnostic discovery, no per-table registration required (#2036).
+  //    CodeRabbit finding 3 (#2896): don't assert an exact row count (this
+  //    table explicitly invites community-contributed rows, per its own
+  //    header) — assert the three seed keys are present and every discovered
+  //    row carries as_of, so a legitimate 4th+ row never breaks this test,
+  //    but a missing seed or a row without as_of still fails it.
+  try {
+    const freshnessMod = await import('./check-table-freshness.mjs');
+    const asdDoc = yaml.load(asdPath && existsSync(asdPath) ? readFileSync(asdPath, 'utf-8') : '');
+    const rows = freshnessMod.extractRows(asdDoc || {});
+    const discoveredKeys = new Set(rows.map((r) => r.row?.jurisdiction));
+    const seedKeys = ['US-NY-NYC', 'US-IL', 'EU'];
+    const allSeedsDiscovered = seedKeys.every((k) => discoveredKeys.has(k));
+    const allRowsHaveAsOf = rows.length > 0 && rows.every((r) => !r.missingAsOf);
+    if (allSeedsDiscovered && allRowsHaveAsOf) {
+      pass(`check-table-freshness.mjs extractRows() auto-discovers all 3 seed rows (US-NY-NYC, US-IL, EU) of jurisdiction-ai-screening-disclosure.yml with as_of present, tolerating future community-contributed rows (${rows.length} rows discovered) — no registration step needed (#2036, #2896 CodeRabbit finding 3)`);
+    } else {
+      fail(`check-table-freshness.mjs extractRows() did not cleanly discover the seed rows of jurisdiction-ai-screening-disclosure.yml — discovered keys: ${[...discoveredKeys].join(', ') || '(none)'}, missing seeds: ${seedKeys.filter((k) => !discoveredKeys.has(k)).join(', ') || 'none'}, any missing as_of: ${!allRowsHaveAsOf} (#2896)`);
+    }
+  } catch (e) {
+    fail(`could not import check-table-freshness.mjs to verify auto-discovery: ${e.message} (#2892)`);
+  }
+}
+
 // --- Block G pay-transparency range-width signal (#2019, re-scoped #2280) ---
 {
   // Maintainer direction (#2280): the jurisdiction table is gone — no
@@ -3451,6 +3732,16 @@ if (
   pass('pipeline mode sweeps unconfirmed entries for liveness before processing');
 } else {
   fail('pipeline mode missing batch liveness sweep for unconfirmed entries');
+}
+
+if (
+  pipelineMode.includes('Concurrency is conditional on the extraction tool') &&
+  pipelineMode.includes('multiple workers must never share one browser session') &&
+  pipelineMode.includes('When in doubt, use the sequential path')
+) {
+  pass('pipeline mode prevents parallel Playwright session cross-contamination (#2551)');
+} else {
+  fail('pipeline mode still permits unsafe parallel Playwright workers (#2551)');
 }
 
 // --- salary tracking mode wiring (#1656 PR-2) ---
@@ -6504,6 +6795,49 @@ try {
     pass('non-string entries (null, numbers, undefined) are filtered out without crashing');
   } else {
     fail('mixed-type keyword lists should not crash and should still match string entries');
+  }
+
+  // Case 9b: block_hard beats always_allow — a European city name that is a whole
+  // word inside a non-European location. Word-boundary matching (#2087) cannot
+  // catch these because both sides are genuine whole words, and the pre-existing
+  // `always_allow`-wins rule discarded the user's own country-level block entry.
+  const hardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+    block_hard: ['brazil', 'usa'],
+  });
+  const homonyms = [
+    ['Porto Alegre, Rio Grande do Sul, Brazil', 'city name shared with a Portuguese city'],
+    ['USA - Example State - Malta', 'city name shared with a European country'],
+  ];
+  const leaks = homonyms.filter(([loc]) => hardFilter(loc) !== false);
+  if (leaks.length === 0) {
+    pass('block_hard rejects a non-European location whose city name matches always_allow');
+  } else {
+    fail(`block_hard failed to reject: ${leaks.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9c: block_hard does NOT widen rejection — a genuine multi-location
+  // posting must still survive a plain `block` entry, which is the whole reason
+  // always_allow exists (#650). This is the regression guard for that feature.
+  if (hardFilter('Amsterdam, Netherlands') === true) {
+    pass('block_hard leaves a genuine always_allow hit untouched');
+  } else {
+    fail('block_hard must not reject a location that only matches always_allow');
+  }
+
+  // Case 9d: additive and backward compatible — the same config with no
+  // block_hard key behaves exactly as it did before this tier existed.
+  const noHardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+  });
+  if (noHardFilter('Porto Alegre, Rio Grande do Sul, Brazil') === true) {
+    pass('without block_hard, always_allow still wins over block (unchanged semantics)');
+  } else {
+    fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
   }
 
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
@@ -15219,6 +15553,106 @@ try {
   } else {
     fail('titles mode missing error handling for absent cv.md / portals.yml');
   }
+
+  // A mode that can only ADD keeps whatever the list started as — on day zero
+  // that is the template's 37, copied on doctor's instruction. #2751.
+  if (
+    titlesFlat.includes('may be proposed for removal on exactly one ground') &&
+    titlesFlat.includes('`cv.md` does not support it')
+  ) {
+    pass('titles mode can retire a keyword, on CV evidence alone');
+  } else {
+    fail('titles mode should be able to propose removals, grounded in cv.md');
+  }
+
+  // The user-layer guarantee. portals.yml may hold an evening of hand-pruning,
+  // so removal is per-keyword and confirmed, never a regeneration.
+  if (
+    titlesFlat.includes('There is no bulk "replace" and no silent rewrite') &&
+    titlesFlat.includes('one keyword at a time')
+  ) {
+    pass('titles mode never regenerates a curated portals.yml — removals are per-keyword and confirmed');
+  } else {
+    fail('titles mode missing the no-silent-rewrite guarantee for the user-layer portals.yml');
+  }
+
+  // Emptying `positive` makes the scanner match every posting on every board —
+  // strictly worse than the wrong keyword the removal was meant to fix.
+  // The failure mode that makes removal dangerous: reading "cv.md does not
+  // support it" as a string test. On one real setup 39 of 49 curated keywords
+  // are absent from cv.md as strings, and most of them are correct. #2751.
+  if (
+    titlesFlat.includes('never that it contains the word') &&
+    titlesFlat.includes('plausible candidate for a posting carrying this keyword')
+  ) {
+    pass('titles mode defines removal support as capability, not wording');
+  } else {
+    fail('titles mode must say that CV support means the capability, not the literal keyword');
+  }
+
+  // A phrase search proves the document MENTIONS a protection, not that it
+  // GRANTS one: 'the last remaining positive keyword' matches a sentence
+  // permitting its removal exactly as well as one forbidding it. Scope each
+  // check to the prohibition block, so a protection that drifts out of
+  // "Never remove:" fails here instead of passing on its own wording.
+  const neverStart = titlesFlat.indexOf('Never remove:');
+  const neverEnd = titlesFlat.indexOf('Show removals under their own heading');
+  const neverRemove =
+    neverStart >= 0 && neverEnd > neverStart ? titlesFlat.slice(neverStart, neverEnd) : '';
+  if (
+    neverRemove.includes('the last remaining positive keyword') &&
+    neverRemove.includes('`title_filter.negative`') &&
+    neverRemove.includes('the user added during this session')
+  ) {
+    pass(
+      'titles mode forbids removing the last positive keyword, the negative list and user-added keywords — inside the prohibition block, not merely somewhere in the document',
+    );
+  } else {
+    fail(
+      'titles mode must list the last positive keyword, title_filter.negative and user-added keywords under "Never remove:"',
+    );
+  }
+
+  // Every removal carries its own stated reason in both branches — that is what
+  // makes the diff reviewable rather than a list the user has to trust.
+  if (
+    titlesFlat.includes('list them individually with the reason') &&
+    titlesFlat.includes('it still goes through the diff with its reason')
+  ) {
+    pass('titles mode attaches a reason to each proposed removal, in both the template and edited cases');
+  } else {
+    fail('titles mode should require a per-removal reason rather than a bare removal list');
+  }
+
+  // portals.yml stores keywords and not who wrote them, so "the user added this
+  // in a previous run" is unknowable. The mode must say so, otherwise unknowable
+  // reads as false and a curated keyword loses its protection. #2751.
+  if (
+    titlesFlat.includes('`portals.yml` records no provenance') &&
+    titlesFlat.includes('treat it as unknowable rather than as false') &&
+    titlesFlat.includes('inference, not a record')
+  ) {
+    pass('titles mode treats keyword ownership as unknowable, never inferring the template from silence');
+  } else {
+    fail('titles mode must state that portals.yml records no provenance, so unknown ownership defaults to keep');
+  }
+
+  // The way out of an empty list is the CV this mode already reads; the
+  // template is the second option, not the first (#2751).
+  if (
+    titlesFlat.includes('derive the list from `cv.md` here rather than sending the user away') &&
+    titlesFlat.includes('or start from an example and edit it')
+  ) {
+    pass('titles mode answers an empty positive list from cv.md, with the template offered second');
+  } else {
+    fail('titles mode should derive from cv.md on an empty list rather than pointing at the template first');
+  }
+
+  if (titlesFlat.includes('ONE diff under separate headings')) {
+    pass('titles mode shows additions and removals in one diff, under separate headings');
+  } else {
+    fail('titles mode should show removals under their own heading in the same diff');
+  }
 } catch (e) {
   fail(`modes/titles.md missing or unreadable: ${e.message}`);
 }
@@ -15294,6 +15728,36 @@ console.log('\n59b. Pipeline lock (pipeline-lock.mjs)');
   const unit = run(NODE, ['--test', 'test/pipeline-lock.test.mjs']);
   if (unit !== null) pass('pipeline-lock unit tests pass');
   else fail('pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)');
+}
+
+console.log('\n59c. The exported script budget matches the one run() enforces');
+{
+  // DEFAULT_SCRIPT_TIMEOUT_MS and the `timeout: 30000` literal inside run() are
+  // the same number held in two places, because that execFileSync call is kept
+  // byte-identical on purpose — editing it makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // the line. A comment asks the two to stay in step, and a comment is not a
+  // mechanism: if they drift, the slow-script warning starts measuring against
+  // a budget nobody is enforcing, and the first sign is a script killed at a
+  // limit the suite never mentioned. Read the literal back and compare.
+  // Anchored on run()'s own `(exe, args, …)` call signature rather than on
+  // `execFileSync` alone: that file has six other execFileSync calls, and a
+  // pattern that takes the FIRST match would start comparing against whichever
+  // one grows a `timeout:` first — a guard quietly measuring the wrong number,
+  // which is worse than no guard because it still reports green.
+  //
+  // Zero or several matches is therefore a failure in its own right, not a
+  // reason to fall back to a best guess.
+  const helpersSrc = readFileSync(join(ROOT, 'tests', 'helpers.mjs'), 'utf-8');
+  const enforced = [...helpersSrc.matchAll(/execFileSync\(\s*exe\s*,\s*args\s*,\s*\{[^}]*?timeout:\s*(\d+)/g)];
+  if (enforced.length !== 1) {
+    fail(`expected exactly one timeout literal in run()'s execFileSync call, found ${enforced.length}`
+      + ' — if that call was refactored or duplicated, update this check alongside it');
+  } else if (Number(enforced[0][1]) === DEFAULT_SCRIPT_TIMEOUT_MS) {
+    pass(`run()'s enforced timeout (${enforced[0][1]}ms) matches the exported DEFAULT_SCRIPT_TIMEOUT_MS`);
+  } else {
+    fail(`budget drift: run() enforces ${enforced[0][1]}ms but DEFAULT_SCRIPT_TIMEOUT_MS is ${DEFAULT_SCRIPT_TIMEOUT_MS}ms`);
+  }
 }
 
 console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');

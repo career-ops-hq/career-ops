@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validateFlags } from './lib/cli-flags.mjs';
 /**
  * stats.mjs — Lifetime pipeline stats aggregator (zero-token). #1604
  *
@@ -547,11 +548,9 @@ const USAGE = `Usage:
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-  } else {
-    const stats = computeAllStats();
-    if (args.includes('--summary')) printSummary(stats);
-    else console.log(JSON.stringify(stats, null, 2));
-  }
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+
+  const stats = computeAllStats();
+  if (args.includes('--summary')) printSummary(stats);
+  else console.log(JSON.stringify(stats, null, 2));
 }

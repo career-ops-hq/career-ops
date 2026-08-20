@@ -101,9 +101,30 @@ function defaultProbe(candidate) {
     // Bounded like extract() below: a wedged binary must not hang every run.
     execFileSync(candidate.name, candidate.probeArgs, { stdio: 'pipe', timeout: 5_000 });
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    return probeRan(err);
   }
+}
+
+/**
+ * Given whatever execFileSync threw from a version probe, did the binary
+ * actually run? Pure and exported so the self-test can cover every error shape
+ * without needing a real binary on PATH.
+ *
+ * A nonzero exit is NOT proof of absence. Poppler's pdftotext exits 0 on `-v`,
+ * but Xpdf's — the Glyph & Cog build shipped by xpdfreader.com and by
+ * MSYS2/mingw64 — prints its version and exits 99. Reading that as "not
+ * installed" silently skipped every PDF on a machine where extraction worked
+ * perfectly, and the scan summary blamed a missing extractor.
+ *
+ * What separates present-but-grumpy from absent is whether the process ran at
+ * all: execFileSync sets `status` to the exit code when it did, and leaves it
+ * null with code ENOENT / EACCES / ETIMEDOUT when the binary is missing,
+ * unrunnable, or wedged. A wedged binary stays excluded on purpose — extract()
+ * would hit the same timeout on every source.
+ */
+export function probeRan(err) {
+  return typeof err?.status === 'number';
 }
 
 export function sha256(text) {
@@ -353,6 +374,18 @@ function runSelfTest() {
   eq('ladder picks first probing rung',
     detectPdfExtractor(() => true)?.name, 'pdftotext');
   eq('ladder degrades to null', detectPdfExtractor(() => false), null);
+
+  // A version probe that exits nonzero is not proof the binary is absent:
+  // Xpdf's pdftotext prints its version and exits 99. Only a process that never
+  // ran counts as missing.
+  eq('exit 99 (Xpdf -v) counts as present', probeRan({ status: 99 }), true);
+  eq('exit 1 counts as present', probeRan({ status: 1 }), true);
+  eq('exit 0 counts as present', probeRan({ status: 0 }), true);
+  eq('ENOENT counts as absent', probeRan({ code: 'ENOENT', status: null }), false);
+  eq('EACCES counts as absent', probeRan({ code: 'EACCES', status: null }), false);
+  eq('timeout counts as absent',
+    probeRan({ code: 'ETIMEDOUT', status: null, signal: 'SIGTERM' }), false);
+  eq('missing error object counts as absent', probeRan(undefined), false);
 
   const state = { ingested: { 'cv/master.md': { hash: sha256('old') } } };
   const delta = computeDelta(state, [
