@@ -838,3 +838,168 @@ export const chromium = {
     rmSync(sandbox, { recursive: true, force: true });
   }
 }
+
+
+// ── cv.sections is read from the WORKSPACE profile, like every other setting ──
+//    readStyleTokens() resolves config/profile.yml against workspaceRoot. This
+//    read was anchored to __dirname instead, so with CAREER_OPS_TRACKER pointing
+//    at a workspace outside the checkout the two settings came from two
+//    DIFFERENT files of the same name: style tokens from the workspace, section
+//    order from the repo. cv.md is read from workspaceRoot too, so the guard was
+//    judging the workspace's CV against the repo's declared order (CodeRabbit).
+//
+//    The fixture puts the profile ONLY in the external workspace, so an
+//    __dirname-anchored read finds nothing and silently applies no order.
+{
+  const outputRoot = join(ROOT, 'output');
+  mkdirSync(outputRoot, { recursive: true });
+  const sandbox = mkdtempSync(join(outputRoot, 'section-order-anchor-'));
+  try {
+    const script = join(sandbox, 'generate-pdf.mjs');
+    for (const f of [
+      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+    ]) {
+      copyFileSync(join(ROOT, f), join(sandbox, f));
+    }
+
+    // The external workspace: tracker, profile, CV and documents all live here,
+    // and NOT beside the script. This is the shape CAREER_OPS_TRACKER creates.
+    const ws = join(sandbox, 'ws');
+    mkdirSync(join(ws, 'data'), { recursive: true });
+    mkdirSync(join(ws, 'config'), { recursive: true });
+    writeFileSync(join(ws, 'data', 'applications.md'), '# Applications Tracker\n', 'utf-8');
+    writeFileSync(join(ws, 'data', 'pdf-index.tsv'), '', 'utf-8');
+    writeFileSync(
+      join(ws, 'config', 'profile.yml'),
+      'cv:\n  sections:\n    - education\n    - experience\n',
+      'utf-8',
+    );
+    writeFileSync(join(ws, 'in.html'), FIXTURE, 'utf-8');
+
+    const playwrightStub = join(sandbox, 'node_modules', 'playwright');
+    mkdirSync(playwrightStub, { recursive: true });
+    writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
+      name: 'playwright', type: 'module', exports: './index.js',
+    }), 'utf-8');
+    writeFileSync(join(playwrightStub, 'index.js'), `
+import { readFile } from 'fs/promises';
+function twoPagePdf(markerText) {
+  const marker = Buffer.from(markerText, 'utf-8').toString('base64');
+  return Buffer.from(\`%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Marker (\${marker}) >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R >>
+endobj
+%%EOF\`, 'latin1');
+}
+function makePage() {
+  let rendered = '';
+  return {
+    async goto(url) { rendered = await readFile(new URL(url), 'utf-8'); },
+    async evaluate() {},
+    async pdf() { return twoPagePdf(rendered); },
+    async close() {},
+  };
+}
+export const chromium = {
+  async launch() {
+    return {
+      async newContext() {
+        return { async newPage() { return makePage(); }, async close() {} };
+      },
+      async newPage() { return makePage(); },
+      async close() {},
+    };
+  },
+};
+`, 'utf-8');
+
+    const manifest = join(ws, 'batch.json');
+    writeFileSync(manifest, JSON.stringify([{ input: 'in.html', output: 'out/in.pdf' }]), 'utf-8');
+
+    const run = spawnSync(NODE, [script, `--batch=${manifest}`], {
+      cwd: sandbox,
+      encoding: 'utf-8',
+      timeout: 60_000,
+      env: { ...process.env, CAREER_OPS_TRACKER: join(ws, 'data', 'applications.md') },
+    });
+    const outPdf = join(ws, 'out', 'in.pdf');
+
+    if (!existsSync(outPdf)) {
+      fail(`workspace-anchored render produced no PDF: ${(run.stdout || '') + (run.stderr || '')}`);
+    } else {
+      const pdf = readFileSync(outPdf).toString('latin1');
+      const m = pdf.match(/\/Marker \(([^)]*)\)/);
+      const printed = m ? Buffer.from(m[1], 'base64').toString('utf-8') : '';
+      const titles = renderedTitles(printed);
+      const iEdu = titles.indexOf('Education');
+      const iExp = titles.indexOf('Work Experience');
+      if (existsSync(join(sandbox, 'config', 'profile.yml'))) {
+        fail('a profile exists beside the script — the __dirname anchor would find it and the assertion would prove nothing');
+      } else if (iEdu === -1 || iExp === -1) {
+        fail(`could not read both section titles back out (got ${titles.join(' -> ') || 'nothing'})`);
+      } else if (iEdu < iExp) {
+        pass('cv.sections is read from the workspace profile when CAREER_OPS_TRACKER moves the workspace off __dirname');
+      } else {
+        fail(`the workspace profile was ignored: printed order was ${titles.join(' -> ')}`);
+      }
+    }
+  } catch (e) {
+    fail(`workspace-anchor test crashed: ${e.message}`);
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+
+// -- configured names reach the terminal, so they get displayTitle() too --
+//    The rendered-title warning already sanitizes, because these strings land in
+//    a terminal or a run log. The names from config/profile.yml were quoted in
+//    raw: an ESC sequence repaints the line so a warning can appear to say
+//    something the tool never printed, U+202E reverses what follows, and an
+//    unbounded name buries the message it is attached to (CodeRabbit).
+//
+//    The hostile names are BUILT at runtime rather than written as literals, so
+//    this file stays safe to cat and safe to paste into a review.
+{
+  const { reorderCvSections: reorder } =
+    await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
+
+  const esc = String.fromCharCode(0x1b);
+  const ESC = esc + '[31mFAKE-ERROR' + esc + '[0m';
+  const RTL = 'testing' + String.fromCharCode(0x202e);
+  const LONG = 'z'.repeat(200);
+
+  const CONTROLS = new RegExp('[\u0000-\u001f\u007f-\u009f]');
+  const BIDI = new RegExp('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]');
+
+  // Paired with a real key so the list is long enough to be applied at all; each
+  // hostile name is unrecognized, so it takes the "not a CV section" path.
+  const { warnings } = captureWarnings(() =>
+    reorder(FIXTURE, ['skills', ESC, RTL, LONG]));
+  // Test each warning on its own. Joining them first splices in a newline,
+  // which is itself inside the C0 range asserted against below, so the control
+  // check would report a leak no matter what the code did.
+
+  const leaks = [];
+  if (warnings.some(w => CONTROLS.test(w))) leaks.push('C0/C1 control');
+  if (warnings.some(w => BIDI.test(w))) leaks.push('bidi override');
+  if (warnings.some(w => w.includes(LONG))) leaks.push('unbounded name (' + LONG.length + ' chars)');
+
+  if (warnings.length === 0) {
+    fail('no warning was emitted for the unrecognized names - the sanitization assertion would prove nothing');
+  } else if (leaks.length === 0) {
+    pass('cv.sections names are sanitized and length-bounded before being quoted into warnings');
+  } else {
+    fail('configured name reached the warning unsanitized: ' + leaks.join(', '));
+  }
+}

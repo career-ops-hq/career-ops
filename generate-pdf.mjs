@@ -750,7 +750,7 @@ export function reorderCvSections(html, order) {
     // Not an error, but not a no-op worth staying quiet about either: one name
     // states no relationship, so there is nothing to apply and the user would
     // otherwise be left thinking the setting took effect.
-    console.warn(`⚠️  config/profile.yml cv.sections lists only "${order[0]}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
+    console.warn(`⚠️  config/profile.yml cv.sections lists only "${displayTitle(order[0])}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
     return html;
   }
 
@@ -768,13 +768,19 @@ export function reorderCvSections(html, order) {
   const unresolved = [];
   const seen = new Set();
   for (const name of order) {
+    // `name` comes from a config file and is quoted straight into console
+    // output, so it gets the same treatment as a rendered title: displayTitle()
+    // strips C0/C1 controls and bidi overrides (either can repaint a terminal
+    // line so a warning appears to say something the tool never printed) and
+    // bounds the length so one long entry cannot bury the message.
+    const shown = displayTitle(name);
     if (seen.has(name)) {
-      console.warn(`⚠️  config/profile.yml cv.sections lists "${name}" more than once — keeping its first position.`);
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}" more than once — keeping its first position.`);
       continue;
     }
     seen.add(name);
     if (!CV_SECTION_KEYS.includes(name)) {
-      console.warn(`⚠️  config/profile.yml cv.sections lists "${name}", which is not a CV section — ignoring it. Recognized: ${CV_SECTION_KEYS.join(', ')}.`);
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", which is not a CV section — ignoring it. Recognized: ${CV_SECTION_KEYS.join(', ')}.`);
       continue;
     }
     const block = byKey.get(name);
@@ -786,7 +792,7 @@ export function reorderCvSections(html, order) {
       // Reported rather than skipped quietly: the section stays where the
       // template put it, and the user would otherwise see a setting that
       // silently does nothing.
-      console.warn(`⚠️  config/profile.yml cv.sections lists "${name}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
     } else {
       // Recognized and unambiguous but with no block. Ordinarily that just means
       // the section isn't in this CV (an optional one with no entries is
@@ -808,7 +814,7 @@ export function reorderCvSections(html, order) {
   // signal misreads an order that was already satisfied.
   const reportUnresolved = () => {
     if (unresolved.length === 0 || unrecognized.size === 0) return;
-    const names = unresolved.map(name => `"${name}"`).join(', ');
+    const names = unresolved.map(name => `"${displayTitle(name)}"`).join(', ');
     const titles = [...unrecognized.values()].map(title => `"${title}"`).join(', ');
     console.warn(`⚠️  config/profile.yml cv.sections names ${names}, which matched no section in this CV. The CV also renders ${unrecognized.size} section title(s) the section-order alias table doesn't recognize (${titles}) — if one of those is the section you meant, its title needs an entry in SECTION_ALIASES in generate-pdf.mjs. Otherwise the name has no effect and can be dropped.`);
   };
@@ -1146,9 +1152,12 @@ async function generatePDF() {
   }
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
-  // printed. Anchored to __dirname rather than the cwd so it is found when the
-  // script is invoked from outside the repo, as the usage line shows.
-  html = reorderCvSections(html, readCvSectionOrder(resolve(__dirname, 'config', 'profile.yml')));
+  // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
+  // the same file from workspaceRoot, and cv.md is read from there too, so an
+  // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
+  // two files — style from the workspace, section order from the checkout —
+  // and validated the workspace's CV against the checkout's declared order.
+  html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
 
@@ -1240,9 +1249,10 @@ async function runBatchFromManifest(manifestPath, globals) {
     if (err?.code !== 'ENOENT') throw err;
   }
   // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to __dirname for the same reason the single
-  // render is: the script is routinely invoked from outside the repo.
-  const cvSectionOrder = readCvSectionOrder(resolve(__dirname, 'config', 'profile.yml'));
+  // rather than per entry. Anchored to workspaceRoot for the same reason the
+  // single render is: it is the anchor readStyleTokens() and the cv.md read
+  // already use, so one profile.yml supplies every setting.
+  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
