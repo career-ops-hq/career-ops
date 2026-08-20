@@ -963,10 +963,22 @@ export const chromium = {
 
 // -- configured names reach the terminal, so they get displayTitle() too --
 //    The rendered-title warning already sanitizes, because these strings land in
-//    a terminal or a run log. The names from config/profile.yml were quoted in
-//    raw: an ESC sequence repaints the line so a warning can appear to say
-//    something the tool never printed, U+202E reverses what follows, and an
-//    unbounded name buries the message it is attached to (CodeRabbit).
+//    a terminal or a run log. The names from config/profile.yml did not: an ESC
+//    sequence repaints the line so a warning can appear to say something the
+//    tool never printed, U+202E reverses what follows, and an unbounded name
+//    buries the message it is attached to (CodeRabbit).
+//
+//    Every warning site an arbitrary name can REACH is exercised, not just one.
+//    Covering a single site let a dropped displayTitle() elsewhere pass: with
+//    only the not-a-section case here, reverting the duplicate-name site scored
+//    0 failures (CodeRabbit's follow-up, confirmed by mutation before fixing).
+//
+//    The two remaining sites -- the ambiguous-markup warning and the unresolved
+//    report -- are deliberately absent. Both sit after CV_SECTION_KEYS.includes(name)
+//    has passed, so `name` there is a canonical key like "skills" and no config
+//    string can reach them. A hostile-input case for those would assert nothing.
+//    displayTitle() stays on them as defence in depth, in case a later change
+//    widens what arrives.
 //
 //    The hostile names are BUILT at runtime rather than written as literals, so
 //    this file stays safe to cat and safe to paste into a review.
@@ -982,24 +994,37 @@ export const chromium = {
   const CONTROLS = new RegExp('[\u0000-\u001f\u007f-\u009f]');
   const BIDI = new RegExp('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]');
 
-  // Paired with a real key so the list is long enough to be applied at all; each
-  // hostile name is unrecognized, so it takes the "not a CV section" path.
-  const { warnings } = captureWarnings(() =>
-    reorder(FIXTURE, ['skills', ESC, RTL, LONG]));
-  // Test each warning on its own. Joining them first splices in a newline,
-  // which is itself inside the C0 range asserted against below, so the control
-  // check would report a leak no matter what the code did.
+  // One entry per reachable site, each with the shape that actually lands there.
+  const sites = [
+    // order.length < 2 returns early through its own warning, before the loop.
+    { site: 'single-name', order: [ESC] },
+    // The second occurrence hits `seen.has(name)`; the first spends itself on
+    // the not-a-section branch, so both sites fire from this one call.
+    { site: 'duplicate-name', order: ['skills', ESC, ESC] },
+    { site: 'not-a-CV-section', order: ['skills', ESC, RTL, LONG] },
+  ];
 
-  const leaks = [];
-  if (warnings.some(w => CONTROLS.test(w))) leaks.push('C0/C1 control');
-  if (warnings.some(w => BIDI.test(w))) leaks.push('bidi override');
-  if (warnings.some(w => w.includes(LONG))) leaks.push('unbounded name (' + LONG.length + ' chars)');
+  const failures = [];
+  for (const { site, order } of sites) {
+    const { warnings } = captureWarnings(() => reorder(FIXTURE, order));
+    if (warnings.length === 0) {
+      failures.push(site + ' emitted no warning (nothing was asserted)');
+      continue;
+    }
+    // Each warning on its own: joining them first splices in a newline, which is
+    // itself inside the C0 range below, so the control check would report a leak
+    // no matter how the code behaved. That is how the first version of this
+    // assertion "failed" against correct code.
+    const leaks = [];
+    if (warnings.some(w => CONTROLS.test(w))) leaks.push('C0/C1 control');
+    if (warnings.some(w => BIDI.test(w))) leaks.push('bidi override');
+    if (warnings.some(w => w.includes(LONG))) leaks.push('unbounded name');
+    if (leaks.length > 0) failures.push(site + ': ' + leaks.join(', '));
+  }
 
-  if (warnings.length === 0) {
-    fail('no warning was emitted for the unrecognized names - the sanitization assertion would prove nothing');
-  } else if (leaks.length === 0) {
-    pass('cv.sections names are sanitized and length-bounded before being quoted into warnings');
+  if (failures.length === 0) {
+    pass('cv.sections names are sanitized and length-bounded at every warning site a config string can reach');
   } else {
-    fail('configured name reached the warning unsanitized: ' + leaks.join(', '));
+    fail('configured name reached a warning unsanitized -- ' + failures.join(' | '));
   }
 }
