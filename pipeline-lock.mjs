@@ -91,7 +91,7 @@ function readLockOwner(lockDir) {
 
 // Identity of a directory, so a lock that was removed and recreated by another
 // process is never mistaken for the one this caller created.
-function sameLockDirectory(left, right) {
+export function sameLockDirectory(left, right) {
   return left.dev === right.dev && left.ino === right.ino
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
@@ -213,6 +213,87 @@ export function lockRecoveryVerdict(lockDir, staleMs) {
 // tell a lock that is CHANGING HANDS (the system is making progress; this
 // caller is merely unlucky) from one that is WEDGED (a single holder is not
 // letting go, which is what the timeout exists to escape).
+/**
+ * The waiting half of the protocol, as one definition the copies can import.
+ *
+ * Both rules here were bought with measured failures in `pipeline-lock`, and
+ * neither reached `followup-seed.mjs`, `portal-health-lock.mjs` or
+ * `tracker-utils.mjs`, which still slept a FIXED `retryMs` and timed out on a
+ * plain elapsed check:
+ *
+ *   - jitter (#2506). A fixed retry wakes every waiter at the same instant to
+ *     re-race, which is the coupon-collector problem: serving N waiters takes
+ *     about N·H(N) rounds, and the loser's write is lost. Measured at 20 runs
+ *     per arm, a fixed retry lost an item in 12 of 20 against 2 of 20 jittered.
+ *   - the progress rule (#2835). An expired deadline only means "give up" when
+ *     the lock has NOT changed hands since we last looked. Without it a caller
+ *     waiting on a healthy, briskly handed-round lock is killed for being
+ *     unlucky rather than for anything being stuck.
+ *
+ * Returned as closures over one caller's state because both rules are
+ * stateful: the backoff needs the ceiling, and the progress rule needs the
+ * previous fingerprint and a re-armable window.
+ *
+ * @param {string} lockDir - The lock directory this caller is waiting on.
+ * @param {{timeoutMs: number, retryMs: number, deadline: number, hardDeadline: number}} timing
+ * @returns {{backoffMs: () => number, holderStillWedged: () => boolean}}
+ */
+export function createLockWaitPolicy(lockDir, { timeoutMs, retryMs, deadline, hardDeadline }) {
+  let perHolderDeadline = deadline;
+  let lastFingerprint;
+
+  // Jittered backoff, never sleeping past the ceiling. An uncapped sleep can
+  // cross hardDeadline and let the NEXT mkdir succeed, returning a lock after
+  // the documented absolute limit — an overshoot of up to 1.5x retryMs. Waking
+  // exactly at the ceiling means the check at the top of the loop is what
+  // decides, rather than whichever of the two happened to be later.
+  const backoffMs = () => Math.max(0, Math.min(
+    retryMs * (0.5 + Math.random()),
+    hardDeadline - Date.now(),
+  ));
+
+  // The per-holder deadline, evaluated the SAME way everywhere: an expired
+  // deadline only means "give up" when the lock has not changed hands since we
+  // last looked. Otherwise the window is re-armed and the caller waits again.
+  //
+  // A helper rather than inline code because three separate paths can time a
+  // caller out — the main retry, a non-EEXIST guard refusal, and an ENOENT
+  // owner-write retry — and the progress rule holding on one while the other
+  // two throw directly is the same bug in two more places: a healthy lock
+  // being handed round briskly could still kill a caller through them.
+  const holderStillWedged = () => {
+    if (Date.now() <= perHolderDeadline) return false;
+    const fingerprint = lockFingerprint(lockDir);
+    // Only a lock we can SEE, unchanged across a full window, is evidence that
+    // waiting longer is futile. A fingerprint that moved means the lock is
+    // being handed round. A null one means it was free or unobservable at the
+    // instant we looked — no evidence either way, and not to be mistaken for a
+    // wedged holder.
+    if (fingerprint !== null && fingerprint === lastFingerprint) return true;
+    lastFingerprint = fingerprint;
+    perHolderDeadline = Date.now() + timeoutMs;
+    return false;
+  };
+
+  // Sampled lazily on the first failed acquisition, not at construction, so the
+  // very first window is measured against the state the caller actually started
+  // waiting on. Without it the first expiry compares against `undefined`,
+  // always re-arms, and every caller gets one free window it did not ask for.
+  const noteWaiting = () => {
+    if (lastFingerprint === undefined) lastFingerprint = lockFingerprint(lockDir);
+  };
+
+  // The absolute ceiling, exposed because holderStillWedged() RE-ARMS on
+  // progress: a lock being handed round briskly resets the window every time,
+  // so the progress rule alone never terminates. pipeline-lock always checked
+  // this at the top of its loop; the three copies had no ceiling at all before
+  // they adopted the progress rule, and adopting it without this would trade a
+  // premature timeout for an unbounded wait.
+  const ceilingReached = () => Date.now() > hardDeadline;
+
+  return { backoffMs, holderStillWedged, noteWaiting, ceilingReached };
+}
+
 function lockFingerprint(lockDir) {
   try {
     const st = statSync(lockDir);
@@ -276,11 +357,6 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   // maxWaitMs a no-op in precisely the range where it was stated most
   // explicitly. The ceiling wins; timeoutMs just stops mattering.
   const hardDeadline = Date.now() + maxWaitMs;
-  // Lock identity as of the last time this caller ran out of patience, so the
-  // next timeout can ask "did anything move since?". Sampled lazily on the
-  // first failed acquisition, not here, so the very first deadline is measured
-  // against the state we actually started waiting on.
-  let lastFingerprint;
   // The last mkdir error this caller treated as contention. On POSIX it is
   // always EEXIST and says nothing; on Windows an EPERM/EACCES that persists
   // to the deadline is the difference between "crowded" and "this process
@@ -288,38 +364,9 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
   // problem would present as a plain, unexplained timeout.
   let lastContentionError = null;
 
-  // Jittered backoff, never sleeping past the ceiling. An uncapped sleep can
-  // cross hardDeadline and let the NEXT mkdir succeed, returning a lock after
-  // the documented absolute limit — an overshoot of up to 1.5x retryMs. Waking
-  // exactly at the ceiling means the check at the top of the loop is what
-  // decides, rather than whichever of the two happened to be later.
-  const backoffMs = () => Math.max(0, Math.min(
-    retryMs * (0.5 + Math.random()),
-    hardDeadline - Date.now(),
-  ));
-
-  // The per-holder deadline, evaluated the SAME way everywhere: an expired
-  // deadline only means "give up" when the lock has not changed hands since we
-  // last looked. Otherwise the window is re-armed and the caller waits again.
-  //
-  // A helper rather than inline code because three separate paths can time a
-  // caller out — the main retry, a non-EEXIST guard refusal, and an ENOENT
-  // owner-write retry — and the progress rule holding on one while the other
-  // two throw directly is the same bug in two more places: a healthy lock
-  // being handed round briskly could still kill a caller through them.
-  const holderStillWedged = () => {
-    if (Date.now() <= deadline) return false;
-    const fingerprint = lockFingerprint(lockDir);
-    // Only a lock we can SEE, unchanged across a full window, is evidence that
-    // waiting longer is futile. A fingerprint that moved means the lock is
-    // being handed round. A null one means it was free or unobservable at the
-    // instant we looked — no evidence either way, and not to be mistaken for a
-    // wedged holder.
-    if (fingerprint !== null && fingerprint === lastFingerprint) return true;
-    lastFingerprint = fingerprint;
-    deadline = Date.now() + timeoutMs;
-    return false;
-  };
+  const { backoffMs, holderStillWedged, noteWaiting } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline, hardDeadline,
+  });
   // Built at the throw site so the diagnosis reflects the moment it gave up.
   // A timeout on a critical section that is a single sub-millisecond append
   // has more than one explanation, and the owner record separates them:
@@ -377,7 +424,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
     } catch (err) {
       if (!isMkdirContention(err)) throw err;
       lastContentionError = err;
-      if (lastFingerprint === undefined) lastFingerprint = lockFingerprint(lockDir);
+      noteWaiting();
 
       // Serialize stale-reclaim behind a second atomic guard so only one
       // caller can be inside the decide-then-delete window at a time.
