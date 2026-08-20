@@ -36,36 +36,40 @@
 import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const trackerPath = resolveTrackerPath(__dirname);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const PDF_PAGE_MARGIN = '0.6in';
 
-// Canonical project root: realpath so a symlinked repo ancestor (e.g. macOS
-// /var -> /private/var, or a symlinked checkout) is compared like-for-like by
-// assertInsideProject below.
-const __projectRoot = realpathSync(__dirname);
+// Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
+// /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
+// When CAREER_OPS_TRACKER points at another workspace, that workspace—not the
+// installed script directory—is the safe boundary for input and output.
+const __workspaceRoot = realpathSync(workspaceRoot);
 
 /**
- * Assert that an already-resolved absolute path stays inside the project,
+ * Assert that an already-resolved absolute path stays inside the tracker workspace,
  * resolving symlinks first.
  *
- * A lexical relative(__dirname, p) check accepts a path that stays lexically
+ * A lexical relative(workspaceRoot, p) check accepts a path that stays lexically
  * inside the repo but whose ancestor is a symlink escaping it. This canonicalizes
  * p through realpath — the path itself when it exists, otherwise its nearest
  * existing ancestor with the not-yet-created tail re-appended (the output PDF and
  * its directory may not exist yet) — then checks containment against the
- * realpathed project root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
+ * realpathed workspace root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
  *
  * @param {string} absPath - Already-resolved absolute candidate path.
  * @param {string} label - 'input' | 'output', used in the thrown message.
  * @returns {string} absPath unchanged when contained.
- * @throws {Error} when the canonical path escapes the project directory.
+ * @throws {Error} when the canonical path escapes the tracker workspace.
  */
-function assertInsideProject(absPath, label) {
+function assertInsideWorkspace(absPath, label) {
   let probe = absPath;
   const tail = [];
   while (!existsSync(probe)) {
@@ -81,17 +85,17 @@ function assertInsideProject(absPath, label) {
     // Canonicalization failed (realpath raced away, permission error): containment
     // is unprovable, so fail closed rather than fall back to a lexical form that a
     // symlinked ancestor could slip past.
-    throw new Error(`${label} escapes the project directory: ${absPath}`);
+    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
   }
-  const rel = relative(__projectRoot, canonical);
+  const rel = relative(__workspaceRoot, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`${label} escapes the project directory: ${absPath}`);
+    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
   }
   return absPath;
 }
 
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -392,17 +396,61 @@ function countRenderedPdfPages(pdfBuffer) {
 }
 
 /**
- * Convert a path to a repo-relative manifest entry, or blank if it is unknown
- * or outside the career-ops repository.
+ * Convert a path to a workspace-relative manifest entry, or blank if it is
+ * unknown or outside the tracker-owned workspace.
  *
  * @param {string} pathValue - Absolute or cwd-relative filesystem path.
- * @returns {string} Repo-relative path using forward slashes, or an empty string.
+ * @param {string} [rootDir] - Workspace root used as the manifest base.
+ * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function repoRelativeManifestPath(pathValue) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
+  const rel = relative(rootDir, resolve(pathValue));
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
+}
+
+/** @deprecated Use workspaceRelativeManifestPath. */
+export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+  return workspaceRelativeManifestPath(pathValue, rootDir);
+}
+
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Confirm a PDF destination is lexically and canonically inside its workspace.
+ * Resolving the nearest existing ancestor catches output directories that are
+ * symlinks to another location before Chromium writes through them.
+ */
+export function isWorkspaceOutputPath(pathValue, rootDir = workspaceRoot) {
+  const root = resolve(rootDir);
+  const candidate = resolve(pathValue);
+  const lexical = relative(root, candidate);
+  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
+    return false;
+  }
+
+  try {
+    const canonicalRoot = realpathSync(root);
+    const canonicalAnchor = realpathSync(nearestExistingPath(candidate));
+    const canonical = relative(canonicalRoot, canonicalAnchor);
+    return canonical === '' || (canonical !== '..' && !canonical.startsWith(`..${sep}`) && !isAbsolute(canonical));
+  } catch {
+    return false;
+  }
 }
 
 export function injectPrintPageCss(html, format = 'a4') {
@@ -437,16 +485,16 @@ export function injectPrintPageCss(html, format = 'a4') {
  * report number to the exact PDF (and its source HTML for regeneration).
  *
  * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * career-ops root with forward slashes. One row per PDF path; when a report
+ * tracker workspace with forward slashes. One row per PDF path; when a report
  * number is given, older rows for that report are dropped too (regenerated
  * CVs supersede stale entries). The file is gitignored: it references
  * gitignored output/ artifacts and is meaningless on another machine.
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+  const manifestPath = resolvePdfIndexPath(trackerPath);
+  const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = repoRelativeManifestPath(htmlPath);
+  const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
@@ -553,15 +601,19 @@ async function generatePDF() {
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
 
-  // Path-containment guard (realpath-based): keep both the HTML read and the PDF
-  // write inside the project even when an ancestor is a symlink — a lexical
-  // relative() check alone would accept a symlinked ancestor that escapes the
-  // repo. Anchored to the realpathed repo root (__projectRoot), not process.cwd().
+  // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
+  // so a crafted output argument cannot escape into another user's directory.
+  // Anchored to the workspace root, not process.cwd(): running the script
+  // from outside the repo used to falsely refuse in-repo outputs — and, worse,
+  // would have allowed writes anywhere under an arbitrary cwd.
   try {
-    assertInsideProject(inputPath, 'input');
-    assertInsideProject(outputPath, 'output');
+    assertInsideWorkspace(inputPath, 'input');
   } catch (err) {
-    console.error(`Refusing to render outside the project directory: ${err.message}`);
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
+    process.exit(1);
+  }
+  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
 
@@ -580,7 +632,7 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
@@ -602,6 +654,7 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
   });
 }
 
@@ -629,11 +682,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   const manifestDir = dirname(resolvedManifest);
 
   // Contain the manifest itself before any filesystem access: batch manifests are
-  // machine-generated repo-internal artifacts, so a --batch path pointing outside
+  // machine-generated workspace-internal artifacts, so a --batch path pointing outside
   // the project marks a malformed/tampered invocation. Reject before reading the
   // manifest or writing its <manifest>.results.json sibling below.
   try {
-    assertInsideProject(resolvedManifest, 'batch manifest');
+    assertInsideWorkspace(resolvedManifest, 'batch manifest');
   } catch (err) {
     console.error(`❌ ${err.message}`);
     process.exit(1);
@@ -668,7 +721,7 @@ async function runBatchFromManifest(manifestPath, globals) {
   // manifest index through renderBatch; prep failures land at their own index.
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
@@ -697,15 +750,14 @@ async function runBatchFromManifest(manifestPath, globals) {
       const entryInput = resolve(manifestDir, spec.input);
       const entryOutput = resolve(manifestDir, spec.output);
 
-      // Path-containment guards (realpath-based): keep both the read and the
-      // write inside the repo even through a symlinked ancestor. The output guard
-      // blocks a crafted path from writing outside the project. The input guard
-      // mirrors it: batch manifests are machine-generated by the pdf/batch flow
-      // and only ever reference repo-internal HTML, so an input that escapes the
-      // project marks a malformed/tampered manifest — rejected per-entry (recorded
-      // as a failure) rather than read.
-      assertInsideProject(entryInput, 'input');
-      assertInsideProject(entryOutput, 'output');
+      // Path-containment guards (realpath-based): keep the read and write inside
+      // the tracker workspace even through a symlinked ancestor. A batch
+      // manifest that escapes the workspace is malformed/tampered and is
+      // recorded as a per-entry failure rather than read or written.
+      assertInsideWorkspace(entryInput, 'input');
+      if (!isWorkspaceOutputPath(entryOutput, workspaceRoot)) {
+        throw new Error(`output escapes the tracker workspace: ${entryOutput}`);
+      }
 
       let html = await readFile(entryInput, 'utf-8');
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
@@ -744,8 +796,8 @@ async function runBatchFromManifest(manifestPath, globals) {
   const resultsPath = `${resolvedManifest}.results.json`;
   try {
     // resolvedManifest is already contained, so this sibling is too; assert
-    // explicitly so the write can never land outside the project.
-    assertInsideProject(resultsPath, 'batch results');
+    // explicitly so the write can never land outside the workspace.
+    assertInsideWorkspace(resultsPath, 'batch results');
     writeFileSync(resultsPath, JSON.stringify(results, null, 2) + '\n');
     console.log(`🔗 Batch results: ${resultsPath}`);
   } catch (err) {

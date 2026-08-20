@@ -36,7 +36,7 @@ const HARD_MAX_PAGES = 200;
 // large boards request-heavy (a 999+ board is ~170 pages); firing those with no
 // gap risks the tenant's WAF rate-limiting the burst. Mirrors workday's
 // INTER_PAGE_DELAY_MS — only boards that paginate past page 0 pay it.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 // The bare key we self-heal to when the primary (`jobOffset`) proves inert.
 const FALLBACK_OFFSET_PARAM = 'offset';
 
