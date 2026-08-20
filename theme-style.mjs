@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * theme-style.mjs — dynamic CV/cover-letter theming from config/profile.yml (#1837)
+ * theme-style.mjs — presentation settings read from config/profile.yml for the
+ * PDF pipeline: dynamic CV/cover-letter theming (#1837) and CV section order
+ * (#2533).
  *
  * Users declare a `style:` block in config/profile.yml:
  *
@@ -14,6 +16,12 @@
  * hits the PDF pipeline. The templates read them via `var(--x, <default>)`, so a
  * profile with no `style:` block produces byte-identical output — this only ever
  * *overrides* the template defaults, never changes the baseline.
+ *
+ * `cv.sections` declares the order the CV's sections render in. Both live here
+ * for the same reason: config/profile.yml is a user-layer file, so a setting
+ * that lives in it survives `update-system.mjs apply`, while the same
+ * customization made in templates/cv-template.html (a SYSTEM_PATHS file) is
+ * reverted by every release.
  *
  * Pure + dependency-light (js-yaml only) so it's unit-testable without Playwright.
  */
@@ -59,6 +67,45 @@ export function styleTokensFrom(style) {
     if (typeof v === 'string' && v.trim()) out[cssVar] = v.trim();
   }
   return out;
+}
+
+/**
+ * Read the declared CV section order from a profile file (#2533):
+ *
+ *   cv:
+ *     sections: [skills, education]
+ *
+ * Missing file / absent block / bad YAML → []. Same defensive contract as
+ * readStyleTokens: an unreadable profile must never stop a CV rendering.
+ * @param {string} [profilePath]
+ * @returns {string[]}
+ */
+export function readCvSectionOrder(profilePath = 'config/profile.yml') {
+  try {
+    if (!existsSync(profilePath)) return [];
+    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    return cvSectionOrderFrom(raw?.cv);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Map a parsed `cv:` block to a list of section names. Only the syntax is
+ * checked here — whether a name is a real section, and whether this CV even has
+ * it, is decided at render time by generate-pdf.mjs, which owns the section
+ * vocabulary. Exported for tests.
+ * @param {unknown} cv
+ * @returns {string[]}
+ */
+export function cvSectionOrderFrom(cv) {
+  if (!cv || typeof cv !== 'object' || Array.isArray(cv)) return [];
+  const sections = cv.sections;
+  if (!Array.isArray(sections)) return [];
+  return sections
+    .filter(v => typeof v === 'string')
+    .map(v => v.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 /**

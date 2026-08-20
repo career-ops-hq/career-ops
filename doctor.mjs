@@ -14,9 +14,37 @@ import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
+
+// CLIs the doctor recognises.
+const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
+
+// --help ran the full diagnostic and printed the report at exit 0 (#2856), so
+// a mistyped flag was indistinguishable from a clean run — and --targe
+// silently diagnosed THIS checkout instead of the one asked for. Handled via
+// lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
+// flags before --help so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--target', '--json', '--strict', '--cli', '--help', '-h'];
+
+// Both take their value as the next argv token.
+const VALUE_FLAGS = ['--target', '--cli'];
+
+const USAGE = `Usage:
+  node doctor.mjs                    # run the setup diagnostic
+  node doctor.mjs --json             # machine-readable onboarding state
+  node doctor.mjs --strict           # also probe portals.yml ATS slugs (network)
+  node doctor.mjs --target <path>    # diagnose another career-ops checkout
+  node doctor.mjs --cli <name>       # check a specific CLI's integration
+  node doctor.mjs --help             # show this message
+
+CLIs: ${VALID_CLIS.join(', ')}`;
+
+validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
 const targetIdx = argv.indexOf('--target');
 const projectRoot =
   targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : __dirname;
@@ -24,9 +52,6 @@ const JSON_OUT = argv.includes('--json');
 // --strict adds a live ATS-slug probe of portals.yml (network). Opt-in so the
 // default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
-
-// CLIs the doctor recognises.
-const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
 
 const cliIdx = argv.indexOf('--cli');
 const cliFlag = cliIdx !== -1 ? argv[cliIdx + 1] : null;
@@ -507,6 +532,9 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
+    // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
+    // abajo lo descarta, así que ningún otro usuario ve un check que no le toca.
+    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     await checkPlaywright(),
@@ -577,6 +605,7 @@ function onboardingState(root) {
     { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
     { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
     { target: 'modes/_brief.md', template: 'modes/_brief.template.md' },
+    { target: 'voice-dna.md', template: 'voice-dna.template.md' },
   ];
   for (const { target, template } of templates) {
     const targetPath = join(root, ...target.split('/'));

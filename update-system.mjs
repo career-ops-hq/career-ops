@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -74,6 +74,7 @@ const SYSTEM_PATHS = [
   'modes/_profile.template.md',
   'modes/_custom.template.md',
   'modes/_brief.template.md',
+  'voice-dna.template.md',
   'modes/oferta.md',
   'modes/pdf.md',
   'modes/pdf/',
@@ -124,6 +125,7 @@ const SYSTEM_PATHS = [
   'modes/es/',
   'modes/es/interview/',
   'modes/id/',
+  'modes/id/interview/',
   'modes/it/',
   'modes/it/interview/',
   'modes/ja/',
@@ -133,6 +135,7 @@ const SYSTEM_PATHS = [
   'modes/pt/',
   'modes/pt/interview/',
   'modes/ru/',
+  'modes/ru/interview/',
   'modes/tr/',
   'modes/ua/',
   'modes/heuristics/',
@@ -152,7 +155,10 @@ const SYSTEM_PATHS = [
   'generate-latex.mjs',
   'extract-latex-content.mjs',
   'patch-latex-content.mjs',
+  'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
+  'lib/gemini-node-floor.mjs',
+  'lib/local-today.mjs',
   'lib/latex-escape.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
@@ -196,8 +202,10 @@ const SYSTEM_PATHS = [
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'batch-evaluate-gemini.mjs',
   'providers/',
   'seeds/',
+  'scripts/check-syntax.mjs',
   'tests/',
   'user-agent.mjs',
   'doctor.mjs',
@@ -226,6 +234,7 @@ const SYSTEM_PATHS = [
   'company-history.test.mjs',
   'rejection-latency.mjs',
   'salary-gap.mjs',
+  'negotiation-roi.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
@@ -281,6 +290,7 @@ const SYSTEM_PATHS = [
   'fonts/',
   'examples/',
   'config/profile.example.yml',
+  'config/local-paths.example.txt',
   '.env.example',
   '.editorconfig',
   '.agents/',
@@ -427,6 +437,119 @@ export const USER_PATHS = [
   '.claude/hooks/',
 ];
 
+// Local user layer — a fork's own files, declared OUTSIDE the system layer.
+//
+// USER_PATHS lives in this file, which `apply` overwrites and which git
+// re-merges on every sync, so "this file is mine" was previously a statement
+// you could only make inside the thing that keeps overwriting it (#2421). The
+// declaration file is gitignored and read at runtime instead: one repo-relative
+// path per line, `#` comments, trailing `/` for a directory prefix — the same
+// shape as the arrays above. Absent file means no extra paths, which is the
+// behaviour every existing install already has.
+export const LOCAL_PATHS_FILE = 'config/local-paths.txt';
+
+/**
+ * Parse a declaration file's contents into a de-duplicated path list.
+ * Pure and tolerant of CRLF: Windows forks are the population this exists
+ * for, and a stray \r would make every entry miss its match.
+ * @param {string} text - Raw file contents.
+ * @returns {string[]} Declared paths, in file order, without duplicates.
+ */
+export function parseLocalPaths(text) {
+  const seen = new Set();
+  for (const rawLine of String(text).split('\n')) {
+    const line = rawLine.replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    seen.add(line);
+  }
+  return [...seen];
+}
+
+/**
+ * Read + validate the local declaration file.
+ *
+ * Refuses rather than honours anything ambiguous: a path the system layer
+ * already ships would silently stop updating, and a path that escapes the
+ * checkout would widen the "never touch" set over files the updater does not
+ * own. Both throw, naming the offending entry.
+ *
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Extra user-layer paths. Empty when the file is absent.
+ */
+export function localUserPaths(root = ROOT) {
+  const file = join(root, LOCAL_PATHS_FILE);
+  if (!existsSync(file)) return [];
+
+  const declared = parseLocalPaths(readFileSync(file, 'utf-8'));
+  const reject = (path, why) => {
+    throw new Error(`${LOCAL_PATHS_FILE}: refusing "${path}" — ${why}`);
+  };
+
+  for (const path of declared) {
+    if (path === LOCAL_PATHS_FILE) {
+      reject(path, 'the declaration file cannot list itself (it is gitignored, so nothing updates it)');
+    }
+    if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\')) {
+      reject(path, 'paths must be repo-relative, not absolute');
+    }
+    if (path.split(/[\\/]/).includes('..')) {
+      reject(path, 'paths must stay inside the repo');
+    }
+    const collision = SYSTEM_PATHS.find((sys) =>
+      sys.endsWith('/') ? path.startsWith(sys) : path === sys,
+    );
+    if (collision) {
+      reject(
+        path,
+        `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
+        + 'Declaring it would stop updates to it with no other signal',
+      );
+    }
+  }
+  return declared;
+}
+
+/**
+ * USER_PATHS plus whatever the local declaration file adds. This is what the
+ * safety check compares against — the built-in list alone would report a
+ * fork's own files as violations.
+ * @param {string} [root=ROOT] - Repo root to read from.
+ * @returns {string[]} Every path the updater must never touch.
+ */
+export function effectiveUserPaths(root = ROOT) {
+  return [...USER_PATHS, ...localUserPaths(root)];
+}
+
+/**
+ * Which of the files an update touched belong to the user layer.
+ *
+ * Pure so the rule can be pinned without driving apply(), which is ROOT-bound
+ * and full of side effects.
+ *
+ * @param {string[]} changedFiles - Paths the update modified.
+ * @param {string[]} updatePaths - Paths this update was allowed to write.
+ *   An explicit entry here wins over a user-layer prefix match, e.g.
+ *   writing-samples/README.md is a system-owned doc inside a user directory.
+ * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ *   A trailing `/` means directory prefix; anything else matches exactly. Bare
+ *   `startsWith` over-matched neighbours that merely share a prefix —
+ *   `cv.md` claimed `cv.md.bak`, and a declared `run-nightly.ps1` claimed
+ *   `run-nightly.ps1.old` — reporting files the user never declared as
+ *   violations. The declaration syntax has always said trailing `/` is what
+ *   makes an entry a prefix; this makes the matcher agree with it.
+ * @returns {string[]} Violating files, each listed once.
+ */
+export function userLayerViolations(changedFiles, updatePaths, userPaths) {
+  const violations = [];
+  for (const file of changedFiles) {
+    if (updatePaths.includes(file)) continue;
+    if (userPaths.some((userPath) => (userPath.endsWith('/') ? file.startsWith(userPath) : file === userPath))) {
+      violations.push(file);
+    }
+  }
+  return violations;
+}
+
 function parseVersionFile(raw) {
   // VERSION may carry a release-please marker, e.g. "1.6.0 # x-release-please-version".
   // Take the first whitespace-delimited token so the marker doesn't break semver parsing.
@@ -516,16 +639,28 @@ function gitTimeoutEnvVar(args) {
   return args[0] === 'fetch' ? 'CAREER_OPS_GIT_FETCH_TIMEOUT_MS' : 'CAREER_OPS_GIT_TIMEOUT_MS';
 }
 
-export function gitIn(root, ...args) {
+/**
+ * gitIn without the trailing/leading trim.
+ *
+ * Needed for output where whitespace is significant: `--name-only -z` emits
+ * NUL-delimited paths, and a path may legitimately begin or end with a space.
+ * Trimming the whole buffer would rewrite such a path into a different one.
+ * Everything else should keep using gitIn.
+ */
+export function gitRawIn(root, ...args) {
   const timeout = gitTimeoutMs(args);
   try {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout }).trim();
+    return execFileSync('git', args, { cwd: root, encoding: 'utf-8', timeout });
   } catch (err) {
     if (isTimeoutLikeError(err)) {
       throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
     }
     throw err;
   }
+}
+
+export function gitIn(root, ...args) {
+  return gitRawIn(root, ...args).trim();
 }
 
 function git(...args) {
@@ -601,22 +736,175 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-function gitStatusEntries() {
-  const status = git('status', '--porcelain');
+// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
+// first `--porcelain` line of a worktree/index change begins with a space
+// (` M path`). Trimming rewrites it into `M path`, and the path parse below
+// then drops the first character — a mangled path that no longer matches the
+// real user file in the safety checks. gitRawIn keeps the leading space.
+//
+// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
+// be unit-tested without a real repo: Windows git terminates the last
+// `--porcelain` line with CRLF (its native EOL), and without stripping the
+// trailing CR the sliced `path` would carry a phantom `\r` that matches
+// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+export function parsePorcelainStatus(status) {
   if (!status) return [];
-
-  return status.split('\n')
+  return status
+    .split('\n')
     .filter(Boolean)
-    .map(line => ({
-      code: line.slice(0, 2),
-      path: line.slice(3),
-    }));
+    .map((line) => {
+      // git never writes a CR inside a path, so a line-terminal '\r' is always
+      // the CRLF half of the line ending, never a path character.
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
+      return {
+        code: clean.slice(0, 2),
+        path: clean.slice(3),
+      };
+    });
 }
 
+export function gitStatusEntries(root = ROOT) {
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
+}
+
+/**
+ * Characters that can legally precede a regex literal. A `/` after any of them
+ * opens a pattern; after an identifier, a closing bracket or a literal it is
+ * division. Nothing else distinguishes the two.
+ */
+const REGEX_LITERAL_PREDECESSORS = new Set(
+  ['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'],
+);
+
+/**
+ * Consume a quoted literal starting at `start`, returning its raw inner text
+ * and the offset just past the closing quote. Escapes are copied through
+ * verbatim, which keeps the previous contract (the entries are source text,
+ * not decoded values) while stopping `\'` from ending the literal early.
+ */
+function readStringLiteral(source, start, quote) {
+  let value = '';
+  let index = start + 1;
+  while (index < source.length && source[index] !== quote) {
+    if (source[index] === '\\') {
+      value += source.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    value += source[index];
+    index += 1;
+  }
+  return { value, end: index + 1 };
+}
+
+/**
+ * Consume a regex literal starting at `start` and return the offset just past
+ * it. An unterminated pattern, or one broken by a newline, was not a regex
+ * after all, so the scan resumes one character in rather than swallowing the
+ * rest of the file.
+ */
+function skipRegexLiteral(source, start) {
+  let index = start + 1;
+  let inCharacterClass = false;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === '\\') {
+      index += 2;
+      continue;
+    }
+    if (char === '\n') return start + 1;
+    if (char === '[') inCharacterClass = true;
+    else if (char === ']') inCharacterClass = false;
+    else if (char === '/' && !inCharacterClass) return index + 1;
+    index += 1;
+  }
+  return start + 1;
+}
+
+/**
+ * Read a string-literal array out of updater source text.
+ *
+ * The source is scanned left to right rather than pattern-matched, because a
+ * regex cannot tell code from prose. Comments, string literals, escapes and
+ * regex literals are each consumed whole, and the array ends at the bracket
+ * that returns depth to zero rather than at the first `];` in the text. So
+ * `//` inside `'https://host/file'` stays part of the path, an apostrophe in
+ * `// upstream's own files` does not open a string that eats the next entry,
+ * `// means "do not touch"` adds no phantom path, a `];` inside a comment does
+ * not end the array early, and a commented-out declaration is never selected.
+ * None of these threw before: the caller got a plausible-looking list that was
+ * wrong.
+ *
+ * That matters most where this reads a source we did not write: apply() calls
+ * it on the TARGET updater fetched from FETCH_HEAD, so one apostrophe added
+ * upstream would corrupt the manifest on every client that upgrades, not on
+ * the machine where it was typed (#3099).
+ *
+ * Known limit: template-literal interpolation is treated as ordinary text. A
+ * path manifest has no reason to contain one, and reading it properly would
+ * need a parser rather than a scanner.
+ *
+ * @param {string} source - Updater source text.
+ * @param {string} name - Array binding to read, e.g. 'SYSTEM_PATHS'.
+ * @returns {string[]} Declared entries, in source order. Empty when absent.
+ */
 export function extractArrayFromSource(source, name) {
-  const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
-  if (!match) return [];
-  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
+  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*\\[`, 'y');
+  const entries = [];
+  let depth = 0;
+  let previous = '';
+  let index = 0;
+
+  while (index < source.length) {
+    const char = source[index];
+    const pair = source.slice(index, index + 2);
+
+    if (pair === '//') {
+      const end = source.indexOf('\n', index);
+      index = end === -1 ? source.length : end;
+      continue;
+    }
+    if (pair === '/*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      const literal = readStringLiteral(source, index, char);
+      if (depth > 0) entries.push(literal.value);
+      previous = char;
+      index = literal.end;
+      continue;
+    }
+    if (char === '/' && REGEX_LITERAL_PREDECESSORS.has(previous)) {
+      index = skipRegexLiteral(source, index);
+      previous = '/';
+      continue;
+    }
+
+    if (depth > 0) {
+      if (char === '[') depth += 1;
+      else if (char === ']') {
+        depth -= 1;
+        if (depth === 0) return entries;
+      }
+    } else if (char === 'c') {
+      declaration.lastIndex = index;
+      if (declaration.test(source)) {
+        depth = 1;
+        index = declaration.lastIndex;
+        continue;
+      }
+    }
+
+    if (!/\s/.test(char)) previous = char;
+    index += 1;
+  }
+
+  // An array that never closes is malformed source. Report nothing rather than
+  // a partial manifest: `apply` merges an empty list away, but would act on a
+  // truncated one.
+  return [];
 }
 
 function mergePathLists(...lists) {
@@ -630,6 +918,26 @@ function mergePathLists(...lists) {
     }
   }
   return merged;
+}
+
+function normalizeRepoPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function pathMatchesManifest(file, entry) {
+  const normalizedFile = normalizeRepoPath(file);
+  const normalizedEntry = normalizeRepoPath(entry).replace(/\/$/, '');
+  return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  if (remote.size === 0) return [];
+  return [...localFiles]
+    .map(normalizeRepoPath)
+    .filter((file) => !remote.has(file))
+    .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
@@ -730,7 +1038,20 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
  *   2. it differs from the upstream ref. A local fix upstream has since adopted
  *      independently is byte-identical there, so the checkout costs nothing and
  *      warning about it would be noise — the exact case the #2337 reporter
- *      isolated when one of their two fixes survived an update.
+ *      isolated when one of their two fixes survived an update;
+ *   3. its content is not content upstream itself published at that path
+ *      (#3094). Conditions 1 and 2 assume the merge-base still describes this
+ *      install. It does not: apply() installs an update with a raw checkout
+ *      plus an ordinary commit, and neither creates ancestry to the fetched
+ *      commit, so the merge-base stays pinned to the commit the install was
+ *      CLONED at. From the second update on, everything upstream changed since
+ *      then differs from that baseline and reads as a local edit, so the
+ *      update's own payload is preserved into `.bak` files and silently
+ *      dropped — `VERSION` with it, which is why such a run reports the version
+ *      it just failed to install. Content upstream published cannot have been
+ *      authored here, and the question is asked per file because a stuck
+ *      install is a MIXTURE of versions: no single baseline commit describes
+ *      it, which is what rules out recording one.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
  * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
@@ -743,7 +1064,25 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
 
   const diffNames = (ref) => {
     try {
-      return runGit('diff', '--name-only', ref, '--', ...paths).split('\n').map((p) => p.trim()).filter(Boolean);
+      // `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line
+      // ending must not read as a local edit. Installs that last synced before
+      // `.gitattributes` was introduced (80d104f9) have a merge-base predating
+      // it, so every text file not renormalized in that commit differs from the
+      // baseline by line endings alone — which otherwise flags ~150 untouched
+      // files and silently no-ops the whole update (#2817). This ignores only
+      // the carriage return at end of line, so a genuine trailing-whitespace or
+      // content edit is still detected.
+      //
+      // `--numstat`, deliberately, NOT `--name-only`: `--name-only` can list a
+      // path on the blob-OID comparison alone, before the textual diff runs, so
+      // a CRLF/LF-only file survives `--ignore-cr-at-eol` and the guard leaks
+      // right back. `--numstat` forces the textual diff, so the ignore rule is
+      // actually applied and a CR-only file drops out of the output entirely.
+      // The path is field 3 (a binary file renders as `-\t-\tpath`, still field
+      // 3). Reads less obviously than `--name-only`; keep it as-is.
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...paths)
+        .split('\n').map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.split('\t')[2]).filter(Boolean);
     } catch {
       // An unreadable ref (shallow clone, unrelated histories) must never abort
       // the update — it degrades the warning, not the checkout.
@@ -797,9 +1136,91 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // here also gives the `.bak` failure branch back its single meaning: a backup
   // that genuinely could not be written (permissions, full disk).
   const root = ctx.root || ROOT;
-  return [...new Set(atRisk)]
+  const present = [...new Set(atRisk)]
     .filter((file) => existsSync(join(root, ...file.split('/'))))
     .sort();
+
+  // Condition 3 (#3094). Runs last, on the files that survived everything
+  // above: it needs them to exist on disk to hash them, and on a healthy
+  // install the list is empty by now, so the whole query is skipped.
+  const publishedUpstream = contentPublishedUpstream(present, baseline, upstreamRef, runGit);
+  return present.filter((file) => !publishedUpstream.has(file));
+}
+
+/**
+ * Of `files`, those whose CURRENT content upstream published at that same path
+ * at some point in `baseline..upstreamRef` (#3094).
+ *
+ * Content-addressing does the work: git names a blob by a hash of its bytes, so
+ * "has upstream ever shipped exactly this?" is a set lookup over IDs, never a
+ * text comparison. Two git calls regardless of how many files are checked — the
+ * history walk dominates, not the file count.
+ *
+ * Both the source AND destination ID of each change are collected. The source
+ * ID of the oldest change in the window is the content as of the baseline
+ * itself, which is what an install that never received that file's update is
+ * still holding; taking only destinations would leave a blind spot at the
+ * oldest edge of the window.
+ *
+ * Everything here fails open, returning an empty set so that nothing is
+ * filtered and the caller reports what it already knew. A shallow clone has no
+ * history to read, and unrelated histories give no `baseline` to bound the walk
+ * — the same degradation contract the diffs above follow, for the same reason:
+ * a check we cannot compute must never abort the update.
+ *
+ * @param {string[]} files - existing repo-relative paths, already at risk.
+ * @param {string|null} baseline - merge-base commit, or null if there is none.
+ * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
+ * @param {Function} runGit - git runner bound to the install root.
+ * @returns {Set<string>} subset of `files` whose content came from upstream.
+ */
+function contentPublishedUpstream(files, baseline, upstreamRef, runGit) {
+  const published = new Set();
+  if (files.length === 0 || !baseline) return published;
+
+  let raw = '';
+  try {
+    // `--raw` lines are `:<srcmode> <dstmode> <srcOID> <dstOID> <status>\t<path>`.
+    // `--full-history` keeps commits history simplification would prune, and
+    // `--no-renames` keeps the question about this exact path. A path git has to
+    // C-quote (a space, a quote) simply will not match a `files` entry and stays
+    // reported — the safe direction, and career-ops ships no such path.
+    raw = runGit('log', '--full-history', '--no-renames', '--format=', '--raw',
+      '--no-abbrev', `${baseline}..${upstreamRef}`, '--', ...files);
+  } catch {
+    return published;
+  }
+
+  const idsByPath = new Map();
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith(':')) continue;
+    const [meta, path] = line.split('\t');
+    if (!path) continue;
+    if (!idsByPath.has(path)) idsByPath.set(path, new Set());
+    const fields = meta.split(' ');
+    for (const id of [fields[2], fields[3]]) {
+      // An added file has an all-zero source ID and a deleted one an all-zero
+      // destination; neither names content.
+      if (id && !/^0+$/.test(id)) idsByPath.get(path).add(id);
+    }
+  }
+  if (idsByPath.size === 0) return published;
+
+  // The worktree copy is hashed, not the committed one: an uncommitted edit is
+  // exactly as overwritable, and `hash-object` applies the same filters git
+  // would on the way in, so a CRLF working file still hashes to the LF blob.
+  let hashes = [];
+  try {
+    hashes = runGit('hash-object', '--', ...files).split('\n').map((h) => h.trim());
+  } catch {
+    return published;
+  }
+  if (hashes.length !== files.length) return published;
+
+  files.forEach((file, i) => {
+    if (idsByPath.get(file)?.has(hashes[i])) published.add(file);
+  });
+  return published;
 }
 
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
@@ -889,6 +1310,76 @@ function addPaths(paths) {
   git('add', '--', ...paths);
 }
 
+// Git's "exclude this from the pathspec" magic prefix. Preserved files are held
+// out of the checkout, the staging and the scoped commit with it, so the one
+// place that has to recognise such an entry again — the index-commit guard —
+// reads the prefix from here rather than re-spelling it.
+const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+
+/**
+ * Staged paths that are NOT covered by `owned`.
+ *
+ * Used to decide whether committing the whole index is equivalent to a
+ * pathspec-scoped commit. Entries in `owned` may be directories (`providers/`,
+ * `tests/`), which cover everything beneath them, or exact file paths.
+ *
+ * `preserved` is the update's preserved-file list (#2337): system files THIS
+ * install modified locally, which the update deliberately leaves alone. They are
+ * not the update's to commit, so a staged preserved path is reported as
+ * unrelated even when an owned DIRECTORY contains it — `providers/acme.mjs` is
+ * unrelated although `providers/` is owned.
+ *
+ * It has to be passed separately rather than inferred from `owned`, because the
+ * caller expresses preservation as `:(exclude)<path>` git pathspecs and those
+ * never match a staged path: the `providers/` entry would still claim the file,
+ * the guard would wave the bare index commit through, and the content the user
+ * asked to keep would be swept into it — #915 bug 2, reintroduced through the
+ * guard that exists to prevent it.
+ *
+ * Deliberately reads `--cached` rather than `git status`: only what is STAGED
+ * can end up in a commit, and an unstaged working-tree edit is irrelevant to
+ * that question.
+ *
+ * Takes the git runner as a seam (defaulting to the ROOT-bound one) so it can be
+ * driven against a throwaway repo, matching removeAdditionsNotInHead and
+ * tests/updater-rollback-behavior.test.mjs.
+ *
+ * Takes a RAW git runner — one that does not trim — because a path may
+ * legitimately begin or end with a space and trimming would rewrite it.
+ *
+ * @param {string[]} owned
+ * @param {string[]} [preserved] exact paths the update leaves to the user
+ * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
+ * @returns {string[]} staged paths the update does not own (empty ⇒ safe to commit the index)
+ */
+export function stagedPathsOutside(owned, preserved = [], run = (...args) => gitRawIn(ROOT, ...args)) {
+  // -z, and no trimming. Without it git quotes any path holding a space, quote
+  // or newline, and trimming would additionally rewrite a legitimate name: a
+  // staged ` scan.mjs` (leading space) becomes `scan.mjs`, matches an owned
+  // entry, and is silently treated as the update's own file — sweeping a user's
+  // work into the commit, which is the exact #915 bug 2 regression this guard
+  // exists to prevent. NUL-delimited output is unambiguous and unquoted.
+  const staged = run('diff', '--cached', '--name-only', '-z');
+  if (!staged) return [];
+
+  const files = new Set();
+  const dirs = [];
+  for (const entry of owned) {
+    if (entry.endsWith('/')) dirs.push(entry);
+    else files.add(entry);
+  }
+  // Preservation wins over ownership, hence the check BEFORE the owned lookups:
+  // being inside an owned directory is exactly the case that would otherwise
+  // claim a preserved file. Exact paths only — the preserved list comes from
+  // `git diff --name-only` / `git ls-files`, which never emit directories.
+  const preservedFiles = new Set(preserved);
+
+  return staged.split('\0')
+    .filter(path => path !== '')
+    .filter(path => preservedFiles.has(path)
+      || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
+}
+
 function dashboardGoSourcesChanged() {
   try {
     const changed = git('diff', '--name-only', 'HEAD', '--', 'dashboard');
@@ -950,6 +1441,8 @@ async function check() {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
+  let localCommit = '';
+  let remoteCommit = '';
 
   // Use curl instead of fetch() so the check works inside the Claude Code
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
@@ -961,6 +1454,21 @@ async function check() {
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
   ]);
+
+  // VERSION is release metadata, not a complete description of the system
+  // tree. Compare the installed commit with main as well, so same-version
+  // manifest/file drift is visible (#2630). A failed commit lookup is
+  // deliberately conservative: version checks still work offline/behind a
+  // restricted git transport.
+  try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
+  const remoteRef = await curlGet('https://api.github.com/repos/santifer/career-ops/git/ref/heads/main', [
+    '--header', 'Accept: application/vnd.github+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (remoteRef !== null) {
+    try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
+  }
+  const systemTreeDrift = Boolean(localCommit && remoteCommit && localCommit !== remoteCommit);
 
   if (rawVersion !== null) {
     try {
@@ -1004,8 +1512,8 @@ async function check() {
     remote = releaseVersion;
   }
 
-  if (compareVersions(local, remote) >= 0) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
@@ -1013,8 +1521,162 @@ async function check() {
     status: 'update-available',
     local,
     remote,
+    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    local_commit: localCommit || undefined,
+    remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
+}
+
+// ── .gitignore RECONCILE ────────────────────────────────────────
+
+// The header the appended block is written under. Purely cosmetic: the
+// reconciler keys off pattern presence, never off this marker, so a user who
+// deletes or moves it loses nothing.
+const GITIGNORE_BLOCK_HEADER = [
+  '# Added by career-ops update-system.mjs.',
+  '# System-owned ignore rules that were missing from this file. Your own rules',
+  '# are never modified, reordered or removed: the updater only appends patterns',
+  '# it cannot already find somewhere in this file. Reordering these lines, or',
+  '# moving them elsewhere in the file, is safe and will not bring them back.',
+  '# Deleting or commenting one out is not: they are system-owned, several of',
+  '# them guard files holding personal data, and the next update re-adds any',
+  '# that is no longer present as a live pattern.',
+];
+
+/**
+ * Read a blob from a git ref verbatim, with no trimming.
+ *
+ * `gitQuiet()` calls `.trim()` on stdout, which is right for the SHAs and
+ * pathspecs every other caller reads and wrong for file CONTENT: it strips a
+ * significant backslash-escaped trailing space from the blob's final line, and
+ * the final newline with it. For .gitignore that silently defeats the verbatim
+ * guarantee reconcileGitignore() is built on, at the one line most likely to be
+ * a freshly appended rule.
+ *
+ * @param {string} spec - A `<ref>:<path>` blob spec, e.g. `FETCH_HEAD:.gitignore`.
+ * @returns {string} The blob's exact bytes as UTF-8, untrimmed.
+ */
+function gitShowRaw(spec) {
+  const args = ['show', spec];
+  const timeout = gitTimeoutMs(args);
+  try {
+    return execFileSync('git', args, {
+      cwd: ROOT, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    if (isTimeoutLikeError(err)) {
+      throw new Error(`${describeGitCommand(args)} timed out after ${timeoutSeconds(timeout)}s. If your network is slow, retry or set ${gitTimeoutEnvVar(args)} to a larger value.`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Write .gitignore atomically: temp file on the same filesystem, then rename.
+ *
+ * writeFileSync opens with O_TRUNC, so a crash or I/O error partway through
+ * leaves the file empty or half-written. For most files that is an annoyance.
+ * For this one it un-ignores everything the truncated portion covered, turning
+ * a failed update into exactly the exposure the file exists to prevent, and
+ * doing it silently. Mirrors discover-ats.mjs and followup-seed.mjs.
+ *
+ * @param {string} filePath - Absolute path to write.
+ * @param {string} content - Full file content.
+ * @returns {void}
+ */
+function writeGitignoreAtomic(filePath, content) {
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmpPath, content);
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    // The original is still intact: the rename either happened or it did not.
+    try { rmSync(tmpPath, { force: true }); } catch { /* already gone */ }
+    throw err;
+  }
+}
+
+/**
+ * Reconcile a local .gitignore against the upstream one by appending only the
+ * system-owned patterns it is missing.
+ *
+ * .gitignore cannot join SYSTEM_PATHS: unlike every other system file it is
+ * co-owned. Users add their own rules to it, and the raw `git checkout` the
+ * update stage performs would delete those silently, which is a worse bug than
+ * the one this fixes. So it gets the append-if-missing treatment
+ * agent-inbox.mjs:ensureGitignored() already applies to its own single rule,
+ * generalized to the whole upstream rule set.
+ *
+ * Deliberately append-only. An upstream rule that was REMOVED or REWRITTEN
+ * (e.g. `*.bak` becoming `*.bak*`) leaves the superseded line in place, because
+ * there is no way to tell a stale system rule from a user rule the same shape.
+ * A redundant ignore rule is harmless; deleting a user's is not.
+ *
+ * Ordering caveat: missing patterns are appended at the end in upstream order,
+ * which preserves each negation's position relative to the pattern it negates
+ * *within the appended block*. A user-authored negation earlier in the file can
+ * still be overridden by a newly appended pattern, since later lines win in
+ * .gitignore. That is the correct precedence for a system rule, and it is the
+ * only ordering that does not require rewriting lines we do not own.
+ *
+ * @param {string} localText - Current .gitignore content.
+ * @param {string} upstreamText - Upstream .gitignore content (FETCH_HEAD).
+ * @returns {{ text: string, added: string[] }} Reconciled content and the
+ *   patterns appended. `added` is empty and `text` is byte-identical to
+ *   `localText` when nothing was missing, which is what makes repeated runs
+ *   idempotent and keeps a no-op update out of the commit.
+ */
+export function reconcileGitignore(localText, upstreamText) {
+  // One set for both patterns and comments. A comment can never collide with a
+  // pattern (only comments start with '#'), so membership answers both "does
+  // this install already have this rule?" and "has this rationale block already
+  // been copied by an earlier update?" with no second structure to keep in sync.
+  const seen = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+
+  const block = [];
+  const added = [];
+  let pendingComments = [];
+  for (const raw of upstreamText.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') { pendingComments = []; continue; }
+    if (line.startsWith('#')) { pendingComments.push([raw, line]); continue; }
+    if (seen.has(line)) { pendingComments = []; continue; }
+    // Carry the rule's own rationale across with it. Several of these comments
+    // are the only record of WHY a path is ignored (which ones hold PII, why a
+    // glob has a trailing `*`), and an install that gets the pattern without
+    // the reason is one edit away from removing it as noise.
+    for (const [rawComment, comment] of pendingComments) {
+      if (!seen.has(comment)) { block.push(rawComment); seen.add(comment); }
+    }
+    pendingComments = [];
+    // Emitted verbatim, compared normalized. A pattern whose trailing space is
+    // backslash-escaped (`secret\ `) is significant in .gitignore and would be
+    // corrupted by writing back the trimmed form used for matching.
+    block.push(raw);
+    added.push(line);
+    // Guard against an upstream file that lists the same pattern twice.
+    seen.add(line);
+  }
+
+  if (added.length === 0) return { text: localText, added };
+
+  // Match the local file's dominant line ending. A checkout on Windows under
+  // `core.autocrlf=true` leaves CRLF on disk, and appending LF-only lines to it
+  // makes `git diff` show the whole file as changed.
+  const crlfCount = (localText.match(/\r\n/g) || []).length;
+  const lfCount = (localText.match(/\n/g) || []).length - crlfCount;
+  const eol = crlfCount > lfCount ? '\r\n' : '\n';
+  const body = [...GITIGNORE_BLOCK_HEADER, ...block].join(eol);
+  // localText is concatenated verbatim, never trimmed. A local rule whose
+  // trailing space is backslash-escaped is significant, and stripping it would
+  // MODIFY a user's line, which is the one thing this function promises not to
+  // do. Only the separator varies: none for an empty file, one EOL when the
+  // file already ends in a newline, two when it does not.
+  const separator = localText === ''
+    ? ''
+    : (/\r?\n$/.test(localText) ? eol : `${eol}${eol}`);
+  return { text: `${localText}${separator}${body}${eol}`, added };
 }
 
 // ── APPLY ───────────────────────────────────────────────────────
@@ -1146,7 +1808,7 @@ async function apply() {
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
     // the user asked to keep out.
-    const preserveSpecs = preservedPaths.map((file) => `:(exclude)${file}`);
+    const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
     const preservedSet = new Set(preservedPaths);
 
@@ -1197,6 +1859,37 @@ async function apply() {
     }
     if (skippedPaths.length > 0) {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
+    }
+
+    // All tracked system files need the same stale-file treatment. In
+    // particular, root-level system files removed upstream (for example an
+    // old plugins-registry.json) are not covered by a directory-only prune.
+    // Never infer a deletion from an empty/failed tree lookup, and never touch
+    // untracked files or paths explicitly classified as user data (#2532).
+    try {
+      let remoteFiles = new Set();
+      try {
+        remoteFiles = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // A failed tree lookup is not evidence that the target is empty.
+      }
+      if (remoteFiles.size > 0) {
+        const localFiles = git('ls-files').split('\n').filter(Boolean);
+        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+          try {
+            unlinkSync(join(ROOT, f));
+            updated.push(f);
+            console.log(`Pruned stale system file: ${f}`);
+          } catch (err) {
+            console.error(`Failed to prune stale system file ${f}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Stale system-file prune step failed: ${err.message}`);
     }
 
     // tests/ and test-fixtures/ are both auto-discovered and EXECUTED
@@ -1251,6 +1944,63 @@ async function apply() {
       }
     }
 
+    // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
+    // above; this one cannot be, because it is the one system file users also
+    // write to. A raw checkout would delete their rules silently — the same
+    // failure shape as the bug being fixed. Append what is missing, touch
+    // nothing else. The consequence of skipping it entirely for 43 releases was
+    // that new ignore rules never reached an existing install, so a candidate's
+    // CV or tracker could sit unignored in a fork after a reflexive `git add .`
+    // — exactly what tests/user-layer-gitignored.test.mjs exists to prevent,
+    // and what it could only prevent inside this repository.
+    try {
+      const gitignorePath = join(ROOT, '.gitignore');
+      const upstreamGitignore = gitShowRaw('FETCH_HEAD:.gitignore');
+      // Uncommitted local edits to .gitignore are the user's, and that is a
+      // routine state rather than an exotic one: agent-inbox.mjs's own
+      // ensureGitignored() appends a rule without committing it. Such a file
+      // must stay OUT of `updated`, for the two reasons #2337 established for
+      // system files. `updated` is the rollback pathspec, and revertPaths()
+      // runs a bare `git checkout HEAD -- <path>` whose protectedPaths guard
+      // covers only newly ADDED files, so a tracked .gitignore would be hard
+      // reset and the user's uncommitted rules destroyed. `updated` is also the
+      // commit pathspec, so their edit would be swept in under an "auto-update
+      // system files" message. The reconciled rules are live on disk either
+      // way, which is all that ignoring actually requires.
+      const gitignoreWasDirty = initialStatusPaths.has('.gitignore');
+      const trackGitignore = () => {
+        if (!gitignoreWasDirty) {
+          updated.push('.gitignore');
+          return;
+        }
+        console.log('.gitignore had uncommitted local changes. The new rules are applied but left');
+        console.log('  unstaged, so they land in your own commit rather than in this update.');
+      };
+      if (!existsSync(gitignorePath)) {
+        // No local file at all (deleted by hand, or a checkout predating it).
+        // Nothing is co-owned yet, so the upstream copy can be written whole.
+        // Written exactly as upstream has it. The read is untrimmed, so the blob
+        // already carries its own final newline; the guard is only for a blob that
+        // somehow lacks one.
+        const seed = upstreamGitignore.endsWith('\n') ? upstreamGitignore : `${upstreamGitignore}\n`;
+        writeGitignoreAtomic(gitignorePath, seed);
+        trackGitignore();
+        console.log('Restored .gitignore (it was missing).');
+      } else {
+        const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
+        if (added.length > 0) {
+          writeGitignoreAtomic(gitignorePath, text);
+          trackGitignore();
+          console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      // Never abort an update over this, but never swallow it either: a silent
+      // skip here is precisely how the original bug stayed invisible.
+      console.error(`Could not reconcile .gitignore: ${err.message}`);
+      console.error('Your own rules were left untouched. Compare manually with: git diff FETCH_HEAD -- .gitignore');
+    }
+
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
     // note). scaffolder/ was just checked out by the update stage above, so the
     // module resolves here even on a pre-#1245 old→new re-exec.
@@ -1269,18 +2019,16 @@ async function apply() {
     // can exclude them from the revert and log what was preserved.
     const violatedUserPaths = new Set();
     try {
-      for (const entry of gitStatusEntries()) {
-        const file = entry.path;
-        if (initialStatusPaths.has(file)) continue;
-        // Explicit SYSTEM_PATHS entries override USER_PATHS prefix matches.
-        // (e.g. writing-samples/README.md is system-owned doc inside a user dir.)
-        if (updatePaths.includes(file)) continue;
-        for (const userPath of USER_PATHS) {
-          if (file.startsWith(userPath)) {
-            console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
-            violatedUserPaths.add(file);
-          }
-        }
+      // effectiveUserPaths(), not USER_PATHS: a fork's own files are declared
+      // in the gitignored local file (#2421) and are just as untouchable as
+      // cv.md. Explicit SYSTEM_PATHS entries still override a prefix match
+      // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
+      const changed = gitStatusEntries()
+        .map((entry) => entry.path)
+        .filter((file) => !initialStatusPaths.has(file));
+      for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
+        console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
+        violatedUserPaths.add(file);
       }
     } catch (err) {
       // Fail closed: if we can't validate the safety invariant we must
@@ -1359,6 +2107,10 @@ async function apply() {
       pathsToStage.push('.update-dismissed');
     }
 
+    // Which commit form was used, so the failure path can suggest the matching
+    // recovery command. Declared outside the try because the catch reads it.
+    let usedIndexCommit = false;
+
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
       addPaths(pathsToStage);
@@ -1366,7 +2118,39 @@ async function apply() {
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the
       // commit to exactly the files this update touched.
-      git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      //
+      // …but the pathspec form builds the commit from the WORKING TREE for those
+      // paths rather than from the index. Where `core.fileMode` is false — the
+      // default on Windows — the working tree cannot express the executable bit,
+      // so a mode change that `git checkout FETCH_HEAD -- <path>` just staged is
+      // dropped from the commit and left sitting in the index. The install is
+      // dirty the instant a "clean" update finishes, and stays dirty, because
+      // every later update re-stages the same mode and drops it again.
+      //
+      // Committing the index captures the mode. That is only equivalent to the
+      // scoped commit when the index holds nothing beyond what this update
+      // staged — which is precisely the #915 bug 2 hazard — so verify it rather
+      // than assume it, and fall back to the scoped form when anything else is
+      // staged. Content is committed identically either way; only the mode bits
+      // ride on the index-based path.
+      //
+      // `pathsToStage` is a git PATHSPEC list, not a path list: the preserved
+      // entries in it are `:(exclude)<path>`, which match no staged path at all.
+      // Handing them to the guard as owned paths would leave a preserved file
+      // claimed by its enclosing owned directory (`providers/` covering
+      // `providers/acme.mjs`) — so strip the exclusions out and pass the
+      // preserved list separately, where preservation outranks ownership.
+      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      const unrelated = stagedPathsOutside(
+        [...ownedPaths, ...materializedSkillEntrypoints],
+        preservedPaths,
+      );
+      usedIndexCommit = unrelated.length === 0;
+      if (usedIndexCommit) {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`);
+      } else {
+        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+      }
     } catch (e) {
       let commitFailed = false;
       try {
@@ -1381,11 +2165,18 @@ async function apply() {
       if (commitFailed) {
         const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
         const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
+        // Print the command matching the path actually taken. Suggesting the
+        // pathspec form after the index form was selected would tell the user to
+        // run the very thing that drops the staged mode bits — a recovery step
+        // that quietly reintroduces the bug it is recovering from.
+        const recovery = usedIndexCommit
+          ? `git commit -m "chore: auto-update system files to v${remote}"`
+          : `git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`;
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
           `    Please run manually to finish the update:\n` +
-          `    git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`
+          `    ${recovery}`
         );
       }
       // Otherwise, genuinely nothing to commit (already up to date)

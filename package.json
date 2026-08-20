@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.26.0",
+  "version": "1.28.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "engines": {
@@ -14,6 +14,7 @@
     "or:eval": "node openrouter-runner.mjs evaluate",
     "or:apply": "node openrouter-runner.mjs apply",
     "verify": "node verify-pipeline.mjs",
+    "lint": "node scripts/check-syntax.mjs",
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
     "merge": "node merge-tracker.mjs",
