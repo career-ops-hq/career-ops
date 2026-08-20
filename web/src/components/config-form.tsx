@@ -60,6 +60,15 @@ export function ConfigForm() {
     }
   }, []);
 
+  function selectCli(id: string) {
+    setCliId(id);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const current = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, mode: "cli", cliId: id }));
+    } catch {}
+  }
+
   // Detect installed CLIs
   useEffect(() => {
     fetch("/api/clis")
@@ -67,8 +76,26 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        const defaultId = list.find((c) => c.installed)?.id || "";
+        setCliId((prev) => {
+          const chosen = prev || defaultId;
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const current = raw ? JSON.parse(raw) : {};
+            if (!current.cliId && chosen) {
+              localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({
+                  mode: current.mode || "cli",
+                  cliId: chosen,
+                  provider: current.provider || "anthropic",
+                  logos: current.logos ?? true,
+                }),
+              );
+            }
+          } catch {}
+          return chosen;
+        });
       })
       .catch(() => setClis([]));
   }, []);
@@ -163,7 +190,7 @@ export function ConfigForm() {
                       <button
                         type="button"
                         disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
+                        onClick={() => selectCli(c.id)}
                         className={cn(
                           "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
                           c.installed ? "" : "cursor-default",

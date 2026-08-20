@@ -138,10 +138,30 @@ export function detectClis() {
   });
 }
 
-export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {
-  const spec = KNOWN.find((c) => c.id === id);
-  if (!spec) return null;
-  const binPath = findBin(spec.bin);
-  if (!binPath) return null;
-  return { spec, binPath };
+export function resolveCli(id?: string): { spec: CliSpec; binPath: string } | null {
+  const dirs = searchDirs();
+  if (id) {
+    const spec = KNOWN.find((c) => c.id === id);
+    if (spec) {
+      const binPath = findBin(spec.bin, dirs);
+      if (binPath) return { spec, binPath };
+    }
+    // Fallback alias between gemini and antigravity
+    if (id === "gemini") {
+      const agySpec = KNOWN.find((c) => c.id === "antigravity");
+      const agyBin = findBin("agy", dirs);
+      if (agySpec && agyBin) return { spec: agySpec, binPath: agyBin };
+    } else if (id === "antigravity") {
+      const geminiSpec = KNOWN.find((c) => c.id === "gemini");
+      const geminiBin = findBin("gemini", dirs);
+      if (geminiSpec && geminiBin) return { spec: geminiSpec, binPath: geminiBin };
+    }
+  }
+
+  // Fallback to first installed CLI if id not specified or not found
+  for (const candidate of KNOWN) {
+    const binPath = findBin(candidate.bin, dirs);
+    if (binPath) return { spec: candidate, binPath };
+  }
+  return null;
 }

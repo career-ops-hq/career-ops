@@ -1,13 +1,70 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, FileText, Loader2, Sparkles } from "lucide-react";
+import { Check, Copy, Download, FileText, Loader2, Sparkles } from "lucide-react";
 
-type Answer = { question: string; answer: string; needsConfirmation?: boolean };
+type Outreach = {
+  linkedinRecruiterNote?: string;
+  linkedinHiringManagerMessage?: string;
+  referralRequestMessage?: string;
+  hiringManagerColdEmailSubject?: string;
+  hiringManagerColdEmail?: string;
+  postApplicationEmailSubject?: string;
+  postApplicationEmail?: string;
+};
+
+type StarStory = {
+  requirement: string;
+  storyTitle: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  reflection: string;
+};
+
+type RoleSummary = {
+  archetype?: string;
+  domain?: string;
+  function?: string;
+  seniority?: string;
+  remote?: string;
+  teamSize?: string;
+  cultureScreen?: string;
+  tldr?: string;
+};
+
+type CvMatch = {
+  requirement: string;
+  match: string;
+  source: string;
+};
+
+type GapDetail = {
+  gap: string;
+  severity: string;
+  mitigation: string;
+};
+
+type InterviewIntel = {
+  recommendedCaseStudy?: string;
+  redFlagQuestion?: string;
+  answerStrategy?: string;
+};
+
 type Kit = {
   id: string; company: string; role: string; createdAt: string; appliedAt: string | null;
   fitSummary: string; matchScore: number; gaps: string[]; answers: Answer[];
   coverLetter: string; coverLetterUsed?: string; tailoredCvMarkdown: string; cvFile: string; cvFileUsed?: string;
+  outreach?: Outreach;
+  starStories?: StarStory[];
+  roleSummary?: RoleSummary;
+  cvMatches?: CvMatch[];
+  gapsDetailed?: GapDetail[];
+  interviewIntel?: InterviewIntel;
+  keywords?: string[];
+  trackerNum?: number;
+  reportLink?: string;
 };
 
 const CONFIG_KEY = "career-ops:config";
@@ -26,9 +83,6 @@ export function ApplicationWorkspace() {
     fetch("/api/application-kit").then(r => r.json()).then(d => setKits(d.kits || [])).catch(() => {});
   }, []);
 
-  // Password managers and form-filling extensions inject attributes into
-  // textareas before React hydrates server HTML. Rendering the controls after
-  // mount gives React ownership first and avoids that false mismatch warning.
   if (!mounted) {
     return <div className="mx-auto max-w-5xl px-6 py-10"><div className="h-10 w-72 animate-pulse rounded-lg bg-surface" /><div className="mt-7 grid gap-4 lg:grid-cols-2"><div className="h-96 animate-pulse rounded-2xl bg-surface" /><div className="h-96 animate-pulse rounded-2xl bg-surface" /></div></div>;
   }
@@ -48,7 +102,10 @@ export function ApplicationWorkspace() {
     if (!kit) return;
     const res = await fetch("/api/application-kit", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: kit.id, coverLetter: kit.coverLetter, answers: kit.answers, cvFile: kit.cvFile }) });
     const data = await res.json();
-    if (res.ok) { setKit(data.kit); setKits(old => old.map(k => k.id === data.kit.id ? data.kit : k)); }
+    if (res.ok) {
+      setKit(data.kit);
+      setKits(old => old.map(k => k.id === data.kit.id ? data.kit : k));
+    }
   }
 
   function updateAnswer(index: number, answer: string) {
@@ -84,14 +141,425 @@ export function ApplicationWorkspace() {
   );
 }
 
-function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit: (k: Kit) => void; updateAnswer: (i: number, v: string) => void; markApplied: () => void }) {
-  return <section className="mt-10 space-y-5 border-t border-border pt-8">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-3xl text-landing">{kit.company} · {kit.role}</h2><p className="mt-1 text-sm text-muted">Match {kit.matchScore}/5 · {kit.fitSummary}</p></div>{kit.appliedAt ? <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-sm text-emerald-500">Applied {new Date(kit.appliedAt).toLocaleString()}</span> : <button onClick={markApplied} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white">Mark applied now</button>}</div>
-    <Panel title="Form answers">{kit.answers?.map((a, i) => <div key={i} className="border-b border-border/60 py-3 last:border-0"><div className="flex justify-between gap-2"><p className="text-sm font-medium">{a.question}</p><CopyButton text={a.answer} /></div>{a.needsConfirmation && <p className="mt-1 text-xs text-amber-500">Needs your confirmation</p>}<textarea value={a.answer} onChange={e => updateAnswer(i, e.target.value)} rows={Math.min(8, Math.max(2, a.answer.split("\n").length + 1))} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" /></div>)}</Panel>
-    <Panel title="Tailored CV / résumé"><div className="flex items-center justify-between text-xs text-muted"><span><FileText className="mr-1 inline size-4" />{kit.cvFileUsed || kit.cvFile}</span><CopyButton text={kit.tailoredCvMarkdown} /></div><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-background/60 p-3 text-xs">{kit.tailoredCvMarkdown}</pre></Panel>
-    <Panel title="Cover letter · UK English"><div className="flex justify-end"><CopyButton text={kit.coverLetter} /></div><textarea value={kit.coverLetter} onChange={e => setKit({ ...kit, coverLetter: e.target.value })} rows={15} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" /></Panel>
-  </section>;
+function slugify(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "document";
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) { return <div className="rounded-2xl border border-border bg-surface/50 p-5"><h3 className="font-semibold">{title}</h3><div className="mt-2">{children}</div></div>; }
-function CopyButton({ text }: { text: string }) { const [ok, setOk] = useState(false); return <button onClick={() => navigator.clipboard.writeText(text || "").then(() => { setOk(true); setTimeout(() => setOk(false), 1200); })} className="inline-flex shrink-0 items-center gap-1 text-xs text-brand">{ok ? <Check className="size-3" /> : <Copy className="size-3" />}{ok ? "Copied" : "Copy"}</button>; }
+function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit: (k: Kit) => void; updateAnswer: (i: number, v: string) => void; markApplied: () => void }) {
+  const companySlug = slugify(kit.company || "application");
+  const roleSlug = slugify(kit.role || "role");
+  const outreach = kit.outreach;
+  const starStories = kit.starStories || [];
+  const roleSummary = kit.roleSummary;
+  const cvMatches = kit.cvMatches || [];
+  const gapsDetailed = kit.gapsDetailed || [];
+  const interviewIntel = kit.interviewIntel;
+  const keywords = kit.keywords || [];
+
+  return (
+    <section className="mt-10 space-y-6 border-t border-border pt-8">
+      {/* Header Info */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-md border border-brand/40 bg-brand/10 px-2 py-0.5 font-mono text-xs text-brand font-medium">
+              {kit.matchScore}/5 · Recommended
+            </span>
+            <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs text-muted">
+              High Confidence
+            </span>
+          </div>
+          <h2 className="mt-1 font-display text-3xl text-landing">{kit.company} · {kit.role}</h2>
+          <p className="mt-1 text-sm text-muted">{kit.fitSummary}</p>
+        </div>
+        {kit.appliedAt ? (
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-500/10 px-3.5 py-1.5 text-sm font-medium text-emerald-400">
+              ✅ Applied {new Date(kit.appliedAt).toLocaleDateString()} · Tracker & Follow-up Linked
+            </span>
+            <a href="/followups" className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground">
+              Follow-ups →
+            </a>
+          </div>
+        ) : (
+          <button onClick={markApplied} className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors shadow-sm">
+            Mark applied now
+          </button>
+        )}
+      </div>
+
+      {/* STAR+R Stories & Interview Intel */}
+      {starStories.length > 0 && (
+        <Panel title="STAR+R Interview Stories & Strategy">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
+                  <th className="py-2.5 px-2">#</th>
+                  <th className="py-2.5 px-2">JD Requirement</th>
+                  <th className="py-2.5 px-2">STAR+R Story</th>
+                  <th className="py-2.5 px-2">Situation</th>
+                  <th className="py-2.5 px-2">Task</th>
+                  <th className="py-2.5 px-2">Action</th>
+                  <th className="py-2.5 px-2">Result</th>
+                  <th className="py-2.5 px-2">Reflection</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {starStories.map((s, idx) => (
+                  <tr key={idx} className="hover:bg-surface/30">
+                    <td className="py-2 px-2 font-mono font-medium text-brand">{idx + 1}</td>
+                    <td className="py-2 px-2 font-medium text-foreground">{s.requirement}</td>
+                    <td className="py-2 px-2 text-brand font-medium">{s.storyTitle}</td>
+                    <td className="py-2 px-2 text-muted">{s.situation}</td>
+                    <td className="py-2 px-2 text-muted">{s.task}</td>
+                    <td className="py-2 px-2 text-muted">{s.action}</td>
+                    <td className="py-2 px-2 font-medium text-emerald-400">{s.result}</td>
+                    <td className="py-2 px-2 text-muted">{s.reflection}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {interviewIntel && (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 pt-4 border-t border-border/60">
+              <div className="rounded-xl border border-brand/20 bg-brand/5 p-3.5 text-xs">
+                <span className="font-semibold text-brand">Recommended Case Study:</span>
+                <p className="mt-1 text-muted leading-relaxed">{interviewIntel.recommendedCaseStudy}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-surface/40 p-3.5 text-xs">
+                <span className="font-semibold text-amber-400">Likely Red-Flag Question:</span>
+                <p className="mt-0.5 text-foreground italic">"{interviewIntel.redFlagQuestion}"</p>
+                <div className="mt-2 pt-2 border-t border-border/40">
+                  <span className="font-semibold text-muted">Answer Strategy:</span>
+                  <p className="mt-0.5 text-muted leading-relaxed">{interviewIntel.answerStrategy}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* Role Summary */}
+      {roleSummary && (
+        <Panel title="Role Summary">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
+                  <th className="py-2 px-2.5 w-36">Field</th>
+                  <th className="py-2 px-2.5">Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {roleSummary.archetype && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Archetype</td><td className="py-2 px-2.5 text-foreground">{roleSummary.archetype}</td></tr>
+                )}
+                {roleSummary.domain && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Domain</td><td className="py-2 px-2.5 text-foreground">{roleSummary.domain}</td></tr>
+                )}
+                {roleSummary.function && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Function</td><td className="py-2 px-2.5 text-foreground">{roleSummary.function}</td></tr>
+                )}
+                {roleSummary.seniority && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Seniority</td><td className="py-2 px-2.5 text-foreground">{roleSummary.seniority}</td></tr>
+                )}
+                {roleSummary.remote && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Remote / Location</td><td className="py-2 px-2.5 text-foreground">{roleSummary.remote}</td></tr>
+                )}
+                {roleSummary.cultureScreen && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">Culture Screen</td><td className="py-2 px-2.5 text-emerald-400">{roleSummary.cultureScreen}</td></tr>
+                )}
+                {roleSummary.tldr && (
+                  <tr><td className="py-2 px-2.5 font-semibold text-muted">TL;DR</td><td className="py-2 px-2.5 text-foreground leading-relaxed">{roleSummary.tldr}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* Match with CV & Gaps */}
+      {cvMatches.length > 0 && (
+        <Panel title="Match with CV & Gaps Matrix">
+          <div className="space-y-4">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">CV Evidence Match</h4>
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
+                    <th className="py-2 px-2">JD Requirement</th>
+                    <th className="py-2 px-2">CV Match</th>
+                    <th className="py-2 px-2">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {cvMatches.map((m, idx) => (
+                    <tr key={idx} className="hover:bg-surface/30">
+                      <td className="py-2 px-2 font-medium text-foreground">{m.requirement}</td>
+                      <td className="py-2 px-2 text-muted">{m.match}</td>
+                      <td className="py-2 px-2 font-mono text-brand text-[11px]">{m.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {gapsDetailed.length > 0 && (
+              <div className="pt-3 border-t border-border/60">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-2">Gaps & Strategic Mitigations</h4>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
+                      <th className="py-2 px-2">Gap</th>
+                      <th className="py-2 px-2">Severity</th>
+                      <th className="py-2 px-2">Mitigation Strategy</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {gapsDetailed.map((g, idx) => (
+                      <tr key={idx} className="hover:bg-surface/30">
+                        <td className="py-2 px-2 font-medium text-amber-300">{g.gap}</td>
+                        <td className="py-2 px-2 font-mono text-[11px] text-muted">{g.severity}</td>
+                        <td className="py-2 px-2 text-muted">{g.mitigation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {keywords.length > 0 && (
+              <div className="pt-3 border-t border-border/60">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Extracted Keywords</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {keywords.map((kw, idx) => (
+                    <span key={idx} className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-muted">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
+
+      {/* Form Answers */}
+      <Panel title="Form answers">
+        {kit.answers?.length ? kit.answers.map((a, i) => (
+          <div key={i} className="border-b border-border/60 py-3 last:border-0">
+            <div className="flex justify-between gap-2">
+              <p className="text-sm font-medium">{a.question}</p>
+              <CopyButton text={a.answer} />
+            </div>
+            {a.needsConfirmation && <p className="mt-1 text-xs text-amber-500">Needs your confirmation</p>}
+            <textarea value={a.answer} onChange={e => updateAnswer(i, e.target.value)} rows={Math.min(8, Math.max(2, a.answer.split("\n").length + 1))} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" />
+          </div>
+        )) : (
+          <p className="text-xs text-muted">No specific application form questions provided.</p>
+        )}
+      </Panel>
+
+      {/* Tailored CV */}
+      <Panel title="Tailored CV / résumé">
+        <div className="flex items-center justify-between text-xs text-muted">
+          <span><FileText className="mr-1 inline size-4" />{kit.cvFileUsed || kit.cvFile}</span>
+          <div className="flex items-center gap-2">
+            <a
+              href="/api/cv-pdf?type=cv"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/20 transition-colors"
+            >
+              <FileText className="size-3" />
+              Download Master PDF
+            </a>
+            <DownloadButton text={kit.tailoredCvMarkdown} filename={`${companySlug}-${roleSlug}-CV.md`} label="Download CV (.md)" />
+            <CopyButton text={kit.tailoredCvMarkdown} />
+          </div>
+        </div>
+        <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-background/60 p-3 text-xs">{kit.tailoredCvMarkdown}</pre>
+      </Panel>
+
+      {/* Cover Letter */}
+      <Panel title="Cover letter · UK English">
+        <div className="flex justify-end gap-2">
+          <a
+            href="/api/cv-pdf?type=cover-letter"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand/20 transition-colors"
+          >
+            <FileText className="size-3" />
+            Download Master PDF
+          </a>
+          <DownloadButton text={kit.coverLetter} filename={`${companySlug}-cover-letter.txt`} label="Download Cover Letter (.txt)" />
+          <CopyButton text={kit.coverLetter} />
+        </div>
+        <textarea value={kit.coverLetter} onChange={e => setKit({ ...kit, coverLetter: e.target.value })} rows={15} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" />
+      </Panel>
+
+      {outreach && (
+        <Panel title="Outreach & Networking Toolkit">
+          <div className="space-y-6">
+            {/* LinkedIn Recruiter Note */}
+            <div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">LinkedIn Recruiter Note (&lt; 200 chars)</h4>
+                  <p className="text-xs text-faint">Add this note when sending a connection request to recruiters or talent scouts.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-muted">{(outreach.linkedinRecruiterNote || "").length} / 200 chars</span>
+                  <CopyButton text={outreach.linkedinRecruiterNote || ""} />
+                </div>
+              </div>
+              <textarea
+                value={outreach.linkedinRecruiterNote || ""}
+                onChange={e => setKit({ ...kit, outreach: { ...outreach, linkedinRecruiterNote: e.target.value } })}
+                rows={3}
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+              />
+            </div>
+
+            {/* LinkedIn Hiring Manager Message */}
+            <div className="border-t border-border/60 pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">LinkedIn Hiring Manager InMail / Message</h4>
+                  <p className="text-xs text-faint">Personalized message to the engineering manager or IT team lead.</p>
+                </div>
+                <CopyButton text={outreach.linkedinHiringManagerMessage || ""} />
+              </div>
+              <textarea
+                value={outreach.linkedinHiringManagerMessage || ""}
+                onChange={e => setKit({ ...kit, outreach: { ...outreach, linkedinHiringManagerMessage: e.target.value } })}
+                rows={4}
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+              />
+            </div>
+
+            {/* Peer Referral Request */}
+            <div className="border-t border-border/60 pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Peer / Alumni Referral Request</h4>
+                  <p className="text-xs text-faint">Warm message for asking employees or alumni for an internal referral.</p>
+                </div>
+                <CopyButton text={outreach.referralRequestMessage || ""} />
+              </div>
+              <textarea
+                value={outreach.referralRequestMessage || ""}
+                onChange={e => setKit({ ...kit, outreach: { ...outreach, referralRequestMessage: e.target.value } })}
+                rows={4}
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+              />
+            </div>
+
+            {/* Hiring Manager Direct Cold Email */}
+            <div className="border-t border-border/60 pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Hiring Manager Direct Email</h4>
+                  <p className="text-xs text-faint">Direct email pitch with subject and structured body.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CopyButton text={`Subject: ${outreach.hiringManagerColdEmailSubject || ""}\n\n${outreach.hiringManagerColdEmail || ""}`} />
+                </div>
+              </div>
+              <div className="mt-2 space-y-2">
+                <input
+                  type="text"
+                  value={outreach.hiringManagerColdEmailSubject || ""}
+                  onChange={e => setKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmailSubject: e.target.value } })}
+                  placeholder="Subject line"
+                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-medium"
+                />
+                <textarea
+                  value={outreach.hiringManagerColdEmail || ""}
+                  onChange={e => setKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmail: e.target.value } })}
+                  rows={8}
+                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Post-Application Follow-Up Email */}
+            <div className="border-t border-border/60 pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Post-Application Follow-Up Email</h4>
+                  <p className="text-xs text-faint">Send 5-7 days after submitting the application.</p>
+                </div>
+                <CopyButton text={`Subject: ${outreach.postApplicationEmailSubject || ""}\n\n${outreach.postApplicationEmail || ""}`} />
+              </div>
+              <div className="mt-2 space-y-2">
+                <input
+                  type="text"
+                  value={outreach.postApplicationEmailSubject || ""}
+                  onChange={e => setKit({ ...kit, outreach: { ...outreach, postApplicationEmailSubject: e.target.value } })}
+                  placeholder="Subject line"
+                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-medium"
+                />
+                <textarea
+                  value={outreach.postApplicationEmail || ""}
+                  onChange={e => setKit({ ...kit, outreach: { ...outreach, postApplicationEmail: e.target.value } })}
+                  rows={7}
+                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+    </section>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-border bg-surface/50 p-5">
+      <h3 className="font-semibold">{title}</h3>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button
+      onClick={() => navigator.clipboard.writeText(text || "").then(() => { setOk(true); setTimeout(() => setOk(false), 1200); })}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand hover:border-brand/50 hover:bg-surface"
+    >
+      {ok ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {ok ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function DownloadButton({ text, filename, label = "Download" }: { text: string; filename: string; label?: string }) {
+  function handleDownload() {
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <button
+      onClick={handleDownload}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand hover:border-brand/50 hover:bg-surface"
+      title={`Download ${filename}`}
+    >
+      <Download className="size-3" />
+      {label}
+    </button>
+  );
+}
