@@ -200,6 +200,7 @@ const SYSTEM_PATHS = [
   'company-funded.mjs',
   'match-star.mjs',
   'jd-skill-gap.mjs',
+  'story-provenance-check.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
   'batch-evaluate-gemini.mjs',

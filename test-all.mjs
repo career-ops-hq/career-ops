@@ -312,6 +312,7 @@ const scripts = [
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
+  { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
@@ -1220,6 +1221,10 @@ try {
   // the whole section off the network.
   const restoreHostResolver = setHostResolver(async (hostname) => {
     if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // A shut-down analytics vendor: the name still appears in the page, but it
+    // resolves to nothing at all. Distinct from the loopback case above, which
+    // resolves fine and is blocked for being private.
+    if (hostname === 'dead-analytics-vendor.invalid') return [];
     // Every other host in this section is a stand-in for a normal public site.
     return ['93.184.216.34'];
   });
@@ -1304,6 +1309,67 @@ try {
       pass('SSRF redirect guard allows legitimate subresource requests');
     } else {
       fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
+    }
+
+    // A dead THIRD-PARTY host must not decide the verdict for the posting.
+    // Analytics vendors get shut down and their script tags stay in career
+    // pages forever; without this, every posting on such a page reports
+    // uncertain. The route double here is real-shaped (isNavigationRequest and
+    // frame), because that is the only way the guard can tell a subresource
+    // from the main document.
+    const deadThirdParty = (navigation) => {
+      let cb = null;
+      let abortCount = 0;
+      const main = {};
+      return {
+        _blockedByGuard: null,
+        // The verdict is only half the claim. The other half is that the egress
+        // guard still ABORTS the request in both cases — relaxing the verdict
+        // must not quietly start letting a non-resolving host through.
+        get abortCount() { return abortCount; },
+        mainFrame: () => main,
+        async route(_pattern, callback) { cb = callback; },
+        async goto() {
+          await cb({
+            request: () => ({
+              url: () => 'https://dead-analytics-vendor.invalid/widget.js',
+              isNavigationRequest: () => navigation,
+              frame: () => (navigation ? main : {}),
+            }),
+            abort: async () => { abortCount += 1; },
+            continue: async () => {},
+          });
+          return { status: () => 200 };
+        },
+        async waitForTimeout() {},
+        url: () => 'https://careers.example.com/jobs/1',
+        async evaluate() {
+          this._n = (this._n || 0) + 1;
+          return this._n === 1 ? 'Senior Analyst. '.repeat(30) : ['Apply for this job'];
+        },
+      };
+    };
+
+    const subresourcePage = deadThirdParty(false);
+    const subresourceDead = await checkUrlLiveness(subresourcePage, 'https://careers.example.com/jobs/1');
+    if (subresourceDead.result === 'active' && subresourcePage.abortCount === 1) {
+      pass('a dead third-party subresource is still aborted, but no longer decides the verdict');
+    } else {
+      fail(
+        `dead third-party subresource handled wrongly: ${JSON.stringify(subresourceDead)}, ` +
+        `aborts=${subresourcePage.abortCount} (want result active, aborts 1)`
+      );
+    }
+
+    const mainDocPage = deadThirdParty(true);
+    const mainDocDead = await checkUrlLiveness(mainDocPage, 'https://careers.example.com/jobs/1');
+    if (mainDocDead.result === 'uncertain' && mainDocDead.code === 'blocked_host' && mainDocPage.abortCount === 1) {
+      pass('a non-resolving MAIN DOCUMENT is aborted and still returns blocked_host');
+    } else {
+      fail(
+        `main-document DNS failure handled wrongly: ${JSON.stringify(mainDocDead)}, ` +
+        `aborts=${mainDocPage.abortCount} (want uncertain/blocked_host, aborts 1)`
+      );
     }
   } finally {
     // Always put the real resolver back, even if an assertion above throws:
