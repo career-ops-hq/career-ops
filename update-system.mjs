@@ -1038,7 +1038,20 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
  *   2. it differs from the upstream ref. A local fix upstream has since adopted
  *      independently is byte-identical there, so the checkout costs nothing and
  *      warning about it would be noise — the exact case the #2337 reporter
- *      isolated when one of their two fixes survived an update.
+ *      isolated when one of their two fixes survived an update;
+ *   3. its content is not content upstream itself published at that path
+ *      (#3094). Conditions 1 and 2 assume the merge-base still describes this
+ *      install. It does not: apply() installs an update with a raw checkout
+ *      plus an ordinary commit, and neither creates ancestry to the fetched
+ *      commit, so the merge-base stays pinned to the commit the install was
+ *      CLONED at. From the second update on, everything upstream changed since
+ *      then differs from that baseline and reads as a local edit, so the
+ *      update's own payload is preserved into `.bak` files and silently
+ *      dropped — `VERSION` with it, which is why such a run reports the version
+ *      it just failed to install. Content upstream published cannot have been
+ *      authored here, and the question is asked per file because a stuck
+ *      install is a MIXTURE of versions: no single baseline commit describes
+ *      it, which is what rules out recording one.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
  * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
@@ -1123,9 +1136,91 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // here also gives the `.bak` failure branch back its single meaning: a backup
   // that genuinely could not be written (permissions, full disk).
   const root = ctx.root || ROOT;
-  return [...new Set(atRisk)]
+  const present = [...new Set(atRisk)]
     .filter((file) => existsSync(join(root, ...file.split('/'))))
     .sort();
+
+  // Condition 3 (#3094). Runs last, on the files that survived everything
+  // above: it needs them to exist on disk to hash them, and on a healthy
+  // install the list is empty by now, so the whole query is skipped.
+  const publishedUpstream = contentPublishedUpstream(present, baseline, upstreamRef, runGit);
+  return present.filter((file) => !publishedUpstream.has(file));
+}
+
+/**
+ * Of `files`, those whose CURRENT content upstream published at that same path
+ * at some point in `baseline..upstreamRef` (#3094).
+ *
+ * Content-addressing does the work: git names a blob by a hash of its bytes, so
+ * "has upstream ever shipped exactly this?" is a set lookup over IDs, never a
+ * text comparison. Two git calls regardless of how many files are checked — the
+ * history walk dominates, not the file count.
+ *
+ * Both the source AND destination ID of each change are collected. The source
+ * ID of the oldest change in the window is the content as of the baseline
+ * itself, which is what an install that never received that file's update is
+ * still holding; taking only destinations would leave a blind spot at the
+ * oldest edge of the window.
+ *
+ * Everything here fails open, returning an empty set so that nothing is
+ * filtered and the caller reports what it already knew. A shallow clone has no
+ * history to read, and unrelated histories give no `baseline` to bound the walk
+ * — the same degradation contract the diffs above follow, for the same reason:
+ * a check we cannot compute must never abort the update.
+ *
+ * @param {string[]} files - existing repo-relative paths, already at risk.
+ * @param {string|null} baseline - merge-base commit, or null if there is none.
+ * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
+ * @param {Function} runGit - git runner bound to the install root.
+ * @returns {Set<string>} subset of `files` whose content came from upstream.
+ */
+function contentPublishedUpstream(files, baseline, upstreamRef, runGit) {
+  const published = new Set();
+  if (files.length === 0 || !baseline) return published;
+
+  let raw = '';
+  try {
+    // `--raw` lines are `:<srcmode> <dstmode> <srcOID> <dstOID> <status>\t<path>`.
+    // `--full-history` keeps commits history simplification would prune, and
+    // `--no-renames` keeps the question about this exact path. A path git has to
+    // C-quote (a space, a quote) simply will not match a `files` entry and stays
+    // reported — the safe direction, and career-ops ships no such path.
+    raw = runGit('log', '--full-history', '--no-renames', '--format=', '--raw',
+      '--no-abbrev', `${baseline}..${upstreamRef}`, '--', ...files);
+  } catch {
+    return published;
+  }
+
+  const idsByPath = new Map();
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith(':')) continue;
+    const [meta, path] = line.split('\t');
+    if (!path) continue;
+    if (!idsByPath.has(path)) idsByPath.set(path, new Set());
+    const fields = meta.split(' ');
+    for (const id of [fields[2], fields[3]]) {
+      // An added file has an all-zero source ID and a deleted one an all-zero
+      // destination; neither names content.
+      if (id && !/^0+$/.test(id)) idsByPath.get(path).add(id);
+    }
+  }
+  if (idsByPath.size === 0) return published;
+
+  // The worktree copy is hashed, not the committed one: an uncommitted edit is
+  // exactly as overwritable, and `hash-object` applies the same filters git
+  // would on the way in, so a CRLF working file still hashes to the LF blob.
+  let hashes = [];
+  try {
+    hashes = runGit('hash-object', '--', ...files).split('\n').map((h) => h.trim());
+  } catch {
+    return published;
+  }
+  if (hashes.length !== files.length) return published;
+
+  files.forEach((file, i) => {
+    if (idsByPath.get(file)?.has(hashes[i])) published.add(file);
+  });
+  return published;
 }
 
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
