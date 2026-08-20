@@ -1,6 +1,6 @@
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { processPipelineBatch, processOffer, PATHS } from '../batch-evaluate-gemini.mjs';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 

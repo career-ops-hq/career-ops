@@ -1,5 +1,8 @@
-// The two decisions /api/status makes around its set-status.mjs child, kept
-// here so they are testable without spawning anything.
+// The decisions /api/status makes around its set-status.mjs child, kept here so
+// they are testable without spawning anything.
+
+// What the caller is told when the CLI supplied no usable message of its own.
+const GENERIC_FAILURE = "status update failed";
 
 /**
  * The CLI's JSON document, or null when stdout carries none.
@@ -32,6 +35,27 @@ export function parseCliJson(stdout) {
     }
   }
   return null;
+}
+
+/**
+ * The message that goes in the response body for a failed run.
+ *
+ * Only the CLI's own `error` string is passed through. Child stderr never is:
+ * on the exit-1 crash path it is a Node stack trace carrying absolute server
+ * paths, which is exactly the content the spawn-failure path already refuses to
+ * echo. Guarding one of the two and not the other left the disclosure open on
+ * the path most likely to produce a stack trace in the first place.
+ *
+ * stderr still belongs in the server log — the caller just never sees it, which
+ * is why this takes it and ignores it rather than letting a caller forget it
+ * exists.
+ *
+ * @param {Record<string, unknown> | null} parsed
+ * @param {string} [_stderr] Deliberately unused; log it at the call site.
+ * @returns {string}
+ */
+export function clientErrorMessage(parsed, _stderr) {
+  return typeof parsed?.error === "string" ? parsed.error : GENERIC_FAILURE;
 }
 
 /**
