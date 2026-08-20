@@ -33,7 +33,7 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   allow: [],
   block: [],
   alwaysAllow: [],
-  sinceDays: 7,
+  sinceDays: 1,
   ats: [...ATS_SOURCES],
   limitPerAts: 150,
 };

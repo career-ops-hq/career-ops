@@ -9,7 +9,7 @@ import { useApply } from "@/components/apply/apply-provider";
 // for THIS offer is ready (the tracker's PDF column is ✅, or a pdf worker for
 // this #n just finished). On click it opens the apply form-proxy for the offer
 // (where the user reviews and submits it themselves — never auto-submit).
-export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: string; company: string; pdfReady: boolean }) {
+export function ApplyButton({ n, url, company, pdfReady, label = "Apply" }: { n: string; url?: string; company: string; pdfReady: boolean; label?: string }) {
   const router = useRouter();
   const { jobs } = useJobs();
   const apply = useApply();
@@ -26,7 +26,7 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
         title={!hasUrl ? "No application URL on this report" : "Generate the tailored CV (PDF) first to apply"}
         className="inline-flex cursor-not-allowed items-center justify-center gap-1.5 rounded-full border border-border bg-surface/40 px-3.5 py-1 text-xs font-medium text-faint max-sm:min-h-[44px]"
       >
-        <Lock className="size-3.5" /> Apply
+        <Lock className="size-3.5" /> {label}
       </button>
     );
   }
@@ -45,7 +45,7 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
       className="inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
       title="Apply — opens the form pre-filled, you review and submit yourself"
     >
-      <Send className="size-3.5" /> Apply
+      <Send className="size-3.5" /> {label}
     </button>
   );
 }

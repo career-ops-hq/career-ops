@@ -7,6 +7,8 @@
     "node": ">=18"
   },
   "scripts": {
+    "dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
     "doctor": "node doctor.mjs",
     "or": "node openrouter-runner.mjs",
     "or:scan": "node openrouter-runner.mjs scan",
@@ -62,6 +64,9 @@
     "application:init": "node application-artifacts.mjs --init",
     "build:dashboard": "node build-dashboard.mjs",
     "serve:dashboard": "cd dashboard && go run . --path ..",
+    "dashboard:web": "node generate-web-dashboard.mjs",
+    "open:dashboard": "node dashboard-server.mjs --open",
+    "serve:web-dashboard": "node dashboard-server.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"
   },

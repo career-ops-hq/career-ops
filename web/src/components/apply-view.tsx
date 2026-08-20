@@ -134,7 +134,7 @@ export function ApplyView() {
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <button
-              onClick={a.prefill}
+              onClick={() => a.prefill()}
               disabled={prefilling || filling}
               className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 text-sm font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-50"
             >
@@ -176,6 +176,7 @@ export function ApplyView() {
                   index={i}
                   drafting={prefilling}
                   onChange={(v) => a.setAnswer(f.id, v)}
+                  onSuggest={() => a.prefill(f.id)}
                 />
               </div>
             ))}
@@ -229,7 +230,7 @@ export function ApplyView() {
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
                 <span className="font-medium text-emerald-700 dark:text-emerald-400">The real form is now in front, pre-filled.</span>{" "}
-                <span className="text-muted">Review it and click Submit yourself — career-ops never submits for you.</span>
+                <span className="text-muted">Review it and click Submit yourself — Job Tracking never submits for you.</span>
               </div>
             </div>
           )}
@@ -525,6 +526,7 @@ function FieldRow({
   index,
   drafting,
   onChange,
+  onSuggest,
 }: {
   field: ApplyField;
   value: string;
@@ -532,6 +534,7 @@ function FieldRow({
   index: number;
   drafting: boolean;
   onChange: (v: string) => void;
+  onSuggest: () => void;
 }) {
   // Flash brand-orange the moment a drafted answer first lands (empty → value).
   const prev = useRef(value);
@@ -556,11 +559,23 @@ function FieldRow({
   const writing = drafting && !value && f.type !== "file";
   return (
     <div className={flash ? "co-flash" : ""} style={flash ? { animationDelay: `${Math.min(index * 70, 900)}ms` } : undefined}>
-      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium">
-        {f.label || <span className="text-faint">Untitled field</span>}
-        {f.required && <Asterisk className="size-3 text-brand" />}
-        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
-      </label>
+      <div className="mb-1.5 flex items-center gap-2">
+        <label className="flex min-w-0 items-center gap-1 text-sm font-medium">
+          {f.label || <span className="text-faint">Untitled field</span>}
+          {f.required && <Asterisk className="size-3 shrink-0 text-brand" />}
+          {needs && <span className="ml-1 shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
+        </label>
+        {f.type !== "file" && (!value || needs) && (
+          <button
+            type="button"
+            onClick={onSuggest}
+            disabled={drafting}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-brand/30 bg-brand-soft px-2 py-1 text-[11px] font-medium text-brand hover:bg-brand/15 disabled:opacity-50"
+          >
+            <Sparkles className="size-3" /> Generate suggestion
+          </button>
+        )}
+      </div>
       {writing ? (
         <div className={cn("co-skel", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (

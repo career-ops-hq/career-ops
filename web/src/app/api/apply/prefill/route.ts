@@ -4,10 +4,86 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import * as yaml from "js-yaml";
+import type { ApplyField } from "@/lib/apply/extract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 320;
+
+type DraftAnswer = { value: string; needs_confirmation: boolean };
+
+function localOllama(): { binPath: string; model: string } | null {
+  if (process.env.JOB_TRACKING_USE_OLLAMA !== "1") return null;
+  const candidates = ["/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"];
+  const binPath = candidates.find((candidate) => fs.existsSync(candidate));
+  return binPath ? { binPath, model: process.env.JOB_TRACKING_OLLAMA_MODEL?.trim() || "qwen2.5:14b" } : null;
+}
+
+function option(field: ApplyField, wanted: RegExp): string {
+  return field.options?.find((value) => wanted.test(value)) ?? "";
+}
+
+/** Fill facts we already own without waiting for an AI planner. */
+function knownAnswers(fields: ApplyField[], formTitle: string): Record<string, DraftAnswer> {
+  let profile: Record<string, any> = {};
+  let answerBank: Record<string, any> = {};
+  try {
+    profile = (yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8")) as Record<string, any>) || {};
+  } catch {
+    /* the AI path can still provide answers */
+  }
+  try {
+    answerBank = (yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "data", "application-answers.yml"), "utf8")) as Record<string, any>) || {};
+  } catch {
+    /* saved answer suggestions are optional */
+  }
+  const candidate = profile.candidate || {};
+  const location = profile.location || {};
+  const common = answerBank.common || {};
+  const companyKey = Object.keys(answerBank.companies || {}).find((key) => formTitle.toLowerCase().includes(key.toLowerCase()));
+  const companyAnswers = companyKey ? answerBank.companies[companyKey] || {} : {};
+  const fullName = String(candidate.full_name || "").trim();
+  const names = fullName.split(/\s+/);
+  const firstName = names.shift() || "";
+  const lastName = names.join(" ");
+  const out: Record<string, DraftAnswer> = {};
+
+  for (const field of fields) {
+    const label = `${field.label} ${field.nativeName || ""}`.toLowerCase();
+    let value = "";
+    let confirm = false;
+    if (/first.?name|given.?name/.test(label)) value = firstName;
+    else if (/last.?name|family.?name|surname/.test(label)) value = lastName;
+    else if (/full.?name|legal.?name/.test(label)) value = fullName;
+    else if (/e.?mail/.test(label)) value = String(candidate.email || "");
+    else if (/phone|mobile/.test(label) && !/country/.test(label)) value = String(candidate.phone || "");
+    else if (/linkedin/.test(label)) value = String(candidate.linkedin || "");
+    else if (/github/.test(label)) value = String(candidate.github || "");
+    else if (/portfolio|website|personal.?site/.test(label)) value = String(candidate.portfolio_url || "");
+    else if (/current company|current employer/.test(label)) value = String(common.current_company || "");
+    else if (/preferred name|what would you like us to call you/.test(label)) value = String(common.preferred_name || "");
+    else if (/name pronunciation|pronounce your name/.test(label)) value = String(common.name_pronunciation || "");
+    else if (/\bcountry\b/.test(label)) value = option(field, /^(united kingdom|uk)$/i) || String(location.country || "");
+    else if (/\bcity\b|current location|where.*based|address.*working/.test(label)) value = String(location.city || candidate.location || "");
+    else if (/currently.*(based|living).*uk|based.*united kingdom/.test(label)) value = option(field, /^yes\b/i) || "Yes";
+    else if (/\bschool\b|university|institution/.test(label)) value = String(common.school || "");
+    else if (/\bdegree\b|qualification/.test(label)) value = option(field, /master|msc/i) || String(common.degree || "");
+    else if (/discipline|field of study|subject/.test(label)) value = option(field, /computer science/i) || String(common.discipline || "");
+    else if (/end date year|graduation year/.test(label)) value = option(field, new RegExp(`^${String(common.graduation_year || "")}$`)) || String(common.graduation_year || "");
+    else if (/how did you hear|heard about this opportunity|source/.test(label)) {
+      value = option(field, /company (career|website)|career site|company site/i) || String(common.heard_about_role || "");
+    }
+    else if (/favorite project|favourite project|proudest accomplishment|proudest achievement/.test(label)) value = String(companyAnswers.proudest_accomplishment || "");
+    else if (/why.*(palantir|company|work here)|why do you want/.test(label)) value = String(companyAnswers.why_company || "");
+    else if (/additional information|anything else/.test(label)) value = String(companyAnswers.additional_information || "");
+    else if (/^english\s*\(eng\)/.test(label) && field.type === "checkbox") value = "true";
+    else if (/^cards\[|future job opportunities|consent to contact/.test(label)) confirm = true;
+    else if (/salary|compensation|notice period|visa|sponsor|work authori[sz]ation|demographic|gender|ethnic|disability|veteran/.test(label)) confirm = true;
+    if (value || confirm) out[field.id] = { value, needs_confirmation: confirm };
+  }
+  return out;
+}
 
 /**
  * Pull a JSON object out of an LLM's text answer, tolerating code fences,
@@ -16,7 +92,9 @@ export const maxDuration = 320;
  * largest valid prefix so the fields that DID finish still come through.
  */
 function extractJsonObject(text: string): { obj: Record<string, unknown> | null; truncated: boolean } {
-  const s = text.replace(/```(?:json)?/gi, "");
+  // Ollama's CLI may emit cursor/show-hide and colour sequences when it thinks
+  // stdout is interactive. They are presentation bytes, never model content.
+  const s = text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "").replace(/```(?:json)?/gi, "");
   const start = s.indexOf("{");
   if (start === -1) return { obj: null, truncated: false };
 
@@ -73,13 +151,13 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
 // page AND written to <root>/.career-ops-web/apply-prefill.log for debugging.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string };
+  let body: { sessionId?: string; cliId?: string; fieldId?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId } = body;
+  const { sessionId, cliId, fieldId } = body;
   const t0 = Date.now();
   const encoder = new TextEncoder();
   const logPath = path.join(careerOpsRoot(), ".career-ops-web", "apply-prefill.log");
@@ -120,15 +198,30 @@ export async function POST(req: Request) {
 
       const s = sessionId ? getSession(sessionId) : undefined;
       if (!s) return fail("apply session not found (it may have expired)");
+      const requestedFields = fieldId ? s.fields.filter((field) => field.id === fieldId) : s.fields;
+      if (fieldId && requestedFields.length === 0) return fail("application field not found");
+      const saved = knownAnswers(requestedFields, s.title);
       const resolved = cliId ? resolveCli(cliId) : null;
-      if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
-      const { spec, binPath } = resolved;
+      const ollama = !resolved ? localOllama() : null;
+      // Known single-field answers come straight from the local answer bank:
+      // no reason to start a model and make an "instant" suggestion wait.
+      if (!resolved && (!fieldId || !ollama || saved[fieldId]?.value)) {
+        const count = Object.keys(saved).length;
+        log(`Filled ${count} saved profile/CV answers${ollama ? " instantly" : " (AI planner unavailable)"}`);
+        emit({ t: "done", answers: saved, truncated: false, count });
+        controller.close();
+        return;
+      }
+      const binPath = resolved?.binPath || ollama!.binPath;
 
-      const fieldsList = s.fields
+      const fieldsList = requestedFields
         .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
         .join("\n");
       const mem = readMemory().trim();
-      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). Read cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too. Ground EVERY answer in the REAL candidate — never invent facts.${mem ? `\n\nDurable notes about the user:\n${mem}` : ""}
+      const localContext = ollama
+        ? `\n\nCANDIDATE CV:\n${fs.readFileSync(path.join(careerOpsRoot(), "cv.md"), "utf8")}\n\nCANDIDATE PROFILE:\n${fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8")}`
+        : "";
+      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). ${ollama ? "Use the candidate context included below." : "Read cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too."} Ground EVERY answer in the REAL candidate — never invent facts.${mem ? `\n\nDurable notes about the user:\n${mem}` : ""}${localContext}
 
 FIELDS (id ⇥ type ⇥ label ⇥ options):
 ${fieldsList}
@@ -141,24 +234,29 @@ For each field give the best answer:
 
 Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
 
-      log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
-      log(`Planner: ${cliId} (${binPath})`);
+      log(`Form: "${s.title}" · ${requestedFields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
+      log(`Planner: ${resolved ? cliId : `Ollama ${ollama!.model}`} (${binPath})`);
 
       const isClaude = cliId === "claude";
       // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
       // faster startup (skips the user's global playwright/gmail/linear/… servers
       // the planner doesn't need; it only reads local files).
-      const args = isClaude
+      const args = ollama
+        ? ["run", ollama.model, prompt, "--format", "json", "--hidethinking", "--nowordwrap"]
+        : isClaude
         ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
-        : spec.args(prompt);
+        : resolved!.spec.args(prompt);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
-      const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
+      const killMs = Math.min(300_000, 150_000 + requestedFields.length * 6_000);
       log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
         // wait on piped input that will never arrive.
-        const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+        const child = spawnHeadlessCli(binPath, args, {
+          cwd: careerOpsRoot(),
+          env: ollama ? { ...process.env, TERM: "dumb", NO_COLOR: "1", OLLAMA_NOHISTORY: "1" } : process.env,
+        });
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {
@@ -211,9 +309,10 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
           result.buf.slice(-300),
         );
       }
-      const count = Object.keys(obj).length;
+      const merged = { ...(obj as Record<string, DraftAnswer>), ...saved };
+      const count = Object.keys(merged).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
-      emit({ t: "done", answers: obj, truncated, count });
+      emit({ t: "done", answers: merged, truncated, count });
       controller.close();
     },
   });

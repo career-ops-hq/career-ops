@@ -32,6 +32,21 @@ test("the last JSON object wins, so a diagnostic object cannot shadow the result
   assert.deepEqual(parseCliJson(stdout), { ok: true, changed: false });
 });
 
+test("pretty-printed multi-line CLI JSON is parsed", () => {
+  const stdout = JSON.stringify(
+    { changed: true, num: 2, company: "PolyAI", oldStatus: "Evaluated", newStatus: "Applied" },
+    null,
+    2,
+  );
+  assert.deepEqual(parseCliJson(stdout), {
+    changed: true,
+    num: 2,
+    company: "PolyAI",
+    oldStatus: "Evaluated",
+    newStatus: "Applied",
+  });
+});
+
 test("a plain object is required: no output, no JSON, and a bare array all read as absent", () => {
   assert.equal(parseCliJson(""), null);
   assert.equal(parseCliJson("no json at all\n"), null);

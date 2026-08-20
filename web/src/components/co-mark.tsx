@@ -18,7 +18,7 @@ export function CoMark({ size = 28 }: { size?: number }) {
         paddingBottom: Math.round(size * 0.08),
       }}
     >
-      co
+      jt
     </span>
   );
 }

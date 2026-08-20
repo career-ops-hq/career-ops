@@ -205,6 +205,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "status update returned no result" }, { status: 500 });
   }
 
+  // Preserve the exact local timestamp for web submissions. The canonical
+  // status ledger intentionally stores calendar dates only; this additive,
+  // user-layer activity log supplies the clock time shown by the website.
+  if (canon === "Applied") {
+    const activityPath = `${careerOpsRoot()}/data/dashboard-activity.tsv`;
+    const existingActivity = fs.existsSync(activityPath) ? fs.readFileSync(activityPath, "utf8") : "";
+    const alreadyRecorded = existingActivity.split("\n").some((line) => {
+      const cols = line.split("\t");
+      return cols[1] === row && cols[2] === "status" && cols[3] === "Applied";
+    });
+    if (!alreadyRecorded) {
+      if (!existingActivity) fs.appendFileSync(activityPath, "timestamp\tapplication_id\taction\tvalue\n");
+      fs.appendFileSync(activityPath, `${new Date().toISOString()}\t${row}\tstatus\tApplied\n`);
+    }
+    // Seed the first follow-up from the real application date. Failure here
+    // must not undo a status that was already committed; the follow-up page can
+    // still calculate its labelled fallback and the user can set a date there.
+    if (parsed.changed === true || !alreadyRecorded) {
+      execFile(process.execPath, [rootScript("followup-seed"), row, "--date", new Date().toISOString().slice(0, 10), "--json"], { cwd: careerOpsRoot() }, () => {});
+    }
+  }
+
   // Response shape is unchanged for existing callers; `changed` and
   // `statusLogged` are additive.
   return NextResponse.json({

@@ -14,6 +14,13 @@ function freshness(postedAt: string): string {
   return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
 }
 
+export function sponsorshipSignal(offer: DiscoveredOffer): "yes" | "no" | "unknown" {
+  const text = `${offer.note || ""} ${offer.why || ""}`.toLowerCase();
+  if (/no (visa )?sponsorship|cannot sponsor|unable to sponsor|without sponsorship/.test(text)) return "no";
+  if (/visa sponsorship|sponsor visas|skilled worker sponsorship|sponsorship available/.test(text)) return "yes";
+  return "unknown";
+}
+
 // Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
 // company — so once it resolves it's instant for this card AND every other card,
 // this search or any future one. Falls back to a monogram on miss.
@@ -56,6 +63,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  const sponsorship = sponsorshipSignal(offer);
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
@@ -88,6 +96,16 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
         {fresh && <span className="text-faint">{fresh}</span>}
+        <span
+          className={cn(
+            "rounded border px-1.5 py-0.5 font-medium",
+            sponsorship === "yes" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+            sponsorship === "no" && "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300",
+            sponsorship === "unknown" && "border-border text-faint",
+          )}
+        >
+          {sponsorship === "yes" ? "Sponsorship mentioned" : sponsorship === "no" ? "No sponsorship" : "Verify sponsorship"}
+        </span>
         {unverified && (
           <span
             className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"

@@ -80,8 +80,18 @@ plugins.lock
 .env
 # Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects
 # (e.g. web/ before it graduates to main). Never commit local env files or TS build caches.
+.env*
+**/.env*
+!.env.example
+!**/.env.example
 **/.env.local
 **/.env*.local
+**/.npmrc
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*credentials*.json
+**/*service-account*.json
 **/*.tsbuildinfo
 
 # Generated

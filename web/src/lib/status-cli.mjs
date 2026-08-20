@@ -10,25 +10,25 @@
  * not parse. The route then reports 500 for a write the CLI already committed,
  * losing `changed` and `statusLogged` with it.
  *
- * So the document is read from the end: the last line that parses as a plain
- * object is the result. A diagnostic that happens to be valid JSON cannot shadow
- * it, because the result is printed last.
+ * So candidate objects are read from the end. This supports both compact JSON
+ * and the pretty-printed multi-line JSON emitted by set-status.mjs. A diagnostic
+ * object cannot shadow the result because the result is printed last.
  *
  * @param {string} stdout
  * @returns {Record<string, unknown> | null}
  */
 export function parseCliJson(stdout) {
-  const lines = String(stdout ?? "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line.startsWith("{")) continue;
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return /** @type {Record<string, unknown>} */ (parsed);
+  const text = String(stdout ?? "");
+  for (let end = text.lastIndexOf("}"); end >= 0; end = text.lastIndexOf("}", end - 1)) {
+    for (let start = text.lastIndexOf("{", end); start >= 0; start = text.lastIndexOf("{", start - 1)) {
+      try {
+        const parsed = JSON.parse(text.slice(start, end + 1));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return /** @type {Record<string, unknown>} */ (parsed);
+        }
+      } catch {
+        // This brace pair was diagnostic text or a nested fragment.
       }
-    } catch {
-      // Not the document line. Keep scanning earlier lines.
     }
   }
   return null;

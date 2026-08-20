@@ -3,27 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, ExternalLink } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
-import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
+import { ApplyButton } from "@/components/apply-button";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
-  "INBOX",
   "ALL",
   "EVALUATED",
   "APPLIED",
-  "RESPONDED",
   "INTERVIEW",
   "OFFER",
-  "HIRED",
   "REJECTED",
-  "DISCARDED",
-  "SKIP",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -45,7 +40,7 @@ export function PipelineView({
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "ALL";
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -91,7 +86,6 @@ export function PipelineView({
   }, [inbox]);
 
   const filtered = useMemo(() => {
-    if (tab === "INBOX") return [];
     let rows = applications;
     if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
@@ -120,14 +114,13 @@ export function PipelineView({
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">Applications</h1>
           <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
+            <span className="tabular-nums">{applications.length}</span> tracked applications · select ↗ to open the application page
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
-        {tab !== "INBOX" && (
+        {(
           <div className="relative w-64 max-w-[40vw]">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
             <input
@@ -144,15 +137,13 @@ export function PipelineView({
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
         {TABS.map((t) => {
           const count =
-            t === "INBOX"
-              ? pendingInbox.length
-              : t === "ALL"
+            t === "ALL"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
             <button
               key={t}
-              onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
+              onClick={() => setParams({ tab: t === "ALL" ? null : t })}
               className={cn(
                 "-mb-px inline-flex items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 tab === t
@@ -166,7 +157,7 @@ export function PipelineView({
         })}
       </div>
 
-      {tab !== "INBOX" && minFilter != null && (
+      {minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-faint">Filtered:</span>
           <button
@@ -181,14 +172,7 @@ export function PipelineView({
         </div>
       )}
 
-      {tab === "INBOX" ? (
-        /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
-        pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
-        ) : (
-          <InboxEmpty count={0} filtered={false} />
-        )
-      ) : filtered.length > 0 ? (
+      {filtered.length > 0 ? (
         /* ── Tracker table ──
            overflow-x-auto, not overflow-hidden: the rounded corners still clip,
            but a table too wide for the viewport can now be scrolled to instead
@@ -222,7 +206,7 @@ export function PipelineView({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                    <div className="flex items-center gap-2"><Link href={`/pipeline/${r.n}`}>{r.role}</Link>{r.url && <><a href={r.url} target="_blank" rel="noreferrer" title="Open application page" className="text-brand hover:text-brand-200"><ExternalLink className="size-4" /></a><ApplyButton n={r.n} url={r.url} company={r.company} pdfReady={/✅|yes|ready/i.test(r.pdf)} label="Auto-fill form" /></>}</div>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
@@ -245,51 +229,6 @@ export function PipelineView({
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
-    </div>
-  );
-}
-
-// Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
-// honest for devs (the CLI/file path stays, demoted to progressive transparency).
-function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
-  if (filtered) {
-    return (
-      <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-        <p className="font-display text-lg">No matches</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="dot-bg mt-4 overflow-hidden rounded-2xl border border-border bg-surface/50 bg-origin-border bg-gradient-to-tr from-brand/10 via-transparent to-transparent shadow-lg">
-      <div className="flex items-center gap-2 border-b border-foreground/10 px-5 py-3">
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · inbox</span>
-      </div>
-      <div className="px-6 py-10 text-center">
-        <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
-        </p>
-        {count > 0 ? (
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
-        ) : (
-          <>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
-            <Link
-              href="/explore?run=1"
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
-            </Link>
-            <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
-              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
-              <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
-            </p>
-          </>
-        )}
-      </div>
     </div>
   );
 }

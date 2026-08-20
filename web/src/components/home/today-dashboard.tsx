@@ -8,7 +8,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
-import { DiscoveryCard } from "@/components/explore/discovery-card";
+import { DiscoveryCard, sponsorshipSignal } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
@@ -41,7 +41,7 @@ export function TodayDashboard({
         setOverdue(d.metadata?.overdue ?? d.entries?.length ?? 0);
       })
       .catch(() => {});
-    fetch("/api/whats-new")
+    fetch("/api/whats-new?days=1")
       .then((r) => r.json())
       .then((d) => setFresh(Array.isArray(d.offers) ? d.offers : []))
       .catch(() => {});
@@ -66,9 +66,13 @@ export function TodayDashboard({
     [applications],
   );
 
-  const newThisWeek = fresh.length;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const newLast24h = fresh.length;
+  const allClear = newLast24h === 0 && overdue === 0 && awaiting.length === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  const priorityFresh = useMemo(() => {
+    const rank = { yes: 0, unknown: 1, no: 2 } as const;
+    return [...fresh].sort((a, b) => rank[sponsorshipSignal(a)] - rank[sponsorshipSignal(b)] || (b.postedAt || "").localeCompare(a.postedAt || ""));
+  }, [fresh]);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -85,12 +89,12 @@ export function TodayDashboard({
               <>You&apos;re all caught up.</>
             ) : (
               <>
-                {newThisWeek > 0 && (
+                {newLast24h > 0 && (
                   <>
-                    <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"} this week
+                    <span className="text-brand tabular-nums">{newLast24h}</span> new match{newLast24h === 1 ? "" : "es"} in 24 hours
                   </>
                 )}
-                {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
+                {newLast24h > 0 && overdue > 0 && <span className="text-faint"> · </span>}
                 {overdue > 0 && (
                   <>
                     <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
@@ -136,11 +140,11 @@ export function TodayDashboard({
         </Section>
       )}
 
-      {/* C. Fresh matches this week (supply loop) */}
+      {/* C. Fresh matches in the last 24 hours (supply loop) */}
       {fresh.length > 0 && (
-        <Section icon={Sparkles} title="Fresh matches this week" hint="Found by your free scans · 0 tokens">
+        <Section icon={Sparkles} title="Latest jobs · 24 hours" hint="Sponsorship-positive roles are prioritised · 0 tokens">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {fresh.slice(0, 6).map((o) => (
+            {priorityFresh.slice(0, 6).map((o) => (
               <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
             ))}
           </div>

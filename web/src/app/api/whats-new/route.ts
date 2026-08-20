@@ -37,6 +37,10 @@ export async function GET(req: Request) {
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
     if (company && evaluated.has(norm(company))) return null;
+    // The user's priority feed is London + UK remote. A bare "Remote" or an
+    // absent location is globally ambiguous, so it must not become a UK card.
+    const locationText = (location || "").trim();
+    if (!/london|united kingdom|\buk\b|england|scotland|wales|northern ireland/i.test(locationText)) return null;
     return {
       url,
       company: (company || "").trim(),
