@@ -18,6 +18,15 @@
  * unlisted CLI fails closed (unfenced, reported as such) without anyone having to
  * remember to declare it.
  *
+ * That is also why #2361's inline Codex sandbox — approval policy, `--sandbox
+ * read-only` and `--search`, spelled in the AI-search route — lives here now
+ * rather than there. Two paths that sandbox the same runtime cannot be kept in
+ * agreement by review; fenceCodexArgs REFUSES an argv that spells its own, so a
+ * second path is a failure rather than a divergence. What that route keeps is
+ * everything that is not permission: its temp workspace, `--ephemeral`, and
+ * reading the answer from `--output-last-message` instead of a stdout that
+ * echoes the whole prompt.
+ *
  * Reporting is deliberately honest rather than optimistic. fencingReport() grades
  * a run full / partial / none so it can say what actually applied, instead of a
  * boolean that reads the same whether a runtime is sandboxed, only half-sandboxed,
@@ -33,74 +42,188 @@ const CODEX_WORKSPACE_WRITE = "workspace-write";
 /**
  * Pick the Codex sandbox policy for a capability record.
  *
- * Note network forces workspace-write. Verified against codex-cli 0.146.0: under
- * `read-only` the sandbox blocks DNS outright, and the escape hatch is
- * `sandbox_workspace_write.network_access`, which — as its name says — only
- * applies to workspace-write. There is no read-only-plus-network policy to ask
- * for; `sandbox_workspace_write.writable_roots=[]` was also tried and does NOT
- * remove write access (the probe still wrote successfully). So a fetching worker
- * (research, and the assistant/explore advisors) gets a writable workspace it
- * never uses, because the alternative is a worker whose every fetch fails. Do NOT
- * "tighten" these to read-only without re-testing: nothing in the type system
- * will tell you their WebFetch stopped working.
+ * Note it is `network: "fetch"` — not web access as such — that forces
+ * workspace-write. Measured on codex-cli 0.146.0 (macOS, 2026-08-20) under this
+ * module's own read-only argv: a model-run `curl https://example.com` returned
+ * "could not resolve host", and `echo hi > ./probe.txt` returned "operation not
+ * permitted" — the sandbox governs the commands the MODEL runs, and blocks them
+ * at DNS. The escape hatch is `sandbox_workspace_write.network_access`, which —
+ * as its name says — only applies to workspace-write. There is no
+ * read-only-plus-network policy to ask for;
+ * `sandbox_workspace_write.writable_roots=[]` was also tried and does NOT remove
+ * write access (the probe still wrote successfully). So a worker that must be
+ * able to retrieve ANY url it is handed gets a writable workspace it never uses,
+ * because the alternative is a worker whose fallback fetch cannot run at all.
+ *
+ * A `"search"` worker does not pay that price. Its web access comes from
+ * `--search` (below), which the model calls server-side: in the same probe it
+ * opened https://example.com and quoted the page while the sandbox stayed
+ * read-only. That is the configuration #2361 shipped for AI search, and this must
+ * keep producing it. Do NOT collapse the two back into one boolean: one direction
+ * silently un-sandboxes AI search, the other silently strands every worker whose
+ * posting the native tool cannot reach, and nothing in the type system will tell
+ * you either happened.
  *
  * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
  * @returns {string}
  */
 function codexSandboxMode({ writes, network }) {
-  return writes || network ? CODEX_WORKSPACE_WRITE : CODEX_READ_ONLY;
+  return writes || network === "fetch" ? CODEX_WORKSPACE_WRITE : CODEX_READ_ONLY;
 }
 
 /**
- * Build the Codex sandbox flags for a capability record.
+ * Codex fencing flags that must precede the `exec` subcommand.
+ *
+ * `--ask-for-approval` and `--search` are global options on codex-cli 0.146.0 —
+ * neither appears in `codex exec --help` — so they are not interchangeable with
+ * the exec-scoped flags below and cannot share an insertion point.
+ *
+ * `never` is what makes the sandbox a fence rather than a prompt: without it a
+ * blocked command can be escalated by approval, which a headless run has nobody
+ * to give. `--search` is the web access itself, granted to any record that
+ * declares web at all — it is the model's own tool, executed server-side, and is
+ * the only web mechanism a `read-only` worker has.
+ *
+ * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @returns {string[]}
+ */
+function codexGlobalFencingFlags({ network }) {
+  return ["--ask-for-approval", "never", ...(network ? ["--search"] : [])];
+}
+
+/**
+ * Codex fencing flags that belong after the `exec` subcommand.
  *
  * `-c key=value` rather than `-s <mode>`: verified 2026-08-15 that `-c
  * sandbox_mode=…` overrides a config.toml setting `sandbox_mode =
  * "danger-full-access"` (codex doctor then reports the filesystem and network
  * sandboxes as restricted). `-s`'s precedence over user config could not be
- * verified the same way, and career-ops does not pass --ignore-user-config, so an
- * unproven override would leave the fence defeatable by any user who had set that
- * key for other work. Using `-c` for the mode also matches the network key, so
- * the fencing speaks one language.
+ * verified the same way, and most of career-ops' Codex call sites do not pass
+ * --ignore-user-config (AI search is the one that does), so an unproven override
+ * would leave the fence defeatable by any user who had set that key for other
+ * work. Using `-c` for the mode also matches the network key, so the fencing
+ * speaks one language.
  *
  * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
  * @returns {string[]}
  */
-function codexFencingFlags(capabilities) {
+function codexExecFencingFlags(capabilities) {
   const mode = codexSandboxMode(capabilities);
   const flags = ["-c", `sandbox_mode=${mode}`];
-  if (mode === CODEX_WORKSPACE_WRITE && capabilities.network) {
+  if (mode === CODEX_WORKSPACE_WRITE && capabilities.network === "fetch") {
     flags.push("-c", "sandbox_workspace_write.network_access=true");
   }
   return flags;
 }
 
 /**
+ * Argv tokens that mean "somebody already decided this run's permissions".
+ *
+ * Not a style rule. #2361 landed an inline sandbox in the AI-search route while
+ * this module was being written, and for two days the repo had two Codex
+ * sandboxing paths that no test could see disagreeing. Refusing an argv that
+ * already spells one of these makes "there is exactly one path" a failure a
+ * caller hits immediately, instead of a claim in a comment.
+ */
+const CODEX_PERMISSION_TOKENS = Object.freeze([
+  "-s",
+  "--sandbox",
+  "--ask-for-approval",
+  "--search",
+  "--dangerously-bypass-approvals-and-sandbox",
+  "--full-auto",
+]);
+
+/** `-c` payloads that set a sandbox policy, which `-s` spells as a flag. */
+const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze(["sandbox_mode", "sandbox_workspace_write."]);
+
+/**
+ * Refuse an argv whose caller already fenced it.
+ *
+ * Scans everything but the LAST element: both Codex argv builders keep the prompt
+ * last and positional, and the prompt is user/mode text that may legitimately
+ * contain any of these strings. That is the same assumption the insertion below
+ * makes, stated once here.
+ *
+ * @param {string[]} args
+ */
+function assertCodexArgvUnfenced(args) {
+  const spelled = args
+    .slice(0, -1)
+    .find(
+      (arg) =>
+        CODEX_PERMISSION_TOKENS.includes(arg) ||
+        CODEX_PERMISSION_CONFIG_KEYS.some((key) => arg.startsWith(key)),
+    );
+  if (spelled !== undefined) {
+    throw new Error(
+      `cli-fencing: codex argv already spells ${JSON.stringify(spelled)}. ` +
+        "Permission belongs to the capability record, not the call site — declare it in worker-capabilities.mjs.",
+    );
+  }
+}
+
+/**
  * Insert Codex's fencing flags into an already-built argv.
  *
- * Both Codex argv builders start with the `exec` subcommand and keep the prompt
- * last and positional (`["exec", prompt]` and codexStreamArgs's `["exec",
- * "--json", "--color", "never", prompt]`), so index 1 is the only correct
- * insertion point: after the subcommand, before anything that could be read as
- * the prompt.
+ * The subcommand, not index 0, is the anchor. Callers legitimately put global
+ * options before `exec` (AI search does, because `--output-last-message` needs
+ * `--ephemeral` and a temp workspace around it), so the earlier
+ * `args[0] === "exec"` rule described no real argv once #2361 landed. Global
+ * flags go immediately before the subcommand, exec-scoped ones immediately
+ * after: both then sit ahead of anything that could be read as the prompt, which
+ * the builders keep last and positional.
  *
- * Throws rather than guesses if the argv is not that shape. Splicing flags into a
- * command line this function does not recognize could silently produce a run that
- * looks fenced and is not — the exact failure `enforced` exists to prevent.
+ * Throws rather than guesses if there is no subcommand to anchor to, or if
+ * nothing follows it. Splicing flags into a command line this function does not
+ * recognize could silently produce a run that looks fenced and is not — the exact
+ * failure `enforced` exists to prevent.
  *
  * @param {string[]} args
  * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
  * @returns {string[]}
  */
 function fenceCodexArgs(args, capabilities) {
-  if (args[0] !== "exec") {
+  assertCodexArgvUnfenced(args);
+  const exec = args.indexOf("exec");
+  if (exec === -1 || exec === args.length - 1) {
     throw new Error(
-      `cli-fencing: codex argv must start with "exec" to be fenced, got ${JSON.stringify(args[0])}. ` +
+      `cli-fencing: codex argv must contain an "exec" subcommand followed by a prompt, got ${JSON.stringify(args)}. ` +
         "Sandbox flags have no known-safe insertion point in this argv shape.",
     );
   }
-  return [args[0], ...codexFencingFlags(capabilities), ...args.slice(1)];
+  return [
+    ...args.slice(0, exec),
+    ...codexGlobalFencingFlags(capabilities),
+    "exec",
+    ...codexExecFencingFlags(capabilities),
+    ...args.slice(exec + 1),
+  ];
 }
+
+/**
+ * What a `codex` binary must document for the flags above to mean anything.
+ *
+ * Exported as DATA so the capability probe (cli-fencing-probe.mjs) asserts the
+ * flags this module actually emits. #2361's probe lived in the route and checked
+ * `--sandbox`, while the fencer had already moved to `-c sandbox_mode=`; a probe
+ * that verifies a different command line than the one that ships is a fail-closed
+ * gate guarding the wrong door.
+ *
+ * `read-only`/`workspace-write` are the values `-s` lists, and are checked as
+ * evidence that this build has the sandbox policies `sandbox_mode` selects —
+ * `--config` alone proves only that overrides are accepted, not that these modes
+ * exist.
+ */
+export const CODEX_REQUIRED_GLOBAL_FLAGS = Object.freeze(["--ask-for-approval", "--search", "--config"]);
+
+/** @see CODEX_REQUIRED_GLOBAL_FLAGS */
+export const CODEX_REQUIRED_EXEC_FLAGS = Object.freeze([
+  "--config",
+  "--sandbox",
+  CODEX_READ_ONLY,
+  CODEX_WORKSPACE_WRITE,
+]);
 
 /**
  * Per-CLI fencing. The single table: a CLI is fenceable iff it appears here.
@@ -155,11 +278,15 @@ export function fencingReport({ cliId, cliName, capabilities }) {
   }
   // Codex only. Claude expresses both axes as tool flags, so it is never partial:
   // verifyClaudeArgs refuses any argv that does not deny what the record forbids.
-  if (cliId === "codex" && !capabilities.writes && capabilities.network) {
+  //
+  // "fetch", not any web access: a search-only worker reaches the web through the
+  // model's own tool and keeps a genuine read-only sandbox, so grading it partial
+  // would be the same dishonesty in the opposite direction.
+  if (cliId === "codex" && !capabilities.writes && capabilities.network === "fetch") {
     return {
       level: "partial",
-      notice: `${cliName} ${PARTIAL_MARKER}: this worker needs network access, which its sandbox ` +
-        "only grants alongside write access — its writes are confined to the project folder, not blocked",
+      notice: `${cliName} ${PARTIAL_MARKER}: this worker has to open urls it is handed, which its sandbox ` +
+        "only allows alongside write access — its writes are confined to the project folder, not blocked",
     };
   }
   return { level: "full", notice: null };

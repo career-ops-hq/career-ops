@@ -15120,6 +15120,11 @@ try {
           [/--sandbox\b/, '--sandbox'],
           [/\bsandbox_mode\s*=/, 'sandbox_mode='],
           [/\bsandbox_workspace_write\./, 'sandbox_workspace_write.*'],
+          // Approval policy and web access are permission too, and are what a
+          // route reaching for its own Codex invocation spells first — #2361 did
+          // exactly that, inline, in another route.
+          [/--ask-for-approval/, '--ask-for-approval'],
+          [/--search\b/, '--search'],
           // `-s` as a standalone argv token: quoted on its own, as an argv element
           // would be. Does not match the `-s` inside `--strict-mcp-config`.
           [/(['"`])-s\1/, '-s'],

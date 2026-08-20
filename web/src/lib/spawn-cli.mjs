@@ -32,6 +32,12 @@ import { fenceArgs } from "./cli-fencing.mjs";
  * through untouched, and fencingReport() grades the run so the UI can say so
  * rather than pretending.
  *
+ * The one thing that legitimately spawns a CLI without coming through here is
+ * cli-fencing-probe.mjs, which runs `--help` to ask whether the binary supports
+ * the flags it would be fenced with. That executes no prompt, no model and no
+ * tools, so there is nothing to fence — and it cannot import this module anyway
+ * without making the two a cycle.
+ *
  * @param {string} binPath
  * @param {string[]} args
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options

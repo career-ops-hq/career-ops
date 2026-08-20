@@ -57,6 +57,20 @@ test("a local read-only worker gets a true read-only sandbox", () => {
   assert.equal(configValue(args, "sandbox_workspace_write.network_access"), null);
 });
 
+test("a searching worker keeps the read-only sandbox and gets the model's own web tool", () => {
+  // Given AI search: it hunts the web but is never handed a url to open (#2361)
+  // When its codex argv is fenced
+  const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.webSearchOnly });
+
+  // Then its web access is --search, which the model runs server-side, so
+  // nothing has to cross the sandbox and read-only survives. This is the exact
+  // configuration #2361 shipped inline; the point of moving it here was to keep
+  // it, not to trade it for a writable workspace.
+  assert.ok(args.includes("--search"), "a web-using worker must get the native search tool");
+  assert.equal(configValue(args, "sandbox_mode"), "read-only");
+  assert.equal(configValue(args, "sandbox_workspace_write.network_access"), null);
+});
+
 test("a fetching worker gets workspace-write plus the network hatch", () => {
   // Given a worker that must fetch but is not asked to write (research, the
   // assistant and explore advisors)
@@ -108,33 +122,104 @@ test("the sandbox policy is spelled with -c, which beats the user's config.toml"
   assert.ok(!args.includes("-s") && !args.includes("--sandbox"), "must not rely on -s (precedence unverified)");
 });
 
+test("every codex run refuses escalation by approval", () => {
+  // Given a sandbox a model can ask to be let out of, and a headless run with
+  // nobody to ask
+  for (const [name, caps] of Object.entries(CAPS)) {
+    const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: caps });
+
+    // Then approval is refused outright, so a blocked command stays blocked
+    // instead of hanging on a prompt or being waved through.
+    const approval = args.indexOf("--ask-for-approval");
+    assert.notEqual(approval, -1, `${name} must set an approval policy`);
+    assert.equal(args[approval + 1], "never", `${name} must refuse approvals`);
+  }
+});
+
 test("fencing never disturbs the prompt or the subcommand", () => {
   // Given codex reads the prompt as the last positional argument, and
   // parseCodexEvent only understands output produced by this exact argv
   const original = codexArgv("the prompt");
   const { args } = fenceArgs({ cliId: "codex", args: original, capabilities: CAPS.workspaceWrite });
 
-  // Then the subcommand stays first, the prompt stays last, and the transport
-  // flags survive — flags are inserted between, never appended past the prompt.
-  assert.equal(args[0], "exec");
+  // Then the prompt stays last, the transport flags survive, and everything
+  // fencing added sits ahead of them: global options before the subcommand,
+  // sandbox overrides after it, nothing past the prompt.
+  const exec = args.indexOf("exec");
+  assert.ok(exec !== -1, "the subcommand must survive fencing");
+  assert.ok(args.slice(0, exec).includes("--ask-for-approval"), "global flags belong before the subcommand");
   assert.equal(args.at(-1), "the prompt");
-  for (const flag of ["--json", "--color", "never"]) {
-    assert.ok(args.includes(flag), `${flag} must survive fencing`);
+  for (const flag of ["--json", "--color"]) {
+    assert.ok(args.indexOf(flag) > exec, `${flag} must survive fencing, after the subcommand`);
   }
+  assert.equal(args[args.indexOf("--color") + 1], "never", "--color keeps its own value");
   // And the caller's array is not mutated underneath it.
   assert.deepEqual(original, codexArgv("the prompt"));
 });
 
+test("a caller's own global flags keep their place ahead of the subcommand", () => {
+  // Given AI search's argv shape after #2361: isolation and output flags the
+  // route owns, with the prompt last
+  const original = ["exec", "--ephemeral", "--output-last-message", "/tmp/out.txt", "the prompt"];
+  const { args } = fenceArgs({ cliId: "codex", args: original, capabilities: CAPS.webSearchOnly });
+
+  // Then fencing splices around them rather than replacing them: the route's
+  // flags still follow the subcommand, in order, and the prompt is still last.
+  const exec = args.indexOf("exec");
+  assert.ok(args.indexOf("--ephemeral") > exec);
+  assert.equal(args[args.indexOf("--output-last-message") + 1], "/tmp/out.txt");
+  assert.equal(args.at(-1), "the prompt");
+});
+
+test("an argv that already spells its own permissions is refused", () => {
+  // Given #2361 landed an inline Codex sandbox in one route while this module
+  // was being written, and for two days the repo had two sandboxing paths
+  for (const spelled of [
+    ["exec", "--sandbox", "read-only", "PROMPT"],
+    ["exec", "-s", "workspace-write", "PROMPT"],
+    ["--ask-for-approval", "never", "exec", "PROMPT"],
+    ["--search", "exec", "PROMPT"],
+    ["exec", "-c", "sandbox_mode=danger-full-access", "PROMPT"],
+  ]) {
+    // When such an argv reaches fencing
+    // Then it is refused, so "there is exactly one Codex permission path" is a
+    // failure the caller hits rather than a claim in a comment.
+    assert.throws(
+      () => fenceArgs({ cliId: "codex", args: spelled, capabilities: CAPS.localReadOnly }),
+      /already spells/,
+      `${spelled.join(" ")} must be refused`,
+    );
+  }
+});
+
+test("a prompt that merely mentions a permission flag is still fenceable", () => {
+  // Given modes/discover.md and user queries are free text that may name a flag
+  const { args } = fenceArgs({
+    cliId: "codex",
+    args: ["exec", "run with --sandbox read-only and --search"],
+    capabilities: CAPS.localReadOnly,
+  });
+
+  // Then only the argv BEFORE the prompt is scanned — the prompt is data, and
+  // refusing it would make an ordinary query un-runnable.
+  assert.equal(args.at(-1), "run with --sandbox read-only and --search");
+  assert.equal(configValue(args, "sandbox_mode"), "read-only");
+});
+
 test("an unrecognized codex argv shape throws instead of guessing", () => {
-  // Given an argv this module does not know how to fence (no `exec` subcommand)
-  // When fencing is attempted
-  // Then it fails loudly. Splicing flags into an unknown command line could
-  // produce a run graded "full" while being unsandboxed — the exact dishonesty
-  // fencingReport exists to prevent.
-  assert.throws(
-    () => fenceArgs({ cliId: "codex", args: ["-p", "PROMPT"], capabilities: CAPS.localReadOnly }),
-    /must start with "exec"/,
-  );
+  // Given argvs this module cannot anchor to: no `exec` subcommand at all, and
+  // one with nothing after it that could be the prompt
+  for (const args of [["-p", "PROMPT"], ["--ephemeral", "exec"]]) {
+    // When fencing is attempted
+    // Then it fails loudly. Splicing flags into an unknown command line could
+    // produce a run graded "full" while being unsandboxed — the exact dishonesty
+    // fencingReport exists to prevent.
+    assert.throws(
+      () => fenceArgs({ cliId: "codex", args, capabilities: CAPS.localReadOnly }),
+      /must contain an "exec" subcommand/,
+      `${args.join(" ")} must be refused`,
+    );
+  }
 });
 
 test("claude is fenced by its own tool flags, so its argv passes through", () => {
@@ -184,6 +269,11 @@ test("every runtime and capability pair grades to a defined level", () => {
   // And the middle case is genuinely reachable — a suite where nothing is ever
   // "partial" would pass while the level meant nothing.
   assert.ok(grades.includes("codex/networkReadOnly=partial"), `no partial case reached: ${grades.join(" ")}`);
+  // While a searching worker is fully fenced: it reaches the web without the
+  // sandbox being opened, so grading it "partial" would be the same dishonesty
+  // pointed the other way — and would put a warning on AI search, which #2361
+  // sandboxed properly.
+  assert.ok(grades.includes("codex/webSearchOnly=full"), `search must grade full: ${grades.join(" ")}`);
 });
 
 test("a kind needing neither writes nor network gets a true read-only sandbox", () => {

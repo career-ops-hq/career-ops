@@ -92,7 +92,7 @@ test("spawnHeadlessCli applies fencing rather than spawning the raw argv", () =>
         cliId: "codex",
         capabilities: CAPS.localReadOnly,
       }),
-    /must start with "exec"/,
+    /must contain an "exec" subcommand/,
   );
 });
 

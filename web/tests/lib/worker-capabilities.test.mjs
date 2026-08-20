@@ -31,7 +31,10 @@ test("every known kind has an explicit capability record", () => {
     // which would silently read as `writes: undefined` (falsy, so read-only) and
     // hide a mistake behind a safe-looking default.
     assert.equal(typeof caps.writes, "boolean", `${kind}.writes must be a boolean`);
-    assert.equal(typeof caps.network, "boolean", `${kind}.network must be a boolean`);
+    assert.ok(
+      [false, "search", "fetch"].includes(caps.network),
+      `${kind}.network must be false, "search" or "fetch", got ${JSON.stringify(caps.network)}`,
+    );
     assert.ok(Object.values(CAPS).includes(caps), `${kind} must use a declared CAPS record`);
   }
 });
@@ -107,8 +110,16 @@ test("Claude's scope honours the network axis, not just writes", () => {
     const allowed = toolNames(toolScopeFor(kind).allowed);
     const canFetch = NETWORK_TOOLS.some((t) => allowed.includes(t));
 
-    // Then Claude grants a network tool exactly when the policy says so.
-    assert.equal(canFetch, network, `${kind}: policy says network=${network} but Claude's scope says ${canFetch}`);
+    // Then Claude grants a network tool exactly when the policy says the worker
+    // needs the web at all. Which KIND of web access it needs is a Codex
+    // distinction — its sandbox and its native search tool are different
+    // mechanisms — and Claude's tools are not sandboxed, so both web records
+    // translate the same way here.
+    assert.equal(
+      canFetch,
+      Boolean(network),
+      `${kind}: policy says network=${network} but Claude's scope says ${canFetch}`,
+    );
   }
 });
 

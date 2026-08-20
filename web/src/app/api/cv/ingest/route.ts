@@ -122,7 +122,7 @@ export async function POST(req: Request) {
         "--strict-mcp-config",
         "--allowedTools",
         ADVISOR_SCOPE.allowed,
-      "--disallowedTools",
+        "--disallowedTools",
         ADVISOR_SCOPE.disallowed,
       ]
     : spec.args(prompt);
