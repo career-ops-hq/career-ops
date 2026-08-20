@@ -993,6 +993,17 @@ export const chromium = {
 
   const CONTROLS = new RegExp('[\u0000-\u001f\u007f-\u009f]');
   const BIDI = new RegExp('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]');
+  // Mirrors DISPLAY_TITLE_MAX in generate-pdf.mjs. Asserted rather than just
+  // described: "the full 200-char name is absent" is satisfied by ANY
+  // truncation, so on its own it still passed with the cap widened to 150
+  // (CodeRabbit; confirmed by mutation). Measuring the quoted name pins the
+  // documented bound instead.
+  const NAME_MAX = 60;
+  // Every warning quotes the configured name as `lists "X"` or `lists only "X"`.
+  const quotedName = (w) => {
+    const m = w.match(/lists (?:only )?"([^"]*)"/);
+    return m ? [...m[1]] : null;   // spread: code points, not UTF-16 units
+  };
 
   // One entry per reachable site, each with the shape that actually lands there.
   const sites = [
@@ -1018,7 +1029,17 @@ export const chromium = {
     const leaks = [];
     if (warnings.some(w => CONTROLS.test(w))) leaks.push('C0/C1 control');
     if (warnings.some(w => BIDI.test(w))) leaks.push('bidi override');
-    if (warnings.some(w => w.includes(LONG))) leaks.push('unbounded name');
+    if (warnings.some(w => w.includes(LONG))) leaks.push('untruncated name');
+
+    // The bound itself. A site whose warnings quote no name at all would make
+    // this assert nothing, so that counts as a failure rather than a pass.
+    const quoted = warnings.map(quotedName).filter(Boolean);
+    if (quoted.length === 0) {
+      leaks.push('no quoted name found (length bound asserted nothing)');
+    } else {
+      const over = quoted.map(cp => cp.length).filter(n => n > NAME_MAX);
+      if (over.length > 0) leaks.push('name over ' + NAME_MAX + ' code points (' + over.join(', ') + ')');
+    }
     if (leaks.length > 0) failures.push(site + ': ' + leaks.join(', '));
   }
 
