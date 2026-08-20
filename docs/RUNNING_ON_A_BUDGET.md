@@ -82,6 +82,21 @@ export CLAUDE_CODE_OAUTH_TOKEN="<your-generated-token>"
 
 It is a credential: treat it like one, and never commit it.
 
+### Batch Preflight for Credential Precedence
+
+Before executing the batch run, you must clear out any competing credentials. The `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and cloud-provider switches take precedence over `CLAUDE_CODE_OAUTH_TOKEN`. If left active, they can select an unintended billing path or cause authentication to fail altogether.
+
+Ensure you do the following prior to the run:
+
+1. **Unset environment variables:** Unset `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and any cloud-provider switches.
+2. **Clear Claude Code settings:** Remove `apiKeyHelper` from your Claude Code configuration.
+
+```bash
+unset ANTHROPIC_AUTH_TOKEN
+unset ANTHROPIC_API_KEY
+# Unset any active cloud-provider switches as well         # requires an active Claude subscription
+```
+
 ### Two things worth expecting
 
 - **Plan limits are windows, not balances.** On a subscription you get rolling usage windows rather than a credit balance, so a heavy scan can pause you until the window resets. `spend_tier: economy` and the pre-screen gate above exist precisely to make high-volume days cheaper.
