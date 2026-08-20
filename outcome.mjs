@@ -19,13 +19,19 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
+import {
+  normalizeCompany,
+  resolvePdfIndexPath,
+  resolveTrackerPath,
+  resolveWorkspaceRoot,
+} from './tracker-utils.mjs';
 import { parsePdfIndex } from './find.mjs';
+import { findCaptureForReport } from './jd-capture.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -197,9 +203,8 @@ matchedRow = candidates[0];
 
 const companySlug = slugify(matchedRow.company);
 const roleSlug = slugify(matchedRow.role);
-const trackerDir = dirname(appsFile);
-const repoRoot = dirname(trackerDir);
-const outcomeDir = join(trackerDir, 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
+const repoRoot = resolveWorkspaceRoot(appsFile);
+const outcomeDir = join(repoRoot, 'data', 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 
@@ -248,7 +253,7 @@ if (flags.cv) {
 
   // Case C: Lookup data/pdf-index.tsv to find PDF mapping for the linked report number.
   if (!cvResolvedPath) {
-    const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+    const manifestPath = resolvePdfIndexPath(appsFile);
     if (existsSync(manifestPath)) {
       try {
         const manifestText = readFileSync(manifestPath, 'utf-8');
@@ -315,19 +320,33 @@ if (notesLink) {
   }
 }
 
-// Case 2: Run archive-posting.mjs to generate a new archive if not resolved or not found
+// Case 2: Look for a capture already keyed to this report number. Covers captures
+// made on any earlier day, and postings whose URL has since gone dead — the case
+// the archive exists for, and the one a same-day filename rebuild cannot serve.
+if (!resolvedPostingPath) {
+  const found = findCaptureForReport(resolve(repoRoot, 'jds'), matchedRow.num, {
+    companySlug: slugify(matchedRow.company),
+  });
+  if (found) {
+    resolvedPostingPath = found.path;
+    postingArchived = true;
+  }
+}
+
+// Case 3: Archive the posting now, keyed to the report so it resolves next time.
 if (!resolvedPostingPath && targetUrl) {
   try {
-    execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`], {
+    execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`, `--report=${matchedRow.num}`], {
       cwd: CAREER_OPS,
       env: process.env,
       stdio: 'ignore',
       timeout: 45000,
     });
-    const expectedFilename = `${today()}_${slugify(matchedRow.company)}_${slugify(matchedRow.role)}.pdf`;
-    const expectedFullPath = resolve(repoRoot, 'jds', expectedFilename);
-    if (existsSync(expectedFullPath)) {
-      resolvedPostingPath = expectedFullPath;
+    const found = findCaptureForReport(resolve(repoRoot, 'jds'), matchedRow.num, {
+      companySlug: slugify(matchedRow.company),
+    });
+    if (found) {
+      resolvedPostingPath = found.path;
       postingArchived = true;
     }
   } catch {
@@ -335,9 +354,11 @@ if (!resolvedPostingPath && targetUrl) {
   }
 }
 
-// Copy posting snapshot to the outcomes directory, preserving the original if it exists
+// Copy posting snapshot to the outcomes directory, preserving the original if it exists.
+// The destination keeps the capture's own extension: captures are .pdf, .txt or .md,
+// and naming a text capture posting.pdf would misrepresent its contents.
 if (postingArchived && resolvedPostingPath) {
-  const postingDest = join(outcomeDir, 'posting.pdf');
+  const postingDest = join(outcomeDir, `posting${extname(resolvedPostingPath) || '.pdf'}`);
   if (!existsSync(postingDest)) {
     copyFileSync(resolvedPostingPath, postingDest);
   }

@@ -92,6 +92,9 @@ type PipelineRefreshMsg struct{}
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
+// PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
+type PipelineOpenStatsMsg struct{}
+
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -167,6 +170,7 @@ const (
 	ColHasReport                   // RPT: ✓/—
 	ColHasPDF                      // PDF: ✓/—
 	ColLastContact                 // LAST contact date
+	ColPosted                      // POSTED: how long the req has been open
 )
 
 // colDef describes one optional column for the picker UI.
@@ -186,6 +190,7 @@ func getOptionalCols() []colDef {
 		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
 		{ColHasPDF, i18n.Current.ColPDF, "✓/—", 4, false},
 		{ColLastContact, i18n.Current.ColLast, "", 10, false},
+		{ColPosted, i18n.Current.ColPosted, "", 10, false},
 	}
 }
 
@@ -194,8 +199,13 @@ type StatusPair struct {
 	Canonical string
 }
 
-func getStatusPairs() []StatusPair {
-	return []StatusPair{
+// getStatusPairs returns the status-change picker's options in their static
+// display order. When currentNormalized is non-empty and matches one of the
+// entries (compared via data.NormalizeStatus), that entry is pulled to the
+// front so the row's own current status always leads the list, with the
+// remaining options kept in their original relative order behind it.
+func getStatusPairs(currentNormalized string) []StatusPair {
+	base := []StatusPair{
 		{i18n.Current.StatusEvaluated, "Evaluated"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
@@ -206,6 +216,41 @@ func getStatusPairs() []StatusPair {
 		{i18n.Current.StatusDiscarded, "Discarded"},
 		{i18n.Current.StatusSkip, "Skip"},
 	}
+
+	if currentNormalized == "" {
+		return base
+	}
+
+	var current *StatusPair
+	rest := make([]StatusPair, 0, len(base))
+	for _, pair := range base {
+		if current == nil && data.NormalizeStatus(pair.Canonical) == currentNormalized {
+			p := pair
+			current = &p
+			continue
+		}
+		rest = append(rest, pair)
+	}
+
+	if current == nil {
+		// Unrecognized/unmapped status -- fall back to the static order.
+		return base
+	}
+
+	ordered := make([]StatusPair, 0, len(base))
+	ordered = append(ordered, *current)
+	ordered = append(ordered, rest...)
+	return ordered
+}
+
+// currentStatusPairs resolves the status-change picker options for whichever
+// application is currently selected in the main list, so the picker reflects
+// that row's own status rather than always assuming "Evaluated".
+func (m PipelineModel) currentStatusPairs() []StatusPair {
+	if app, ok := m.CurrentApp(); ok {
+		return getStatusPairs(data.NormalizeStatus(app.Status))
+	}
+	return getStatusPairs("")
 }
 
 // statusGroupOrder defines display order for grouped view.
@@ -622,6 +667,9 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	case "p":
 		return m, func() tea.Msg { return PipelineOpenProgressMsg{} }
 
+	case "S":
+		return m, func() tea.Msg { return PipelineOpenStatsMsg{} }
+
 	case "r":
 		return m, func() tea.Msg { return PipelineRefreshMsg{} }
 
@@ -746,8 +794,8 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(getStatusPairs()) {
-			m.statusCursor = len(getStatusPairs()) - 1
+		if m.statusCursor >= len(m.currentStatusPairs()) {
+			m.statusCursor = len(m.currentStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -759,7 +807,7 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 	case "enter":
 		m.statusPicker = false
 		if app, ok := m.CurrentApp(); ok {
-			newStatus := getStatusPairs()[m.statusCursor].Canonical
+			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
 			if norm == "hired" {
 				m.hiredApp = app
@@ -1487,7 +1535,7 @@ func (m PipelineModel) renderBody() string {
 type colWidths struct {
 	num, score, company, status, role int
 	// optional columns — 0 means the column is hidden
-	date, loc, pay, rpt, pdf, last int
+	date, loc, pay, rpt, pdf, last, posted int
 }
 
 func (m PipelineModel) colVisible(id ColumnID) bool {
@@ -1523,12 +1571,46 @@ func (m PipelineModel) columnWidths() colWidths {
 	if m.colVisible(ColLastContact) {
 		c.last = 10
 	}
-	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last
-	c.role = m.width - fixed - 14 // separators + outer padding
+	if m.colVisible(ColPosted) {
+		c.posted = 10
+	}
+	fixed := c.num + c.score + c.date + c.company + c.status + c.loc + c.pay + c.rpt + c.pdf + c.last + c.posted
+	c.role = m.width - fixed - m.rowOverhead(c)
 	if c.role < 15 {
 		c.role = 15
 	}
 	return c
+}
+
+// rowOverhead is everything a rendered row costs beyond the column widths
+// themselves. It is NOT a constant: renderAppLine and renderColumnHeader join
+// the segments with one space each, so the cost grows by one for every optional
+// column turned on.
+//
+// It used to be a fixed 14, which is the value for all seven optional columns
+// visible — so the full layout landed exactly on the terminal edge while every
+// narrower layout was left up to 7 runes short of the width it had been given.
+// Deriving it from the visible segments keeps the row the same width in every
+// combination, and keeps a future eighth column from silently taking it over.
+func (m PipelineModel) rowOverhead(c colWidths) int {
+	segments := 5 // #, score, company, role, status — always rendered
+	for _, w := range []int{c.date, c.loc, c.pay, c.rpt, c.pdf, c.last, c.posted} {
+		if w > 0 {
+			segments++
+		}
+	}
+	const (
+		leadingSpace = 1 // the " " prefixed before the join
+		outerPadding = 4 // lipgloss Padding(0, 2) — two runes on each side
+		// The score segment is budgeted c.score above but rendered unpadded, so
+		// the budget gets the difference back. Measured against the DATA row,
+		// where the score is always fmt.Sprintf("%.1f") — three runes. The
+		// header uses the ColFit label instead, which is wider in some locales
+		// ("UYUM", "AJUSTE"); that pre-existing header/row drift is not
+		// something the role width can fix for both at once.
+		renderedScoreWidth = 3
+	)
+	return (segments - 1) + leadingSpace + outerPadding - (c.score - renderedScoreWidth)
 }
 
 func (m PipelineModel) workModeColor(mode string) lipgloss.Color {
@@ -1569,6 +1651,48 @@ func (m PipelineModel) renderCheckCell(yes bool, width int) string {
 		color = m.theme.Green
 	}
 	return lipgloss.NewStyle().Foreground(color).Width(width).Render(text)
+}
+
+// postedAgeThresholds bound the POSTED column's colour bands, in days since the
+// requisition went live. A req posted this week is plausibly still being worked;
+// one open past a quarter is often a pipeline-filler or an abandoned listing.
+const (
+	postedFreshDays = 7
+	postedWarmDays  = 30
+	postedStaleDays = 90
+)
+
+// renderPostedCell shows how long a requisition has been open, colour-coded by
+// age: green within a week, yellow within a month, peach within a quarter, red
+// beyond. Rows whose notes carry no "posted <date>" render a subtle dash.
+func (m PipelineModel) renderPostedCell(app model.CareerApplication, width int) string {
+	if app.PostedOn == "" {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	posted, err := time.Parse("2006-01-02", app.PostedOn)
+	if err != nil {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	// A requisition cannot have gone live in the future. Such a date is bad data
+	// (a typo, or a provider field that isn't the posting date at all), and it
+	// would otherwise read as the freshest possible req: time.Since is negative,
+	// which lands in the first case below and paints it green — the one colour
+	// that says "act on this now".
+	if posted.After(time.Now()) {
+		return lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(width).Render("—")
+	}
+	days := int(time.Since(posted).Hours() / 24)
+	color := m.theme.Red
+	switch {
+	case days <= postedFreshDays:
+		color = m.theme.Green
+	case days <= postedWarmDays:
+		color = m.theme.Yellow
+	case days <= postedStaleDays:
+		color = m.theme.Peach
+	}
+	return lipgloss.NewStyle().Foreground(color).Width(width).
+		Render(truncateRunes(formatTimeAgo(app.PostedOn), width-1))
 }
 
 // renderPayCell prefers the pay range parsed from notes and falls back to the
@@ -1623,6 +1747,9 @@ func (m PipelineModel) renderColumnHeader() string {
 	}
 	if cw.last > 0 {
 		segments = append(segments, cell(i18n.Current.ColLast, cw.last))
+	}
+	if cw.posted > 0 {
+		segments = append(segments, cell(i18n.Current.ColPosted, cw.posted))
 	}
 
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
@@ -1698,6 +1825,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 			lastStyle = lastStyle.Foreground(m.theme.Text)
 		}
 		segments = append(segments, lastStyle.Render(truncateRunes(lastText, cw.last)))
+	}
+	if cw.posted > 0 {
+		segments = append(segments, m.renderPostedCell(app, cw.posted))
 	}
 
 	line := " " + strings.Join(segments, " ")
@@ -1874,6 +2004,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
 		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +
 		keyStyle.Render("p") + descStyle.Render(i18n.Current.HelpProgress) +
+		keyStyle.Render("S") + descStyle.Render(i18n.Current.HelpStats) +
 		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) +
 		keyStyle.Render("m") + descStyle.Render(i18n.Current.HelpManifesto) +
 		keyStyle.Render("q") + descStyle.Render(i18n.Current.HelpQuit)
@@ -1899,7 +2030,7 @@ func (m PipelineModel) overlayStatusPicker(body string) string {
 	var picker []string
 	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, pair := range getStatusPairs() {
+	for i, pair := range m.currentStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
@@ -2052,6 +2183,7 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
+		"hired":     m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
 		"interview": m.theme.Green,
 		"offer":     m.theme.Green,
 		"applied":   m.theme.Sky,

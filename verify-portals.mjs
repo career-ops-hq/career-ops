@@ -28,9 +28,10 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, makeHttpCtx } from './providers/_http.mjs';
+import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
@@ -127,16 +128,13 @@ export function parseAtsSlug(url) {
 const SLUG_SUFFIXES = ['ai', 'tech', 'io', 'hq', 'labs'];
 
 export function deriveSlugCandidates(name) {
-  const lower = String(name || '')
-    .toLowerCase()
-    .trim();
-  if (!lower) return [];
-  const words = lower
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean);
+  if (!String(name ?? '').trim()) return [];
+  // ASCII-fold BEFORE splitting. The previous `[^a-z0-9\s]` pass turned an
+  // accented letter into a SEPARATOR, so "Telefónica" became the two words
+  // "telef nica" and never produced "telefonica" — the slug the board actually
+  // uses — while "Société Générale" shattered into four fragments and even the
+  // first-word heuristic above yielded "soci" (#2930).
+  const words = asciiFold(name).split(' ').filter(Boolean);
   if (words.length === 0) return [];
   const candidates = [
     words.join(''), // acmecorp
@@ -469,7 +467,18 @@ function printResults(results) {
 async function runAdd(name, { fetchJson }) {
   const candidates = deriveSlugCandidates(name);
   if (candidates.length === 0) {
-    console.error('verify-portals: --add needs a company name');
+    // Distinguish "you gave me nothing" from "nothing sluggable survived".
+    // A CJK/Cyrillic/Greek name folds to '' because ATS slugs are ASCII, and
+    // reporting that as a missing argument told the user they had omitted an
+    // argument they did supply (#2930).
+    if (!String(name ?? '').trim()) {
+      console.error('verify-portals: --add needs a company name');
+    } else {
+      console.error(
+        `verify-portals: no ASCII slug can be derived from '${name}' — ` +
+        'ATS slugs are ASCII, so pass the latinized brand name (or add the board URL to portals.yml directly).',
+      );
+    }
     process.exit(1);
   }
   console.log(

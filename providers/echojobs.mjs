@@ -41,6 +41,10 @@ function resolveMaxPages(entry) {
   return DEFAULT_MAX_PAGES;
 }
 
+// Guards against a doubled marker when the board already spells the work model
+// into the location itself ("Berlin (Hybrid)", "Hybrid - London").
+const HYBRID_MARKER = /\bhybrid\b/i;
+
 /**
  * Normalize a single EchoJobs feed item. Exported for tests.
  *
@@ -50,8 +54,22 @@ function resolveMaxPages(entry) {
  *               host (NOT echojobs.io), used as the dedup key. Non-https/malformed
  *               URLs drop the item.
  *   - company:  `company_name`, falling back to the portal entry name, then "EchoJobs".
- *   - location: the joined `locations` array; falls back to "Remote" when the
- *               posting has no listed place but `remote_type` is remote/hybrid.
+ *   - location: the joined `locations` array, with " · Hybrid" appended when
+ *               `remote_type` is hybrid ("Berlin · Hybrid"), and falling back
+ *               to a bare "Hybrid" / "Remote" when the posting lists no place
+ *               at all. Hybrid is never collapsed into "Remote": the emitted
+ *               string is what `location_filter` matches on, so collapsing it
+ *               would make a `block: ["Hybrid"]` rule unmatchable and let
+ *               hybrid roles pass a remote-only filter (#2258). A placeless
+ *               on_site posting keeps "" — only remote/hybrid are
+ *               placeless-tolerant, and "" passes the filter under the
+ *               scanner's "don't penalize missing data" convention.
+ *
+ *               Note this diverges from greenhouse.mjs, which treats a
+ *               work-model-only location as damage to repair via /offices
+ *               enrichment. That provider can recover a real city; this feed
+ *               exposes none, so the work model is the only signal there is
+ *               and is better surfaced than dropped.
  *   - postedAt: `posted_at` (already epoch ms) when a positive finite number.
  *
  * @param {any} j
@@ -90,7 +108,20 @@ export function normalizeEchojobsJob(j, fallbackCompany) {
       .map((l) => l.trim())
       .join(', ');
   }
-  if (!location && (j.remote_type === 'remote' || j.remote_type === 'hybrid')) location = 'Remote';
+  // The feed is a third-party aggregate, so `remote_type` is compared
+  // case/whitespace-insensitively: a "Hybrid" variant must not fall through
+  // silently and become an unmarked, unfilterable role.
+  const remoteType = typeof j.remote_type === 'string' ? j.remote_type.trim().toLowerCase() : '';
+  if (remoteType === 'hybrid') {
+    // A hybrid role keeps its city AND gains the marker ("Berlin · Hybrid"),
+    // same shape as oraclecloud's WorkplaceTypeCode hint. Marking only the
+    // placeless ones would leave `block: ["Hybrid"]` half-working: it would
+    // catch the placeless roles and silently pass every hybrid that happens
+    // to list a city (#2258).
+    if (!HYBRID_MARKER.test(location)) location = [location, 'Hybrid'].filter(Boolean).join(' · ');
+  } else if (!location && remoteType === 'remote') {
+    location = 'Remote';
+  }
 
   /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number }} */
   const job = { title, url, company, location };

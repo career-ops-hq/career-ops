@@ -9,6 +9,11 @@
  * your portals.yml `title_filter` / `location_filter` — no manual company
  * curation needed.
  *
+ * Optional `title_filter_full` in portals.yml overrides `title_filter` for
+ * THIS scanner only, so the keywords tuned for scan.mjs's curated company
+ * list do not have to double as the filter for every public board. Absent,
+ * `title_filter` is used exactly as before.
+ *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
  *
@@ -34,18 +39,19 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSyn
 import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
-import { isResolverFailure } from './providers/_dns-cache.mjs';
+import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -60,7 +66,21 @@ const CACHE_TTL_HOURS = 24;
 // careers_url and drops anything that doesn't resolve to the ATS's own host —
 // so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
+
+// Default fan-out. Correct for sources whose boards each live on their OWN
+// host — workday is {tenant}.{instance}.myworkdayjobs.com, so 20 in flight is
+// 20 different servers and the resolver, not any one vendor, is the limit.
 const CONCURRENCY = 20;
+
+// Greenhouse, Lever and Ashby each serve their ENTIRE directory from a single
+// hostname (boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com), so the
+// default is 20 sustained connections to ONE API across thousands of boards.
+// That earns an HTTP throttle, and a throttled sweep loses live boards rather
+// than failing loudly: two full sweeps an hour apart saw lever's unreachable
+// count go 2,436 -> 4,100 and ashby's 683 -> 1,675, then recover to 2,525 / 684
+// after a cooldown with no change to the dataset. The boards were never dead —
+// they were refused, and the matches on them were silently missed.
+const SINGLE_HOST_CONCURRENCY = 6;
 // A refusing resolver fails every lookup in milliseconds, so a sweep that
 // keeps going just feeds it (#2229). Stop after this many consecutive
 // resolver-level failures — high enough that a handful of unlucky boards
@@ -156,6 +176,8 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
@@ -163,6 +185,8 @@ export const SOURCES = {
   },
   lever: {
     provider: lever,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
@@ -170,6 +194,8 @@ export const SOURCES = {
   },
   ashby: {
     provider: ashby,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
@@ -226,28 +252,13 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  // A value-taking flag's space-separated value (e.g. the `-tmp` in
-  // `--md-out -tmp`) must not be mistaken for an unrecognized flag just
-  // because it happens to start with `-`. Mirrors valueOf()'s own adjacency
-  // rule below so `--flag value` and `--flag=value` are validated consistently.
-  const consumedValueIndices = new Set();
-  args.forEach((a, idx) => {
-    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
-      consumedValueIndices.add(idx + 1);
-    }
-  });
-
-  const unknownFlags = args.filter((a, idx) =>
-    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    process.exit(1);
-  }
+  // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
+  // lib/cli-flags.mjs (#2775). This also fixes a latent ordering bug this
+  // script had before the pattern was consolidated: the unrecognized-flag
+  // check now runs BEFORE --help, so `--help --bogus` still errors instead
+  // of exiting 0 having never looked at `--bogus` (the same ordering
+  // CodeRabbit flagged on #2745/#2746).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
@@ -255,7 +266,20 @@ function parseArgs(argv) {
     const kv = args.find(a => a.startsWith(flag + '='));
     return kv ? kv.split('=').slice(1).join('=') : null;
   };
-  const sinceDays = Number(valueOf('--since')) || 3;
+  // Validated by the SAME parser scan.mjs uses, so one flag name cannot mean
+  // two different things (#2498). `Number(...) || 3` silently swallowed every
+  // malformed operand: `--since abc` and `--since 0` became 3 while the user
+  // believed they had scanned the window they typed; `--since -5` put the
+  // cutoff in the FUTURE so nothing was ever eligible, which reads exactly like
+  // "no new postings"; `--since 1e400` became Infinity → an -Infinity cutoff,
+  // i.e. no window at all. Only the DEFAULT stays local: absent --since means
+  // 3 days here, where scan.mjs means no bound.
+  const sinceArg = parseSinceDays(args);
+  if (sinceArg.error) {
+    console.error(`Error: ${sinceArg.error}`);
+    process.exit(1);
+  }
+  const sinceDays = sinceArg.days ?? 3;
   const limit = Number(valueOf('--limit')) || Infinity;
   const atsArg = valueOf('--ats');
   // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).
@@ -377,6 +401,27 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
   return { offers: kept, filteredBlacklist, annotatedBlacklisted };
 }
 
+// `title_filter` is written for scan.mjs, whose corpus is the curated
+// tracked_companies list. That corpus is what makes a broad keyword safe:
+// "Backend" at a company you already vetted is a real lead, and dropping it
+// costs real roles — so tightening the shared key to protect this sweep is a
+// regression for the scanner that actually produces applications.
+//
+// This sweep removes the corpus and leaves the same keywords carrying the
+// whole burden against every public board. Broad keywords then match on a
+// scale they were never chosen for, and ordinary English words land as
+// unrelated product names: one 38,854-board sweep wrote 426 postings, of
+// which 142 passed on "Backend" alone and the rest on Fuel Associate,
+// Traffic Anchor, ICP Mass Spec, Principal Mechanical Canister Eng. Across
+// 194 distinct companies, one matched a crypto name — a gas-station chain.
+//
+// Optional `title_filter_full` lets one portals.yml carry a strict profile
+// for this sweep and a broad one for scan.mjs. Absent — the default — this
+// returns `title_filter` and behaviour is byte-identical to before.
+export function resolveTitleFilterConfig(config) {
+  return config?.title_filter_full ?? config?.title_filter;
+}
+
 // Title/location/content filter chain for one posting, used by runSeedScan().
 // The main ATS-directory loop below inlines the same three checks (it tracks
 // a droppedContent counter per stage for the run summary), but this shared,
@@ -386,8 +431,9 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
 export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
   if (!titleFilter(job.title)) return false;
   // job.url is passed so the location filter can fall back to the URL's own
-  // location segment when the provider reports a rolled-up "N Locations" string.
-  if (!locationFilter(job.location, job.url)) return false;
+  // location segment when the provider reports a rolled-up "N Locations" string;
+  // job.title so a title-stated remote role survives a city-only location.
+  if (!locationFilter(job.location, job.url, job.title)) return false;
   if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
   return true;
 }
@@ -599,13 +645,15 @@ async function main() {
     process.exit(1);
   }
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
-  const titleFilter = buildTitleFilter(config?.title_filter);
+  const fullTitleFilterConfig = resolveTitleFilterConfig(config);
+  const titleFilter = buildTitleFilter(fullTitleFilterConfig);
   const locationFilter = buildLocationFilter(config?.location_filter);
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
   const contentFilter = buildContentFilter(config?.content_filter);
-  if (!config?.title_filter?.positive?.length) {
-    console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
+  if (!fullTitleFilterConfig?.positive?.length) {
+    const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
+    console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
   }
   // Attach filters to opts so runSeedScan can use them without extra parameters.
   opts.titleFilter = titleFilter;
@@ -613,7 +661,7 @@ async function main() {
   opts.contentFilter = contentFilter;
   // Raw title_filter config, needed by matchedTitleKeywords() to scope
   // content_filter.by_title_keyword the same way scan.mjs does.
-  opts.titleFilterConfig = config?.title_filter;
+  opts.titleFilterConfig = fullTitleFilterConfig;
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
@@ -627,7 +675,14 @@ async function main() {
   // sinceMs once postings are confidently past the --since window, and
   // includeUndated (when false) for a tenant that exposes no postedOn at
   // all, since its postings would all be dropped as undated below anyway.
-  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
+  //
+  // syntheticEntries states what this scanner's entries ARE: built from the
+  // external ATS dataset, not read from portals.yml tracked_companies.
+  // workday.mjs picks its cap-hit warning from it — there is no portal entry
+  // here for the user to edit, so "raise max_pages on this entry" would be
+  // inactionable. It used to infer that from sinceMs being set, which stopped
+  // being true once #2418 taught scan.mjs --since to set it too (#2495).
+  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
   const date = new Date().toISOString().slice(0, 10);
 
   // Same defensive default as completedSources/counters below: a version-1
@@ -697,7 +752,7 @@ async function main() {
       // posting stale, --since was silently ignored for the entire source.
       // Enrich first, then let the undated policy decide.
       if (dateClass === 'undated' && provider.enrichDate
-          && titleFilter(job.title) && locationFilter(job.location, job.url)) {
+          && titleFilter(job.title) && locationFilter(job.location, job.url, job.title)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
         dateClass = classifyPostingDate(job, cutoff);
       }
@@ -705,15 +760,20 @@ async function main() {
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
       if (!titleFilter(job.title)) continue;
       // job.url is passed so the location filter can fall back to the URL's own
-      // location segment when the provider reports a rolled-up "N Locations" string.
-      if (!locationFilter(job.location, job.url)) continue;
-      if (!contentFilter(job.description, matchedTitleKeywords(job.title, config?.title_filter))) { droppedContent++; continue; }
+      // location segment when the provider reports a rolled-up "N Locations" string;
+      // job.title so a title-stated remote role survives a city-only location.
+      if (!locationFilter(job.location, job.url, job.title)) continue;
+      if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupUrl = normalizeUrlForDedup(job.url);
       if (seenUrls.has(dedupUrl)) continue;
       seenUrls.add(dedupUrl); // intra-scan dedup
       newOffers.push({ ...job, source: `${sourceName}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   };
+
+  // Run-level, because resolverOutage below is per-source and long out of
+  // scope by the time the checkpoint's fate is decided at the end of main().
+  let stoppedByOutage = false;
 
   for (const name of opts.ats) {
     const source = SOURCES[name];
@@ -751,8 +811,17 @@ async function main() {
     let errors = 0;
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
+    // The board whose failure tripped the breaker. `name` is only the ATS
+    // vendor, and the resume offset is only a position — neither tells the user
+    // which board to try by hand once the resolver is back.
+    let resolverOutageCompany = null;
+    // Latest progress reported by parallelEach. It computes both on every item
+    // but keeps neither, and a run stopped mid-source needs them after the
+    // call returns to checkpoint where it actually stopped (#2283).
+    let lastDone = 0;
+    let lastResumeAt = 0;
     const truncated = [];
-    await parallelEach(entries, CONCURRENCY, async (entry) => {
+    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
       try {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
@@ -776,13 +845,21 @@ async function main() {
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
         if (isResolverFailure(err)) {
-          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT) resolverOutage = true;
+          // Record only the first board past the limit: in-flight boards keep
+          // failing after the flag is set, and the last of them is not the one
+          // that tripped it.
+          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT && !resolverOutage) {
+            resolverOutage = true;
+            resolverOutageCompany = entry.name;
+          }
         } else {
           consecutiveResolverFailures = 0;
         }
         if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: ${err.message}`);
       }
     }, ({ done, resumeAt }) => {
+      lastDone = done;
+      lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
@@ -829,10 +906,36 @@ async function main() {
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
-      log(`\n  ⛔ stopped ${name}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
+      stoppedByOutage = true;
+      // The counter was bumped by the FULL entries.length up front, but the
+      // breaker left entries.length - lastDone boards unattempted. Correct the
+      // live counter, not just the checkpoint payload: this run's own summary
+      // and --json would otherwise report companies nobody ever contacted as
+      // scanned. Correcting it here also gives the checkpoint the right figure
+      // for free — a resumed run re-adds its own slice, so a checkpoint holding
+      // the full slice makes the completed portion count twice.
+      totalCompaniesScanned -= entries.length - lastDone;
+      // Pin the resume point here rather than leaving the last periodic write
+      // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
+      // it can be up to 500 boards behind where the breaker actually stopped —
+      // and --resume would replay all of them against the resolver that just
+      // refused.
+      let checkpointWritten = false;
+      if (!opts.dryRun) {
+        checkpointWritten = writeCheckpoint({
+          ...checkpointBase(),
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash },
+          counters: snapshotCounters(),
+        });
+      }
+      log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
       log(`     CAREER_OPS_NO_DNS_CACHE=1 only if you know the cache is at fault.`);
+      // Only claim resumability when a checkpoint actually exists: --dry-run
+      // writes none, and a failed write (ENOSPC, read-only volume) leaves at
+      // best the last periodic checkpoint — nothing at the offset named here.
+      if (checkpointWritten) log(`     Rerun with --resume once the resolver recovers — checkpointed at company ${startAt + lastResumeAt} of ${name}.`);
       break;
     }
     completedSources.add(name);
@@ -866,6 +969,12 @@ async function main() {
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
+  // A paced sweep is slower on purpose. Say so, or the operator reads the
+  // wall-clock time as a hang (#2229).
+  const pacing = dnsPacingStats();
+  if (pacing.delayed > 0) {
+    log(`DNS pacing:         ${pacing.delayed} lookup${pacing.delayed === 1 ? '' : 's'} delayed, ${Math.round(pacing.waitedMs / 1000)}s total wait (CAREER_OPS_DNS_LOOKUPS_PER_MIN to tune, 0 disables)`);
+  }
   // noDateSkipJobs is a subset of droppedNoDate, not a separate pool: every
   // no-postedOn workday posting counted here also hits the per-job undated
   // filter in the scan loop above and gets dropped there too. Report it as
@@ -904,7 +1013,7 @@ async function main() {
       writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
     }
     await appendToPipeline(offers);
-    appendToScanHistory(offers, date);
+    await appendToScanHistory(offers, date);
     saved = true;
     log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);
 
@@ -929,8 +1038,10 @@ async function main() {
     }
   }
 
-  // Sweep completed — the checkpoint's job is done.
-  if (!opts.dryRun && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
+  // Sweep completed — the checkpoint's job is done. A run the breaker stopped
+  // did NOT complete: deleting here would destroy the resume point the outage
+  // branch just wrote, which is the one case --resume exists for (#2283).
+  if (!opts.dryRun && !stoppedByOutage && existsSync(CHECKPOINT_PATH)) unlinkSync(CHECKPOINT_PATH);
 
   // The authoritative machine-readable result: lets a caller (e.g. the web)
   // tell a *degraded* scan (capped / stale dataset / undated dropped) apart
@@ -944,6 +1055,11 @@ async function main() {
       companiesAvailable: totalCompaniesAvailable,
       companiesScanned: totalCompaniesScanned,
       capHit,
+      // The most degraded outcome this payload can report: the sweep did not
+      // finish its sources, and a checkpoint is waiting for --resume. Without
+      // it a caller can't tell a stopped run from a complete one except by
+      // stat'ing the checkpoint file itself.
+      stoppedByOutage,
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,
@@ -952,6 +1068,7 @@ async function main() {
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
       cappedBoards,
+      dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,
       offers: offers.map(o => ({
         company: o.company,

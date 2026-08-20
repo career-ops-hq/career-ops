@@ -11,6 +11,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 
 type Cli = {
   id: string;
@@ -66,8 +68,15 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        // Highlight + persist the only installed CLI when Config was never saved.
+        // Highlight-only used to look configured while jobs still read empty localStorage.
+        setCliId((prev) => {
+          if (prev) return prev;
+          const only = list.filter((c) => c.installed);
+          if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
+          if (!readSavedCliId()) persistCliId(only[0].id);
+          return only[0].id;
+        });
       })
       .catch(() => setClis([]));
   }, []);
@@ -290,6 +299,8 @@ export function ConfigForm() {
           />
         </span>
       </button>
+
+      <CadenceSettings />
 
       <div className="mt-8 flex items-center gap-3">
         <button
