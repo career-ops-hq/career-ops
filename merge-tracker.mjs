@@ -387,6 +387,22 @@ function parseScore(s) {
 }
 
 /**
+ * True when a Score cell is a documented "no score" sentinel rather than a
+ * number. AGENTS.md names `N/A`, `—` and `-` as the values a row carries when it
+ * was added without an evaluation, or when a re-eval could not be scored (#1799).
+ *
+ * parseScore() maps all of these to 0, so the merge path cannot tell them apart
+ * from a genuine zero on its own — callers that must not treat "no score" as
+ * "scored zero" ask here first (#2803).
+ *
+ * @param {string} s - Raw score cell.
+ * @returns {boolean}
+ */
+function isUnscoreable(s) {
+  return ['—', '-', 'N/A'].includes(String(s).replace(/\*\*/g, '').trim());
+}
+
+/**
  * Load the optional generated-PDF manifest.
  *
  * data/pdf-index.tsv is gitignored and only exists after generate-pdf.mjs has
@@ -1127,6 +1143,22 @@ for (const file of tsvFiles) {
   }
 
   if (duplicate) {
+    // An unscoreable re-eval (N/A/—/-) carries no score to write through. Its
+    // score parses to 0, so the downgrade path below would read it as a genuine
+    // zero and overwrite a real score with the sentinel — unrecoverably, since
+    // the tracker is gitignored and no .bak is written (#2803). A failed fetch is
+    // "no new score", not "scored zero": leave the row's score, report and PDF as
+    // they stand. When the row itself is not yet scored there is nothing to lose,
+    // so let the normal path refresh its date/notes/report from the re-eval.
+    if (isUnscoreable(addition.score) && !isUnscoreable(duplicate.score)) {
+      console.log(
+        `⏭️  Skipping ${file}: re-eval of #${duplicate.num} ${addition.company} — `
+        + `${addition.role} produced no score (${String(addition.score).trim()}); `
+        + `keeping ${duplicate.score}`,
+      );
+      skipped++;
+      continue;
+    }
     const newScore = parseScore(addition.score);
     const oldScore = parseScore(duplicate.score);
 

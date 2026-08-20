@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, rmSync as _rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,6 +10,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// Windows keeps a handle open on a just-exited child's files for a short
+// window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
+// though every assertion passed — `force: true` suppresses ENOENT, not EPERM.
+// Node retries exactly that error class (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM)
+// with linear backoff when given maxRetries, so default it here. An explicit
+// option still wins, and a removal that keeps failing still throws. Same
+// wrapper test-all.mjs applies to its own call sites (#3066), shared so the
+// suites under tests/ cannot drift from it.
+export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+
+/**
+ * The per-script budget run() applies when a caller does not override it.
+ *
+ * Deliberately NOT substituted into the `timeout: 30000` literal inside run()
+ * below. The comment there explains why that execFileSync call is kept
+ * byte-identical: editing the line makes CodeQL re-attribute its long-standing
+ * "uncontrolled command line" finding to whichever PR touched it. Exported so
+ * callers can reason about the budget — how close a script came to it, say —
+ * rather than hard-coding the number in a second file. The two are linked by
+ * this comment, not by the compiler: change one, change the other.
+ */
+export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
 
 let passed = 0;
 let failed = 0;
