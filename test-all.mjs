@@ -15916,6 +15916,58 @@ try {
     fail('computeRunStats should return null for empty/unknown-schema input');
   }
 
+  // checkFollowupsSchema: a malformed follow-ups table must be distinguishable
+  // from an empty one (#2971). computeFollowupStats and followup-cadence.mjs
+  // both skip rows whose num/appNum don't parse, so a wrong column order
+  // reports as zero follow-ups with no error — the case these assertions pin.
+  const FUP_HEADER = '| num | appNum | date | company | role | channel | contact | notes |\n|-----|--------|------|---------|------|---------|---------|-------|\n';
+  const goodFups = FUP_HEADER
+    + '| 1 | 45 | 2026-08-03 | Acme Corp | Software Engineer | LinkedIn DM | A. Recruiter | scheduling nudge |\n'
+    + '| 2 | 23 | 2026-08-03 | BigCo | Staff Engineer | Email reply | B. Hiring | feedback ask |\n';
+  const goodSchema = stats.checkFollowupsSchema(goodFups);
+  if (goodSchema.present && goodSchema.sawSeparator && goodSchema.dataRows === 2
+      && goodSchema.parsed === 2 && goodSchema.unparsedLines.length === 0) {
+    pass('checkFollowupsSchema accepts the documented column order');
+  } else {
+    fail(`checkFollowupsSchema wrong output for a valid table: ${JSON.stringify(goodSchema)}`);
+  }
+
+  // The real-world shape that regressed: plausible 6-column header, company
+  // name where appNum belongs, so parseInt() returns NaN on every row.
+  const wrongOrder = '| Date | Company | Tracker # | Channel | Type | Details |\n|------|---------|-----------|---------|------|---------|\n'
+    + '| 2026-08-03 | Acme Corp | 45 | LinkedIn DM | Scheduling nudge | silent since Jul 28 |\n'
+    + '| 2026-08-03 | BigCo | 23 | Email reply | Feedback ask | replied to rejection |\n';
+  const wrongSchema = stats.checkFollowupsSchema(wrongOrder);
+  const wrongStats = stats.computeFollowupStats(wrongOrder, new Map([[45, 'Applied']]));
+  if (wrongSchema.dataRows === 2 && wrongSchema.parsed === 0
+      && wrongSchema.unparsedLines.length === 2 && wrongStats.totalFollowups === 0) {
+    pass('checkFollowupsSchema flags a wrong column order that computeFollowupStats silently reads as zero');
+  } else {
+    fail(`checkFollowupsSchema missed a wrong column order: ${JSON.stringify(wrongSchema)} / stats ${JSON.stringify(wrongStats)}`);
+  }
+
+  const partialSchema = stats.checkFollowupsSchema(goodFups + '| oops | BigCo | 2026-08-05 | x | y | z | w | v |\n');
+  if (partialSchema.dataRows === 3 && partialSchema.parsed === 2 && partialSchema.unparsedLines.length === 1) {
+    pass('checkFollowupsSchema reports partially-parseable tables with the offending line number');
+  } else {
+    fail(`checkFollowupsSchema wrong output for a partial table: ${JSON.stringify(partialSchema)}`);
+  }
+
+  // An absent file, an empty file, a header with no rows yet, and a table
+  // missing its delimiter row are four different states and must not collapse.
+  const absent = stats.checkFollowupsSchema(null);
+  const headerOnly = stats.checkFollowupsSchema(FUP_HEADER);
+  const noDelimiter = stats.checkFollowupsSchema('| num | appNum | date |\n| 1 | 45 | 2026-08-03 |\n');
+  const pinsOnly = stats.checkFollowupsSchema('# Follow-Ups Tracker\n\n- next #56 2026-08-24 (set 2026-08-17)\n');
+  if (!absent.present && absent.dataRows === 0
+      && headerOnly.present && headerOnly.sawSeparator && headerOnly.dataRows === 0
+      && noDelimiter.present && !noDelimiter.sawSeparator && noDelimiter.pipeLines === 2 && noDelimiter.dataRows === 0
+      && pinsOnly.present && pinsOnly.pipeLines === 0) {
+    pass('checkFollowupsSchema separates absent / header-only / missing-delimiter / pins-only files');
+  } else {
+    fail(`checkFollowupsSchema conflated empty-ish states: ${JSON.stringify({ absent, headerOnly, noDelimiter, pinsOnly })}`);
+  }
+
   const portalsYml = 'tracked_companies:\n  - name: Acme\n  - name: GlobalCorp\n  - name: DeadInc\n  - name: NetworkDead\njob_boards: []';
   const portalHealthTsv = 'timestamp\tcompany\tstatus\n' +
     '2026-07-01\tDeadInc\tslug_gone\n' +
@@ -16769,6 +16821,111 @@ try {
   }
 } catch (e) {
   fail(`rejection-latency wiring check: ${e.message}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n72. formatRunFailure keeps the END of an over-long stream (#3035)');
+
+try {
+  // A red run is the only time this output is read, so what it keeps decides
+  // whether a CI failure is actionable. It kept the head. For the suites here,
+  // which print a tick per assertion, the head is the setup that PASSED and the
+  // tail carries the `Results:` line and the newest cases — so the later a case
+  // was added, the more certain it was to be cut. windows-latest cut
+  // agent-inbox-tests.mjs mid-word, one assertion short of the §8 verdict added
+  // specifically to attribute that failure.
+  //
+  // Drive it through a real failing run() rather than by reaching into the
+  // module's private lastFailure, so this covers the path CI actually takes.
+  const CAP = 1200;
+  const HEAD = 'HEAD-MARKER-AN-EARLY-STACK-WOULD-SIT-HERE';
+  const marker = 'TAIL-MARKER-THE-RESULTS-LINE-SITS-HERE';
+  const FILL = 8000;
+  // One line, no newlines. formatRunFailure re-indents every newline in the
+  // clipped text, which would inflate any length measured off the rendered
+  // string; a newline-free payload keeps the arithmetic below exact.
+  //
+  // Exit from the write CALLBACK, not the next statement: stdout to a pipe is
+  // async, and process.exit() discards whatever has not flushed — which would
+  // silently shrink the fixture and make the cap assertion pass for the wrong
+  // reason.
+  const okOut = run(NODE, ['-e',
+    `process.stdout.write('${HEAD}' + 'x'.repeat(${FILL}) + '${marker}', () => process.exit(1));`]);
+  const streamLen = HEAD.length + FILL + marker.length;
+
+  if (okOut !== null) {
+    fail('formatRunFailure fixture: the child was expected to exit non-zero');
+  } else {
+    const rendered = formatRunFailure(CAP);
+
+    if (rendered.includes(marker)) {
+      pass('formatRunFailure keeps the tail of an over-long stdout (the failure summary)');
+    } else {
+      fail('formatRunFailure dropped the tail — a red run loses its newest assertions and its Results line');
+    }
+
+    // Never zero head: an early stack trace is the other common shape, and
+    // keeping only the tail would just invert the bug rather than fix it.
+    if (rendered.includes(HEAD)) {
+      pass('formatRunFailure still keeps the head (an early stack trace survives too)');
+    } else {
+      fail('formatRunFailure dropped the head — tail-only inverts the original defect');
+    }
+
+    if (/\.\.\. \(\d+ more chars elided\)/.test(rendered)) {
+      pass('formatRunFailure marks the elision with the dropped-character count');
+    } else {
+      fail('formatRunFailure elides silently — a reader cannot tell output is missing');
+    }
+
+    // The cap is a promise about the returned string, so the marker's own
+    // width has to come out of the budget rather than sit on top of it.
+    //
+    // Measure via the reported dropped-count rather than off `rendered`: the
+    // caller re-indents newlines and prefixes ` (exit N)\n    stdout: `, so the
+    // rendered length is not the clipped length. kept = streamLen - dropped is
+    // exact, and this fixture has no newlines of its own to be re-indented.
+    const elided = rendered.match(/\.\.\. \((\d+) more chars elided\)/);
+    if (!elided) {
+      fail('formatRunFailure cap check: no elision marker to measure against');
+    } else {
+      const dropped = Number(elided[1]);
+      const markerLen = `\n    ... (${dropped} more chars elided)\n`.length;
+      const clipped = (streamLen - dropped) + markerLen;
+      if (clipped <= CAP) {
+        pass(`formatRunFailure keeps the clipped stream within maxChars, marker included (${clipped} <= ${CAP})`);
+      } else {
+        fail(`formatRunFailure overruns its own cap: ${clipped} chars returned for maxChars=${CAP} (marker not budgeted)`);
+      }
+    }
+
+    // Squeeze the content budget down to exactly two characters — the smallest
+    // that can still hold both ends. Math.floor(budget * 0.35) is 0 below
+    // budget 3, so without a floor the head vanishes here and the tail takes
+    // everything, which is the inversion this whole case exists to prevent.
+    //
+    // Own fixture with single-character boundaries that appear nowhere else in
+    // the rendered output — not in ` (exit 1)`, not in `stdout: `, not in the
+    // marker — so "both ends survived" is asserted precisely rather than by
+    // matching a letter that could have come from anywhere.
+    const TINY_FILL = 500;
+    const okTiny = run(NODE, ['-e',
+      `process.stdout.write('<' + 'x'.repeat(${TINY_FILL}) + '>', () => process.exit(1));`]);
+    if (okTiny !== null) {
+      fail('formatRunFailure tiny-budget fixture: the child was expected to exit non-zero');
+    } else {
+      const tinyLen = TINY_FILL + 2;
+      const tinyCap = `\n    ... (${tinyLen} more chars elided)\n`.length + 2;
+      const tiny = formatRunFailure(tinyCap);
+      if (tiny.includes('<') && tiny.includes('>')) {
+        pass('formatRunFailure keeps both ends even at a two-character content budget');
+      } else {
+        fail(`formatRunFailure drops an end at a two-character budget (head=${tiny.includes('<')}, tail=${tiny.includes('>')})`);
+      }
+    }
+  }
+} catch (e) {
+  fail(`formatRunFailure clipping check: ${e.message}`);
 }
 
 await runDiscovered();
