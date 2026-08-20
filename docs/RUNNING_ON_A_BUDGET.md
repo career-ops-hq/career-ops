@@ -58,7 +58,7 @@ Remove the key from wherever it is exported (`~/.zshrc`, `~/.bashrc`, `~/.profil
 Check your Claude Code settings for `apiKeyHelper`. A configured helper re-injects an API key even after you clean your environment.
 
 1. Open `~/.claude/settings.json`.
-2. Remove or comment out the `apiKeyHelper` key.
+2. Remove the `apiKeyHelper` key.
 3. Restart the terminal.
 4. Run `/login` in Claude Code and sign in.
 
@@ -66,7 +66,9 @@ Check your Claude Code settings for `apiKeyHelper`. A configured helper re-injec
 
 ### Authenticate for Headless or Batch Runs
 
-For `claude -p` batch runs (cron, CI), headless paths do not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+For `claude -p` batch runs (cron, CI), headless paths do not use the interactive login. If you want batch runs on your subscription rather than on credits, you must perform an interactive setup step beforehand:
+
+Run `claude setup-token` once in an environment with browser access. Store the printed token in your batch environment's secret store and provide it at runtime via the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. **Do not run the `claude setup-token` command directly from cron or CI.**
 
 ```bash
 claude setup-token          # requires an active Claude subscription
