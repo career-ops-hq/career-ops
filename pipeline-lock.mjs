@@ -89,6 +89,17 @@ function readLockOwner(lockDir) {
   }
 }
 
+// stat, or null when the path is gone or unreadable. Callers that are deciding
+// whether to DELETE something need "I could not establish this" and "it is not
+// there" to arrive as the same cautious answer.
+function statOrNull(dir) {
+  try {
+    return statSync(dir);
+  } catch {
+    return null;
+  }
+}
+
 // Identity of a directory, so a lock that was removed and recreated by another
 // process is never mistaken for the one this caller created.
 function sameLockDirectory(left, right) {
@@ -426,7 +437,25 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
           // acquisition, which is what the old comment already claimed this
           // branch did. It costs one backoff in a rare case; deleting a live
           // lock costs an item.
-          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
+          // STALE is not enough on its own either: it says the directory we
+          // READ was abandoned, and the rm acts on whatever is at the path a
+          // moment later. Reaching the verdict costs a readFileSync and a
+          // process.kill, which is ample room to be descheduled, and in that
+          // gap the stale lock can be reclaimed by someone else and replaced by
+          // a live one. Deleting then destroys a lock this caller never judged.
+          //
+          // Not hypothetical. Logging the directory's inode either side of the
+          // verdict, the ONE stale reclaim in a 2,400-acquisition run came back
+          //   idBefore=5910974513639709 ownerBefore=39392
+          //   idAfter =6192449490350378 ownerAfter =27256 alive=true
+          // — a different directory, owned by a live process, deleted anyway.
+          //
+          // So the identity of the judged directory is carried to the rm and
+          // rechecked. A path that changed underneath us is left alone; we go
+          // back and compete for it normally.
+          const judged = statOrNull(lockDir);
+          if (judged && lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE
+            && sameLockDirectory(judged, statOrNull(lockDir) ?? {})) {
             if (rmLockArtifactSync(lockDir)) {
               continue; // retry acquisition immediately, still holding the guard's decision
             }
@@ -499,6 +528,25 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         /* cleanup must never outrank the reason we are here */
       }
       throw ownerErr;
+    }
+
+    // Read our own stamp back before handing the caller a lock handle.
+    //
+    // The identity recheck above stops this caller from deleting a directory it
+    // did not judge, but it cannot stop another caller from doing so to US, and
+    // that failure has no error attached to it: the delete lands after our
+    // owner.json write succeeds, so nothing in the acquisition path notices and
+    // two processes enter the critical section believing they hold it.
+    //
+    // main already recovers the case where the delete lands BEFORE the stamp —
+    // the write fails ENOENT and the loop competes again. This is the same
+    // recovery for the case where it lands just after. A stamp that is missing,
+    // or that carries someone else's token, means we no longer hold what we
+    // took, so we compete again rather than proceed.
+    const confirmed = readLockOwner(lockDir);
+    if (confirmed.owner?.token !== token) {
+      if (holderStillWedged()) throw buildTimeoutError();
+      continue;
     }
 
     let released = false;
