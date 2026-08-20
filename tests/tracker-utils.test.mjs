@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -51,8 +51,9 @@ test('tracker paths follow the workspace selected by the tracker', () => {
     mkdirSync(join(root, 'data'));
     writeFileSync(join(root, 'data', 'applications.md'), '# tracker\n');
     const tracker = resolveTrackerPath(root);
-    assert.equal(resolveWorkspaceRoot(tracker), root);
-    assert.equal(resolvePdfIndexPath(tracker), join(root, 'data', 'pdf-index.tsv'));
+    const canonicalRoot = realpathSync(root);
+    assert.equal(resolveWorkspaceRoot(tracker), canonicalRoot);
+    assert.equal(resolvePdfIndexPath(tracker), join(canonicalRoot, 'data', 'pdf-index.tsv'));
 
     const alternate = join(root, 'custom-applications.md');
     process.env.CAREER_OPS_TRACKER = alternate;
