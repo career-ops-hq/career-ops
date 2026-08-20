@@ -29,7 +29,7 @@ function collect(dir) {
   return files;
 }
 
-const files = collect(root);
+const files = collect(root).sort();
 let failed = 0;
 
 for (const file of files) {

@@ -33,10 +33,10 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
+      - run: npm run lint
       # Skip the postinstall (npx playwright install chromium); the tests
       # never launch a browser, so the ~170 MB download is pure CI overhead.
       - run: npm install --ignore-scripts
-      - run: npm run lint
       - run: node test-all.mjs --quick
       - name: Go dashboard tests
         run: go test ./...

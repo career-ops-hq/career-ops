@@ -45,23 +45,21 @@ test('normalizeCompany preserves meaningful non-Latin company names', () => {
 
 test('tracker paths follow the workspace selected by the tracker', () => {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-tracker-utils-'));
+  const oldTracker = process.env.CAREER_OPS_TRACKER;
   try {
+    delete process.env.CAREER_OPS_TRACKER;
     mkdirSync(join(root, 'data'));
     writeFileSync(join(root, 'data', 'applications.md'), '# tracker\n');
     const tracker = resolveTrackerPath(root);
     assert.equal(resolveWorkspaceRoot(tracker), root);
     assert.equal(resolvePdfIndexPath(tracker), join(root, 'data', 'pdf-index.tsv'));
 
-    const oldTracker = process.env.CAREER_OPS_TRACKER;
     const alternate = join(root, 'custom-applications.md');
-    try {
-      process.env.CAREER_OPS_TRACKER = alternate;
-      assert.equal(resolveTrackerPath(root), alternate);
-    } finally {
-      if (oldTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
-      else process.env.CAREER_OPS_TRACKER = oldTracker;
-    }
+    process.env.CAREER_OPS_TRACKER = alternate;
+    assert.equal(resolveTrackerPath(root), alternate);
   } finally {
+    if (oldTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
+    else process.env.CAREER_OPS_TRACKER = oldTracker;
     rmSync(root, { recursive: true, force: true });
   }
 });
