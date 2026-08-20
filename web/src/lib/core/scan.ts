@@ -80,6 +80,35 @@ type ScanJson = {
   offers?: JsonOffer[];
 };
 
+function extractScanJson(raw: string): ScanJson | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed) as ScanJson;
+  } catch {}
+  
+  const lastClose = trimmed.lastIndexOf("}");
+  if (lastClose !== -1) {
+    let depth = 0;
+    for (let i = lastClose; i >= 0; i--) {
+      if (trimmed[i] === "}") depth++;
+      else if (trimmed[i] === "{") {
+        depth--;
+        if (depth === 0) {
+          try {
+            const candidate = trimmed.slice(i, lastClose + 1);
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === "object" && Array.isArray(parsed.offers)) {
+              return parsed as ScanJson;
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
   return new Promise((resolve) => {
     const tempPortals = writeTempPortals(filters);
@@ -195,7 +224,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
 
     child.stdout.on("data", (d: Buffer) => {
       if (useJson) {
-        jsonOut += d.toString(); // one JSON object — parsed at close
+        jsonOut += d.toString();
         return;
       }
       outBuf += d.toString();
@@ -209,7 +238,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       errBuf = parts.pop() ?? "";
       for (const p of parts) {
         if (!p.trim()) continue;
-        if (useJson) handleProgressLine(p); // human progress lives on stderr in --json mode
+        if (useJson) handleProgressLine(p);
         onEvent({ kind: "log", line: p.trim() });
       }
     });
@@ -224,11 +253,9 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       clearTimeout(killer);
       cleanupTempPortals(tempPortals);
       if (useJson) {
-        let j: ScanJson | null = null;
-        try {
-          j = JSON.parse(jsonOut.trim()) as ScanJson;
-        } catch {
-          j = null;
+        let j = extractScanJson(jsonOut);
+        if (!j && outBuf.trim()) {
+          j = extractScanJson(outBuf);
         }
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
@@ -260,9 +287,20 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             postingsDroppedNoDate: j.postingsDroppedNoDate,
           });
         } else {
-          // --json requested but stdout didn't parse — surface honestly rather than
-          // silently returning 0 (defensive; shouldn't happen once the probe passed).
-          onEvent({ kind: "error", message: "The scanner returned no readable output." });
+          // If JSON object parsing failed, fall back to line parser
+          const allOut = `${jsonOut}\n${outBuf}`;
+          for (const line of allOut.split(/\r?\n/)) {
+            handleLine(line);
+          }
+          if (offers.length === 0 && !companiesScanned) {
+            onEvent({
+              kind: "summary",
+              companiesScanned: 0,
+              unreachable: 0,
+              matches: 0,
+              capHit: false,
+            });
+          }
         }
         resolve(offers);
         return;

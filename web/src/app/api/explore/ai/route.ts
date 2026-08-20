@@ -36,10 +36,10 @@ export async function POST(req: Request) {
   }
   const query = (body.query || "").trim();
   const cliId = body.cliId;
-  if (!query || !cliId) return Response.json({ error: "query and cliId required" }, { status: 400 });
+  if (!query) return Response.json({ error: "query required" }, { status: 400 });
 
   const resolved = resolveCli(cliId);
-  if (!resolved) return Response.json({ error: `CLI '${cliId}' not found on this machine` }, { status: 404 });
+  if (!resolved) return Response.json({ error: `No installed AI CLI found on this machine` }, { status: 404 });
   const { spec, binPath } = resolved;
 
   // Read the CANONICAL mode at request time — single source of truth, never a

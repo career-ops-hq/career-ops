@@ -51,8 +51,22 @@ export function ExplorerView({
 
   useEffect(() => {
     try {
-      const id = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
-      setCli({ id, name: id ? CLI_NAMES[id] || id : undefined });
+      const stored = JSON.parse(localStorage.getItem("career-ops:config") || "{}");
+      if (stored.cliId) {
+        setCli({ id: stored.cliId, name: CLI_NAMES[stored.cliId] || stored.cliId });
+      } else {
+        fetch("/api/clis")
+          .then((r) => r.json())
+          .then((data) => {
+            const installed = (data.clis || []).find((c: any) => c.installed);
+            if (installed) {
+              const updated = { ...stored, cliId: installed.id };
+              localStorage.setItem("career-ops:config", JSON.stringify(updated));
+              setCli({ id: installed.id, name: CLI_NAMES[installed.id] || installed.name });
+            }
+          })
+          .catch(() => {});
+      }
     } catch {
       setCli({ id: null });
     }

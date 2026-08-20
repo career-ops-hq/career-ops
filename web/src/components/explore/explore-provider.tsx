@@ -411,6 +411,17 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       cliId = null;
     }
     if (!cliId) {
+      try {
+        const clisRes = await fetch("/api/clis").then((r) => r.json());
+        const installed = (clisRes.clis || []).find((c: any) => c.installed);
+        if (installed) {
+          cliId = installed.id;
+          const stored = JSON.parse(localStorage.getItem("career-ops:config") || "{}");
+          localStorage.setItem("career-ops:config", JSON.stringify({ ...stored, cliId }));
+        }
+      } catch {}
+    }
+    if (!cliId) {
       setPhase("blocked");
       return;
     }
