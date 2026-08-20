@@ -516,7 +516,7 @@ if (!wordCountMatch) {
       const script2 = join(work, 'case2.sh');
       writeFileSync(script2, buildScript(jsShell));
       const result2 = execFileSync(bash, [script2], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words2, size2] = result2.replace(/^.*RESULT:\s*/, '').split('|').map(Number);
+      const [words2, size2] = result2.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size2 === 0) {
         pass(`JS shell HTML (${words2} words): file truncated → WebFetch fallback fires`);
       } else {
