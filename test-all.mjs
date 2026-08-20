@@ -3721,13 +3721,13 @@ if (
 }
 
 if (
-  pipelineMode.includes('Concurrency is conditional on the extraction tool') &&
-  pipelineMode.includes('multiple workers must never share one browser session') &&
-  pipelineMode.includes('When in doubt, use the sequential path')
+  pipelineMode.includes('Try browser-backed Playwright/MCP extraction first') &&
+  pipelineMode.includes('After two consecutive browser attempts') &&
+  pipelineMode.includes('no browser tool is available')
 ) {
-  pass('pipeline mode prevents parallel Playwright session cross-contamination (#2551)');
+  pass('LinkedIn extraction is browser-first with bounded paste fallback (#2619)');
 } else {
-  fail('pipeline mode still permits unsafe parallel Playwright workers (#2551)');
+  fail('LinkedIn extraction still asks for pasted JDs before trying the browser (#2619)');
 }
 
 // --- salary tracking mode wiring (#1656 PR-2) ---
