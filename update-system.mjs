@@ -202,6 +202,7 @@ const SYSTEM_PATHS = [
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'batch-evaluate-gemini.mjs',
   'providers/',
   'seeds/',
   'tests/',
@@ -765,6 +766,26 @@ function mergePathLists(...lists) {
   return merged;
 }
 
+function normalizeRepoPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function pathMatchesManifest(file, entry) {
+  const normalizedFile = normalizeRepoPath(file);
+  const normalizedEntry = normalizeRepoPath(entry).replace(/\/$/, '');
+  return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  if (remote.size === 0) return [];
+  return [...localFiles]
+    .map(normalizeRepoPath)
+    .filter((file) => !remote.has(file))
+    .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
+}
+
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
 // loads without a missing-module crash. Today this is the entry plus its only
 // local import; resolveReexecCheckout derives the real set from the fetched
@@ -1171,6 +1192,8 @@ async function check() {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
+  let localCommit = '';
+  let remoteCommit = '';
 
   // Use curl instead of fetch() so the check works inside the Claude Code
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
@@ -1182,6 +1205,21 @@ async function check() {
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
   ]);
+
+  // VERSION is release metadata, not a complete description of the system
+  // tree. Compare the installed commit with main as well, so same-version
+  // manifest/file drift is visible (#2630). A failed commit lookup is
+  // deliberately conservative: version checks still work offline/behind a
+  // restricted git transport.
+  try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
+  const remoteRef = await curlGet('https://api.github.com/repos/santifer/career-ops/git/ref/heads/main', [
+    '--header', 'Accept: application/vnd.github+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (remoteRef !== null) {
+    try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
+  }
+  const systemTreeDrift = Boolean(localCommit && remoteCommit && localCommit !== remoteCommit);
 
   if (rawVersion !== null) {
     try {
@@ -1225,8 +1263,8 @@ async function check() {
     remote = releaseVersion;
   }
 
-  if (compareVersions(local, remote) >= 0) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
@@ -1234,6 +1272,9 @@ async function check() {
     status: 'update-available',
     local,
     remote,
+    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    local_commit: localCommit || undefined,
+    remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
 }
@@ -1569,6 +1610,37 @@ async function apply() {
     }
     if (skippedPaths.length > 0) {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
+    }
+
+    // All tracked system files need the same stale-file treatment. In
+    // particular, root-level system files removed upstream (for example an
+    // old plugins-registry.json) are not covered by a directory-only prune.
+    // Never infer a deletion from an empty/failed tree lookup, and never touch
+    // untracked files or paths explicitly classified as user data (#2532).
+    try {
+      let remoteFiles = new Set();
+      try {
+        remoteFiles = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // A failed tree lookup is not evidence that the target is empty.
+      }
+      if (remoteFiles.size > 0) {
+        const localFiles = git('ls-files').split('\n').filter(Boolean);
+        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+          try {
+            unlinkSync(join(ROOT, f));
+            updated.push(f);
+            console.log(`Pruned stale system file: ${f}`);
+          } catch (err) {
+            console.error(`Failed to prune stale system file ${f}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Stale system-file prune step failed: ${err.message}`);
     }
 
     // tests/ and test-fixtures/ are both auto-discovered and EXECUTED

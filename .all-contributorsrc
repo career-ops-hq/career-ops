@@ -919,7 +919,10 @@
       "avatar_url": "https://avatars.githubusercontent.com/u/94570424?u=00affba7d9f68cb50ec594b83766bfb14ce3d139&v=4",
       "profile": "https://github.com/LayerC0de",
       "contributions": [
-        "doc"
+        "code",
+        "doc",
+        "plugin",
+        "test"
       ]
     },
     {

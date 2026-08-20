@@ -359,6 +359,20 @@ try {
   ok('unknown flag exits 1', e.status === 1);
 }
 
+// --emit-signal is a bare boolean flag, not a value flag: `--emit-signal=true`
+// must be rejected explicitly, since the unknown-flag check strips the `=`
+// suffix before matching KNOWN_FLAGS (so it would otherwise pass as "known")
+// while the boolean read is an exact-token check that would silently never
+// see it as set — accepted args, signal never emitted.
+for (const bad of ['--emit-signal=true', '--emit-signal=1', '--emit-signal=']) {
+  try {
+    execFileSync('node', [scriptPath, '--summary', bad], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+    ok(`"${bad}" exits 1`, false);
+  } catch (e) {
+    ok(`"${bad}" exits 1`, e.status === 1 && /does not accept a value/.test(String(e.stderr)));
+  }
+}
+
 // --silence-window validation: non-numeric, zero, and negative must fail fast
 // (a silent fallback hides typos; a 0/negative window labels everything silent).
 for (const bad of ['abc', '0', '--silence-window=-5']) {

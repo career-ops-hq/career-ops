@@ -1,18 +1,27 @@
 // Shared optional-section stripping for the CV builders (build-cv-html.mjs,
 // build-cv-latex.mjs).
 //
-// Core competencies, projects, education, certifications, awards, and skills
-// are the genuinely optional CV sections: a competency tag row is often
-// redundant with the summary and experience bullets that prove the same
-// claims, a candidate's projects are often already covered under Work
+// Core competencies, work experience, projects, education, certifications,
+// awards, and skills are the genuinely optional CV sections: a competency tag
+// row is often redundant with the summary and experience bullets that prove
+// the same claims, a student or career-switcher has no professional history
+// to list yet, a candidate's projects are often already covered under Work
 // Experience, not every candidate has a degree, not every application carries
 // a certification worth listing, most candidates have no award to name, and
 // plenty of candidates list no skills section at all. The templates wrap all
-// six unconditionally, so a payload with no entries renders a bare section
+// seven unconditionally, so a payload with no entries renders a bare section
 // header with nothing under it. The builders' buildCompetencies()/
-// buildProjects()/buildEducation()/buildCertifications()/buildAwards()/
-// buildSkills() correctly return '' — nothing removes the surrounding
-// wrapper, which is what this module does.
+// buildExperience()/buildProjects()/buildEducation()/buildCertifications()/
+// buildAwards()/buildSkills() correctly return '' — nothing removes the
+// surrounding wrapper, which is what this module does.
+//
+// Work experience (#2504) is optional for the people this tool is aimed at —
+// new graduates, career changers, and anyone leading with projects or
+// education — not because the section is unimportant. Note that the payload
+// key being optional says nothing about the template placeholder:
+// cv-templates.mjs still requires `{{EXPERIENCE}}` to be present in any custom
+// template, exactly as before. What changed is that an empty `experience` no
+// longer leaves the wrapper behind.
 //
 // Certifications has no marker in the LaTeX template (cv-template.tex has no
 // Certifications section at all), so PATTERNS.tex has no `certifications` key
@@ -100,6 +109,7 @@ const TEX_END_SENTINEL = String.raw`(?=^%{4,}\s)`;
 const PATTERNS = {
   html: {
     competencies: new RegExp(String.raw`<!--\s+CORE COMPETENCIES\s+-->[\s\S]*?` + HTML_BOUNDARY),
+    experience: new RegExp(String.raw`<!--\s+WORK EXPERIENCE\s+-->[\s\S]*?` + HTML_BOUNDARY),
     projects: new RegExp(String.raw`<!--\s+PROJECTS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     education: new RegExp(String.raw`<!--\s+EDUCATION\s+-->[\s\S]*?` + HTML_BOUNDARY),
     certifications: new RegExp(String.raw`<!--\s+CERTIFICATIONS\s+-->[\s\S]*?` + HTML_BOUNDARY),
@@ -107,6 +117,9 @@ const PATTERNS = {
     skills: new RegExp(String.raw`<!--\s+SKILLS\s+-->[\s\S]*?` + HTML_END_SENTINEL),
   },
   tex: {
+    // The LaTeX banner is `%%%%  Experience  %%%%` — mixed case, and not the
+    // "WORK EXPERIENCE" the HTML templates use.
+    experience: new RegExp(String.raw`%{4,}\s+Experience\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     education: new RegExp(String.raw`%{4,}\s+Education\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
     awards: new RegExp(String.raw`%{4,}\s+AWARDS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
@@ -114,7 +127,7 @@ const PATTERNS = {
   },
 };
 
-export const OPTIONAL_SECTIONS = ['competencies', 'projects', 'education', 'certifications', 'awards', 'skills'];
+export const OPTIONAL_SECTIONS = ['competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
 
 export function isEmptySection(payload, section) {
   const entries = payload?.[section];

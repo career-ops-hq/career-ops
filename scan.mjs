@@ -203,6 +203,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 // Semantics (case-insensitive substring, in this order):
 //   - Empty / whitespace-only / non-string location → pass (don't penalize
 //     missing or malformed provider data)
+//   - `block_hard` matches → reject (the only tier `always_allow` cannot
+//     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
 //     the home region is an option, even though "france" is blocked)
@@ -340,6 +342,7 @@ export function buildLocationFilter(locationFilter) {
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
+  const blockHard = compileLocationKeywordList(locationFilter.block_hard);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
@@ -347,6 +350,21 @@ export function buildLocationFilter(locationFilter) {
     // Nothing to judge on either field → pass (don't penalize missing data).
     if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    // `block_hard` is the ONE tier always_allow cannot override. It exists because
+    // a European city name can be a whole word inside a non-European location, so
+    // word-boundary matching (#2087) does not catch it and always_allow's
+    // unconditional win silently discards the user's own block entry:
+    //
+    //   "Porto Alegre, Rio Grande do Sul, Brazil"  always_allow "Porto" beats block "Brazil"
+    //   "USA - New York - Malta"                   always_allow "Malta" beats block "USA"
+    //
+    // Both configs already listed the country under `block`. Plain `block` cannot
+    // be promoted wholesale — always_allow was added in #650 precisely so a
+    // multi-location posting survives one blocked city ("Stockholm · London ·
+    // Madrid" must not die on a London entry) — so the user marks the entries
+    // that are country-level and therefore never a false rejection. Opt-in and
+    // additive: a config without `block_hard` behaves exactly as before.
+    if (blockHard.length > 0 && blockHard.some(matches)) return false;
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never
     // rejected because of what its URL happens to contain.
