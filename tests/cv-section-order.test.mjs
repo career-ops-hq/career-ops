@@ -990,6 +990,9 @@ export const chromium = {
   const ESC = esc + '[31mFAKE-ERROR' + esc + '[0m';
   const RTL = 'testing' + String.fromCharCode(0x202e);
   const LONG = 'z'.repeat(200);
+  // Same, but carrying a double quote: displayTitle() leaves quotes alone, so
+  // this is the shape that defeats a lazy extractor.
+  const QLONG = 'aa"' + 'z'.repeat(200);
 
   const CONTROLS = new RegExp('[\u0000-\u001f\u007f-\u009f]');
   const BIDI = new RegExp('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]');
@@ -1001,7 +1004,12 @@ export const chromium = {
   const NAME_MAX = 60;
   // Every warning quotes the configured name as `lists "X"` or `lists only "X"`.
   const quotedName = (w) => {
-    const m = w.match(/lists (?:only )?"([^"]*)"/);
+    // GREEDY to the last quote, not lazy to the first. displayTitle() does not
+    // strip double quotes, so a name carrying one truncates a lazy capture at
+    // that character: `lists "aa"zzz..."` measured 2 code points instead of 60,
+    // which would let an overlong name pass the bound. Each site below quotes
+    // the name exactly once, so the last quote is its closing one.
+    const m = w.match(/lists (?:only )?"(.*)"/);
     return m ? [...m[1]] : null;   // spread: code points, not UTF-16 units
   };
 
@@ -1012,7 +1020,7 @@ export const chromium = {
     // The second occurrence hits `seen.has(name)`; the first spends itself on
     // the not-a-section branch, so both sites fire from this one call.
     { site: 'duplicate-name', order: ['skills', ESC, ESC] },
-    { site: 'not-a-CV-section', order: ['skills', ESC, RTL, LONG] },
+    { site: 'not-a-CV-section', order: ['skills', ESC, RTL, LONG, QLONG] },
   ];
 
   const failures = [];
