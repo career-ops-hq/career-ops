@@ -104,15 +104,31 @@ function readCliHelp(binPath, args) {
       } catch {
         /* best-effort capability-probe cleanup */
       }
-      // Escalate after a bounded grace period even when SIGTERM itself failed.
-      // The close handler is the only path that completes a timed-out probe, so
-      // the child is reaped before the caller stops tracking it.
+      // Reaping and SETTLING are two things, and tying them together is how a
+      // probe hangs. `close` waits for the stdio streams to close as well as
+      // the process to exit, so a descendant holding inherited stdout keeps it
+      // from ever firing — and SIGKILL goes to the direct child, not a process
+      // group, so that descendant is exactly the case it does not reach. This
+      // promise sits on the AI-search request path; it must not wait on a
+      // grandchild nobody can signal.
+      //
+      // So: escalate to SIGKILL on its own timer (reap what can be reaped), and
+      // separately settle at a hard deadline, releasing the captured streams so
+      // this probe stops holding handles it will never read from again.
       killTimeout = setTimeout(() => {
         try {
           child.kill("SIGKILL");
         } catch {
           /* best-effort capability-probe cleanup */
         }
+        for (const stream of [child.stdout, child.stderr]) {
+          try {
+            stream?.destroy();
+          } catch {
+            /* best-effort capability-probe cleanup */
+          }
+        }
+        finish("");
       }, SIGKILL_GRACE_MS);
       killTimeout.unref?.();
     }, HELP_TIMEOUT_MS);

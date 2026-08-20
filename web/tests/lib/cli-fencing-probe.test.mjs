@@ -289,6 +289,44 @@ test("a replaced binary is re-read even if size and mtime are restored", needsSp
   assert.ok(spawnCount() > afterFirst, `expected a re-read, spawns stayed at ${afterFirst}`);
 });
 
+// A bound, not a preference: the failure this case guards against is a promise
+// that never settles, and asserting on a value cannot catch that — the runner
+// would simply wait forever, in CI as much as here. An explicit timeout turns
+// the hang into a reported failure. Generous against the probe's own 6s
+// deadline (5s help timeout + 1s grace) so slow CI cannot make it flap.
+const settlesOrFails = { ...needsSpawnableStub, timeout: 20_000 };
+
+test("a probe settles even when a descendant holds the pipe open", settlesOrFails, async (t) => {
+  // Given a binary that spawns a detached child inheriting its stdout and then
+  // exits. The direct child is gone, but the WRITE end of the pipe is not, so
+  // the "close" event — which waits for the stdio streams, not just the exit —
+  // never fires. SIGKILL goes to the direct child, never to a process group, so
+  // nothing this module can signal will release that handle.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-holder-"));
+  const bin = path.join(dir, "codex-holder.mjs");
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+// Inherits stdout, outlives the parent, and says nothing.
+spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+  detached: true,
+  stdio: ["ignore", "inherit", "ignore"],
+}).unref();
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // When the probe runs it
+  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
+
+  // Then it still settles, fail-closed. Awaiting the pipe instead would leave
+  // this promise pending forever — and it sits on the AI-search request path,
+  // so "forever" is a hung request, not a slow one.
+  assert.equal(supported, false);
+});
+
 test("a binary that says nothing is retried rather than remembered", needsSpawnableStub, async (t) => {
   // Given a probe that produced no help at all: a spawn error, a timeout, a
   // binary killed mid-write. That is a transient condition, not a verdict about

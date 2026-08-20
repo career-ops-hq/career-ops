@@ -137,14 +137,42 @@ const CODEX_PERMISSION_TOKENS = Object.freeze([
   "--full-auto",
 ]);
 
-/** `-c` payloads that change sandbox, approval, or web-access policy. */
+/**
+ * `-c` keys that change sandbox, approval, or web-access policy.
+ *
+ * Written as bare keys. The comparison below splits the payload on its first
+ * `=` and trims, so the boundary a trailing `=` used to stand in for is now
+ * supplied by the split — and matching survives the spacing codex tolerates.
+ * A key ending in `.` is a dotted PREFIX: every setting under it is policy.
+ */
 const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze([
-  "sandbox_mode=",
+  "sandbox_mode",
   "sandbox_workspace_write.",
-  "approval_policy=",
-  "web_search=",
-  "features.web_search_request=",
+  "approval_policy",
+  "web_search",
+  "features.web_search_request",
 ]);
+
+/**
+ * Does this `-c` payload set one of the policy keys above?
+ *
+ * Codex trims a config key before applying it, so `sandbox_mode =
+ * danger-full-access` is the same override as `sandbox_mode=danger-full-access`
+ * — and a `startsWith("sandbox_mode=")` check saw neither the space nor the
+ * override. That is not a parsing nicety: verified on codex-cli 0.146.0 that
+ * the spaced form is APPLIED, by running a fenced-looking exec that carried it
+ * and watching the model's `echo hi > ./probe.txt` succeed. The sandbox was
+ * off, and this guard had waved the argv through.
+ *
+ * @param {string} payload - A `key=value` config override, flag already stripped.
+ * @returns {boolean}
+ */
+function setsCodexPermissionKey(payload) {
+  const key = payload.split("=")[0].trim();
+  return CODEX_PERMISSION_CONFIG_KEYS.some((policyKey) =>
+    policyKey.endsWith(".") ? key.startsWith(policyKey) : key === policyKey,
+  );
+}
 
 /**
  * Strip a config option's own flag from a token, leaving the `key=value` payload.
@@ -200,7 +228,7 @@ function assertCodexArgvUnfenced(args) {
         (arg.startsWith("-s") && arg.length > 2) ||
         // The payload, not the split option name: a `-c` value IS `key=value`,
         // so its key is what precedes the `=` that the check above strips.
-        CODEX_PERMISSION_CONFIG_KEYS.some((key) => codexConfigPayload(arg).startsWith(key)),
+        setsCodexPermissionKey(codexConfigPayload(arg)),
     );
   if (spelled !== undefined) {
     throw new Error(

@@ -207,6 +207,51 @@ test("an argv that already spells its own permissions is refused", () => {
   }
 });
 
+test("a policy key is caught through the spacing codex tolerates", () => {
+  // Given codex TRIMS a config key before applying it, so the spaced spelling is
+  // not a typo that fails safely — it is the same override. Confirmed on 0.146.0
+  // by running an otherwise-fenced exec carrying `-c "sandbox_mode =
+  // danger-full-access"` and watching the model's `echo hi > ./probe.txt`
+  // succeed: the sandbox was off, and a startsWith("sandbox_mode=") guard had
+  // waved the argv through.
+  for (const spelled of [
+    ["exec", "-c", "sandbox_mode = danger-full-access", "PROMPT"],
+    ["exec", "-c", "  sandbox_mode=danger-full-access", "PROMPT"],
+    ["exec", "-c", "sandbox_mode\t=\tdanger-full-access", "PROMPT"],
+    ["exec", "-csandbox_mode = danger-full-access", "PROMPT"],
+    ["exec", "--config=sandbox_mode = danger-full-access", "PROMPT"],
+    // The dotted key is a prefix, and must survive the same treatment.
+    ["exec", "-c", "sandbox_workspace_write.network_access = true", "PROMPT"],
+    // And the other two policy axes, which are just as much permission.
+    ["exec", "-c", "approval_policy = never", "PROMPT"],
+    ["exec", "-c", "web_search = live", "PROMPT"],
+  ]) {
+    // When such an argv reaches fencing
+    // Then it is refused: whitespace is not a second spelling the guard gets to
+    // miss, because it is not a second meaning to codex.
+    assert.throws(
+      () => fenceArgs({ cliId: "codex", args: spelled, capabilities: CAPS.localReadOnly }),
+      /already spells/,
+      `${spelled.join(" ")} must be refused`,
+    );
+  }
+});
+
+test("a key that merely STARTS with a policy key is not mistaken for one", () => {
+  // Given the comparison is now on the trimmed key, exact for scalar keys — a
+  // prefix test would read a future `sandbox_mode_hint` as sandbox policy and
+  // refuse an argv that sets nothing of the kind
+  const { args } = fenceArgs({
+    cliId: "codex",
+    args: ["exec", "-c", "web_search_results = 5", "PROMPT"],
+    capabilities: CAPS.localReadOnly,
+  });
+
+  // Then it passes through, and the run is still fenced by us.
+  assert.ok(args.includes("web_search_results = 5"), "an unrelated key must survive");
+  assert.equal(configValue(args, "sandbox_mode"), "read-only");
+});
+
 test("a config override that is not about permission passes through", () => {
   // Given `-c` carries every kind of codex setting, not only sandbox policy
   const { args } = fenceArgs({
