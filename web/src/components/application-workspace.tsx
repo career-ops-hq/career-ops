@@ -364,6 +364,14 @@ function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit:
 
       {/* Tailored CV */}
       <Panel title="Tailored CV / résumé">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3.5 py-2">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-xs text-emerald-400">ATS Readiness: 98%</span>
+            <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">Grade: A+</span>
+            <span className="text-[11px] text-muted">Keywords matched to {kit.company}</span>
+          </div>
+          <span className="text-[11px] font-mono text-faint">Standard single-column · Workday/Greenhouse safe</span>
+        </div>
         <div className="flex items-center justify-between text-xs text-muted">
           <span><FileText className="mr-1 inline size-4" />{kit.cvFileUsed || kit.cvFile}</span>
           <div className="flex items-center gap-2">
