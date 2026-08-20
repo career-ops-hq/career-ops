@@ -97,7 +97,10 @@ function parseCliArgs(args) {
   // this file is imported for its exports (test-all.mjs does), and a
   // module-scope call would read the IMPORTER's argv and exit(1) on flags that
   // are perfectly valid for it.
-  validateFlags(args, KNOWN_FLAGS, HELP_TEXT, { valueFlags: VALUE_FLAGS });
+  validateFlags(args, KNOWN_FLAGS, HELP_TEXT, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
 
   if (args.length === 0) {
     console.log(HELP_TEXT);

@@ -96,6 +96,28 @@ test('archive-posting --report -1 reaches its own value check', () => {
   assert.doesNotMatch(r.all, /unrecognized flag/i);
 });
 
+// A known value flag followed by another flag has no operand. In particular,
+// --company must not swallow --dry-run and turn a requested preview into a
+// live archive.
+test('archive-posting rejects --company followed by --dry-run', () => {
+  const r = runScript(
+    'archive-posting.mjs',
+    '--company', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123',
+  );
+  assert.equal(r.status, 1);
+  assert.match(r.all, /--company requires a value/);
+  assert.doesNotMatch(r.all, /Archiving 1 posting/);
+});
+
+// Missing operands are usage errors even when --help follows; validation must
+// report the malformed command before taking the help exit-0 path.
+test('archive-posting rejects --report followed by --help', () => {
+  const r = runScript('archive-posting.mjs', '--report', '--help');
+  assert.equal(r.status, 1);
+  assert.match(r.all, /--report requires a value/);
+  assert.doesNotMatch(r.all, /career-ops — Job Posting Archiver/);
+});
+
 // The guard against a validator that passes by rejecting everything: the real
 // vocabulary must still work, in both spellings.
 test('archive-posting still accepts its real flags in both forms', () => {
