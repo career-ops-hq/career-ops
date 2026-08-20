@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
+import { suppressesCompany } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 
 export const runtime = "nodejs";
@@ -30,7 +31,16 @@ export async function GET(req: Request) {
   // Companies already evaluated → don't resurface as "new".
   const normalizeTextKey = await getNormalizeTextKey();
   const norm = (s: string) => normalizeTextKey(s, " ");
-  const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
+  // A Rejected or Discarded row is not an "already evaluated" company: the first
+  // is the employer's verdict on ONE role, the second is the candidate's own pass
+  // on ONE role, and neither says anything about that employer's other postings.
+  // Suppressing on them hid live roles at companies still being actively targeted.
+  const evaluated = new Set(
+    readApplications()
+      .filter((a) => suppressesCompany(a.status))
+      .map((a) => norm(a.company))
+      .filter(Boolean),
+  );
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
