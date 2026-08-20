@@ -17,8 +17,11 @@
  *   7c. When a writer in 7 dies, the line 7 prints names the cause. It did not:
  *      a macOS failure reported `Node.js v24.18.0` — the last-line fallback —
  *      on the one crash that had a cause to give.
- *   8. The lock underneath 7 is never held by two processes at once. 7 reports
- *      WHAT was lost; 8 reports whether the lock is WHY, so a red run separates
+ *   8. The queue file is SEEDED under the lock too, not merely appended to under
+ *      it. Creating it is open() then write(), and a writer that observed the
+ *      gap appended into a zero-byte file and lost its item to the header.
+ *   9. The lock underneath 7 is never held by two processes at once. 7 reports
+ *      WHAT was lost; 9 reports whether the lock is WHY, so a red run separates
  *      "two writers got in" from "a write went missing" without a round trip.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
@@ -26,10 +29,11 @@
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -297,16 +301,76 @@ console.log('7c. a crashed writer\'s cause survives extraction');
 }
 
 // ---------------------------------------------------------------------------
-console.log('8. the lock is never held by two processes at once');
+console.log('8. the queue file is seeded under the lock, not before it');
+{
+  // §7 asserts the concurrent adds all survive. This asserts the reason they
+  // can: the file is created AND its header written while the lock is held, so
+  // no other writer can ever observe it mid-initialisation.
+  //
+  // The distinction is not academic. `wx` makes the CREATE atomic but not the
+  // INITIALISATION — writeFileSync is open() then write(), and between them the
+  // file exists at zero bytes. Measured on Windows, a second process polling
+  // existsSync saw it empty in 303 of 400 rounds. A writer that looked in that
+  // window skipped creation, appended into the empty file, and had its line
+  // overwritten when the 479-byte header landed at offset 0: every process
+  // exited 0 and the queue came out well-formed and one item short — §7's
+  // `kept=29 of 30` with nothing to show for it. Seeding OUTSIDE the lock is
+  // what made that window reachable.
+  //
+  // Asserted deterministically rather than by racing for it: the test holds the
+  // lock itself, so a seed that happens before acquisition shows up as a file
+  // existing at a moment when no writer can possibly be in the critical
+  // section. Racing would reproduce it only on a loaded multi-core runner,
+  // which is precisely the flake this replaces.
+  const dir = tmp('inbox-seed-');
+  const inbox = join(dir, 'agent-inbox.md');
+  const held = await acquirePipelineLock(inbox, { timeoutMs: 10_000 });
+
+  const child = spawn(NODE, [CLI, 'add', 'seeded under the lock'], {
+    cwd: ROOT, env: { ...process.env, CAREER_OPS_INBOX: inbox }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let childErr = '';
+  child.stderr.on('data', (c) => { childErr += c; });
+  const finished = new Promise((res) => child.on('exit', res));
+
+  // Generous, because a false green here is the one outcome worth avoiding: the
+  // pre-fix ensureFile() ran before the first lock attempt, so the file
+  // appeared as soon as the process finished booting.
+  const appearedWhileLocked = await new Promise((res) => {
+    const deadline = Date.now() + 2_000;
+    const poll = () => {
+      if (existsSync(inbox)) return res(true);
+      if (Date.now() > deadline) return res(false);
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
+  check('queue file is NOT created while another process holds the lock', appearedWhileLocked === false);
+
+  held.release();
+  const code = await finished;
+  check('the blocked add still completes once the lock frees', code === 0,
+    childErr.trim().split('\n').slice(-2).join(' | '));
+  const md = existsSync(inbox) ? readFileSync(inbox, 'utf8') : '';
+  check('header was seeded', /^# Agent Inbox/.test(md) && /Agent protocol:/.test(md), md.slice(0, 60));
+  check('the item landed after the header', /^- \[ \] .*seeded under the lock/m.test(md), md);
+}
+
+// ---------------------------------------------------------------------------
+console.log('9. the lock is never held by two processes at once');
 {
   // Case 7 says WHAT was lost. This says WHETHER THE LOCK IS THE REASON.
   //
   // When 7 goes red on windows-latest the log reads `kept=27 of 30` with every
-  // child exiting 0, and two very different explanations fit that equally well:
+  // child exiting 0, and several very different explanations fit that equally
+  // well:
   //
   //   - the lock let two writers in at once, so their appends interleaved and
-  //     one overwrote the other; or
-  //   - the lock held perfectly and the append itself lost a write.
+  //     one overwrote the other;
+  //   - the lock held perfectly and the append itself lost a write; or
+  //   - the lock held perfectly and the loss happened BEFORE it, while the file
+  //     was still being seeded — which is what it actually turned out to be
+  //     (#3118), and what 8 now pins directly.
   //
   // Nothing in 7 separates them, so each red run costs a round trip of guessing.
   // This case answers it directly by measuring the property in question —
@@ -319,10 +383,15 @@ console.log('8. the lock is never held by two processes at once');
   // overlapping [enter, exit] intervals — any overlap means two processes were
   // inside the critical section together.
   //
-  // Read the pair together:
-  //   7 red + 8 green  -> the lock held; suspect the append.
-  //   7 red + 8 red    -> the lock was double-held; the append is downstream.
-  //   8 red alone      -> a lock bug that has not yet cost an item.
+  // Read the three together:
+  //   7 red + 8 red             -> the seed ran outside the lock: a writer
+  //                                appended into a file whose header had not
+  //                                landed, and lost its line to it.
+  //   7 red + 9 red             -> the lock was double-held; the append is
+  //                                downstream of that.
+  //   7 red + 8 green + 9 green -> the seed was under the lock and the lock
+  //                                held; suspect the append itself.
+  //   9 red alone               -> a lock bug that has not yet cost an item.
   const dir = tmp('inbox-holds-');
   const outDir = join(dir, 'holds');
   mkdirSync(outDir);

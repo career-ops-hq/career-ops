@@ -11,6 +11,19 @@ export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one leve
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
 
+/**
+ * The per-script budget run() applies when a caller does not override it.
+ *
+ * Deliberately NOT substituted into the `timeout: 30000` literal inside run()
+ * below. The comment there explains why that execFileSync call is kept
+ * byte-identical: editing the line makes CodeQL re-attribute its long-standing
+ * "uncontrolled command line" finding to whichever PR touched it. Exported so
+ * callers can reason about the budget — how close a script came to it, say —
+ * rather than hard-coding the number in a second file. The two are linked by
+ * this comment, not by the compiler: change one, change the other.
+ */
+export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
+
 let passed = 0;
 let failed = 0;
 let warnings = 0;

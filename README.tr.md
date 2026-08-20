@@ -84,7 +84,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), diğer adıyla **careerops**), herhangi bir yapay zekâ kodlama CLI'sini eksiksiz bir iş arama komuta merkezine dönüştürür. Başvurularınızı elle bir tabloda takip etmek yerine, şunları yapan yapay zekâ destekli bir hattınız olur:
 
-- **İlanları değerlendirir** -- yapılandırılmış A-F değerlendirmesiyle (bütüncül 1.0-5.0 puana giden beş puanlama boyutu)
+- **İlanları değerlendirir** -- yapılandırılmış A-H değerlendirmesiyle (bütüncül 1.0-5.0 puana giden beş puanlama boyutu)
 - **Kişiselleştirilmiş PDF'ler üretir** -- her iş ilanına özel, ATS uyumlu CV'ler
 - **Portalları otomatik tarar** (Greenhouse, Ashby, Lever, şirket sayfaları)
 - **Toplu işler** -- alt-ajanlarla 10+ ilanı paralel değerlendirir
@@ -316,7 +316,7 @@ Bir iş ilanı URL'si veya açıklaması yapıştırırsınız
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F             │  Uyum, eksikler, ücret araştırması, STAR hikayeleri
+│  A-H             │  Uyum, eksikler, ücret araştırması, STAR hikayeleri
 │  Değerlendirme   │
 │  (cv.md okur)    │
 └────────┬─────────┘

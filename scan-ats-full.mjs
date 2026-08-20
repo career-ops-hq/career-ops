@@ -9,6 +9,11 @@
  * your portals.yml `title_filter` / `location_filter` — no manual company
  * curation needed.
  *
+ * Optional `title_filter_full` in portals.yml overrides `title_filter` for
+ * THIS scanner only, so the keywords tuned for scan.mjs's curated company
+ * list do not have to double as the filter for every public board. Absent,
+ * `title_filter` is used exactly as before.
+ *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
  *
@@ -61,7 +66,21 @@ const CACHE_TTL_HOURS = 24;
 // careers_url and drops anything that doesn't resolve to the ATS's own host —
 // so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
+
+// Default fan-out. Correct for sources whose boards each live on their OWN
+// host — workday is {tenant}.{instance}.myworkdayjobs.com, so 20 in flight is
+// 20 different servers and the resolver, not any one vendor, is the limit.
 const CONCURRENCY = 20;
+
+// Greenhouse, Lever and Ashby each serve their ENTIRE directory from a single
+// hostname (boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com), so the
+// default is 20 sustained connections to ONE API across thousands of boards.
+// That earns an HTTP throttle, and a throttled sweep loses live boards rather
+// than failing loudly: two full sweeps an hour apart saw lever's unreachable
+// count go 2,436 -> 4,100 and ashby's 683 -> 1,675, then recover to 2,525 / 684
+// after a cooldown with no change to the dataset. The boards were never dead —
+// they were refused, and the matches on them were silently missed.
+const SINGLE_HOST_CONCURRENCY = 6;
 // A refusing resolver fails every lookup in milliseconds, so a sweep that
 // keeps going just feeds it (#2229). Stop after this many consecutive
 // resolver-level failures — high enough that a handful of unlucky boards
@@ -157,6 +176,8 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
@@ -164,6 +185,8 @@ export const SOURCES = {
   },
   lever: {
     provider: lever,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
@@ -171,6 +194,8 @@ export const SOURCES = {
   },
   ashby: {
     provider: ashby,
+    // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
@@ -374,6 +399,27 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
   }
 
   return { offers: kept, filteredBlacklist, annotatedBlacklisted };
+}
+
+// `title_filter` is written for scan.mjs, whose corpus is the curated
+// tracked_companies list. That corpus is what makes a broad keyword safe:
+// "Backend" at a company you already vetted is a real lead, and dropping it
+// costs real roles — so tightening the shared key to protect this sweep is a
+// regression for the scanner that actually produces applications.
+//
+// This sweep removes the corpus and leaves the same keywords carrying the
+// whole burden against every public board. Broad keywords then match on a
+// scale they were never chosen for, and ordinary English words land as
+// unrelated product names: one 38,854-board sweep wrote 426 postings, of
+// which 142 passed on "Backend" alone and the rest on Fuel Associate,
+// Traffic Anchor, ICP Mass Spec, Principal Mechanical Canister Eng. Across
+// 194 distinct companies, one matched a crypto name — a gas-station chain.
+//
+// Optional `title_filter_full` lets one portals.yml carry a strict profile
+// for this sweep and a broad one for scan.mjs. Absent — the default — this
+// returns `title_filter` and behaviour is byte-identical to before.
+export function resolveTitleFilterConfig(config) {
+  return config?.title_filter_full ?? config?.title_filter;
 }
 
 // Title/location/content filter chain for one posting, used by runSeedScan().
@@ -599,13 +645,15 @@ async function main() {
     process.exit(1);
   }
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
-  const titleFilter = buildTitleFilter(config?.title_filter);
+  const fullTitleFilterConfig = resolveTitleFilterConfig(config);
+  const titleFilter = buildTitleFilter(fullTitleFilterConfig);
   const locationFilter = buildLocationFilter(config?.location_filter);
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
   const contentFilter = buildContentFilter(config?.content_filter);
-  if (!config?.title_filter?.positive?.length) {
-    console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
+  if (!fullTitleFilterConfig?.positive?.length) {
+    const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
+    console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
   }
   // Attach filters to opts so runSeedScan can use them without extra parameters.
   opts.titleFilter = titleFilter;
@@ -613,7 +661,7 @@ async function main() {
   opts.contentFilter = contentFilter;
   // Raw title_filter config, needed by matchedTitleKeywords() to scope
   // content_filter.by_title_keyword the same way scan.mjs does.
-  opts.titleFilterConfig = config?.title_filter;
+  opts.titleFilterConfig = fullTitleFilterConfig;
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
@@ -715,7 +763,7 @@ async function main() {
       // location segment when the provider reports a rolled-up "N Locations" string;
       // job.title so a title-stated remote role survives a city-only location.
       if (!locationFilter(job.location, job.url, job.title)) continue;
-      if (!contentFilter(job.description, matchedTitleKeywords(job.title, config?.title_filter))) { droppedContent++; continue; }
+      if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupUrl = normalizeUrlForDedup(job.url);
       if (seenUrls.has(dedupUrl)) continue;
       seenUrls.add(dedupUrl); // intra-scan dedup
@@ -773,7 +821,7 @@ async function main() {
     let lastDone = 0;
     let lastResumeAt = 0;
     const truncated = [];
-    await parallelEach(entries, CONCURRENCY, async (entry) => {
+    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
       try {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside

@@ -254,6 +254,29 @@ career-ops/
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)** — 作者的作品集網站（santifer.io），包含 AI 聊天機器人、LLMOps 儀表板與案例研究。如果你需要一個在求職過程中展示的作品集，可以 fork 它並改造成你自己的。
 
+## 常見問題（FAQ）
+
+**career-ops 是什麼？**
+career-ops 是一套開源、不綁定特定 CLI 的求職指揮中心。它把任何 AI 程式碼 CLI 變成一條管道：依你的 CV 評估職缺、產生適配 ATS 的 PDF、找出該聯絡的對象，並把所有進度集中追蹤——最終決定權仍在你手上。它是 CareerOps Manifesto 的第一個參考實作，詳見 [career-ops.org](https://career-ops.org)。
+
+**我可以免費執行 career-ops，或改用較便宜／本地的模型嗎？**
+可以。career-ops 不綁定特定 CLI，也能跑在免費與本地模型上——透過 OpenRouter 的免費模型、Ollama，或任何相容 OpenAI 的端點——所以你不必被付費訂閱綁住。完整設定見 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)。
+
+**我已經付費訂閱 Claude Pro/Max，為什麼 career-ops 還在燒 API 額度？**
+因為環境變數中的 `ANTHROPIC_API_KEY` 優先於你已登入的訂閱：CLI 會改用這把金鑰，並按 token 計費。執行 `echo $ANTHROPIC_API_KEY`，若有印出任何內容，就把它從 shell 設定檔移除、重開終端機並執行 `/login`。批次模式是例外，因為 `claude -p` 的 worker 不會使用互動式登入：執行一次 `claude setup-token`，再把結果匯出為 `CLAUDE_CODE_OAUTH_TOKEN`。完整說明見 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md#2b-already-paying-for-a-subscription-make-sure-you-are-using-it)。
+
+**career-ops 支援哪些 AI CLI？**
+career-ops 可以跑在各主流 AI 程式碼 CLI 上——Claude Code、Codex、Gemini / Antigravity、OpenCode、Grok、Qwen 等——它透過開放的 Agent Skill Standard 運作，因此不會被單一廠商綁死。你手上已經有的 CLI 就能直接用。
+
+**要怎麼在 Windows 上安裝 career-ops？**
+career-ops 可以在 Windows 上執行。如果安裝過程中技能因 symlink 錯誤而載入失敗，解法在 [docs/FAQ.md](docs/FAQ.md)。完整步驟見 [docs/SETUP.md](docs/SETUP.md)。
+
+**career-ops 會自動幫我投遞職缺嗎？**
+不會。career-ops 是篩選器，不是亂槍打鳥的自動投遞工具。AI 負責評估、排序與草擬；審閱與決定由你來做。它不會替你送出、寄出或點擊任何東西——最終決定權永遠在你手上。這種保留人工把關的設計，正是整套系統的重點。
+
+**career-ops 是免費且開源的嗎？**
+是。career-ops 免費且開源，而且對求職者而言永遠都會是——它是 [CareerOps Manifesto](https://career-ops.org/manifesto) 的第一個參考實作。讀一讀，如果它說中了你的想法，就簽署它。
+
 ## 關於作者
 
 我是 Santiago — Head of Applied AI，前創業者（創建並出售了一家至今仍以我名字營運的公司）。我打造 career-ops 是為了管理自己的求職過程，並成功用它找到了現在這份工作。
