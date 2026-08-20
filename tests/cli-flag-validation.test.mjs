@@ -1,12 +1,20 @@
-// tests/cli-flag-validation.test.mjs — four reporting CLIs must reject a
-// mistyped flag instead of answering from their defaults (#2919).
+// tests/cli-flag-validation.test.mjs — the CLIs that must reject a mistyped
+// flag instead of answering from their defaults (#2919).
 //
 // The failure class lib/cli-flags.mjs exists to end: an unrecognized flag is
 // ignored, the value flag it was meant to be falls back to its default, and
 // the script reports a result for inputs nobody asked for at exit 0. Already
 // fixed in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
 // dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
-// check-table-freshness.mjs (#2873) and plugin-audit.mjs (#2813).
+// check-table-freshness.mjs (#2873), plugin-audit.mjs (#2813) and
+// upskill.mjs and archive-posting.mjs (#2977).
+//
+// archive-posting.mjs is the one that does not merely report: a dropped
+// --report writes a capture with no report prefix, findable only by rebuilding
+// the filename from that day's date and the scraped company and role — so it
+// stops resolving the next day, which is the exact failure --report exists to
+// prevent. A dropped --dry-run is worse than a wrong answer: it is a live
+// navigation and a real file, from a run the user asked to be a preview.
 //
 // rejection-latency.mjs is the sharpest case and gets its own fixture: its
 // output is a blacklist suggestion, so the silent failure is a FALSE ALL-CLEAR
@@ -23,7 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -39,15 +47,19 @@ function runScript(script, ...args) {
 }
 
 // Each script paired with a realistic typo of one of ITS OWN value flags —
-// the transposition a user actually makes, not an obviously bogus token.
+// the transposition a user actually makes, not an obviously bogus token. The
+// third element is the pattern its usage block prints, because not every CLI
+// spells that header the same way.
 const SCRIPTS = [
   ['rejection-latency.mjs', '--traker'],
   ['process-quality.mjs', '--fiel'],
   ['detect-reposts.mjs', '--windo'],
   ['weekly-digest.mjs', '--dri'],
+  ['upskill.mjs', '--min-report'],
+  ['archive-posting.mjs', '--reprot', /USAGE/],
 ];
 
-for (const [script, typo] of SCRIPTS) {
+for (const [script, typo, usage = /Usage:/i] of SCRIPTS) {
   test(`${script} rejects ${typo} instead of falling back to its default`, () => {
     const r = runScript(script, typo, 'some-value');
     assert.equal(r.status, 1, `${script} ${typo} exited ${r.status}, want 1`);
@@ -58,7 +70,7 @@ for (const [script, typo] of SCRIPTS) {
   test(`${script} --help exits 0 and prints usage`, () => {
     const r = runScript(script, '--help');
     assert.equal(r.status, 0, `${script} --help exited ${r.status}, want 0`);
-    assert.match(r.all, /Usage:/i, `${script} --help printed no usage block`);
+    assert.match(r.all, usage, `${script} --help printed no usage block`);
   });
 
   // CodeRabbit caught the reverse ordering as a bug on #2745 and #2746: the
@@ -70,6 +82,55 @@ for (const [script, typo] of SCRIPTS) {
     assert.match(r.all, /unrecognized flag/i);
   });
 }
+
+// --- archive-posting: the value flag whose operand looks like a flag --------
+
+// --report's operand must reach archive-posting's OWN validator, which says
+// "positive report number" — listing --report in valueFlags is what stops the
+// shared helper from reporting "-1" as an unrecognized flag and burying the
+// real diagnosis. Exits before any navigation, so no browser is launched.
+test('archive-posting --report -1 reaches its own value check', () => {
+  const r = runScript('archive-posting.mjs', '--report', '-1', '--dry-run', 'https://example.com/j');
+  assert.equal(r.status, 1);
+  assert.match(r.all, /positive report number/);
+  assert.doesNotMatch(r.all, /unrecognized flag/i);
+});
+
+// A known value flag followed by another flag has no operand. In particular,
+// --company must not swallow --dry-run and turn a requested preview into a
+// live archive.
+test('archive-posting rejects --company followed by --dry-run', () => {
+  const r = runScript(
+    'archive-posting.mjs',
+    '--company', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123',
+  );
+  assert.equal(r.status, 1);
+  assert.match(r.all, /--company requires a value/);
+  assert.doesNotMatch(r.all, /Archiving 1 posting/);
+});
+
+// Missing operands are usage errors even when --help follows; validation must
+// report the malformed command before taking the help exit-0 path.
+test('archive-posting rejects --report followed by --help', () => {
+  const r = runScript('archive-posting.mjs', '--report', '--help');
+  assert.equal(r.status, 1);
+  assert.match(r.all, /--report requires a value/);
+  assert.doesNotMatch(r.all, /career-ops — Job Posting Archiver/);
+});
+
+// The guard against a validator that passes by rejecting everything: the real
+// vocabulary must still work, in both spellings.
+test('archive-posting still accepts its real flags in both forms', () => {
+  const url = 'https://boards.greenhouse.io/openai/jobs/123';
+  for (const argv of [
+    ['--company=Anthropic', '--role=Engineer', '--report=42', '--dry-run', url],
+    ['--company', 'Anthropic', '--role', 'Engineer', '--report', '42', '--dry-run', url],
+  ]) {
+    const r = runScript('archive-posting.mjs', ...argv);
+    assert.equal(r.status, 0, `rejected a valid flag set: ${r.all.slice(0, 200)}`);
+    assert.doesNotMatch(r.all, /unrecognized flag/i);
+  }
+});
 
 // --- rejection-latency: the false all-clear, and the `=` form (#2401) -------
 
@@ -162,4 +223,23 @@ test('validating importable modules does not break their importers', () => {
   const r2 = runScript('company-history.mjs', '--help');
   assert.equal(r2.status, 0, 'detect-reposts rejected its importer\'s flags');
   assert.doesNotMatch(r2.all, /unrecognized flag/i);
+});
+
+// archive-posting.mjs has no CLI importer to borrow, so the hazard is spelled
+// out directly: test-all.mjs imports archiveUrl/installEgressGuard from it, and
+// a top-level call would read test-all's own argv — `node test-all.mjs --quick`
+// exiting 1 on a flag that is perfectly valid for test-all, the whole suite
+// killed by an unrelated import. The two trailing args reproduce that argv
+// shape, so process.argv.slice(2) sees '--quick' exactly as it would there.
+test('importing archive-posting does not judge its importer\'s argv', () => {
+  const target = JSON.stringify(pathToFileURL(join(ROOT, 'archive-posting.mjs')).href);
+  const r = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', `await import(${target}); console.log('IMPORT OK');`,
+      '--', 'test-all.mjs', '--quick'],
+    { cwd: ROOT, encoding: 'utf-8', timeout: 30_000 },
+  );
+  const all = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  assert.equal(r.status, 0, `archive-posting rejected its importer's flags: ${all.slice(0, 200)}`);
+  assert.match(all, /IMPORT OK/, 'the probe never completed the import');
 });

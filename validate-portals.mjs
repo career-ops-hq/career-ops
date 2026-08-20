@@ -116,6 +116,8 @@ async function loadProviderIds() {
   return ids;
 }
 
+const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -132,6 +134,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.title_filter.positive, 'title_filter.positive', errors);
       validateKeywordList(config.title_filter.negative, 'title_filter.negative', errors);
       validateKeywordList(config.title_filter.seniority_boost, 'title_filter.seniority_boost', errors);
+    }
+  }
+
+  // Optional per-scanner override consumed only by scan-ats-full.mjs. Same
+  // shape as title_filter, so it gets the same structural checks — an
+  // unvalidated key would let a typo ("positve") silently resolve to a
+  // profile with no positive keywords, which matches every posting.
+  if (config.title_filter_full !== undefined) {
+    if (!isObject(config.title_filter_full)) {
+      add(errors, 'title_filter_full', 'title_filter_full must be an object');
+    } else {
+      // A misspelled field is the dangerous case, not a missing one:
+      // `positve:` leaves `positive` undefined, buildTitleFilter treats an
+      // empty positive list as "no positive constraint", and the sweep then
+      // matches every title on every board — the exact outcome this key
+      // exists to prevent. An unknown field is therefore an error, while
+      // `positive: []` stays valid as a deliberate choice.
+      for (const key of Object.keys(config.title_filter_full)) {
+        if (!TITLE_FILTER_FIELDS.includes(key)) {
+          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
+        }
+      }
+      validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
+      validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
+      validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
     }
   }
 

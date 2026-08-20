@@ -735,16 +735,35 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-function gitStatusEntries() {
-  const status = git('status', '--porcelain');
+// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
+// first `--porcelain` line of a worktree/index change begins with a space
+// (` M path`). Trimming rewrites it into `M path`, and the path parse below
+// then drops the first character — a mangled path that no longer matches the
+// real user file in the safety checks. gitRawIn keeps the leading space.
+//
+// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
+// be unit-tested without a real repo: Windows git terminates the last
+// `--porcelain` line with CRLF (its native EOL), and without stripping the
+// trailing CR the sliced `path` would carry a phantom `\r` that matches
+// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+export function parsePorcelainStatus(status) {
   if (!status) return [];
-
-  return status.split('\n')
+  return status
+    .split('\n')
     .filter(Boolean)
-    .map(line => ({
-      code: line.slice(0, 2),
-      path: line.slice(3),
-    }));
+    .map((line) => {
+      // git never writes a CR inside a path, so a line-terminal '\r' is always
+      // the CRLF half of the line ending, never a path character.
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
+      return {
+        code: clean.slice(0, 2),
+        path: clean.slice(3),
+      };
+    });
+}
+
+export function gitStatusEntries(root = ROOT) {
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
 }
 
 export function extractArrayFromSource(source, name) {

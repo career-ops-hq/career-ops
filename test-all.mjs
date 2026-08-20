@@ -35,7 +35,21 @@
 
 
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+
+// Windows keeps a handle open on a just-exited child process's working files
+// for a short window (antivirus and Search Indexer widen it), so removing a
+// fixture directory the suite created inside the repo can fail with EPERM even
+// though every assertion passed. `force: true` does not cover that — it
+// suppresses ENOENT, not EPERM — and most of these removals sit in `finally`
+// blocks, so one unlucky cleanup aborted the whole run with a stack trace and
+// a non-zero exit. That reads as a broken test suite on Windows when nothing
+// is broken, and it leaves the fixture dir behind for the next run to trip on.
+//
+// Node retries exactly this class of error (EBUSY/EMFILE/ENFILE/ENOTEMPTY/
+// EPERM) with linear backoff when given maxRetries, so default it everywhere
+// rather than at ~95 individual call sites. An explicit option still wins.
+const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';

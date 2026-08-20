@@ -1018,7 +1018,7 @@ search_queries:
 #   enabled: true
 #
 # - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
-#   careers_url: https://mercedes-benz.app.beesite.de   # the *.app.beesite.de host, not the branded front
+#   careers_url: https://mercedes-benz-beesite-production-gjb.app.beesite.de   # the *.app.beesite.de host, not the branded front (jobs.mercedes-benz.com)
 #   provider: beesite
 #   enabled: true
 #
@@ -1323,9 +1323,9 @@ tracked_companies:
     enabled: true
 
   - name: Twilio
-    careers_url: https://www.twilio.com/en-us/company/jobs
+    careers_url: https://jobs.twilio.com
     scan_method: websearch
-    scan_query: 'site:twilio.com/company/jobs "AI" OR "Voice" "Solutions" OR "Architect"'
+    scan_query: 'site:jobs.twilio.com "AI" OR "Voice" "Solutions" OR "Architect"'
     notes: "Voice/messaging infrastructure."
     enabled: true
 
@@ -1489,9 +1489,9 @@ tracked_companies:
   # -- European tech (EMEA-friendly) --
 
   - name: Factorial
-    careers_url: https://job-boards.greenhouse.io/factorial
+    careers_url: https://careers.factorialhr.com
     scan_method: websearch
-    scan_query: 'site:jobs.greenhouse.io/factorial'
+    scan_query: 'site:careers.factorialhr.com'
     notes: "Barcelona. HR SaaS unicorn."
     enabled: true
 
@@ -1517,10 +1517,10 @@ tracked_companies:
     enabled: true
 
   - name: Travelperk
-    careers_url: https://jobs.ashbyhq.com/travelperk
+    careers_url: https://jobs.ashbyhq.com/perk
     scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/travelperk'
-    notes: "Barcelona. Business travel unicorn."
+    scan_query: 'site:jobs.ashbyhq.com/perk'
+    notes: "Barcelona. Business travel unicorn (rebranded Perk)."
     enabled: true
 
   # -- DACH & European AI ecosystem --
@@ -1617,7 +1617,7 @@ tracked_companies:
   # -- DACH logistics / mobility --
 
   - name: Forto
-    careers_url: https://jobs.lever.co/forto
+    careers_url: https://jobs.ashbyhq.com/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
 
@@ -1745,8 +1745,105 @@ tracked_companies:
     enabled: true
 
   - name: Vinted
-    careers_url: https://jobs.lever.co/vinted
-    notes: "Vilnius LT / Berlin. C2C marketplace unicorn, data science & ML roles."
+    careers_url: https://careers.vinted.com
+    notes: "Vilnius LT / Berlin. C2C marketplace unicorn, data science & ML roles. Greenhouse-backed custom board."
+    enabled: true
+
+  # -- ATS migration refreshes (2026-08): boards moved off Greenhouse/Lever --
+
+  - name: Revolut
+    careers_url: https://www.revolut.com/careers
+    scan_method: websearch
+    scan_query: 'site:revolut.com/careers "Java" OR "Backend" OR "Platform" OR "Engineer"'
+    notes: "London / EU remote. Fintech super-app. Custom board at /careers/position/."
+    enabled: true
+
+  - name: Klarna
+    careers_url: https://www.klarna.com/careers/
+    scan_method: websearch
+    scan_query: 'site:klarna.com/careers "Engineer" OR "Backend" OR "Platform"'
+    notes: "Stockholm. Fintech. SPA at klarna.com/careers."
+    enabled: true
+
+  - name: Bolt
+    careers_url: https://jobs.ashbyhq.com/bolt
+    notes: "Tallinn. Ride-hailing/mobility."
+    enabled: true
+
+  - name: Bosch
+    careers_url: https://jobs.bosch.com
+    scan_method: websearch
+    scan_query: 'site:jobs.bosch.com "Java" OR "Backend" OR "Cloud"'
+    notes: "Germany/Remote. IoT and automotive. Custom e-spirit CaaS portal (bosch-i3-caas-api.e-spirit.cloud)."
+    enabled: true
+
+  - name: BMW Group
+    careers_url: https://jobs.bmwgroup.com
+    provider: successfactors
+    api: https://jobs.bmwgroup.com
+    notes: "Munich/Remote DE. Automotive software. SuccessFactors portal."
+    enabled: true
+
+  - name: CARIAD (Volkswagen)
+    careers_url: https://jobs.volkswagen-group.com/cariad
+    provider: successfactors
+    api: https://jobs.volkswagen-group.com
+    notes: "Germany. VW Group software. Board on the VW Group SuccessFactors portal."
+    enabled: true
+
+  - name: Shopify
+    careers_url: https://www.shopify.com/careers
+    scan_method: websearch
+    scan_query: 'site:shopify.com/careers OR site:shopify.com/careers/* "Engineer" OR "Backend" OR "Platform"'
+    notes: "Remote-first. E-commerce platform. Greenhouse-backed SPA."
+    enabled: true
+
+  - name: Aiven
+    careers_url: https://aiven.io/careers
+    scan_method: websearch
+    scan_query: 'site:aiven.io/careers "Engineer" OR "Backend" OR "Platform"'
+    notes: "Helsinki/Remote EU. Managed open-source data infra. Greenhouse-backed custom board."
+    enabled: true
+
+  - name: Zendesk
+    careers_url: https://careers.zendesk.com
+    scan_method: websearch
+    scan_query: 'site:careers.zendesk.com "Engineer" OR "Backend" OR "Platform"'
+    notes: "Global remote. Customer service SaaS. Cloudflare-walled careers page."
+    enabled: true
+
+  - name: Mollie
+    careers_url: https://jobs.ashbyhq.com/mollie
+    notes: "Amsterdam. Payments fintech."
+    enabled: true
+
+  - name: MessageBird
+    careers_url: https://bird.com/careers
+    scan_method: websearch
+    scan_query: 'site:bird.com/careers "Engineer" OR "Backend" OR "Platform"'
+    notes: "Amsterdam. Communications platform (rebranded Bird). Custom SPA board."
+    enabled: true
+
+  - name: Tiqets
+    careers_url: https://www.tiqets.com/jobs
+    scan_method: websearch
+    scan_query: 'site:tiqets.com/jobs "Engineer" OR "Backend" OR "Platform"'
+    notes: "Amsterdam. Travel tech."
+    enabled: true
+
+  - name: Hotjar
+    careers_url: https://jobs.lever.co/contentsquare
+    notes: "Remote EU. Analytics, part of Contentsquare. Lever board jobs.lever.co/contentsquare."
+    enabled: true
+
+  - name: Toggl
+    careers_url: https://apply.workable.com/toggl
+    notes: "Remote EU. Time tracking. Workable board."
+    enabled: true
+
+  - name: Doist
+    careers_url: https://apply.workable.com/doist
+    notes: "Remote global. Productivity (Todoist). Workable board."
     enabled: true
 
   # -- Denmark AI / tech --
