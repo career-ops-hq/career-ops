@@ -145,6 +145,19 @@ const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze(["sandbox_mode", "sandbox_wor
  * contain any of these strings. That is the same assumption the insertion below
  * makes, stated once here.
  *
+ * Matches on the option NAME, before any `=`. Codex takes both spellings —
+ * verified on 0.146.0 that `--sandbox=read-only` and `--ask-for-approval=never`
+ * are accepted exactly as their space-separated forms are — so a whole-token
+ * comparison would wave the equals form straight through and then splice a
+ * second, contradicting sandbox policy in beside it.
+ *
+ * The split is applied to every token rather than only to the options that take
+ * a value. `--search=true` is malformed (codex exits 2 on it) and gets refused
+ * here with a message naming `--search`, which is close enough to the truth for
+ * an argv that could not have run; knowing which flags accept values would mean
+ * keeping a second table in step with codex's own, and a second table is the
+ * failure mode this module exists to remove.
+ *
  * @param {string[]} args
  */
 function assertCodexArgvUnfenced(args) {
@@ -152,7 +165,9 @@ function assertCodexArgvUnfenced(args) {
     .slice(0, -1)
     .find(
       (arg) =>
-        CODEX_PERMISSION_TOKENS.includes(arg) ||
+        CODEX_PERMISSION_TOKENS.includes(arg.split("=")[0]) ||
+        // Raw, not the split name: a `-c` payload IS `key=value`, so its key is
+        // what precedes the `=` that the option name check above strips.
         CODEX_PERMISSION_CONFIG_KEYS.some((key) => arg.startsWith(key)),
     );
   if (spelled !== undefined) {

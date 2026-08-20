@@ -180,6 +180,13 @@ test("an argv that already spells its own permissions is refused", () => {
     ["--ask-for-approval", "never", "exec", "PROMPT"],
     ["--search", "exec", "PROMPT"],
     ["exec", "-c", "sandbox_mode=danger-full-access", "PROMPT"],
+    // The equals form is not a hypothetical spelling: verified on codex-cli
+    // 0.146.0 that `--sandbox=read-only` and `--ask-for-approval=never` are
+    // accepted exactly as their space-separated forms are. A whole-token scan
+    // waves these through and then fences an argv that already had a policy.
+    ["exec", "--sandbox=read-only", "PROMPT"],
+    ["exec", "-s=workspace-write", "PROMPT"],
+    ["--ask-for-approval=never", "exec", "PROMPT"],
   ]) {
     // When such an argv reaches fencing
     // Then it is refused, so "there is exactly one Codex permission path" is a
@@ -378,19 +385,18 @@ test("a claude argv consistent with its capabilities passes verification", () =>
   // Given the two records that permit more than the strictest one
   // When each is paired with an argv that matches
   // Then verification is silent — it refuses contradictions, it does not demand
-  // that every permitted tool be present.
-  const net = fenceArgs({
-    cliId: "claude",
-    args: claudeArgv("Read,WebFetch,WebSearch,Glob,Grep"),
-    capabilities: CAPS.networkReadOnly,
-  });
+  // that every permitted tool be present — and it hands BACK the argv it was
+  // given. Asserting only the report level would leave this passing if
+  // verifyClaudeArgs began rewriting or dropping the caller's flags, which is
+  // the one thing Claude's entry in FENCERS promises not to do.
+  const netArgv = claudeArgv("Read,WebFetch,WebSearch,Glob,Grep");
+  const net = fenceArgs({ cliId: "claude", args: netArgv, capabilities: CAPS.networkReadOnly });
+  assert.deepEqual(net.args, netArgv, "a verified claude argv must pass through unchanged");
   assert.equal(fencingReport({ cliId: "claude", cliName: "Claude Code", capabilities: CAPS.networkReadOnly }).level, "full");
 
-  const write = fenceArgs({
-    cliId: "claude",
-    args: claudeArgv("Read,WebFetch,Write,Edit,Bash"),
-    capabilities: CAPS.workspaceWrite,
-  });
+  const writeArgv = claudeArgv("Read,WebFetch,Write,Edit,Bash");
+  const write = fenceArgs({ cliId: "claude", args: writeArgv, capabilities: CAPS.workspaceWrite });
+  assert.deepEqual(write.args, writeArgv, "a verified claude argv must pass through unchanged");
   assert.equal(fencingReport({ cliId: "claude", cliName: "Claude Code", capabilities: CAPS.workspaceWrite }).level, "full");
 });
 

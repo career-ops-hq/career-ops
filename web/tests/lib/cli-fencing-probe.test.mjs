@@ -19,7 +19,8 @@ import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "../../sr
 const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 
 /**
- * Write an executable stand-in for `codex` whose --help output we control.
+ * Write an executable stand-in for `codex` whose --help output we control, and
+ * which records every invocation so a test can count actual process spawns.
  *
  * A real codex is not installed on CI, and pinning these guards to whatever
  * version a developer happens to have would make them pass or fail for reasons
@@ -28,18 +29,28 @@ const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 function stubCodex(t, { globalFlags, execFlags }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-"));
   const bin = path.join(dir, "codex-stub.mjs");
+  const callLog = path.join(dir, "calls.log");
   const help = JSON.stringify({ globalFlags, execFlags });
   fs.writeFileSync(
     bin,
     `#!/usr/bin/env node
+import fs from "node:fs";
 const help = ${help};
 const isExec = process.argv[2] === "exec";
+fs.appendFileSync(${JSON.stringify(callLog)}, (isExec ? "exec" : "global") + "\\n");
 process.stdout.write((isExec ? help.execFlags : help.globalFlags).join("\\n") + "\\n");
 `,
   );
   fs.chmodSync(bin, 0o755);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return bin;
+  const spawnCount = () => {
+    try {
+      return fs.readFileSync(callLog, "utf8").trim().split("\n").filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  return { bin, spawnCount };
 }
 
 const fullySupported = (t) =>
@@ -48,7 +59,7 @@ const fullySupported = (t) =>
     execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS],
   });
 
-test("the flag lists these guards read still look like themselves", async (t) => {
+test("the flag lists these guards read still look like themselves", async () => {
   // Given a suite that derives its fixtures from the exported requirement lists
   // When either is empty, "every required flag is present" holds vacuously
   // Then refuse that before any case below can pass by measuring nothing.
@@ -60,7 +71,7 @@ test("the flag lists these guards read still look like themselves", async (t) =>
 test("a binary documenting every required flag is supported", async (t) => {
   // Given a codex whose help lists everything fencing emits and everything the
   // AI-search route adds
-  const bin = fullySupported(t);
+  const { bin } = fullySupported(t);
 
   // When the probe runs
   const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
@@ -75,7 +86,7 @@ test("a binary missing any single required flag is refused", async (t) => {
   // flags move between releases, and one absence is all it takes for the fencing
   // flags to be accepted and ignored
   for (const missing of [...CODEX_REQUIRED_GLOBAL_FLAGS, ...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS]) {
-    const bin = stubCodex(t, {
+    const { bin } = stubCodex(t, {
       globalFlags: CODEX_REQUIRED_GLOBAL_FLAGS.filter((f) => f !== missing),
       execFlags: [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS].filter((f) => f !== missing),
     });
@@ -88,10 +99,50 @@ test("a binary missing any single required flag is refused", async (t) => {
   }
 });
 
+test("a flag whose name merely CONTAINS a requirement does not satisfy it", async (t) => {
+  // Given a codex that renamed --sandbox to --sandbox-mode: a substring check
+  // reads the rename as support and hands the user an unsandboxed agent
+  const { bin } = stubCodex(t, {
+    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
+    execFlags: [
+      ...CODEX_REQUIRED_EXEC_FLAGS.filter((f) => f !== "--sandbox"),
+      "--sandbox-mode <SANDBOX_MODE>",
+      ...ROUTE_EXEC_FLAGS,
+    ],
+  });
+
+  // When the probe runs
+  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
+
+  // Then the requirement is unmet: matching is on the declared token, not on
+  // any text that happens to contain it.
+  assert.equal(supported, false);
+});
+
+test("a required value is recognised inside codex's possible-values list", async (t) => {
+  // Given the sandbox MODES are documented only as `-s`'s accepted values, in
+  // the bracketed comma-separated form codex actually prints
+  const { bin } = stubCodex(t, {
+    globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
+    execFlags: [
+      "-c, --config <key=value>",
+      "-s, --sandbox <SANDBOX_MODE>  [possible values: read-only, workspace-write, danger-full-access]",
+      ...ROUTE_EXEC_FLAGS,
+    ],
+  });
+
+  // When the probe runs
+  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
+
+  // Then brackets and commas count as boundaries — tightening the matcher must
+  // not start rejecting the real help text, which would disable AI search.
+  assert.equal(supported, true);
+});
+
 test("a flag the caller requires is checked even though fencing never emits it", async (t) => {
   // Given the route's own isolation and output flags, which fencing cannot know
   // about but which break the run just as thoroughly when absent
-  const bin = stubCodex(t, {
+  const { bin } = stubCodex(t, {
     globalFlags: [...CODEX_REQUIRED_GLOBAL_FLAGS],
     execFlags: [...CODEX_REQUIRED_EXEC_FLAGS],
   });
@@ -100,7 +151,8 @@ test("a flag the caller requires is checked even though fencing never emits it",
   const withExtras = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
   const withoutExtras = await codexFencingSupported(bin);
 
-  // Then the caller's list genuinely discriminates — it is not decoration.
+  // Then the caller's list genuinely discriminates — it is not decoration, and
+  // the second answer is computed rather than inherited from the first.
   assert.equal(withExtras, false, "a missing caller flag must fail the gate");
   assert.equal(withoutExtras, true, "the same binary satisfies fencing's own requirements");
 });
@@ -115,29 +167,56 @@ test("a binary that cannot be inspected is refused", async () => {
   assert.equal(supported, false);
 });
 
-test("a successful probe is cached, a failed one is retried", async (t) => {
-  // Given help output costs two process spawns per request, and AI search is
-  // called repeatedly from the Scan tab
-  const good = fullySupported(t);
-  const bad = stubCodex(t, { globalFlags: [], execFlags: [] });
+test("a binary that exists but cannot be executed is refused", async (t) => {
+  // Given a file that stats successfully and then fails at spawn (EACCES) —
+  // a half-finished install, and a different code path from the missing one
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fencing-probe-noexec-"));
+  const bin = path.join(dir, "codex-stub.mjs");
+  fs.writeFileSync(bin, "#!/usr/bin/env node\n");
+  fs.chmodSync(bin, 0o644);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  // When the same binary is probed twice
-  const first = codexFencingSupported(good, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-  const second = codexFencingSupported(good, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
-  await Promise.all([first, second]);
-  const third = codexFencingSupported(good, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
+  // When the probe runs
+  const supported = await codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS });
 
-  // Then concurrent and later callers share one in-flight probe...
-  assert.equal(first, second, "concurrent probes must share one in-flight result");
-  assert.equal(await third, true);
+  // Then the spawn-error path fails closed too — the one branch of readCliHelp
+  // that no other case here reaches.
+  assert.equal(supported, false);
+});
 
-  // ...while a negative result is dropped once it settles, so a user who
-  // upgrades Codex mid-session is not stuck with "unsupported" until the server
-  // restarts. (Concurrent callers still share the in-flight failure; it is only
-  // the SETTLED negative that is not kept.)
-  const failed = codexFencingSupported(bad);
-  assert.equal(await failed, false);
-  const retried = codexFencingSupported(bad);
-  assert.notEqual(retried, failed, "a settled failure must be re-probed, not served from cache");
-  assert.equal(await retried, false);
+test("help output is read once per binary, whatever the caller asks of it", async (t) => {
+  // Given two process spawns per read, and a Scan tab that calls this on every
+  // AI search
+  const { bin, spawnCount } = fullySupported(t);
+
+  // When the same binary is probed repeatedly, concurrently, and with different
+  // requirement lists
+  await Promise.all([
+    codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS }),
+    codexFencingSupported(bin, { alsoRequiresInExec: ROUTE_EXEC_FLAGS }),
+  ]);
+  assert.equal(await codexFencingSupported(bin), true);
+  assert.equal(await codexFencingSupported(bin, { alsoRequiresInExec: ["--not-a-real-flag"] }), false);
+
+  // Then the help was read exactly once — the cache holds the evidence, so a
+  // second caller's different requirements are computed from it rather than
+  // being answered with the first caller's verdict.
+  assert.equal(spawnCount(), 2, "one --help and one `exec --help`, shared by every caller");
+});
+
+test("a binary that says nothing is retried rather than remembered", async (t) => {
+  // Given a probe that produced no help at all: a spawn error, a timeout, a
+  // binary killed mid-write. That is a transient condition, not a verdict about
+  // the flags — caching it would strand a working Codex until the server
+  // restarts.
+  const { bin, spawnCount } = stubCodex(t, { globalFlags: [], execFlags: [] });
+
+  // When it is probed twice
+  assert.equal(await codexFencingSupported(bin), false);
+  const afterFirst = spawnCount();
+  assert.equal(await codexFencingSupported(bin), false);
+
+  // Then it fails closed both times, and the second call actually re-read the
+  // binary instead of being served from the cache.
+  assert.ok(spawnCount() > afterFirst, `expected a re-read, spawns stayed at ${afterFirst}`);
 });
