@@ -109,10 +109,17 @@ try {
   // fetch() — retired (#2976): throws immediately, names the cause, and never
   // touches the network (the feed sits behind a bot-protection checkpoint, and
   // career-ops does not work around bot protection).
+  let networkCalls = 0;
   const ctx = {
     transport: 'http',
-    fetchJson: async (url) => { throw new Error(`fetchJson should not be called, got: ${url}`); },
-    fetchText: async () => { throw new Error('fetchText should not be called'); },
+    fetchJson: async (url) => {
+      networkCalls++;
+      throw new Error(`fetchJson should not be called, got: ${url}`);
+    },
+    fetchText: async () => {
+      networkCalls++;
+      throw new Error('fetchText should not be called');
+    },
   };
   let fetchErr = null;
   try {
@@ -120,10 +127,10 @@ try {
   } catch (e) {
     fetchErr = e;
   }
-  if (fetchErr && /this feed is gone/i.test(fetchErr.message) && /#2976/.test(fetchErr.message)) {
-    pass('echojobs.fetch() throws a retirement message naming the cause (#2976) instead of fetching');
+  if (networkCalls === 0 && fetchErr && /this feed is gone/i.test(fetchErr.message) && /#2976/.test(fetchErr.message)) {
+    pass('echojobs.fetch() throws a retirement message naming the cause (#2976) without touching the network');
   } else {
-    fail(`echojobs.fetch() should throw a retirement message, got: ${fetchErr ? fetchErr.message : '(did not throw)'}`);
+    fail(`echojobs.fetch() should throw a retirement message with zero network calls, got: networkCalls=${networkCalls}, error=${fetchErr ? fetchErr.message : '(did not throw)'}`);
   }
 
 } catch (e) {
