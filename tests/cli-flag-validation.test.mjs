@@ -56,6 +56,7 @@ const SCRIPTS = [
   ['detect-reposts.mjs', '--windo'],
   ['weekly-digest.mjs', '--dri'],
   ['upskill.mjs', '--min-report'],
+  ['add-entry.mjs', '--dry-rum'],
   ['archive-posting.mjs', '--reprot', /USAGE/],
 ];
 
