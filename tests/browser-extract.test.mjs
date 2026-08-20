@@ -1,10 +1,10 @@
 // tests/browser-extract.test.mjs — unit coverage for the pure logic in
 // browser-extract.mjs (config resolution + result normalizers). The Playwright
 // navigation path is exercised live, not here.
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
