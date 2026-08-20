@@ -62,7 +62,7 @@ Check your Claude Code settings for `apiKeyHelper`. A configured helper re-injec
 3. Restart the terminal.
 4. Run `/login` in Claude Code and sign in.
 
-`ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
+`ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`) take precedence too, so check those if a stray key is not the culprit.
 
 ### Authenticate for Headless or Batch Runs
 
