@@ -14389,8 +14389,11 @@ try {
   const webStatusLists = [
     { file: 'web/src/lib/format.ts', re: /CANONICAL_STATES\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
     { file: 'web/src/app/actions/registry.ts', re: /CANON_STATUS\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
-    { file: 'web/src/app/actions/registry.ts', re: /TAB_VALUES\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
-    { file: 'web/src/components/pipeline-view.tsx', re: /TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
+    // registry.ts's TAB_VALUES and pipeline-view.tsx's TABS used to be two
+    // literal copies checked separately. They now both alias PIPELINE_TABS, so
+    // the one shared list is what this has to read — checking the aliases would
+    // match an empty block and report every state as missing.
+    { file: 'web/src/lib/pipeline-tabs.mjs', re: /PIPELINE_TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
     { file: 'web/src/app/analytics/page.tsx', re: /STAGES[^=]*=\s*\[([\s\S]*?)\];/, upper: true, exclude: ['SKIP'] },
     // The states ACL used to be checked here too. It moved to its own block
     // below, because it now has TWO valid shapes and this table only knows one.
@@ -14410,6 +14413,22 @@ try {
       pass('every web status list covers all canonical states from states.yml (#2249)');
     } else {
       fail(`web status list(s) missing canonical state(s) — dashboard can't set/count them (#2249): ${drift.join(' | ')}`);
+    }
+
+    // Reading the shared list only proves the dashboard's tabs when the tab
+    // consumers actually read it too. Without this, a re-added local literal
+    // would drop out of coverage silently and #2249 could recur unseen.
+    const tabConsumers = ['web/src/app/actions/registry.ts', 'web/src/components/pipeline-view.tsx'];
+    const detached = tabConsumers.filter((f) => {
+      const p = join(ROOT, f);
+      // \b both sides: a substring test would accept a PIPELINE_TABS_LEGACY
+      // local copy as if it were the shared import.
+      return existsSync(p) && !/\bPIPELINE_TABS\b/.test(readFileSync(p, 'utf-8'));
+    });
+    if (detached.length === 0) {
+      pass('both pipeline tab consumers read the shared PIPELINE_TABS list (#2249)');
+    } else {
+      fail(`pipeline tab consumer(s) no longer read PIPELINE_TABS — their tabs are unchecked: ${detached.join(', ')}`);
     }
 
     // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's

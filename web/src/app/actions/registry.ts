@@ -11,6 +11,7 @@
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { PIPELINE_TABS } from "@/lib/pipeline-tabs.mjs";
 
 export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
@@ -18,9 +19,8 @@ export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 // Canonical states (templates/states.yml) — the web validates against the same set.
 const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
-const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP",
-] as const;
+// Pipeline tabs: the same list the tab strip renders (lib/pipeline-tabs.mjs).
+const TAB_VALUES = PIPELINE_TABS;
 const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
 
 export type StartJobInput = {

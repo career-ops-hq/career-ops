@@ -290,3 +290,15 @@ cover_letter:
 #     cross_role_bucket: "all_EM_roles"
 #     applied_to: ["Senior Software Engineer"]
 #     last_apply_date: "2026-01-01"
+
+# ---------------------------------------------------------------------------
+# WEB APP VIEW PREFERENCES (optional, set from Config in the web app)
+# ---------------------------------------------------------------------------
+#
+#   default_pipeline_tab: which tab the Pipeline page opens on when the URL
+#                         names none. One of INBOX, ALL, EVALUATED, APPLIED,
+#                         RESPONDED, INTERVIEW, OFFER, HIRED, REJECTED,
+#                         DISCARDED, SKIP. Default (key absent): INBOX.
+#
+# web:
+#   default_pipeline_tab: INBOX

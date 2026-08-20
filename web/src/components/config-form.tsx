@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { DefaultTabSetting } from "@/components/pipeline/default-tab-setting";
 
 type Cli = {
   id: string;
@@ -291,6 +292,8 @@ export function ConfigForm() {
           />
         </span>
       </button>
+
+      <DefaultTabSetting />
 
       <CadenceSettings />
 

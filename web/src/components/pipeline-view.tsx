@@ -10,22 +10,18 @@ import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
+import {
+  FALLBACK_PIPELINE_TAB,
+  PIPELINE_TABS,
+  normalizePipelineTab,
+  type PipelineTab,
+} from "@/lib/pipeline-tabs.mjs";
 
-// INBOX (the triage queue) is the default tab; the rest filter the tracker.
-const TABS = [
-  "INBOX",
-  "ALL",
-  "EVALUATED",
-  "APPLIED",
-  "RESPONDED",
-  "INTERVIEW",
-  "OFFER",
-  "HIRED",
-  "REJECTED",
-  "DISCARDED",
-  "SKIP",
-] as const;
-type Tab = (typeof TABS)[number];
+// INBOX (the triage queue) through SKIP — the canonical list lives in
+// pipeline-tabs.mjs so the Config page's default-tab dropdown offers exactly the
+// tabs this strip renders.
+const TABS = PIPELINE_TABS;
+type Tab = PipelineTab;
 
 const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
@@ -33,9 +29,13 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  defaultTab = FALLBACK_PIPELINE_TAB,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  /** The user's Config-page default, resolved on the server so the first paint
+   *  is already the right tab (no post-hydration swap). */
+  defaultTab?: Tab;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -44,8 +44,9 @@ export function PipelineView({
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
-  const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  // No `tab` in the URL means "wherever the user chose to land" (Config →
+  // Pipeline → Default tab), not INBOX.
+  const tab: Tab = normalizePipelineTab(params.get("tab")) ?? defaultTab;
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -140,7 +141,9 @@ export function PipelineView({
         )}
       </div>
 
-      {/* tabs */}
+      {/* tabs. The clicked tab is always written to the URL, INBOX included:
+          clearing the param would hand the choice back to the saved default, so
+          a user whose default is ALL could never click into INBOX. */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
         {TABS.map((t) => {
           const count =
@@ -152,7 +155,7 @@ export function PipelineView({
           return (
             <button
               key={t}
-              onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
+              onClick={() => setParams({ tab: t })}
               className={cn(
                 "-mb-px inline-flex items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 tab === t
