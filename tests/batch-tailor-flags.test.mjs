@@ -17,9 +17,9 @@
 // sandbox instead of the developer's real batch run. Every case below picks a
 // threshold that matches NO job, so the script always exits before spawning a
 // worker.
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
