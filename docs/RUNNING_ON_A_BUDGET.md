@@ -80,21 +80,29 @@ Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment 
 export CLAUDE_CODE_OAUTH_TOKEN="<your-generated-token>"
 ```
 
-It is a credential: treat it like one, and never commit it.
+### Subscription Usage and Billing
+
+Providing the `CLAUDE_CODE_OAUTH_TOKEN` selects subscription authentication instead of API-key billing. Keep in mind that batch usage still consumes your plan allowance and can consume enabled usage credits after the allowance is reache
 
 ### Batch Preflight for Credential Precedence
 
-Before executing the batch run, you must clear out any competing credentials. The `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and cloud-provider switches take precedence over `CLAUDE_CODE_OAUTH_TOKEN`. If left active, they can select an unintended billing path or cause authentication to fail altogether.
+Before executing the batch run, you must clear out any competing credentials. The `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and cloud-provider switches (`CLAUDE_CODE_USE_ANTHROPIC_AWS`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, and `CLAUDE_CODE_USE_FOUNDRY`) take precedence over `CLAUDE_CODE_OAUTH_TOKEN`. If left active, they can select an unintended billing path or cause authentication to fail altogether.
 
 Ensure you do the following prior to the run:
 
-1. **Unset environment variables:** Unset `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and any cloud-provider switches.
-2. **Clear Claude Code settings:** Remove `apiKeyHelper` from your Claude Code configuration.
+1. **Unset environment variables:** Unset `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, and all cloud-provider switches.
+2. **Clear Claude Code settings:** Remove competing credentials (such as `apiKeyHelper`) and provider switches from your effective Claude Code `settings.json` configuration. This is crucial because values defined in the settings JSON file will override shell `unset` commands.
 
 ```bash
+# Unset API and Auth tokens
 unset ANTHROPIC_AUTH_TOKEN
 unset ANTHROPIC_API_KEY
-# Unset any active cloud-provider switches as well         # requires an active Claude subscription
+
+# Unset cloud-provider switches
+unset CLAUDE_CODE_USE_ANTHROPIC_AWS
+unset CLAUDE_CODE_USE_BEDROCK
+unset CLAUDE_CODE_USE_VERTEX
+unset CLAUDE_CODE_USE_FOUNDRY
 ```
 
 ### Two things worth expecting
