@@ -213,9 +213,71 @@ export function ApplicationWorkspace() {
 
       {error && <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
 
-      {kit && <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} />}
+      {kit && (
+        <div id="application-kit-view">
+          <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} />
+        </div>
+      )}
 
-      {kits.length > 0 && <section className="mt-12"><h2 className="text-sm font-semibold uppercase tracking-[.15em] text-muted">Saved locally</h2><div className="mt-3 grid gap-2 sm:grid-cols-2">{kits.map(k => <button key={k.id} onClick={() => setKit(k)} className="rounded-xl border border-border bg-surface/40 p-4 text-left hover:border-brand/40"><div className="font-medium">{k.company || "Application"} · {k.role || "Role"}</div><div className="mt-1 text-xs text-muted">{k.appliedAt ? `Applied ${new Date(k.appliedAt).toLocaleString()}` : `Prepared ${new Date(k.createdAt).toLocaleString()}`}</div></button>)}</div></section>}
+      {kits.length > 0 && (
+        <section className="mt-12">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-[.15em] text-muted">
+              Saved applications ({kits.length})
+            </h2>
+            {kit && (
+              <span className="text-xs text-muted">
+                Viewing: <strong className="text-brand font-medium">{kit.company} · {kit.role}</strong>
+              </span>
+            )}
+          </div>
+          <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+            {kits.map(k => {
+              const isSelected = kit?.id === k.id;
+              return (
+                <button
+                  key={k.id}
+                  type="button"
+                  onClick={() => {
+                    setKit(k);
+                    setJd(k.jobDescription || "");
+                    setQuestions(k.formQuestions || "");
+                    const kitEl = document.getElementById("application-kit-view");
+                    if (kitEl) {
+                      kitEl.scrollIntoView({ behavior: "smooth" });
+                    }
+                  }}
+                  className={cn(
+                    "relative rounded-xl p-4 text-left transition-all duration-200",
+                    isSelected
+                      ? "border-2 border-brand bg-brand/10 shadow-lg ring-2 ring-brand/30"
+                      : "border border-border bg-surface/40 hover:border-brand/40 hover:bg-surface/70"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className={cn("text-sm", isSelected ? "text-brand font-bold" : "font-medium text-foreground")}>
+                      {k.company || "Application"} · {k.role || "Role"}
+                    </div>
+                    {isSelected && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-brand-foreground shadow-sm">
+                        <Check className="size-3" /> Active
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-xs text-muted">
+                    <span>
+                      {k.appliedAt ? `✅ Applied ${new Date(k.appliedAt).toLocaleDateString()}` : `Prepared ${new Date(k.createdAt).toLocaleDateString()}`}
+                    </span>
+                    <span className="font-mono text-[11px] text-brand font-medium">
+                      {k.matchScore ? `${k.matchScore}/5 Match` : ""}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
