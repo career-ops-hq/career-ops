@@ -170,24 +170,42 @@ function processIsAlive(pid) {
 // OWNERLESS_GRACE_MS is a lower bound on that patience, never a cap: a larger
 // caller staleMs still wins, and a genuinely abandoned directory still ages
 // out, so a crash while holding the guard cannot disable recovery for good.
-function lockCanRecover(lockDir, staleMs) {
+//
+// The answer is a VERDICT, not a boolean, because "recoverable" was two
+// different answers wearing one hat and only one of them licenses a delete:
+//
+//   STALE    — a directory is THERE and its holder is gone. Deleting it IS the
+//              recovery, and it is the only case that should reach rmSync.
+//   VANISHED — there was nothing there when we looked. Also "not blocked", but
+//              emphatically NOT a licence to delete: the caller acts on this
+//              verdict microseconds later, and by then the path may be owned by
+//              a process that legitimately created it in between. Deleting on
+//              this answer is how an acquirer destroys a live lock it never
+//              observed (see the caller).
+//   LIVE     — someone holds it, or we could not establish otherwise. Wait.
+export const RECOVER_STALE = 'stale';
+export const RECOVER_VANISHED = 'vanished';
+export const RECOVER_LIVE = 'live';
+
+export function lockRecoveryVerdict(lockDir, staleMs) {
   const { inspected, owner } = readLockOwner(lockDir);
   // Unreadable is not ownerless. A stamp this process could not read proves
   // nothing about whether its holder is alive, and falling through to the age
   // rule on that basis is how a LIVE lock gets condemned — the same reasoning
   // #2984 applied to the stat below, one step earlier in the same function.
-  if (!inspected) return false;
-  if (owner?.pid) return !processIsAlive(owner.pid);
+  if (!inspected) return RECOVER_LIVE;
+  if (owner?.pid) return processIsAlive(owner.pid) ? RECOVER_LIVE : RECOVER_STALE;
   try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
+    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS)
+      ? RECOVER_STALE
+      : RECOVER_LIVE;
   } catch (err) {
-    // Only a genuinely vanished directory is "nothing to recover". Any other
-    // stat failure — Windows EPERM/EBUSY while the directory is mid-flight —
-    // is "could not look", and answering "recoverable" to that hands the
-    // caller an rmSync of a LIVE lock created microseconds ago: its winner
-    // then dies with ENOENT writing owner.json (#2777, third face — measured
-    // after the rm-contention fix exposed it).
-    return err?.code === 'ENOENT';
+    // Any stat failure other than ENOENT — Windows EPERM/EBUSY while the
+    // directory is mid-flight — is "could not look", and answering
+    // "recoverable" to that hands the caller an rmSync of a LIVE lock created
+    // microseconds ago: its winner then dies with ENOENT writing owner.json
+    // (#2777, third face — measured after the rm-contention fix exposed it).
+    return err?.code === 'ENOENT' ? RECOVER_VANISHED : RECOVER_LIVE;
   }
 }
 
@@ -382,14 +400,33 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
-        if (lockCanRecover(recoverGuardDir, staleMs)) {
+        // STALE only. A guard that was already gone when we looked needs no
+        // eviction, and evicting on that answer would delete the guard a
+        // different caller has just legitimately taken — putting two callers
+        // inside the decide-then-delete window this guard exists to serialize.
+        if (lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
           rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
+          // Only STALE reaches the rm. VANISHED means the lock was absent when
+          // we looked, and the gap between that observation and this line is
+          // long enough for another acquirer to have won the mkdir and be
+          // partway through writing its owner.json. Deleting on that answer
+          // destroys the fresh, live lock: measured on Windows, the winner's
+          // mkdir landed 472 us after the vanished verdict and the rm 68 us
+          // after that, killing it with `ENOENT ... open '<path>.lock/owner.json'`
+          // and losing its queued item. The rm is the lucky outcome — had the
+          // stamp landed first, both callers would have held the lock with no
+          // error at all.
+          //
+          // So VANISHED falls through to the normal backoff and retries
+          // acquisition, which is what the old comment already claimed this
+          // branch did. It costs one backoff in a rare case; deleting a live
+          // lock costs an item.
+          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
             if (rmLockArtifactSync(lockDir)) {
               continue; // retry acquisition immediately, still holding the guard's decision
             }
@@ -447,7 +484,7 @@ export async function acquirePipelineLock(pipelinePath, options = {}) {
         continue;
       }
       // Best-effort: a contended rm here must not mask ownerErr, and an
-      // orphaned owner-less lock ages out via lockCanRecover anyway.
+      // orphaned owner-less lock ages out via lockRecoveryVerdict anyway.
       //
       // The try/catch is what makes that sentence true for EVERY failure, not
       // just a contended one. rmLockArtifactSync deliberately rethrows the
