@@ -26,9 +26,14 @@ const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 
 /** Render tokens in the two structured forms Codex's clap help uses. */
 const structuredHelp = (tokens) => {
-  const options = tokens.filter((token) => token.startsWith("-")).map((token) => `  ${token} <VALUE>`);
   const values = tokens.filter((token) => !token.startsWith("-"));
-  return [...options, ...(values.length ? [`  [possible values: ${values.join(", ")}]`] : [])].join("\n");
+  return tokens
+    .filter((token) => token.startsWith("-"))
+    .flatMap((token) => [
+      `  ${token} <VALUE>`,
+      ...(token === "--sandbox" && values.length ? [`      [possible values: ${values.join(", ")}]`] : []),
+    ])
+    .join("\n");
 };
 
 /** Help text that declares every token as codex's own does. */
@@ -165,6 +170,27 @@ test("required tokens mentioned only in prose do not satisfy the contract", () =
     .join("\n");
 
   assert.equal(helpSatisfiesFencing({ globalHelp, execHelp }, ROUTE_EXEC_FLAGS), false);
+});
+
+test("sandbox evidence must belong to a structured sandbox declaration", () => {
+  const execRequirements = [...CODEX_REQUIRED_EXEC_FLAGS, ...ROUTE_EXEC_FLAGS];
+
+  for (const sandboxEvidence of [
+    "--sandbox was removed in this build\n[possible values: read-only, workspace-write]",
+    "The old sandbox accepted [possible values: read-only, workspace-write]",
+    "--color <COLOR>\n[possible values: read-only, workspace-write]",
+  ]) {
+    const otherOptions = execRequirements
+      .filter((token) => token.startsWith("-") && token !== "--sandbox")
+      .map((token) => `${token} <VALUE>`);
+    const help = completeHelp({ execHelp: [...otherOptions, sandboxEvidence].join("\n") });
+
+    assert.equal(
+      helpSatisfiesFencing(help, ROUTE_EXEC_FLAGS),
+      false,
+      `${JSON.stringify(sandboxEvidence)} must not prove sandbox support`,
+    );
+  }
 });
 
 test("a flag the caller requires is checked even though fencing never emits it", () => {

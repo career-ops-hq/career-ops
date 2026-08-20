@@ -65,13 +65,17 @@ function readCliHelp(binPath, args) {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
     /** @type {ReturnType<typeof setTimeout>|undefined} */
     let timeout;
+    /** @type {ReturnType<typeof setTimeout>|undefined} */
+    let killTimeout;
 
     const finish = (output) => {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
+      if (killTimeout) clearTimeout(killTimeout);
       resolve(output);
     };
 
@@ -87,55 +91,84 @@ function readCliHelp(binPath, args) {
     child.stderr.on("data", (chunk) => {
       stderr = appendBounded(stderr, chunk);
     });
-    child.on("error", () => finish(""));
+    child.on("error", () => {
+      if (!timedOut) finish("");
+    });
     // Help goes to stdout on success and stderr on a usage error; read both.
-    child.on("close", () => finish(`${stdout}\n${stderr}`));
+    child.on("close", () => finish(timedOut ? "" : `${stdout}\n${stderr}`));
 
     timeout = setTimeout(() => {
+      timedOut = true;
       try {
         child.kill("SIGTERM");
-        // Escalate, because finish() below stops anyone watching this child. A
-        // binary that ignores SIGTERM would otherwise outlive every probe of it
-        // and accumulate one orphan per request for the life of the server.
-        const kill = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* best-effort capability-probe cleanup */
-          }
-        }, SIGKILL_GRACE_MS);
-        kill.unref?.();
       } catch {
         /* best-effort capability-probe cleanup */
       }
-      finish("");
+      // Escalate after a bounded grace period even when SIGTERM itself failed.
+      // The close handler is the only path that completes a timed-out probe, so
+      // the child is reaped before the caller stops tracking it.
+      killTimeout = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* best-effort capability-probe cleanup */
+        }
+      }, SIGKILL_GRACE_MS);
+      killTimeout.unref?.();
     }, HELP_TIMEOUT_MS);
   });
 }
 
+const OPTION_TOKEN = "-{1,2}[A-Za-z0-9?][A-Za-z0-9?-]*";
+const OPTION_DECLARATION = new RegExp(
+  `^(${OPTION_TOKEN})(?:,\\s*(${OPTION_TOKEN}))?(?:\\s+<[^>]+>(?:\\.\\.\\.)?)?(?:\\s+\\[possible values:\\s*([^\\]]+)\\])?\\s*$`,
+  "i",
+);
+const POSSIBLE_VALUES = /^\[possible values:\s*([^\]]+)\]\s*$/i;
+
 /**
  * Is `flag` DECLARED in this help text, rather than merely contained in it?
  *
- * `help.includes("--sandbox")` is also satisfied by `--sandbox-mode`, and
- * Flags count only in option declarations, and bare sandbox modes count only in
- * clap's structured possible-values lists. Prose can discuss a removed option;
- * treating that as proof of support would fail this security gate open.
+ * `help.includes("--sandbox")` is also satisfied by `--sandbox-mode`. Flags
+ * count only in option declarations, and bare sandbox modes count only in the
+ * structured possible-values list owned by `--sandbox`. Prose can discuss a
+ * removed option or an unrelated option's values; neither proves support.
  *
  * @param {string} help
  * @param {string} flag
  * @returns {boolean}
  */
 function declaresFlag(help, flag) {
-  for (const line of help.split(/\r?\n/)) {
-    const declaration = line
-      .trimStart()
-      .match(/^(-{1,2}[A-Za-z0-9?][A-Za-z0-9?-]*)(?:,\s*(-{1,2}[A-Za-z0-9?][A-Za-z0-9?-]*))?(?=$|[\s=<[])/);
-    if (declaration?.slice(1).includes(flag)) return true;
+  const declaredOptions = new Set();
+  /** @type {Map<string, Set<string>>} */
+  const valuesByOption = new Map();
+  /** @type {string[]} */
+  let currentOptions = [];
 
-    const values = line.match(/\[possible values:\s*([^\]]+)\]/i)?.[1];
-    if (values?.split(",").some((value) => value.trim() === flag)) return true;
+  const recordValues = (values) => {
+    if (!values || currentOptions.length === 0) return;
+    for (const option of currentOptions) {
+      const owned = valuesByOption.get(option) ?? new Set();
+      for (const value of values.split(",")) owned.add(value.trim());
+      valuesByOption.set(option, owned);
+    }
+  };
+
+  for (const line of help.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const declaration = trimmed.match(OPTION_DECLARATION);
+    if (declaration) {
+      currentOptions = declaration.slice(1, 3).filter(Boolean);
+      for (const option of currentOptions) declaredOptions.add(option);
+      recordValues(declaration[3]);
+      continue;
+    }
+
+    recordValues(trimmed.match(POSSIBLE_VALUES)?.[1]);
   }
-  return false;
+
+  if (flag.startsWith("-")) return declaredOptions.has(flag);
+  return valuesByOption.get("--sandbox")?.has(flag) ?? false;
 }
 
 /**

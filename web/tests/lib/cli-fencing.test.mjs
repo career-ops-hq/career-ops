@@ -222,6 +222,30 @@ test("a config override that is not about permission passes through", () => {
   assert.equal(configValue(args, "sandbox_mode"), "read-only");
 });
 
+test("every Codex permission config override spelling is refused", () => {
+  for (const payload of [
+    "sandbox_mode=danger-full-access",
+    "sandbox_workspace_write.network_access=true",
+    "approval_policy=never",
+    "web_search=live",
+    "features.web_search_request=true",
+  ]) {
+    for (const configArgs of [
+      ["-c", payload],
+      ["--config", payload],
+      [`-c${payload}`],
+      [`--config=${payload}`],
+    ]) {
+      const args = ["exec", ...configArgs, "PROMPT"];
+      assert.throws(
+        () => fenceArgs({ cliId: "codex", args, capabilities: CAPS.localReadOnly }),
+        /already spells/,
+        `${args.join(" ")} must be refused`,
+      );
+    }
+  }
+});
+
 test("a prompt that merely mentions a permission flag is still fenceable", () => {
   // Given modes/discover.md and user queries are free text that may name a flag
   const { args } = fenceArgs({

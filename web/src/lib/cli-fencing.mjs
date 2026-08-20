@@ -137,8 +137,14 @@ const CODEX_PERMISSION_TOKENS = Object.freeze([
   "--full-auto",
 ]);
 
-/** `-c` payloads that set a sandbox policy, which `-s` spells as a flag. */
-const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze(["sandbox_mode", "sandbox_workspace_write."]);
+/** `-c` payloads that change sandbox, approval, or web-access policy. */
+const CODEX_PERMISSION_CONFIG_KEYS = Object.freeze([
+  "sandbox_mode=",
+  "sandbox_workspace_write.",
+  "approval_policy=",
+  "web_search=",
+  "features.web_search_request=",
+]);
 
 /**
  * Strip a config option's own flag from a token, leaving the `key=value` payload.
