@@ -1239,6 +1239,10 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // One profile governs the whole batch, so the declared order is read once
+  // rather than per entry. Anchored to __dirname for the same reason the single
+  // render is: the script is routinely invoked from outside the repo.
+  const cvSectionOrder = readCvSectionOrder(resolve(__dirname, 'config', 'profile.yml'));
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1274,6 +1278,10 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
+      // Same order as the single render: reorder first so the guard judges the
+      // document that will actually be printed. Without this the batch path
+      // rendered N CVs with cv.sections silently inert.
+      html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       html = normalizeTextForATS(html).html;
 

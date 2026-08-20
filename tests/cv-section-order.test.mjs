@@ -7,10 +7,11 @@
 // Assertions run against rendered HTML rather than source patterns: the reorder
 // has to survive nested markup, comments, absent optional sections and a second
 // application, and none of that is observable from the source text.
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nCV section order from config/profile.yml (#2533)');
@@ -713,4 +714,127 @@ try {
   }
 } catch (e) {
   fail(`cv-section-order tests crashed: ${e.message}`);
+}
+
+
+// ── batch mode applies the declared order too (#2747 added a second render path) ──
+//    reorderCvSections() sits in the single-render path. --batch (#2384, reworked
+//    by #2747 to reuse one Chromium) prepares each entry on its own code path, and
+//    that path called validateCvSectionOrder() WITHOUT calling reorderCvSections()
+//    first. The result was not a crash: cv.sections simply did nothing in batch
+//    mode, which is precisely the silent no-op this feature exists to remove — the
+//    user configures an order, N CVs render, and nothing says the setting was
+//    ignored.
+//
+//    Driven through the CLI because runBatchFromManifest() is not exported. The
+//    playwright stub embeds the HTML it was handed into the PDF it returns (the
+//    shape tests/generate-pdf-batch.test.mjs uses), so the assertion reads the
+//    order that was actually about to be PRINTED, not the order of the input file.
+{
+  const outputRoot = join(ROOT, 'output');
+  mkdirSync(outputRoot, { recursive: true });
+  const sandbox = mkdtempSync(join(outputRoot, 'section-order-batch-'));
+  try {
+    const script = join(sandbox, 'generate-pdf.mjs');
+    for (const f of [
+      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+    ]) {
+      copyFileSync(join(ROOT, f), join(sandbox, f));
+    }
+    mkdirSync(join(sandbox, 'data'), { recursive: true });
+    writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
+
+    // readCvSectionOrder() anchors to the SCRIPT's dirname, not the cwd, so the
+    // profile has to live beside the copied script for the batch run to see it.
+    mkdirSync(join(sandbox, 'config'), { recursive: true });
+    writeFileSync(
+      join(sandbox, 'config', 'profile.yml'),
+      'cv:\n  sections:\n    - education\n    - experience\n',
+      'utf-8',
+    );
+
+    const playwrightStub = join(sandbox, 'node_modules', 'playwright');
+    mkdirSync(playwrightStub, { recursive: true });
+    writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
+      name: 'playwright', type: 'module', exports: './index.js',
+    }), 'utf-8');
+    writeFileSync(join(playwrightStub, 'index.js'), `
+import { readFile } from 'fs/promises';
+function twoPagePdf(markerText) {
+  const marker = Buffer.from(markerText, 'utf-8').toString('base64');
+  return Buffer.from(\`%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Marker (\${marker}) >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R >>
+endobj
+%%EOF\`, 'latin1');
+}
+function makePage() {
+  let rendered = '';
+  return {
+    async goto(url) { rendered = await readFile(new URL(url), 'utf-8'); },
+    async evaluate() {},
+    async pdf() { return twoPagePdf(rendered); },
+    async close() {},
+  };
+}
+export const chromium = {
+  async launch() {
+    return {
+      async newContext() {
+        return { async newPage() { return makePage(); }, async close() {} };
+      },
+      async newPage() { return makePage(); },
+      async close() {},
+    };
+  },
+};
+`, 'utf-8');
+
+    writeFileSync(join(sandbox, 'in.html'), FIXTURE, 'utf-8');
+    const manifest = join(sandbox, 'batch.json');
+    writeFileSync(manifest, JSON.stringify([{ input: 'in.html', output: 'out/in.pdf' }]), 'utf-8');
+
+    const run = spawnSync(NODE, [script, `--batch=${manifest}`], {
+      cwd: sandbox, encoding: 'utf-8', timeout: 60_000,
+    });
+    const outPdf = join(sandbox, 'out', 'in.pdf');
+
+    if (!existsSync(outPdf)) {
+      fail(`batch render produced no PDF: ${(run.stdout || '') + (run.stderr || '')}`);
+    } else {
+      // Recover the HTML the stub was actually handed, so the order asserted is
+      // the printed one rather than the input file's.
+      const pdf = readFileSync(outPdf).toString('latin1');
+      const m = pdf.match(/\/Marker \(([^)]*)\)/);
+      const printed = m ? Buffer.from(m[1], 'base64').toString('utf-8') : '';
+      const titles = renderedTitles(printed);
+      const iEdu = titles.indexOf('Education');
+      const iExp = titles.indexOf('Work Experience');
+      const inputTitles = renderedTitles(FIXTURE);
+
+      if (inputTitles.indexOf('Education') < inputTitles.indexOf('Work Experience')) {
+        fail('fixture already renders Education before Work Experience — the batch assertion would pass without any reordering');
+      } else if (iEdu === -1 || iExp === -1) {
+        fail(`could not read both section titles back out of the batch PDF (got ${titles.join(' -> ') || 'nothing'})`);
+      } else if (iEdu < iExp) {
+        pass('--batch applies cv.sections: Education renders before Work Experience in the printed document');
+      } else {
+        fail(`--batch ignored cv.sections: printed order was ${titles.join(' -> ')}`);
+      }
+    }
+  } catch (e) {
+    fail(`batch section-order test crashed: ${e.message}`);
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 }
