@@ -15,7 +15,7 @@ const apiKey = process.env.GEMINI_API_KEY;
 const modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 if (!apiKey) {
-  console.log('⚠️  Skipping Gemini CI check: GEMINI_API_KEY not found in .env');
+  console.log('⚠️ Skipping Gemini CI check: GEMINI_API_KEY not found.');
   process.exit(0);
 }
 
