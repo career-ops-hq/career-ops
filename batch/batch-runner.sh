@@ -800,8 +800,13 @@ process_offer() {
             .replace(/\s+/g, ' ')
             .trim();
           fs.writeFileSync(process.argv[1], text);
-          console.log(text.split(' ').filter(Boolean).length);
-        } catch (e) { console.log(0); }
+          // process.stdout.write, not console.log: with FORCE_COLOR set, Node
+          // decorates console.log(number) with ANSI codes (\x1b[33m42\x1b[39m), and
+          // the digit sanitizer below turns those escapes into extra digits, so a
+          // 79-word shell counted as 337939 words and every thin page passed the
+          // threshold (#2858).
+          process.stdout.write(String(text.split(' ').filter(Boolean).length));
+        } catch (e) { process.stdout.write('0'); }
       " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
       # Ensure jd_prefetch_words is always a non-negative integer. A non-integer
       # (e.g. empty string, "NaN") would cause bash arithmetic to fail or
