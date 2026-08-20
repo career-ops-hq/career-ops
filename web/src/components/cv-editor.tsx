@@ -6,6 +6,8 @@ import remarkGfm from "remark-gfm";
 import { Award, Check, ChevronDown, ChevronUp, Copy, Download, FileText, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
+import { evaluateCvAts } from "@/lib/ats-scorer";
+
 export function CvEditor() {
   const [content, setContent] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -15,6 +17,8 @@ export function CvEditor() {
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showAtsDetails, setShowAtsDetails] = useState(true);
+
+  const ats = evaluateCvAts(content);
 
   useEffect(() => {
     fetch("/api/cv")
@@ -71,7 +75,7 @@ export function CvEditor() {
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">CV editor</h1>
           <p className="mt-1 text-sm text-muted">
-            Edit <code className="text-foreground">cv.md</code> with live preview and automated ATS scoring.
+            Edit <code className="text-foreground">cv.md</code> with live preview and genuine ATS score verification.
             {!exists && loaded && <span className="ml-1 text-faint">No cv.md yet — start typing to create it.</span>}
           </p>
         </div>
@@ -120,22 +124,22 @@ export function CvEditor() {
         </div>
       </div>
 
-      {/* Live ATS Score Card */}
+      {/* Genuine Real-Time ATS Score Card */}
       {loaded && (
         <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex size-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 font-display text-xl font-bold border border-emerald-500/20">
-                96
+                {ats.totalScore}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-emerald-400">ATS Score: 96 / 100</span>
-                  <span className="rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-bold text-emerald-300">Grade: A+</span>
-                  <span className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-muted">High Pass Rate</span>
+                  <span className="font-semibold text-emerald-400">ATS Score: {ats.totalScore} / 100</span>
+                  <span className="rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-bold text-emerald-300">Grade: {ats.grade}</span>
+                  <span className="rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-muted">{ats.rating}</span>
                 </div>
                 <p className="text-xs text-muted mt-0.5">
-                  Optimized for Workday, Greenhouse, Lever, Ashby, Taleo & iCIMS parsers.
+                  Calculated in real-time for Workday, Greenhouse, Lever, Ashby, Taleo & iCIMS.
                 </p>
               </div>
             </div>
@@ -152,42 +156,94 @@ export function CvEditor() {
 
           {/* Progress bar */}
           <div className="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-surface">
-            <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: "96%" }} />
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${ats.totalScore}%` }}
+            />
           </div>
 
           {/* Audit Details */}
           {showAtsDetails && (
-            <div className="mt-5 grid gap-4 border-t border-emerald-500/20 pt-4 sm:grid-cols-2 lg:grid-cols-3 text-xs">
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Structure & Hierarchy</span>
-                <p className="mt-1 font-mono font-bold text-emerald-400 text-sm">20 / 20</p>
-                <p className="mt-0.5 text-faint">Standard section headers, single-column ATS hierarchy.</p>
+            <div className="mt-5 space-y-4 border-t border-emerald-500/20 pt-4 text-xs">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Structure & Hierarchy</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.structure.score} / {ats.breakdown.structure.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.structure.details}</p>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Contact & Work Rights</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.contact.score} / {ats.breakdown.contact.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.contact.details}</p>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Keyword Density</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.keywords.score} / {ats.breakdown.keywords.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.keywords.details}</p>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Action Verbs</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.actionVerbs.score} / {ats.breakdown.actionVerbs.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.actionVerbs.details}</p>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Quantified Metrics</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.metrics.score} / {ats.breakdown.metrics.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.metrics.details}</p>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-muted">Typography & Layout</span>
+                    <span className="font-mono font-bold text-emerald-400">{ats.breakdown.layout.score} / {ats.breakdown.layout.max}</span>
+                  </div>
+                  <p className="mt-1 text-faint">{ats.breakdown.layout.details}</p>
+                </div>
               </div>
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Contact & Work Rights</span>
-                <p className="mt-1 font-mono font-bold text-emerald-400 text-sm">15 / 15</p>
-                <p className="mt-0.5 text-faint">London UK, +44 phone, email, Graduate visa (no sponsorship).</p>
+
+              {/* Role Match Readiness */}
+              <div className="rounded-xl border border-border bg-surface/40 p-3">
+                <span className="font-semibold text-muted">Target Role Match Readiness:</span>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 font-mono text-xs">
+                  <div className="rounded-lg bg-background/60 p-2 text-center">
+                    <span className="text-faint text-[10px] block">IT Support</span>
+                    <span className="font-bold text-emerald-400">{ats.roleMatches.itSupport}%</span>
+                  </div>
+                  <div className="rounded-lg bg-background/60 p-2 text-center">
+                    <span className="text-faint text-[10px] block">Helpdesk</span>
+                    <span className="font-bold text-emerald-400">{ats.roleMatches.helpdesk}%</span>
+                  </div>
+                  <div className="rounded-lg bg-background/60 p-2 text-center">
+                    <span className="text-faint text-[10px] block">SysAdmin</span>
+                    <span className="font-bold text-emerald-400">{ats.roleMatches.sysAdmin}%</span>
+                  </div>
+                  <div className="rounded-lg bg-background/60 p-2 text-center">
+                    <span className="text-faint text-[10px] block">Cloud Support</span>
+                    <span className="font-bold text-emerald-400">{ats.roleMatches.cloudSupport}%</span>
+                  </div>
+                </div>
               </div>
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Keyword Density</span>
-                <p className="mt-1 font-mono font-bold text-emerald-400 text-sm">25 / 25</p>
-                <p className="mt-0.5 text-faint">Active Directory, Jira, TCP/IP, DNS, Linux, Azure AZ-900.</p>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Action Verbs & Metrics</span>
-                <p className="mt-1 font-mono font-bold text-emerald-400 text-sm">18 / 20</p>
-                <p className="mt-0.5 text-faint">Quantified bullets (SynthView 40% time reduction, HackChallenge 13/33k).</p>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Typography & Layout</span>
-                <p className="mt-1 font-mono font-bold text-emerald-400 text-sm">18 / 20</p>
-                <p className="mt-0.5 text-faint">Clean sans-serif stack, disabled ligatures, no corrupting glyphs.</p>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-surface/50 p-3">
-                <span className="font-semibold text-muted">Target Role Match</span>
-                <p className="mt-1 text-emerald-300 font-medium">IT Support: 96% · Helpdesk: 95%</p>
-                <p className="mt-0.5 text-faint">SysAdmin: 92% · Cloud Support: 90%</p>
-              </div>
+
+              {/* Suggestions if any */}
+              {ats.suggestions.length > 0 && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                  <span className="font-semibold text-amber-400">Optimization Suggestions:</span>
+                  <ul className="mt-1 list-disc list-inside space-y-0.5 text-muted">
+                    {ats.suggestions.map((s, idx) => (
+                      <li key={idx}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

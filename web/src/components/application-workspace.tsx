@@ -69,6 +69,14 @@ type Kit = {
 
 const CONFIG_KEY = "career-ops:config";
 
+const LOADING_STEPS = [
+  "1/4 Analysing job requirements & extracting keywords…",
+  "2/4 Evaluating fit against MSc CS & IT experience…",
+  "3/4 Tailoring ATS CV & building STAR+R stories…",
+  "4/4 Drafting UK cover letter & outreach toolkit…",
+  "Finalizing application kit & checking formatting…"
+];
+
 export function ApplicationWorkspace() {
   const [mounted, setMounted] = useState(false);
   const [jd, setJd] = useState("");
@@ -76,6 +84,8 @@ export function ApplicationWorkspace() {
   const [kits, setKits] = useState<Kit[]>([]);
   const [kit, setKit] = useState<Kit | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [completed, setCompleted] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -88,14 +98,37 @@ export function ApplicationWorkspace() {
   }
 
   async function generate() {
-    setBusy(true); setError("");
+    setBusy(true);
+    setCompleted(false);
+    setError("");
+    setLoadingStep(0);
+
+    let step = 0;
+    const interval = setInterval(() => {
+      step = Math.min(LOADING_STEPS.length - 1, step + 1);
+      setLoadingStep(step);
+    }, 3500);
+
     let cliId = "";
     try { cliId = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").cliId || ""; } catch {}
-    const res = await fetch("/api/application-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobDescription: jd, formQuestions: questions, cliId }) });
-    const data = await res.json();
-    setBusy(false);
-    if (!res.ok) return setError(data.error || "Could not generate the application kit.");
-    setKit(data.kit); setKits(old => [data.kit, ...old]);
+    
+    try {
+      const res = await fetch("/api/application-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobDescription: jd, formQuestions: questions, cliId }) });
+      const data = await res.json();
+      clearInterval(interval);
+      setBusy(false);
+      if (!res.ok) {
+        return setError(data.error || "Could not generate the application kit.");
+      }
+      setKit(data.kit);
+      setKits(old => [data.kit, ...old]);
+      setCompleted(true);
+      setTimeout(() => setCompleted(false), 4000);
+    } catch (err: any) {
+      clearInterval(interval);
+      setBusy(false);
+      setError(err?.message || "Generation failed. Please try again.");
+    }
   }
 
   async function markApplied() {
@@ -123,15 +156,61 @@ export function ApplicationWorkspace() {
 
       <div className="mt-7 grid gap-4 lg:grid-cols-2">
         <label className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">1. Job description
-          <textarea value={jd} onChange={e => setJd(e.target.value)} rows={16} placeholder="Paste the complete job description…" className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50" />
+          <textarea
+            value={jd}
+            onChange={e => {
+              setJd(e.target.value);
+              setCompleted(false);
+              setError("");
+            }}
+            rows={16}
+            placeholder="Paste the complete job description…"
+            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50"
+          />
         </label>
         <label className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">2. Application questions
-          <textarea value={questions} onChange={e => setQuestions(e.target.value)} rows={16} placeholder="Paste the form questions and dropdown options…" className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50" />
+          <textarea
+            value={questions}
+            onChange={e => {
+              setQuestions(e.target.value);
+              setCompleted(false);
+              setError("");
+            }}
+            rows={16}
+            placeholder="Paste the form questions and dropdown options…"
+            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50"
+          />
         </label>
       </div>
-      <button onClick={generate} disabled={busy || !jd.trim()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground disabled:opacity-50">
-        {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}{busy ? "Preparing everything…" : "Analyze and prepare everything"}
-      </button>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={generate}
+          disabled={busy || !jd.trim()}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-all shadow-sm disabled:opacity-50",
+            completed
+              ? "bg-emerald-600 text-white hover:bg-emerald-500"
+              : "bg-brand text-brand-foreground hover:bg-brand-200"
+          )}
+        >
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : completed ? (
+            <Check className="size-4 text-emerald-300" />
+          ) : (
+            <Sparkles className="size-4" />
+          )}
+          {busy ? LOADING_STEPS[loadingStep] : completed ? "Application kit ready!" : "Analyze and prepare everything"}
+        </button>
+
+        {busy && (
+          <span className="text-xs text-muted animate-pulse">
+            Processing local AI pipeline… please wait
+          </span>
+        )}
+      </div>
+
       {error && <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
 
       {kit && <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} />}
