@@ -3730,6 +3730,13 @@ if (
   fail('LinkedIn extraction still asks for pasted JDs before trying the browser (#2619)');
 }
 
+const cliDetector = readFile('web/src/lib/clis.ts');
+if (cliDetector.includes('path.join(home, ".opencode/bin")')) {
+  pass('web CLI detection includes Linux OpenCode default install path (#1793)');
+} else {
+  fail('web CLI detection misses ~/.opencode/bin/opencode on Linux (#1793)');
+}
+
 // --- salary tracking mode wiring (#1656 PR-2) ---
 const trackerModeDoc = readFile('modes/tracker.md');
 const patternsModeDoc = readFile('modes/patterns.md');
