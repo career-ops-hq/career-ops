@@ -36,6 +36,20 @@ const METRIC_NOUNS = [
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
   'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
+  // Headcount outside software. The list above counts users, engineers and
+  // repos, so a CV in operations, facilities, healthcare, education or the
+  // trades produced NO claim for the one number those CVs actually inflate:
+  // how many people were managed. "Managed 45 staff" against a source saying
+  // 20 passed the gate silently, which is the exact fabrication class this
+  // script exists to catch.
+  'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
+  'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
+  'crew',
+  // Physical assets and scale, for the same reason.
+  'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
+  'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
+  'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
+  'alarms', 'tickets',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -77,6 +91,10 @@ const NOUN_SYNONYMS = new Map([
   ['cvs', 'resumes'],
   ['certificates', 'certifications'],
   ['articles', 'guides'],
+  // A CV and its source rarely word a headcount identically; "20 personnel"
+  // restating a source's "20 staff" is a paraphrase, not a fabrication.
+  ['personnel', 'staff'],
+  ['labs', 'laboratories'],
 ]);
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?\s?%/g,
@@ -491,6 +509,31 @@ function runSelfTest() {
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
     ['proven track record']
   );
+
+  // Non-software domains. METRIC_NOUNS counted users, engineers and repos but
+  // not staff, facilities or sites, so an operations/facilities/healthcare CV
+  // yielded no claim at all for its headcount — the one number such a CV is
+  // most likely to inflate. The gate reported a pass having checked nothing.
+  const opsSource = [
+    'Managed 20 staff across shift coverage: 8 scientists and 12 support personnel.',
+    'Built out four facilities and ran a research program across 45 hectares.',
+    'Held temperature setpoints across 3 production rooms.',
+  ].join(' ');
+
+  equal('truthful headcount', auditClaims('Managed 20 staff', opsSource).invented, []);
+  equal('inflated headcount is caught', auditClaims('Managed 45 staff', opsSource).invented, ['45 staff']);
+  equal('inflated specialist count is caught',
+    auditClaims('Led 30 scientists', opsSource).invented, ['30 scientists']);
+  equal('headcount paraphrase is not a fabrication',
+    auditClaims('Managed 20 personnel', opsSource).invented, []);
+  equal('inflated site count is caught',
+    auditClaims('Built out 12 facilities', opsSource).invented, ['12 facilities']);
+  equal('truthful area', auditClaims('Ran a program across 45 hectares', opsSource).invented, []);
+  equal('inflated area is caught',
+    auditClaims('Ran a program across 450 hectares', opsSource).invented, ['450 hectares']);
+  equal('truthful room count', auditClaims('Setpoints across 3 rooms', opsSource).invented, []);
+  equal('inflated room count is caught',
+    auditClaims('Setpoints across 30 rooms', opsSource).invented, ['30 rooms']);
 
   // Non-ASCII digits: every claim pattern here is written with ASCII \d, so a
   // CV in ar/hi/ja/zh produced ZERO claims and the gate reported a pass having

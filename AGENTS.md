@@ -17,12 +17,21 @@ Two layers — full list in `DATA_CONTRACT.md`:
 
 ## Source-of-Truth Boundary (CRITICAL)
 
-User-facing content (CV, cover letters, application emails, form answers, recruiter outreach) is generated **exclusively** from these files plus statements the user makes directly in the current conversation:
+User-facing content (CV, cover letters, application emails, form answers, recruiter outreach) is generated **exclusively** from these files plus statements the user makes directly in the current conversation. The list is tiered by trust level (#2947) — read both tiers before generating content, but treat them differently for quantified claims:
+
+**Primary / user-authored (full trust — the ground truth for facts):**
 
 - `cv.md` · `article-digest.md` · `config/profile.yml` · `modes/_profile.md` · `writing-samples/`
 - `modes/_custom.md` (procedural/style rules only — never introduces factual claims)
 - `voice-dna.md` (voice/style only — never introduces factual claims)
-- `interview-prep/story-bank.md` and `interview-prep/{company}-{role}.md` (the user's own STAR stories and prep notes — same trust level as `cv.md`; consumed by `interview` and `apply`/`match-star`)
+
+**Derived / accumulated (narrative + phrasing trust; NOT automatically cv.md-equivalent for numbers):**
+
+- `interview-prep/story-bank.md` and `interview-prep/{company}-{role}.md` (the user's own STAR stories and prep notes; consumed by `interview` and `apply`/`match-star`)
+
+`story-bank.md` is *accumulated*, not authored the way `cv.md` is — it is commonly built up from past interview-prep documents, which are themselves AI-written mappings of the user's experience onto a specific job posting's language. A scale figure or scope claim invented once in a prep doc (to match a JD's emphasis) can get absorbed into story-bank.md as a standalone fact, then cited as ground truth by a later, unrelated prep doc, drifting further on each reuse — with nothing forcing it back to a primary file. These files may supply narrative structure and phrasing freely. **Any quantified claim, scale figure, or scope-of-responsibility claim originating in a derived file must trace to a primary file above, or carry an explicit provenance marker on that story-bank entry** (`**Provenance:** source: cv.md | user-stated YYYY-MM-DD | derived-unverified | user-cannot-confirm` — see `story-provenance-check.mjs`'s header for the full convention and classification). Absent a marker, treat an unconfirmed number from story-bank.md as `derived-unverified`, not as an established fact — run `node story-provenance-check.mjs --summary` before trusting a story-bank figure in generated content, and don't restate a `derived-unverified` number as settled just because it appears confidently in the story.
+
+**Confirmation UX invariant (binding on any workflow that surfaces a `derived-unverified` finding to the user):** never lead with the unverified number as if confirm/deny were the only options — that invites a guess, and a confirmed guess is worse than an honest unknown because it launders the guess into a "verified" fact. Present the claim plainly and offer four distinct outcomes: (a) confirm it's accurate as stated, (b) provide the correct figure, (c) mark it narrative-only / not a quantified claim, (d) "I don't know" → sets `user-cannot-confirm` on that entry, durably. A `user-cannot-confirm` marker must never decay back into being treated as verified through repeated citation or a later re-scan — every consumer (CV generation, cover letters, interview prep) treats it as narrative texture only, never as a quantified claim in interview-facing output. Building this interactive flow is separate future work; the invariant applies regardless of which mode eventually implements it.
 
 Everything else is **out of scope for content generation**: auto-memory (see below), any directory outside the career-ops project (parent/sibling repos, other codebases on the machine), knowledge from other Claude Code projects on the same machine, and cross-session inferences not written into an in-scope file.
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1](https://github.com/santifer/career-ops/compare/web-v0.7.0...web-v0.7.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **web:** block_hard survives the Explore round-trip — type, URL params, seed and serializer ([#3102](https://github.com/santifer/career-ops/issues/3102)) ([89d6b1b](https://github.com/santifer/career-ops/commit/89d6b1b708454cca863bcf11464c87b76400b14e))
+* **web:** persist the only installed CLI so jobs can start ([#2966](https://github.com/santifer/career-ops/issues/2966)) ([e80bf7e](https://github.com/santifer/career-ops/commit/e80bf7e60ce95e92dcd7501f97fda092b60b8f95))
+* **web:** resolve 27 unmapped states.yml aliases and fix the Turkish status fold ([#2918](https://github.com/santifer/career-ops/issues/2918)) ([360ce49](https://github.com/santifer/career-ops/commit/360ce490c2e8d610a76767261679ed6b02880c9c))
+* **web:** resolve company logos by name, not one guessed domain ([#2942](https://github.com/santifer/career-ops/issues/2942)) ([6096fc9](https://github.com/santifer/career-ops/commit/6096fc9497f3d8bd920d2eaa83c13c30fa989f3d))
+* **web:** safe Codex AI-search exec with mtime-keyed capability cache ([#2361](https://github.com/santifer/career-ops/issues/2361)) ([699f506](https://github.com/santifer/career-ops/commit/699f506f62427cdb5a93bef8247eb6c1fd6418ef))
+* **web:** stop first-run from claiming no setup ([#2965](https://github.com/santifer/career-ops/issues/2965)) ([f028012](https://github.com/santifer/career-ops/commit/f0280129e63a063a88b00598cc09747cd70bc19e))
+* **web:** take the core followups lock so web writes cannot race the seeder ([#3034](https://github.com/santifer/career-ops/issues/3034)) ([3b761b0](https://github.com/santifer/career-ops/commit/3b761b09b2979eedf4eadbd9d3c24b9d61462f04))
+* **web:** Today primary action opens the report ([#2967](https://github.com/santifer/career-ops/issues/2967)) ([74781e6](https://github.com/santifer/career-ops/commit/74781e6d66784bff97e15c507db7383a7fa2ab59))
+
 ## [0.7.0](https://github.com/santifer/career-ops/compare/web-v0.6.1...web-v0.7.0) (2026-08-18)
 
 

@@ -16,6 +16,8 @@
  */
 
 /** @type {string[]} */
+import { asciiFold } from '../lib/ascii-fold.mjs';
+
 const DEFAULT_SUSPICIOUS_DOMAINS = [
   'bit.ly',
   'tinyurl.com',
@@ -102,22 +104,6 @@ export function matchesDomainList(hostname, domainList) {
   return false;
 }
 
-// Latin letters that do NOT decompose under NFD, so stripping combining marks
-// alone still deletes them. Lowercase only — the caller lowercases first.
-// A stroke or bar through a letter is part of the glyph, not a combining
-// mark, so NFD leaves these untouched and the [^a-z0-9] strip below then
-// DELETES them — the very failure this fold exists to stop. The Turkish
-// dotless ı is the one that actually bites: "Işık" scored no match against
-// isik.com.tr and was flagged for being on its own domain. ħ/ŋ/ŧ happened to
-// pass anyway on a word-level substring, which is luck, not correctness —
-// the same accidental pass "Nestlé" had before this fold existed.
-// (CodeRabbit, reviewing #2927.)
-const NON_DECOMPOSING_LATIN = [
-  [/ø/g, 'o'], [/æ/g, 'ae'], [/œ/g, 'oe'], [/ß/g, 'ss'],
-  [/đ/g, 'd'], [/ł/g, 'l'], [/þ/g, 'th'], [/ð/g, 'd'],
-  [/ħ/g, 'h'], [/ı/g, 'i'], [/ŋ/g, 'ng'], [/ŧ/g, 't'],
-  [/ĸ/g, 'k'], [/ſ/g, 's'],
-];
 
 /**
  * ASCII-fold a company name for comparison against a hostname.
@@ -136,9 +122,15 @@ const NON_DECOMPOSING_LATIN = [
  * @returns {string} Lowercased, space-separated ASCII, or '' when nothing Latin remains.
  */
 export function asciiFoldForHostname(company) {
-  let out = String(company ?? '').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
-  for (const [re, to] of NON_DECOMPOSING_LATIN) out = out.replace(re, to);
-  return out.replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  // punctuation: 'delete', not the shared default of 'space'. Deliberate, and
+  // the reason this migration was not a straight swap (#3040): the word-level
+  // check below matches any word of 3+ chars, so turning punctuation into a
+  // separator would CREATE words that were never there —
+  // "Smith&Jones" -> [smith, jones], and `smith` substring-matches
+  // smithfield.com, so a mismatch that should be flagged silently is not.
+  // Fewer false penalties is the safe direction in general; on a legitimacy
+  // validator, the flag NOT firing is the failure that costs something.
+  return asciiFold(company, { punctuation: 'delete' });
 }
 
 /**
