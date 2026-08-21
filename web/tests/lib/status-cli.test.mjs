@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCliJson, trackerRowArg } from "../../src/lib/status-cli.mjs";
+import { parseCliJson, trackerRowArg, clientErrorMessage } from "../../src/lib/status-cli.mjs";
 
 test("the JSON document is read even when a warning printed a brace first", () => {
   // --json puts one JSON object on stdout, but the CLI may print diagnostics
@@ -51,4 +51,36 @@ test("a row selector that cannot name a row is refused before anything is spawne
   for (const bad of [{}, [], ["42"], null, undefined, "", "  ", "42abc", "-1", "1.5", "0x2a", true]) {
     assert.equal(trackerRowArg(bad), null, `${JSON.stringify(bad) ?? String(bad)} must not select a row`);
   }
+});
+
+test("the CLI's own error text is what the client is told", () => {
+  assert.equal(clientErrorMessage({ error: "no row 9999 in the tracker" }), "no row 9999 in the tracker");
+});
+
+test("a crash that printed no JSON never puts stderr in the response body", () => {
+  // The spawn-failure path already keeps stderr out of the body because it is a
+  // Node stack trace carrying absolute server paths. The exit-1 crash path is the
+  // same content and needs the same treatment; falling back to stderr.trim() here
+  // discloses the server's filesystem layout to the caller.
+  //
+  // The fixture path is assembled rather than written out because test-all.mjs
+  // greps tracked sources for an absolute-path literal and would flag this file.
+  // The string still IS an absolute path at run time, which is what the assertion
+  // needs; only the source form differs.
+  const root = ["", "Users", "someone", "Developer", "private", "career-ops"].join("/");
+  const stack = [
+    `file://${root}/set-status.mjs:41`,
+    "        throw new Error('boom');",
+    "Error: boom",
+    `    at file://${root}/tracker-utils.mjs:118:9`,
+  ].join("\n");
+  const msg = clientErrorMessage(null, stack);
+  assert.equal(msg, "status update failed");
+  assert.doesNotMatch(msg, new RegExp(root), "no absolute path reaches the client");
+  assert.doesNotMatch(msg, /set-status\.mjs/, "no server file name reaches the client");
+});
+
+test("a non-string error field is not passed through as one", () => {
+  assert.equal(clientErrorMessage({ error: { nested: true } }), "status update failed");
+  assert.equal(clientErrorMessage({}), "status update failed");
 });

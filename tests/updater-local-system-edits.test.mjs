@@ -55,6 +55,16 @@ function upstreamChange(repo, file, content) {
   repo.g('checkout', '-q', 'main');
 }
 
+/**
+ * Replay what apply() does with an update: check the content out of the
+ * upstream ref and record it with an ordinary commit. NOT a merge — that is
+ * the whole point of case 14, so this must stay a raw checkout.
+ */
+function replayUpdate(repo, version) {
+  repo.g('checkout', 'upstream', '--', ...PATHS);
+  repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
+}
+
 const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 
 // ── 1. The reported case: a committed local fix upstream has not adopted ──
@@ -362,4 +372,80 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#13 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 14. The SECOND update: upstream's own last release is not a local edit ──
+//    Every case above models an install at its FIRST update, where the
+//    merge-base is still the commit the install was cloned at and therefore
+//    still describes it. apply() never advances that merge-base: it installs
+//    updates with a raw checkout plus an ordinary commit, neither of which
+//    creates ancestry to the fetched commit. So from the second update on, the
+//    baseline describes a state the install left behind, and every file
+//    upstream changed in between reads as a local edit — preserved, backed up
+//    to `.bak`, and never updated. `VERSION` is a system file too, so it is
+//    preserved along with the rest and the run reports the version it just
+//    failed to install (#3094).
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('content installed by a previous update is not a local edit (#3094)');
+  } else {
+    fail(`#14 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 15. ...and the fix must not cost us the warning it exists for ──
+//    Case 14 removes files from atRisk, so pin that it removes ONLY the ones
+//    upstream itself installed. A genuine local fix in a twice-updated install
+//    is exactly the #2337 case, and it has to survive the second update too.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'generate-cover-letter.mjs') {
+    pass('a real local fix is still reported after a second update (#2337)');
+  } else {
+    fail(`#15 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 16. History we cannot read degrades the warning, never the update ──
+//    Same contract as case 7, one level down: the #3094 filter reads upstream
+//    history, and a shallow clone does not have it. A history query that fails
+//    must leave the detector reporting what it already knew rather than
+//    throwing — a warning we cannot compute must never abort the checkout.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  const blind = {
+    root: repo.dir,
+    git: (...args) => {
+      if (args[0] === 'log') throw new Error('shallow clone: no history here');
+      return repo.g(...args);
+    },
+  };
+
+  let threw = false;
+  let atRisk = null;
+  try {
+    atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', blind);
+  } catch {
+    threw = true;
+  }
+  if (!threw && Array.isArray(atRisk) && atRisk.includes('generate-cover-letter.mjs')) {
+    pass('unreadable upstream history degrades the filter, not the update');
+  } else {
+    fail(`#16 threw=${threw} atRisk=${JSON.stringify(atRisk)}`);
+  }
 }

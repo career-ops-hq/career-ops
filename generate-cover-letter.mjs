@@ -9,24 +9,65 @@
  * Fills templates/cover-letter-template.html with the payload, then renders
  * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
  *
- * `buildHtml` is exported as a pure function so the template can be tested
- * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
+ * `buildHtml` and `safeOutputPath` are exported as pure functions so the
+ * template and --out path guard can be tested without loading Playwright
+ * (renderHtmlToPdf is imported lazily inside main).
  */
 
 import { readFileSync, existsSync, mkdirSync } from "fs";
-import { dirname, resolve, basename, join } from "path";
+import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 
-const OUTPUT_ROOT = resolve("output");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const OUTPUT_ROOT = resolve(__dirname, "output");
 
-/** Sanitize a requested output filename and keep it under the output directory. */
-function safeOutputPath(raw) {
-  // Derive a sanitized filename from raw string (strip path separators and dots)
-  const filename = basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/\.{2,}/g, "-");
-  return join(OUTPUT_ROOT, filename);
+/**
+ * Resolve a requested cover-letter output path.
+ *
+ * Paths that stay inside `output/` keep their relative subdirectory (the
+ * application-bundle layout `generate-pdf.mjs` already supports). Paths that
+ * would escape `output/` — `..` traversal or an absolute path outside it —
+ * are rejected instead of being silently flattened to `output/<basename>`.
+ *
+ * @param {string} raw - Caller-supplied --out / payload.output_path value.
+ * @returns {string} Absolute path inside OUTPUT_ROOT.
+ */
+export function safeOutputPath(raw) {
+  if (raw == null || String(raw).trim() === "") {
+    throw new Error("Refusing to write the cover letter outside output/: (empty path)");
+  }
+  const trimmed = String(raw).trim();
+
+  const asWritten = resolve(trimmed);
+  if (containedInOutput(asWritten)) return asWritten;
+
+  // Absolute paths and any `..` segment already chose a location; if that
+  // location is not inside output/, refuse instead of rewriting to a basename.
+  if (isAbsolute(trimmed) || /(^|[\\/])\.\.([\\/]|$)/.test(trimmed)) {
+    throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+  }
+
+  // Bare filename or a relative path that is not already under output/
+  // (e.g. --out cover.pdf, or --out output/foo/bar.pdf from another cwd).
+  const posix = trimmed.replace(/\\/g, "/").replace(/^\.\//, "");
+  const relativeToRoot = posix === "output" || posix === "output/"
+    ? ""
+    : posix.startsWith("output/")
+      ? posix.slice("output/".length)
+      : posix;
+  const candidate = resolve(OUTPUT_ROOT, relativeToRoot);
+  if (containedInOutput(candidate)) return candidate;
+
+  throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+}
+
+/** True when absPath is a file (not output/ itself) still inside OUTPUT_ROOT. */
+function containedInOutput(absPath) {
+  const rel = relative(OUTPUT_ROOT, absPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /** Assert that a payload object contains the required keys. */
@@ -267,7 +308,12 @@ Usage:
     const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
-    payload.output_path = safeOutputPath(payload.output_path);
+    try {
+      payload.output_path = safeOutputPath(payload.output_path);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
 
   if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
