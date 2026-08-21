@@ -48,6 +48,28 @@ check(
   `got ${JSON.stringify(owner('Ben &amp; Jerry&#x27;s Jobs'))}`,
 );
 
+// Latin-1 letter entities. A European board writes `Soci&eacute;t&eacute;
+// G&eacute;n&eacute;rale Careers`, and leaving those literal hits the same false
+// negative an ampersand does. The shared decoder carries the full letter table.
+check(
+  'a Latin-1 letter entity is decoded',
+  owner('Soci&eacute;t&eacute; G&eacute;n&eacute;rale Jobs') === 'Société Générale',
+  `got ${JSON.stringify(owner('Soci&eacute;t&eacute; G&eacute;n&eacute;rale Jobs'))}`,
+);
+check(
+  'Soci\u00e9t\u00e9 G\u00e9n\u00e9rale matches its own board title',
+  boardIdentityMatches('Société Générale', owner('Soci&eacute;t&eacute; G&eacute;n&eacute;rale Jobs')),
+);
+
+// Letter entities are case-sensitive: `&Eacute;` is the capital. Looking the
+// name up lowercased would decode it to the lowercase letter and quietly change
+// a company's name.
+check(
+  'an uppercase letter entity keeps its case',
+  owner('&Eacute;ditions Gallimard Jobs') === 'Éditions Gallimard',
+  `got ${JSON.stringify(owner('&Eacute;ditions Gallimard Jobs'))}`,
+);
+
 // A double-encoded ampersand must decode exactly one level. Decoding `&amp;`
 // before the other named entities would turn `&amp;lt;` into `<`, inventing
 // markup the page never served.

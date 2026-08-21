@@ -31,6 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 
@@ -273,43 +274,6 @@ export async function probeSlug(
 }
 
 /**
- * Decode the HTML entities a board page can serve inside its <title>.
- *
- * A title is markup, so a company whose name contains an ampersand arrives as
- * `Hims &amp; Hers`, and an apostrophe often as `&#39;`. Read literally, the
- * owner name keeps the entity and never equals the name in portals.yml.
- *
- * One `replace` pass, deliberately: each match is consumed where it is found and
- * the substituted text is not rescanned, so `&amp;lt;` decodes to `&lt;` rather
- * than to a bracket. Decoding `&amp;` in a separate earlier pass would invent
- * markup the page never served.
- *
- * Unknown names are left as written. A board titled `Foo &widget; Bar` is more
- * likely to contain a literal ampersand than an entity worth guessing at.
- *
- * @param {string} text
- * @returns {string}
- */
-function decodeHtmlEntities(text) {
-  const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-  return String(text).replace(
-    /&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*));/g,
-    (whole, dec, hex, name) => {
-      const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : null;
-      if (code !== null) {
-        // Out-of-range or surrogate code points would throw or produce a lone
-        // surrogate; the raw text is a better answer than either.
-        if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return whole;
-        if (code >= 0xd800 && code <= 0xdfff) return whole;
-        return String.fromCodePoint(code);
-      }
-      const named = NAMED[name.toLowerCase()];
-      return named === undefined ? whole : named;
-    },
-  );
-}
-
-/**
  * Pull the board owner's name out of a careers page <title>.
  *
  * Both providers title the board after its owner and append a jobs suffix:
@@ -324,7 +288,7 @@ export function boardTitleOwner(html) {
   if (!m) return null;
   // Decode before collapsing whitespace: `&nbsp;` is a space once decoded, and
   // collapsing first would leave it as literal text in the middle of a name.
-  const title = decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim();
+  const title = decodeEntities(m[1]).replace(/\s+/g, ' ').trim();
   if (!title) return null;
   return title.replace(/\s+jobs$/i, '').trim() || null;
 }
