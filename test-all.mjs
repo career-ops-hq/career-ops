@@ -3838,16 +3838,21 @@ if (
   fail('pipeline concurrency section still permits unsafe parallel Playwright workers (#2551)');
 }
 
-const openrouterRunner = readFile('openrouter-runner.mjs');
-if (
-  openrouterRunner.includes('// Job page content fetcher (Playwright-first, plain fetch fallback)') &&
-  openrouterRunner.includes('browser = await chromium.launch({ headless: true })') &&
-  openrouterRunner.includes('falling back to plain fetch.') &&
-  openrouterRunner.includes('if (browser) await browser.close().catch(() => {})')
-) {
-  pass('job-page fetch boundary launches a browser first and closes its session before fallback (#2619)');
+const openrouterRunnerPath = join(ROOT, 'openrouter-runner.mjs');
+if (!existsSync(openrouterRunnerPath)) {
+  fail('job-page fetch boundary source file is missing (#2619)');
 } else {
-  fail('job-page fetch boundary lost browser-first or per-call session cleanup (#2619)');
+  const openrouterRunner = readFile('openrouter-runner.mjs');
+  if (
+    openrouterRunner.includes('// Job page content fetcher (Playwright-first, plain fetch fallback)') &&
+    openrouterRunner.includes('browser = await chromium.launch({ headless: true })') &&
+    openrouterRunner.includes('falling back to plain fetch.') &&
+    openrouterRunner.includes('if (browser) await browser.close().catch(() => {})')
+  ) {
+    pass('job-page fetch boundary launches a browser first and closes its session before fallback (#2619)');
+  } else {
+    fail('job-page fetch boundary lost browser-first or per-call session cleanup (#2619)');
+  }
 }
 
 const cliDetector = readFile('web/src/lib/clis.ts');
