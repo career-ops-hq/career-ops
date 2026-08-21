@@ -93,8 +93,9 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
       !/if\s*\([^)]*code\s*!==\s*'EEXIST'\)\s*throw/.test(src),
       `${file} does not treat a non-EEXIST mkdir answer as fatal (Windows says EPERM under contention)`,
     );
+    const ENOENT_OR_DELEGATE = /(?:return err\?\.code === 'ENOENT'(?:;|\s*\?\s*RECOVER_VANISHED\s*:\s*RECOVER_LIVE;)|lockRecoveryVerdict\([^)]*\)\s*===\s*RECOVER_STALE)/;
     ok(
-      /return err\?\.code === 'ENOENT';/.test(src),
+      ENOENT_OR_DELEGATE.test(src),
       `${file} answers "recoverable" only on ENOENT, never on "could not look"`,
     );
   }
@@ -111,15 +112,15 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 // than one spelling of it. pipeline-lock.mjs — the definition — returns a
 // verdict, because "vanished" and "stale" are different answers and only one of
 // them licenses a delete: acting on "it was gone when I looked" destroys a lock
-// a rival acquirer created in the interim. The copies still return a boolean.
-// What every implementor must do is discriminate on ENOENT and never hand
-// "could not look" to the caller as recoverable.
+// a rival acquirer created in the interim. Sibling locks delegate directly to
+// lockRecoveryVerdict. What every implementor must do is discriminate on ENOENT
+// and never hand "could not look" to the caller as recoverable.
 {
-  const ENOENT_ONLY = /return err\?\.code === 'ENOENT'(?:;|\s*\?\s*RECOVER_VANISHED\s*:\s*RECOVER_LIVE;)/;
+  const ENOENT_OR_DELEGATE = /(?:return err\?\.code === 'ENOENT'(?:;|\s*\?\s*RECOVER_VANISHED\s*:\s*RECOVER_LIVE;)|lockRecoveryVerdict\([^)]*\)\s*===\s*RECOVER_STALE)/;
   for (const file of protocolImplementors()) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     ok(
-      ENOENT_ONLY.test(src),
+      ENOENT_OR_DELEGATE.test(src),
       `${file}: the recovery judgment's stat catch answers recoverable ONLY on ENOENT`,
     );
     ok(

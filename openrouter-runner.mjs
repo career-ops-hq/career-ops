@@ -29,6 +29,7 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -524,7 +525,7 @@ function addToPipeline(entries) {
 
   if (newEntries.length === 0) return 0;
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localToday();
   let pipeline = existingPipeline;
   let hist = history;
 
@@ -660,7 +661,7 @@ async function cmdEvaluate(input, ctx) {
 
   try {
     // Save report
-    const today   = new Date().toISOString().split('T')[0];
+    const today   = localToday();
     const num     = reservedNumbers[0];
     const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
     const numStr  = formatReportNumber(num);

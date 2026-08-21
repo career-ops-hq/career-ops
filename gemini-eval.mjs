@@ -34,6 +34,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -400,7 +401,7 @@ if (saveReport) {
 
       reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
       const num         = formatReportNumber(reservedNumbers[0]);
-      const today       = new Date().toISOString().split('T')[0];
+      const today       = localToday();
       const companySlug = slugifyCompany(company);
       const filename    = `${num}-${companySlug}-${today}.md`;
       const reportPath  = join(PATHS.reports, filename);

@@ -31,6 +31,7 @@ for (const relativePath of [
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
   'lib/context-budget.mjs',
+  'lib/local-today.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);

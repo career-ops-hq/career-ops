@@ -43,6 +43,7 @@ import { resolveColumns } from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
 } from './tracker-utils.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -302,7 +303,7 @@ function reportDiagnostics(diag) {
 
 function syncIndex(db, states) {
   const { apps, diag } = parseTracker(states);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit

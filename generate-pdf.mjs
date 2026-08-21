@@ -41,6 +41,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(__dirname);
@@ -1009,7 +1010,7 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localToday();
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
   const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');

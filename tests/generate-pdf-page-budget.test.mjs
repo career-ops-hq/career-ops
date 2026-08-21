@@ -36,6 +36,8 @@ copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs')
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+mkdirSync(join(sandbox, 'lib'), { recursive: true });
+copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',
