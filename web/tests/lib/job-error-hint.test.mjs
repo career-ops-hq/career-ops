@@ -43,11 +43,33 @@ test("'no output' canned message -> auth hint", () => {
   assert.equal(hint?.kind, "auth");
 });
 
+test("a raw 401 unauthorized label -> auth hint", () => {
+  assert.equal(jobErrorHint(errorJob("401 unauthorized"))?.kind, "auth");
+});
+
 test("'author' in an unrelated terminal label -> NO auth hint (the bug this fixes)", () => {
   // career-ops evaluates AI/tech job postings, so a terminal label can
   // legitimately read something like "Failed to parse author metadata" —
   // a bare "auth" substring matched inside it and produced the sign-in prompt.
   assert.equal(jobErrorHint(errorJob("Failed to parse author metadata")), null);
+});
+
+test("authenticate/authentication match the pattern, authority does not", () => {
+  assert.equal(jobErrorHint(errorJob("Please authenticate before continuing"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("Authentication required"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("Missing authority metadata in the JD")), null);
+});
+
+test("only the TERMINAL step is classified: an earlier auth label is ignored", () => {
+  const job = {
+    status: "error",
+    text: "",
+    steps: [
+      { kind: "status", label: "The CLI exited with an error — is it installed and authenticated?", ts: 0 },
+      { kind: "status", label: "No report was written", ts: 1 },
+    ],
+  };
+  assert.equal(jobErrorHint(job), null);
 });
 
 test("connection error -> connection hint, NOT auth", () => {
