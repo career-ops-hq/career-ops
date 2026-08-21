@@ -36,6 +36,20 @@ const METRIC_NOUNS = [
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
   'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
+  // Headcount outside software. The list above counts users, engineers and
+  // repos, so a CV in operations, facilities, healthcare, education or the
+  // trades produced NO claim for the one number those CVs actually inflate:
+  // how many people were managed. "Managed 45 staff" against a source saying
+  // 20 passed the gate silently, which is the exact fabrication class this
+  // script exists to catch.
+  'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
+  'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
+  'crew',
+  // Physical assets and scale, for the same reason.
+  'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
+  'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
+  'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
+  'alarms', 'tickets',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -77,6 +91,10 @@ const NOUN_SYNONYMS = new Map([
   ['cvs', 'resumes'],
   ['certificates', 'certifications'],
   ['articles', 'guides'],
+  // A CV and its source rarely word a headcount identically; "20 personnel"
+  // restating a source's "20 staff" is a paraphrase, not a fabrication.
+  ['personnel', 'staff'],
+  ['labs', 'laboratories'],
 ]);
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?\s?%/g,
@@ -289,16 +307,41 @@ export function metricClaims(text) {
   return claims;
 }
 
+/**
+ * Build the allow-list a metric claim is checked against.
+ *
+ * Claims extracted from text are folded through NOUN_SYNONYMS; allow_metrics
+ * entries used to be normalized only, so an exception written in the spelling
+ * a human reaches for - `77 repos` - never matched the canonical `77
+ * repositories` the extractor produces. The entry then did nothing at all and
+ * the CV still failed the gate, with no diagnostic pointing at the allow-list
+ * (CodeRabbit, reviewing #2175). A silently inert exception is the same failure
+ * class this script exists to catch.
+ *
+ * Both spellings are added rather than the canonical one alone: metricClaims()
+ * yields nothing for an entry no pattern recognizes (a bare `$900k`, a
+ * percentage), so replacing normalizeClaim outright would drop those exceptions
+ * instead of widening them. The union can only ever allow more, never less.
+ */
+function allowedMetricSet(sourceText, allowMetrics) {
+  const allowed = new Set(metricClaims(sourceText));
+  for (const entry of allowMetrics || []) {
+    allowed.add(normalizeClaim(entry));
+    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+  }
+  return allowed;
+}
+
 /** Compare generated metric claims against source text without reading files. */
 export function auditClaims(targetText, sourceText, config = {}) {
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...(config.allow_metrics || []).map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const invented = [...metricClaims(targetText)].filter(claim => !allowed.has(claim));
+  // Hoisted: stripMarkup re-ran the whole markup pass once per configured
+  // phrase (CodeRabbit, reviewing #2175). Same result, one pass.
+  const targetPlain = stripMarkup(targetText).toLowerCase();
   const forbidden = (config.forbidden_phrases || [])
     .filter(Boolean)
-    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+    .filter(phrase => targetPlain.includes(String(phrase).toLowerCase()));
   return { invented, forbidden };
 }
 
@@ -339,10 +382,7 @@ export function verifyFacts(targetText, {
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
   const config = loadConfig(resolveInputPath(configPath, cwd));
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...config.allow_metrics.map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
@@ -451,11 +491,49 @@ function runSelfTest() {
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,
     []
   );
+  // An exception is written in the spelling a human reaches for, which is not
+  // always the canonical noun the extractor emits. Before the allow-list was
+  // folded too, this entry matched nothing and the CV stayed red.
+  equal('a synonym-spelled exception is honoured',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repos'] }).invented, []);
+  equal('the canonical spelling still works',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repositories'] }).invented, []);
+  // and folding the allow-list must not swallow an entry no claim pattern
+  // recognizes, which is what routing it through metricClaims alone would do.
+  equal('a currency exception survives the folding',
+    auditClaims('Managed a $900K budget', source, { allow_metrics: ['$900K'] }).invented, []);
+  equal('an unrelated exception still leaves the claim invented',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['12 repos'] }).invented, ['77 repositories']);
   equal(
     'forbidden phrase',
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
     ['proven track record']
   );
+
+  // Non-software domains. METRIC_NOUNS counted users, engineers and repos but
+  // not staff, facilities or sites, so an operations/facilities/healthcare CV
+  // yielded no claim at all for its headcount — the one number such a CV is
+  // most likely to inflate. The gate reported a pass having checked nothing.
+  const opsSource = [
+    'Managed 20 staff across shift coverage: 8 scientists and 12 support personnel.',
+    'Built out four facilities and ran a research program across 45 hectares.',
+    'Held temperature setpoints across 3 production rooms.',
+  ].join(' ');
+
+  equal('truthful headcount', auditClaims('Managed 20 staff', opsSource).invented, []);
+  equal('inflated headcount is caught', auditClaims('Managed 45 staff', opsSource).invented, ['45 staff']);
+  equal('inflated specialist count is caught',
+    auditClaims('Led 30 scientists', opsSource).invented, ['30 scientists']);
+  equal('headcount paraphrase is not a fabrication',
+    auditClaims('Managed 20 personnel', opsSource).invented, []);
+  equal('inflated site count is caught',
+    auditClaims('Built out 12 facilities', opsSource).invented, ['12 facilities']);
+  equal('truthful area', auditClaims('Ran a program across 45 hectares', opsSource).invented, []);
+  equal('inflated area is caught',
+    auditClaims('Ran a program across 450 hectares', opsSource).invented, ['450 hectares']);
+  equal('truthful room count', auditClaims('Setpoints across 3 rooms', opsSource).invented, []);
+  equal('inflated room count is caught',
+    auditClaims('Setpoints across 30 rooms', opsSource).invented, ['30 rooms']);
 
   // Non-ASCII digits: every claim pattern here is written with ASCII \d, so a
   // CV in ar/hi/ja/zh produced ZERO claims and the gate reported a pass having

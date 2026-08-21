@@ -1,7 +1,7 @@
 // tests/cv-optional-sections.test.mjs — the optional CV sections
-// (competencies, projects, education, certifications, awards, skills) must
-// vanish entirely when they have no entries, rather than rendering a bare
-// section header with nothing under it.
+// (competencies, experience, projects, education, certifications, awards,
+// skills) must vanish entirely when they have no entries, rather than
+// rendering a bare section header with nothing under it.
 //
 // #1879 fixed this for projects; education is the same bug (not every
 // candidate has a degree). Certifications was fixed once directly in
@@ -14,17 +14,23 @@
 // bullets, so payloads legitimately omit it — and like certifications it has
 // no LaTeX marker, so it is html-only. Skills (#2515) is optional for the
 // plainest reason of all: plenty of candidates simply have no skills section.
-// All six are delimited by marker matching rather than parsed, so the
-// boundary pattern is the whole correctness story — see the header comment in
-// cv-sections-core.mjs for the failure modes exercised here.
+// Work experience (#2504) is the last of the seven and the one that sounds
+// wrong until you name the people it is for: students, new graduates, and
+// career changers with no professional history to list, who lead with
+// projects or education instead and would otherwise ship a CV with an empty
+// "Work Experience" title on it. All seven are delimited by marker matching
+// rather than parsed, so the boundary pattern is the whole correctness story
+// — see the header comment in cv-sections-core.mjs for the failure modes
+// exercised here.
 //
-// Skills carries one extra burden the other five do not. It is the LAST
-// section in every shipped template, so it has no following section marker to
-// stop at; with the shared `…|$` boundary, stripping it would run to
-// end-of-file and swallow the closing document skeleton. Its patterns
-// therefore match only up to an explicit `<!-- END -->` / `%%%% END %%%%`
-// sentinel, with NO end-of-input alternative, which produces two behaviours
-// this suite pins down:
+// Skills carries one extra burden the other six do not. It is the LAST
+// section in every shipped template, so it may have no following section marker
+// to stop at; with the shared `…|$` boundary, stripping it would run to
+// end-of-file and swallow the closing document skeleton. Its patterns therefore
+// use the same marker shapes with NO end-of-input alternative — stopping at the
+// `<!-- END -->` / `%%%% END %%%%` sentinel when Skills is last, and at the next
+// section's marker when a custom template puts Skills higher up. That produces
+// two behaviours this suite pins down:
 //
 //   - with the sentinel: the section is stripped and the closing skeleton
 //     survives ("keeps the closing document skeleton" checks);
@@ -33,16 +39,17 @@
 //     valid without the sentinel — cv-templates.mjs requires only
 //     NAME/EXPERIENCE/EDUCATION — so this case must degrade to the cosmetic
 //     bare-header bug, never to a truncated CV.
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { stripEmptySections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
-const EMPTY = { competencies: [], projects: [], education: [], certifications: [], awards: [], skills: [] };
+const EMPTY = { competencies: [], experience: [], projects: [], education: [], certifications: [], awards: [], skills: [] };
 const FULL = {
   competencies: ['Tag'],
+  experience: [{ company: 'E' }],
   projects: [{ name: 'P' }],
   education: [{ degree: 'D' }],
   certifications: [{ title: 'C' }],
@@ -64,8 +71,44 @@ function check(label, actual, expected) {
 const TEMPLATES = [
   { file: 'templates/cv-template.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
   { file: 'templates/resume-template.html', format: 'html', after: '<!-- END -->', hasCertifications: false, hasCompetencies: true },
+  { file: 'templates/cv-template.zh-minimal.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.compact.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.executive.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.jake.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.leadership.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
+  { file: 'templates/cv-template.modern.html', format: 'html', after: '<!-- END -->', hasCertifications: true, hasCompetencies: true },
   { file: 'templates/cv-template.tex', format: 'tex', after: '%%%%  END  %%%%', hasCertifications: false, hasCompetencies: false },
 ];
+
+// --- Coverage guard: no shipped CV template may sit outside the matrix ------
+// The matrix above is hand-written, which is what makes it worth trusting —
+// `hasCertifications: false` is a claim about resume-template.html, not an
+// observation of it, so a template that loses its `<!-- CERTIFICATIONS -->`
+// marker fails instead of being quietly reclassified. The cost of a hand-
+// written list is that it silently goes stale: `cv-template.zh-minimal.html`
+// shipped a full marker set and was never covered here, and #2954 then added
+// five named templates at once. Neither omission could fail a test, because an
+// uncovered template runs no assertions at all.
+//
+// So the list of templates is declared, and membership is checked against
+// disk. A CV template is identified by the `{{EXPERIENCE}}` placeholder that
+// cv-templates.mjs requires of every one (see `required` there), which is why
+// cover-letter-template.html is correctly not swept up. Adding a template
+// without adding it here fails loudly, right here, naming the file.
+const shippedCvTemplates = readdirSync(join(ROOT, 'templates'))
+  .filter((f) => /\.(html|tex)$/.test(f))
+  .filter((f) => readFileSync(join(ROOT, 'templates', f), 'utf-8').includes('{{EXPERIENCE}}'))
+  .map((f) => `templates/${f}`)
+  .sort();
+const covered = new Set(TEMPLATES.map((t) => t.file));
+const uncovered = shippedCvTemplates.filter((f) => !covered.has(f));
+const phantom = [...covered].filter((f) => !shippedCvTemplates.includes(f));
+
+if (uncovered.length === 0) pass(`every shipped CV template is in the matrix (${shippedCvTemplates.length} on disk)`);
+else fail(`shipped CV templates missing from TEMPLATES — they run zero assertions: ${uncovered.join(', ')}`);
+
+if (phantom.length === 0) pass('every template in the matrix exists on disk');
+else fail(`TEMPLATES names templates that are not on disk: ${phantom.join(', ')}`);
 
 for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLATES) {
   const template = readFileSync(join(ROOT, file), 'utf-8');
@@ -79,6 +122,11 @@ for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLA
   const competenciesMarker = '<!-- CORE COMPETENCIES -->'; // html-only; no LaTeX Competencies section exists
   const awardsMarker = format === 'html' ? '<!-- AWARDS -->' : 'AWARDS  %';
   const skillsMarker = format === 'html' ? '<!-- SKILLS -->' : 'Technical Skills  %';
+  // The LaTeX banner reads "Experience" while its \section reads "Work
+  // Experience"; the HTML marker is "WORK EXPERIENCE". They are not the same
+  // string, which is exactly the kind of drift these template-backed
+  // assertions exist to catch.
+  const experienceMarker = format === 'html' ? '<!-- WORK EXPERIENCE -->' : 'Experience  %';
 
   check(`${name}: empty payload removes the projects block`, stripped.includes(projectsMarker), false);
   check(`${name}: empty payload removes the education block`, stripped.includes(educationMarker), false);
@@ -90,9 +138,13 @@ for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLA
   }
   check(`${name}: empty payload removes the awards block`, stripped.includes(awardsMarker), false);
   check(`${name}: empty payload removes the skills block`, stripped.includes(skillsMarker), false);
+  check(`${name}: empty payload removes the work-experience block`, stripped.includes(experienceMarker), false);
   check(`${name}: the trailing sentinel survives`, stripped.includes(after), true);
   check(`${name}: the closing document skeleton survives`, stripped.trimEnd().endsWith(closingSkeleton), true);
-  check(`${name}: {{EXPERIENCE}} is untouched`, stripped.includes('{{EXPERIENCE}}'), true);
+  // Removing the block takes its placeholder with it. Note this is about the
+  // *payload* key being empty, not about the template: cv-templates.mjs still
+  // requires `{{EXPERIENCE}}` to exist in any custom template.
+  check(`${name}: empty payload removes {{EXPERIENCE}} with its block`, stripped.includes('{{EXPERIENCE}}'), false);
 
   // Populated payload must be a no-op — the strip only ever removes.
   check(`${name}: populated payload leaves the template unchanged`,
@@ -143,6 +195,55 @@ for (const { file, format, after, hasCertifications, hasCompetencies } of TEMPLA
     check(`${name}: empty competencies alone keeps awards`, onlyComp.includes(awardsMarker), true);
     check(`${name}: empty competencies alone keeps skills`, onlyComp.includes(skillsMarker), true);
   }
+
+  // Experience empty on its own — the #2504 case. It sits mid-document with
+  // populated sections on both sides, so an over-greedy boundary here does
+  // not truncate a tail, it eats Projects (and in the shipped HTML templates,
+  // everything after it up to the next marker it happens to reach). Assert
+  // every neighbour survives, not just the immediate one.
+  const onlyExp = stripEmptySections(template, { ...FULL, experience: [] }, format);
+  check(`${name}: empty experience alone drops the work-experience marker`, onlyExp.includes(experienceMarker), false);
+  check(`${name}: empty experience alone drops {{EXPERIENCE}}`, onlyExp.includes('{{EXPERIENCE}}'), false);
+  check(`${name}: empty experience alone keeps projects`, onlyExp.includes(projectsMarker), true);
+  check(`${name}: empty experience alone keeps education`, onlyExp.includes(educationMarker), true);
+  check(`${name}: empty experience alone keeps awards`, onlyExp.includes(awardsMarker), true);
+  check(`${name}: empty experience alone keeps skills`, onlyExp.includes(skillsMarker), true);
+  check(`${name}: empty experience alone keeps the closing document skeleton`,
+    onlyExp.trimEnd().endsWith(closingSkeleton), true);
+  if (hasCompetencies) {
+    check(`${name}: empty experience alone keeps competencies`, onlyExp.includes(competenciesMarker), true);
+  }
+  if (hasCertifications) {
+    check(`${name}: empty experience alone keeps certifications`, onlyExp.includes(certificationsMarker), true);
+  }
+
+  // The new-graduate payload the issue is actually about: no experience AND
+  // no competencies, i.e. two adjacent empty sections. Stripping the first
+  // removes the marker the second's boundary would otherwise have stopped at,
+  // so this is where a boundary that names its successor breaks — and it is
+  // the combination a student CV actually produces, not a synthetic one.
+  if (hasCompetencies) {
+    const newGrad = stripEmptySections(template, { ...FULL, competencies: [], experience: [] }, format);
+    check(`${name}: new-grad payload drops competencies`, newGrad.includes(competenciesMarker), false);
+    check(`${name}: new-grad payload drops work experience`, newGrad.includes(experienceMarker), false);
+    check(`${name}: new-grad payload keeps projects`, newGrad.includes(projectsMarker), true);
+    check(`${name}: new-grad payload keeps education`, newGrad.includes(educationMarker), true);
+    check(`${name}: new-grad payload keeps skills`, newGrad.includes(skillsMarker), true);
+    check(`${name}: new-grad payload keeps the closing document skeleton`,
+      newGrad.trimEnd().endsWith(closingSkeleton), true);
+  }
+
+  // An omitted `experience` key must behave identically to an explicit empty
+  // array — a payload built for a candidate with no history is far more
+  // likely to omit the key than to pass [].
+  const withoutExperience = { ...FULL };
+  delete withoutExperience.experience;
+  const omittedExperience = stripEmptySections(template, withoutExperience, format);
+  check(`${name}: omitted experience key removes the work-experience block`,
+    omittedExperience.includes(experienceMarker), false);
+  check(`${name}: omitted experience key keeps projects`, omittedExperience.includes(projectsMarker), true);
+  check(`${name}: omitted experience key keeps the closing document skeleton`,
+    omittedExperience.trimEnd().endsWith(closingSkeleton), true);
 
   // Skills empty on its own: every other populated section survives, and the
   // closing document skeleton is not swallowed with it — Skills is last, so
@@ -238,8 +339,15 @@ check('html: with no sentinel, empty skills is a no-op (fail-safe, bare header b
   withoutSentinel, SKILLS_NO_SENTINEL);
 check('html: with no sentinel, the closing skeleton survives', withoutSentinel.includes('</body></html>'), true);
 
-const TEX_WITH_SENTINEL = '%%%%  Technical Skills  %%%%\nskills\n%%%%  END  %%%%\n\\end{document}';
-const TEX_NO_SENTINEL = '%%%%  Technical Skills  %%%%\nskills\n\\end{document}';
+// Banners are the shipped 28-wide, NOT a minimal `%%%%`. Width matters: the
+// Skills lookahead has no end-of-input branch, so on a template with no
+// following banner the engine backtracks the opening banner's own greedy
+// trailing `%{4,}`. It can only give back enough `%` to fake a boundary when the
+// banner is wider than 8, so a narrow fixture passes while the real template
+// gets a stray `%%%%` left behind. See TEX_END_SENTINEL in cv-sections-core.mjs.
+const TEX_BANNER = '%'.repeat(28);
+const TEX_WITH_SENTINEL = `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}\nskills\n${TEX_BANNER}  END  ${TEX_BANNER}\n\\end{document}`;
+const TEX_NO_SENTINEL = `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}\nskills\n\\end{document}`;
 
 const texWith = stripEmptySections(TEX_WITH_SENTINEL, EMPTY, 'tex');
 check('tex: with the sentinel, empty skills is stripped', texWith.includes('Technical Skills'), false);
@@ -248,6 +356,64 @@ check('tex: with the sentinel, \\end{document} survives', texWith.includes('\\en
 const texWithout = stripEmptySections(TEX_NO_SENTINEL, EMPTY, 'tex');
 check('tex: with no sentinel, empty skills is a no-op (fail-safe)', texWithout, TEX_NO_SENTINEL);
 check('tex: with no sentinel, \\end{document} survives', texWithout.includes('\\end{document}'), true);
+// The two checks above are narrowing diagnostics under the exact-equality check
+// on the previous line, not independent coverage: that one already pins the
+// whole template byte for byte, so anything these catch it catches too. They
+// earn their place by naming WHICH half of the fail-safe broke, so a regression
+// reports "half-eaten banner" instead of only a full-template diff.
+// The substring is the right probe for that: when the boundary loses its `^`
+// anchor the engine backtracks the opening banner's own greedy trailing `%{4,}`
+// and consumes the heading with it, leaving `%%%%\nskills\n\end{document}`. The
+// heading text is gone in that state, so this assertion goes red.
+check('tex: with no sentinel, no half-eaten banner is left behind',
+  texWithout.includes('Technical Skills'), true);
+
+// --- Skills is not always the last section ---------------------------------
+// A custom template may put Skills above Education. The Skills boundary must
+// then stop at the NEXT section's marker, not run all the way to the trailing
+// sentinel: matching the sentinel only would delete every populated section in
+// between along with the empty Skills header — silent data loss in a CV that
+// still has an education block to show. Both formats, because both boundaries
+// have the same shape.
+
+const SKILLS_NOT_LAST_HTML = [
+  '<html><body><div>',
+  '<!-- SKILLS -->',
+  '<div>{{SKILLS}}</div>',
+  '<!-- EDUCATION -->',
+  '<div>keep my degree</div>',
+  '<!-- END -->',
+  '</div></body></html>',
+].join('\n');
+
+const skillsNotLast = stripEmptySections(
+  SKILLS_NOT_LAST_HTML, { ...FULL, skills: [] }, 'html');
+check('html: skills above education — the empty skills block goes',
+  skillsNotLast.includes('<!-- SKILLS -->'), false);
+check('html: skills above education — the populated education block survives',
+  skillsNotLast.includes('keep my degree'), true);
+check('html: skills above education — the sentinel survives',
+  skillsNotLast.includes('<!-- END -->'), true);
+check('html: skills above education — the closing skeleton survives',
+  skillsNotLast.trimEnd().endsWith('</div></body></html>'), true);
+
+const SKILLS_NOT_LAST_TEX = [
+  `${TEX_BANNER}  Technical Skills  ${TEX_BANNER}`,
+  '{{SKILLS}}',
+  `${TEX_BANNER}  Education  ${TEX_BANNER}`,
+  'keep my degree',
+  `${TEX_BANNER}  END  ${TEX_BANNER}`,
+  '\\end{document}',
+].join('\n');
+
+const texSkillsNotLast = stripEmptySections(
+  SKILLS_NOT_LAST_TEX, { ...FULL, skills: [] }, 'tex');
+check('tex: skills above education — the empty skills block goes',
+  texSkillsNotLast.includes('Technical Skills'), false);
+check('tex: skills above education — the populated education block survives',
+  texSkillsNotLast.includes('keep my degree'), true);
+check('tex: skills above education — \\end{document} survives',
+  texSkillsNotLast.includes('\\end{document}'), true);
 
 // Stripping one section must not depend on the other still being present: a
 // lookahead naming `<!-- EDUCATION -->` breaks once education is removed.

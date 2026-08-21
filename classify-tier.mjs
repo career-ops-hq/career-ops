@@ -16,6 +16,8 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { validateFlags } from './lib/cli-flags.mjs';
+
 /**
  * Classifies a job title into exactly one seniority tier.
  *
@@ -163,16 +165,28 @@ export default classifyTier;
 const isDirect = process.argv[1] &&
   (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)));
 
+// The title is the only positional, so `--help` was classified as a job title
+// and answered `mid` at exit 0 (#2852). Validated up front via
+// lib/cli-flags.mjs's validateFlags() (#2775), which also rejects unrecognized
+// flags before --help so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--test', '--help', '-h'];
+
+const USAGE = `Usage:
+  node classify-tier.mjs "<job-title>"   # print the seniority tier
+  node classify-tier.mjs --test          # run the inline test cases
+  node classify-tier.mjs --help          # show this message
+
+Tiers: intern, entry, mid, senior. Defaults to mid when no keyword matches.`;
+
 if (isDirect) {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE);
   if (args.includes('--test')) {
     runTests();
   } else if (args.length > 0) {
     console.log(classifyTier(args[0]));
   } else {
-    console.log('Usage:');
-    console.log('  node classify-tier.mjs "<job-title>"');
-    console.log('  node classify-tier.mjs --test');
+    console.log(USAGE);
   }
 }
 
