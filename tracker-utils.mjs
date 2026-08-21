@@ -18,7 +18,15 @@ import * as yaml from 'js-yaml';
 // copies drift — pipeline-lock learned that Windows answers mkdir/rm with
 // EPERM/EACCES/EBUSY under contention while this file still treated anything
 // but EEXIST as fatal, killing a writer and losing its item.
-import { isMkdirContention, isRmContention, rmLockArtifactSync } from './pipeline-lock.mjs';
+import {
+  isMkdirContention,
+  isRmContention,
+  rmLockArtifactSync,
+  lockRecoveryVerdict,
+  RECOVER_STALE,
+  RECOVER_VANISHED,
+  RECOVER_LIVE,
+} from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -268,44 +276,18 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
+export { RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE, lockRecoveryVerdict };
+
 /**
  * Decide whether an existing lock can be safely recovered.
  *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * That age fallback needs a floor. Two directories are ownerless by
- * construction, not by accident: a lock between its `mkdirSync` and its
- * `owner.json` write, and the recover guard, which never carries `owner.json`
- * at all. Judging those on `age > staleMs` alone lets a caller with an
- * aggressive staleMs delete a directory created microseconds ago — either
- * stealing a winner's lock inside its acquisition window, or evicting a live
- * guard and putting two callers inside the decide-then-delete window the guard
- * exists to serialize. OWNERLESS_GRACE_MS is a lower bound on that patience,
- * never a cap: a larger caller staleMs still wins, and a genuinely abandoned
- * directory still ages out, so a crash while holding the guard cannot disable
- * recovery for good.
- *
+ * @deprecated Use `lockRecoveryVerdict` from `pipeline-lock.mjs` instead.
  * @param {string} lockDir - Directory that represents the active lock.
  * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
  * @returns {boolean} True when the caller may remove and recreate the lock.
  */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch (err) {
-    // Mirrors pipeline-lock: only ENOENT means "vanished, nothing to
-    // recover". A Windows EPERM/EBUSY mid-flight stat is "could not look",
-    // and treating it as recoverable lets a caller delete a live lock
-    // created microseconds ago (#2777, third face).
-    return err?.code === 'ENOENT';
-  }
+export function lockCanRecover(lockDir, staleMs) {
+  return lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE;
 }
 
 /**
@@ -462,20 +444,25 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
         // the guard is mid-flight right now, and reasoning about the age of a
         // directory we cannot even stat reliably would evict a live guard.
-        if (guardErr.code === 'EEXIST' && lockCanRecover(recoverGuardDir, staleMs)) {
+        if (guardErr.code === 'EEXIST' && lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
           rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
+          const verdict = lockRecoveryVerdict(lockDir, staleMs);
+          if (verdict === RECOVER_STALE) {
             if (rmLockArtifactSync(lockDir)) {
               staleRecovered = true;
               continue;
             }
             // rm hit contention: another process is touching the stale lock at
             // this instant — back off instead of treating the collision as fatal.
+          } else if (verdict === RECOVER_VANISHED) {
+            // Nothing was there when inspected: do NOT delete (another process
+            // may be mid-create right now). Retry acquisition immediately.
+            continue;
           }
         } finally {
           rmLockArtifactSync(recoverGuardDir);

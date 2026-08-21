@@ -28,6 +28,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
@@ -165,7 +166,7 @@ function slugify(text) {
 }
 
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localToday();
 }
 
 /**

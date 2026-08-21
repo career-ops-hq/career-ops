@@ -19,6 +19,7 @@ import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { localToday } from './lib/local-today.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -58,11 +59,11 @@ function readSpendTier() {
 
 function spendTierToModel(tier) {
   switch (tier) {
-    case 'economy': return 'gemini-2.5-flash-lite';
-    case 'premium': return 'gemini-2.5-pro';
+    case 'economy': return 'gemini-3.6-flash';
+    case 'premium': return 'gemini-3.5-pro';
     case 'standard':
     default:
-      return 'gemini-2.5-flash';
+      return 'gemini-3.6-flash';
   }
 }
 
@@ -270,7 +271,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
     const num = await nextReportNumber();
-    const today = new Date().toISOString().split('T')[0];
+    const today = localToday();
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
     const reportPath = join(PATHS.reports, filename);

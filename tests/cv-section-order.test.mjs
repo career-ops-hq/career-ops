@@ -742,6 +742,8 @@ try {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
     mkdirSync(join(sandbox, 'data'), { recursive: true });
     writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
@@ -862,6 +864,8 @@ export const chromium = {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
     // The external workspace: tracker, profile, CV and documents all live here,
     // and NOT beside the script. This is the shape CAREER_OPS_TRACKER creates.

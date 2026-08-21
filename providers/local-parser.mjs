@@ -92,7 +92,7 @@ function resolveInsideRoot(rawPath) {
 function resolveCommand(command) {
   const value = String(command || '');
   if (!value) throw new Error('local-parser: parser.command is required');
-  if (!value.includes('/') && ALLOWED_INTERPRETERS.has(value)) return value;
+  if (!value.includes('/') && !value.includes('\\') && ALLOWED_INTERPRETERS.has(value)) return value;
   return resolveInsideRoot(value);
 }
 
@@ -103,7 +103,7 @@ function resolveInvocation(entry) {
   const args = buildParserArgs(entry);
   const scriptPath = getParserScriptPath(entry);
 
-  const usesInterpreter = !rawCommand.includes('/') && ALLOWED_INTERPRETERS.has(rawCommand);
+  const usesInterpreter = !rawCommand.includes('/') && !rawCommand.includes('\\') && ALLOWED_INTERPRETERS.has(rawCommand);
   if (usesInterpreter) {
     // A whitelisted interpreter must run an in-repo script as its FIRST argument.
     // Anything before the script is an interpreter option (node --eval / --require,

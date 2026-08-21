@@ -30,8 +30,14 @@ import { randomUUID } from 'crypto';
 // Fourth copy of the directory-lock protocol in this repo. #2984 patched two of
 // them and declared "one definition, no sibling drift"; this one and
 // followup-seed.mjs were still carrying all three faces of #2777. The
-// classifiers live in pipeline-lock.mjs so the next finding lands once.
-import { isMkdirContention, rmLockArtifactSync } from './pipeline-lock.mjs';
+import {
+  isMkdirContention,
+  rmLockArtifactSync,
+  lockRecoveryVerdict,
+  RECOVER_STALE,
+  RECOVER_VANISHED,
+  RECOVER_LIVE,
+} from './pipeline-lock.mjs';
 
 const DEFAULT_STALE_MS = 30_000;
 const DEFAULT_RETRY_MS = 80;
@@ -88,21 +94,13 @@ function processIsAlive(pid) {
   } catch (err) {
     return err?.code === 'EPERM'; // exists, just not signalable by this user
   }
+  return false;
 }
 
-// Conservative: a lock whose recorded owner is still running is never stale,
-// however old it is. Age is the fallback only when there's no readable owner.
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch (err) {
-    // Only a vanished directory means "nothing to recover". Any other stat
-    // failure — a Windows EPERM/EBUSY mid-flight — is "could not look", and
-    // answering "recoverable" to that deletes a LIVE lock (#2777, third face).
-    return err?.code === 'ENOENT';
-  }
+export { RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE, lockRecoveryVerdict };
+
+export function lockCanRecover(lockDir, staleMs) {
+  return lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE;
 }
 
 /**
@@ -155,16 +153,19 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
-        if (lockCanRecover(recoverGuardDir, staleMs)) {
+        if (lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
           rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
+          const verdict = lockRecoveryVerdict(lockDir, staleMs);
+          if (verdict === RECOVER_STALE) {
             rmLockArtifactSync(lockDir);
             continue; // retry acquisition immediately
+          } else if (verdict === RECOVER_VANISHED) {
+            continue;
           }
         } finally {
           rmLockArtifactSync(recoverGuardDir);
