@@ -18,7 +18,9 @@ import * as yaml from 'js-yaml';
 // copies drift — pipeline-lock learned that Windows answers mkdir/rm with
 // EPERM/EACCES/EBUSY under contention while this file still treated anything
 // but EEXIST as fatal, killing a writer and losing its item.
-import { isMkdirContention, isRmContention, rmLockArtifactSync } from './pipeline-lock.mjs';
+import {
+  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
+} from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -338,7 +340,19 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   let attempts = 0;
   let staleRecovered = false;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
+  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // There is no separate maxWaitMs knob here, so the ceiling is the same
+  // multiple of timeoutMs the definition defaults to.
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+  });
+  for (;;) {
+    if (holderStillWedged() || ceilingReached()) break;
     attempts++;
     try {
       mkdirSync(lockDir);
@@ -445,6 +459,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       // not failure — treating it as fatal is how a concurrent writer dies and
       // its write is lost (#2777, measured on windows-latest).
       if (!isMkdirContention(err)) throw err;
+      noteWaiting();
 
       let hasRecoverGuard = false;
       try {
@@ -482,7 +497,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         }
       }
 
-      await sleep(retryMs);
+      await sleep(backoffMs());
     }
   }
 
