@@ -1021,6 +1021,55 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
 }
 
 /**
+ * Does the COMMITTED system tree differ between `upstreamRef` and HEAD?
+ *
+ * check() needs this to tell two apart-shaped situations that both look like
+ * "HEAD ≠ upstream main":
+ *
+ *   1. apply() ran successfully at the current version. It checks out
+ *      upstream content and commits it as a NEW local commit, so HEAD can
+ *      never equal upstream main's SHA again — SHA inequality alone is the
+ *      steady state of every healthy install, not drift.
+ *   2. Upstream changed system files this install has not adopted. That is
+ *      real drift worth surfacing (#2630).
+ *
+ * Only content settles it: a ref-to-ref diff scoped to the system paths.
+ * Compared against the COMMITTED state (HEAD), deliberately not the working
+ * tree — uncommitted local edits to system files are the preserved-edit case
+ * apply() already handles with .bak + messaging (#2337), not an update
+ * waiting to happen.
+ *
+ * `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line ending
+ * must not read as drift. Installs that last synced before `.gitattributes`
+ * was introduced carry pre-renormalization blobs that differ from upstream by
+ * line endings alone (#2817 — same rationale as locallyModifiedSystemFiles).
+ *
+ * Failure is conservative by design: an unreadable ref or a git error throws
+ * inside the diff and reads as drift, which preserves the pre-fix behavior
+ * whenever content cannot be verified.
+ *
+ * @param {string[]} systemPaths - Pathspecs scoping the diff (SYSTEM_PATHS).
+ * @param {string} [upstreamRef='FETCH_HEAD'] - Ref holding upstream content.
+ * @param {{git?: (...args: string[]) => string}} [ctx] - Test seam: override
+ *   the git runner (defaults to the module-level git() against ROOT).
+ * @returns {boolean} True when committed system content differs (or cannot
+ *   be proven identical); false when the trees match.
+ */
+export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  if (!systemPaths || systemPaths.length === 0) return false;
+  try {
+    // --quiet: exit 0 when identical; exit 1 when they differ, which
+    // execFileSync surfaces as a throw — indistinguishable here from any
+    // other failure, and every throw lands on the conservative answer.
+    runGit('diff', '--quiet', '--ignore-cr-at-eol', upstreamRef, 'HEAD', '--', ...systemPaths);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1469,7 +1518,6 @@ async function check() {
   if (remoteRef !== null) {
     try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
   }
-  const systemTreeDrift = Boolean(localCommit && remoteCommit && localCommit !== remoteCommit);
 
   if (rawVersion !== null) {
     try {
@@ -1511,6 +1559,26 @@ async function check() {
     remote = releaseVersion;
   } else if (releaseVersion && compareVersions(releaseVersion, remote) > 0) {
     remote = releaseVersion;
+  }
+
+  // SHA inequality alone is NOT drift. apply() commits upstream content as a
+  // NEW local commit on the install's own history, so after any successful
+  // update HEAD never equals upstream main again — treating SHA mismatch as
+  // drift made every post-apply check report system-files-changed forever.
+  // Settle it on CONTENT instead: fetch upstream (exactly what apply() does)
+  // and diff the committed system tree (#2630's same-version drift intent).
+  // Computed after the offline early-return above, so a machine with no
+  // network never pays for a doomed git fetch. Fetch/diff failure stays
+  // conservative (drift reported), matching the failed-commit-lookup policy
+  // at the top of this function.
+  let systemTreeDrift = false;
+  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+    try {
+      gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
+      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+    } catch {
+      systemTreeDrift = true;
+    }
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
