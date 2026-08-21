@@ -802,7 +802,7 @@ process_offer() {
           -- "$current_url" 2>/dev/null || curl_status=$?
         redirect_location=""
         if [[ "$curl_status" -eq 47 ]]; then
-          redirect_location="$(awk 'tolower($1) == "location:" { $1=""; sub(/^[[:space:]]+/, ""); value=$0 } END { print value }' "$redirect_headers")"
+          redirect_location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ { value=$0; sub(/^[^:]*:[[:space:]]*/, "", value) } END { print value }' "$redirect_headers")"
         fi
         rm -f "$redirect_headers"
         if [[ "$curl_status" -eq 47 && -n "$redirect_location" ]]; then

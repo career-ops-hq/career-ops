@@ -62,11 +62,6 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
-  // .gitattributes governs how every other path below is written to disk, and
-  // `apply` checks paths out one at a time in this order: if it landed later,
-  // everything before it would be written under the old core.autocrlf setting
-  // on an existing install, silently (once text=auto is live, git status stays
-  // clean and only a second update would repair it).
   '.gitattributes',
   'modes/README.md',
   'modes/_shared.md',
@@ -160,6 +155,9 @@ const SYSTEM_PATHS = [
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
   'lib/latex-escape.mjs',
+  'scan-hn.mjs',
+  'scripts/check-syntax.mjs',
+  'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
   'lib/context-budget.test.mjs',
@@ -208,8 +206,6 @@ const SYSTEM_PATHS = [
   'tests/',
   'user-agent.mjs',
   'doctor.mjs',
-  // doctor.mjs imports this one: an install that receives the new doctor
-  // without it would crash on startup.
   'jsonc-parse.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
@@ -494,6 +490,32 @@ export function localUserPaths(root = ROOT) {
     if (path.split(/[\\/]/).includes('..')) {
       reject(path, 'paths must stay inside the repo');
     }
+    // Canonical spelling, required BEFORE the collision check below.
+    //
+    // That check compares strings exactly (`path === sys`), and
+    // userLayerViolations() later compares against git's changed-path format,
+    // which is always canonical. A non-canonical spelling therefore matches
+    // NEITHER: `./merge-tracker.mjs` sails past the collision check, and is
+    // never recognised as the file it names when the safety check runs. The
+    // declaration silently protects nothing while the updater overwrites the
+    // file — the data loss this feature exists to prevent, reachable from a
+    // plausible typo.
+    //
+    // Rejected rather than normalised, deliberately. Normalising would accept
+    // several spellings for one path and leave this file disagreeing with what
+    // git reports; refusing keeps one path to one spelling, and says so.
+    if (path.includes('\\')) {
+      reject(path, 'paths use forward slashes, matching how git reports them');
+    }
+    // A single trailing slash is the documented directory-prefix form, so it is
+    // dropped before the segment check rather than read as an empty segment.
+    const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+    if (segments.includes('')) {
+      reject(path, 'paths must not contain an empty segment (a repeated separator)');
+    }
+    if (segments.includes('.')) {
+      reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
+    }
     const collision = SYSTEM_PATHS.find((sys) =>
       sys.endsWith('/') ? path.startsWith(sys) : path === sys,
     );
@@ -735,19 +757,41 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-function gitStatusEntries() {
-  const status = git('status', '--porcelain');
+// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
+// first `--porcelain` line of a worktree/index change begins with a space
+// (` M path`). Trimming rewrites it into `M path`, and the path parse below
+// then drops the first character — a mangled path that no longer matches the
+// real user file in the safety checks. gitRawIn keeps the leading space.
+//
+// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
+// be unit-tested without a real repo: Windows git terminates the last
+// `--porcelain` line with CRLF (its native EOL), and without stripping the
+// trailing CR the sliced `path` would carry a phantom `\r` that matches
+// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+export function parsePorcelainStatus(status) {
   if (!status) return [];
-
-  return status.split('\n')
+  return status
+    .split('\n')
     .filter(Boolean)
-    .map(line => ({
-      code: line.slice(0, 2),
-      path: line.slice(3),
-    }));
+    .map((line) => {
+      // git never writes a CR inside a path, so a line-terminal '\r' is always
+      // the CRLF half of the line ending, never a path character.
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
+      return {
+        code: clean.slice(0, 2),
+        path: clean.slice(3),
+      };
+    });
+}
+
+export function gitStatusEntries(root = ROOT) {
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
 }
 
 export function extractArrayFromSource(source, name) {
+  source = source.replace(/(['"])(?:\\.|(?!\1)[\s\S])*\1|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g, (token) => (
+    /^['"]/.test(token) ? token : token.replace(/[^\n]/g, ' ')
+  ));
   const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
   if (!match) return [];
   return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
@@ -764,6 +808,26 @@ function mergePathLists(...lists) {
     }
   }
   return merged;
+}
+
+function normalizeRepoPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function pathMatchesManifest(file, entry) {
+  const normalizedFile = normalizeRepoPath(file);
+  const normalizedEntry = normalizeRepoPath(entry).replace(/\/$/, '');
+  return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  if (remote.size === 0) return [];
+  return [...localFiles]
+    .map(normalizeRepoPath)
+    .filter((file) => !remote.has(file))
+    .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
@@ -846,6 +910,55 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
 }
 
 /**
+ * Does the COMMITTED system tree differ between `upstreamRef` and HEAD?
+ *
+ * check() needs this to tell two apart-shaped situations that both look like
+ * "HEAD ≠ upstream main":
+ *
+ *   1. apply() ran successfully at the current version. It checks out
+ *      upstream content and commits it as a NEW local commit, so HEAD can
+ *      never equal upstream main's SHA again — SHA inequality alone is the
+ *      steady state of every healthy install, not drift.
+ *   2. Upstream changed system files this install has not adopted. That is
+ *      real drift worth surfacing (#2630).
+ *
+ * Only content settles it: a ref-to-ref diff scoped to the system paths.
+ * Compared against the COMMITTED state (HEAD), deliberately not the working
+ * tree — uncommitted local edits to system files are the preserved-edit case
+ * apply() already handles with .bak + messaging (#2337), not an update
+ * waiting to happen.
+ *
+ * `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line ending
+ * must not read as drift. Installs that last synced before `.gitattributes`
+ * was introduced carry pre-renormalization blobs that differ from upstream by
+ * line endings alone (#2817 — same rationale as locallyModifiedSystemFiles).
+ *
+ * Failure is conservative by design: an unreadable ref or a git error throws
+ * inside the diff and reads as drift, which preserves the pre-fix behavior
+ * whenever content cannot be verified.
+ *
+ * @param {string[]} systemPaths - Pathspecs scoping the diff (SYSTEM_PATHS).
+ * @param {string} [upstreamRef='FETCH_HEAD'] - Ref holding upstream content.
+ * @param {{git?: (...args: string[]) => string}} [ctx] - Test seam: override
+ *   the git runner (defaults to the module-level git() against ROOT).
+ * @returns {boolean} True when committed system content differs (or cannot
+ *   be proven identical); false when the trees match.
+ */
+export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  if (!systemPaths || systemPaths.length === 0) return false;
+  try {
+    // --quiet: exit 0 when identical; exit 1 when they differ, which
+    // execFileSync surfaces as a throw — indistinguishable here from any
+    // other failure, and every throw lands on the conservative answer.
+    runGit('diff', '--quiet', '--ignore-cr-at-eol', upstreamRef, 'HEAD', '--', ...systemPaths);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -903,14 +1016,28 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  // Without a merge-base (unrelated histories, a shallow clone) fall back to
-  // HEAD: that still catches uncommitted local edits, which is the common case,
-  // and simply misses local edits already committed.
+  // An updater commit is the installed system snapshot. On a later update,
+  // using the original merge-base would mistake the previous update's files
+  // for user edits. Keep the merge-base fallback for installations without a
+  // recorded updater commit.
   let baseline = null;
   try {
-    baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+    const updaterCommit = runGit(
+      'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD',
+    ).trim();
+    if (updaterCommit) {
+      runGit('merge-base', '--is-ancestor', updaterCommit, 'HEAD');
+      baseline = updaterCommit;
+    }
   } catch {
     baseline = null;
+  }
+  if (!baseline) {
+    try {
+      baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+    } catch {
+      baseline = null;
+    }
   }
 
   const changedLocally = new Set(diffNames(baseline || 'HEAD'));
@@ -1172,6 +1299,8 @@ async function check() {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
+  let localCommit = '';
+  let remoteCommit = '';
 
   // Use curl instead of fetch() so the check works inside the Claude Code
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
@@ -1183,6 +1312,20 @@ async function check() {
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
   ]);
+
+  // VERSION is release metadata, not a complete description of the system
+  // tree. Compare the installed commit with main as well, so same-version
+  // manifest/file drift is visible (#2630). A failed commit lookup is
+  // deliberately conservative: version checks still work offline/behind a
+  // restricted git transport.
+  try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
+  const remoteRef = await curlGet('https://api.github.com/repos/santifer/career-ops/git/ref/heads/main', [
+    '--header', 'Accept: application/vnd.github+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (remoteRef !== null) {
+    try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
+  }
 
   if (rawVersion !== null) {
     try {
@@ -1226,8 +1369,28 @@ async function check() {
     remote = releaseVersion;
   }
 
-  if (compareVersions(local, remote) >= 0) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
+  // SHA inequality alone is NOT drift. apply() commits upstream content as a
+  // NEW local commit on the install's own history, so after any successful
+  // update HEAD never equals upstream main again — treating SHA mismatch as
+  // drift made every post-apply check report system-files-changed forever.
+  // Settle it on CONTENT instead: fetch upstream (exactly what apply() does)
+  // and diff the committed system tree (#2630's same-version drift intent).
+  // Computed after the offline early-return above, so a machine with no
+  // network never pays for a doomed git fetch. Fetch/diff failure stays
+  // conservative (drift reported), matching the failed-commit-lookup policy
+  // at the top of this function.
+  let systemTreeDrift = false;
+  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+    try {
+      gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
+      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+    } catch {
+      systemTreeDrift = true;
+    }
+  }
+
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
@@ -1235,6 +1398,9 @@ async function check() {
     status: 'update-available',
     local,
     remote,
+    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    local_commit: localCommit || undefined,
+    remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
 }
@@ -1570,6 +1736,37 @@ async function apply() {
     }
     if (skippedPaths.length > 0) {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
+    }
+
+    // All tracked system files need the same stale-file treatment. In
+    // particular, root-level system files removed upstream (for example an
+    // old plugins-registry.json) are not covered by a directory-only prune.
+    // Never infer a deletion from an empty/failed tree lookup, and never touch
+    // untracked files or paths explicitly classified as user data (#2532).
+    try {
+      let remoteFiles = new Set();
+      try {
+        remoteFiles = new Set(
+          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+            .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+        );
+      } catch {
+        // A failed tree lookup is not evidence that the target is empty.
+      }
+      if (remoteFiles.size > 0) {
+        const localFiles = git('ls-files').split('\n').filter(Boolean);
+        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+          try {
+            unlinkSync(join(ROOT, f));
+            updated.push(f);
+            console.log(`Pruned stale system file: ${f}`);
+          } catch (err) {
+            console.error(`Failed to prune stale system file ${f}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Stale system-file prune step failed: ${err.message}`);
     }
 
     // tests/ and test-fixtures/ are both auto-discovered and EXECUTED

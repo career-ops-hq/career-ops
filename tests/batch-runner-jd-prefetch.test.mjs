@@ -17,9 +17,9 @@
 //
 // Tests extract the real bash snippets from batch-runner.sh so the tests and
 // the implementation can never drift apart.
-import { pass, fail, getBash } from './helpers.mjs';
+import { pass, fail, rmSync, getBash } from './helpers.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -635,16 +635,94 @@ if (!wordCountMatch) {
         fail(`curl absent: exit=${exit6} stderr=${JSON.stringify(stderr6)} size=${size6}`);
       }
 
+      // A public two-hop redirect must be followed manually because curl is
+      // capped at --max-redirs 0. Exercise both Location header spellings:
+      // `Location:https://...` and `Location: https://...`.
+      const publicRedirectTrace = join(work, 'public-redirect-trace.txt');
+      const publicRedirectFile = join(work, 'public-redirect.html');
+      const publicRedirectHtml = '<p>' + 'word '.repeat(120).trim() + '</p>';
+      const publicRedirectScript = join(work, 'case-redirect-public.sh');
+      writeFileSync(publicRedirectScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(publicRedirectFile)}`,
+        `> "$jd_file"`,
+        `trace_file=${JSON.stringify(publicRedirectTrace)}`,
+        `: > "$trace_file"`,
+        'curl() {',
+        '  local output_arg="" header_arg="" request_url=""',
+        '  while [[ $# -gt 0 ]]; do',
+        '    case "$1" in',
+        '      --output|-o|--dump-header) if [[ "$1" == "--dump-header" ]]; then header_arg="$2"; else output_arg="$2"; fi; shift 2 ;;',
+        '      --) request_url="$2"; shift 2 ;;',
+        '      *) shift ;;',
+        '    esac',
+        '  done',
+        '  printf "%s\\n" "$request_url" >> "$trace_file"',
+        '  case "$request_url" in',
+        '    https://example.com/job) printf "HTTP/1.1 302 Found\\nLocation:https://example.com/hop1\\n\\n" > "$header_arg"; return 47 ;;',
+        '    https://example.com/hop1) printf "HTTP/1.1 302 Found\\nLocation: https://example.com/final\\n\\n" > "$header_arg"; return 47 ;;',
+        `    https://example.com/final) printf '%s' ${JSON.stringify(publicRedirectHtml)} > "$output_arg"; return 0 ;;`,
+        '    *) return 1 ;;',
+        '  esac',
+        '}',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://example.com/job"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+        `printf 'RESULT:%s|%s|%s\\n' "$jd_prefetch_words" "$(wc -c < "$jd_file")" "$(wc -l < "$trace_file")"`,
+      ].join('\n'));
+      const publicRedirectResult = execFileSync(bash, [publicRedirectScript], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [, publicWords, publicSize, publicCalls] = publicRedirectResult.match(/RESULT:\s*(\d+)\|\s*(\d+)\|\s*(\d+)/).map(Number);
+      const publicContent = readFileSync(publicRedirectFile, 'utf-8');
+      if (publicWords >= 80 && publicSize > 0 && publicCalls === 3 && !/<[^>]+>/.test(publicContent)) {
+        pass(`public two-hop redirect: curl called ${publicCalls} times and final rich JD retained (${publicWords} words)`);
+      } else {
+        fail(`public two-hop redirect: expected 3 calls and rich content, got calls=${publicCalls} words=${publicWords} size=${publicSize}`);
+      }
+
       // A redirect to a private destination must be blocked before the second
       // curl request is made.
-      const redirectScript = join(work, 'case-redirect-private.sh');
-      writeFileSync(redirectScript, buildScript('', 0, 'http://127.0.0.1/private'));
-      const redirectResult = execFileSync(bash, [redirectScript], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [, redirectSize] = redirectResult.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
-      if (redirectSize === 0) {
-        pass('redirect to private destination: second hop blocked → WebFetch fallback fires');
+      const privateRedirectTrace = join(work, 'private-redirect-trace.txt');
+      const privateRedirectFile = join(work, 'private-redirect.html');
+      const privateRedirectScript = join(work, 'case-redirect-private.sh');
+      writeFileSync(privateRedirectScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(privateRedirectFile)}`,
+        `> "$jd_file"`,
+        `trace_file=${JSON.stringify(privateRedirectTrace)}`,
+        `: > "$trace_file"`,
+        'curl() {',
+        '  local output_arg="" header_arg="" request_url=""',
+        '  while [[ $# -gt 0 ]]; do',
+        '    case "$1" in',
+        '      --output|-o|--dump-header) if [[ "$1" == "--dump-header" ]]; then header_arg="$2"; else output_arg="$2"; fi; shift 2 ;;',
+        '      --) request_url="$2"; shift 2 ;;',
+        '      *) shift ;;',
+        '    esac',
+        '  done',
+        '  printf "%s\\n" "$request_url" >> "$trace_file"',
+        '  if [[ "$request_url" == "https://example.com/job" ]]; then printf "HTTP/1.1 302 Found\\nLocation:http://127.0.0.1/private\\n\\n" > "$header_arg"; return 47; fi',
+        '  return 1',
+        '}',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://example.com/job"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+        `printf 'RESULT:%s|%s|%s\\n' "$jd_prefetch_words" "$(wc -c < "$jd_file")" "$(wc -l < "$trace_file")"`,
+      ].join('\n'));
+      const privateRedirectResult = execFileSync(bash, [privateRedirectScript], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [, privateWords, privateSize, privateCalls] = privateRedirectResult.match(/RESULT:\s*(\d+)\|\s*(\d+)\|\s*(\d+)/).map(Number);
+      const privateTrace = readFileSync(privateRedirectTrace, 'utf-8');
+      if (privateWords === 0 && privateSize === 0 && privateCalls === 1 && !privateTrace.includes('127.0.0.1')) {
+        pass('redirect to private destination: private second hop was blocked before curl → WebFetch fallback fires');
       } else {
-        fail(`redirect to private destination: expected empty file, got size=${redirectSize}`);
+        fail(`redirect to private destination: expected one public request and no private hop, got calls=${privateCalls} words=${privateWords} size=${privateSize}`);
       }
 
       // Cases 9-10: SSRF guard blocks loopback and cloud-metadata URLs before curl fires.

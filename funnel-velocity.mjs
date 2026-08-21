@@ -42,13 +42,20 @@ import { computeFunnel, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
 import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
-const args = process.argv.slice(2);
-const summaryMode = args.includes('--summary');
-const selfTestMode = args.includes('--self-test');
+const KNOWN_FLAGS = ['--summary', '--self-test', '--benchmarks', '--help', '-h'];
+const VALUE_FLAGS = ['--benchmarks'];
+
+const USAGE = `Usage:
+  node funnel-velocity.mjs                       # JSON report
+  node funnel-velocity.mjs --summary             # human-readable report
+  node funnel-velocity.mjs --benchmarks <path>   # override the benchmark YAML file
+  node funnel-velocity.mjs --self-test           # run the built-in fixtures
+  node funnel-velocity.mjs --help|-h              # show this message`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // `web` sits alongside `set-status` because it is the same class of event: a
@@ -673,17 +680,17 @@ function selfTest() {
 }
 
 // --- Main ---
-function flagValue(name) {
-  const i = args.indexOf(name);
-  return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
-}
-
 function main() {
+  const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+  const summaryMode = args.includes('--summary');
+  const selfTestMode = args.includes('--self-test');
   if (selfTestMode) { selfTest(); return; }
 
   let benchmarks;
   try {
-    benchmarks = loadBenchmarks(flagValue('--benchmarks')).benchmarks;
+    benchmarks = loadBenchmarks(flagValue(args, '--benchmarks')).benchmarks;
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

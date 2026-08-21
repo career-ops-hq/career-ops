@@ -27,6 +27,7 @@ import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -846,8 +847,29 @@ async function validateUrlSecurity(urlString) {
 // repo convention is worth more here than covering a path nothing takes.
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
+// An unrecognized or mistyped flag (e.g. `--min-report` for `--min-reports`)
+// used to fall through silently: the aggregate branch just ran with its
+// default MIN_REPORTS, reporting a gap map for a threshold nobody asked for.
+// Handled via lib/cli-flags.mjs's validateFlags() (#2775), same shape as
+// doctor.mjs (#2874) — checked before --self-test/--url-text/--min-reports
+// are read, and before --help, so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
+
+// Only --min-reports and --url-text take their value as the next argv token.
+const VALUE_FLAGS = ['--min-reports', '--url-text'];
+
+const USAGE = `Usage:
+  node upskill.mjs                        # aggregate skill-gap map (JSON)
+  node upskill.mjs --summary              # human-readable table
+  node upskill.mjs --min-reports <n>      # minimum scored reports required (default 5)
+  node upskill.mjs --url-text <url|path>  # targeted gap analysis vs one JD (URL or local file)
+  node upskill.mjs <url>                  # same as --url-text <url>
+  node upskill.mjs --self-test            # run the pure-function self-tests
+  node upskill.mjs --help                 # show this message`;
+
 if (isMain) {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (args.includes('--self-test')) runSelfTest();
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
