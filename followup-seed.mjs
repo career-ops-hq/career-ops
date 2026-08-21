@@ -55,7 +55,7 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash, randomUUID } from 'crypto';
@@ -68,6 +68,7 @@ import {
   isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
   sameLockDirectory, lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 import { tmpdir } from 'os';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -440,7 +441,7 @@ function writeFileAtomic(filePath, content) {
   const tmpPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;
