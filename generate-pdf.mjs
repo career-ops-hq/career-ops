@@ -95,7 +95,14 @@ function assertInsideWorkspace(absPath, label) {
   }
   const rel = relative(__workspaceRoot, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+    // #3162: an intermittent macOS-CI-only hit of this branch happens on paths
+    // that are lexically inside the sandbox, and canonicalization SUCCEEDS
+    // before it. Print both sides so the next occurrence names the disagreeing
+    // ancestor outright instead of asking a reader to reconstruct it.
+    throw new Error(
+      `${label} escapes the tracker workspace: ${absPath}`
+      + ` (workspaceRoot=${__workspaceRoot} canonical=${canonical} rel=${rel})`,
+    );
   }
   return absPath;
 }
