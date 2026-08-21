@@ -42,6 +42,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { normalizeTextKey } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -138,15 +139,15 @@ export function insertIntoCvSection(md, section, entry) {
 
 // article-digest.md is a sequence of `## <name> -- <tagline>` blocks separated
 // by `---`. Dedup on the name (the heading text before the dash), matched by
-// normalized equality or prefix so "## FraudShield -- Detection" matches the key
-// "FraudShield" without a short key colliding on unrelated heading text.
+// normalized equality so "## FraudShield -- Detection" matches the key
+// "FraudShield" without a short key colliding on other project names.
 export function articleDigestHasEntry(md, dedupKey) {
   const key = normalizeKey(dedupKey);
   if (!key) return false;
   for (const m of md.matchAll(/^##\s+(.*\S)\s*$/gm)) {
     const name = m[1].split(/\s+[—–-]{1,2}\s+/)[0];
     const n = normalizeKey(name);
-    if (n === key || n.startsWith(key)) return true;
+    if (n === key) return true;
   }
   return false;
 }
@@ -216,17 +217,9 @@ async function readStdin() {
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length) {
-    console.error(`add-entry: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
+  // Migrated to shared validateFlags to reject mistyped flags (#3112).
+  // Inside the main-module guard so importers are unaffected (#3088).
+  validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const dryRun = args.includes('--dry-run');
   const useStdin = args.includes('--stdin');

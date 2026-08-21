@@ -19,11 +19,58 @@
 // point of a shared decoder — the improvement should not have had to live in
 // one provider.
 //
+// A fourth round (#2790) migrated the seven RSS/XML providers — jobspresso,
+// higheredjobs, nodesk, larajobs, personio, teamtailor, weworkremotely — that
+// had never been in scope for any of the above. Their private copies guarded
+// only with a try/catch, which catches the RangeError above 0x10FFFF and
+// nothing else, so NUL, the C0 controls, lone surrogates and the
+// noncharacters decoded into job titles; the catch then returned '', deleting
+// the malformed reference rather than leaving it visible.
+//
+// Each round has migrated whichever copies were in front of the contributor at
+// the time, which is why there were four. tests/providers/rss-entity-decoding
+// .test.mjs now asserts at the source level that no importer of this module
+// also declares its own decoder, so the next re-introduction fails on the
+// commit that adds it instead of drifting quietly for a year.
+//
 // The hex/decimal alternatives are matched separately (not "#x?[0-9a-fA-F]+")
 // so a decimal entity can never absorb trailing hex letters — "&#1a2;" no
 // longer silently parses as codepoint 1 and drops "a2"; it just fails to
 // match and passes through untouched, same as any other malformed entity.
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+// The XML five plus nbsp, then the Latin-1 letter entities. The letters are not
+// decoration: a European board writes `D&eacute;veloppeur` and `Fran&ccedil;ais`
+// in its HTML, and leaving those literal puts `D&eacute;veloppeur` in a job
+// title, the tracker, and every document generated from it. Providers that
+// needed them grew private tables instead, which is the drift this module
+// exists to end — so they belong here rather than in the next scraper.
+//
+// Unknown names still pass through untouched (see decodeEntities), so this list
+// is a floor, not a closed set.
+const NAMED_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  // French / Portuguese / Spanish / German / Nordic letters, lower and upper.
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç',
+  egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+  igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï',
+  ntilde: 'ñ',
+  ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü',
+  yacute: 'ý', yuml: 'ÿ', szlig: 'ß',
+  Agrave: 'À', Aacute: 'Á', Acirc: 'Â', Atilde: 'Ã', Auml: 'Ä', Aring: 'Å', AElig: 'Æ',
+  Ccedil: 'Ç',
+  Egrave: 'È', Eacute: 'É', Ecirc: 'Ê', Euml: 'Ë',
+  Igrave: 'Ì', Iacute: 'Í', Icirc: 'Î', Iuml: 'Ï',
+  Ntilde: 'Ñ',
+  Ograve: 'Ò', Oacute: 'Ó', Ocirc: 'Ô', Otilde: 'Õ', Ouml: 'Ö', Oslash: 'Ø',
+  Ugrave: 'Ù', Uacute: 'Ú', Ucirc: 'Û', Uuml: 'Ü',
+  Yacute: 'Ý',
+  // Punctuation these same pages emit around titles.
+  deg: '°', hellip: '…', laquo: '«', raquo: '»', ndash: '–', mdash: '—',
+  lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201C', rdquo: '\u201D', middot: '·', euro: '€',
+};
+
+const CASE_INSENSITIVE_NAMES = new Set(['amp', 'lt', 'gt', 'quot', 'apos', 'nbsp']);
 
 /**
  * Whether a numeric reference names a code point this decoder will emit.
@@ -74,6 +121,13 @@ export function decodeEntities(s) {
       // `&#0;` in a title is visible and inert; a decoded NUL is neither.
       return isEmittableCodePoint(code) ? String.fromCodePoint(code) : m;
     }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
+    // Letter entities are CASE-SENSITIVE: `&Eacute;` is É, not é. Looking the
+    // name up lowercased would make every uppercase entry unreachable and
+    // silently decode `&Eacute;` to the lowercase letter. Only the XML five and
+    // nbsp are matched case-insensitively, which is where legacy pages really do
+    // write `&AMP;`.
+    if (Object.hasOwn(NAMED_ENTITIES, body)) return NAMED_ENTITIES[body];
+    const lower = body.toLowerCase();
+    return CASE_INSENSITIVE_NAMES.has(lower) ? NAMED_ENTITIES[lower] : m;
   });
 }

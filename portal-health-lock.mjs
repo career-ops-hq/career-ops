@@ -27,6 +27,13 @@
 import { mkdirSync, rmSync, statSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
+// Fourth copy of the directory-lock protocol in this repo. #2984 patched two of
+// them and declared "one definition, no sibling drift"; this one and
+// followup-seed.mjs were still carrying all three faces of #2777. The
+// classifiers live in pipeline-lock.mjs so the next finding lands once.
+import {
+  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+} from './pipeline-lock.mjs';
 
 const DEFAULT_STALE_MS = 30_000;
 const DEFAULT_RETRY_MS = 80;
@@ -92,8 +99,11 @@ function lockCanRecover(lockDir, staleMs) {
   if (owner?.pid) return !processIsAlive(owner.pid);
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true; // vanished — nothing to recover, retry acquisition
+  } catch (err) {
+    // Only a vanished directory means "nothing to recover". Any other stat
+    // failure — a Windows EPERM/EBUSY mid-flight — is "could not look", and
+    // answering "recoverable" to that deletes a LIVE lock (#2777, third face).
+    return err?.code === 'ENOENT';
   }
 }
 
@@ -118,6 +128,17 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
   const recoverGuardDir = `${lockDir}.recover`;
   const token = randomUUID();
   const deadline = Date.now() + timeoutMs;
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and timed out on a
+  // plain elapsed check, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // maxWaitMs has no separate knob here, so the ceiling is the same multiple
+  // of timeoutMs the definition defaults to.
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline, hardDeadline: Date.now() + timeoutMs * 10,
+  });
 
   // A fresh install may not have data/ yet, and appendPortalHealth() creates
   // it only after this lock is taken — create it here so mkdirSync(lockDir)
@@ -128,7 +149,10 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
     try {
       mkdirSync(lockDir);
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
+      // Windows answers a mid-flight directory with EPERM/EACCES: contention,
+      // not failure. Treating it as fatal kills the writer and loses its write.
+      if (!isMkdirContention(err)) throw err;
+      noteWaiting();
 
       // Serialize stale-reclaim behind a second atomic guard so only one
       // caller can be inside the decide-then-delete window at a time.
@@ -137,28 +161,36 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         mkdirSync(recoverGuardDir);
         hasRecoverGuard = true;
       } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
+        if (!isMkdirContention(guardErr)) throw guardErr;
+        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means it
+        // is mid-flight, and judging the age of a directory we cannot stat
+        // reliably would evict a live guard.
+        if (guardErr.code !== 'EEXIST') {
+          if (holderStillWedged() || ceilingReached()) throw new LockTimeoutError(lockDir, timeoutMs);
+          await sleep(backoffMs());
+          continue;
+        }
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
         if (lockCanRecover(recoverGuardDir, staleMs)) {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
           if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
+            rmLockArtifactSync(lockDir);
             continue; // retry acquisition immediately
           }
         } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
-      if (Date.now() > deadline) throw new LockTimeoutError(lockDir, timeoutMs);
-      await sleep(retryMs);
+      if (holderStillWedged() || ceilingReached()) throw new LockTimeoutError(lockDir, timeoutMs);
+      await sleep(backoffMs());
       continue;
     }
 
@@ -172,7 +204,7 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         file: filePath,
       }, null, 2));
     } catch (ownerErr) {
-      rmSync(lockDir, { recursive: true, force: true });
+      rmLockArtifactSync(lockDir);
       throw ownerErr;
     }
 
@@ -202,7 +234,7 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         }
         if (!sameLockDirectory(before, after)) return; // swapped underneath us
         try {
-          rmSync(lockDir, { recursive: true, force: true });
+          rmLockArtifactSync(lockDir);
         } catch {
           /* best-effort; a stale-reclaim will recover it */
         }
