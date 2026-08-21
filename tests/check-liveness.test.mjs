@@ -1,13 +1,14 @@
 /**
  * check-liveness.test.mjs — CLI help tests for check-liveness.mjs
  *
- * Run: node check-liveness.test.mjs
+ * Run: node tests/check-liveness.test.mjs (from repo root) or node check-liveness.test.mjs
+ * The script under test lives at the repository root, one level above this file.
  */
 
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-const scriptPath = fileURLToPath(new URL('./check-liveness.mjs', import.meta.url));
+const scriptPath = fileURLToPath(new URL('../check-liveness.mjs', import.meta.url));
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -39,6 +40,9 @@ const hOut = execFileSync('node', [scriptPath, '-h'], {
 });
 ok('-h prints usage', hOut.includes('Usage:'));
 
+// CodeRabbit suggestion: prove -h and --help print the identical contract.
+ok('-h output is byte-identical to --help', hOut === helpOut);
+
 const helpWithMissingFile = execFileSync('node', [scriptPath, '--help', '--file', '/definitely/missing'], {
   encoding: 'utf-8',
   timeout: 10000,
@@ -61,4 +65,4 @@ console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
   console.log(failures.join('\n'));
 }
-process.exitCode = failed > 0 ? 1 : 0;
+process.exit(failed > 0 ? 1 : 0);
