@@ -56,7 +56,7 @@
  * Issue #1205 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -224,19 +224,26 @@ export function companyKey(row) {
 // when it has no tracker rows and no clusters, and without the original name
 // that card would be titled with the normalized key — "joinupch" rather than
 // "joinup.ch". Map.has() is identical to Set.has() on the matching path.
+// BOTH collections, not just tracked_companies. A multi-employer board is far
+// likelier to live under `job_boards` — that is what the section is for — and
+// the two entries this template ships the flag on (Founderful, joinup.ch) are
+// both there. Reading only one collection made the shipped default load ZERO
+// aggregators while looking configured, which is the worst version of this: a
+// flag the user can see in their own config and that silently does nothing.
 export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
   const found = new Map();
   try {
     if (!existsSync(portalsPath)) return found;
     const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
-    const entries = doc?.tracked_companies;
-    if (!Array.isArray(entries)) return found;
-    for (const entry of entries) {
-      if (!entry || entry.aggregator !== true) continue;
-      const raw = typeof entry.name === 'string' ? entry.name.trim() : '';
-      if (!raw) continue;
-      const key = normalizeCompanyName(raw) || raw.toLowerCase();
-      if (key && !found.has(key)) found.set(key, raw);
+    for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!entry || entry.aggregator !== true) continue;
+        const raw = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!raw) continue;
+        const key = normalizeCompanyName(raw) || raw.toLowerCase();
+        if (key && !found.has(key)) found.set(key, raw);
+      }
     }
   } catch {
     // A malformed portals.yml is scan.mjs's problem to report, not this
@@ -710,8 +717,13 @@ function runSelfTest() {
   // silently produce an empty Set, and an empty Set looks exactly like
   // "no aggregators configured". ---
   {
-    const tmp = join(tmpdir(), `co-aggr-${process.pid}.yml`);
+    // One private directory rather than predictable names in the shared temp
+    // dir: `co-aggr-<pid>.yml` can be pre-created as a symlink by anyone else
+    // on the machine, and writeFileSync follows it. mkdtempSync gives a path
+    // nobody can guess ahead of time, and one rmSync cleans all of it up.
+    const fixtures = mkdtempSync(join(tmpdir(), 'co-aggr-'));
     try {
+      const tmp = join(fixtures, 'portals.yml');
       writeFileSync(tmp, [
         'tracked_companies:',
         '  - name: Plain Co',
@@ -725,37 +737,35 @@ function runSelfTest() {
         '    aggregator: false',
         '  - name: Stringy',
         '    aggregator: "true"',
+        'job_boards:',
+        '  - name: Board Under Boards',
+        '    aggregator: true',
         '',
       ].join('\n'), 'utf-8');
       const keys = loadAggregatorCompanies(tmp);
       check(keys.has(normalizeCompanyName('Board One')), 'aggregator: true is picked up');
       check(keys.has(normalizeCompanyName('Board Two Inc.')), 'a suffixed name is normalized into the companyKey space');
+      // A multi-employer board is likelier to be configured here than under
+      // tracked_companies, and both entries portals.example.yml flags are.
+      check(keys.has(normalizeCompanyName('Board Under Boards')), 'a flagged entry under job_boards counts too');
       check(!keys.has(normalizeCompanyName('Plain Co')), 'an entry without the flag is not an aggregator');
       check(!keys.has(normalizeCompanyName('Explicitly Not')), 'aggregator: false is not an aggregator');
       // YAML would give the string "true" here. Accepting it would make the
       // flag's meaning depend on quoting; rejecting it keeps `=== true` honest.
       check(!keys.has(normalizeCompanyName('Stringy')), 'a quoted "true" is not the boolean true');
-      check(keys.size === 2, 'exactly the two flagged entries are returned');
-    } finally {
-      try { unlinkSync(tmp); } catch { /* best effort */ }
-    }
+      check(keys.size === 3, 'exactly the three flagged entries are returned');
 
-    check(loadAggregatorCompanies(join(tmpdir(), 'co-aggr-does-not-exist.yml')).size === 0, 'a missing portals.yml yields no aggregators, no crash');
+      check(loadAggregatorCompanies(join(fixtures, 'does-not-exist.yml')).size === 0, 'a missing portals.yml yields no aggregators, no crash');
 
-    const bad = join(tmpdir(), `co-aggr-bad-${process.pid}.yml`);
-    try {
+      const bad = join(fixtures, 'malformed.yml');
       writeFileSync(bad, 'tracked_companies: [unclosed\n', 'utf-8');
       check(loadAggregatorCompanies(bad).size === 0, 'a malformed portals.yml yields no aggregators, no crash');
-    } finally {
-      try { unlinkSync(bad); } catch { /* best effort */ }
-    }
 
-    const noList = join(tmpdir(), `co-aggr-nolist-${process.pid}.yml`);
-    try {
-      writeFileSync(noList, 'job_boards:\n  - name: Somewhere\n', 'utf-8');
-      check(loadAggregatorCompanies(noList).size === 0, 'a portals.yml with no tracked_companies yields no aggregators');
+      const unflagged = join(fixtures, 'unflagged.yml');
+      writeFileSync(unflagged, 'job_boards:\n  - name: Somewhere\n', 'utf-8');
+      check(loadAggregatorCompanies(unflagged).size === 0, 'a config whose entries carry no flag yields no aggregators');
     } finally {
-      try { unlinkSync(noList); } catch { /* best effort */ }
+      rmSync(fixtures, { recursive: true, force: true });
     }
   }
 

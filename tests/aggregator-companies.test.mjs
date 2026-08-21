@@ -12,7 +12,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 import {
   parseScanHistory, detectReposts, loadAggregatorCompanies, companyKey,
 } from '../detect-reposts.mjs';
@@ -68,6 +68,44 @@ try {
     pass('a missing portals.yml yields an empty set rather than throwing');
   } else {
     fail('loadAggregatorCompanies did not degrade to empty on a missing file');
+  }
+
+  // A board belongs under `job_boards` at least as often as under
+  // `tracked_companies` — that is what the section is for — so the loader has to
+  // read both. Reading only one is invisible to a synthetic fixture that happens
+  // to use the other, which is exactly how it survived the first round here.
+  const boards = join(dir, 'boards.yml');
+  writeFileSync(boards, [
+    'job_boards:',
+    '  - name: Board Under job_boards',
+    '    aggregator: true',
+    '  - name: Ordinary Board',
+    '',
+  ].join('\n'));
+  const fromBoards = loadAggregatorCompanies(boards);
+  if (isAggregatorCompany('Board Under job_boards', fromBoards) && !isAggregatorCompany('Ordinary Board', fromBoards)) {
+    pass('a flagged entry under job_boards is loaded, not only under tracked_companies');
+  } else {
+    fail(`job_boards flag not honoured: size=${fromBoards.size}`);
+  }
+
+  // The assertion that would have caught the above: measure the SHIPPED
+  // template, not a fixture. Both entries it flags live under `job_boards`, so a
+  // loader reading only `tracked_companies` returns zero here while every
+  // synthetic case still passes.
+  const shipped = loadAggregatorCompanies(join(ROOT, 'templates/portals.example.yml'));
+  if (shipped.size >= 2) {
+    pass(`the shipped template's own aggregator flags load (${shipped.size} entries)`);
+  } else {
+    fail(`the shipped template loads ${shipped.size} aggregators — its flags are inert`);
+  }
+  // The raw name is why this returns a Map rather than a Set: a card titled
+  // "joinupch" instead of "joinup.ch" is the visible symptom of losing it.
+  const rawNames = [...shipped.values()];
+  if (rawNames.some((n) => /[.A-Z]/.test(n))) {
+    pass('the raw name is preserved alongside the normalized key');
+  } else {
+    fail(`raw names look normalized rather than as written: ${JSON.stringify(rawNames)}`);
   }
 
   // Membership is by normalized name, so the report can ask with whatever
