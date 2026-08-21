@@ -642,8 +642,17 @@ export async function inlineLocalFonts(html) {
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
-  const baseDir = opts.baseDir || process.cwd();
   const outputRoot = opts.workspaceRoot || workspaceRoot;
+  const requestedBaseDir = resolve(opts.baseDir || outputRoot);
+  // Temporary HTML is an output too: never let an external input path or
+  // caller-supplied baseDir choose an arbitrary directory. If the requested
+  // directory is outside the tracker workspace (or escapes through a symlink),
+  // keep the render workspace-owned while still allowing the input itself to
+  // be read.
+  const baseDir = isWorkspaceOutputPath(
+    resolve(requestedBaseDir, '.career-ops-render-anchor'),
+    outputRoot,
+  ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
 

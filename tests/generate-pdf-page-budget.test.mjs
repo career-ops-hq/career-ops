@@ -5,17 +5,20 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'fs';
 import { join, relative } from 'path';
+import { tmpdir } from 'os';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 const sandbox = mkdtempSync(join(outputRoot, 'page-budget-test-'));
 const externalOutput = mkdtempSync(join(outputRoot, 'page-budget-external-'));
+const externalInputRoot = mkdtempSync(join(tmpdir(), 'career-ops-pdf-external-input-'));
 const script = join(sandbox, 'generate-pdf.mjs');
 const input = join(sandbox, 'two-pages.html');
 const defaultOverflowInput = join(sandbox, 'three-pages.html');
@@ -119,6 +122,8 @@ writeFileSync(defaultOverflowInput, `<!doctype html>
   </body>
 </html>
 `, 'utf-8');
+const externalInput = join(externalInputRoot, 'external-source.html');
+copyFileSync(input, externalInput);
 
 function runPdf(args, env = {}) {
   const result = spawnSync(NODE, [script, ...args], {
@@ -281,7 +286,20 @@ try {
   } else {
     fail(`generate-pdf followed an output symlink outside its workspace: ${symlinkEscape.output.trim()}`);
   }
+
+  // An external input path must not move the renderer's temporary HTML out of
+  // the tracker workspace via the CLI's baseDir derivation.
+  const externalInputPdf = join(sandbox, 'external-input.pdf');
+  const externalInputRun = runPdf([externalInput, externalInputPdf]);
+  const externalTempFiles = readdirSync(externalInputRoot)
+    .filter((name) => name.startsWith('.career-ops-render-'));
+  if (externalInputRun.status === 0 && existsSync(externalInputPdf) && externalTempFiles.length === 0) {
+    pass('generate-pdf keeps temporary HTML workspace-scoped for external input paths');
+  } else {
+    fail(`generate-pdf leaked a temporary HTML file beside external input: ${externalTempFiles.join(', ')}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
   rmSync(externalOutput, { recursive: true, force: true });
+  rmSync(externalInputRoot, { recursive: true, force: true });
 }
