@@ -43,6 +43,13 @@ test("'no output' canned message -> auth hint", () => {
   assert.equal(hint?.kind, "auth");
 });
 
+test("'author' in an unrelated terminal label -> NO auth hint (the bug this fixes)", () => {
+  // career-ops evaluates AI/tech job postings, so a terminal label can
+  // legitimately read something like "Failed to parse author metadata" —
+  // a bare "auth" substring matched inside it and produced the sign-in prompt.
+  assert.equal(jobErrorHint(errorJob("Failed to parse author metadata")), null);
+});
+
 test("connection error -> connection hint, NOT auth", () => {
   const hint = jobErrorHint(errorJob("Connection error"));
   assert.equal(hint?.kind, "connection");

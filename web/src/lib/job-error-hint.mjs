@@ -19,8 +19,13 @@
 //   Everything else (bad input, missing CV, no report written, etc.) -> null;
 //   the error text itself is the explanation.
 
+// "auth" as a bare substring matched inside unrelated words like "author" —
+// career-ops evaluates AI/tech job postings, so a terminal label can
+// legitimately read something like "Failed to parse author metadata".
+// authenticat\w* matches authenticate/authenticated/authentication (the
+// actual terminal-label forms listed above) without matching author/authority.
 const AUTH_PATTERN =
-  /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated|no cli configured/i;
+  /authenticat\w*|login|sign[ -]?in|credential|api[ -]?key|unauthorized|no cli configured/i;
 
 const HINTS = {
   auth: { kind: "auth", text: "Sign your CLI in from Config, then re-run." },
