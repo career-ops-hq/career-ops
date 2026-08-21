@@ -66,8 +66,8 @@ for (const file of MIGRATED_FILES) {
   const importsFromTrackerUtils = new RegExp(
     `import\\s*\\{[^}]*\\brenameSyncWithRetry\\b[^}]*\\}\\s*from\\s*['"]\\.\\/tracker-utils\\.mjs['"]`,
   ).test(src);
-  const lazyImportsFromTrackerUtils = /await\s+import\(\s*['"]\.\/tracker-utils\.mjs['"]\s*\)/.test(src) &&
-    /renameSyncWithRetry/.test(src);
+  const lazyImportsFromTrackerUtils =
+    /(?:const|let|var)\s*\{[^}]*\brenameSyncWithRetry\b[^}]*\}\s*=\s*await\s+import\(\s*['"]\.\/tracker-utils\.mjs['"]\s*\)/.test(src);
   ok(
     importsFromTrackerUtils || lazyImportsFromTrackerUtils,
     `${file}: renameSyncWithRetry is imported from the canonical tracker-utils.mjs (not reimplemented)`,
