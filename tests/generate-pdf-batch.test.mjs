@@ -38,6 +38,10 @@ writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
 copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs'));
+copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
+copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
+copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
 
 const playwrightStub = join(sandbox, 'node_modules', 'playwright');
 mkdirSync(playwrightStub, { recursive: true });
@@ -262,7 +266,7 @@ try {
     escResults[2].ok === false && /output escapes/i.test(escResults[2].error || '') &&
     existsSync(join(sandbox, 'out', 'esc-ok.pdf'))
   ) {
-    pass('generate-pdf --batch rejects input/output paths that escape the project directory');
+    pass('generate-pdf --batch rejects input/output paths that escape the tracker workspace');
   } else {
     fail(`containment guard regressed: status=${escape.status} results=${JSON.stringify(escResults)}\n${escape.output.trim()}`);
   }
@@ -289,7 +293,7 @@ try {
     fail(`manifest-relative path resolution regressed: status=${relRun.status}\n${relRun.output.trim()}`);
   }
 
-  // --- Test 7: a --batch manifest that lives OUTSIDE the project is rejected
+  // --- Test 7: a --batch manifest that lives OUTSIDE the workspace is rejected
   // before any filesystem access — the manifest is never read (error is the
   // containment error, not a parse/read error) and no .results.json is written
   // next to it (the write is gated too) ---
@@ -305,7 +309,7 @@ try {
     const extResults = `${externalManifest}.results.json`;
     if (
       ext.status === 1 &&
-      /batch manifest escapes the project directory/i.test(ext.output) &&
+      /batch manifest escapes the tracker workspace/i.test(ext.output) &&
       !existsSync(extResults)
     ) {
       pass('generate-pdf --batch rejects an external manifest path before any filesystem access');
@@ -319,7 +323,7 @@ try {
   // --- Test 8: every entry renders, but writing the .results.json manifest
   // fails — the batch must still exit 1, never mask a manifest write failure
   // behind a clean exit. A directory pre-created at the results path forces
-  // writeFileSync to throw (EISDIR/EPERM) while assertInsideProject passes. ---
+  // writeFileSync to throw (EISDIR/EPERM) while the workspace guard passes. ---
   const wfManifest = join(sandbox, 'writefail.json');
   writeFileSync(wfManifest, JSON.stringify([
     { input: 'a.html', output: 'out/wf-a.pdf' },

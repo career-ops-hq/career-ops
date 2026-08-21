@@ -11,7 +11,7 @@ data/*
 !data/offers/
 !data/parser-output/
 # Received offers/contracts, promise notes, prep reports (PII — never commit)
-data/offers/*
+data/offers/*   
 !data/offers/.gitkeep
 data/parser-output/**
 !data/parser-output/**/

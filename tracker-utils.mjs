@@ -18,7 +18,9 @@ import * as yaml from 'js-yaml';
 // copies drift — pipeline-lock learned that Windows answers mkdir/rm with
 // EPERM/EACCES/EBUSY under contention while this file still treated anything
 // but EEXIST as fatal, killing a writer and losing its item.
-import { isMkdirContention, isRmContention, rmLockArtifactSync } from './pipeline-lock.mjs';
+import {
+  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
+} from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -338,7 +340,19 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   let attempts = 0;
   let staleRecovered = false;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
+  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // There is no separate maxWaitMs knob here, so the ceiling is the same
+  // multiple of timeoutMs the definition defaults to.
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+  });
+  for (;;) {
+    if (holderStillWedged() || ceilingReached()) break;
     attempts++;
     try {
       mkdirSync(lockDir);
@@ -445,6 +459,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       // not failure — treating it as fatal is how a concurrent writer dies and
       // its write is lost (#2777, measured on windows-latest).
       if (!isMkdirContention(err)) throw err;
+      noteWaiting();
 
       let hasRecoverGuard = false;
       try {
@@ -482,7 +497,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         }
       }
 
-      await sleep(retryMs);
+      await sleep(backoffMs());
     }
   }
 
@@ -539,12 +554,81 @@ export async function openTrackerTransaction(appsFile, options = {}) {
 }
 
 /**
+ * Codes Windows raises when a rename-over-existing-file loses a race for the
+ * destination handle. Same portability gap this module already documents for
+ * mkdir/rm (#2777): POSIX `rename(2)` atomically replaces the destination and
+ * cannot fail this way, so these never fire on Linux/macOS.
+ */
+const RENAME_CONTENTION_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+/** Backoff schedule for a contended rename. Worst case ~193ms, then rethrow. */
+export const RENAME_RETRY_DELAYS_MS = [1, 2, 5, 10, 25, 50, 100];
+
+/**
+ * Is this error Windows saying "the destination is busy right now"?
+ *
+ * Exported for the same reason `pipeline-lock.mjs` exports `isMkdirContention`
+ * and `isRmContention`: one definition, testable, and no second copy to drift.
+ *
+ * @param {unknown} err - Error thrown by a rename attempt.
+ * @returns {boolean} True when the rename should be retried.
+ */
+export function isRenameContention(err) {
+  return RENAME_CONTENTION_CODES.has(err?.code);
+}
+
+/**
+ * Block the current thread for `ms` without an event-loop turn.
+ *
+ * `writeFileAtomic` is synchronous by contract (every tracker writer calls it
+ * inside a held lock), so the backoff cannot be a promise.
+ *
+ * @param {number} ms - Milliseconds to sleep.
+ * @returns {void}
+ */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * `renameSync` that survives Windows contention for the destination handle.
+ *
+ * Windows refuses a rename whose destination is open by anyone else at that
+ * instant, and answers EPERM/EACCES/EBUSY. The holder is usually not another
+ * writer of ours (they are serialized by the tracker lock) but a transient
+ * reader: an antivirus scanner, the Search indexer, or a concurrent
+ * `readFileSync` from a reporting script. The handle is released in
+ * milliseconds, so a short backoff converts a lost write into a completed one.
+ *
+ * This mirrors `isMkdirContention` / `isRmContention` in pipeline-lock.mjs.
+ * Same reasoning as #2777: treating portable-looking contention as fatal is how
+ * a write gets LOST, and the tracker is the canonical store.
+ *
+ * @param {string} tmpPath - Source path (the fully written temporary file).
+ * @param {string} path - Destination path to replace.
+ * @param {(from: string, to: string) => void} [rename] - Injectable rename, for tests.
+ * @returns {void}
+ */
+export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(tmpPath, path);
+      return;
+    } catch (err) {
+      if (!isRenameContention(err) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw err;
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+/**
  * Replace a tracker file atomically using a same-directory temporary file.
  *
- * Writing into the same directory keeps the final `renameSync` atomic on normal
+ * Writing into the same directory keeps the final rename atomic on normal
  * filesystems and avoids exposing a partially written `applications.md` to other
- * readers. If the write or rename fails, the temporary file is cleaned up before
- * the original error is rethrown.
+ * readers. The rename retries through short Windows contention (see
+ * `renameSyncWithRetry`). If the write or rename ultimately fails, the temporary
+ * file is cleaned up before the original error is rethrown.
  *
  * @param {string} path - Final file path to replace.
  * @param {string} content - Complete file content to write.
@@ -554,7 +638,7 @@ export function writeFileAtomic(path, content) {
   const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
+    renameSyncWithRetry(tmpPath, path);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;

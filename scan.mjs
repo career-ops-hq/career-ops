@@ -55,6 +55,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -139,6 +140,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 // Semantics (case-insensitive substring, in this order):
 //   - Empty / whitespace-only / non-string location → pass (don't penalize
 //     missing or malformed provider data)
+//   - `block_hard` matches → reject (the only tier `always_allow` cannot
+//     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
 //     the home region is an option, even though "france" is blocked)
@@ -276,6 +279,7 @@ export function buildLocationFilter(locationFilter) {
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
+  const blockHard = compileLocationKeywordList(locationFilter.block_hard);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
@@ -283,6 +287,21 @@ export function buildLocationFilter(locationFilter) {
     // Nothing to judge on either field → pass (don't penalize missing data).
     if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    // `block_hard` is the ONE tier always_allow cannot override. It exists because
+    // a European city name can be a whole word inside a non-European location, so
+    // word-boundary matching (#2087) does not catch it and always_allow's
+    // unconditional win silently discards the user's own block entry:
+    //
+    //   "Porto Alegre, Rio Grande do Sul, Brazil"  always_allow "Porto" beats block "Brazil"
+    //   "USA - New York - Malta"                   always_allow "Malta" beats block "USA"
+    //
+    // Both configs already listed the country under `block`. Plain `block` cannot
+    // be promoted wholesale — always_allow was added in #650 precisely so a
+    // multi-location posting survives one blocked city ("Stockholm · London ·
+    // Madrid" must not die on a London entry) — so the user marks the entries
+    // that are country-level and therefore never a false rejection. Opt-in and
+    // additive: a config without `block_hard` behaves exactly as before.
+    if (blockHard.length > 0 && blockHard.some(matches)) return false;
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never
     // rejected because of what its URL happens to contain.
@@ -965,7 +984,13 @@ function daysBetweenIsoDates(start, end) {
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
 
-export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+// `today` defaults to the LOCAL calendar day, not the UTC one. This function
+// gates a COOLDOWN (`today < cooldownUntil`) — the user asked not to see a
+// posting until a date — and the UTC day is tomorrow for a west-of-Greenwich
+// evening run, so the cooldown opened a day early (#3070). The recheck window
+// below reads one day high the same way. Callers may still pass `today`
+// explicitly; only the default moves.
+export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
@@ -2452,7 +2477,12 @@ async function main() {
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day. This one value does two things that both care which day it is:
+  // it is the `today` buildCooldownFilter compares against, and it is the
+  // firstSeen date written into scan-history.tsv. On the UTC day a
+  // west-of-Greenwich evening scan opened cooldowns early AND stamped history
+  // rows with tomorrow, which then read one day old on the next recheck (#3070).
+  const date = localToday();
   const windows = loadReApplyWindows();
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
