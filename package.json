@@ -33,6 +33,7 @@
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "extract": "node browser-extract.mjs",
+    "scan:hn": "node scan-hn.mjs",
     "scan": "node scan.mjs",
     "scan:full": "node scan-ats-full.mjs",
     "scan:seeds": "node scan-ats-full.mjs --seeds yc,a16z",

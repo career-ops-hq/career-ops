@@ -56,6 +56,7 @@ const SCRIPTS = [
   ['detect-reposts.mjs', '--windo'],
   ['weekly-digest.mjs', '--dri'],
   ['upskill.mjs', '--min-report'],
+  ['add-entry.mjs', '--dry-rum'],
   ['archive-posting.mjs', '--reprot', /USAGE/],
 ];
 
@@ -64,7 +65,11 @@ for (const [script, typo, usage = /Usage:/i] of SCRIPTS) {
     const r = runScript(script, typo, 'some-value');
     assert.equal(r.status, 1, `${script} ${typo} exited ${r.status}, want 1`);
     assert.match(r.all, /unrecognized flag/i, `${script} did not name the unrecognized flag`);
-    assert.match(r.all, new RegExp(typo.replace(/^--/, '--')), `${script} did not echo ${typo} back`);
+    // Substring, not a regex. The flag is data, and `typo.replace(/^--/, '--')`
+    // replaced `--` with itself, so nothing was ever escaped: the RegExp only
+    // worked because none of today's flags carry a metacharacter. Add one that
+    // does and the assertion stops asking the question it is named after.
+    assert.ok(r.all.includes(typo), `${script} did not echo ${typo} back`);
   });
 
   test(`${script} --help exits 0 and prints usage`, () => {

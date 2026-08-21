@@ -30,6 +30,7 @@ export function TodayDashboard({
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
+  const [freshCount, setFreshCount] = useState(0);
   const router = useRouter();
   const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
 
@@ -43,7 +44,12 @@ export function TodayDashboard({
       .catch(() => {});
     fetch("/api/whats-new")
       .then((r) => r.json())
-      .then((d) => setFresh(Array.isArray(d.offers) ? d.offers : []))
+      .then((d) => {
+        const offers = Array.isArray(d.offers) ? d.offers : [];
+        const count = Number(d.count);
+        setFresh(offers);
+        setFreshCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : offers.length);
+      })
       .catch(() => {});
   }, []);
 
@@ -66,7 +72,7 @@ export function TodayDashboard({
     [applications],
   );
 
-  const newThisWeek = fresh.length;
+  const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
@@ -146,7 +152,7 @@ export function TodayDashboard({
           </div>
           {fresh.length > 6 && (
             <Link href="/explore?view=fresh" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
-              See all {fresh.length} →
+              See all {freshCount} →
             </Link>
           )}
         </Section>

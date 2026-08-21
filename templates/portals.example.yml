@@ -742,7 +742,7 @@ search_queries:
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, senjob,
+# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, senjob,
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
@@ -974,6 +974,18 @@ search_queries:
 #   # field we could find, so every keyword search is nationwide — use
 #   # location_filter (above) for precision, same recall-first approach
 #   # arbeitsagentur uses for its optional remote pass.
+#   enabled: true
+#
+# - name: Job Bank Canada — Software     # Canadian federal jobs service (jobbank.gc.ca)
+#   provider: jobbankca
+#   jobbankca:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted.
+#     keywords: ["software engineer", "backend developer"]  # explicit override
+#   max_pages: 5          # optional page cap (100 jobs/page, default 5, max 20)
+#   # No location option: the feed's own locationstring filter is unreliable
+#   # (measured: a city name did not narrow results) — use location_filter
+#   # (above) for precision, same recall-first approach VDAB uses.
 #   enabled: true
 #
 # - name: Glints — Indonesia             # SE-Asia aggregator (SG/ID/MY/VN)
