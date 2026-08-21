@@ -93,19 +93,27 @@ try {
   // template, not a fixture. Both entries it flags live under `job_boards`, so a
   // loader reading only `tracked_companies` returns zero here while every
   // synthetic case still passes.
+  // By NAME, not by count. `size >= 2` is satisfied by any two flagged entries:
+  // measured against a template with these two unflagged and two unrelated ones
+  // flagged instead, it returns 2 and passes while protecting nothing.
   const shipped = loadAggregatorCompanies(join(ROOT, 'templates/portals.example.yml'));
-  if (shipped.size >= 2) {
-    pass(`the shipped template's own aggregator flags load (${shipped.size} entries)`);
+  const REQUIRED = ['Founderful (portfolio)', 'joinup.ch'];
+  const notFlagged = REQUIRED.filter((n) => !isAggregatorCompany(n, shipped));
+  if (notFlagged.length === 0) {
+    pass('the shipped template still flags the two boards it ships flagged');
   } else {
-    fail(`the shipped template loads ${shipped.size} aggregators — its flags are inert`);
+    fail(`the shipped template no longer flags: ${JSON.stringify(notFlagged)} (loaded ${shipped.size})`);
   }
-  // The raw name is why this returns a Map rather than a Set: a card titled
-  // "joinupch" instead of "joinup.ch" is the visible symptom of losing it.
+  // And the raw name has to survive, by value: this returns a Map rather than a
+  // Set precisely so a card reads "joinup.ch" instead of the key "joinup ch".
+  // A regex for punctuation would accept any flagged entry that happens to have
+  // some, which is the same counting mistake one level down.
   const rawNames = [...shipped.values()];
-  if (rawNames.some((n) => /[.A-Z]/.test(n))) {
-    pass('the raw name is preserved alongside the normalized key');
+  const missingRaw = REQUIRED.filter((n) => !rawNames.includes(n));
+  if (missingRaw.length === 0) {
+    pass('each flagged board keeps its raw name exactly as written in the template');
   } else {
-    fail(`raw names look normalized rather than as written: ${JSON.stringify(rawNames)}`);
+    fail(`raw names lost or rewritten: ${JSON.stringify(missingRaw)} not in ${JSON.stringify(rawNames)}`);
   }
 
   // Membership is by normalized name, so the report can ask with whatever
