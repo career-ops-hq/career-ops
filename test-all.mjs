@@ -5291,6 +5291,45 @@ try {
     fail(`verify-portals boardIdentityMatches wrong on: ${JSON.stringify(identityBad)}`);
   }
 
+  // ── The ampersand rule runs BEFORE the ASCII fold (#2938) ──
+  // asciiFold resolves every '&' itself, so only the RAW string still separates
+  // a spaced ampersand (a word: 'Hims & Hers' -> hims and hers) from an unspaced
+  // one (punctuation: 'AT&T' -> att). Move the '&' rule after the fold and the
+  // distinction is gone in whichever direction the fold's `punctuation` mode
+  // picks: under 'delete' 'Hims & Hers' quietly loses its 'and'; under the
+  // default 'space' 'AT&T' splits into two tokens. Each pair pins one direction
+  // — the true row alone would still pass if the tokens collapsed the other way.
+  const ampersandOrder = [
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced '&' became the word 'and'
+    ['Hims & Hers', 'Hims Hers', false],      // ...and it is really there, not dropped
+    ['AT&T', 'ATT', true],                    // unspaced '&' was deleted, not spaced out
+    ['AT&T', 'AT T', false],                  // ...so it must not read as two tokens
+  ];
+  const ampersandBad = ampersandOrder.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (ampersandBad.length === 0) {
+    pass('verify-portals handles the ampersand before folding, so spaced and unspaced stay distinct');
+  } else {
+    fail(`verify-portals ampersand-before-fold ordering broken on: ${JSON.stringify(ampersandBad)}`);
+  }
+
+  // The fold is `asciiFold`, not a local strip-the-combining-marks pass, so the
+  // Latin letters that do NOT decompose under NFD come with it. Before this, the
+  // `[^a-z0-9\s]` strip deleted them outright: 'Işık' canonicalized to [isk] and
+  // never matched its own board titled "Isik".
+  const nonDecomposing = [
+    ['Işık Holding', 'Isik Holding', true],        // Turkish dotless ı
+    ['Møller Group', 'Moller Group', true],        // ø
+    ['Großmann AG', 'Grossmann', true],            // ß expands to two letters
+    ['Đại Việt Corp', 'Dai Viet', true],           // đ, plus marks that do decompose
+    ['Møller Group', 'Miller Group', false],       // folding must not merge employers
+  ];
+  const nonDecomposingBad = nonDecomposing.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (nonDecomposingBad.length === 0) {
+    pass('verify-portals inherits the non-decomposing Latin fold (ı, ø, ß, đ) from asciiFold');
+  } else {
+    fail(`verify-portals non-decomposing fold wrong on: ${JSON.stringify(nonDecomposingBad)}`);
+  }
+
   // #3019: Lever and Ashby answer "whose board is this" only through the board
   // page title. Tracked "Nimbus Data" 404s, the live Lever board `nimbus` is
   // titled "Nimbus AI", and the repair must refuse it exactly as Greenhouse does.

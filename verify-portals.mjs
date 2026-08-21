@@ -48,9 +48,9 @@ export const ATS = {
     probeUrl: (slug) =>
       `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
-    // The board root publishes its owner: {"name":"Stripe","content":""}. Lever
-    // returns a bare posting array and Ashby returns {jobs, apiVersion}, so
-    // neither can answer "whose board is this" and neither defines these.
+    // The board root publishes its owner: {"name":"Stripe","content":""}. The
+    // Ashby and Lever posting APIs answer no such question, so those two read
+    // their owner off the board page <title> instead (see below).
     ownerUrl: (slug) => `https://boards-api.greenhouse.io/v1/boards/${slug}`,
     ownerKind: 'json',
     ownerName: (json) => (typeof json?.name === 'string' ? json.name.trim() : null),
@@ -304,24 +304,32 @@ const NAME_DESIGNATORS = new Set([
 /**
  * Reduce a company or board name to the tokens that actually identify it.
  *
- * Accents fold (Café -> cafe). A spaced ampersand is a word ('Hims & Hers' ->
- * hims and hers); an unspaced one is punctuation ('AT&T' -> att). Remaining
- * punctuation is dropped, then a leading article and any trailing legal
- * designators are removed.
+ * Accents fold through the shared `asciiFold` (Café -> cafe), which also carries
+ * the Latin letters NFD does not decompose — Işık -> isik, Møller -> moller,
+ * Großmann -> grossmann, Đại -> dai — where a bare strip-the-marks pass deletes
+ * the letter outright (#2930).
+ *
+ * THE AMPERSAND RULE RUNS BEFORE THE FOLD, AND THE ORDER IS LOAD-BEARING.
+ * A spaced ampersand is a word ('Hims & Hers' -> hims and hers); an unspaced one
+ * is punctuation ('AT&T' -> att). Only the raw string still tells them apart:
+ * `asciiFold` has resolved every '&' by the time it returns, whichever
+ * `punctuation` mode it ran in. Fold first and 'Hims & Hers' silently loses its
+ * 'and' under 'delete', or 'AT&T' splits into two tokens under 'space'.
+ *
+ * `punctuation: 'delete'` because these tokens are compared for EQUALITY, never
+ * substring-matched, so a hyphen or apostrophe must keep joining its word
+ * ("L'Oréal" -> loreal) exactly as the inline strip this replaced did.
+ * Whitespace is collapsed to single spaces first, so 'delete' — which removes a
+ * tab rather than collapsing it — cannot weld two words together.
+ *
+ * A leading article and any trailing legal designators are dropped afterwards.
  *
  * @param {string} name
  * @returns {string[]} Canonical identifying tokens.
  */
 function canonicalNameTokens(name) {
-  const words = String(name || '')
-    // NFKD splits an accented character into base + combining mark, and the
-    // punctuation strip below then drops the mark, so 'Café' folds to 'cafe'.
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/\s+&\s+/g, ' and ')
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const spaced = String(name || '').replace(/\s+/g, ' ');
+  const words = asciiFold(spaced.replace(/\s+&\s+/g, ' and '), { punctuation: 'delete' })
     .split(' ')
     .filter(Boolean);
   let start = 0;
@@ -362,8 +370,11 @@ export function boardIdentityMatches(companyName, boardName) {
  * company name; a wrong one relabels another employer's postings in scan.mjs.
  * The reason is recorded so a transient outage is not read as a mismatch.
  *
- * ATSes that publish no owner (lever, ashby) keep their existing behavior, which
- * is tracked separately rather than implied to be safe here.
+ * Every ATS in the table above publishes an owner, so all three are confirmed
+ * here. The `no-owner-endpoint` pass-through is a guard for a FUTURE entry that
+ * defines no `ownerUrl`: it keeps this function total instead of throwing on
+ * one. Such an entry would need its own identity signal before boards found on
+ * it could be adopted, so the reason is returned rather than swallowed.
  */
 async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu = false, cache }) {
   const spec = ATS[ats];
