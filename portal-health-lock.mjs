@@ -31,7 +31,9 @@ import { randomUUID } from 'crypto';
 // them and declared "one definition, no sibling drift"; this one and
 // followup-seed.mjs were still carrying all three faces of #2777. The
 // classifiers live in pipeline-lock.mjs so the next finding lands once.
-import { isMkdirContention, rmLockArtifactSync } from './pipeline-lock.mjs';
+import {
+  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+} from './pipeline-lock.mjs';
 
 const DEFAULT_STALE_MS = 30_000;
 const DEFAULT_RETRY_MS = 80;
@@ -126,6 +128,17 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
   const recoverGuardDir = `${lockDir}.recover`;
   const token = randomUUID();
   const deadline = Date.now() + timeoutMs;
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and timed out on a
+  // plain elapsed check, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // maxWaitMs has no separate knob here, so the ceiling is the same multiple
+  // of timeoutMs the definition defaults to.
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline, hardDeadline: Date.now() + timeoutMs * 10,
+  });
 
   // A fresh install may not have data/ yet, and appendPortalHealth() creates
   // it only after this lock is taken — create it here so mkdirSync(lockDir)
@@ -139,6 +152,7 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
       // Windows answers a mid-flight directory with EPERM/EACCES: contention,
       // not failure. Treating it as fatal kills the writer and loses its write.
       if (!isMkdirContention(err)) throw err;
+      noteWaiting();
 
       // Serialize stale-reclaim behind a second atomic guard so only one
       // caller can be inside the decide-then-delete window at a time.
@@ -151,7 +165,11 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means it
         // is mid-flight, and judging the age of a directory we cannot stat
         // reliably would evict a live guard.
-        if (guardErr.code !== 'EEXIST') { await sleep(retryMs); continue; }
+        if (guardErr.code !== 'EEXIST') {
+          if (holderStillWedged() || ceilingReached()) throw new LockTimeoutError(lockDir, timeoutMs);
+          await sleep(backoffMs());
+          continue;
+        }
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
@@ -171,8 +189,8 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         }
       }
 
-      if (Date.now() > deadline) throw new LockTimeoutError(lockDir, timeoutMs);
-      await sleep(retryMs);
+      if (holderStillWedged() || ceilingReached()) throw new LockTimeoutError(lockDir, timeoutMs);
+      await sleep(backoffMs());
       continue;
     }
 

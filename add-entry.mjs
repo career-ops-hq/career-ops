@@ -42,6 +42,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { normalizeTextKey } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -216,17 +217,9 @@ async function readStdin() {
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length) {
-    console.error(`add-entry: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
+  // Migrated to shared validateFlags to reject mistyped flags (#3112).
+  // Inside the main-module guard so importers are unaffected (#3088).
+  validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const dryRun = args.includes('--dry-run');
   const useStdin = args.includes('--stdin');
