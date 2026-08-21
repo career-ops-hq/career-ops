@@ -84,12 +84,12 @@ if (/command -v curl/.test(SRC)) {
   fail('"command -v curl" guard is missing — a system without curl aborts the offer');
 }
 
-// The curl call must end with `|| true` so a curl failure cannot propagate to
-// the outer `set -e` shell (if enabled) and abort process_offer().
-if (/curl[\s\S]{0,400}2>\/dev\/null \|\| true/.test(SRC)) {
-  pass('curl call uses "|| true" (curl failure cannot abort the offer processing)');
+// The curl status must be captured so a curl failure cannot propagate to the
+// outer `set -e` shell (if enabled) and abort process_offer().
+if (/curl_status=\$\?/.test(curlPrefetchBlock)) {
+  pass('curl status is captured (curl failure cannot abort the offer processing)');
 } else {
-  fail('"|| true" after curl is missing — a curl failure may abort process_offer()');
+  fail('curl status is not captured — a curl failure may abort process_offer()');
 }
 
 // The comparison uses the named variable, not a bare literal.
@@ -202,10 +202,10 @@ if (/jd_prefetch_words="\$\{jd_prefetch_words\/\/\[/.test(SRC) || /jd_prefetch_w
 
 // The curl call must use `-- "$url"` to separate options from the URL operand.
 // A URL starting with `-` would otherwise be parsed as a curl flag (flag injection).
-if (/-- "\$url"/.test(SRC)) {
-  pass('curl uses -- before $url (URL-as-flag injection prevented)');
+if (/-- "\$current_url"/.test(SRC) || /-- "\$url"/.test(SRC)) {
+  pass('curl uses -- before the URL (URL-as-flag injection prevented)');
 } else {
-  fail('curl is missing "-- \\"$url\\"" — a URL starting with - would be parsed as a flag');
+  fail('curl is missing "-- \\"$current_url\\"" — a URL starting with - would be parsed as a flag');
 }
 
 // The node word-count snippet must use process.argv[1] (not "$jd_file" expanded into the JS)
@@ -269,7 +269,25 @@ if (!wordCountMatch) {
         encoding: 'utf-8',
         timeout: 10000,
       });
-      return parseInt(result.stdout.trim(), 10) || 0;
+      if (result.error || result.status !== 0) {
+        throw new Error(`word-count snippet failed: ${result.error?.message || result.stderr}`);
+      }
+      const output = result.stdout.trim();
+      if (!/^\d+$/.test(output)) {
+        throw new Error(`word-count snippet returned non-numeric output: ${JSON.stringify(output)}`);
+      }
+      return Number(output);
+    };
+
+    const runWordCountWithColor = (content) => {
+      const filePath = join(work, 'jd-force-color.html');
+      writeFileSync(filePath, content);
+      const result = spawnSync(process.execPath, ['-e', nodeSnippet, filePath], {
+        encoding: 'utf-8',
+        timeout: 10000,
+        env: { ...process.env, FORCE_COLOR: '3', TERM: 'xterm-256color' },
+      });
+      return result.stdout.trim();
     };
 
     // A real job description has hundreds of visible words.
@@ -290,6 +308,13 @@ if (!wordCountMatch) {
       pass(`real JD HTML counts ${realCount} visible words (>= 80 threshold)`);
     } else {
       fail(`real JD HTML counted only ${realCount} words — threshold of 80 would wrongly truncate it`);
+    }
+
+    const colorCount = runWordCountWithColor('<p>' + 'word '.repeat(79).trim() + '</p>');
+    if (/^79$/.test(colorCount)) {
+      pass('FORCE_COLOR does not add ANSI escapes to the machine-readable word count');
+    } else {
+      fail(`FORCE_COLOR produced ${JSON.stringify(colorCount)} instead of the machine-readable count 79`);
     }
 
     // A JS shell (Workday, Phenom, iCIMS pattern) has near-zero visible text.
@@ -429,22 +454,8 @@ if (!wordCountMatch) {
     } else {
       pass('prefetch block is extractable for e2e simulation');
 
-      // Extract the real node word-count snippet from SRC so this e2e test
-      // always uses the same logic as batch-runner.sh — no drift possible.
-      const realWordCountSnippet = (wordCountMatch && wordCountMatch[1]) || '';
-
-      // Extract the production curl invocation from SRC so buildScript uses the
-      // same flags as batch-runner.sh — no manual sync needed when flags change.
-      const curlInvocationMatch = SRC.match(/curl --silent --location[\s\S]*?-- "\$url"[^\n]*/);
-      const curlLines = curlInvocationMatch
-        ? curlInvocationMatch[0].split('\n').map(l => l.trim()).filter(Boolean)
-        : null;
-      if (!curlLines) {
-        fail('could not extract curl invocation from SRC — e2e buildScript will use fallback flags');
-      }
-
       // Helper: write a script that mocks curl and runs the real prefetch logic.
-      const buildScript = (curlOutput, curlExit = 0) => {
+      const buildScript = (curlOutput, curlExit = 0, redirectUrl = null) => {
         const jdFilePath = join(work, 'jd.html');
 
         return [
@@ -454,18 +465,25 @@ if (!wordCountMatch) {
           `# Stub curl: writes predetermined content or fails`,
           `curl() {`,
           `  local output_arg=""`,
+          `  local header_arg=""`,
           `  while [[ $# -gt 0 ]]; do`,
           `    if [[ "$1" == "--output" || "$1" == "-o" ]]; then output_arg="$2"; shift 2`,
+          `    elif [[ "$1" == "--dump-header" ]]; then header_arg="$2"; shift 2`,
           `    else shift; fi`,
           `  done`,
-          curlExit === 0
+          redirectUrl !== null
+            ? `  printf 'HTTP/1.1 302 Found\nLocation: %s\n\n' ${JSON.stringify(redirectUrl)} > "$header_arg"; return 47`
+            : curlExit === 0
             ? `  [[ -n "$output_arg" ]] && printf '%s' ${JSON.stringify(curlOutput)} > "$output_arg" || true`
             : `  return 1`,
           `}`,
           `prefetch_min_words=80`,
           `jd_prefetch_words=0`,
           `url="https://example.com/job"`,
+          `runPrefetch() {`,
           curlPrefetchBlock,
+          `}`,
+          `runPrefetch`,
           // Report results: file size and word count
           `file_size=$(wc -c < "$jd_file" 2>/dev/null || echo 0)`,
           `printf 'RESULT:%s|%s\\n' "$jd_prefetch_words" "$file_size"`,
@@ -498,7 +516,7 @@ if (!wordCountMatch) {
       const script2 = join(work, 'case2.sh');
       writeFileSync(script2, buildScript(jsShell));
       const result2 = execFileSync(bash, [script2], { encoding: 'utf-8', timeout: 30000 }).trim();
-      const [words2, size2] = result2.split('|').map(Number);
+      const [words2, size2] = result2.match(/RESULT:\s*(\d+)\|\s*(\d+)/).slice(1).map(Number);
       if (size2 === 0) {
         pass(`JS shell HTML (${words2} words): file truncated → WebFetch fallback fires`);
       } else {
@@ -596,7 +614,10 @@ if (!wordCountMatch) {
         `prefetch_min_words=80`,
         `jd_prefetch_words=0`,
         `url="https://example.com/job"`,
+        `runPrefetch() {`,
         curlPrefetchBlock,
+        `}`,
+        `runPrefetch`,
       ].join('\n');
       const script6 = join(work, 'case6.sh');
       writeFileSync(script6, script6Source);
@@ -612,6 +633,96 @@ if (!wordCountMatch) {
         pass('curl absent from PATH: file stays empty → WebFetch fallback fires');
       } else {
         fail(`curl absent: exit=${exit6} stderr=${JSON.stringify(stderr6)} size=${size6}`);
+      }
+
+      // A public two-hop redirect must be followed manually because curl is
+      // capped at --max-redirs 0. Exercise both Location header spellings:
+      // `Location:https://...` and `Location: https://...`.
+      const publicRedirectTrace = join(work, 'public-redirect-trace.txt');
+      const publicRedirectFile = join(work, 'public-redirect.html');
+      const publicRedirectHtml = '<p>' + 'word '.repeat(120).trim() + '</p>';
+      const publicRedirectScript = join(work, 'case-redirect-public.sh');
+      writeFileSync(publicRedirectScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(publicRedirectFile)}`,
+        `> "$jd_file"`,
+        `trace_file=${JSON.stringify(publicRedirectTrace)}`,
+        `: > "$trace_file"`,
+        'curl() {',
+        '  local output_arg="" header_arg="" request_url=""',
+        '  while [[ $# -gt 0 ]]; do',
+        '    case "$1" in',
+        '      --output|-o|--dump-header) if [[ "$1" == "--dump-header" ]]; then header_arg="$2"; else output_arg="$2"; fi; shift 2 ;;',
+        '      --) request_url="$2"; shift 2 ;;',
+        '      *) shift ;;',
+        '    esac',
+        '  done',
+        '  printf "%s\\n" "$request_url" >> "$trace_file"',
+        '  case "$request_url" in',
+        '    https://example.com/job) printf "HTTP/1.1 302 Found\\nLocation:https://example.com/hop1\\n\\n" > "$header_arg"; return 47 ;;',
+        '    https://example.com/hop1) printf "HTTP/1.1 302 Found\\nLocation: https://example.com/final\\n\\n" > "$header_arg"; return 47 ;;',
+        `    https://example.com/final) printf '%s' ${JSON.stringify(publicRedirectHtml)} > "$output_arg"; return 0 ;;`,
+        '    *) return 1 ;;',
+        '  esac',
+        '}',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://example.com/job"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+        `printf 'RESULT:%s|%s|%s\\n' "$jd_prefetch_words" "$(wc -c < "$jd_file")" "$(wc -l < "$trace_file")"`,
+      ].join('\n'));
+      const publicRedirectResult = execFileSync(bash, [publicRedirectScript], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [, publicWords, publicSize, publicCalls] = publicRedirectResult.match(/RESULT:\s*(\d+)\|\s*(\d+)\|\s*(\d+)/).map(Number);
+      const publicContent = readFileSync(publicRedirectFile, 'utf-8');
+      if (publicWords >= 80 && publicSize > 0 && publicCalls === 3 && !/<[^>]+>/.test(publicContent)) {
+        pass(`public two-hop redirect: curl called ${publicCalls} times and final rich JD retained (${publicWords} words)`);
+      } else {
+        fail(`public two-hop redirect: expected 3 calls and rich content, got calls=${publicCalls} words=${publicWords} size=${publicSize}`);
+      }
+
+      // A redirect to a private destination must be blocked before the second
+      // curl request is made.
+      const privateRedirectTrace = join(work, 'private-redirect-trace.txt');
+      const privateRedirectFile = join(work, 'private-redirect.html');
+      const privateRedirectScript = join(work, 'case-redirect-private.sh');
+      writeFileSync(privateRedirectScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(privateRedirectFile)}`,
+        `> "$jd_file"`,
+        `trace_file=${JSON.stringify(privateRedirectTrace)}`,
+        `: > "$trace_file"`,
+        'curl() {',
+        '  local output_arg="" header_arg="" request_url=""',
+        '  while [[ $# -gt 0 ]]; do',
+        '    case "$1" in',
+        '      --output|-o|--dump-header) if [[ "$1" == "--dump-header" ]]; then header_arg="$2"; else output_arg="$2"; fi; shift 2 ;;',
+        '      --) request_url="$2"; shift 2 ;;',
+        '      *) shift ;;',
+        '    esac',
+        '  done',
+        '  printf "%s\\n" "$request_url" >> "$trace_file"',
+        '  if [[ "$request_url" == "https://example.com/job" ]]; then printf "HTTP/1.1 302 Found\\nLocation:http://127.0.0.1/private\\n\\n" > "$header_arg"; return 47; fi',
+        '  return 1',
+        '}',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://example.com/job"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+        `printf 'RESULT:%s|%s|%s\\n' "$jd_prefetch_words" "$(wc -c < "$jd_file")" "$(wc -l < "$trace_file")"`,
+      ].join('\n'));
+      const privateRedirectResult = execFileSync(bash, [privateRedirectScript], { encoding: 'utf-8', timeout: 30000 }).trim();
+      const [, privateWords, privateSize, privateCalls] = privateRedirectResult.match(/RESULT:\s*(\d+)\|\s*(\d+)\|\s*(\d+)/).map(Number);
+      const privateTrace = readFileSync(privateRedirectTrace, 'utf-8');
+      if (privateWords === 0 && privateSize === 0 && privateCalls === 1 && !privateTrace.includes('127.0.0.1')) {
+        pass('redirect to private destination: private second hop was blocked before curl → WebFetch fallback fires');
+      } else {
+        fail(`redirect to private destination: expected one public request and no private hop, got calls=${privateCalls} words=${privateWords} size=${privateSize}`);
       }
 
       // Cases 9-10: SSRF guard blocks loopback and cloud-metadata URLs before curl fires.
@@ -638,7 +749,10 @@ if (!wordCountMatch) {
           `curl_was_called=0`,
           `curl() { curl_was_called=1; }`,
           `url=${JSON.stringify(badUrl)}`,
+          `runPrefetch() {`,
           curlPrefetchBlock,
+          `}`,
+          `runPrefetch`,
           `printf '%s|%s\\n' "$jd_prefetch_words" "$curl_was_called"`,
         ].join('\n');
         const scriptSsrf = join(work, `case-ssrf-${label}.sh`);
@@ -664,7 +778,10 @@ if (!wordCountMatch) {
         `curl_was_called=0`,
         `curl() { curl_was_called=1; }`,
         `url="https://jobs.example.com/eng-42"`,
+        `runPrefetch() {`,
         curlPrefetchBlock,
+        `}`,
+        `runPrefetch`,
         `printf '%s\\n' "$curl_was_called"`,
       ].join('\n');
       const scriptSafeGuard = join(work, 'case-ssrf-safe.sh');
