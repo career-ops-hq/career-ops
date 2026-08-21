@@ -196,3 +196,38 @@ test("buildPrompt: the evaluate prompt demands an EMPTY url field, never a place
   assert.match(prompt, /EMPTY if there is no posting URL/i);
   assert.match(prompt, /never "N\/A"/i);
 });
+
+// ── the posted: segment (#2692) ─────────────────────────────────────────────
+//
+// The dashboard's POSTED column parses this out of the tracker's Notes cell.
+// The date is interpolated by the server from what the scanner recorded, never
+// requested from the agent: modes/oferta.md is explicit that a guessed date is
+// worse than an absent one, because the column renders absent as `—` and would
+// render an invented one as a fresh requisition.
+
+test("buildPrompt: a known posting date becomes its own trailing segment", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
+  const fields = exampleTsvRow(prompt);
+
+  assert.equal(fields.length, 10, "the row must still carry all 10 fields");
+  // Canonical form, from the regex that CONSUMES it: separator-anchored `; `,
+  // label, colon, ISO date. A mid-sentence mention is deliberately not metadata.
+  assert.match(fields[8], /; posted: 2026-08-07$/);
+});
+
+test("buildPrompt: no known date writes NO segment, never a guess", () => {
+  for (const postedAt of [undefined, null, "", "unknown", "7 Aug 2026", "2026-8-7", "1999-01-01"]) {
+    const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt });
+    const fields = exampleTsvRow(prompt);
+    assert.equal(fields.length, 10, `field count changed for ${JSON.stringify(postedAt)}`);
+    assert.ok(!/posted:/.test(fields[8]), `wrote a posted segment for ${JSON.stringify(postedAt)}: ${fields[8]}`);
+  }
+});
+
+test("buildPrompt: the row without a date is byte-identical to before the feature", () => {
+  // The segment is the ONLY difference between the two prompts, so a run with no
+  // recorded date cannot drift from what the CLI has always produced.
+  const withDate = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
+  const without = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14" });
+  assert.equal(withDate.replace("; posted: 2026-08-07", ""), without);
+});

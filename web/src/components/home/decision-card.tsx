@@ -8,8 +8,8 @@ import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
 
-// Awaiting-decision row: a scored role with no terminal status. One-tap Apply /
-// Skip writes back through the EXISTING /api/status (UPDATE-only, canonical states).
+// Awaiting-decision row: a scored role with no terminal status. Primary action
+// opens the report (PDF + Apply live there). Skip / Applied still write status.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
@@ -52,18 +52,14 @@ export function DecisionCard({ app }: { app: Application }) {
         )}
       </div>
       <div className="flex items-center gap-2">
-        {/* brand-soft AT REST (not a solid fill, not hover-only): a calm-but-
-            affirmative primary — a queue of these reads as gentle brand, not 6
-            solid shouts (P5), while staying visibly the positive action next to
-            the neutral Skip even on touch (no hover). */}
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={() => setStatus("Applied")}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 disabled:opacity-60 max-sm:min-h-[44px]"
+        {/* Primary is the report (PDF + Apply live there). Marking Applied from
+            Today skipped that path and wrote a status with no application. */}
+        <a
+          href={`/pipeline/${app.n}`}
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 max-sm:min-h-[44px]"
         >
-          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Mark applied
-        </button>
+          <FileText className="size-3.5" /> Review
+        </a>
         <button
           type="button"
           disabled={!!busy}
@@ -72,9 +68,16 @@ export function DecisionCard({ app }: { app: Application }) {
         >
           {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
         </button>
-        <a href={`/pipeline/${app.n}`} title="Open report" aria-label="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1.5 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
-          <FileText className="size-4" />
-        </a>
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={() => setStatus("Applied")}
+          title="Record Applied without opening the apply flow"
+          className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+        >
+          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+          Applied
+        </button>
       </div>
     </div>
   );

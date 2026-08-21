@@ -203,6 +203,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 // Semantics (case-insensitive substring, in this order):
 //   - Empty / whitespace-only / non-string location → pass (don't penalize
 //     missing or malformed provider data)
+//   - `block_hard` matches → reject (the only tier `always_allow` cannot
+//     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
 //     the home region is an option, even though "france" is blocked)
@@ -340,6 +342,7 @@ export function buildLocationFilter(locationFilter) {
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
+  const blockHard = compileLocationKeywordList(locationFilter.block_hard);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
@@ -347,6 +350,21 @@ export function buildLocationFilter(locationFilter) {
     // Nothing to judge on either field → pass (don't penalize missing data).
     if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    // `block_hard` is the ONE tier always_allow cannot override. It exists because
+    // a European city name can be a whole word inside a non-European location, so
+    // word-boundary matching (#2087) does not catch it and always_allow's
+    // unconditional win silently discards the user's own block entry:
+    //
+    //   "Porto Alegre, Rio Grande do Sul, Brazil"  always_allow "Porto" beats block "Brazil"
+    //   "USA - New York - Malta"                   always_allow "Malta" beats block "USA"
+    //
+    // Both configs already listed the country under `block`. Plain `block` cannot
+    // be promoted wholesale — always_allow was added in #650 precisely so a
+    // multi-location posting survives one blocked city ("Stockholm · London ·
+    // Madrid" must not die on a London entry) — so the user marks the entries
+    // that are country-level and therefore never a false rejection. Opt-in and
+    // additive: a config without `block_hard` behaves exactly as before.
+    if (blockHard.length > 0 && blockHard.some(matches)) return false;
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never
     // rejected because of what its URL happens to contain.
@@ -1108,6 +1126,139 @@ export function normalizeUrlForDedup(url) {
 }
 
 /**
+ * The leading checkbox marker of a `data/pipeline.md` entry.
+ *
+ * Only ` ` and `x` are recognized, matching the pre-existing gates: `- [!]`
+ * marks a URL that could not be fetched, which is not evidence a posting was
+ * surfaced.
+ *
+ * Anchored, because the URL it guards is then matched anywhere in the entry: a
+ * hand-written note that happens to contain checkbox syntax mid-sentence and a
+ * link would otherwise seed that link and silently bury a live posting. Leading
+ * whitespace is tolerated so an indented entry still dedupes, as it did when the
+ * URL had to sit immediately after the checkbox.
+ */
+const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
+
+/**
+ * As `PIPELINE_CHECKBOX_RE`, but rejecting indentation.
+ *
+ * The company/role gate stays exactly as strict as the `^- \[` anchor it
+ * replaces: widening it would seed *more* role keys, and one role key suppresses
+ * every other posting that shares it.
+ */
+const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+
+/**
+ * The `~~…~~` wrapper an expired entry is written with.
+ *
+ * Matched only at the start of the entry body, never searched for line-wide.
+ * `~` is a legal URL character and a documented `note:` column may carry its own
+ * strikethrough, so treating `~` as a global signal both truncates real URLs and
+ * strips live entries of their pair. Expiry is a property of the entry, so it is
+ * read at the entry boundary.
+ */
+const PIPELINE_STRIKETHROUGH_RE = /^~~([\s\S]*?)~~/;
+
+/**
+ * A URL inside a pipeline entry.
+ *
+ * Terminates on whitespace and `|` only. `|` cannot appear unencoded in a URL
+ * and is this format's cell separator, so it is the one safe boundary; every
+ * other character stays legal. `~` (RFC 3986 unreserved) and `)` (a sub-delim)
+ * in particular must not terminate the match — excluding them truncated `~user`
+ * paths and parenthesised region suffixes, and a truncated URL both stops
+ * deduping and seeds a bare-origin key that everything else on that host then
+ * false-matches against.
+ *
+ * `local:` entries are deliberately not matched — the gates this feeds have
+ * always been http(s)-only.
+ */
+const PIPELINE_URL_RE = /https?:\/\/[^\s|]+/;
+
+/**
+ * Split a `data/pipeline.md` checkbox line into its entry body and expiry state.
+ *
+ * The body is whatever follows the checkbox, unwrapped when the entry is struck
+ * out, so every caller parses the same cell sequence either way. An unclosed
+ * wrapper still reads as expired: the opening `~~` is the marker.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @param {RegExp} checkboxRe - Which checkbox anchor this gate accepts.
+ * @returns {{body: string, expired: boolean}|null} Null when the line is not an
+ *   entry at all.
+ */
+function pipelineEntry(line, checkboxRe) {
+  const checkbox = line.match(checkboxRe);
+  if (!checkbox) return null;
+
+  const rest = line.slice(checkbox[0].length);
+  if (!rest.startsWith('~~')) return { body: rest, expired: false };
+
+  const closed = rest.match(PIPELINE_STRIKETHROUGH_RE);
+  return { body: closed ? closed[1] : rest.slice(2), expired: true };
+}
+
+/**
+ * Extract the job URL from a `data/pipeline.md` checkbox line, wherever it sits.
+ *
+ * Six line shapes are documented across the modes, and only the one
+ * `appendToPipeline` writes leads with the URL. The others lead with a report
+ * number (`#NNN`, `modes/pipeline.md`), a report link
+ * (`[NNN](reports/…)`, `reconcile-pipeline.mjs`), a pre-screen marker (`#--`,
+ * `modes/pipeline.md`), or a strikethrough (`~~…~~`, `modes/pipeline.md` and
+ * `modes/oferta.md`). Anchoring the URL to the checkbox missed all five.
+ *
+ * An expired entry still seeds a URL key; only its company/role pair is withheld
+ * (see `extractPipelineCompanyRole`).
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {string|null} The URL, or null when the line carries none.
+ */
+function extractPipelineUrl(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_RE);
+  if (!entry) return null;
+
+  const match = entry.body.match(PIPELINE_URL_RE);
+  return match ? match[0] : null;
+}
+
+/**
+ * Extract the company/role pair from a `data/pipeline.md` checkbox line.
+ *
+ * Company and role are the two cells *after* the URL cell, not cells 1 and 2 —
+ * see `extractPipelineUrl` for why the URL is not always first.
+ *
+ * Two shapes deliberately yield nothing, mirroring the `status !== 'added'`
+ * rule the scan-history branch of `collectSeenCompanyRoles` already applies:
+ *
+ * - **Expired entries** (`~~…~~`). Strikethrough is how the pipeline records the
+ *   same state scan-history records as `skipped_expired`; seeding a dead
+ *   posting's role key would let a dead SF URL bury a live NY req. Read at the
+ *   entry boundary, so a `note:` column containing its own strikethrough leaves
+ *   a live entry's pair intact.
+ * - **Pre-screen discards** (`#-- | {url} | skipped (…)`). The cell after the
+ *   URL is a discard reason, not a company.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {{company: string, role: string}|null} The pair, or null when the
+ *   line has none to contribute.
+ */
+function extractPipelineCompanyRole(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_STRICT_RE);
+  if (!entry || entry.expired) return null;
+
+  const cells = entry.body.split('|').map(cell => cell.trim());
+  if (cells[0].startsWith('#--')) return null;
+
+  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
+  if (urlIndex === -1) return null;
+
+  const [company = '', role = ''] = cells.slice(urlIndex + 1);
+  return { company, role };
+}
+
+/**
  * Build the seen-URL set from already-read source texts. An absent file is
  * passed as '' (the readIfExists convention shared with
  * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
@@ -1125,9 +1276,12 @@ export function collectSeenUrls(sources = {}, policy = {}) {
     else recheckEligible++;
   }
 
-  // pipeline.md — extract URLs from checkbox lines
-  for (const match of pipelineText.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-    seen.add(normalizeUrlForDedup(match[1]));
+  // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
+  // line (see extractPipelineUrl: five of the six documented shapes lead with a
+  // report number, a report link, or a strikethrough rather than the URL).
+  for (const line of pipelineText.split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (url) seen.add(normalizeUrlForDedup(url));
   }
 
   // applications.md — extract URLs from report links and any inline URLs
@@ -1483,10 +1637,15 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     add(company, title);
   }
 
-  // pipeline.md — "- [ ] {url} | {company} | {title}" plus optional trailing
-  // columns (location, compensation, posted:/trust:/note: segments).
-  for (const match of pipelineText.matchAll(/^- \[[ x]\]\s+\S+\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?:\|[^\n]*)?$/gm)) {
-    add(match[1], match[2]);
+  // pipeline.md — company/title are the two cells after the URL cell, plus
+  // optional trailing columns (location, compensation, posted:/trust:/note:
+  // segments). The URL is not always first, and expired/pre-screen shapes
+  // contribute no pair at all — see extractPipelineCompanyRole. Same failure the
+  // applications.md branch above fixed in #954: a positional regex read the
+  // wrong cells, so the seen-set keyed on garbage.
+  for (const line of pipelineText.split('\n')) {
+    const pair = extractPipelineCompanyRole(line);
+    if (pair) add(pair.company, pair.role);
   }
 
   return seen;

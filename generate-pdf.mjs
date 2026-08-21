@@ -5,6 +5,13 @@
  *
  * Usage:
  *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *
+ * --batch renders every document in a JSON manifest (an array of
+ * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
+ * relaunching per document. One failing document is isolated and recorded; the
+ * rest still render. Results are written to <manifest>.results.json and the
+ * process exits non-zero if any document failed (#2384).
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -27,18 +34,68 @@
  */
 
 import { chromium } from 'playwright';
-import { resolve, dirname, relative, sep, isAbsolute } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
-import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const trackerPath = resolveTrackerPath(__dirname);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const PDF_PAGE_MARGIN = '0.6in';
 
+// Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
+// /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
+// When CAREER_OPS_TRACKER points at another workspace, that workspace—not the
+// installed script directory—is the safe boundary for input and output.
+const __workspaceRoot = realpathSync(workspaceRoot);
+
+/**
+ * Assert that an already-resolved absolute path stays inside the tracker workspace,
+ * resolving symlinks first.
+ *
+ * A lexical relative(workspaceRoot, p) check accepts a path that stays lexically
+ * inside the repo but whose ancestor is a symlink escaping it. This canonicalizes
+ * p through realpath — the path itself when it exists, otherwise its nearest
+ * existing ancestor with the not-yet-created tail re-appended (the output PDF and
+ * its directory may not exist yet) — then checks containment against the
+ * realpathed workspace root (mirrors canonicalizeTrackerPath in tracker-utils.mjs).
+ *
+ * @param {string} absPath - Already-resolved absolute candidate path.
+ * @param {string} label - 'input' | 'output', used in the thrown message.
+ * @returns {string} absPath unchanged when contained.
+ * @throws {Error} when the canonical path escapes the tracker workspace.
+ */
+function assertInsideWorkspace(absPath, label) {
+  let probe = absPath;
+  const tail = [];
+  while (!existsSync(probe)) {
+    tail.unshift(basename(probe));
+    const parent = dirname(probe);
+    if (parent === probe) break; // reached the filesystem root
+    probe = parent;
+  }
+  let canonical;
+  try {
+    canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
+  } catch {
+    // Canonicalization failed (realpath raced away, permission error): containment
+    // is unprovable, so fail closed rather than fall back to a lexical form that a
+    // symlinked ancestor could slip past.
+    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+  }
+  const rel = relative(__workspaceRoot, canonical);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+  }
+  return absPath;
+}
+
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -272,6 +329,520 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
 }
 
 /**
+ * Every canonical section key the alias table can produce, in template order.
+ * Derived from the table rather than restated so the two cannot drift.
+ */
+export const CV_SECTION_KEYS = [...new Set(SECTION_ALIASES.values())];
+
+// The all-caps comments the templates use to delimit sections, matched exactly
+// as cv-sections-core.mjs matches them when stripping empty sections.
+const SECTION_MARKER_RE = /<!--\s+[A-Z][A-Z ]*-->/g;
+const SECTION_TITLE_RE = /class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
+
+const DISPLAY_TITLE_MAX = 60;
+
+/**
+ * A rendered section title, made safe to quote back in a console warning.
+ *
+ * The title comes out of the CV, and a warning goes to a terminal or a log, so
+ * it is untrusted output rather than untrusted input: C0/C1 controls are
+ * dropped (an ANSI escape here would let a CV repaint the operator's console or
+ * forge a line of output), and the result is truncated, since nothing stops a
+ * heading being thousands of characters long.
+ *
+ * @param {string} raw - Inner markup of the title element.
+ * @returns {string}
+ */
+function displayTitle(raw) {
+  const text = raw
+    .replace(/<[^>]+>/g, ' ')
+    // C0/C1 controls, then the bidi overrides and isolates. Both let text
+    // rewrite a terminal line rather than merely occupy it: an escape repaints
+    // it, and U+202E reverses what follows, so a title can appear to be output
+    // the tool produced. Stripped rather than escaped — a section heading has
+    // no legitimate use for either.
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Truncate by code point, not UTF-16 unit, so the cap can't end on half a
+  // surrogate pair; then step back off any trailing combining marks so it
+  // can't end on a mark whose base character was just removed. Marks *within*
+  // the cap are left alone — they are ordinary in many scripts, and the length
+  // bound is what keeps a stacked run from running away.
+  const points = [...text];
+  if (points.length <= DISPLAY_TITLE_MAX) return text;
+  const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
+  while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join('')}…`;
+}
+
+/**
+ * The text of the first real section title in html[start, end), skipping any
+ * that sits in raw text (a heading quoted inside a script names nothing).
+ *
+ * @param {string} html
+ * @param {number} start
+ * @param {number} end
+ * @param {[number, number][]} inert
+ * @returns {string|null}
+ */
+function findSectionTitle(html, start, end, inert) {
+  // Matched against the slice, not the whole document: a marker with no title
+  // under it would otherwise send the engine looking as far as the next title
+  // anywhere in the file, which is quadratic across many markers. The slices
+  // partition the document, so this is linear overall.
+  const within = html.slice(start, end);
+  SECTION_TITLE_RE.lastIndex = 0;
+  let match;
+  while ((match = SECTION_TITLE_RE.exec(within)) !== null) {
+    if (!isInRanges(inert, start + match.index)) return match[1];
+  }
+  return null;
+}
+
+// Elements that never have a closing tag, so they must not open a nesting level.
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+// Elements whose content is text, not markup. `<style>.x { content: "</div>" }`
+// closes nothing, and counting that as a close tag would end a section early.
+// The legacy entries (xmp, plaintext, noembed, noframes) and iframe are here
+// because a parser doesn't build elements from their contents either; leaving
+// one out means markup-shaped text inside it is mistaken for structure.
+const RAW_TEXT_ELEMENTS = new Set([
+  'script', 'style', 'textarea', 'title',
+  'xmp', 'plaintext', 'iframe', 'noembed', 'noframes',
+]);
+
+/**
+ * Index of the `>` that ends the tag opening at `from`, or -1.
+ *
+ * Quote-aware, because `>` is legal inside an attribute value:
+ * `<span data-x="> <div>">` is one tag, not a tag plus a stray `<div>`. Reading
+ * it as the latter miscounts the depth — and since a forged count can be made
+ * to balance, it would let a section pass validation and then be moved into
+ * markup it doesn't belong to.
+ *
+ * @param {string} html
+ * @param {number} from - Index of the `<`.
+ * @returns {number}
+ */
+function tagEnd(html, from) {
+  let quote = null;
+  for (let i = from + 1; i < html.length; i++) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Ranges of html holding raw text rather than markup — the contents of
+ * `<script>`, `<style>`, `<textarea>` and `<title>`.
+ *
+ * Needed from the start of the document, not from a section: a marker comment
+ * quoted inside a script string (`const fixture = '<!-- SKILLS -->…'`) is text,
+ * but a search that begins at that marker has no way to know it. Treating it as
+ * a section would move part of a script body around the document.
+ *
+ * @param {string} html
+ * @returns {[number, number][]}
+ */
+function rawTextRanges(html) {
+  const ranges = [];
+  let index = 0;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      index = close === -1 ? html.length : close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) break;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+    if (inner.startsWith('/')) continue;
+
+    // No self-closing check: `<script/>` opens raw text, it does not stand alone.
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name || !RAW_TEXT_ELEMENTS.has(name[1].toLowerCase())) continue;
+
+    // <plaintext> has no end tag at all: everything after it is text to the end
+    // of the document, so a literal `</plaintext>` closes nothing.
+    if (name[1].toLowerCase() === 'plaintext') {
+      ranges.push([index, html.length]);
+      break;
+    }
+
+    const closeTag = new RegExp(`</${name[1]}\\s*>`, 'gi');
+    closeTag.lastIndex = index;
+    const end = closeTag.exec(html);
+    ranges.push([index, end ? end.index : html.length]);
+    index = end ? end.index + end[0].length : html.length;
+  }
+
+  return ranges;
+}
+
+/**
+ * Whether `position` falls inside one of the ranges, which are ascending and
+ * disjoint by construction. Binary search rather than a scan: this is asked
+ * once per marker and once per candidate title, and a linear answer makes the
+ * pair quadratic on a document with many of both.
+ *
+ * @param {[number, number][]} ranges
+ * @param {number} position
+ * @returns {boolean}
+ */
+function isInRanges(ranges, position) {
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (position < ranges[mid][0]) high = mid - 1;
+    else if (position >= ranges[mid][1]) low = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+/**
+ * Walk html[from, to) and report what it does to the nesting depth.
+ *
+ * A forward scan built on indexOf rather than a regex tokenizer: a pattern like
+ * `<!--[\s\S]*?-->` restarts its search from every `<!--`, which is quadratic on
+ * a run of unterminated comments (measured 728ms for 32k of them) and
+ * exponential when nested inside a repetition. Every step here consumes input.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @param {number} to
+ * @returns {{depth: number, exitAt: number}|null} `depth` is the net change at
+ *   `to`; `exitAt` is where a close tag first tried to rise above the starting
+ *   level, or -1. null means the markup could not be read at all (an
+ *   unterminated comment, tag or raw-text element), which callers treat as
+ *   "don't touch this".
+ */
+function scanNesting(html, from, to) {
+  let index = from;
+  let depth = 0;
+
+  while (index < to) {
+    const open = html.indexOf('<', index);
+    if (open === -1 || open >= to) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1 || close + 3 > to) return null;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1 || close >= to) return null;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+
+    if (inner.startsWith('/')) {
+      if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(inner)) continue; // not a close tag
+      if (depth === 0) return { depth, exitAt: open };
+      depth--;
+      continue;
+    }
+
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name) continue; // <!DOCTYPE …>, <?xml …>, or a stray '<'
+    const tag = name[1].toLowerCase();
+
+    // Checked before the self-closing branch: trailing-slash syntax has no
+    // effect on an HTML element, so `<script/>` opens raw text rather than
+    // standing alone, and treating it as self-closing would read the script
+    // body as markup.
+    if (RAW_TEXT_ELEMENTS.has(tag)) {
+      // <plaintext> never ends, so a slice containing one can't be read as
+      // markup at all — refuse rather than guess where it stops.
+      if (tag === 'plaintext') return null;
+      const closeTag = new RegExp(`</${tag}\\s*>`, 'gi');
+      closeTag.lastIndex = index;
+      const end = closeTag.exec(html);
+      if (!end || end.index + end[0].length > to) return null;
+      index = end.index + end[0].length; // consumed whole, depth unchanged
+      continue;
+    }
+
+    if (inner.endsWith('/') || VOID_ELEMENTS.has(tag)) continue;
+
+    depth++;
+  }
+
+  return { depth, exitAt: -1 };
+}
+
+/**
+ * True when html[from, to) is only whitespace, comments and closing tags —
+ * the shape of a document tail (`</div></body></html>`) and of nothing else.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @returns {boolean}
+ */
+function isStructuralTail(html, from) {
+  let index = from;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+    if (html.slice(index, open).trim() !== '') return false; // stray text
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1) return false;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) return false;
+    if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(html.slice(open + 1, close))) return false;
+    index = close + 1;
+  }
+
+  return html.slice(index).trim() === '';
+}
+
+/**
+ * Locate each CV section in a rendered document as a [start, end) slice.
+ *
+ * A section runs from its marker comment to the next one — the extent comes
+ * from the markers, never from matching tags. That matters more than it looks:
+ * when extent is derived by pairing tags, any markup the scanner reads wrongly
+ * yields a *plausible but wrong* extent, and moving it truncates the CV. Here a
+ * misread can only make a section fail the balance check below, and a section
+ * that fails is left alone. Mistakes cost the feature, not the document.
+ *
+ * It also means a section is whatever sits between two markers, so a template
+ * that marks sections with a bare heading —
+ *
+ *   <!-- EDUCATION -->
+ *   <h2 class="section-title">Education</h2>
+ *   <div class="edu-item">BSc</div>
+ *
+ * — moves its heading and body together, rather than being refused.
+ *
+ * Each slice must be balanced: as many elements closed as opened, never rising
+ * above the level it started at. That single check does double duty. It rejects
+ * a slice that would leave markup unclosed, and it establishes that every
+ * accepted section sits at the same nesting level as its neighbours, so filling
+ * one section's place with another can't move it into a container of its own
+ * (`<div class="education-layout"><!-- EDUCATION -->…</div>` fails, because its
+ * slice closes a div it never opened).
+ *
+ * Identity comes from the rendered section title, resolved through the same
+ * alias table validateCvSectionOrder() uses, so the reorder and the guard
+ * cannot disagree about what a section is. A marker with no `.section-title`
+ * under it (`<!-- HEADER -->`) is not a section — which is also what leaves a
+ * cover letter untouched.
+ *
+ * @param {string} html
+ * @returns {{
+ *   blocks: {key: string, start: number, end: number, title: string}[],
+ *   ambiguous: Set<string>,
+ *   unrecognized: Map<string, string>,
+ * }} `blocks` are the movable sections, each carrying its title as rendered (see
+ *   displayTitle). `ambiguous` holds keys whose extent could not be established.
+ *   `unrecognized` maps key -> title for sections the alias table cannot name,
+ *   which are movable but can never match a configured name.
+ */
+function extractSectionBlocks(html) {
+  // A marker quoted inside a script or style is text, not a section boundary.
+  const inert = rawTextRanges(html);
+  const markers = [...html.matchAll(SECTION_MARKER_RE)]
+    .filter(marker => !isInRanges(inert, marker.index));
+  const blocks = [];
+  const ambiguous = new Set();
+
+  for (let i = 0; i < markers.length; i++) {
+    const start = markers[i].index;
+    const next = i + 1 < markers.length ? markers[i + 1].index : html.length;
+
+    // A title quoted inside a script is text too, so it cannot name a section:
+    // taking it would label this block from markup that only looks like a
+    // heading, and apply the user's ordering to the wrong section.
+    const title = findSectionTitle(html, start, next, inert);
+    if (!title) continue;
+    const text = normalizeSectionTitle(title);
+    if (!text) continue;
+    const key = sectionKey(text);
+
+    const scan = scanNesting(html, start, next);
+    if (!scan) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    // The last section has no following marker to bound it, so it ends where
+    // its content first tries to close an element it doesn't own — the parent's
+    // closing tag. Everything after that must be document tail: anything else
+    // means the scan stopped in the wrong place (raw text it misread, say), and
+    // trusting it would move a fragment.
+    const end = scan.exitAt === -1 ? next : scan.exitAt;
+    const bounded = scan.exitAt === -1 ? scan : scanNesting(html, start, end);
+    if (!bounded || bounded.depth !== 0 || (end !== next && !isStructuralTail(html, end))) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    blocks.push({ key, start, end, title: displayTitle(title) });
+  }
+
+  // Titles the alias table doesn't cover. sectionKey() falls back to the
+  // normalized title, so such a block is real and movable but can never match a
+  // configured name — and without this, a CV rendered with titles outside
+  // SECTION_ALIASES makes cv.sections do nothing at all, silently.
+  const unrecognized = new Map();
+  for (const block of blocks) {
+    if (!CV_SECTION_KEYS.includes(block.key)) unrecognized.set(block.key, block.title);
+  }
+
+  return { blocks, ambiguous, unrecognized };
+}
+
+/**
+ * Render the CV's sections in the order declared by `cv.sections` in
+ * config/profile.yml (#2533).
+ *
+ * The named sections are permuted among the slots they already occupy;
+ * everything else stays exactly where the template put it. So a list is a local
+ * statement ("these sections, in this order") rather than a full table of
+ * contents the user has to keep in sync — a section added by a later release
+ * lands where upstream put it instead of breaking the config. Moving a section
+ * past its neighbours is therefore a rotation: name the sections it displaces
+ * too, in the order they should end up in.
+ *
+ * Runs before validateCvSectionOrder(), so the guard still judges what will
+ * actually be printed — this satisfies the guard rather than bypassing it, which
+ * is what separates it from --allow-reorder.
+ *
+ * No `cv.sections` → the input string is returned unchanged.
+ *
+ * @param {string} html
+ * @param {string[]} order - Canonical section keys, e.g. ['skills', 'education'].
+ * @returns {string}
+ */
+export function reorderCvSections(html, order) {
+  if (!Array.isArray(order) || order.length === 0) return html;
+  if (order.length < 2) {
+    // Not an error, but not a no-op worth staying quiet about either: one name
+    // states no relationship, so there is nothing to apply and the user would
+    // otherwise be left thinking the setting took effect.
+    console.warn(`⚠️  config/profile.yml cv.sections lists only "${displayTitle(order[0])}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
+    return html;
+  }
+
+  // No early return on an empty block list: a CV whose sections are all
+  // ambiguous produces none, and silently doing nothing is the failure mode
+  // this feature exists to remove. The per-name loop below reports first.
+  const { blocks, ambiguous, unrecognized } = extractSectionBlocks(html);
+
+  const byKey = new Map();
+  for (const block of blocks) {
+    if (!byKey.has(block.key)) byKey.set(block.key, block);
+  }
+
+  const chosen = [];
+  const unresolved = [];
+  const seen = new Set();
+  for (const name of order) {
+    // `name` comes from a config file and is quoted straight into console
+    // output, so it gets the same treatment as a rendered title: displayTitle()
+    // strips C0/C1 controls and bidi overrides (either can repaint a terminal
+    // line so a warning appears to say something the tool never printed) and
+    // bounds the length so one long entry cannot bury the message.
+    const shown = displayTitle(name);
+    if (seen.has(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}" more than once — keeping its first position.`);
+      continue;
+    }
+    seen.add(name);
+    if (!CV_SECTION_KEYS.includes(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", which is not a CV section — ignoring it. Recognized: ${CV_SECTION_KEYS.join(', ')}.`);
+      continue;
+    }
+    const block = byKey.get(name);
+    if (block) {
+      chosen.push(block);
+    } else if (ambiguous.has(name)) {
+      // Present, but its markup doesn't stand on its own — it opens or closes
+      // elements outside itself, so moving it would leave tags unbalanced.
+      // Reported rather than skipped quietly: the section stays where the
+      // template put it, and the user would otherwise see a setting that
+      // silently does nothing.
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
+    } else {
+      // Recognized and unambiguous but with no block. Ordinarily that just means
+      // the section isn't in this CV (an optional one with no entries is
+      // stripped before the PDF step), which is not worth a warning on its own.
+      unresolved.push(name);
+    }
+  }
+
+  // It is worth one when the CV also renders titles the alias table can't name,
+  // because then "not in this CV" may be a misreading: the section could be
+  // sitting right there under a heading nothing could identify.
+  //
+  // Whether that is what happened is not knowable here — an unresolved name may
+  // equally be an optional section with no entries. So the report states only
+  // what is checkable (this name matched nothing; these titles are unidentified)
+  // and leaves the conclusion to the reader. Deliberately not conditioned on
+  // whether the document changed: a name that did nothing did nothing, whether
+  // or not its neighbours moved, and treating "output identical" as the failure
+  // signal misreads an order that was already satisfied.
+  const reportUnresolved = () => {
+    if (unresolved.length === 0 || unrecognized.size === 0) return;
+    const names = unresolved.map(name => `"${displayTitle(name)}"`).join(', ');
+    const titles = [...unrecognized.values()].map(title => `"${title}"`).join(', ');
+    console.warn(`⚠️  config/profile.yml cv.sections names ${names}, which matched no section in this CV. The CV also renders ${unrecognized.size} section title(s) the section-order alias table doesn't recognize (${titles}) — if one of those is the section you meant, its title needs an entry in SECTION_ALIASES in generate-pdf.mjs. Otherwise the name has no effect and can be dropped.`);
+  };
+  if (chosen.length < 2) {
+    reportUnresolved();
+    return html;
+  }
+
+  // The slots are the named sections' own positions, in document order; the
+  // sections fill them in the configured order. No separate sibling check is
+  // needed: every accepted block is balanced, so they all sit at the same
+  // nesting level by construction.
+  const slots = [...chosen].sort((a, b) => a.start - b.start);
+
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < slots.length; i++) {
+    out += html.slice(cursor, slots[i].start);
+    out += html.slice(chosen[i].start, chosen[i].end);
+    cursor = slots[i].end;
+  }
+
+  const reordered = out + html.slice(cursor);
+  reportUnresolved();
+  return reordered;
+}
+
+/**
  * Decide whether a rendered CV fits its configured page budget.
  *
  * This is deliberately separate from rendering: page count comes from the
@@ -339,17 +910,61 @@ function countRenderedPdfPages(pdfBuffer) {
 }
 
 /**
- * Convert a path to a repo-relative manifest entry, or blank if it is unknown
- * or outside the career-ops repository.
+ * Convert a path to a workspace-relative manifest entry, or blank if it is
+ * unknown or outside the tracker-owned workspace.
  *
  * @param {string} pathValue - Absolute or cwd-relative filesystem path.
- * @returns {string} Repo-relative path using forward slashes, or an empty string.
+ * @param {string} [rootDir] - Workspace root used as the manifest base.
+ * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function repoRelativeManifestPath(pathValue) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
+  const rel = relative(rootDir, resolve(pathValue));
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
+}
+
+/** @deprecated Use workspaceRelativeManifestPath. */
+export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+  return workspaceRelativeManifestPath(pathValue, rootDir);
+}
+
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Confirm a PDF destination is lexically and canonically inside its workspace.
+ * Resolving the nearest existing ancestor catches output directories that are
+ * symlinks to another location before Chromium writes through them.
+ */
+export function isWorkspaceOutputPath(pathValue, rootDir = workspaceRoot) {
+  const root = resolve(rootDir);
+  const candidate = resolve(pathValue);
+  const lexical = relative(root, candidate);
+  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
+    return false;
+  }
+
+  try {
+    const canonicalRoot = realpathSync(root);
+    const canonicalAnchor = realpathSync(nearestExistingPath(candidate));
+    const canonical = relative(canonicalRoot, canonicalAnchor);
+    return canonical === '' || (canonical !== '..' && !canonical.startsWith(`..${sep}`) && !isAbsolute(canonical));
+  } catch {
+    return false;
+  }
 }
 
 export function injectPrintPageCss(html, format = 'a4') {
@@ -384,16 +999,16 @@ export function injectPrintPageCss(html, format = 'a4') {
  * report number to the exact PDF (and its source HTML for regeneration).
  *
  * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * career-ops root with forward slashes. One row per PDF path; when a report
+ * tracker workspace with forward slashes. One row per PDF path; when a report
  * number is given, older rows for that report are dropped too (regenerated
  * CVs supersede stale entries). The file is gitignored: it references
  * gitignored output/ artifacts and is meaningless on another machine.
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+  const manifestPath = resolvePdfIndexPath(trackerPath);
+  const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
-  const relHTML = repoRelativeManifestPath(htmlPath);
+  const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
@@ -432,13 +1047,15 @@ async function generatePDF() {
 
   // Parse arguments
   let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false;
+  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.split('=')[1].trim();
+    } else if (arg.startsWith('--batch=')) {
+      batchManifestPath = arg.slice('--batch='.length);
     } else if (arg.startsWith('--max-pages=')) {
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
@@ -453,8 +1070,34 @@ async function generatePDF() {
     }
   }
 
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
+    process.exit(1);
+  }
+
+  // Batch mode (#2384): render every document in the manifest through one
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
+  // all entries; each entry supplies its own input/output and may override
+  // format/reportNum. Takes no positional input/output.
+  if (batchManifestPath) {
+    // --report keys a single PDF to one tracker row; a batch renders N distinct
+    // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
+    // in the manifest is the correct channel — reject the global flag here rather
+    // than silently ignore it (fails before the batch path returns).
+    if (reportNum) {
+      console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
+      process.exit(1);
+    }
+    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+  }
+
   if (!inputPath || !outputPath) {
     console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('');
+    console.error('Batch mode renders every document in the JSON manifest (an array of');
+    console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
+    console.error('<manifest>.results.json; it exits non-zero if any document fails.');
     console.error('');
     console.error('This script only converts an already-built HTML file to PDF.');
     console.error('The input HTML is produced by the pdf mode: the agent fills cv-template.html');
@@ -469,22 +1112,22 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
-    process.exit(1);
-  }
-
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
 
-  // Path-traversal guard: keep the PDF write inside the project directory so a
-  // crafted output argument (e.g. "../../etc/cron.d/x") can't escape the repo.
-  // Anchored to the repo root (__dirname), not process.cwd(): running the script
+  // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
+  // so a crafted output argument cannot escape into another user's directory.
+  // Anchored to the workspace root, not process.cwd(): running the script
   // from outside the repo used to falsely refuse in-repo outputs — and, worse,
   // would have allowed writes anywhere under an arbitrary cwd.
-  const relOut = relative(__dirname, outputPath);
-  if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
-    console.error(`Refusing to write the PDF outside the project directory: ${outputPath}`);
+  try {
+    assertInsideWorkspace(inputPath, 'input');
+  } catch (err) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
+    process.exit(1);
+  }
+  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+    console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
 
@@ -503,10 +1146,19 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Apply the user's declared section order (config/profile.yml `cv.sections`)
+  // before the guard runs, so the guard judges the document that will be
+  // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
+  // the same file from workspaceRoot, and cv.md is read from there too, so an
+  // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
+  // two files — style from the workspace, section order from the checkout —
+  // and validated the workspace's CV against the checkout's declared order.
+  html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
+
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
 
   // Normalize text for ATS compatibility (issue #1)
@@ -525,7 +1177,175 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
   });
+}
+
+/**
+ * Drive batch mode (#2384) from a JSON manifest.
+ *
+ * The manifest is a JSON array of {input, output, format?, reportNum?}. Each
+ * entry is validated and its HTML read + ATS-normalized independently: a bad
+ * entry (missing file, bad format, escaping output path, scrambled section
+ * order) is recorded as a failure and skipped so it can never sink the rest of
+ * the batch. Surviving entries render through one shared Chromium (renderBatch).
+ *
+ * A results manifest is always written next to the input manifest as
+ * `<manifest>.results.json` — an ordered array mirroring the input, each item
+ * `{outputPath, ok, ...}`. The process exits non-zero if ANY entry failed (or
+ * the browser died), so cron/batch-tailor callers never mistake a partial run
+ * for success; it exits zero only when every document rendered.
+ *
+ * @param {string} manifestPath - Path to the JSON manifest.
+ * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @returns {Promise<{ok: number, failed: number, results: Array}>}
+ */
+async function runBatchFromManifest(manifestPath, globals) {
+  const resolvedManifest = resolve(manifestPath);
+  const manifestDir = dirname(resolvedManifest);
+
+  // Contain the manifest itself before any filesystem access: batch manifests are
+  // machine-generated workspace-internal artifacts, so a --batch path pointing outside
+  // the project marks a malformed/tampered invocation. Reject before reading the
+  // manifest or writing its <manifest>.results.json sibling below.
+  try {
+    assertInsideWorkspace(resolvedManifest, 'batch manifest');
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
+
+  let raw;
+  try {
+    raw = await readFile(resolvedManifest, 'utf-8');
+  } catch (err) {
+    console.error(`❌ Cannot read batch manifest: ${resolvedManifest} (${err.message})`);
+    process.exit(1);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch (err) {
+    console.error(`❌ Batch manifest is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+
+  if (!Array.isArray(manifest) || manifest.length === 0) {
+    console.error('❌ Batch manifest must be a non-empty JSON array of {input, output, format?, reportNum?}.');
+    process.exit(1);
+  }
+
+  const validFormats = ['a4', 'letter'];
+  const results = new Array(manifest.length).fill(null);
+  const entries = [];
+
+  // Prepare each entry. Preserve input order in the results by carrying the
+  // manifest index through renderBatch; prep failures land at their own index.
+  let cvMarkdown = '';
+  try {
+    cvMarkdown = await readFile(resolve(workspaceRoot, 'cv.md'), 'utf-8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  // One profile governs the whole batch, so the declared order is read once
+  // rather than per entry. Anchored to workspaceRoot for the same reason the
+  // single render is: it is the anchor readStyleTokens() and the cv.md read
+  // already use, so one profile.yml supplies every setting.
+  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+
+  for (let i = 0; i < manifest.length; i++) {
+    const spec = manifest[i];
+    try {
+      if (!spec || typeof spec.input !== 'string' || typeof spec.output !== 'string') {
+        throw new Error('each entry needs a string "input" and "output"');
+      }
+
+      const entryFormat = (spec.format || globals.format).toLowerCase();
+      if (!validFormats.includes(entryFormat)) {
+        throw new Error(`invalid format "${entryFormat}" (use: ${validFormats.join(', ')})`);
+      }
+
+      const entryReport = (spec.reportNum ?? '').toString().trim();
+      if (entryReport && !/^\d+$/.test(entryReport)) {
+        throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
+      }
+
+      // Resolve manifest-supplied input/output relative to the manifest's own
+      // directory, not process.cwd(), so a manifest renders identically wherever
+      // the batch is launched from. Absolute paths in the manifest still win
+      // (resolve() ignores the base when the tail is absolute).
+      const entryInput = resolve(manifestDir, spec.input);
+      const entryOutput = resolve(manifestDir, spec.output);
+
+      // Path-containment guards (realpath-based): keep the read and write inside
+      // the tracker workspace even through a symlinked ancestor. A batch
+      // manifest that escapes the workspace is malformed/tampered and is
+      // recorded as a per-entry failure rather than read or written.
+      assertInsideWorkspace(entryInput, 'input');
+      if (!isWorkspaceOutputPath(entryOutput, workspaceRoot)) {
+        throw new Error(`output escapes the tracker workspace: ${entryOutput}`);
+      }
+
+      let html = await readFile(entryInput, 'utf-8');
+      // Same order as the single render: reorder first so the guard judges the
+      // document that will actually be printed. Without this the batch path
+      // rendered N CVs with cv.sections silently inert.
+      html = reorderCvSections(html, cvSectionOrder);
+      validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      html = normalizeTextForATS(html).html;
+
+      entries.push({
+        _idx: i,
+        html,
+        outputPath: entryOutput,
+        format: entryFormat,
+        baseDir: dirname(entryInput),
+        reportNum: entryReport,
+        inputPath: entryInput,
+        maxPages: globals.maxPages,
+        strictPages: globals.strictPages,
+      });
+    } catch (err) {
+      console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
+      // Record outputPath with the same manifest-dir-resolved absolute convention
+      // successful entries use, so consumers see one path shape across ok/failed
+      // results; null stays null when the entry named no output.
+      const failedOutput = spec && typeof spec.output === 'string' ? resolve(manifestDir, spec.output) : null;
+      results[i] = { outputPath: failedOutput, ok: false, error: err.message };
+    }
+  }
+
+  if (entries.length > 0) {
+    console.log(`📦 Batch: rendering ${entries.length} document(s) in one Chromium…`);
+    const rendered = await renderBatch(entries);
+    rendered.forEach((r, k) => { results[entries[k]._idx] = r; });
+  }
+
+  const ok = results.filter((r) => r && r.ok).length;
+  const failed = results.length - ok;
+
+  const resultsPath = `${resolvedManifest}.results.json`;
+  try {
+    // resolvedManifest is already contained, so this sibling is too; assert
+    // explicitly so the write can never land outside the workspace.
+    assertInsideWorkspace(resultsPath, 'batch results');
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2) + '\n');
+    console.log(`🔗 Batch results: ${resultsPath}`);
+  } catch (err) {
+    console.error(`⚠️  Could not write batch results manifest: ${err.message}`);
+    // A failed results write is itself a batch failure: consumers rely on the
+    // manifest, so exit non-zero even when every entry rendered fine.
+    process.exitCode = 1;
+  }
+
+  console.log(`📦 Batch complete: ${ok} ok, ${failed} failed`);
+  // Signal failure via exitCode, not process.exit(1): the latter can truncate
+  // buffered stdout (the summary + results-path logs above) before it flushes.
+  // Returning normally lets in-process callers read the full breakdown and the
+  // process still exits non-zero once the event loop drains.
+  if (failed > 0) process.exitCode = 1;
+  return { ok, failed, results };
 }
 
 /**
@@ -538,9 +1358,27 @@ async function generatePDF() {
  *
  * Missing font files keep their original reference and log a warning.
  *
+ * Encoded font data: URLs are memoized across calls (keyed by resolved absolute
+ * path, not name — two fonts can share a display name but not a path) so a
+ * batch render does not re-read and re-base64 the same font once per document.
+ * The cache holds only successful encodings; a missing font is re-checked each
+ * call so a font added mid-run is picked up. The bytes are deterministic, so a
+ * cache hit returns the exact same data: URL — output stays byte-identical.
+ *
+ * Cache lifetime and invalidation: the cache lives only for the duration of a
+ * single CLI run (a module-level Map, never persisted). It is keyed by path and
+ * is deliberately NOT invalidated when a font file changes or is deleted mid-run
+ * — once a path is cached, that path serves the first-read bytes for the rest of
+ * the run even if the file is later edited or removed on disk (no mtime/size
+ * stat check). This is intentional: a batch renders from a fixed set of fonts and
+ * relies on the stale-on-deletion behavior to stay byte-identical; the next CLI
+ * run starts with an empty cache and re-reads from disk.
+ *
  * @param {string} html - HTML that may reference url('./fonts/<file>').
  * @returns {Promise<string>} HTML with local font references inlined.
  */
+const _fontDataUrlCache = new Map();
+
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
@@ -556,10 +1394,16 @@ export async function inlineLocalFonts(html) {
       console.warn(`⚠️  Font reference escapes fonts/, keeping original reference: ${name}`);
       continue;
     }
+    if (_fontDataUrlCache.has(fontPath)) {
+      dataUrls.set(name, _fontDataUrlCache.get(fontPath));
+      continue;
+    }
     try {
       const buf = await readFile(fontPath);
       const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
-      dataUrls.set(name, `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`);
+      const dataUrl = `url('data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}')`;
+      _fontDataUrlCache.set(fontPath, dataUrl);
+      dataUrls.set(name, dataUrl);
     } catch (err) {
       if (err?.code !== 'ENOENT') throw err;
       console.warn(`⚠️  Font file not found, keeping original reference: fonts/${name}`);
@@ -593,6 +1437,47 @@ export async function inlineLocalFonts(html) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
+  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  let browser = null;
+  try {
+    browser = await launchBrowser({ headless: true });
+    return await renderInPage(browser, html, outputPath, opts);
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
+  }
+}
+
+/**
+ * Render one already-normalized HTML document to a PDF on an already-launched
+ * browser. This is the page-level half of the render — it owns the per-document
+ * work (theme/print/font injection, temp file, page, PDF, page-budget, manifest)
+ * but NOT the browser lifecycle. Both the single-CV path (renderHtmlToPdf) and
+ * the batch path (renderBatch) call this exact function, which is what keeps a
+ * single-CV render byte-identical whether it runs alone or inside a batch (#2384).
+ *
+ * The page and the temp HTML file are always cleaned up in a finally, so a
+ * throw here (e.g. a strict page-budget overflow) never leaks a page into the
+ * shared browser — the caller's remaining documents keep their own fresh pages.
+ *
+ * @param {import('playwright').Browser} browser - An open browser to render on.
+ * @param {string} html - Full HTML document to render.
+ * @param {string} outputPath - Absolute path to write the PDF to.
+ * @param {{
+ *   format?: 'a4'|'letter',
+ *   baseDir?: string,
+ *   reportNum?: string,
+ *   inputPath?: string,
+ *   maxPages?: number,
+ *   strictPages?: boolean,
+ *   styleTokens?: object
+ * }} [opts]
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ */
+async function renderInPage(browser, html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
   const baseDir = opts.baseDir || process.cwd();
   const reportNum = opts.reportNum || '';
@@ -616,10 +1501,9 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const { writeFile, unlink } = await import('fs/promises');
   await writeFile(tmpHtmlPath, html, 'utf-8');
 
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
-  let browser = null;
+  let page = null;
+  let context = null;
   try {
-    browser = await launchBrowser({ headless: true });
     // A CV is static markup, so the renderer needs neither scripts nor the network.
     // Both are denied because this HTML is not fully trusted: it is built from
     // cv.md, the job posting and the evaluation report, and postings are untrusted
@@ -628,12 +1512,14 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
     // out. file:/data: subresources still load, which is all a template needs.
     //
     // newContext(), not newPage(): javaScriptEnabled is a Playwright context
-    // option with no per-page equivalent. Guarded so an injected test double that
-    // only implements newPage() still works.
-    const context = browser.newContext
+    // option with no per-page equivalent, and a fresh context per document also
+    // keeps each render isolated from its siblings within one shared browser
+    // (#2384). Guarded so an injected test double that only implements newPage()
+    // still works.
+    context = browser.newContext
       ? await browser.newContext({ javaScriptEnabled: false })
       : null;
-    const page = context ? await context.newPage() : await browser.newPage();
+    page = context ? await context.newPage() : await browser.newPage();
     if (page.route) {
       await page.route('**/*', (route) => {
         const url = route.request().url();
@@ -690,9 +1576,19 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     return { outputPath, pageCount, size: pdfBuffer.length };
   } finally {
-    if (browser) {
-      await browser.close().catch((err) => {
-        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+    // Close the page so a batch does not accumulate pages into the shared
+    // browser (leak → OOM). Optional-chained: the single path's browser.close()
+    // already reclaims the page, and minimal test doubles may omit close().
+    if (page && typeof page.close === 'function') {
+      await page.close().catch((err) => {
+        console.warn(`⚠️  Page cleanup failed: ${err.message}`);
+      });
+    }
+    // Close the per-document context too, so the JS-disabled context created
+    // above does not accumulate in the shared browser across a batch (#2384).
+    if (context && typeof context.close === 'function') {
+      await context.close().catch((err) => {
+        console.warn(`⚠️  Context cleanup failed: ${err.message}`);
       });
     }
     // Clean up temp file
@@ -701,6 +1597,65 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
         console.warn(`⚠️  Temporary HTML cleanup failed: ${err.message}`);
       }
     });
+  }
+}
+
+/**
+ * Render many already-normalized HTML documents through ONE shared Chromium.
+ *
+ * Maintainer conditions (#2384): the browser is launched once via the same
+ * opts.launchBrowser seam the single path uses, and closed in a finally at the
+ * batch boundary — it never outlives the batch and is torn down even if a
+ * document throws. Each entry renders on its own page (renderInPage), and a
+ * failing entry is captured as `{ok:false, error}` without stopping the rest.
+ *
+ * The browser is owned here: renderBatch closes whatever launchBrowser returns.
+ * launchBrowser is a launch *factory*, not a caller-owned handle, so this does
+ * not break test injection — the stub returns a fresh browser to be closed.
+ *
+ * Rendering is intentionally serial: a shared module-level font cache and one
+ * long-lived browser make parallel rendering a determinism/memory hazard that
+ * this change does not take on.
+ *
+ * @param {Array<{html: string, outputPath: string, format?: string, baseDir?: string,
+ *   reportNum?: string, inputPath?: string, maxPages?: number, strictPages?: boolean}>} entries
+ * @param {{launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>}} [opts]
+ * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
+ */
+export async function renderBatch(entries, opts = {}) {
+  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  const results = [];
+  let browser = null;
+  try {
+    try {
+      browser = await launchBrowser({ headless: true });
+    } catch (err) {
+      // A shared-browser launch failure is fatal to every document, but it must
+      // NOT escape as an uncaught throw: record a failed result for each entry so
+      // runBatchFromManifest still writes a complete results manifest and takes
+      // the existing non-zero exit path, instead of crashing before either (#2384).
+      console.error(`❌ Batch browser launch failed: ${err.message}`);
+      for (const entry of entries) {
+        results.push({ outputPath: entry.outputPath, ok: false, error: `browser launch failed: ${err.message}` });
+      }
+      return results;
+    }
+    for (const entry of entries) {
+      try {
+        const r = await renderInPage(browser, entry.html, entry.outputPath, entry);
+        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size });
+      } catch (err) {
+        console.error(`❌ Batch entry failed (${entry.outputPath}): ${err.message}`);
+        results.push({ outputPath: entry.outputPath, ok: false, error: err.message });
+      }
+    }
+    return results;
+  } finally {
+    if (browser) {
+      await browser.close().catch((err) => {
+        console.warn(`⚠️  Browser cleanup failed: ${err.message}`);
+      });
+    }
   }
 }
 
