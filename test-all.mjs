@@ -5813,6 +5813,33 @@ try {
     fail('fix-slugs.mjs --dry-run wrote to portals.yml — must require --fix/--apply');
   }
   rmSync(dryRunTmp, { recursive: true, force: true });
+
+  // CLI flag validation (#2980)
+  const helpOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--help'], { encoding: 'utf-8' });
+  const hOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '-h'], { encoding: 'utf-8' });
+  if (helpOut.status === 0 && hOut.status === 0 &&
+      helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('fix-slugs.mjs') &&
+      hOut.stdout === helpOut.stdout) {
+    pass('fix-slugs.mjs --help/-h print usage and exit 0');
+  } else {
+    fail(`fix-slugs.mjs --help/-h failed => status=${helpOut.status}/${hOut.status}`);
+  }
+
+  const badFlagOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--dryrun'], { encoding: 'utf-8' });
+  if (badFlagOut.status === 1 && badFlagOut.stderr.includes('unrecognized flag(s): --dryrun') && badFlagOut.stderr.includes('Valid flags:')) {
+    pass('fix-slugs.mjs rejects unrecognized flags with exit 1');
+  } else {
+    fail(`fix-slugs.mjs bad flag handling => status=${badFlagOut.status} stderr=${badFlagOut.stderr}`);
+  }
+
+  const missingFileOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file'], { encoding: 'utf-8' });
+  const fileFlagNextOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', '--fix'], { encoding: 'utf-8' });
+  if (missingFileOut.status === 1 && missingFileOut.stderr.includes('--file requires a value') &&
+      fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
+    pass('fix-slugs.mjs rejects missing --file value with exit 1');
+  } else {
+    fail(`fix-slugs.mjs missing --file value handling => bare: ${missingFileOut.status} nextFlag: ${fileFlagNextOut.status}`);
+  }
 } catch (e) {
   fail(`slug auto-fixer tests crashed: ${e.message}`);
 }
