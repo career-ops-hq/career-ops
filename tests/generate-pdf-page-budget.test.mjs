@@ -12,6 +12,7 @@ import {
 } from 'fs';
 import { join, relative } from 'path';
 import { tmpdir } from 'os';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
@@ -297,6 +298,42 @@ try {
     pass('generate-pdf keeps temporary HTML workspace-scoped for external input paths');
   } else {
     fail(`generate-pdf leaked a temporary HTML file beside external input: ${externalTempFiles.join(', ')}`);
+  }
+
+  // Observe the temporary path before renderer cleanup. The CLI rejects an
+  // external input path, so call the renderer directly to cover its public
+  // baseDir option as well.
+  const { renderHtmlToPdf } = await import(pathToFileURL(script).href);
+  const directPdf = join(sandbox, 'direct-external-base-dir.pdf');
+  let observedTempPath = '';
+  const directResult = await renderHtmlToPdf('<!doctype html><html><body>direct</body></html>', directPdf, {
+    baseDir: externalInputRoot,
+    workspaceRoot: sandbox,
+    inputPath: input,
+    launchBrowser: async () => ({
+      async newPage() {
+        return {
+          async goto(url) { observedTempPath = fileURLToPath(url); },
+          async evaluate() {},
+          async pdf() {
+            return Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF');
+          },
+        };
+      },
+      async close() {},
+    }),
+  });
+  const tempRelativeToWorkspace = relative(sandbox, observedTempPath);
+  const tempRelativeToExternal = relative(externalInputRoot, observedTempPath);
+  if (
+    directResult?.outputPath === directPdf &&
+    tempRelativeToWorkspace !== '' &&
+    !tempRelativeToWorkspace.startsWith('..') &&
+    tempRelativeToExternal.startsWith('..')
+  ) {
+    pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
+  } else {
+    fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
