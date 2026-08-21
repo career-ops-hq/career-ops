@@ -30,6 +30,7 @@ import {
   readdirSync,
   statSync,
   existsSync,
+  realpathSync,
 } from 'fs';
 import { join, dirname, relative, isAbsolute, resolve, basename, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -163,6 +164,39 @@ function toRelKey(p, reportsDir) {
   return rel;
 }
 
+// realpath-containment guard for every on-disk read this module performs. The
+// filename filter (REPORT_FILE_RE) and toRelKey() are LEXICAL only: a symlink
+// planted inside reportsDir (e.g. reports/042-evil-2026-01-01.md → /etc/passwd)
+// has a perfectly valid lexical path, so statSync()/readFileSync() would follow
+// it and splice an out-of-tree file's Machine Summary into the shared index and
+// data/reports-index.json. Canonicalize the candidate with realpathSync and
+// require it to stay inside the canonical reportsDir before any read (#2762).
+// realRoot is resolved once per load; a candidate whose realpath cannot be
+// resolved (broken/dangling link) is rejected. Mirrors withinReports() in
+// analyze-patterns.mjs / upskill.mjs, applied here at the read site.
+function realRootOf(reportsDir) {
+  try {
+    return realpathSync(reportsDir);
+  } catch {
+    return null;
+  }
+}
+
+function withinRealRoot(abs, realRoot) {
+  if (!realRoot) return false;
+  let real;
+  try {
+    real = realpathSync(abs);
+  } catch {
+    // ENOENT/ENOTDIR (missing or broken symlink) or any resolve failure: do not
+    // read it. Enumeration already filtered to existing dir entries, so this is
+    // an escaping/broken link, not a normal missing file.
+    return false;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return real === realRoot || real.startsWith(rootWithSep);
+}
+
 function serializeIndex(entries) {
   const obj = { version: INDEX_VERSION, entries: {} };
   // Sorted keys → deterministic on-disk bytes across runs.
@@ -178,6 +212,28 @@ function serializeIndex(entries) {
   return JSON.stringify(obj, null, 2) + '\n';
 }
 
+// A cache entry is only safe to reuse if BOTH its stat metadata AND its nested
+// payload are well-formed. Top-level version/shape checks are not enough: a
+// stat-matching entry with a malformed `summary` or a missing
+// `extras.salaryGap.advertised_comp` would be trusted and then crash a consumer
+// (salary-gap.mjs reads `entry.extras.salaryGap.advertised_comp` directly). One
+// bad entry poisons the whole cache, so any malformed entry forces a full
+// rebuild rather than a silent per-entry repair (#2762).
+function isValidCacheEntry(e) {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return false;
+  if (typeof e.mtimeMs !== 'number' || !Number.isFinite(e.mtimeMs)) return false;
+  if (typeof e.size !== 'number' || !Number.isFinite(e.size)) return false;
+  // summary is either null (no usable Machine Summary) or a plain object.
+  if (e.summary !== null && (typeof e.summary !== 'object' || Array.isArray(e.summary))) return false;
+  // extras must carry salaryGap.advertised_comp (value-or-null) so salary-gap's
+  // `entry.extras.salaryGap.advertised_comp` read never dereferences undefined.
+  const sg = e.extras && typeof e.extras === 'object' && !Array.isArray(e.extras)
+    ? e.extras.salaryGap
+    : null;
+  if (!sg || typeof sg !== 'object' || Array.isArray(sg) || !('advertised_comp' in sg)) return false;
+  return true;
+}
+
 function readCache(cachePath) {
   try {
     const parsed = JSON.parse(readFileSync(cachePath, 'utf-8'));
@@ -188,6 +244,11 @@ function readCache(cachePath) {
       parsed.entries &&
       typeof parsed.entries === 'object'
     ) {
+      // Validate every entry's nested shape before trusting ANY of them; a
+      // single malformed entry rejects the whole cache (force rebuild).
+      for (const key of Object.keys(parsed.entries)) {
+        if (!isValidCacheEntry(parsed.entries[key])) return null;
+      }
       return parsed.entries;
     }
   } catch {
@@ -218,12 +279,17 @@ export function loadReportsIndex({
   }
 
   const cache = noCache ? null : readCache(cachePath);
+  const realRoot = realRootOf(reportsDir);
 
   const entries = new Map();
   let reused = 0;
   let parsed = 0;
   for (const file of files) {
     const abs = join(reportsDir, file);
+    // Reject a symlinked candidate whose realpath escapes reportsDir BEFORE any
+    // stat/read — a lexically-valid filename is not proof the bytes live inside
+    // reports/ (#2762).
+    if (!withinRealRoot(abs, realRoot)) continue;
     let stat;
     try {
       stat = statSync(abs);
@@ -282,6 +348,10 @@ export function loadReportsIndex({
       if (key === null) return null;
       if (entries.has(key)) return entries.get(key);
       const abs = join(reportsDir, key);
+      // Same realpath-containment guard as the enumeration loop: toRelKey is
+      // lexical, so an on-demand lookup of a symlink escaping reports/ must not
+      // be read either (#2762).
+      if (!withinRealRoot(abs, realRoot)) return null;
       let stat;
       let content;
       try {
@@ -500,6 +570,73 @@ advertised_comp: "${adv}"
       if (!CORE_SUMMARY_FIELDS.has('via') || !CORE_SUMMARY_FIELDS.has('company_confidential')) failures.push('7: CORE_SUMMARY_FIELDS must contain via + company_confidential');
       if (CORE_SUMMARY_FIELDS.has('advertised_comp')) failures.push('7: CORE_SUMMARY_FIELDS must NOT contain advertised_comp');
     }
+
+    // ── 8. Symlink escaping reportsDir is never stat/read into the index ─────
+    // A lexically-valid report filename that is really a symlink whose target
+    // lives OUTSIDE reportsDir must be rejected before any read, so an out-of-
+    // tree file's Machine Summary never enters the shared index or the on-disk
+    // cache (#2762). symlinkSync needs privilege on Windows — skip (do not fail)
+    // the assertion when the platform refuses.
+    {
+      const ws = makeWorkspace();
+      const real = join(ws.reportsDir, '001-real-2026-01-01.md');
+      writeFileSync(real, canonicalReport('RealCo'));
+      const outsideFile = join(ws.root, 'secret.md');
+      writeFileSync(outsideFile, canonicalReport('LEAKED-SECRET'));
+      const link = join(ws.reportsDir, '999-leak-2026-01-01.md');
+      let linked = false;
+      try {
+        fs.symlinkSync(outsideFile, link);
+        linked = true;
+      } catch (err) {
+        if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+          console.log(`reports-index self-test: skipping symlink-escape assertion (platform refused symlink: ${err.code})`);
+        } else {
+          throw err;
+        }
+      }
+      if (linked) {
+        const idx = loadReportsIndex({ reportsDir: ws.reportsDir, cachePath: ws.cachePath });
+        const names = [...idx].map(([k]) => k);
+        if (names.includes('999-leak-2026-01-01.md')) failures.push('8: symlink escaping reportsDir was read into the index (#2762)');
+        if (idx.get(link) !== null) failures.push('8: get() followed a symlink escaping reportsDir (#2762)');
+        if (!names.includes('001-real-2026-01-01.md')) failures.push('8: real in-tree report wrongly dropped alongside the symlink guard');
+        const onDisk = JSON.parse(fs.readFileSync(ws.cachePath, 'utf-8'));
+        if ('999-leak-2026-01-01.md' in onDisk.entries) failures.push('8: symlink escape leaked into the on-disk cache (#2762)');
+      }
+    }
+
+    // ── 9. A malformed cache entry rejects the WHOLE cache (rebuild) ─────────
+    // Valid JSON, correct version, stat-matching entry — but its nested payload
+    // is malformed (extras.salaryGap missing). Trusting it would later crash
+    // salary-gap's `entry.extras.salaryGap.advertised_comp` read, so a single
+    // bad entry must force a full rebuild from disk (#2762).
+    {
+      const ws = makeWorkspace();
+      const file = join(ws.reportsDir, '042-acme-2026-01-01.md');
+      writeFileSync(file, canonicalReport('Acme', '80-90k EUR'));
+      const st = fs.statSync(file);
+      const malformed = {
+        version: INDEX_VERSION,
+        entries: {
+          '042-acme-2026-01-01.md': {
+            summary: { company: 'STALE' },
+            extras: {}, // salaryGap.advertised_comp missing → malformed
+            mtimeMs: st.mtimeMs,
+            size: st.size,
+          },
+        },
+      };
+      writeFileSync(ws.cachePath, JSON.stringify(malformed));
+      const idx = loadReportsIndex({ reportsDir: ws.reportsDir, cachePath: ws.cachePath });
+      const e = idx.get(file);
+      if (e?.summary?.company !== 'Acme') failures.push('9: malformed cache entry was trusted instead of forcing a rebuild (#2762)');
+      if (e?.extras?.salaryGap?.advertised_comp !== '80-90k EUR') failures.push('9: rebuilt entry missing advertised_comp after malformed-cache rejection');
+      if (idx.meta.parsed !== 1 || idx.meta.reused !== 0) failures.push('9: expected a full rebuild (parsed=1 reused=0) after a malformed cache entry');
+      // The rewritten cache must now be well-formed and reusable next load.
+      const idx2 = loadReportsIndex({ reportsDir: ws.reportsDir, cachePath: ws.cachePath });
+      if (idx2.meta.reused !== 1) failures.push('9: rebuilt cache was not reused on the subsequent load');
+    }
   } finally {
     for (const root of tmpRoots) {
       try {
@@ -514,7 +651,7 @@ advertised_comp: "${adv}"
     console.error(`reports-index self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('reports-index self-test OK (fresh build + stat-trust/invalidate + deletion + version bump + no-cache + fence variants + split contract)');
+  console.log('reports-index self-test OK (fresh build + stat-trust/invalidate + deletion + version bump + no-cache + fence variants + split contract + symlink-escape guard + malformed-cache rebuild)');
   process.exit(0);
 }
 

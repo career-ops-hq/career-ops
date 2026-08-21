@@ -400,22 +400,23 @@ function analyze(minReports, options = {}) {
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
-    // The read is attempted directly instead of probing with existsSync first,
-    // which costs a full stat per report and races with the read (#2385).
+    // Resolve each contained candidate through the shared, stat-validated index
+    // FIRST: a cache hit yields the Machine Summary with NO body read, which is
+    // the whole point of #2385. The report body is read only as a fallback below
+    // (#2762 — reading it up front here defeated the read-reduction).
     const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
-    let content = null;
+    let entry = null;
     let reportPath = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
-      content = readTextIfExists(p);
-      if (content !== null) { reportPath = p; break; }
+      const e = index.get(p);
+      if (e) { entry = e; reportPath = p; break; }
     }
-    if (content === null) continue;
+    if (!entry) continue;
     reportsRead += 1;
 
-    // Machine Summary comes from the shared, stat-validated index (no re-parse);
-    // the already-read body is the fallback for score/gaps the summary can't supply.
-    const summary = index.get(reportPath)?.summary ?? null;
+    // Machine Summary comes from the shared index (no re-parse, no re-read).
+    const summary = entry.summary ?? null;
     let score = null;
     let hasMachineSummary = false;
     let haveSummaryGaps = false;
@@ -428,17 +429,20 @@ function analyze(minReports, options = {}) {
         gapDescriptions.push(...normalizeList(summary.hard_stops), ...normalizeList(summary.soft_gaps));
       }
     }
-    // Fallback: parse the body only when the summary can't supply the score or
-    // the gap descriptions (legacy reports, or a Machine Summary missing keys).
-    // Reuse the body already read under the containment guard — no second read.
+    // Fallback: read + parse the body only when the summary can't supply the
+    // score or the gap descriptions (legacy reports, or a Machine Summary
+    // missing keys). This is the ONLY path that reads the report body.
     if (score === null || !haveSummaryGaps) {
-      const fb = parseReportGaps(content);
-      if (fb.hasMachineSummary) hasMachineSummary = true;
-      if (score === null && Number.isFinite(fb.score)) score = fb.score;
-      // parseReportGaps re-adds the summary's hard_stops/soft_gaps; only take
-      // its text when we haven't already sourced gaps from the cached summary,
-      // so a report with summary gaps isn't double-counted.
-      if (!haveSummaryGaps && fb.gapText) gapDescriptions.push(fb.gapText);
+      const content = readTextIfExists(reportPath);
+      if (content !== null) {
+        const fb = parseReportGaps(content);
+        if (fb.hasMachineSummary) hasMachineSummary = true;
+        if (score === null && Number.isFinite(fb.score)) score = fb.score;
+        // parseReportGaps re-adds the summary's hard_stops/soft_gaps; only take
+        // its text when we haven't already sourced gaps from the cached summary,
+        // so a report with summary gaps isn't double-counted.
+        if (!haveSummaryGaps && fb.gapText) gapDescriptions.push(fb.gapText);
+      }
     }
 
     if (hasMachineSummary) reportsWithMachineSummary += 1;
@@ -629,6 +633,30 @@ soft_gaps:
     }
     if (!/compactText\(targetText\)/.test(selfSrc)) {
       failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
+    }
+  }
+
+  // Read-reduction ordering (#2385 / #2762): the aggregate loop must resolve
+  // each linked report through the shared, stat-validated index BEFORE reading
+  // its body, so a cache hit skips the body read entirely. Reading the body up
+  // front (the old `content = readTextIfExists(p)` in the candidate loop)
+  // silently defeated #2385. Guard the ordering at the source level, matching
+  // the #1894 regression check above.
+  {
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    const start = src.indexOf('function analyze(');
+    const end = src.indexOf('function printSummary(', start);
+    const analyzeSrc = start >= 0 && end > start ? src.slice(start, end) : '';
+    const idxGetAt = analyzeSrc.indexOf('index.get(');
+    const bodyReadAt = analyzeSrc.indexOf('readTextIfExists(');
+    if (idxGetAt < 0) {
+      failures.push('read-reduction: analyze() no longer resolves reports through index.get() (#2385)');
+    }
+    if (idxGetAt >= 0 && bodyReadAt >= 0 && idxGetAt > bodyReadAt) {
+      failures.push('read-reduction: analyze() reads the report body before consulting the index — defeats #2385 (#2762)');
+    }
+    if (/readTextIfExists\(\s*p\s*\)/.test(analyzeSrc)) {
+      failures.push('read-reduction: analyze() still reads the body straight off a candidate path before the index (#2762)');
     }
   }
 
