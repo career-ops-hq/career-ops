@@ -54,7 +54,7 @@ export function CvEditor() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "Venkateswarlu-Pambha-CV.md";
+    a.download = "cv.md";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

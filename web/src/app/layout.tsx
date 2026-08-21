@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
-      <body className="font-sans antialiased" suppressHydrationWarning>
+      <body className="font-sans antialiased">
         <Script id="career-ops-theme" strategy="beforeInteractive">{THEME_SCRIPT}</Script>
         <AppShell>{children}</AppShell>
       </body>

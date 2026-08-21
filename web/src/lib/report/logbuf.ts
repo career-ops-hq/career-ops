@@ -18,7 +18,13 @@ if (typeof window !== "undefined" && !window.__coLogBufInstalled) {
   window.__coLogBufInstalled = true;
   const orig = console.error.bind(console);
   console.error = (...args: unknown[]) => {
-    const combined = args.map((a) => String(a)).join(" ");
+    let combined = "";
+    try {
+      combined = args.map((a) => String(a)).join(" ");
+    } catch {
+      orig(...args);
+      return;
+    }
     // Some password managers/form fillers inject jf-ext-* attributes before
     // React hydrates. The DOM remains usable; this is not an application bug
     // and should not open Next's red development overlay. Suppress only this

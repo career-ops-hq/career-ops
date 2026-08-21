@@ -23,6 +23,11 @@ test("the JSON document is read even when a warning printed a brace first", () =
   assert.deepEqual(parseCliJson(stdout), { ok: true, changed: true, statusLogged: true });
 });
 
+test("outermost valid JSON object is selected when nested objects are present", () => {
+  const stdout = '{"ok":true,"meta":{"changed":true}}';
+  assert.deepEqual(parseCliJson(stdout), { ok: true, meta: { changed: true } });
+});
+
 test("a brace inside a warning is not mistaken for the document when no document follows", () => {
   assert.equal(parseCliJson("warning: nothing to do for {row 4}\n"), null);
 });

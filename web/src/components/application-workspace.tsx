@@ -94,6 +94,7 @@ export function ApplicationWorkspace() {
   const [busy, setBusy] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [completed, setCompleted] = useState(false);
+  const [markingApplied, setMarkingApplied] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -122,36 +123,57 @@ export function ApplicationWorkspace() {
     
     try {
       const res = await fetch("/api/application-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobDescription: jd, formQuestions: questions, cliId }) });
-      const data = await res.json();
-      clearInterval(interval);
-      setBusy(false);
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        return setError(data.error || "Could not generate the application kit.");
+        setError(data.error || "Could not generate the application kit.");
+        return;
       }
       setKit(data.kit);
       setKits(old => [data.kit, ...old]);
       setCompleted(true);
       setTimeout(() => setCompleted(false), 4000);
     } catch (err: any) {
+      setError(err?.message || "Generation failed. Please try again.");
+    } finally {
       clearInterval(interval);
       setBusy(false);
-      setError(err?.message || "Generation failed. Please try again.");
     }
   }
 
   async function markApplied() {
-    if (!kit) return;
-    const res = await fetch("/api/application-kit", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: kit.id, coverLetter: kit.coverLetter, answers: kit.answers, cvFile: kit.cvFile }) });
-    const data = await res.json();
-    if (res.ok) {
+    if (!kit || markingApplied) return;
+    setMarkingApplied(true);
+    setError("");
+    try {
+      const res = await fetch("/api/application-kit", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: kit.id,
+          coverLetter: kit.coverLetter,
+          answers: kit.answers,
+          cvFile: kit.cvFile,
+          outreach: kit.outreach,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.kit) {
+        setError(data.error || "Could not mark the application as applied.");
+        return;
+      }
       setKit(data.kit);
       setKits(old => old.map(k => k.id === data.kit.id ? data.kit : k));
+    } catch {
+      setError("Could not mark the application as applied.");
+    } finally {
+      setMarkingApplied(false);
     }
   }
 
   function updateAnswer(index: number, answer: string) {
     if (!kit) return;
-    setKit({ ...kit, answers: kit.answers.map((a, i) => i === index ? { ...a, answer } : a) });
+    const answers = Array.isArray(kit.answers) ? kit.answers : [];
+    setKit({ ...kit, answers: answers.map((a, i) => i === index ? { ...a, answer } : a) });
   }
 
   return (
@@ -223,7 +245,7 @@ export function ApplicationWorkspace() {
 
       {kit && (
         <div id="application-kit-view">
-          <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} />
+          <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} markingApplied={markingApplied} />
         </div>
       )}
 
@@ -294,7 +316,7 @@ function slugify(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "document";
 }
 
-function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit: (k: Kit) => void; updateAnswer: (i: number, v: string) => void; markApplied: () => void }) {
+function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { kit: Kit; setKit: (k: Kit) => void; updateAnswer: (i: number, v: string) => void; markApplied: () => void; markingApplied: boolean }) {
   const companySlug = slugify(kit.company || "application");
   const roleSlug = slugify(kit.role || "role");
   const outreach = kit.outreach;
@@ -312,10 +334,7 @@ function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit:
         <div>
           <div className="flex items-center gap-2">
             <span className="rounded-md border border-brand/40 bg-brand/10 px-2 py-0.5 font-mono text-xs text-brand font-medium">
-              {kit.matchScore}/5 · Recommended
-            </span>
-            <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs text-muted">
-              High Confidence
+              {kit.matchScore}/5 · {kit.matchScore >= 4 ? "Recommended" : kit.matchScore >= 3 ? "Consider" : "Weak match"}
             </span>
           </div>
           <h2 className="mt-1 font-display text-3xl text-landing">{kit.company} · {kit.role}</h2>
@@ -331,8 +350,12 @@ function KitView({ kit, setKit, updateAnswer, markApplied }: { kit: Kit; setKit:
             </a>
           </div>
         ) : (
-          <button onClick={markApplied} className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors shadow-sm">
-            Mark applied now
+          <button
+            onClick={markApplied}
+            disabled={markingApplied}
+            className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors shadow-sm disabled:opacity-50"
+          >
+            {markingApplied ? "Marking applied…" : "Mark applied now"}
           </button>
         )}
       </div>
@@ -686,20 +709,35 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function CopyButton({ text }: { text: string }) {
   const [ok, setOk] = useState(false);
+  const [failed, setFailed] = useState(false);
   return (
     <button
-      onClick={() => navigator.clipboard.writeText(text || "").then(() => { setOk(true); setTimeout(() => setOk(false), 1200); })}
+      onClick={() =>
+        navigator.clipboard.writeText(text || "").then(
+          () => {
+            setFailed(false);
+            setOk(true);
+            setTimeout(() => setOk(false), 1200);
+          },
+          () => {
+            setFailed(true);
+            setTimeout(() => setFailed(false), 1200);
+          }
+        )
+      }
       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand hover:border-brand/50 hover:bg-surface"
     >
       {ok ? <Check className="size-3" /> : <Copy className="size-3" />}
-      {ok ? "Copied" : "Copy"}
+      {failed ? "Copy failed" : ok ? "Copied" : "Copy"}
     </button>
   );
 }
 
 function DownloadButton({ text, filename, label = "Download" }: { text: string; filename: string; label?: string }) {
   function handleDownload() {
-    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const isTxt = filename.endsWith(".txt");
+    const mimeType = isTxt ? "text/plain;charset=utf-8" : "text/markdown;charset=utf-8";
+    const blob = new Blob([text], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

@@ -18,23 +18,27 @@ export async function GET(req: NextRequest) {
   if (!fs.existsSync(dir)) return new Response("no output directory", { status: 404 });
 
   if (type === "cv" || fileParam === "cv") {
-    const cvFile = path.join(dir, "Venkateswarlu-Pambha-CV.pdf");
-    if (fs.existsSync(cvFile)) {
+    const cvFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith(".pdf") && (f.toLowerCase().includes("cv") || f.toLowerCase().includes("resume")));
+    if (cvFiles.length) {
+      cvFiles.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
+      const cvFile = path.join(dir, cvFiles[0]);
       const buf = fs.readFileSync(cvFile);
       return new Response(new Uint8Array(buf), {
         status: 200,
-        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Venkateswarlu-Pambha-CV.pdf"`, "Cache-Control": "no-store" },
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${cvFiles[0]}"`, "Cache-Control": "no-store" },
       });
     }
   }
 
   if (type === "cover-letter" || fileParam === "cover-letter") {
-    const clFile = path.join(dir, "Venkateswarlu-Pambha-Cover-Letter.pdf");
-    if (fs.existsSync(clFile)) {
+    const clFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith(".pdf") && (f.toLowerCase().includes("cover") || f.toLowerCase().includes("letter")));
+    if (clFiles.length) {
+      clFiles.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
+      const clFile = path.join(dir, clFiles[0]);
       const buf = fs.readFileSync(clFile);
       return new Response(new Uint8Array(buf), {
         status: 200,
-        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Venkateswarlu-Pambha-Cover-Letter.pdf"`, "Cache-Control": "no-store" },
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${clFiles[0]}"`, "Cache-Control": "no-store" },
       });
     }
   }

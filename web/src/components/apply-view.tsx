@@ -175,6 +175,7 @@ export function ApplyView() {
                   needs={!!a.meta[f.id]?.needsConfirmation}
                   index={i}
                   drafting={prefilling}
+                  disabled={filling || prefilling}
                   onChange={(v) => a.setAnswer(f.id, v)}
                   onSuggest={() => a.prefill(f.id)}
                 />
@@ -525,6 +526,7 @@ function FieldRow({
   needs,
   index,
   drafting,
+  disabled,
   onChange,
   onSuggest,
 }: {
@@ -533,6 +535,7 @@ function FieldRow({
   needs: boolean;
   index: number;
   drafting: boolean;
+  disabled?: boolean;
   onChange: (v: string) => void;
   onSuggest: () => void;
 }) {
@@ -569,7 +572,7 @@ function FieldRow({
           <button
             type="button"
             onClick={onSuggest}
-            disabled={drafting}
+            disabled={drafting || disabled}
             className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-brand/30 bg-brand-soft px-2 py-1 text-[11px] font-medium text-brand hover:bg-brand/15 disabled:opacity-50"
           >
             <Sparkles className="size-3" /> Generate suggestion

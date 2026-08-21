@@ -84,6 +84,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // be recalled, so each one carries the generation it started in and drops its
   // results if that generation is no longer current.
   const generation = useRef(0);
+  const inFlight = useRef(false);
   // When a session opens with {prefill:true}, auto-fire prefill once fields are
   // ready — driven by an effect (not a fragile setTimeout) so it can't race the
   // session response or a navigation.
@@ -206,7 +207,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const prefill = useCallback(async (fieldId?: string) => {
-    if (!sessionId.current) return;
+    if (!sessionId.current || inFlight.current) return;
+    inFlight.current = true;
     const gen = generation.current;
     setStatus("prefilling");
     setError("");
@@ -271,6 +273,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       if (generation.current !== gen) return; // left mid-prefill
       setError(`Couldn't pre-fill from your CV: ${e instanceof Error ? e.message : "stream error"}. See diagnostics.`);
       setStatus("ready");
+    } finally {
+      inFlight.current = false;
     }
   }, []);
 
@@ -293,7 +297,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fill = useCallback(async () => {
-    if (!sessionId.current) return;
+    if (!sessionId.current || inFlight.current) return;
+    inFlight.current = true;
     const gen = generation.current;
     setStatus("filling");
     setSteps([]);
@@ -330,6 +335,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       if (generation.current !== gen) return; // left mid-fill
       setError("Fill failed.");
       setStatus("error");
+    } finally {
+      inFlight.current = false;
     }
   }, [answers, fields]);
 

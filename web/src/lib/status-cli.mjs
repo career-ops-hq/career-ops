@@ -20,7 +20,7 @@
 export function parseCliJson(stdout) {
   const text = String(stdout ?? "");
   for (let end = text.lastIndexOf("}"); end >= 0; end = text.lastIndexOf("}", end - 1)) {
-    for (let start = text.lastIndexOf("{", end); start >= 0; start = text.lastIndexOf("{", start - 1)) {
+    for (let start = text.indexOf("{"); start >= 0 && start < end; start = text.indexOf("{", start + 1)) {
       try {
         const parsed = JSON.parse(text.slice(start, end + 1));
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {

@@ -156,9 +156,10 @@ export function resolveCli(id?: string): { spec: CliSpec; binPath: string } | nu
       const geminiBin = findBin("gemini", dirs);
       if (geminiSpec && geminiBin) return { spec: geminiSpec, binPath: geminiBin };
     }
+    return null;
   }
 
-  // Fallback to first installed CLI if id not specified or not found
+  // Fallback to first installed CLI if id not specified
   for (const candidate of KNOWN) {
     const binPath = findBin(candidate.bin, dirs);
     if (binPath) return { spec: candidate, binPath };

@@ -163,15 +163,17 @@ For each field, preserve the application form contract:
 - `options`: visible options for select/radio/checkbox fields
 - `needs_candidate_confirmation`: `yes` for legal, demographic, work authorization, visa, relocation, salary, disability, veteran, sponsorship, background-check, or self-identification questions unless the answer is explicitly present in `config/profile.yml`
 
-**NEVER leave a form field empty or write "Ask candidate" for any fillable question.** Every visible field must get a generated answer. The only exception is fields that are genuinely unsanswerable without the candidate's input (e.g., "Upload your passport" file uploads, or salary history where the candidate hasn't provided one). For ALL other fields — including those marked `needs_candidate_confirmation` — generate the best possible answer from available context:
+Never invent answers for legal, demographic, work-authorization, visa/sponsorship, salary, disability, veteran, background-check, relocation, or self-identification fields. If the answer is not present in `config/profile.yml` or visible context, mark it as needing candidate confirmation (`needs_candidate_confirmation: yes`) and provide the safest question to ask the candidate (`Ask candidate: ...`).
+
+For all other fillable fields supported by `config/profile.yml`, `cv.md`, the report, or direct candidate statements:
 
 - **Work authorization / visa**: If `config/profile.yml` has `visa_status` or `needs_sponsorship`, use it directly. Write a natural sentence, not a robotic declaration. E.g., "I'm on a Graduate Route visa with full right to work in the UK — no sponsorship required."
 - **Salary expectations**: If `config/profile.yml` has `compensation.target_range`, use it. E.g., "My target range is £28,000–£35,000, but I'm open to discussion based on the full package."
 - **Relocation / location**: If `config/profile.yml` has location info, use it. E.g., "I'm based in London and happy to work on-site or hybrid."
-- **Demographic / self-identification**: These are typically optional. If the candidate hasn't provided info, write "Prefer not to say" or the equivalent available option — never leave blank.
-- **"Why this company?" / "Why this role?"**: Always generate a specific, personalized answer referencing the company and role by name. Never skip these.
+- **Demographic / self-identification**: These are typically optional. If the candidate explicitly chose "Prefer not to say" or the profile specifies it and the form offers that option, select it; otherwise mark for candidate confirmation.
+- **"Why this company?" / "Why this role?"**: Always generate a specific, personalized answer referencing the company and role by name from the report and CV proof points.
 
-The goal is a COMPLETELY FILLED form — every field has an answer before presenting to the candidate for review.
+Fields that are genuinely unanswerable without the candidate's input (e.g., "Upload your passport" file uploads, or specific personal decisions not documented in profile) must use `Ask candidate: ...` and be confirmed by the candidate before submission.
 
 
 ## Step 7 — Generate responses
@@ -188,7 +190,7 @@ For each question, generate the response following:
 
 ### Cover letter fields — auto-generate, never skip
 
-If the form contains a cover letter text field (textarea labeled "Cover Letter", "Cover Letter", "Why are you interested?", or similar), **generate the cover letter inline** — do not leave it for the candidate. The agent has all the context needed:
+If the form contains a cover letter text field (textarea labeled "Cover Letter", "Why are you interested?", or similar), **generate the cover letter inline** — do not leave it for the candidate. The agent has all the context needed:
 
 1. Load `cv.md` + the matched report + `modes/_profile.md` (if exists) + `article-digest.md` (if exists).
 2. Write a 150–250 word cover letter that:
@@ -199,17 +201,17 @@ If the form contains a cover letter text field (textarea labeled "Cover Letter",
 4. If the form has a **file upload** for cover letter (PDF), generate the text version for the textarea field AND note that a PDF version should be uploaded from `output/` if one exists from a prior `cover` mode run.
 5. Never paste a generic template. Every cover letter must reference the specific company and role by name.
 
-### "Human-touch" questions — fill with natural answers, never leave blank
+### "Human-touch" questions — fill with natural, supported answers
 
-Questions that appear to require personal or "human" answers (e.g., "Why do you want to work here?", "What excites you about this role?", "Tell us about yourself", "How did you hear about us?", "Is there anything else you'd like to share?") MUST be filled with a natural, conversational answer — never left as "Ask candidate" or skipped.
+Questions that require personal or motivation answers (e.g., "Why do you want to work here?", "What excites you about this role?", "Tell us about yourself") should be filled with a natural, conversational answer grounded strictly in verified candidate facts.
 
 Rules for these fields:
 - Write in first person, casual-professional tone (like a real person typing, not a bot).
 - Reference the specific company and role by name.
 - Keep answers concise: 2–4 sentences for short-answer, 1 paragraph for textarea.
 - Use proof points from the report/cv.md but phrase them naturally, not as bullet-point lists.
-- For "How did you hear about us?" — use a plausible answer (e.g., "I found the role on the company careers page" or "I came across Attio through LinkedIn" — pick whichever fits the context).
-- For open-ended "anything else" fields — write a brief, genuine addition that strengthens the application (e.g., mention a side project, a relevant certification, or enthusiasm for a specific aspect of the role).
+- For "How did you hear about us?" — use only a stored answer or direct user statement; otherwise ask the candidate.
+- For open-ended "anything else" fields — mention only a documented project, certification, or proof point from cv.md / article-digest.md, or omit the optional field.
 
 **Output format:**
 

@@ -540,7 +540,12 @@ export async function handoffSession(id: string): Promise<void> {
   // user's click visibly lands on the real, pre-filled employer form.
   if (process.platform === "darwin") {
     await new Promise<void>((resolve) => {
-      execFile("/usr/bin/osascript", ["-e", 'tell application "Google Chrome" to activate'], () => resolve());
+      execFile(
+        "/usr/bin/osascript",
+        ["-e", 'tell application "Google Chrome" to activate'],
+        { timeout: 2000, killSignal: "SIGKILL" },
+        () => resolve(),
+      );
     });
     await s.page.bringToFront().catch(() => {});
   }

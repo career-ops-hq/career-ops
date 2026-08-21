@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
+import { withTrackerLock } from "@/lib/core/tracker-lock";
 import { parseCliJson, trackerRowArg } from "@/lib/status-cli.mjs";
 
 export const runtime = "nodejs"; // delegates to the core CLI via child_process
@@ -210,20 +212,36 @@ export async function POST(req: Request) {
   // user-layer activity log supplies the clock time shown by the website.
   if (canon === "Applied") {
     const activityPath = `${careerOpsRoot()}/data/dashboard-activity.tsv`;
-    const existingActivity = fs.existsSync(activityPath) ? fs.readFileSync(activityPath, "utf8") : "";
-    const alreadyRecorded = existingActivity.split("\n").some((line) => {
-      const cols = line.split("\t");
-      return cols[1] === row && cols[2] === "status" && cols[3] === "Applied";
-    });
-    if (!alreadyRecorded) {
-      if (!existingActivity) fs.appendFileSync(activityPath, "timestamp\tapplication_id\taction\tvalue\n");
-      fs.appendFileSync(activityPath, `${new Date().toISOString()}\t${row}\tstatus\tApplied\n`);
-    }
-    // Seed the first follow-up from the real application date. Failure here
-    // must not undo a status that was already committed; the follow-up page can
-    // still calculate its labelled fallback and the user can set a date there.
-    if (parsed.changed === true || !alreadyRecorded) {
-      execFile(process.execPath, [rootScript("followup-seed"), row, "--date", new Date().toISOString().slice(0, 10), "--json"], { cwd: careerOpsRoot() }, () => {});
+    const now = new Date();
+    const appliedDate = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    try {
+      await withTrackerLock(activityPath, async () => {
+        fs.mkdirSync(path.dirname(activityPath), { recursive: true });
+        const existingActivity = fs.existsSync(activityPath) ? fs.readFileSync(activityPath, "utf8") : "";
+        const alreadyRecorded = existingActivity.split("\n").some((line) => {
+          const cols = line.split("\t");
+          return cols[1] === row && cols[2] === "status" && cols[3] === "Applied";
+        });
+        if (!alreadyRecorded) {
+          if (!existingActivity) fs.appendFileSync(activityPath, "timestamp\tapplication_id\taction\tvalue\n");
+          fs.appendFileSync(activityPath, `${now.toISOString()}\t${row}\tstatus\tApplied\n`);
+        }
+        // Seed the first follow-up from the real application date. Failure here
+        // must not undo a status that was already committed; the follow-up page can
+        // still calculate its labelled fallback and the user can set a date there.
+        if (parsed.changed === true || !alreadyRecorded) {
+          execFile(process.execPath, [rootScript("followup-seed"), row, "--date", appliedDate, "--json"], { cwd: careerOpsRoot() }, () => {});
+        }
+      });
+    } catch {
+      if (parsed.changed === true) {
+        execFile(process.execPath, [rootScript("followup-seed"), row, "--date", appliedDate, "--json"], { cwd: careerOpsRoot() }, () => {});
+      }
     }
   }
 

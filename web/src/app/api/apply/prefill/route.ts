@@ -205,7 +205,7 @@ export async function POST(req: Request) {
       const ollama = !resolved ? localOllama() : null;
       // Known single-field answers come straight from the local answer bank:
       // no reason to start a model and make an "instant" suggestion wait.
-      if (!resolved && (!fieldId || !ollama || saved[fieldId]?.value)) {
+      if (!resolved && (!ollama || (fieldId && saved[fieldId]?.value))) {
         const count = Object.keys(saved).length;
         log(`Filled ${count} saved profile/CV answers${ollama ? " instantly" : " (AI planner unavailable)"}`);
         emit({ t: "done", answers: saved, truncated: false, count });
@@ -309,7 +309,14 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
           result.buf.slice(-300),
         );
       }
-      const merged = { ...(obj as Record<string, DraftAnswer>), ...saved };
+      const allowedIds = new Set(requestedFields.map((f) => f.id));
+      const filteredObj: Record<string, DraftAnswer> = {};
+      for (const [k, v] of Object.entries((obj as Record<string, DraftAnswer>) || {})) {
+        if (allowedIds.has(k)) {
+          filteredObj[k] = v;
+        }
+      }
+      const merged = { ...filteredObj, ...saved };
       const count = Object.keys(merged).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
       emit({ t: "done", answers: merged, truncated, count });
