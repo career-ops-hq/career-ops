@@ -1,5 +1,5 @@
 // tests/stats.test.mjs — moved verbatim from test-all.mjs (#1604).
-import { pass, fail, run, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
@@ -223,6 +223,32 @@ try {
     pass('stats.mjs --summary renders the human table');
   } else {
     fail('stats.mjs --summary missing header');
+  }
+
+  // --help smoke: must print usage, exit 0, and not read any data file.
+  const helpOut = run(NODE, [join(ROOT, 'stats.mjs'), '--help']);
+  if (helpOut && helpOut.includes('Usage:') && helpOut.includes('--summary') && helpOut.includes('--help|-h')) {
+    pass('stats.mjs --help prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs --help missing usage output: ${helpOut}`);
+  }
+
+  // -h alias smoke: same behavior as --help.
+  const hOut = run(NODE, [join(ROOT, 'stats.mjs'), '-h']);
+  if (hOut && hOut.includes('Usage:') && hOut.includes('--help|-h')) {
+    pass('stats.mjs -h prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs -h missing usage output: ${hOut}`);
+  }
+
+  // Unknown flag smoke: must fail cleanly and report the invalid-flag message.
+  const bogusOut = run(NODE, [join(ROOT, 'stats.mjs'), '--bogus']);
+  const bogusFailure = lastRunFailure();
+  const bogusOutput = `${bogusFailure?.stdout ?? ''}\n${bogusFailure?.stderr ?? ''}`;
+  if (bogusOut === null && bogusFailure?.status !== 0 && /invalid|unrecognized|unknown/i.test(bogusOutput)) {
+    pass('stats.mjs --bogus rejects unknown flags with a non-zero exit status');
+  } else {
+    fail(`stats.mjs --bogus did not fail as expected: exit=${bogusFailure?.status ?? 'null'} output=${bogusOutput.trim()}`);
   }
 
   // --summary cold-classification integration (#2123): the CLI reads its

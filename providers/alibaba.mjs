@@ -24,6 +24,7 @@
 //     max_pages: 50                # per keyword, pageSize 100
 
 import { randomUUID } from 'crypto';
+import { sleep } from './_http.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -131,14 +132,13 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         let json;
         try {
           json = /** @type {any} */ (await ctx.fetchJson(API, {

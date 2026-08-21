@@ -13,7 +13,7 @@
  *      node analyze-patterns.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
@@ -52,6 +52,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Work-authorization / visa-sponsorship tier from Block A (report + Machine
   // Summary only). Allowlisted so it round-trips; no consumer logic yet.
   'work_auth',
+  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
+  // Allowlisted so it round-trips; no consumer logic yet.
+  'reports_to',
 ]);
 
 // --- CLI args ---
@@ -103,6 +106,28 @@ function classifyOutcome(status) {
   if (['rejected', 'discarded'].includes(s)) return 'negative';
   if (['skip'].includes(s)) return 'self_filtered';
   return 'pending'; // evaluated
+}
+
+// --- Rate denominators ---
+//
+// A frequency is only meaningful against the population that could have
+// produced it. Both counters below exist because `enriched.length` — EVERY
+// tracker row — was standing in for two much smaller populations, silently
+// deflating every derived percentage and the thresholds computed from them.
+//
+// Entries eligible to carry a discard/skip reason. A 'pending' (Evaluated,
+// never acted on) or 'positive' row has no reason to state, so counting it in
+// the base only dilutes the share. Must stay in lockstep with the filter that
+// guards the discard-reason harvest loop.
+function discardableBase(enriched) {
+  return enriched.filter(e => e.outcome === 'self_filtered' || e.outcome === 'negative').length;
+}
+
+// Entries that actually carry gaps, i.e. the ones a blocker can be extracted
+// from. Entries whose report has no gaps (or no report at all) can never
+// contribute a blocker and must not pad the denominator.
+function gapBearingBase(enriched) {
+  return enriched.filter(e => e.report?.gaps?.length > 0).length;
 }
 
 // Statuses that count as a submitted application for channel-yield analysis
@@ -312,7 +337,7 @@ risk_summary:
     ['https://jobs.lever.co/acme/abc-def', 'lever'],
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
-    ['https://careers.icims.com/jobs/9/x', null],
+    ['https://careers.icims.com/jobs/9/x', 'icims'],
     ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
     ['not a url', null],
     ['', null],
@@ -390,6 +415,76 @@ risk_summary:
     failures.push('node.js case variants failed to canonicalize');
   }
 
+  // Production aggregation regressions. The fixture distinguishes the fixed
+  // denominator from the old full-tracker base: 3 tags among 20 eligible rows
+  // trigger a recommendation, while 3 among all 30 rows would not.
+  const baseFixture = [];
+  for (let i = 0; i < 20; i++) {
+    baseFixture.push({
+      outcome: i === 19 ? 'negative' : 'self_filtered',
+      notes: i < 3 ? `SKIP: geo-block${i === 0 ? '; SKIP: geo-block' : ''}` : '',
+      report: { gaps: [] },
+    });
+  }
+  for (let i = 0; i < 10; i++) {
+    baseFixture.push({ outcome: 'pending', notes: '', report: null });
+  }
+  const baseSignals = buildPatternSignals(baseFixture);
+  if (baseSignals.discardReasonBase !== 20) {
+    failures.push(`discardReasonBase counted ${baseSignals.discardReasonBase}, expected 20`);
+  }
+  if (baseSignals.blockerBase !== 0) {
+    failures.push(`blockerBase counted ${baseSignals.blockerBase}, expected 0 (no gaps in fixture)`);
+  }
+  const geoReason = baseSignals.discardReasonStats.find(d => d.reason === 'geo-block');
+  if (geoReason?.frequency !== 3 || geoReason?.percentage !== 15) {
+    failures.push(`discard aggregation returned ${JSON.stringify(geoReason)}, expected frequency 3 and percentage 15`);
+  }
+  if (!baseSignals.discardReasonRecommendation) {
+    failures.push('3 discard reasons among 20 eligible entries did not trigger a recommendation');
+  }
+
+  // One report whose gaps all resolve to geo-restriction is one affected entry,
+  // not three. The explicit count catches both missing and misclassified fixture
+  // descriptions instead of merely checking that no count exceeds the base.
+  const dupBlockerFixture = [
+    { outcome: 'negative', notes: '', report: { gaps: [
+      { description: 'US-only remote', severity: 'hard' },
+      { description: 'Remote US only, no sponsorship', severity: 'hard' },
+      { description: 'US-only residency required', severity: 'hard' },
+    ] } },
+    { outcome: 'negative', notes: '', report: { gaps: [{ description: 'US-only remote', severity: 'hard' }] } },
+    // Gapless rows make the fixture distinguish blockerBase (2) from the old
+    // full-tracker denominator (5). Restoring `/ enriched.length` must turn the
+    // expected 100% into 40% and fail this regression.
+    { outcome: 'pending', notes: '', report: { gaps: [] } },
+    { outcome: 'pending', notes: '', report: null },
+    { outcome: 'positive', notes: '', report: { gaps: [] } },
+  ];
+  const blockerSignals = buildPatternSignals(dupBlockerFixture);
+  const geoBlocker = blockerSignals.blockerAnalysis.find(b => b.blocker === 'geo-restriction');
+  if (geoBlocker?.frequency !== blockerSignals.blockerBase || geoBlocker?.percentage !== 100) {
+    failures.push(`geo blocker aggregation returned ${JSON.stringify(geoBlocker)} against base ${blockerSignals.blockerBase}, expected 2/2 (100%)`);
+  }
+
+  // Repeated technology mentions across one report count once per entry.
+  const techSignals = buildPatternSignals([{ outcome: 'negative', notes: '', report: { gaps: [
+    { description: 'Java is required', severity: 'hard' },
+    { description: 'Production Java and Go experience', severity: 'hard' },
+  ] } }]);
+  const javaGap = techSignals.techStackGaps.find(g => g.skill === 'Java');
+  if (javaGap?.frequency !== 1) {
+    failures.push(`technology deduplication returned ${JSON.stringify(javaGap)}, expected Java frequency 1`);
+  }
+
+  // Empty populations must expose zero bases and no NaN-bearing stats.
+  const emptySignals = buildPatternSignals([]);
+  if (emptySignals.discardReasonBase !== 0 || emptySignals.blockerBase !== 0
+      || emptySignals.discardReasonStats.length !== 0 || emptySignals.blockerAnalysis.length !== 0
+      || emptySignals.discardReasonRecommendation) {
+    failures.push(`empty pattern signals were not empty: ${JSON.stringify(emptySignals)}`);
+  }
+
   // Remote classifier (regression): the "70+" signal ends in "+", so a
   // trailing \b silently dropped it and "70+ countries" postings fell to the
   // weaker 'regional remote' bucket instead of 'global remote'.
@@ -398,6 +493,65 @@ risk_summary:
   }
   if (classifyRemote('US-only remote') !== 'geo-restricted') {
     failures.push('classifyRemote geo-restricted precedence regressed');
+  }
+
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before parseReport. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`analyze-patterns self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
   }
 
   if (failures.length > 0) {
@@ -423,10 +577,55 @@ function parseTracker() {
   return entries;
 }
 
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// upskill.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // --- Parse a single report file ---
 function parseReport(reportPath) {
-  if (!existsSync(reportPath)) return null;
-  const content = readFileSync(reportPath, 'utf-8');
+  const content = readTextIfExists(reportPath);
+  if (content === null) return null;
   const report = {
     company: null,
     role: null,
@@ -588,8 +787,8 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only community ATS with clean, public URL fingerprints —
-// Greenhouse, Lever, Ashby, Workday. White-labeled ATS (iCIMS/UKG/Dayforce) are
+// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
+// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
 // NOT detectable from the URL alone and are deferred until the community adds a
 // reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
 const VENDOR_HOST_PATTERNS = [
@@ -597,6 +796,7 @@ const VENDOR_HOST_PATTERNS = [
   { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
   { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
   { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
+  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
 ];
 
 function detectVendor(rawUrl) {
@@ -638,6 +838,94 @@ function extractBlockerType(gap) {
   return 'other';
 }
 
+/**
+ * Build the blocker, discard-reason, and technology signals used by both the
+ * production analysis and regression fixtures.
+ * @param {Array<object>} enriched Tracker entries enriched with outcomes/reports.
+ * @returns {object} Aggregated rates, population bases, and discard recommendation.
+ */
+function buildPatternSignals(enriched) {
+  const blockerCounts = new Map();
+  const blockerBase = gapBearingBase(enriched);
+  for (const e of enriched) {
+    if (!e.report?.gaps) continue;
+    const entryBlockers = new Set();
+    for (const gap of e.report.gaps) {
+      const type = extractBlockerType(gap);
+      if (type) entryBlockers.add(type);
+    }
+    for (const type of entryBlockers) {
+      blockerCounts.set(type, (blockerCounts.get(type) || 0) + 1);
+    }
+  }
+  const blockerAnalysis = [...blockerCounts.entries()]
+    .map(([blocker, frequency]) => ({
+      blocker,
+      frequency,
+      percentage: blockerBase ? Math.round((frequency / blockerBase) * 100) : 0,
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  const discardReasonCounts = new Map();
+  for (const e of enriched) {
+    if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
+    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
+    if (!notesMatch) continue;
+    const entryReasons = new Set();
+    for (const match of notesMatch) {
+      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
+      if (key) entryReasons.add(key);
+    }
+    for (const key of entryReasons) {
+      discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
+    }
+  }
+  const discardReasonBase = discardableBase(enriched);
+  const discardReasonStats = [...discardReasonCounts.entries()]
+    .map(([reason, frequency]) => ({
+      reason,
+      frequency,
+      percentage: discardReasonBase ? Math.round((frequency / discardReasonBase) * 100) : 0,
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  const stackGapCounts = new Map();
+  for (const e of enriched) {
+    if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
+    if (!e.report?.gaps) continue;
+    const entryTechs = new Set();
+    for (const gap of e.report.gaps) {
+      for (const tech of extractTechMentions(gap.description)) entryTechs.add(tech);
+    }
+    for (const tech of entryTechs) {
+      stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
+    }
+  }
+  const techStackGaps = [...stackGapCounts.entries()]
+    .map(([skill, frequency]) => ({ skill, frequency }))
+    .sort((a, b) => b.frequency - a.frequency)
+    .slice(0, 15);
+
+  const topDiscardReason = discardReasonStats[0];
+  const discardReasonRecommendation = topDiscardReason
+    && topDiscardReason.frequency >= Math.max(3, Math.ceil(discardReasonBase * 0.15))
+    ? {
+      action: `Add "${topDiscardReason.reason}" filter to modes/_custom.md to avoid wasting evaluation effort`,
+      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of ${discardReasonBase} eligible entries with self-filtered or negative outcomes).`,
+      impact: 'high',
+    }
+    : null;
+
+  return {
+    blockerBase,
+    blockerAnalysis,
+    discardReasonBase,
+    discardReasonStats,
+    techStackGaps,
+    discardReasonRecommendation,
+  };
+}
+
 // --- Main analysis ---
 function analyze() {
   const entries = parseTracker();
@@ -651,18 +939,21 @@ function analyze() {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
     // Tracker links are relative to the tracker file's own directory (see
     // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links.
-    let reportPath = null;
+    // legacy root-relative links. Each candidate is guarded to reports/
+    // before the read is attempted; parseReport returns null for a missing
+    // file, so no pre-flight existsSync is needed (#2385).
+    let reportData = null;
     if (reportMatch) {
-      const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
-      const candidate = existsSync(fromTracker) ? fromTracker : join(CAREER_OPS, reportMatch[1]);
-      
-      const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-      if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
-        reportPath = existsSync(candidate) ? candidate : null;
+      const candidates = new Set([
+        join(dirname(APPS_FILE), reportMatch[1]),
+        join(CAREER_OPS, reportMatch[1]),
+      ]);
+      for (const candidate of candidates) {
+        if (!withinReports(candidate)) continue;
+        reportData = parseReport(candidate);
+        if (reportData) break;
       }
     }
-    const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);
     const score = Number.isFinite(trackerScore)
@@ -741,24 +1032,16 @@ function analyze() {
     conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
   })).sort((a, b) => b.total - a.total);
 
-  // --- Blocker analysis ---
-  const blockerCounts = new Map();
-  const totalWithGaps = enriched.filter(e => e.report?.gaps?.length > 0);
-  for (const e of enriched) {
-    if (!e.report?.gaps) continue;
-    for (const gap of e.report.gaps) {
-      const type = extractBlockerType(gap);
-      if (!type) continue;
-      blockerCounts.set(type, (blockerCounts.get(type) || 0) + 1);
-    }
-  }
-  const blockerAnalysis = [...blockerCounts.entries()]
-    .map(([blocker, frequency]) => ({
-      blocker,
-      frequency,
-      percentage: Math.round((frequency / enriched.length) * 100),
-    }))
-    .sort((a, b) => b.frequency - a.frequency);
+  // --- Blocker / discard-reason / technology analysis ---
+  // Shared with --self-test so fixtures exercise the production aggregation.
+  const {
+    blockerBase,
+    blockerAnalysis,
+    discardReasonBase,
+    discardReasonStats,
+    techStackGaps,
+    discardReasonRecommendation,
+  } = buildPatternSignals(enriched);
 
   // --- Remote policy breakdown ---
   const remoteMap = new Map();
@@ -838,7 +1121,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday'],
+    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
@@ -872,61 +1155,14 @@ function analyze() {
   // --- Generate recommendations ---
   const recommendations = [];
 
-  // --- Discard reason analysis (Issue 1380) ---
-
-  // Aggregates user-committed `DISCARD: <reason>` or `SKIP: <reason>` tags in the Notes column.
-  const discardReasonCounts = new Map();
-  for (const e of enriched) {
-    if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
-    // From tracker Notes column: "DISCARD: <reason>" or "SKIP: <reason>"
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
-    if (notesMatch) {
-      for (const m of notesMatch) {
-        const key = m.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-        if (key) discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
-      }
-    }
-  }
-  const discardReasonStats = [...discardReasonCounts.entries()]
-    .map(([reason, frequency]) => ({
-      reason,
-      frequency,
-      percentage: Math.round((frequency / enriched.length) * 100),
-    }))
-    .sort((a, b) => b.frequency - a.frequency);
-
-  // Recommend updating _custom.md when a single reason dominates
-  const topDiscardReason = discardReasonStats[0];
-  if (topDiscardReason && topDiscardReason.frequency >= Math.max(3, Math.ceil(enriched.length * 0.15))) {
-    recommendations.push({
-      action: `Add "${topDiscardReason.reason}" filter to modes/_custom.md to avoid wasting evaluation effort`,
-      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of all applications).`,
-      impact: 'high',
-    });
-  }
-
-  // --- Tech stack gaps (from negative + self_filtered outcomes) ---
-  const stackGapCounts = new Map();
-  for (const e of enriched) {
-    if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
-    if (!e.report?.gaps) continue;
-    for (const gap of e.report.gaps) {
-      for (const tech of extractTechMentions(gap.description)) {
-        stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
-      }
-    }
-  }
-  const techStackGaps = [...stackGapCounts.entries()]
-    .map(([skill, frequency]) => ({ skill, frequency }))
-    .sort((a, b) => b.frequency - a.frequency)
-    .slice(0, 15);
+  if (discardReasonRecommendation) recommendations.push(discardReasonRecommendation);
 
   // Geo-restriction recommendation
   const geoBlocker = blockerAnalysis.find(b => b.blocker === 'geo-restriction');
   if (geoBlocker && geoBlocker.percentage >= 20) {
     recommendations.push({
-      action: `Tighten location filters in portals.yml -- ${geoBlocker.percentage}% of applications hit a geo-restriction blocker`,
-      reasoning: `${geoBlocker.frequency} of ${enriched.length} offers are location-restricted (US/Canada-only). These are wasted evaluation effort.`,
+      action: `Review location and work-authorization filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
+      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are affected by a location or work-authorization restriction. Review these filters before applying to similar roles.`,
       impact: 'high',
     });
   }
@@ -1037,6 +1273,11 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    // Populations the percentages above are shares of. Exported because a
+    // consumer cannot sanity-check a rate whose denominator is invisible —
+    // that opacity is precisely what let the wrong base survive unnoticed.
+    discardReasonBase,
+    blockerBase,
     recommendations,
   };
 }
@@ -1076,10 +1317,10 @@ function printSummary(result) {
 
   // Blockers
   if (blockerAnalysis.length > 0) {
-    console.log('\nTOP BLOCKERS');
+    console.log(`\nTOP BLOCKERS (of ${result.blockerBase} entries carrying gaps)`);
     console.log('-'.repeat(40));
     for (const b of blockerAnalysis) {
-      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}% of all)`);
+      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}%)`);
     }
   }
 
@@ -1101,7 +1342,7 @@ function printSummary(result) {
 
   // Discard reasons
   if (discardReasonStats && discardReasonStats.length > 0) {
-    console.log('\nTOP DISCARD / SKIP REASONS');
+    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered/negative entries)`);
     console.log('-'.repeat(40));
     for (const d of discardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);

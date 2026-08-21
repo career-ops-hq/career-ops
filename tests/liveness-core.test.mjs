@@ -85,6 +85,21 @@ blocked.result === 'uncertain' && blocked.code === 'access_blocked'
   ? pass('HTTP 503 still classifies as uncertain/access_blocked, not server_error')
   : fail(`HTTP 503 classified ${blocked.result}/${blocked.code}, expected uncertain/access_blocked`);
 
+// 429 is throttling, never evidence the posting is gone. Its body is a short
+// "Too Many Requests" — under MIN_CONTENT_CHARS — so before the guard covered it
+// the verdict fell through to insufficient_content and read as `expired`, which
+// scan-history records as skipped_expired and every later scan dedup-skips.
+const throttled = classifyLiveness({
+  status: 429,
+  requestedUrl: 'https://boards.greenhouse.io/acme/jobs/1234567',
+  finalUrl: 'https://boards.greenhouse.io/acme/jobs/1234567',
+  bodyText: 'Too Many Requests. Please retry after some time.',
+  applyControls: [],
+});
+throttled.result === 'uncertain' && throttled.code === 'access_blocked'
+  ? pass('HTTP 429 classifies as uncertain/access_blocked, not expired')
+  : fail(`HTTP 429 classified ${throttled.result}/${throttled.code}, expected uncertain/access_blocked`);
+
 // A real 404/410 is still authoritative expiry — both statuses, both halves.
 for (const status of [404, 410]) {
   const gone = classifyLiveness({

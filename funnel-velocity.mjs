@@ -37,24 +37,34 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { computeFunnel, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
 import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
-const args = process.argv.slice(2);
-const summaryMode = args.includes('--summary');
-const selfTestMode = args.includes('--self-test');
+const KNOWN_FLAGS = ['--summary', '--self-test', '--benchmarks', '--help', '-h'];
+const VALUE_FLAGS = ['--benchmarks'];
+
+const USAGE = `Usage:
+  node funnel-velocity.mjs                       # JSON report
+  node funnel-velocity.mjs --summary             # human-readable report
+  node funnel-velocity.mjs --benchmarks <path>   # override the benchmark YAML file
+  node funnel-velocity.mjs --self-test           # run the built-in fixtures
+  node funnel-velocity.mjs --help|-h              # show this message`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const VALID_SOURCES = new Set(['set-status', 'correction', 'backfill', 'manual']);
+// `web` sits alongside `set-status` because it is the same class of event: a
+// status change made in the web app is recorded as the user makes it, not
+// reconstructed afterwards. Only the door differs.
+const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual']);
 // Sources whose dates are trusted for day-math. backfill/manual are parsed and
 // counted but excluded: they are reconstructed after the fact, not observed.
-const DAY_MATH_SOURCES = new Set(['set-status', 'correction']);
+const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction']);
 
 // The hops a candidate can measure from their own tracker. Applied→Rejected is
 // tracked separately from the forward hops — a "days to terminal" number that
@@ -486,6 +496,29 @@ function selfTest() {
   check(observations.find(o => o.source === 'future-import')?.dayMath === false, 'parser: unknown source excluded from day-math');
   check(observations.find(o => o.num === 2 && o.from === null), 'parser: "-" from-state parses as null');
 
+  // A status change made from the web app is observed live, at the moment the
+  // user makes it — the same event as a set-status transition entering through
+  // a different door. Excluding it does not drop the rows, which is what makes
+  // the failure quiet: they are parsed, counted, flagged under unknownSources,
+  // and contribute nothing to the hop figures, so a web-driven install reads as
+  // an empty funnel rather than a broken one. Its own fixture so the counts
+  // pinned above stay pinned.
+  const WEB_FIXTURE = [
+    '1\t2026-06-01\tEvaluated\tApplied\tweb\t',
+    '1\t2026-06-08\tApplied\tResponded\tweb\t',
+  ].join('\n');
+  const web = parseStatusLog(WEB_FIXTURE, states);
+  check(web.unknownSources.length === 0, `parser: web is a recognized source (got ${web.unknownSources.length} unknown)`);
+  check(web.observations.length === 2 && web.observations.every(o => o.dayMath === true),
+    'parser: web observations are trusted for day-math');
+
+  // The rows above are a clean 7-day Applied→Responded hop. Asserting the
+  // parse alone would not have caught this: the defect was never that the rows
+  // failed to parse, it was that a parsed row reached no figure.
+  const webVelocity = computeVelocity(foldObservations(web.observations), TODAY);
+  check(webVelocity.appliedToResponded.n === 1,
+    `velocity: a web transition reaches the hop figures (expected n=1, got ${webVelocity.appliedToResponded.n})`);
+
   // -- fold --
   const timelines = foldObservations(observations);
   const t2 = timelines.get(2);
@@ -647,17 +680,17 @@ function selfTest() {
 }
 
 // --- Main ---
-function flagValue(name) {
-  const i = args.indexOf(name);
-  return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
-}
-
 function main() {
+  const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+  const summaryMode = args.includes('--summary');
+  const selfTestMode = args.includes('--self-test');
   if (selfTestMode) { selfTest(); return; }
 
   let benchmarks;
   try {
-    benchmarks = loadBenchmarks(flagValue('--benchmarks')).benchmarks;
+    benchmarks = loadBenchmarks(flagValue(args, '--benchmarks')).benchmarks;
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

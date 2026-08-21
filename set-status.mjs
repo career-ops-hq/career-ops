@@ -60,18 +60,41 @@
  *
  * Every real status change also appends one line to the transition ledger
  * (status-log.tsv, sibling of the tracker file):
- *   {tracker#}\t{date}\t{from}\t{to}\tset-status\t
+ *   {tracker#}\t{date}\t{from}\t{to}\t{source}\t
+ * Source is `set-status` unless --source names the caller delegating here.
  * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
  * happened earlier ("they replied Tuesday"). The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
+ *
+ * Two rules the reader enforces that this writer never has to think about,
+ * because it always has a real prior status and always writes its own source.
+ * Any other producer does have to, so they are stated here:
+ *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
+ *     funnel-velocity.mjs reads the two columns differently: a from of "-"
+ *     parses to null, meaning no prior state, while a to of "-" is preserved
+ *     as the literal "-", meaning an unknown target. Any other value goes
+ *     through resolveCanonicalState, so an empty cell is rejected as
+ *     `unknown from-state ""` or `unknown to-state ""` for its own column,
+ *     and the row is dropped.
+ *   - The source column is a closed set, and VALID_SOURCES in
+ *     funnel-velocity.mjs is the authority on its members. Deliberately not
+ *     enumerated here: a copy of that list in prose is wrong the first time a
+ *     writer is added, and it would be wrong in three files at once.
+ *     A value outside the set parses but is excluded from day-math. The row
+ *     is not lost and the exclusion is not silent: it is kept as an
+ *     observation, recorded in unknownSources, and printed with its line
+ *     number under dataQuality. Namespacing a source (say "backfill:notes")
+ *     therefore keeps the row out of the day-math figures; put that detail in
+ *     the note column.
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
@@ -96,6 +119,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
+  --source NAME      Attribution for the transition ledger: set-status (default)
+                     or web (a caller delegating to this script)
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
@@ -109,8 +134,19 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
+const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+
+// Who is driving this write. A caller that delegates here instead of touching
+// the tracker itself — the web status route — needs its ledger rows to stay
+// distinguishable from a CLI run's.
+//
+// The allow-list is narrow on purpose. The value is written to a file
+// funnel-velocity.mjs parses positionally and gates on its own source
+// allow-list, so an unrecognized label would be persisted here and then
+// silently dropped there. Rejecting it at the boundary keeps the two ends from
+// disagreeing about what a valid source is.
+const WRITER_SOURCES = new Set(['set-status', 'web']);
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -125,6 +161,9 @@ for (let i = 0; i < rawArgs.length; i++) {
     // silently treating it as "no match" would hide the mistake.
     if ((a === '--row' || a === '--report') && !/^\d+$/.test(value)) {
       failUsage(`${a} expects a positive integer, got "${value}"`);
+    }
+    if (a === '--source' && !WRITER_SOURCES.has(value)) {
+      failUsage(`--source expects one of ${[...WRITER_SOURCES].join(', ')}, got "${value}"`);
     }
     flags[VALUE_FLAGS[a]] = value;
     i++;
@@ -161,7 +200,13 @@ if (flags.on !== null) {
   const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
   const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
   if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
-  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
+  // LOCAL today, not the UTC day. At a positive UTC offset the UTC day is
+  // still yesterday for the first hours of the local day, so comparing against
+  // it rejected the user's own today: `TZ=Pacific/Auckland --on 2026-08-16`
+  // failed with "date is in the future" on 2026-08-16 (#2932). The round-trip
+  // check above deliberately stays on UTC — that is date PARSING, not "what
+  // day is it here".
+  if (flags.on > localToday()) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
 const selector = explicitSelector ? null : positional[0];
@@ -408,15 +453,29 @@ if (isBareNumericSelector && !flags.force) {
 // entirely baseline vocabulary (["platform","engineer"]) so that same-titled
 // sibling reqs never auto-merge. That makes it unusable on its own here — it
 // would reject --role "Platform Engineer" against a row that IS exactly that.
-const normalizeRoleText = s => String(s ?? '')
-  .toLowerCase()
-  // Preserve symbols that distinguish real titles before collapsing generic
-  // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
-  // "c engineer" and the exact-equality path treats them as the same row.
-  .replace(/\+\+/g, ' plusplus ')
-  .replace(/#/g, ' sharp ')
-  .replace(/[^a-z0-9]+/g, ' ')
-  .trim();
+// The collapse must drop PUNCTUATION, never letters. `[^a-z0-9]` dropped every
+// letter outside the Latin range, so any title written entirely in Japanese,
+// Arabic or Cyrillic keyed to '' — two different titles then compared equal
+// ('' === '') and the guard wrote the status to a row it had never actually
+// matched (#2670). normalizeTextKey is the Unicode-aware normalizer company
+// matching already used; it also folds NFKC, so a decomposed title still
+// matches its composed row.
+const normalizeRoleText = s => normalizeTextKey(
+  String(s ?? '')
+    // NFKC first: normalizeTextKey folds it too, but only AFTER this pre-map, so
+    // a fullwidth ＃/＋＋ would reach the collapse unrecognized and be stripped as
+    // punctuation — "C＃ Engineer" and "C＋＋ Engineer" both keying to
+    // "c engineer". Fullwidth forms are ordinary Japanese typography, so this is
+    // the same shipped-market surface as the rest of #2670. Folding here also
+    // makes the ASCII and fullwidth spellings of one title match each other.
+    .normalize('NFKC')
+    // Preserve symbols that distinguish real titles before collapsing generic
+    // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
+    // "c engineer" and the exact-equality path treats them as the same row.
+    .replace(/\+\+/g, ' plusplus ')
+    .replace(/#/g, ' sharp '),
+  ' ',
+);
 const roleMatchesTarget = normalizeRoleText(target.role) === normalizeRoleText(flags.role)
   || roleFuzzyMatch(target.role, flags.role);
 
@@ -485,9 +544,14 @@ if (changed && !flags.dryRun) {
 let statusLogged = false;
 if (statusChanged && !flags.dryRun) {
   const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
+  // so this appended a status-log row dated a day that had not happened yet
+  // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
+  // time-between-stages, so a future-dated transition skews the interval it
+  // measures rather than just looking odd in the file.
+  const eventDate = flags.on ?? localToday();
   try {
-    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\tset-status\t\n`);
+    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
     statusLogged = true;
   } catch (err) {
     console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);

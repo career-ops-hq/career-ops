@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -116,6 +116,8 @@ async function loadProviderIds() {
   return ids;
 }
 
+const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -135,6 +137,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // Optional per-scanner override consumed only by scan-ats-full.mjs. Same
+  // shape as title_filter, so it gets the same structural checks — an
+  // unvalidated key would let a typo ("positve") silently resolve to a
+  // profile with no positive keywords, which matches every posting.
+  if (config.title_filter_full !== undefined) {
+    if (!isObject(config.title_filter_full)) {
+      add(errors, 'title_filter_full', 'title_filter_full must be an object');
+    } else {
+      // A misspelled field is the dangerous case, not a missing one:
+      // `positve:` leaves `positive` undefined, buildTitleFilter treats an
+      // empty positive list as "no positive constraint", and the sweep then
+      // matches every title on every board — the exact outcome this key
+      // exists to prevent. An unknown field is therefore an error, while
+      // `positive: []` stays valid as a deliberate choice.
+      for (const key of Object.keys(config.title_filter_full)) {
+        if (!TITLE_FILTER_FIELDS.includes(key)) {
+          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
+        }
+      }
+      validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
+      validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
+      validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
+    }
+  }
+
   if (config.location_filter !== undefined) {
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
@@ -142,6 +169,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
+      validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
     }
   }
 

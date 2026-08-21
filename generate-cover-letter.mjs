@@ -9,24 +9,65 @@
  * Fills templates/cover-letter-template.html with the payload, then renders
  * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
  *
- * `buildHtml` is exported as a pure function so the template can be tested
- * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
+ * `buildHtml` and `safeOutputPath` are exported as pure functions so the
+ * template and --out path guard can be tested without loading Playwright
+ * (renderHtmlToPdf is imported lazily inside main).
  */
 
 import { readFileSync, existsSync, mkdirSync } from "fs";
-import { dirname, resolve, basename, join } from "path";
+import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 
-const OUTPUT_ROOT = resolve("output");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const OUTPUT_ROOT = resolve(__dirname, "output");
 
-/** Sanitize a requested output filename and keep it under the output directory. */
-function safeOutputPath(raw) {
-  // Derive a sanitized filename from raw string (strip path separators and dots)
-  const filename = basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/\.{2,}/g, "-");
-  return join(OUTPUT_ROOT, filename);
+/**
+ * Resolve a requested cover-letter output path.
+ *
+ * Paths that stay inside `output/` keep their relative subdirectory (the
+ * application-bundle layout `generate-pdf.mjs` already supports). Paths that
+ * would escape `output/` — `..` traversal or an absolute path outside it —
+ * are rejected instead of being silently flattened to `output/<basename>`.
+ *
+ * @param {string} raw - Caller-supplied --out / payload.output_path value.
+ * @returns {string} Absolute path inside OUTPUT_ROOT.
+ */
+export function safeOutputPath(raw) {
+  if (raw == null || String(raw).trim() === "") {
+    throw new Error("Refusing to write the cover letter outside output/: (empty path)");
+  }
+  const trimmed = String(raw).trim();
+
+  const asWritten = resolve(trimmed);
+  if (containedInOutput(asWritten)) return asWritten;
+
+  // Absolute paths and any `..` segment already chose a location; if that
+  // location is not inside output/, refuse instead of rewriting to a basename.
+  if (isAbsolute(trimmed) || /(^|[\\/])\.\.([\\/]|$)/.test(trimmed)) {
+    throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+  }
+
+  // Bare filename or a relative path that is not already under output/
+  // (e.g. --out cover.pdf, or --out output/foo/bar.pdf from another cwd).
+  const posix = trimmed.replace(/\\/g, "/").replace(/^\.\//, "");
+  const relativeToRoot = posix === "output" || posix === "output/"
+    ? ""
+    : posix.startsWith("output/")
+      ? posix.slice("output/".length)
+      : posix;
+  const candidate = resolve(OUTPUT_ROOT, relativeToRoot);
+  if (containedInOutput(candidate)) return candidate;
+
+  throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+}
+
+/** True when absPath is a file (not output/ itself) still inside OUTPUT_ROOT. */
+function containedInOutput(absPath) {
+  const rel = relative(OUTPUT_ROOT, absPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /** Assert that a payload object contains the required keys. */
@@ -118,6 +159,26 @@ function buildFootnotesBlock(footnotes) {
   return `<div class="footnotes">\n${lines}\n  </div>`;
 }
 
+/**
+ * Build the optional sign-off block: a valediction over the signing name.
+ *
+ * Accepts either a plain string (used verbatim as the valediction) or an
+ * object `{ valediction, name }`. `name` defaults to the candidate name so a
+ * payload can set only the valediction. Returns "" when unset, which keeps
+ * every pre-existing payload rendering byte-identical.
+ */
+function buildSignatureBlock(signature, candidateName) {
+  if (!signature) return "";
+  const isObject = typeof signature === "object" && signature !== null;
+  const valediction = isObject ? signature.valediction : signature;
+  const name = (isObject ? signature.name : "") || candidateName || "";
+  if (!valediction && !name) return "";
+  // Each value is escaped independently; the <br> separator is template markup
+  // emitted between them, never injected into escaped content.
+  const lines = [valediction, name].filter(Boolean).map(escapeHtml);
+  return `<p class="signature">${lines.join("<br>")}</p>`;
+}
+
 // Resolve the cover-letter template through the shared resolver so a
 // `cover_letter.template` profile default, an explicit `payload.template`, and
 // installed template packs are all honored. Any resolver failure (no profile,
@@ -152,6 +213,12 @@ export function buildHtml(payload, templatePath) {
     : "";
   const problemsBlock = letter.problems_section ? `<p>${escapeHtml(letter.problems_section)}</p>` : "";
 
+  // Optional sign-off (e.g. valediction "Sincerely," over the signing name).
+  // Omitted -> no signature, preserving behavior for payloads that don't set it.
+  // The name falls back to the candidate name so a payload can set only the
+  // valediction. The <br> is emitted around escaped values, never inside one.
+  const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
+
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
@@ -165,6 +232,7 @@ export function buildHtml(payload, templatePath) {
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,
     "{{LANGUAGE_CLOSING_BLOCK}}": languageClosingBlock,
+    "{{SIGNATURE_BLOCK}}": signatureBlock,
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
@@ -172,8 +240,29 @@ export function buildHtml(payload, templatePath) {
   // the original template. A single regex pass (rather than iterative
   // split/join) ensures a substituted value that itself contains a {{TOKEN}}
   // sequence is left literal instead of being re-interpreted as a placeholder.
-  // Tokens with no entry in the map are left untouched.
-  return html.replace(/\{\{[A-Z_]+\}\}/g, (token) => replacements[token] ?? token);
+  //
+  // A token with no entry in the map is a template the renderer cannot fill —
+  // a custom cover-letter template (KINDS.cover in cv-templates.mjs) carrying a
+  // typo'd or unsupported token. Collect those DURING the pass rather than
+  // scanning the result: a scan of the output cannot tell a template token from
+  // the same sequence appearing inside a substituted value, which is exactly
+  // what the single pass above is careful to leave literal.
+  const unresolved = new Set();
+  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+    const value = replacements[token];
+    if (value == null) {
+      unresolved.add(token);
+      return token;
+    }
+    return value;
+  });
+
+  // Fail loudly, matching build-cv-html.mjs and build-cv-latex.mjs. Shipping a
+  // letter with a literal {{TOKEN}} in it is worse than not producing one.
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
+  return rendered;
 }
 
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
@@ -219,7 +308,12 @@ Usage:
     const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
-    payload.output_path = safeOutputPath(payload.output_path);
+    try {
+      payload.output_path = safeOutputPath(payload.output_path);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
 
   if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });

@@ -22,11 +22,12 @@
  *      node upskill.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { join, dirname, relative, sep } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -34,6 +35,51 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   : join(CAREER_OPS, 'applications.md');
 const CV_FILE = join(CAREER_OPS, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// analyze-patterns.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
 
 // Bump when extraction rules change in a way that would make gap lists from
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
@@ -50,6 +96,154 @@ const LOW_FIT_SCORE = 4.0;
 // exported here so existing importers of extractSkills keep working unchanged.
 import { extractSkills } from './skill-extract.mjs';
 export { extractSkills };
+
+// --- Known-skills text assembly ---
+// The known-skills set is built by running extractSkills() over cv.md and
+// config/profile.yml. Feeding those files in RAW means every skill named in a
+// COMMENT registers as a skill the user has, and is then suppressed from the
+// gap map — silently, permanently, and with no way to tell "suppressed because
+// known" from "never appeared".
+//
+// The failure is inverted, which is what makes it nasty: a comment written to
+// record that the user does NOT have something is the thing that makes this
+// believe they do. Realistic triggers, all ordinary config hygiene:
+//
+//   # not using Kubernetes anymore, moved to ECS
+//   # considering a Snowflake migration in 2027
+//   # removed the CISSP line 2026-07-05, was never accurate
+//
+// Both helpers below are pure and exported for unit testing.
+
+/**
+ * Text of a YAML config with comments removed, for skill extraction.
+ *
+ * Parsing and re-serializing drops comments for free — no regex has to guess
+ * whether a `#` is a comment or lives inside a quoted string. Keys are kept
+ * alongside values: the reported bug is about comments, and dropping keys
+ * would silently narrow what counts as known (`skills: {Python: expert}` puts
+ * the skill in key position), which is a different behaviour change than the
+ * one being fixed here.
+ *
+ * An unparseable file falls back to the raw text — the previous behaviour —
+ * so a malformed profile degrades to "slightly over-eager" rather than
+ * "no known skills at all", which would flood the gap map with false gaps.
+ *
+ * That fallback re-opens the exact hole this function closes: the raw text
+ * still carries its comments, so an unparseable profile can register
+ * `# not using Kubernetes anymore` as a known skill again. Degrading is still
+ * the right default, but doing it SILENTLY is what made the original bug
+ * expensive — "suppressed because known" was indistinguishable from "never
+ * appeared". `onParseFailure` lets the caller say so out loud. Omit it and the
+ * function stays pure, which is how the self-tests use it.
+ *
+ * @param {string} raw
+ * @param {(err: Error) => void} [onParseFailure]  called before falling back
+ * @returns {string}
+ */
+export function yamlValueText(raw, onParseFailure) {
+  if (!raw) return '';
+  let doc;
+  try {
+    doc = yamlLoad(raw);
+  } catch (err) {
+    if (onParseFailure) onParseFailure(err);
+    return raw;
+  }
+  const out = [];
+  // YAML anchors/aliases can produce a genuinely cyclic object graph
+  //   root: &a
+  //     self: *a
+  // which js-yaml resolves into a real JS cycle (doc.root.self === doc.root).
+  // An unguarded walk chases that forever and dies with a RangeError, killing
+  // the whole run — the parse try/catch above cannot help, because the throw
+  // happens here, not in yamlLoad(). The WeakSet also collapses a non-cyclic
+  // alias reused in several places, which is harmless: the caller turns this
+  // into a Set of skills, so emitting a value once is sufficient.
+  const seen = new WeakSet();
+  const walk = (node) => {
+    if (node == null) return;
+    const t = typeof node;
+    if (t === 'string' || t === 'number' || t === 'boolean') { out.push(String(node)); return; }
+    if (t !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    for (const [k, v] of Object.entries(node)) { out.push(String(k)); walk(v); }
+  };
+  walk(doc);
+  return out.join('\n');
+}
+
+/**
+ * Markdown with HTML comments removed. `cv.md` ships from a template carrying
+ * `<!-- ... -->` guidance, and users leave their own notes in the same form.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function stripMarkdownComments(raw) {
+  return String(raw ?? '').replace(/<!--[\s\S]*?-->/g, '\n');
+}
+
+/**
+ * The text the known-skills set is extracted from. Single definition so the
+ * aggregate and targeted paths cannot drift — the drift class #1896 exists to
+ * prevent.
+ *
+ * @param {string} cvRaw       raw cv.md (or cv-example.md)
+ * @param {string} profileRaw  raw config/profile.yml
+ * @param {(err: Error) => void} [onProfileParseFailure]  forwarded to yamlValueText
+ * @returns {string}
+ */
+export function knownSkillsText(cvRaw, profileRaw, onProfileParseFailure) {
+  return [
+    stripMarkdownComments(cvRaw),
+    yamlValueText(profileRaw, onProfileParseFailure),
+  ].join('\n');
+}
+
+/**
+ * The one warning for an unparseable profile, shared by both CLI paths so they
+ * cannot word it differently or forget it independently.
+ *
+ * stderr, not stdout: stdout carries the JSON contract that the `upskill` mode
+ * and any downstream tooling parse, and a warning line there would break it.
+ *
+ * @param {Error} err
+ */
+function warnProfileUnparseable(err) {
+  const detail = String(err?.message ?? '').split('\n')[0];
+  console.error(
+    `upskill: warning — config/profile.yml could not be parsed (${detail}). ` +
+    'Falling back to its raw text, so comments in it may still register as ' +
+    'known skills and be suppressed from the gap map. Fix the YAML to restore ' +
+    'comment-aware extraction.'
+  );
+}
+
+/**
+ * Contents of an OPTIONAL file, or '' when it cannot be read as one.
+ *
+ * `existsSync(p) ? readFileSync(p) : ''` looks safe and is not: existsSync is
+ * true for a DIRECTORY, and reading that path throws EISDIR. Aggregate mode had
+ * no try/catch around those reads, so a `cv.md/` directory — or any unreadable
+ * path — killed the run instead of degrading to empty input. The targeted path
+ * already swallowed read errors, so the two disagreed about the same files.
+ *
+ * Both now share this one reader. Missing, unreadable, and not-a-file all
+ * collapse to '', which is what "optional" is supposed to mean.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+export function readOptionalText(filePath) {
+  try {
+    if (!statSync(filePath).isFile()) return '';
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
 
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
@@ -212,11 +406,17 @@ function analyze(minReports) {
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
-    const candidates = [join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])];
-    const reportPath = candidates.find(p => existsSync(p));
-    if (!reportPath) continue;
+    // The read is attempted directly instead of probing with existsSync first,
+    // which costs a full stat per report and races with the read (#2385).
+    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    let content = null;
+    for (const p of candidates) {
+      if (!withinReports(p)) continue;
+      content = readTextIfExists(p);
+      if (content !== null) break;
+    }
+    if (content === null) continue;
     reportsRead += 1;
-    const content = readFileSync(reportPath, 'utf-8');
     const { score, gapText, hasMachineSummary } = parseReportGaps(content);
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
@@ -236,10 +436,11 @@ function analyze(minReports) {
     };
   }
 
-  const knownText = [
-    existsSync(CV_FILE) ? readFileSync(CV_FILE, 'utf-8') : '',
-    existsSync(PROFILE_FILE) ? readFileSync(PROFILE_FILE, 'utf-8') : '',
-  ].join('\n');
+  const knownText = knownSkillsText(
+    readOptionalText(CV_FILE),
+    readOptionalText(PROFILE_FILE),
+    warnProfileUnparseable,
+  );
   const knownSkills = extractSkills(knownText);
 
   const { gaps, excludedAsKnown, totalLowFit } = aggregateGaps(parsedReports, knownSkills);
@@ -408,22 +609,181 @@ soft_gaps:
     }
   }
 
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before any read. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`upskill self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
+  }
+
+  // --- known-skills text: comments must never register as known skills ---
+  // A comment recording that the user does NOT have something must not make it
+  // count as known and suppress it from the gap map.
+  {
+    const profile = [
+      'candidate:',
+      '  full_name: "Test User"',
+      '# We dropped Kubernetes last year and never picked up Terraform.',
+      'skills:',
+      '  - Python',
+    ].join('\n');
+    const cv = '# CV\n\n<!-- template note: list Snowflake if you have used it -->\n\n## Skills\nSQL, AWS\n';
+
+    const leaked = extractSkills([cv, profile].join('\n'));
+    if (!leaked.has('Kubernetes') || !leaked.has('Snowflake')) {
+      failures.push('known-skills: fixture no longer reproduces the raw-concat leak — rewrite it, not the fix');
+    }
+
+    const fixed = extractSkills(knownSkillsText(cv, profile));
+    for (const ghost of ['Kubernetes', 'Terraform', 'Snowflake']) {
+      if (fixed.has(ghost)) failures.push(`known-skills: "${ghost}" leaked from a comment`);
+    }
+    for (const real of ['Python', 'SQL', 'AWS']) {
+      if (!fixed.has(real)) failures.push(`known-skills: real skill "${real}" was dropped`);
+    }
+
+    // A skill in KEY position stays known — dropping keys would silently narrow
+    // what counts as known, a different behaviour change than removing comments.
+    if (!extractSkills(yamlValueText('skills:\n  Python: expert\n')).has('Python')) {
+      failures.push('known-skills: key-position skill dropped');
+    }
+
+    // Parsing beats regex-stripping: a '#' inside a quoted string is not a comment.
+    if (!extractSkills(yamlValueText('note: "uses C# daily"\n')).has('C#')) {
+      failures.push('known-skills: "#" inside a quoted string was treated as a comment');
+    }
+
+    // Unparseable YAML degrades to the raw text (previous behaviour). Returning
+    // nothing would empty the known-skills set and flood the map with false gaps.
+    if (!yamlValueText('key: [unclosed\n  bad: : :').includes('unclosed')) {
+      failures.push('known-skills: unparseable YAML should fall back to raw text');
+    }
+
+    // ...but that fallback re-exposes the bug, so it must not be silent. The
+    // caller has to be told, or a malformed profile quietly reinstates exactly
+    // the suppression this fix removes.
+    {
+      const badProfile = '# We dropped Kubernetes.\nkey: [unclosed\n  bad: : :';
+      let notified = 0;
+      const text = yamlValueText(badProfile, () => { notified++; });
+      if (notified !== 1) {
+        failures.push(`known-skills: unparseable YAML must notify the caller exactly once (got ${notified})`);
+      }
+      if (!text.includes('unclosed')) {
+        failures.push('known-skills: notifying must not change the raw-text fallback');
+      }
+      // The leak the warning exists to announce — assert it is real, so this
+      // test cannot pass because the fixture stopped being malformed.
+      if (!extractSkills(text).has('Kubernetes')) {
+        failures.push('known-skills: malformed-YAML fixture no longer leaks — rewrite it, not the warning');
+      }
+      // Valid YAML must stay quiet: a warning on every run is noise, and noise
+      // is how a real one gets ignored.
+      let spurious = 0;
+      yamlValueText('skills:\n  - Python\n', () => { spurious++; });
+      if (spurious !== 0) {
+        failures.push('known-skills: valid YAML must not emit a parse-failure warning');
+      }
+      // knownSkillsText must forward the callback — the CLI paths rely on it,
+      // and a dropped forward would silently disable both warnings at once.
+      let forwarded = 0;
+      knownSkillsText('# CV\n', badProfile, () => { forwarded++; });
+      if (forwarded !== 1) {
+        failures.push(`known-skills: knownSkillsText must forward the parse-failure callback (got ${forwarded})`);
+      }
+    }
+
+    if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
+      failures.push('known-skills: markdown comment not stripped');
+    }
+
+    // A YAML alias can produce a genuinely cyclic object. Without a visited-set
+    // the walk recurses until the stack dies, taking the whole run with it —
+    // and the parse try/catch cannot help, because the throw is in the walk.
+    const cyclicYaml = 'root: &a\n  name: Python\n  self: *a\n';
+    // Load ONCE and compare within that graph — two separate loads produce two
+    // independent object trees, so a cross-load identity check never holds and
+    // would assert nothing.
+    const cyclicDoc = yamlLoad(cyclicYaml);
+    if (cyclicDoc?.root?.self !== cyclicDoc?.root) {
+      failures.push('known-skills: cyclic fixture no longer produces a cycle — rewrite it, not the guard');
+    }
+    try {
+      if (!extractSkills(yamlValueText(cyclicYaml)).has('Python')) {
+        failures.push('known-skills: cyclic YAML lost a real value');
+      }
+    } catch (e) {
+      failures.push(`known-skills: cyclic YAML alias threw (${e.constructor.name}) instead of terminating`);
+    }
+
+    // Optional files: missing, unreadable, and not-a-file must all read as ''.
+    if (readOptionalText(join(CAREER_OPS, 'no-such-file-xyz.md')) !== '') {
+      failures.push('readOptionalText: a missing file should read as empty');
+    }
+    if (readOptionalText(CAREER_OPS) !== '') {
+      failures.push('readOptionalText: a DIRECTORY should read as empty, not throw EISDIR');
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing)');
+  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing, known-skills comment handling)');
   process.exit(0);
 }
-
-// --- CLI ---
-// --- CLI ---
-const args = process.argv.slice(2);
-if (args.includes('--self-test')) runSelfTest();
-
-// ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
-const urlTextIdx = args.indexOf('--url-text');
-const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
 // Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
 const dnsCache = new Map();
@@ -458,117 +818,201 @@ async function validateUrlSecurity(urlString) {
   return url.toString();
 }
 
-if (urlTextIdx !== -1 || directUrl) {
-  (async () => {
-    let targetText = '';
-    const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+// --- CLI ---
+// Everything below runs ONLY when upskill.mjs is the process entry point.
+//
+// Without this guard the module tail was unconditional, so `import
+// { knownSkillsText } from './upskill.mjs'` re-parsed the IMPORTER's argv and ran
+// one of these branches. That made the pure helpers above un-unit-testable despite
+// their "exported for unit testing" docblocks — every assertion about them had to
+// live inside --self-test.
+//
+// Under tests/ it also broke the harness, because test-all.mjs imports discovered
+// suites IN-PROCESS and they therefore share its argv. Both branches were
+// reachable, and both were measured by pinning isMain to true:
+//   - ordinary argv → the aggregate branch walked the tracker and every linked
+//     report, then dumped a 68-line JSON gap map into the middle of the suite
+//     output.
+//   - argv containing --self-test → runSelfTest() ran and EXITED. test-all died
+//     on the spot with exit 0, no summary line, and every later section silently
+//     skipped: a forged green, which is the exact failure its own source guard
+//     rejects a discovered suite for.
+//
+// Same shape as the other CLIs in this repo (add-entry.mjs, detect-reposts.mjs,
+// contacts.mjs, check-table-freshness.mjs, ...): compare import.meta.url against
+// argv[1]. Node resolves the ESM entry through realpath while pathToFileURL does
+// not, so invoking this file through a SYMLINK reads as "not main" and prints
+// nothing — the same edge contacts.test.mjs documents on macOS. Every caller
+// (test-all.mjs, the modes, package scripts) uses the real path, and matching the
+// repo convention is worth more here than covering a path nothing takes.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-    if (!inputSource) {
-      console.error('Error: Please provide a valid URL or file path after --url-text');
-      process.exit(1);
-    }
+// An unrecognized or mistyped flag (e.g. `--min-report` for `--min-reports`)
+// used to fall through silently: the aggregate branch just ran with its
+// default MIN_REPORTS, reporting a gap map for a threshold nobody asked for.
+// Handled via lib/cli-flags.mjs's validateFlags() (#2775), same shape as
+// doctor.mjs (#2874) — checked before --self-test/--url-text/--min-reports
+// are read, and before --help, so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
 
-    if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
-      let browser;
-      try {
-        const secureUrl = await validateUrlSecurity(inputSource);
-        const { chromium } = await import('playwright');
-        browser = await chromium.launch({ headless: true });
-        const page = await browser.newPage();
+// Only --min-reports and --url-text take their value as the next argv token.
+const VALUE_FLAGS = ['--min-reports', '--url-text'];
 
-        await page.route('**/*', async (route) => {
-          const requestUrl = route.request().url();
-          try {
-            await validateUrlSecurity(requestUrl);
-            await route.continue();
-          } catch (err) {
-            console.error(`Security Violation on Redirect: ${err.message}`);
-            await route.abort('blockedbyclient');
-            process.exit(1);
-          }
-        });
+const USAGE = `Usage:
+  node upskill.mjs                        # aggregate skill-gap map (JSON)
+  node upskill.mjs --summary              # human-readable table
+  node upskill.mjs --min-reports <n>      # minimum scored reports required (default 5)
+  node upskill.mjs --url-text <url|path>  # targeted gap analysis vs one JD (URL or local file)
+  node upskill.mjs <url>                  # same as --url-text <url>
+  node upskill.mjs --self-test            # run the pure-function self-tests
+  node upskill.mjs --help                 # show this message`;
 
-        await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        targetText = await page.innerText('body');
-      } catch (err) {
-        console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
-        try {
-          const secureUrl = await validateUrlSecurity(inputSource);
-          // validateUrlSecurity only vets the initial URL; a redirect could still
-          // steer the fetch at an internal host (SSRF). The Playwright path
-          // re-validates per hop, but this plain fetch must refuse redirects
-          // outright — fail closed rather than follow an unvetted Location (#1851).
-          const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
-          if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-          targetText = await res.text();
-        } catch (fetchErr) {
-          console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
-          process.exit(1);
-        }
-      } finally {
-        if (browser) await browser.close();
-      }
+if (isMain) {
+  const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  if (args.includes('--self-test')) runSelfTest();
 
-      // Whitespace-collapse + length-cap the fetched page text. Use compactText
-      // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
-      // text } DOM-read object and returns { url, title, text }, so feeding it
-      // the innerText/fetch STRING silently produced { text: '' } — destroying
-      // the JD and then throwing `text.matchAll is not a function` downstream
-      // (#1894). compactText is the string-in/string-out helper this wants.
-      try {
-        const { compactText } = await import('./browser-extract.mjs');
-        targetText = compactText(targetText);
-      } catch (e) {}
-    } else {
-      if (existsSync(inputSource)) {
-        targetText = readFileSync(inputSource, 'utf-8');
-      } else {
-        console.error(`Fatal: Target file not found at path: ${inputSource}`);
+  // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
+  const urlTextIdx = args.indexOf('--url-text');
+  const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
+
+  if (urlTextIdx !== -1 || directUrl) {
+    (async () => {
+      let targetText = '';
+      const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+
+      if (!inputSource) {
+        console.error('Error: Please provide a valid URL or file path after --url-text');
         process.exit(1);
       }
-    }
 
-    // Assemble the known-skills text (cv + profile), matching aggregate mode.
-    // Targeted mode additionally falls back to cv-example.md when cv.md is absent
-    // so a fresh checkout still produces a meaningful comparison.
-    const knownTextChunks = [];
-    if (existsSync(PROFILE_FILE)) {
-      try { knownTextChunks.push(readFileSync(PROFILE_FILE, 'utf-8')); } catch (e) {}
-    }
-    let activeCvFile = CV_FILE;
-    if (!existsSync(activeCvFile)) {
-      activeCvFile = join(CAREER_OPS, 'cv-example.md');
-    }
-    if (existsSync(activeCvFile)) {
-      try { knownTextChunks.push(readFileSync(activeCvFile, 'utf-8')); } catch (e) {}
-    }
+      if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
+        let browser;
+        try {
+          const secureUrl = await validateUrlSecurity(inputSource);
+          const { chromium } = await import('playwright');
+          browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
 
-    const { gaps: gapList, excludedAsKnown, knownSkills } =
-      computeTargetedGaps(targetText, knownTextChunks.join('\n'));
+          await page.route('**/*', async (route) => {
+            const requestUrl = route.request().url();
+            try {
+              await validateUrlSecurity(requestUrl);
+              await route.continue();
+            } catch (err) {
+              console.error(`Security Violation on Redirect: ${err.message}`);
+              await route.abort('blockedbyclient');
+              process.exit(1);
+            }
+          });
 
-    console.log(JSON.stringify({
-      mode: 'targeted',
-      source: inputSource,
-      gaps: gapList.map(skill => ({ skill })),
-      excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
-      knownSkills,
-    }, null, 2));
+          await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
+          targetText = await page.innerText('body');
+        } catch (err) {
+          console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
+          try {
+            const secureUrl = await validateUrlSecurity(inputSource);
+            // validateUrlSecurity only vets the initial URL; a redirect could still
+            // steer the fetch at an internal host (SSRF). The Playwright path
+            // re-validates per hop, but this plain fetch must refuse redirects
+            // outright — fail closed rather than follow an unvetted Location (#1851).
+            const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
+            if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            targetText = await res.text();
+          } catch (fetchErr) {
+            console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
+            process.exit(1);
+          }
+        } finally {
+          if (browser) await browser.close();
+        }
 
-    process.exit(0);
-  })();
-} else {
-  // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
-  const minReportsIdx = args.indexOf('--min-reports');
-  const MIN_REPORTS = (() => {
-    if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-    const n = parseInt(args[minReportsIdx + 1], 10);
-    return Number.isNaN(n) || n < 1 ? 5 : n;
-  })();
+        // Whitespace-collapse + length-cap the fetched page text. Use compactText
+        // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
+        // text } DOM-read object and returns { url, title, text }, so feeding it
+        // the innerText/fetch STRING silently produced { text: '' } — destroying
+        // the JD and then throwing `text.matchAll is not a function` downstream
+        // (#1894). compactText is the string-in/string-out helper this wants.
+        try {
+          const { compactText } = await import('./browser-extract.mjs');
+          targetText = compactText(targetText);
+        } catch (e) {}
+      } else {
+        // Same failure class readOptionalText was introduced for, one branch
+        // over. `existsSync(p)` is TRUE for a DIRECTORY, so the readFileSync
+        // that followed threw EISDIR — and it threw inside this async IIFE,
+        // which has no catch and no .catch(), so the process died on an
+        // unhandled rejection printing a raw stack trace instead of the message
+        // below. An unreadable file (EACCES) failed identically.
+        //
+        // Reuse the one reader rather than adding a second guarded read: it
+        // already collapses missing / not-a-file / unreadable to ''. The
+        // difference here is that this input is REQUIRED, so '' is fatal
+        // instead of "optional file absent".
+        //
+        // An empty-but-readable file lands in the same branch deliberately.
+        // It used to compute a gap map from an empty JD and exit 0, which
+        // reads as "no gaps found" when it means "no input was read".
+        targetText = readOptionalText(inputSource);
+        if (!targetText.trim()) {
+          console.error(`Fatal: Target file is missing, unreadable, or empty: ${inputSource}`);
+          process.exit(1);
+        }
+      }
 
-  const result = analyze(MIN_REPORTS);
-  if (args.includes('--summary')) {
-    printSummary(result);
+      // Assemble the known-skills text (cv + profile), matching aggregate mode.
+      // Targeted mode additionally falls back to cv-example.md when cv.md is absent
+      // so a fresh checkout still produces a meaningful comparison.
+      const profileRaw = readOptionalText(PROFILE_FILE);
+      let cvRaw = readOptionalText(CV_FILE);
+      // Fall back to the shipped example when cv.md is absent OR unreadable, so a
+      // fresh checkout still produces a meaningful comparison. Keyed on the read
+      // result rather than existsSync: a cv.md that exists but cannot be read is,
+      // for this purpose, the same as one that is not there.
+      if (!cvRaw) cvRaw = readOptionalText(join(CAREER_OPS, 'cv-example.md'));
+
+      const { gaps: gapList, excludedAsKnown, knownSkills } =
+        computeTargetedGaps(
+          targetText,
+          knownSkillsText(cvRaw, profileRaw, warnProfileUnparseable),
+        );
+
+      console.log(JSON.stringify({
+        mode: 'targeted',
+        source: inputSource,
+        gaps: gapList.map(skill => ({ skill })),
+        excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
+        knownSkills,
+      }, null, 2));
+
+      process.exit(0);
+    })().catch((err) => {
+      // Terminal handler for the whole branch. The local-file read above is now
+      // guarded, and the URL fetch has its own try/catch, but everything after
+      // them — knownSkillsText, computeTargetedGaps, the JSON.stringify — runs
+      // bare. A throw there would end the process on an unhandled rejection,
+      // dumping a raw stack trace instead of the single `Fatal:` line the rest
+      // of this branch promises (and that tests/upskill-targeted-input.test.mjs
+      // asserts). What this restores is the DIAGNOSTIC, not the status: Node
+      // already exits 1 on an unhandled rejection, so the exit code was never
+      // the part that was wrong.
+      console.error(`Fatal: targeted analysis failed: ${err?.message ?? err}`);
+      process.exit(1);
+    });
   } else {
-    console.log(JSON.stringify(result, null, 2));
+    // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
+    const minReportsIdx = args.indexOf('--min-reports');
+    const MIN_REPORTS = (() => {
+      if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
+      const n = parseInt(args[minReportsIdx + 1], 10);
+      return Number.isNaN(n) || n < 1 ? 5 : n;
+    })();
+
+    const result = analyze(MIN_REPORTS);
+    if (args.includes('--summary')) {
+      printSummary(result);
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
   }
 }

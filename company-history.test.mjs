@@ -150,6 +150,7 @@ console.log('\n--- 1. multi-source 3-company scenario ---');
   eq('Silent Systems silent fact appliedDate comes from notes, not the date column', silentFact.appliedDate, '2026-03-10');
   eq('Silent Systems silent fact confidence: confirmed-by-followups (1 follow-up joined by appNum)', silentFact.confidence, 'confirmed-by-followups');
   ok('Silent Systems silent fact clearInstruction references set-status', typeof silentFact.clearInstruction === 'string' && silentFact.clearInstruction.includes('set-status'));
+  ok('Silent Systems silent fact clearInstruction selects the row via --row and records the response date via --on, not a --note workaround', silentFact.clearInstruction.includes('--row') && silentFact.clearInstruction.includes('--on') && !silentFact.clearInstruction.includes('--note'));
 
   // --- postingChurn cluster shape (only role/repostCount/daysSpan/lastSeen survive the mapping) ---
   const churnCluster = silent.postingChurn.clusters[0];
@@ -356,6 +357,20 @@ try {
   ok('unknown flag exits 1', false);
 } catch (e) {
   ok('unknown flag exits 1', e.status === 1);
+}
+
+// --emit-signal is a bare boolean flag, not a value flag: `--emit-signal=true`
+// must be rejected explicitly, since the unknown-flag check strips the `=`
+// suffix before matching KNOWN_FLAGS (so it would otherwise pass as "known")
+// while the boolean read is an exact-token check that would silently never
+// see it as set — accepted args, signal never emitted.
+for (const bad of ['--emit-signal=true', '--emit-signal=1', '--emit-signal=']) {
+  try {
+    execFileSync('node', [scriptPath, '--summary', bad], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+    ok(`"${bad}" exits 1`, false);
+  } catch (e) {
+    ok(`"${bad}" exits 1`, e.status === 1 && /does not accept a value/.test(String(e.stderr)));
+  }
 }
 
 // --silence-window validation: non-numeric, zero, and negative must fail fast

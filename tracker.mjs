@@ -38,7 +38,7 @@ import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs'
 import { createHash } from 'crypto';
 import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,

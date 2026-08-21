@@ -1,6 +1,6 @@
 // tests/outcome.test.mjs — Unit test suite for outcome.mjs (#1722).
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, realpathSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -26,6 +26,7 @@ function setupTestEnvironment() {
 |---|------|---------|------|-------|--------|-----|--------|-------|
 | 1 | 2026-07-01 | Acme Corp | Senior Backend Engineer | 4.5/5 | Applied | local:output/acme.pdf | local:reports/1-acme.md | Applied online |
 | 2 | 2026-07-02 | Beta Systems | Lead AI Architect | 4.8/5 | Interview | local:output/beta.pdf | local:reports/2-beta.md | Screen passed |
+| 3 | 2026-07-03 | Gamma Labs | Director of Data | 4.2/5 | Applied | local:output/gamma.pdf | local:reports/3-gamma.md | Applied online |
 `;
   writeFileSync(join(testDir, 'data', 'applications.md'), mockTracker);
   writeFileSync(join(testDir, 'cv.md'), '# Candidate CV\n\nSenior Engineer with 10 years experience.\n');
@@ -164,6 +165,66 @@ try {
   const resWithPdf = JSON.parse(outWithPdf);
   check('Copies canonical PDF CV if present', existsSync(join(resWithPdf.outcomeDir, 'submitted_cv.pdf')));
   check('PDF CV content matches', readFileSync(join(resWithPdf.outcomeDir, 'submitted_cv.pdf'), 'utf-8') === 'PDF-CV-CONTENT');
+
+  // Test 9: Resolve a report-keyed capture archived on an earlier day (#134).
+  // Row 3 carries no URL and is touched by no other test, so the live-archive
+  // fallback cannot run and the outcome dir is clean. Before report keying this
+  // produced posting_missing.md even with the capture sitting in jds/.
+  mkdirSync(join(testDir, 'jds'), { recursive: true });
+  const capture = join(testDir, 'jds', '003-gamma-labs-director-of-data.txt');
+  writeFileSync(capture, 'ARCHIVED-JD-BODY');
+  const lastMonth = Date.now() / 1000 - 30 * 24 * 60 * 60;
+  utimesSync(capture, lastMonth, lastMonth);
+
+  const resKeyed = JSON.parse(execFileSync(NODE, [OUTCOME_SCRIPT, '3', 'rejected', '--json'], {
+    cwd: testDir,
+    env: { ...process.env, CAREER_OPS_TRACKER: join(testDir, 'data', 'applications.md') },
+    encoding: 'utf-8',
+  }));
+  const keyedPosting = join(resKeyed.outcomeDir, 'posting.txt');
+  check('Resolves a report-keyed capture from an earlier day', existsSync(keyedPosting));
+  check('Copied capture keeps its own extension, not .pdf', !existsSync(join(resKeyed.outcomeDir, 'posting.pdf')));
+  check('Capture content is copied verbatim', existsSync(keyedPosting) && readFileSync(keyedPosting, 'utf-8') === 'ARCHIVED-JD-BODY');
+  check('No missing-posting stub when a capture resolved', !existsSync(join(resKeyed.outcomeDir, 'posting_missing.md')));
+  check('Original capture is left in place', existsSync(capture));
+
+  // Test 10: Root-layout trackers own the same workspace as data-layout
+  // trackers. Outcome artifacts and an overridden PDF manifest must follow
+  // that workspace rather than the installed script or the workspace parent.
+  // macOS exposes mkdtempSync paths through /var while child processes may
+  // report the canonical /private/var spelling. Compare one canonical path so
+  // this workspace-ownership assertion is platform-independent.
+  const rootLayoutDir = realpathSync(mkdtempSync(join(tmpdir(), 'cops-outcome-root-layout-')));
+  try {
+    const rootTracker = join(rootLayoutDir, 'applications.md');
+    const customManifest = join(rootLayoutDir, 'custom', 'pdf-index.tsv');
+    const indexedPdf = join(rootLayoutDir, 'output', 'root-layout.pdf');
+    mkdirSync(join(rootLayoutDir, 'custom'), { recursive: true });
+    mkdirSync(join(rootLayoutDir, 'output'), { recursive: true });
+    writeFileSync(rootTracker, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 7 | 2026-07-07 | Root Corp | Platform Engineer | 4.6/5 | Applied | - | [7](reports/7-root.md) | Root layout |
+`);
+    writeFileSync(indexedPdf, 'ROOT-LAYOUT-PDF');
+    writeFileSync(customManifest, '# report\tpdf\thtml\tformat\tdate\n7\toutput/root-layout.pdf\t\ta4\t2026-07-07\n');
+
+    const rootResult = JSON.parse(execFileSync(NODE, [OUTCOME_SCRIPT, '7', 'rejected', '--json'], {
+      cwd: rootLayoutDir,
+      env: {
+        ...process.env,
+        CAREER_OPS_TRACKER: rootTracker,
+        CAREER_OPS_PDF_INDEX: customManifest,
+      },
+      encoding: 'utf-8',
+    }));
+    const expectedDir = join(rootLayoutDir, 'data', 'outcomes', '7_root-corp_platform-engineer');
+    check('Root-layout outcome directory stays under workspace/data', rootResult.outcomeDir === expectedDir);
+    check('Outcome honors CAREER_OPS_PDF_INDEX', readFileSync(join(expectedDir, 'submitted_cv.pdf'), 'utf8') === 'ROOT-LAYOUT-PDF');
+  } finally {
+    rmSync(rootLayoutDir, { recursive: true, force: true });
+  }
 
 } finally {
   rmSync(testDir, { recursive: true, force: true });

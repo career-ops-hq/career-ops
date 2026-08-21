@@ -126,12 +126,38 @@ export function findMatches(rows, query, pdfIndex = new Map()) {
 
 // ── CLI ─────────────────────────────────────────────────────────────
 
-function main() {
-  const args = process.argv.slice(2);
+const KNOWN_FLAGS = ['--json', '--help', '-h'];
+
+const USAGE = `Usage:
+  node find.mjs <report# | tracker# | company/role fragment> [--json]
+  node find.mjs --help                            # print this usage block and exit`;
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
   const json = args.includes('--json');
   const query = args.filter(a => a !== '--json').join(' ').trim();
+  return { json, query };
+}
+
+function main() {
+  const { json, query } = parseArgs(process.argv);
   if (!query) {
-    console.log('Usage: node find.mjs <report# | tracker# | company/role fragment> [--json]');
+    // The same USAGE the flag paths print. A second hand-written copy is a
+    // second thing to keep in step, which is the class of bug #2773 was about.
+    console.log(USAGE);
     process.exitCode = 1;
     return;
   }

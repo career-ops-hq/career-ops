@@ -14,14 +14,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LIMIT = 20;
 const DEFAULT_MONTHS = 3;
 const DEFAULT_SORT = 'date';
 const DEFAULT_SOURCES = ['techcrunch', 'prnewswire', 'guardian', 'hn'];
-const BROWSER_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const RSS_SOURCES = {
   techcrunch: [
@@ -431,7 +430,7 @@ async function fetchTextMeta(url, { timeoutMs = 12_000, source = '' } = {}) {
     let currentUrl = startUrl;
     for (let hops = 0; hops <= 5; hops++) {
       const res = await fetch(currentUrl, {
-        headers: { 'user-agent': BROWSER_UA, accept: 'application/rss+xml,application/xml,text/xml,text/plain,*/*' },
+        headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, accept: 'application/rss+xml,application/xml,text/xml,text/plain,*/*' },
         redirect: 'manual',
         signal: controller.signal,
       });

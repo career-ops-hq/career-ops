@@ -17,7 +17,7 @@ We have field-tested the auto-fill flow across several major ATS platforms (Ashb
 
 ### Lever
 
-- **Captcha Avoidance:** Lever often pops an hCaptcha challenge if checkboxes or radio buttons are clicked programmatically. To avoid this, the agent only auto-fills text, textareas, and standard select dropdowns. It will list any skipped checkboxes or radio buttons with recommended values so you can tick them manually and solve the captcha before submitting.
+- **Checkboxes and the Captcha Stay Yours:** Lever often pops an hCaptcha challenge when checkboxes or radio buttons are clicked programmatically. The agent therefore auto-fills text, textareas, and standard select dropdowns only, and never touches the checkboxes, the radio buttons, or the captcha widget. It lists every field it skipped along with recommended values, and you tick them, solve the captcha, and submit.
 
 ### Workable
 

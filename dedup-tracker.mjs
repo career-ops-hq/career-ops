@@ -14,15 +14,29 @@ import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+  openTrackerTransaction, rebuildRow, resolveTrackerPath, normalizeCompany,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
+// ── CLI args ────────────────────────────────────────────────────────
+// Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
+// (#2743): an unrecognized flag must fail fast, never silently fall through
+// to the live-run default and write to the real tracker (#2744). Shared via
+// lib/cli-flags.mjs's validateFlags() (#2775).
+const KNOWN_FLAGS = ['--dry-run', '--help', '-h'];
+const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
+
+const cliArgs = process.argv.slice(2);
+
+validateFlags(cliArgs, KNOWN_FLAGS, USAGE);
+
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
@@ -60,25 +74,6 @@ const STATUS_RANK = {
   'contratado': 7,
   'contratada': 7,
 };
-
-/**
- * Normalize a company name into the grouping key used by deduplication.
- *
- * The tracker may contain punctuation, parenthetical branding, or spacing
- * differences for the same employer. This function removes those presentation
- * differences while keeping the alphanumeric company identity that determines
- * which rows are safe to compare for duplicate roles.
- *
- * @param {string} name - Company name from an applications.md row.
- * @returns {string} Lowercase company key used for same-company grouping.
- */
-function normalizeCompany(name) {
-  return name.toLowerCase()
-    .replace(/[()]/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[^a-z0-9 ]/g, '')
-    .trim();
-}
 
 /**
  * Normalize tracker status text before ranking or comparing it.
@@ -312,15 +307,24 @@ console.log(`📊 ${entries.length} entries loaded`);
 // normalize to the same empty key, so they group by their Via channel instead:
 // the same agency re-blasting one listing IS a duplicate, while the same role
 // via two different agencies is two real submissions and must never merge.
-// The channel key is Unicode-aware (#1603/#2393): normalizeCompany() strips
-// everything outside [a-z0-9], so distinct non-Latin agency names (リクルート,
-// パーソル, …) all collapsed to the same empty key and one of two genuinely
-// separate submissions was DELETED. normalizeVia() is the same key that
+// The channel key is Unicode-aware (#1603/#2393): this file's own
+// normalizeCompany() used to strip everything outside [a-z0-9], so distinct
+// non-Latin agency names (リクルート, パーソル, …) all collapsed to the same empty
+// key and one of two genuinely separate submissions was DELETED. Both keys are
+// now Unicode-aware — normalizeCompany comes from tracker-utils.mjs (#2429), so
+// the ordinary company path cannot regress the way this channel path did.
+// normalizeVia() is the same key that
 // merge-tracker.mjs uses for its cross-channel guard, so the two scripts
 // cannot drift on agency identity. An absent Via (empty or `—`) still keys to
 // '' and groups with other via-less blind rows, matching merge-tracker, whose
 // guard does not reject a pair whose Via cells are both blank.
-const BLIND_KEY = ' blind-via:';
+// The NUL prefix makes this key uncollidable with any real company name.
+// It is written as the ESCAPE, never as a raw NUL byte in the source: a raw
+// one makes grep classify this file as binary and report NO MATCH for any
+// pattern in it, silently, with the same exit code as a genuine absence.
+// Identical value at runtime, and the file stays greppable.
+// Pinned by tests/source-no-nul-bytes.test.mjs.
+const BLIND_KEY = '\u0000blind-via:';
 const groups = new Map();
 for (const entry of entries) {
   const key = String(entry.company).trim() === '?'

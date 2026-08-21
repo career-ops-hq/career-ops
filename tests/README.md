@@ -24,6 +24,18 @@ Node.js (`tests/helpers.mjs`).
   scripts. Note: standalone `*.test.mjs` files in the repo root are run by
   `test-all.mjs`'s inline script list, not by this directory's discovery.
 
+**Web tests do not live here.** `web/` runs its own `npm test` over
+`web/tests/**/*.test.mjs` (see [../web/README.md](../web/README.md)); this
+directory is for the core. The two suites also differ in style on purpose: web
+suites use `node:test`, while suites here use the `pass`/`fail` helpers because
+this suite must run on a bare clone with no framework — "not even `node:test`"
+(#1440). Don't carry either style across the boundary.
+
+The one exception to the split is a guard *about* web's layout —
+`web-test-layout.test.mjs` lives here on purpose, because `web-ci.yml` is
+informative by design and never blocks a merge, while `test-all.mjs` runs on
+every PR as a required check.
+
 ## Running
 
 ```bash

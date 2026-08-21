@@ -64,8 +64,12 @@ const DEFAULT_SECTION_TITLES = {
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
 function escapeHtml(text) {
-  if (typeof text !== 'string') return '';
-  return text
+  // Blank out only truly absent/structural values. A number or boolean scalar
+  // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
+  // not vanish: the old `typeof text !== 'string' → ''` guard silently dropped
+  // numeric years/dates from the CV while `present` stayed true.
+  if (text === null || text === undefined || typeof text === 'object') return '';
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -261,20 +265,26 @@ function parsePartial(source) {
 function fillEntry(entryTemplate, blocks, fields, blockValues) {
   let out = entryTemplate;
 
+  // Every replacement below passes a FUNCTION rather than the value directly.
+  // A string replacement argument is scanned by JS for $-patterns, so candidate
+  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
+  // would splice part of the template into the CV instead of being inserted
+  // literally. A replacer function's return value is never interpreted.
+
   // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
   // present/absent markup depending on whether the field has a value.
   if (blockValues) {
     for (const [name, { value, present }] of blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
-      const markup = present ? block.present.replace(`{{${name}}}`, value) : block.absent;
-      out = out.replace(`{{${name}}}`, markup);
+      const markup = present ? block.present.replace(`{{${name}}}`, () => value) : block.absent;
+      out = out.replace(`{{${name}}}`, () => markup);
     }
   }
 
   // Fill remaining scalar placeholders.
   for (const [key, value] of Object.entries(fields)) {
-    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
   }
 
   return out;

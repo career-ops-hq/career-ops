@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validateFlags } from './lib/cli-flags.mjs';
 /**
  * stats.mjs — Lifetime pipeline stats aggregator (zero-token). #1604
  *
@@ -21,7 +22,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 
@@ -351,6 +352,58 @@ export function computeFollowupStats(followupsContent, trackerByNum) {
   };
 }
 
+/**
+ * Schema check for follow-ups.md, so a malformed table is distinguishable from
+ * an empty one (#2971).
+ *
+ * computeFollowupStats() above and followup-cadence.mjs's parseTrackerContent()
+ * both read this table POSITIONALLY, in the shape modes/followup.md documents:
+ * `| num | appNum | date | company | role | channel | contact | notes |`. Both
+ * skip any row where parts[1] or parts[2] fails parseInt. A table written with a
+ * different column order is therefore dropped row by row and reports as ZERO
+ * follow-ups in both tools — indistinguishable from a file where nothing has
+ * been logged yet, with no error and no warning. This returns the counts needed
+ * to tell those two cases apart; verify-pipeline.mjs turns them into output.
+ *
+ * Reports rather than throws: it is a diagnostic, and the consumers must keep
+ * degrading gracefully on a bad file rather than crashing a stats run.
+ *
+ * @param {string|null} followupsContent - Raw follow-ups.md text, or null when absent.
+ * @returns {{present: boolean, sawSeparator: boolean, pipeLines: number,
+ *   dataRows: number, parsed: number, unparsedLines: number[]}}
+ *   `unparsedLines` holds 1-based line numbers of data rows the consumers will skip.
+ */
+export function checkFollowupsSchema(followupsContent) {
+  const empty = { present: false, sawSeparator: false, pipeLines: 0, dataRows: 0, parsed: 0, unparsedLines: [] };
+  if (followupsContent == null) return empty;
+  const lines = String(followupsContent).replace(/\r/g, '').split('\n');
+  // A Markdown table's delimiter row is the boundary: everything before it is
+  // the header (whose cells never parse as ints), everything after is data.
+  const SEPARATOR_RE = /^\|[\s|:-]+\|?\s*$/;
+  let sawSeparator = false;
+  let pipeLines = 0;
+  let dataRows = 0;
+  let parsed = 0;
+  const unparsedLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.startsWith('|')) continue; // followup-seed.mjs's "- next #N" pins live outside the table
+    pipeLines++;
+    if (SEPARATOR_RE.test(line)) { sawSeparator = true; continue; }
+    if (!sawSeparator) continue; // header row, or a table missing its delimiter entirely
+    dataRows++;
+    const parts = line.split('|').map((s) => s.trim());
+    // Mirrors both consumers' guard exactly; if it diverges, this check stops
+    // predicting what they will actually do with the file.
+    const readable = parts.length >= 8
+      && !Number.isNaN(parseInt(parts[1], 10))
+      && !Number.isNaN(parseInt(parts[2], 10));
+    if (readable) parsed++;
+    else unparsedLines.push(i + 1);
+  }
+  return { present: true, sawSeparator, pipeLines, dataRows, parsed, unparsedLines };
+}
+
 // ── Scan-run trends ─────────────────────────────────────────────────
 
 /**
@@ -387,7 +440,18 @@ export function computeRunStats(content) {
     });
   }
   if (rows.length === 0) return null;
-  const completed = rows.filter((r) => r.status !== 'failed');
+  // Inclusion by 'completed', not exclusion by known failure names: any
+  // status a future scan.mjs writes is excluded from trend averages until
+  // this aggregator learns what it means. Rows from pre-status files default
+  // to 'completed' above, so old data keeps counting.
+  //
+  // No-op on today's data: scan.mjs only ever writes 'completed' or 'failed',
+  // and both predicates ('!== failed' vs '=== completed') agree on those two.
+  // The switch is a guard for a future third status (e.g. 'aborted'), not a
+  // behavior change now. One edge is reachable only by hand-editing the TSV:
+  // an explicitly empty status flips from counted to failedRuns, since
+  // appendScanRunSummary always writes a non-empty status.
+  const completed = rows.filter((r) => r.status === 'completed');
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
@@ -524,8 +588,21 @@ function printSummary(stats) {
   console.log('');
 }
 
+// ── CLI flags + help ────────────────────────────────────────────────
+
+const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+
+const USAGE = `Usage:
+  node stats.mjs             # full JSON stats to stdout
+  node stats.mjs --summary   # human-readable table
+  node stats.mjs --help|-h   # print this usage block and exit`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const args = process.argv.slice(2);
+
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+
   const stats = computeAllStats();
-  if (process.argv.includes('--summary')) printSummary(stats);
+  if (args.includes('--summary')) printSummary(stats);
   else console.log(JSON.stringify(stats, null, 2));
 }

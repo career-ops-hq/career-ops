@@ -26,6 +26,11 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { acquireTrackerLock } from './tracker-utils.mjs';
+// The ledger date is the LOCAL calendar day (#2932). Computing the expected
+// value with toISOString() here would compare a local date against a UTC one
+// and fail for the hours of the day where they differ — a test that passes
+// only in part of the UTC day.
+import { localToday } from './lib/local-today.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -229,6 +234,126 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     pass('role-mismatch: "c++ engineer" still matches a "C++ Engineer" row (#2009)');
   } else {
     fail(`role-mismatch symbol-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1f. Non-Latin titles must not all collapse to the same role (#2670) ─
+// The equality normalizer stripped `[^a-z0-9]`, which deletes every non-Latin
+// LETTER, not just punctuation. Any title written entirely in Japanese, Arabic
+// or Cyrillic keyed to "", two different titles compared equal ("" === ""), and
+// the guard that exists to stop a status reaching the wrong row accepted the
+// mismatch and wrote. The repo ships modes/ja/, modes/ar/ and modes/ru/, so
+// these are shipped-market titles, not exotica. Company matching already used
+// the Unicode-aware normalizeTextKey; only the role guard was left ASCII-only.
+{
+  const TRACKER_CJK = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | バックエンドエンジニア | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`;
+  const sb = makeSandbox(TRACKER_CJK);
+  const before = readTracker(sb);
+  const r = runSetStatus(['リクルート', 'Rejected', '--role', 'フロントエンドエンジニア', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: a different Japanese title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Two titles differing ONLY by a parenthesised city — the fullwidth
+  // parentheses are punctuation and must still collapse, so what has to
+  // distinguish them is the city itself.
+  const sb2 = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | エンジニア（東京） | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`);
+  const before2 = readTracker(sb2);
+  const r2 = runSetStatus(['リクルート', 'Rejected', '--role', 'エンジニア（大阪）', '--json'], sb2);
+  if (r2.code === 3 && readTracker(sb2) === before2) {
+    pass('role-mismatch: same Japanese title, different city does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk-city: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+
+  // The guard must not over-fire: the SAME non-Latin title still proceeds,
+  // including across a Unicode normalization form (NFD input vs NFC row).
+  const r3 = runSetStatus(['リクルート', 'Applied', '--role', 'バックエンドエンジニア'], sb);
+  if (r3.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: the same Japanese title still proceeds (#2670)');
+  } else {
+    fail(`role-mismatch cjk-equal: code=${r3.code}\n${r3.stdout}${r3.stderr}`);
+  }
+  const nfdRole = "バックエンドエンジニア".normalize('NFD');
+  if (nfdRole === "バックエンドエンジニア") {
+    fail("role-mismatch cjk-nfd: fixture is not actually decomposed — the case would prove nothing");
+  }
+  const r4 = runSetStatus(["リクルート", 'Responded', '--role', nfdRole], sb);
+  if (r4.code === 0 && /\| 1 \|[^\n]*\| Responded \|/.test(readTracker(sb))) {
+    pass('role-mismatch: a decomposed (NFD) Japanese title still matches (#2670)');
+  } else {
+    fail(`role-mismatch cjk-nfd: code=${r4.code}\n${r4.stdout}${r4.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+  rmSync(sb2.dir, { recursive: true, force: true });
+}
+
+// ── 1g. The same collapse hits Arabic and Cyrillic (#2670) ─
+// Not a CJK quirk: `[^a-z0-9]` deletes every letter outside the Latin range,
+// so modes/ar/ and modes/ru/ titles were equally unprotected.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Яндекс | Разработчик | 4.0/5 | Evaluated | ✅ | [1](../reports/001-yandex-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['Яндекс', 'Rejected', '--role', 'Тестировщик', '--json'], sb);
+  if (r.code === 3 && readTracker(sb) === before) {
+    pass('role-mismatch: a different Cyrillic title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cyrillic: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1h. Fullwidth C＃ / C＋＋ must not collapse together (#2670) ─
+// The symbol pre-map matches ASCII "#" and "++", but normalizeTextKey folds
+// NFKC AFTER it, so a fullwidth ＃/＋＋ reached the collapse still fullwidth, was
+// stripped as punctuation, and both titles keyed to "c engineer". Fullwidth
+// forms are ordinary Japanese typography, so this is the same shipped-market
+// surface as §1f. Pre-normalizing NFKC lets the ASCII pre-map see them.
+// The collision predates the #2670 fix — "[^a-z0-9]" dropped them too.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Contoso | C＋＋ Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-contoso-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C＃ Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: fullwidth C＃ does not match a fullwidth C＋＋ row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Not over-firing: the ASCII spelling of the SAME title still matches, which
+  // is exactly what the NFKC folding buys.
+  const r2 = runSetStatus(['contoso', 'Applied', '--role', 'C++ Engineer'], sb);
+  if (r2.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: ASCII "C++ Engineer" matches the fullwidth row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
@@ -687,7 +812,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 
   // real transition → one line, today's date, from/to states, source set-status
   const r1 = runSetStatus(['2', 'Applied', '--json'], sb);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   let log = '';
   try { log = readFileSync(logPath, 'utf-8'); } catch {}
   if (r1.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
@@ -1118,6 +1243,111 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     } else {
       fail(`#2348: paths that did not fail closed: ${failures.join('; ')}`);
     }
+  }
+}
+
+// ── --source: attribution for a caller that delegates here (#2900) ──────────
+// The web status route writes through this CLI rather than touching the tracker
+// itself, so the ledger row it produces has to stay distinguishable from a CLI
+// one. One value feeds the ledger; it must be legal there.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = localToday();
+
+  const r = runSetStatus(['2', 'Applied', '--source', 'web', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tweb\t\n`) {
+    pass('--source web: ledger row carries web, not set-status');
+  } else {
+    fail(`--source web: expected web in the source column, got ${JSON.stringify(log)}\n${r.stdout}${r.stderr}`);
+  }
+}
+
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = localToday();
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
+    pass('--source omitted: still defaults to set-status');
+  } else {
+    fail(`--source default: expected set-status, got ${JSON.stringify(log)}`);
+  }
+}
+
+// Fails closed. The value is written to a file another tool parses positionally
+// and gates on an allow-list, so an unrecognized label would be persisted and
+// then silently dropped by the reader. Reject it at the boundary instead.
+for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['2', 'Applied', '--source', bad, '--json'], sb);
+  let wrote = true;
+  try { readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8'); } catch { wrote = false; }
+  if (r.code !== 0 && !wrote) {
+    pass(`--source ${bad}: rejected non-zero and nothing written`);
+  } else {
+    fail(`--source ${bad}: expected rejection, got code=${r.code} wrote=${wrote}`);
+  }
+}
+
+// ── #2932: "today" is the LOCAL calendar day, never the UTC one ──────────
+{
+  // Auckland is always at or ahead of the UTC day, so for the first hours of
+  // its local day the UTC day is still yesterday. Comparing --on against the
+  // UTC day therefore rejected the user's own today:
+  //   TZ=Pacific/Auckland --on 2026-08-16  ->  "date is in the future"
+  const nzToday = execFileSync(NODE, ['-e',
+    "const d=new Date(),p=n=>String(n).padStart(2,'0');process.stdout.write(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`)",
+  ], { env: { ...process.env, TZ: 'Pacific/Auckland' }, encoding: 'utf-8' }).trim();
+
+  const sandbox = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', nzToday, '--dry-run'], sandbox, { TZ: 'Pacific/Auckland' });
+    if (r.code === 0) pass('#2932: --on accepts the local today east of UTC');
+    else fail(`#2932: --on rejected Auckland's own today (${nzToday}): code=${r.code} ${(r.stderr || r.stdout).split('\n')[0]}`);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+
+  // MUST NOT CHANGE: a genuinely future date is still refused. Without this,
+  // deleting the check entirely would pass the assertion above.
+  const sandbox2 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2099-01-01', '--dry-run'], sandbox2, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: a genuinely future --on is still rejected');
+    else fail(`#2932: future date not rejected (code=${r.code})`);
+  } finally {
+    rmSync(sandbox2.dir, { recursive: true, force: true });
+  }
+
+  // The west-of-UTC half, pinned to an instant so it does not depend on when
+  // the suite runs: at 01:30 UTC it is still the previous day in New York, and
+  // the UTC-day form would write tomorrow into status-log.tsv.
+  const probe = execFileSync(NODE, ['-e',
+    "const {localToday}=await import('./lib/local-today.mjs');" +
+    "const i=new Date('2026-08-16T01:30:00Z');" +
+    "process.stdout.write(localToday(i)+' '+i.toISOString().slice(0,10));",
+    '--input-type=module',
+  ], { cwd: ROOT, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf-8' }).trim();
+  if (probe === '2026-08-15 2026-08-16') {
+    pass('#2932: localToday() resolves the local day west of UTC where the UTC day is tomorrow');
+  } else {
+    fail(`#2932: localToday() west-of-UTC probe returned "${probe}", want "2026-08-15 2026-08-16"`);
+  }
+
+  // MUST NOT CHANGE: the round-trip validity check is date PARSING on UTC
+  // midnight and is deliberately untouched, so a malformed date still fails.
+  const sandbox3 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2026-02-30', '--dry-run'], sandbox3, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: an impossible calendar date is still rejected');
+    else fail(`#2932: 2026-02-30 accepted (code=${r.code})`);
+  } finally {
+    rmSync(sandbox3.dir, { recursive: true, force: true });
   }
 }
 

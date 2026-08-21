@@ -11,7 +11,7 @@
 // "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
 // and omitted for the unbounded "30+ Days Ago" form.
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
 
 const PAGE_SIZE = 20;
 
@@ -27,15 +27,13 @@ const DEFAULT_MAX_PAGES = 100;
 // company directory this size has no fixed upper bound.
 const MAX_PAGES_CAP = 1500;
 
-// Retry policy for transient page failures (429 rate-limit, 5xx, timeouts/aborts).
-// Workday's CXS API is fronted by a WAF that rate-limits in bursts; without
-// retry, a single 429 silently truncates an entire tenant (e.g. a
-// 3,383-posting tenant reduced to 20 jobs on page 2). Non-transient errors
-// (4xx other than 429) are not retried — retrying a malformed request just
-// wastes the budget.
-const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 500;
-const RETRY_MAX_DELAY_MS = 8_000;
+// Retry policy for transient page failures (429 rate-limit, 5xx, timeouts/aborts),
+// via providers/_http.mjs's shared fetchJsonWithRetry. Workday's CXS API is
+// fronted by a WAF that rate-limits in bursts; without retry, a single 429
+// silently truncates an entire tenant (e.g. a 3,383-posting tenant reduced to
+// 20 jobs on page 2). Non-transient errors (4xx other than 429) are not
+// retried — retrying a malformed request just wastes the budget.
+const RETRY_POLICY = { retries: 3 };
 
 // Delay between successive pages *within one tenant's own pagination loop*
 // (not between tenants — that's scan-ats-full.mjs's concurrency, a separate
@@ -43,7 +41,7 @@ const RETRY_MAX_DELAY_MS = 8_000;
 // WAF-level rate limiting on any tenant that paginates several pages deep
 // (large boards like rollsroyce, sec, roche). Only tenants that loop past
 // page 1 pay this; no-date-skip and early-stopped tenants never do.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 // Workday returns postings newest-first, so pagination can stop once a
 // page's oldest *dated* posting is well past --since — no point paying for
@@ -69,44 +67,6 @@ function resolveMaxPages(entry) {
 function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Parses a `Retry-After` header value (seconds, or an HTTP-date) to ms, or null. */
-function parseRetryAfterMs(value) {
-  if (!value) return null;
-  const secs = Number(value);
-  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
-  const dateMs = Date.parse(value);
-  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
-}
-
-function isRetryableError(err) {
-  const status = err?.status;
-  if (status === 429) return true;
-  if (typeof status === 'number' && status >= 500) return true;
-  return status === undefined; // network error / timeout / abort — no status set
-}
-
-/** Fetches a single page, retrying transient failures with backoff. */
-async function fetchPageWithRetry(ctx, api, opts) {
-  let lastErr;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await ctx.fetchJson(api, opts);
-    } catch (err) {
-      lastErr = err;
-      if (attempt === MAX_RETRIES || !isRetryableError(err)) throw err;
-      const backoff = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
-      // A server-supplied Retry-After is honored, but still clamped — an
-      // unbounded value (hostile or just misconfigured: Retry-After: 86400)
-      // would otherwise stall this tenant's fetch for as long as the server
-      // says, defeating the whole point of a bounded backoff.
-      const retryAfterMs = parseRetryAfterMs(err?.retryAfter);
-      const delayMs = retryAfterMs !== null ? Math.min(retryAfterMs, RETRY_MAX_DELAY_MS * 4) : (backoff + Math.random() * 250);
-      await sleep(delayMs, ctx);
-    }
-  }
-  throw lastErr;
 }
 
 /**
@@ -208,7 +168,7 @@ export default {
    * as providers/glints.mjs's firewall).
    *
    * @param {{ name?: string, api?: string, careers_url?: string, max_pages?: number }} entry
-   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any>, sinceMs?: number, maxPages?: number }} ctx
+   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any>, sinceMs?: number, maxPages?: number, syntheticEntries?: boolean }} ctx
    * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt?: number}>>}
    */
   async fetch(entry, ctx) {
@@ -230,7 +190,7 @@ export default {
     const makeBody = (offset) => JSON.stringify({ limit: PAGE_SIZE, offset, searchText: '', appliedFacets: {} });
     const sinceMs = typeof ctx?.sinceMs === 'number' ? ctx.sinceMs : null;
 
-    const first = await fetchPageWithRetry(ctx, ep.api, { ...postOpts, body: makeBody(0) });
+    const first = await fetchJsonWithRetry(ctx, ep.api, { ...postOpts, body: makeBody(0) }, RETRY_POLICY);
     const jobs = parseWorkdayResponse(first, entry);
 
     const total = typeof first?.total === 'number' ? first.total : null;
@@ -248,8 +208,8 @@ export default {
     // Honor a context page cap — verify-portals' liveness probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its full
     // count. Without this we'd fetch page 0, then request page 1 and trip the
-    // probe's second-request sentinel; fetchPageWithRetry treats that abort as
-    // transient and retries it MAX_RETRIES times (with backoff) before giving up
+    // probe's second-request sentinel; fetchJsonWithRetry treats that abort as
+    // transient and retries it RETRY_POLICY.retries times (with backoff) before giving up
     // — noisy in the logs and rude to the tenant. Capping here makes workday a
     // "cooperating provider" that stops after one page and reports an exact
     // first-page count. Kept separate from `maxPages` so the entry-cap warning
@@ -289,10 +249,14 @@ export default {
         await sleep(INTER_PAGE_DELAY_MS, ctx);
         let json;
         try {
-          json = await fetchPageWithRetry(ctx, ep.api, { ...postOpts, body: makeBody(page * PAGE_SIZE) });
+          json = await fetchJsonWithRetry(ctx, ep.api, { ...postOpts, body: makeBody(page * PAGE_SIZE) }, RETRY_POLICY);
         } catch (err) {
           const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
-          console.error(`⚠️  workday: ${entry.name} truncated at ${page + 1} of ${pagesToFetch} pages after ${MAX_RETRIES + 1} attempts (${jobsSummary}): ${err.message}`);
+          // err.attempts (set by fetchJsonWithRetry) is the actual request count —
+          // a non-retryable error can end the loop after just one attempt, well
+          // short of RETRY_POLICY.retries + 1.
+          const attempts = err.attempts ?? RETRY_POLICY.retries + 1;
+          console.error(`⚠️  workday: ${entry.name} truncated at ${page + 1} of ${pagesToFetch} pages after ${attempts} attempts (${jobsSummary}): ${err.message}`);
           stopReason = 'fetch-error';
           break;
         }
@@ -319,15 +283,22 @@ export default {
     // portal entry to point at, and no fixed cap can guarantee full coverage of
     // an unbounded company directory anyway; nothing else to suggest there.
     //
-    // The branch below keys on `sinceMs === null` as a proxy for that
-    // distinction. Since #2418 the proxy is no longer exact: `scan.mjs --since`
-    // also sets ctx.sinceMs, so those runs take the else branch and get the
-    // terser message even though they DO have a portals.yml entry to raise.
-    // Harmless (the cap is still surfaced, just without the suggestion) but
-    // worth knowing before trusting the proxy — see #2495.
+    // The branch below used to key on `sinceMs === null` as a proxy for that
+    // distinction, which held only because scan-ats-full.mjs was the sole
+    // caller setting it. #2418 broke the proxy — `scan.mjs --since` sets
+    // ctx.sinceMs too, so a tracked entry lost the actionable half of the
+    // message on every --since run (#2495). Provenance is now stated by the
+    // caller instead of inferred from an unrelated flag, so a future caller
+    // that starts setting sinceMs cannot re-couple the two concerns.
+    //
+    // Absence means "tracked": scan-ats-full.mjs is the only caller that
+    // synthesizes entries AND can reach the cap (discover-ats.mjs and
+    // verify-portals.mjs both probe with ctx.maxPages: 1, which never sets
+    // stopReason to 'cap'), so it is the one place that opts out.
+    const syntheticEntries = ctx?.syntheticEntries === true;
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
-      if (sinceMs === null) {
+      if (!syntheticEntries) {
         console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
       } else {
         // Workday's CXS backend can report `total` as exactly
