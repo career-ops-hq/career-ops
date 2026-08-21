@@ -14,7 +14,8 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
+import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
@@ -82,31 +83,50 @@ export function resolveCadenceConfig({ profilePath = PROFILE_FILE, appliedDays =
 
 const CADENCE = resolveCadenceConfig();
 
-// --- Status normalization (mirrors verify-pipeline.mjs) ---
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  // Hired aliases from templates/states.yml — without these, an "Accepted" or
-  // "Contratado" row normalizes to itself, so stats/funnel/company-history
-  // consumers looking for 'hired' silently drop the best outcome in the tracker.
-  'contratado': 'hired', 'contratada': 'hired', 'accepted': 'hired', 'accept': 'hired',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
+// --- Status normalization ---
+//
+// DERIVED from templates/states.yml, not a hand-copy of it. The map that used
+// to live here was already missing every Turkish spelling the Go dashboard
+// recognises, so the same tracker row normalized three different ways: the TUI
+// read `Mülakat` as `interview`, this file left it as `mülakat` (matching no
+// ACTIONABLE/ADVANCED set, so the row silently vanished from the funnel), and
+// the web rejected it outright on writeback. tracker-utils already exposes the
+// loader for exactly this — its docstring says "a new state or alias lands in
+// one file and every consumer follows" — it just had no consumer here (#2704).
+//
+// Cached per process: these are short-lived CLI runs, so a single read is
+// correct. A long-running consumer must NOT copy this pattern — see #2590,
+// where caching states.yml for a server's lifetime pinned a stale roster.
+let aliasMapCache = null;
+
+/** alias/id/label (lowercased) → canonical lowercase id, from states.yml. */
+function statusAliasMap() {
+  if (aliasMapCache) return aliasMapCache;
+  const map = new Map();
+  try {
+    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+      const id = st.id.toLowerCase();
+      map.set(foldStatusInput(id), id);
+      if (st.label) map.set(foldStatusInput(st.label), id);
+      for (const a of st.aliases) map.set(foldStatusInput(a), id);
+    }
+  } catch {
+    // A missing/malformed states.yml is a broken install. Degrade to
+    // identity-normalization rather than resurrecting a hardcoded table: a
+    // fallback copy is the same copy in disguise and drifts the same way.
+    return (aliasMapCache = new Map());
+  }
+  return (aliasMapCache = map);
+}
 
 const ACTIONABLE_STATUSES = ['applied', 'responded', 'interview'];
 
 export function normalizeStatus(raw) {
-  const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return ALIASES[clean] || clean;
+  // foldStatusInput, not a bare toLowerCase: JS lowercases the Turkish dotted
+  // capital `İ` to `i` + U+0307 and the mark survives, so every all-caps
+  // Turkish row missed every alias (#2704 review).
+  const clean = foldStatusInput(String(raw).replace(/\s+\d{4}-\d{2}-\d{2}.*$/, ''));
+  return statusAliasMap().get(clean) || clean;
 }
 
 // --- Date helpers ---
@@ -164,10 +184,146 @@ export function parseDate(dateStr) {
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
-  for (const m of String(notes).matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) return m[1];
+  const text = String(notes);
+
+  const matches = [];
+  for (const m of text.matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+    if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
   }
+  if (matches.length === 0) return null;
+
+  // Drop dates that belong to a DIFFERENT row before choosing. Notes routinely
+  // cite a sibling requisition's timeline for context — "#154 is already live
+  // in the same ATS (applied 2026-08-04)" — and that citation reads exactly
+  // like this row's own apply date to a positional scan (#2607).
+  const own = matches.filter(m => !isCrossReferencedMention(text, m.index));
+
+  // First-wins is preserved among a row's OWN dates: a later status date must
+  // not displace the submission date (see the fixture in test-all.mjs).
+  // Cross-reference filtering is orthogonal to that ordering rule.
+  if (own.length > 0) return own[0].date;
+
+  // Every apply-date in the note belongs to another row, so this note does not
+  // state when THIS row was submitted. Returning null is the honest answer —
+  // the alternative is reporting a real but foreign date as
+  // `appDateSource: 'notes'`, i.e. measured, which is precisely the failure the
+  // header comment warns about.
+  //
+  // Both consumers degrade to a LABELLED evaluation-date fallback:
+  // resolveAppliedDate below reports `appDateSource: 'evaluation-date-fallback'`,
+  // and followup-seed.mjs reports `appDateSource: 'evaluation-date'`. That was
+  // not true when this was written — seed fell through to today(), unlabelled,
+  // which made an old application look new and silently reset its follow-up
+  // clock. #2607 changed seed's fallback so the claim below actually holds.
   return null;
+}
+
+// How far back to look for a row reference. Long enough to span a clause like
+// "#154 Sr PM M&A is already live in the same ATS (applied ...)", short enough
+// that an unrelated "#123" earlier in a long note does not reach forward and
+// disqualify a genuine date.
+const CROSS_REF_LOOKBACK = 120;
+
+// A `#NNN` immediately preceded by a req/job/posting/reference label is an ATS
+// identifier for THIS row, not a pointer at another tracker row. Anchored at the
+// end so it only matches a label sitting directly before the `#`, and the
+// separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
+// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Notes column.
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
+
+/**
+ * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
+ *
+ * Heuristic, and deliberately a narrow one: a `#NNN` row reference shortly
+ * before the date, with no sentence boundary between them, means the date is
+ * inside that reference's clause. A sentence break ends the reference's scope,
+ * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
+ * row's own date.
+ *
+ * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
+ * These are the separators this Notes column actually uses, and they do two
+ * different jobs depending on what came before:
+ *
+ *   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+ *        the citation already carries its date, so the second one is a new
+ *        subject — this row's own. Reading the whole note as #154's discards a
+ *        real measured date, and this is the MORE common shape: two roles live
+ *        at one employer, and the note naming the sibling is usually the same
+ *        note that records this submission.
+ *
+ *   "#154 is already live; applied 2026-08-04"
+ *        the citation has no date yet, so the one after the separator is still
+ *        its own — a semicolon joins independent clauses within a sentence and
+ *        the subject carries across it. Treating it as a break here adopts a
+ *        foreign date and reports it as MEASURED.
+ *
+ * Where the reading is genuinely ambiguous the tie goes to "cross-referenced",
+ * because the two errors are not symmetric — a false positive degrades to a
+ * fallback that is LABELLED as not-measured, while a false negative reports
+ * another row's date as this row's measured one.
+ *
+ * Both failure directions are survivable, which is why a heuristic is
+ * acceptable here: a false positive degrades to the evaluation date, labelled
+ * as a fallback by both consumers (see the note in parseAppliedDate), and a
+ * false negative is just the pre-#2607 behaviour. Neither invents a date.
+ *
+ * @param {string} text
+ * @param {number} index - offset of the "applied" match within `text`
+ * @returns {boolean}
+ */
+function isCrossReferencedMention(text, index) {
+  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  let refEnd = -1;
+  for (const m of window.matchAll(/#\d+\b/g)) {
+    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
+    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
+    // this row's own date, and reading it as a cross-reference would discard a
+    // genuine date. The label vocabulary is the one merge-tracker.mjs already
+    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // being written the same way rather than imported — merge-tracker's regex
+    // also captures the id itself, which is not wanted here.
+    if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
+    refEnd = m.index + m[0].length;
+  }
+  if (refEnd === -1) return false;
+
+  const sinceRef = window.slice(refEnd);
+  // A sentence break always ends the reference's scope.
+  if (/[.!?]\s/.test(sinceRef)) return false;
+
+  // A semicolon or pipe ends it too — but only once the reference has already
+  // been GIVEN a date. Those are the separators this Notes column actually uses,
+  // and they do two different jobs depending on what came before:
+  //
+  //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+  //        the citation already has its date, so the second one is a new
+  //        subject: this row's own. Reading the whole note as #154's loses a
+  //        real measured date, and that is the more common shape — two roles
+  //        live at one employer, and the note naming the sibling is usually the
+  //        same note recording this submission.
+  //
+  //   "#154 is already live; applied 2026-08-04"
+  //        the citation has NO date yet, so the one after the semicolon is
+  //        still its own: a semicolon joins independent clauses within a
+  //        sentence and the subject carries across it. Treating it as a break
+  //        here adopts a foreign date and reports it as MEASURED, which is the
+  //        failure this whole function exists to prevent.
+  //
+  // "Has the reference already been satisfied?" is what separates them, and it
+  // is checked against the text before the LAST separator so a date belonging
+  // to the citation cannot be read as belonging to a later clause.
+  //
+  // No trailing-whitespace requirement, unlike the sentence rule above. A full
+  // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
+  // appear inside numbers or abbreviations, and a hand-typed note writes
+  // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
+  const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
+  if (lastSeparator) {
+    const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
+    if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;
+  }
+  return true;
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a

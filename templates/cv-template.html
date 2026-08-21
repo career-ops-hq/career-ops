@@ -442,6 +442,15 @@
     page-break-after: avoid;
   }
 
+  /* Keep a project's tech line attached to the description above it.  A project
+     may still split across pages, but not at the one opportunity that strands a
+     bare "Python | github.com/..." line at the top of the next page with no
+     title or description to identify it. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
   /* === RTL (Arabic) Support === */
   html[lang="ar"] body {
     direction: rtl;
@@ -493,9 +502,9 @@
      browser's per-glyph fallback picks the first installed CJK face for kana
      and kanji. Mirrors the lang="ar" precedent above. */
   html[lang="ja"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
-      'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
-      Meiryo, 'MS PGothic', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans',
+      'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP',
+      'Noto Sans JP', Meiryo, 'MS PGothic', sans-serif);
   }
 
   html[lang="ja"] .header h1,
@@ -504,9 +513,9 @@
   html[lang="ja"] .project-title,
   html[lang="ja"] .competency-tag,
   html[lang="ja"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+   font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
-      Meiryo, 'MS PGothic', sans-serif;
+      Meiryo, 'MS PGothic', sans-serif);
   }
 
   /* === Simplified Chinese typography ===
@@ -516,9 +525,9 @@
      punctuation from producing clipped or awkward PDF lines. */
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+      'Noto Sans SC', 'Source Han Sans SC', sans-serif);
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -538,9 +547,9 @@
   html[lang="zh"] .contact-row,
   html[lang="zh"] .competency-tag,
   html[lang="zh"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+      'Noto Sans SC', 'Source Han Sans SC', sans-serif);
   }
 
   /* === Korean typography ===
@@ -549,11 +558,10 @@
      whatever the PDF engine happened to substitute. Same shape as the ja and
      zh blocks above: Latin-capable faces first for stable ATS extraction, then
      platform-native and open-source Korean faces for Hangul glyphs. */
-  html[lang="ko"] body,
   html[lang="ko"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+      'Noto Sans KR', 'Nanum Gothic', sans-serif);
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -567,9 +575,9 @@
   html[lang="ko"] .competency-tag,
   html[lang="ko"] .skill-category,
   html[lang="ko"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+      'Noto Sans KR', 'Nanum Gothic', sans-serif);
   }
 
   /* === Traditional Chinese typography ===

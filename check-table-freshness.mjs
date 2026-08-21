@@ -53,8 +53,8 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
-import { flagValue } from './lib/cli-flags.mjs';
+import * as yaml from 'js-yaml';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = join(CAREER_OPS, 'templates');
@@ -62,6 +62,25 @@ const DEFAULT_MAX_AGE_MONTHS = 12;
 
 // --- CLI args ---
 const args = process.argv.slice(2);
+
+// --help fell through to a full freshness scan and printed the report (#2855).
+// Handled via lib/cli-flags.mjs's validateFlags() (#2775), which also rejects
+// unrecognized flags before --help so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--summary', '--self-test', '--max-age-months', '--today', '--help', '-h'];
+
+// Both take their value as the next argv token.
+const VALUE_FLAGS = ['--max-age-months', '--today'];
+
+const USAGE = `Usage:
+  node check-table-freshness.mjs                       # JSON freshness report
+  node check-table-freshness.mjs --summary             # human-readable table
+  node check-table-freshness.mjs --max-age-months <n>  # review-due threshold (default: 12)
+  node check-table-freshness.mjs --today <YYYY-MM-DD>  # evaluate as of a fixed date
+  node check-table-freshness.mjs --self-test           # run the inline self-test
+  node check-table-freshness.mjs --help                # show this message
+
+Exits 1 when any row is expired (past next_effective without re-verification).`;
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const maxAgeRaw = flagValue(args, '--max-age-months') ?? null;
@@ -539,6 +558,7 @@ function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) {
     runSelfTest();
   }

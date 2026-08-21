@@ -4,7 +4,8 @@
  * Tests the pure, network-free functions with inline fixtures:
  * - deriveSlug (lowercasing, punctuation, edge cases)
  * - parseCompanyInput (shape, bare-name merge, malformed YAML, dedup, drops)
- * - buildCandidateUrls (vendor order, subset, SLUG_RE rejection, explicit slug)
+ * - buildCandidateUrls (vendor order, subset, SLUG_RE rejection, explicit slug,
+ *   dotted slugs vs subdomain vendors, host-never-leaves-vendor-domain)
  * - yamlScalar / renderPortalEntry (GH api line, quoting)
  * - dedupeAgainstPortals (name/url/api hits, trailing-slash norm, self-dedup)
  * - insertIntoTrackedCompanies (splice correctness, byte-preservation, empty
@@ -29,7 +30,7 @@ import {
   buildWorkdayCandidates,
   resolveCompany,
 } from './discover-ats.mjs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -111,14 +112,18 @@ ok('non-list doc → warning about companies key', p9.warnings.some(w => w.inclu
 console.log('\n--- 3. buildCandidateUrls ---');
 
 const b1 = buildCandidateUrls({ name: 'Adyen' });
-eq('3 candidates in vendor order', b1.candidates.map(c => c.vendor), ['gh', 'ashby', 'lever']);
+// The three highest-hit-rate vendors must stay FIRST: resolveCompany returns on
+// the first match, so this ordering is what caps a company they can resolve at
+// three probes (one on gh, two on ashby, three on lever) even though the long
+// tail is now probed too.
+eq('common vendors probed first', b1.candidates.slice(0, 3).map(c => c.vendor), ['gh', 'ashby', 'lever']);
 eq('GH careers_url', b1.candidates[0].careers_url, 'https://job-boards.greenhouse.io/adyen');
 eq('Ashby careers_url', b1.candidates[1].careers_url, 'https://jobs.ashbyhq.com/adyen');
 eq('Lever careers_url', b1.candidates[2].careers_url, 'https://jobs.lever.co/adyen');
 
 const b2 = buildCandidateUrls({ name: 'X', slug: 'bad/slug' });
 eq('unsafe slug builds NO candidate URLs (SSRF guard)', b2.candidates.length, 0);
-eq('unsafe slug records all vendors as skipped', b2.skipped, ['gh', 'ashby', 'lever']);
+eq('unsafe slug records every vendor as skipped', b2.skipped.length, b1.candidates.length);
 
 const b2b = buildCandidateUrls({ name: 'X', slug: 'has space' });
 eq('slug with space rejected', b2b.candidates.length, 0);
@@ -128,6 +133,36 @@ eq('honors vendor subset', b3.candidates.map(c => c.vendor), ['ashby']);
 
 const b4 = buildCandidateUrls({ name: 'Some Co', slug: 'DeepL' });
 eq('explicit mixed-case slug preserved', b4.candidates[1].careers_url, 'https://jobs.ashbyhq.com/DeepL');
+
+// --- dotted slugs vs subdomain vendors -------------------------------------
+// SLUG_RE allows dots and path vendors accept them, but a subdomain vendor
+// interpolates the slug into the HOSTNAME: `foo.bar` → `foo.bar.bamboohr.com`,
+// two tenant labels, which every subdomain provider's `<tenant>.<vendor>` regex
+// rejects. The host assertion cannot catch this (the expected host is built by
+// the same concatenation), so buildCandidateUrls asks the provider itself.
+const SUBDOMAIN_VENDORS = ['recruitee', 'breezy', 'bamboohr', 'pinpoint'];
+const bDot = buildCandidateUrls({ name: 'X', slug: 'foo.bar' });
+const dotCandidates = bDot.candidates.map(c => c.vendor);
+for (const v of SUBDOMAIN_VENDORS) {
+  ok(`dotted slug is not a ${v} candidate`, !dotCandidates.includes(v));
+  ok(`dotted slug reported unsupported for ${v}`, bDot.unsupported.includes(v));
+}
+eq('dotted slug is an unsupported shape, not an unsafe-slug skip', bDot.skipped, []);
+ok('dotted slug still probes the vendors whose contract accepts it', bDot.candidates.length > 0);
+
+// The security property, asserted rather than argued: buildUrl always appends the
+// vendor suffix, so no slug can move the host off the vendor's own domain. A
+// dotted slug is a wasted-probe/reporting problem, not an SSRF one.
+const SUBDOMAIN_SUFFIX = {
+  recruitee: '.recruitee.com', breezy: '.breezy.hr', bamboohr: '.bamboohr.com', pinpoint: '.pinpointhq.com',
+};
+const offDomain = [];
+for (const s of ['foo.bar', 'evil.com', 'a.b.c.d', '..evil.com', 'x.bamboohr.com', '169.254.169.254', 'localhost']) {
+  for (const c of buildCandidateUrls({ name: 'X', slug: s }, SUBDOMAIN_VENDORS).candidates) {
+    if (!new URL(c.careers_url).hostname.endsWith(SUBDOMAIN_SUFFIX[c.vendor])) offDomain.push(c.careers_url);
+  }
+}
+eq('no slug moves a subdomain-vendor host off the vendor domain', offDomain, []);
 
 // ============================================================================
 // 4. yamlScalar / renderPortalEntry
@@ -277,12 +312,71 @@ ok('workday entry has no api line', !wdRender.includes('api:'));
 const noWd = await resolveCompany({ name: 'Whatever', slug: 'bad/slug' }, { vendors: [], includeWorkday: false });
 ok('resolveCompany no-vendor no-workday → unresolved', !!noWd.unresolved);
 ok('resolveCompany unresolved names workday hint path', /Workday/.test(noWd.unresolved.reason));
+// VENDOR_ORDER probes eleven vendors now, so the fallback must not name three of
+// them as if they were the whole list.
+ok('fallback reason is provider-neutral', !/Greenhouse|Ashby|Lever/i.test(noWd.unresolved.reason));
+
+// A slug no vendor's contract can represent must be reported as such — NOT as a
+// probe error, which would read as transient and invite a pointless re-run.
+// Subdomain vendors only → nothing is probeable → network-free.
+const dotResolve = await resolveCompany({ name: 'X', slug: 'foo.bar' }, { vendors: SUBDOMAIN_VENDORS, includeWorkday: false });
+eq('dotted slug → nothing tried', dotResolve.unresolved.triedVendors, []);
+eq('dotted slug → reported as unsupported shape', dotResolve.unresolved.unsupportedSlugShape, SUBDOMAIN_VENDORS);
+ok('dotted slug → no probe errors recorded', !dotResolve.unresolved.errors);
+ok('dotted slug → reason says the slug is invalid, not that a board is missing', /not a valid board slug/i.test(dotResolve.unresolved.reason));
 
 // A rejected Workday hint (bad tenant/site) must produce a "fix your hint" reason,
 // NOT the "add a hint" message. No slug vendors → network-free.
 const badHint = await resolveCompany({ name: 'BadHint', workday: { tenant: 'a/b', site: 'S' } }, { vendors: [] });
 ok('rejected hint → "given but rejected" reason', /rejected/i.test(badHint.unresolved.reason));
 ok('rejected hint → NOT the "add a hint" message', !/add a hint/i.test(badHint.unresolved.reason));
+
+// ── #2883: a definitive 404 must not be reported as a transient error ──
+// Greenhouse/Ashby/Lever answering 404 means the board does not exist. Reporting
+// that as "board status unknown ... re-run" advises a retry guaranteed to give
+// the same answer, and erases the difference between "no board" and "the network
+// hiccuped" — the two states a user pruning portals.yml has to tell apart.
+const httpErrorCtx = (statusByVendor) => ({
+  fetchJson: async (url) => {
+    const vendor = /greenhouse/.test(url) ? 'gh' : /ashby/.test(url) ? 'ashby' : 'lever';
+    const status = statusByVendor[vendor] ?? 404;
+    const err = new Error(`HTTP ${status}${status === 404 ? ' Not Found' : ''}`);
+    err.status = status;
+    throw err;
+  },
+  fetchText: async () => { throw new Error('unused'); },
+});
+const SLUG_VENDORS = ['gh', 'ashby', 'lever'];
+
+const all404 = await resolveCompany({ name: 'Mercado Libre' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 404, ashby: 404, lever: 404 }) });
+ok('all-404 → not reported as unknown', !/status unknown/i.test(all404.unresolved.reason));
+// Precisely: no advice to re-run THE SAME PROBE. The fallback message does say
+// "add a Workday hint and re-run", which is a different and actionable
+// instruction — the user changes their input first. What must not survive is
+// the unconditional retry attached to an unknown status.
+ok('all-404 → no advice to re-run the same probe', !/errors\[\] and re-run/i.test(all404.unresolved.reason));
+ok('all-404 → says no board was found', /no .*board found/i.test(all404.unresolved.reason));
+ok('all-404 → each error is marked definitive',
+  all404.unresolved.errors.length === 3 && all404.unresolved.errors.every(e => e.definitive === true));
+
+// A 410 Gone is equally definitive.
+const all410 = await resolveCompany({ name: 'Gone Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 410, ashby: 410, lever: 410 }) });
+ok('all-410 → treated as definitive too', !/status unknown/i.test(all410.unresolved.reason));
+
+// Guard: a genuinely transient failure must KEEP the unknown/re-run wording.
+const all503 = await resolveCompany({ name: 'Flaky Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 503, ashby: 503, lever: 503 }) });
+ok('all-503 → still reported as unknown', /status unknown/i.test(all503.unresolved.reason));
+ok('all-503 → still advises a re-run', /re-run/i.test(all503.unresolved.reason));
+ok('all-503 → errors are not marked definitive', all503.unresolved.errors.every(e => e.definitive !== true));
+
+// Guard: ONE transient failure among 404s leaves the outcome unknown — that
+// vendor was never actually answered, so absence is not established.
+const mixed = await resolveCompany({ name: 'Mixed Co' },
+  { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 404, ashby: 503, lever: 404 }) });
+ok('mixed 404/503 → still unknown, absence not established', /status unknown/i.test(mixed.unresolved.reason));
 
 // parseCompanyInput warns on a present-but-wrong-typed workday field (e.g. a number).
 const wrongType = parseCompanyInput('companies:\n  - name: X\n    workday: 42\n', []);

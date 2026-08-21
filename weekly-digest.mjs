@@ -40,7 +40,11 @@
 import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
+
+// Only validateFlags: this module keeps its own flagValue (see below), so
+// importing the shared one too would shadow it.
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SESSIONS_DIR = join(CAREER_OPS, 'interview-prep', 'sessions');
@@ -650,8 +654,31 @@ async function runSelfTest() {
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
+const KNOWN_FLAGS = ['--from', '--to', '--dir', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--from', '--to', '--dir'];
+
+const USAGE = `Usage:
+  node weekly-digest.mjs                        # JSON digest for the current ISO week
+  node weekly-digest.mjs --summary              # human-readable roll-up
+  node weekly-digest.mjs --from <YYYY-MM-DD>    # start of the window
+  node weekly-digest.mjs --to <YYYY-MM-DD>      # end of the window
+  node weekly-digest.mjs --dir <path>           # a different interview-prep/sessions dir
+  node weekly-digest.mjs --self-test            # run the built-in fixtures
+  node weekly-digest.mjs --help                 # show this message
+
+Both bounds are optional; supplying one without the other is rejected rather
+than silently widened.`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
+
+  // The script had no --help and no unrecognized-flag check at all, so a
+  // mistyped --dir was ignored and the digest silently rolled up
+  // interview-prep/sessions instead of the directory that was asked for —
+  // the same silent discard #2402 already fixed here for the `--from=` form
+  // (#2919). Inside the main-module guard so importers are unaffected.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   if (args.includes('--self-test')) {
     await runSelfTest();
   }

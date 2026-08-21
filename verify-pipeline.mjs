@@ -15,6 +15,7 @@
  * 10. Every report file has a tracker row referencing it (warning — see #1425)
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
+ * 13. applications.md <-> active-interviews.md status sync (see #1504)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -26,6 +27,8 @@ import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { checkFollowupsSchema } from './stats.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -256,8 +259,14 @@ if (staleSentinels === 0) ok('No stale reservation sentinels');
 // Warning-level, not error: duplicates can be legitimate (re-evaluation
 // after a JD change).
 const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
-// Shares normalizeTextKey with Check 2 so a report pair and a tracker pair
-// can never disagree about whether two roles are the same (#2393).
+// Shares normalizeTextKey with Check 2 so the two checks fold text the same
+// way (#2393). That is where the guarantee ends: this check keys off the
+// FILENAME slug, already ASCII by the time a report is written, while Check 2
+// keys off the tracker's Company column with the original spelling intact. So
+// the two can and do disagree — `İstanbul Tekstil` vs `Istanbul Tekstil` is
+// flagged here and not there, because the dotted I survives in one input and
+// not the other. Sharing a normalizer is not sharing a contract when the
+// callers feed it different things. Pinned in test-all.mjs.
 const normalizeKey = normalizeTextKey;
 
 // Role comes from the report body: the Machine Summary YAML fence when
@@ -400,7 +409,6 @@ for (const [key, vias] of channelsByRole) {
   }
 }
 if (viaIssues === 0) ok('Via channels consistent');
-
 // --- Check 12: Duplicate tracker numbers (#1704) ---
 // The # column is a row id and must be unique. Unlike Check 2 (company+role
 // dedup, which can false-positive on a legitimate re-application), the SAME
@@ -424,6 +432,74 @@ for (const [num, group] of numGroups) {
   }
 }
 if (dupeNums === 0) ok('No duplicate tracker numbers');
+
+// --- Check 13: applications.md <-> active-interviews.md status sync (#1504) ---
+// Delegates to tracker-sync-check.mjs's exported checkTrackerSync() rather than
+// re-implementing the matching/two-tier resolution logic here or shelling out
+// to a second process. Read-only: this only surfaces drift, it does not write
+// a fix (tracker-sync-check.mjs is intentionally reporting-only for now — see
+// its module header).
+let syncResult;
+try {
+  syncResult = checkTrackerSync({ appsFile: APPS_FILE });
+} catch (err) {
+  warn(`Sync check could not run: ${err.message}`);
+}
+
+if (syncResult) {
+  const tier1Mismatches = syncResult.mismatches.filter(m => m.resolution === 'auto-tier1');
+  const tier2Mismatches = syncResult.mismatches.filter(m => m.resolution === 'needs-review-tier2');
+  const unmatchedRows = syncResult.mismatches.filter(m => m.resolution === 'unmatched');
+
+  for (const m of tier1Mismatches) {
+    warn(`Sync drift (auto-resolvable): ${m.company} — ${m.role}: applications.md="${m.applicationsStatus}" vs active-interviews.md="${m.activeInterviewsStatus}" -> suggest "${m.suggestedStatus}" in ${m.staleIn} (run node tracker-sync-check.mjs for details)`);
+  }
+  for (const m of tier2Mismatches) {
+    warn(`Sync drift (needs human review): ${m.company} — ${m.role}: applications.md="${m.applicationsStatus}" (${m.applicationsLastModified || 'no blame info'}) vs active-interviews.md="${m.activeInterviewsStatus}" (${m.activeInterviewsLastModified || 'no blame info'})`);
+  }
+  for (const m of unmatchedRows) {
+    warn(`Sync check: active-interviews.md row for "${m.company}" — "${m.role}" could not be matched to a tracker row (${m.note})`);
+  }
+  if (tier1Mismatches.length === 0 && tier2Mismatches.length === 0 && unmatchedRows.length === 0) {
+    ok(syncResult.summary.total > 0
+      ? 'applications.md and active-interviews.md are in sync'
+      : 'No active-interviews.md rows to sync-check');
+  }
+}
+
+// --- Check 14: data/follow-ups.md table schema (#2971) ---
+// stats.mjs (computeFollowupStats) and followup-cadence.mjs both read this table
+// positionally, in the shape modes/followup.md documents, and both skip any row
+// whose num/appNum cells don't parse as integers. A table written with a
+// different column order therefore reports as ZERO follow-ups in both tools,
+// silently — indistinguishable from a file where nothing has been logged yet.
+// Follow-up compliance is exactly the number a user consults to decide whether
+// their follow-ups are working, so a silent zero is actively misleading. This is
+// the only place that difference is visible.
+//
+// Path resolution deliberately matches the two consumers (CAREER_OPS/data/...)
+// rather than APPS_FILE's directory: the check exists to predict what they will
+// do, so it has to read the same file they read.
+const FOLLOWUPS_FILE = join(CAREER_OPS, 'data', 'follow-ups.md');
+const FOLLOWUPS_COLUMNS = '| num | appNum | date | company | role | channel | contact | notes |';
+if (!existsSync(FOLLOWUPS_FILE)) {
+  ok('No follow-ups.md yet — nothing to schema-check');
+} else {
+  const fups = checkFollowupsSchema(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+  if (fups.pipeLines === 0) {
+    ok('follow-ups.md has no table rows yet');
+  } else if (!fups.sawSeparator) {
+    error(`follow-ups.md has table rows but no header delimiter row, so every row is skipped — expected ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.dataRows === 0) {
+    ok('follow-ups.md has no logged follow-ups yet');
+  } else if (fups.parsed === 0) {
+    error(`follow-ups.md: none of its ${fups.dataRows} row(s) parse, so stats.mjs and followup-cadence.mjs will both report zero follow-ups — expected column order ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.unparsedLines.length > 0) {
+    warn(`follow-ups.md: ${fups.unparsedLines.length} of ${fups.dataRows} rows will be skipped by stats.mjs and followup-cadence.mjs (line${fups.unparsedLines.length === 1 ? '' : 's'} ${fups.unparsedLines.join(', ')}) — expected ${FOLLOWUPS_COLUMNS}`);
+  } else {
+    ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
+  }
+}
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

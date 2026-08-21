@@ -19,7 +19,7 @@ import { decodeEntities } from './_html-entities.mjs';
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
 const ICIMS_MAX_PAGES = 30;
 // Same per-tenant courtesy delay as workday.mjs — only multi-page tenants pay it.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 // iCIMS serves 200 directly to a browser-like UA (verified live); the default
 // career-ops UA risks WAF interstitials, same as workday/glints.

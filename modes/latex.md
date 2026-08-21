@@ -96,6 +96,7 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `education[].degree` | string | Degree name |
 | `education[].dates` | string | Date range |
 | `education[].coursework` | string[] | Optional — generates a coursework line if present |
+| `experience[]` | object[] | Optional — omit the key or pass `[]` and the Work Experience section is dropped, header included. For candidates with no professional history yet (students, new graduates, career changers); never drop it to hide a gap |
 | `experience[].company` | string | From cv.md Experience |
 | `experience[].role` | string | Job title |
 | `experience[].location` | string | Work location |
@@ -136,7 +137,7 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 
 - Single-column layout (enforced by template)
 - Standard section headers: Education, Work Experience, Personal Projects, Awards & Honors, Technical Skills
-- Optional sections (Personal Projects, Education, Awards & Honors) are dropped entirely — header included — when their array is empty or absent
+- Optional sections (Work Experience, Personal Projects, Education, Awards & Honors, Technical Skills) are dropped entirely — header included — when their array is empty or absent
 - UTF-8, machine-readable via `\pdfgentounicode=1`
 - Keywords distributed: first bullet of each role, skills section
 - No images, no graphics, no color in body text

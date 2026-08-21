@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 // Avature provider — parses the public Avature career-site job list.
 // Auto-detects from a careers_url on `*.avature.net`; a branded custom domain
@@ -35,7 +36,7 @@ const HARD_MAX_PAGES = 200;
 // large boards request-heavy (a 999+ board is ~170 pages); firing those with no
 // gap risks the tenant's WAF rate-limiting the burst. Mirrors workday's
 // INTER_PAGE_DELAY_MS — only boards that paginate past page 0 pay it.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 // The bare key we self-heal to when the primary (`jobOffset`) proves inert.
 const FALLBACK_OFFSET_PARAM = 'offset';
 
@@ -153,7 +154,6 @@ export default {
 
     const jobs = [];
     const seen = new Set();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
 
     const getPage = async (param, page) => {
       const htmlText = await ctx.fetchText(`${cfg.searchUrl}?${param}=${page * PAGE_SIZE}`, {
@@ -181,7 +181,7 @@ export default {
     };
 
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS);
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let articles = await getPage(offsetParam, page);
       let fresh = absorb(articles);
 
@@ -195,7 +195,7 @@ export default {
       // or an inert key that returns an empty page 1 would exit without healing.
       if (fresh === 0 && canHeal && page === 1) {
         canHeal = false;
-        await sleep(INTER_PAGE_DELAY_MS);
+        await sleep(INTER_PAGE_DELAY_MS, ctx);
         const altArticles = await getPage(FALLBACK_OFFSET_PARAM, page);
         const altFresh = absorb(altArticles);
         if (altFresh > 0) {

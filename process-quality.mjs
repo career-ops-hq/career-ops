@@ -16,6 +16,14 @@
  * This is a company/process-level signal only — never tied to a named
  * individual recruiter. See issue #1466.
  *
+ * Example friction patterns (illustrative, NOT an enforced taxonomy — the
+ * tag stays free-text; tag anything that fits the spirit even if it doesn't
+ * match one of these verbatim):
+ *   [process-friction: call scheduled for a rejection with no info beyond what email would convey]
+ *   [process-friction: prescreen repeated info already given in a prior round]
+ *   [process-friction: interview rescheduled 2+ times same week]
+ *   [process-friction: no confirmation after stated timeline passed]
+ *
  * Run: node process-quality.mjs             (JSON to stdout)
  *      node process-quality.mjs --summary   (human-readable table)
  *      node process-quality.mjs --min-threshold 2  (min total interviews per company to report)
@@ -28,7 +36,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
@@ -141,6 +149,12 @@ export function extractFriction(row) {
   return { hasFriction: true, reason: (match[1] || '').trim() };
 }
 
+// A cell carrying no letter and no digit is a PLACEHOLDER, not a value: `?` for
+// an undisclosed employer (#1596), and the tracker's `—`/`-` no-data sentinels.
+function isPlaceholder(value) {
+  return !/[\p{L}\p{N}]/u.test(value);
+}
+
 // --- Core aggregation ---
 //
 // Groups rows by company (case-insensitive, trimmed), counts total
@@ -161,11 +175,32 @@ export function aggregateProcessQuality(rows, minThreshold = 1) {
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const company = companyKey(row);
-    if (!company) continue;
 
-    const dedupeKey = company.toLowerCase();
+    // `?` is the documented marker for an undisclosed end employer (#1596), not
+    // a company name. Grouping on it merged every unrelated employer into ONE
+    // row and reported a friction rate averaged across all of them — the number
+    // a user acts on ("this company wastes my time") computed over companies
+    // they never dealt with. merge-tracker already refuses that merge; this
+    // aggregate has to refuse it too.
+    //
+    // The channel is what distinguishes those rows, so it becomes the bucket.
+    // A row naming neither employer nor channel supports no per-company claim
+    // at all and is dropped rather than given one.
+    let label = company;
+    if (isPlaceholder(company)) {
+      const via = findColumn(row, 'via').trim();
+      if (!via || isPlaceholder(via)) continue;
+      // The prefix is ALWAYS `?`, never the cell's own spelling. isPlaceholder
+      // accepts `?`, `—`, `-` and an empty cell, and every one of them means the
+      // same thing — but keeping them verbatim keys `— (via Hays)` apart from
+      // `? (via Hays)`, splitting one channel's totals. That is this function's
+      // own bug in miniature, so it gets the same answer: normalize, then group.
+      label = `? (via ${via})`;
+    }
+
+    const dedupeKey = label.toLowerCase();
     if (!byCompany.has(dedupeKey)) {
-      byCompany.set(dedupeKey, { company, total: 0, frictionCount: 0, reasons: [] });
+      byCompany.set(dedupeKey, { company: label, total: 0, frictionCount: 0, reasons: [] });
     }
     const entry = byCompany.get(dedupeKey);
     entry.total += 1;
@@ -308,7 +343,26 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
+const KNOWN_FLAGS = ['--file', '--min-threshold', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--file', '--min-threshold'];
+
+const USAGE = `Usage:
+  node process-quality.mjs                        # JSON report
+  node process-quality.mjs --summary              # human-readable table
+  node process-quality.mjs --file <path>          # a different active-interviews.md
+  node process-quality.mjs --min-threshold <N>    # minimum rounds before a company is reported (default 1)
+  node process-quality.mjs --self-test            # run the built-in fixtures
+  node process-quality.mjs --help                 # show this message`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // Inside the main-module guard, not at import time: rejection-latency.mjs
+  // imports parseActiveInterviews from here, so a top-level check would judge
+  // the IMPORTER's argv and reject its flags as unrecognized (#2919).
+  //
+  // A mistyped --file was previously ignored, so the script silently reported
+  // on data/active-interviews.md instead of the path that was asked for.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   if (selfTestMode) {
     runSelfTest();
   }

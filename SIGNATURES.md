@@ -119,3 +119,24 @@ public commit with a stated reason.
 - @Honeypanchi | 2026-08-10 | "Garv Sajnani" | id:146434822 | src:https://github.com/santifer/career-ops/discussions/2660 | n:71
 - @abankar1 | Akshay Bankar | 2026-08-11 | "career-ops is more than a job-search helper - it runs the whole pipeline locally, and a search you can audit is a search you can win." | id:47008224 | src:https://github.com/santifer/career-ops/discussions/2712 | n:72
 - @anshulgeorge | 2026-08-11 | "If companies and recruiters forgo using machine learning to screen candidates, then I will forgo using CareerOps" | id:60569434 | src:https://github.com/santifer/career-ops/discussions/2716 | n:73
+- @ShiosOS | Julius Walton | 2026-08-12 | id:31512984 | src:https://github.com/santifer/career-ops/discussions/2742 | n:74
+- @lambda125 | 2026-08-12 | "CareerOps is a must have for everyone who wants to take control over their data, their career and the way they present themselves. I wholeheartedly agree with this and commit to building on top of…" | id:927405 | src:https://github.com/santifer/career-ops/discussions/2761 | n:75
+- @DJK95 | 2026-08-13 | id:100816857 | src:https://github.com/santifer/career-ops/discussions/2805 | n:76
+- @Siddharth0207 | Siddharth Gautam | 2026-08-13 | id:81465411 | src:https://github.com/santifer/career-ops/discussions/2806 | n:77
+- @Mickey374 | Michael Kobby Asante | 2026-08-13 | "Career Ops has indeed revolutionalized my perspective on how you need to position yourself for the evolving job market. A win in the chats." | id:41800926 | src:https://github.com/santifer/career-ops/discussions/2814 | n:78
+- @arr900 | Arunraj | 2026-08-15 | id:29600103 | src:https://github.com/santifer/career-ops/discussions/2910 | n:79
+- @omega-strikes | 2026-08-17 | "Optimizing and accelarating my job seeking process" | id:205552426 | src:https://github.com/santifer/career-ops/discussions/2973 | n:80
+- @EM917 | YiLong(Elon) Mei | 2026-08-17 | id:130506559 | src:https://github.com/santifer/career-ops/discussions/2985 | n:81
+- @prajwalyb | 2026-08-18 | id:32199473 | src:https://github.com/santifer/career-ops/discussions/3012 | n:82
+- @hiteshjha24 | Hitesh Jha | 2026-08-18 | "Its a must have if u are in job search!!!!!" | id:143171761 | src:https://github.com/santifer/career-ops/discussions/3015 | n:83
+- @Ahmedmhassany | Ahmed Mohamed Hassany | 2026-08-18 | id:149591909 | src:https://github.com/santifer/career-ops/discussions/3041 | n:84
+- @katkurigopi05 | Gopi Krishna Reddy Katkuri | 2026-08-19 | "i have tried to build my own job hunter but i didn't go well so i am trying to use this awesome repo to fix mine" | id:231100182 | src:https://github.com/santifer/career-ops/discussions/3063 | n:85
+- @TMFNK | TMFNK | 2026-08-19 | id:235670256 | src:https://github.com/santifer/career-ops/discussions/3068 | n:86
+- @etugrand | Etugrand | 2026-08-19 | id:44446037 | src:https://github.com/santifer/career-ops/discussions/3069 | n:87
+- @kaarthiiik | Karthik Taduvai | 2026-08-19 | id:3398790 | src:https://github.com/santifer/career-ops/discussions/3074 | n:88
+- @MuhammadAliAsgher | Muhammad | 2026-08-19 | id:109615982 | src:https://github.com/santifer/career-ops/discussions/3078 | n:89
+- @bluezeb12 | Joseph Landry | 2026-08-20 | id:3913655 | src:https://github.com/santifer/career-ops/discussions/3108 | n:90
+- @kps2120 | 2026-08-20 | "Career change is hard enough already, trying to match past experiences to many new possibilities and areas of interest. Just leveling it up." | id:166546704 | src:https://github.com/santifer/career-ops/discussions/3121 | n:91
+- @rodolrojas | Rodolfo Rojas Giménez | 2026-08-20 | id:6399387 | src:https://github.com/santifer/career-ops/discussions/3133 | n:92
+- @CodePlato3721 | Alex | 2026-08-21 | id:2314106 | src:https://github.com/santifer/career-ops/discussions/3148 | n:93
+- @gunjanjaswal | Gunjan Jaswal | 2026-08-21 | id:400143 | src:https://github.com/santifer/career-ops/discussions/3151 | n:94
