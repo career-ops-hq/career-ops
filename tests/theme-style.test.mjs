@@ -87,6 +87,22 @@ try {
     else fail(`${tpl}: hasRoot=${hasRoot} usesVars=${usesVars} circular=${circular}`);
   }
 
+  // Regression: the Korean locale must honor profile.style.font_family on the
+  // body and the prominent heading/contact surfaces. A duplicate selector or a
+  // fixed-only stack silently defeats the dynamic theme block.
+  {
+    const koSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+    const koBody = koSrc.match(/html\[lang="ko"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const koHeadings = koSrc.match(/html\[lang="ko"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const hasProfileFontFallback = (src) => /font-family:\s*var\(--font-family,/.test(src);
+    const hasDuplicateBodySelector = /html\[lang="ko"\]\s+body\s*,\s*html\[lang="ko"\]\s+body\s*\{/.test(koSrc);
+    if (hasProfileFontFallback(koBody) && hasProfileFontFallback(koHeadings) && !hasDuplicateBodySelector) {
+      pass('Korean body/headings honor --font-family theme override without duplicate selector');
+    } else {
+      fail(`Korean theme contract: body=${hasProfileFontFallback(koBody)} headings=${hasProfileFontFallback(koHeadings)} duplicate=${hasDuplicateBodySelector}`);
+    }
+  }
+
   // Regression (post-review, #1837): injectPrintPageCss's @page rule used to
   // hardcode `margin: 0.6in`, which — injected last, right before </head> — won
   // the CSS cascade over the template's own `@page { margin: var(--page-margin) }`

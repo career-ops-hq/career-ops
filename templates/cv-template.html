@@ -549,11 +549,10 @@
      whatever the PDF engine happened to substitute. Same shape as the ja and
      zh blocks above: Latin-capable faces first for stable ATS extraction, then
      platform-native and open-source Korean faces for Hangul glyphs. */
-  html[lang="ko"] body,
   html[lang="ko"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+      'Noto Sans KR', 'Nanum Gothic', sans-serif);
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -567,9 +566,9 @@
   html[lang="ko"] .competency-tag,
   html[lang="ko"] .skill-category,
   html[lang="ko"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif;
+      'Noto Sans KR', 'Nanum Gothic', sans-serif);
   }
 
   /* === Traditional Chinese typography ===
