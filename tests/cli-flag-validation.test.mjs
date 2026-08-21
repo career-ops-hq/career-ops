@@ -41,7 +41,7 @@ for (const [script, typo] of SCRIPTS) {
     const r = runScript(script, typo, 'some-value');
     assert.equal(r.status, 1, `${script} ${typo} exited ${r.status}, want 1`);
     assert.match(r.all, /unrecognized flag/i, `${script} did not name the unrecognized flag`);
-    assert.match(r.all, new RegExp(typo.replace(/^--/, '--')), `${script} did not echo ${typo} back`);
+    assert.ok(r.all.includes(typo), `${script} did not echo ${typo} back`);
   });
 }
 
