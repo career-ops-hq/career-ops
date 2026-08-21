@@ -1,68 +1,55 @@
-/**
- * check-liveness.test.mjs — CLI help tests for check-liveness.mjs
- *
- * Run: node tests/check-liveness.test.mjs (from repo root) or node check-liveness.test.mjs
- * The script under test lives at the repository root, one level above this file.
- */
+// tests/check-liveness.test.mjs — CLI contract for check-liveness.mjs (issue #2576).
+//
+// The script under test lives at the repository root, so its path is resolved
+// from ROOT, not from this file's directory: the first version resolved
+// ./check-liveness.mjs relative to tests/ and every CI job died with
+// ERR_MODULE_NOT_FOUND before a single assertion ran.
+import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { spawnSync } from 'child_process';
+import { join } from 'path';
 
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
+console.log('\ncheck-liveness — --help/-h contract');
 
-const scriptPath = fileURLToPath(new URL('../check-liveness.mjs', import.meta.url));
-let passed = 0;
-let failed = 0;
-const failures = [];
-
-function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
-}
-
-const helpOut = execFileSync('node', [scriptPath, '--help'], {
+const scriptPath = join(ROOT, 'check-liveness.mjs');
+const run = (args) => spawnSync(NODE, [scriptPath, ...args], {
   encoding: 'utf-8',
   timeout: 10000,
 });
-ok('--help prints usage', helpOut.includes('Usage:'));
-ok('--help documents --no-fallback', helpOut.includes('--no-fallback'));
-ok('--help documents --throttle', helpOut.includes('--throttle'));
-ok('--help documents --file', helpOut.includes('--file'));
-ok('--help documents --help', helpOut.includes('--help'));
-ok('--help documents -h', helpOut.includes('node check-liveness.mjs -h'));
 
-const hOut = execFileSync('node', [scriptPath, '-h'], {
-  encoding: 'utf-8',
-  timeout: 10000,
-});
-ok('-h prints usage', hOut.includes('Usage:'));
+const help = run(['--help']);
+if (help.status === 0) {
+  pass('--help exits 0');
+} else {
+  fail(`--help exits 0 (got status ${help.status})`);
+}
+if ((help.stdout || '').includes('Usage:')) {
+  pass('--help prints usage');
+} else {
+  fail('--help prints usage');
+}
+for (const flag of ['--no-fallback', '--throttle', '--file', '--help']) {
+  if ((help.stdout || '').includes(flag)) pass(`--help documents ${flag}`);
+  else fail(`--help documents ${flag}`);
+}
+if ((help.stdout || '').includes('node check-liveness.mjs -h')) pass('--help documents -h');
+else fail('--help documents -h');
 
-// CodeRabbit suggestion: prove -h and --help print the identical contract.
-ok('-h output is byte-identical to --help', hOut === helpOut);
+const h = run(['-h']);
+if (h.status === 0 && (h.stdout || '').includes('Usage:')) pass('-h prints usage');
+else fail('-h prints usage');
+// The alias must stay byte-identical to --help or the two contracts can drift.
+if (h.stdout === help.stdout) pass('-h output is byte-identical to --help');
+else fail('-h output is byte-identical to --help');
 
-const helpWithMissingFile = execFileSync('node', [scriptPath, '--help', '--file', '/definitely/missing'], {
-  encoding: 'utf-8',
-  timeout: 10000,
-});
-ok('--help exits before file read', helpWithMissingFile.includes('Usage:'));
-
-try {
-  execFileSync('node', [scriptPath], {
-    encoding: 'utf-8',
-    timeout: 10000,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  ok('no args exits non-zero', false);
-} catch (err) {
-  ok('no args exits 1', err.status === 1);
-  ok('no args prints usage to stderr', String(err.stderr).includes('Usage:'));
+const helpWithMissingFile = run(['--help', '--file', join('definitely', 'missing')]);
+if (helpWithMissingFile.status === 0 && (helpWithMissingFile.stdout || '').includes('Usage:')) {
+  pass('--help exits before file read');
+} else {
+  fail('--help exits before file read');
 }
 
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-if (failures.length > 0) {
-  console.log(failures.join('\n'));
-}
-process.exit(failed > 0 ? 1 : 0);
+const noArgs = run([]);
+if (noArgs.status === 1) pass('no args exits 1');
+else fail(`no args exits 1 (got status ${noArgs.status})`);
+if ((noArgs.stderr || '').includes('Usage:')) pass('no args prints usage to stderr');
+else fail('no args prints usage to stderr');
