@@ -54,6 +54,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1047,7 +1048,13 @@ function daysBetweenIsoDates(start, end) {
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
 
-export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+// `today` defaults to the LOCAL calendar day, not the UTC one. This function
+// gates a COOLDOWN (`today < cooldownUntil`) — the user asked not to see a
+// posting until a date — and the UTC day is tomorrow for a west-of-Greenwich
+// evening run, so the cooldown opened a day early (#3070). The recheck window
+// below reads one day high the same way. Callers may still pass `today`
+// explicitly; only the default moves.
+export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
@@ -2534,7 +2541,12 @@ async function main() {
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day. This one value does two things that both care which day it is:
+  // it is the `today` buildCooldownFilter compares against, and it is the
+  // firstSeen date written into scan-history.tsv. On the UTC day a
+  // west-of-Greenwich evening scan opened cooldowns early AND stamped history
+  // rows with tomorrow, which then read one day old on the next recheck (#3070).
+  const date = localToday();
   const windows = loadReApplyWindows();
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;

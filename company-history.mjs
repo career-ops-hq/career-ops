@@ -12,6 +12,11 @@
  *     response — it is an answer, not silence.
  *   - postingChurn: does this company repost the same role repeatedly
  *     (evergreen requisition / re-opened search), per detect-reposts.mjs?
+ *     "The same role, later" is the whole claim: a company running several
+ *     openings side by side — one per city, country, language or segment — is
+ *     not reposting, and detect-reposts.mjs enforces that with a minimum span
+ *     and a title-identity rule. Before it did, this axis reported
+ *     `reposts-detected` for companies that had never reposted anything.
  *
  * This script deliberately reports FACTS, not verdicts. It never uses the
  * words "ghost"/"ghosted" or "risk" — high-volume inboxes, evergreen
@@ -51,6 +56,7 @@ import * as yaml from 'js-yaml';
 import { parseScanHistory, detectReposts } from './detect-reposts.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   parseFollowups,
   parseAppliedDate,
@@ -238,7 +244,12 @@ export function resolveDefaultSilenceWindow(rootDir = CAREER_OPS) {
 
 // --- today() — injectable for deterministic tests ---
 export function today() {
-  return new Date(new Date().toISOString().split('T')[0]);
+  // LOCAL calendar day, UTC midnight anchor. toISOString() gives the UTC DAY,
+  // so west of Greenwich an evening run answered "today" with tomorrow and
+  // every age in the report came out one day high (#3070). Only WHICH day
+  // this is moves; parseDate() still anchors at UTC midnight, so the
+  // arithmetic downstream is unchanged.
+  return new Date(localToday());
 }
 
 function resolveNow(now) {
