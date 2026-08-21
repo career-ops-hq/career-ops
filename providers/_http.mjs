@@ -54,6 +54,44 @@ export async function fetchJson(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.json());
 }
 
+/**
+ * Fetch only the head of a text response.
+ *
+ * Board landing pages carry the owner's name in <title>, but the page itself can
+ * be a megabyte of embedded job JSON (jobs.lever.co ships ~950KB and ignores a
+ * Range request). Reading the whole thing to learn one string would be exactly the
+ * "slow and rude to the careers site" behavior the probe path avoids elsewhere, so
+ * this stops at maxBytes and cancels the body.
+ *
+ * @param {string} url
+ * @param {{maxBytes?: number}} [opts]
+ * @returns {Promise<string>} The first maxBytes of the body, decoded as UTF-8.
+ */
+export async function fetchTextHead(url, opts = {}) {
+  const maxBytes = opts.maxBytes ?? 8192;
+  return fetchWithTimeout(url, opts, async (res) => {
+    const reader = res.body?.getReader?.();
+    if (!reader) return String(await res.text()).slice(0, maxBytes);
+    const chunks = [];
+    let total = 0;
+    try {
+      while (total < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(Buffer.from(value));
+        total += value.length;
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* body already closed */
+      }
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  });
+}
+
 export async function fetchText(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.text());
 }

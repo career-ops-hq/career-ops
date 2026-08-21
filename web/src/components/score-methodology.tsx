@@ -64,9 +64,10 @@ export function ScoreMethodology() {
           href="https://career-ops.org/methodology"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-brand transition-colors hover:underline"
+          aria-label="Full methodology (opens in a new tab)"
+          className="inline-flex min-h-[24px] items-center gap-1 text-xs text-brand transition-colors hover:underline max-sm:min-h-[44px]"
         >
-          Full methodology <ExternalLink className="size-3" />
+          Full methodology <ExternalLink className="size-3" aria-hidden="true" />
         </a>
       </div>
     </details>

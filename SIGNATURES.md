@@ -135,3 +135,8 @@ public commit with a stated reason.
 - @etugrand | Etugrand | 2026-08-19 | id:44446037 | src:https://github.com/santifer/career-ops/discussions/3069 | n:87
 - @kaarthiiik | Karthik Taduvai | 2026-08-19 | id:3398790 | src:https://github.com/santifer/career-ops/discussions/3074 | n:88
 - @MuhammadAliAsgher | Muhammad | 2026-08-19 | id:109615982 | src:https://github.com/santifer/career-ops/discussions/3078 | n:89
+- @bluezeb12 | Joseph Landry | 2026-08-20 | id:3913655 | src:https://github.com/santifer/career-ops/discussions/3108 | n:90
+- @kps2120 | 2026-08-20 | "Career change is hard enough already, trying to match past experiences to many new possibilities and areas of interest. Just leveling it up." | id:166546704 | src:https://github.com/santifer/career-ops/discussions/3121 | n:91
+- @rodolrojas | Rodolfo Rojas Giménez | 2026-08-20 | id:6399387 | src:https://github.com/santifer/career-ops/discussions/3133 | n:92
+- @CodePlato3721 | Alex | 2026-08-21 | id:2314106 | src:https://github.com/santifer/career-ops/discussions/3148 | n:93
+- @gunjanjaswal | Gunjan Jaswal | 2026-08-21 | id:400143 | src:https://github.com/santifer/career-ops/discussions/3151 | n:94

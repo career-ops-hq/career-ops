@@ -39,7 +39,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
-import { readStyleTokens, injectThemeStyle } from './theme-style.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -326,6 +326,520 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
       throw new Error(message);
     }
   }
+}
+
+/**
+ * Every canonical section key the alias table can produce, in template order.
+ * Derived from the table rather than restated so the two cannot drift.
+ */
+export const CV_SECTION_KEYS = [...new Set(SECTION_ALIASES.values())];
+
+// The all-caps comments the templates use to delimit sections, matched exactly
+// as cv-sections-core.mjs matches them when stripping empty sections.
+const SECTION_MARKER_RE = /<!--\s+[A-Z][A-Z ]*-->/g;
+const SECTION_TITLE_RE = /class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
+
+const DISPLAY_TITLE_MAX = 60;
+
+/**
+ * A rendered section title, made safe to quote back in a console warning.
+ *
+ * The title comes out of the CV, and a warning goes to a terminal or a log, so
+ * it is untrusted output rather than untrusted input: C0/C1 controls are
+ * dropped (an ANSI escape here would let a CV repaint the operator's console or
+ * forge a line of output), and the result is truncated, since nothing stops a
+ * heading being thousands of characters long.
+ *
+ * @param {string} raw - Inner markup of the title element.
+ * @returns {string}
+ */
+function displayTitle(raw) {
+  const text = raw
+    .replace(/<[^>]+>/g, ' ')
+    // C0/C1 controls, then the bidi overrides and isolates. Both let text
+    // rewrite a terminal line rather than merely occupy it: an escape repaints
+    // it, and U+202E reverses what follows, so a title can appear to be output
+    // the tool produced. Stripped rather than escaped — a section heading has
+    // no legitimate use for either.
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Truncate by code point, not UTF-16 unit, so the cap can't end on half a
+  // surrogate pair; then step back off any trailing combining marks so it
+  // can't end on a mark whose base character was just removed. Marks *within*
+  // the cap are left alone — they are ordinary in many scripts, and the length
+  // bound is what keeps a stacked run from running away.
+  const points = [...text];
+  if (points.length <= DISPLAY_TITLE_MAX) return text;
+  const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
+  while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join('')}…`;
+}
+
+/**
+ * The text of the first real section title in html[start, end), skipping any
+ * that sits in raw text (a heading quoted inside a script names nothing).
+ *
+ * @param {string} html
+ * @param {number} start
+ * @param {number} end
+ * @param {[number, number][]} inert
+ * @returns {string|null}
+ */
+function findSectionTitle(html, start, end, inert) {
+  // Matched against the slice, not the whole document: a marker with no title
+  // under it would otherwise send the engine looking as far as the next title
+  // anywhere in the file, which is quadratic across many markers. The slices
+  // partition the document, so this is linear overall.
+  const within = html.slice(start, end);
+  SECTION_TITLE_RE.lastIndex = 0;
+  let match;
+  while ((match = SECTION_TITLE_RE.exec(within)) !== null) {
+    if (!isInRanges(inert, start + match.index)) return match[1];
+  }
+  return null;
+}
+
+// Elements that never have a closing tag, so they must not open a nesting level.
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+// Elements whose content is text, not markup. `<style>.x { content: "</div>" }`
+// closes nothing, and counting that as a close tag would end a section early.
+// The legacy entries (xmp, plaintext, noembed, noframes) and iframe are here
+// because a parser doesn't build elements from their contents either; leaving
+// one out means markup-shaped text inside it is mistaken for structure.
+const RAW_TEXT_ELEMENTS = new Set([
+  'script', 'style', 'textarea', 'title',
+  'xmp', 'plaintext', 'iframe', 'noembed', 'noframes',
+]);
+
+/**
+ * Index of the `>` that ends the tag opening at `from`, or -1.
+ *
+ * Quote-aware, because `>` is legal inside an attribute value:
+ * `<span data-x="> <div>">` is one tag, not a tag plus a stray `<div>`. Reading
+ * it as the latter miscounts the depth — and since a forged count can be made
+ * to balance, it would let a section pass validation and then be moved into
+ * markup it doesn't belong to.
+ *
+ * @param {string} html
+ * @param {number} from - Index of the `<`.
+ * @returns {number}
+ */
+function tagEnd(html, from) {
+  let quote = null;
+  for (let i = from + 1; i < html.length; i++) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Ranges of html holding raw text rather than markup — the contents of
+ * `<script>`, `<style>`, `<textarea>` and `<title>`.
+ *
+ * Needed from the start of the document, not from a section: a marker comment
+ * quoted inside a script string (`const fixture = '<!-- SKILLS -->…'`) is text,
+ * but a search that begins at that marker has no way to know it. Treating it as
+ * a section would move part of a script body around the document.
+ *
+ * @param {string} html
+ * @returns {[number, number][]}
+ */
+function rawTextRanges(html) {
+  const ranges = [];
+  let index = 0;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      index = close === -1 ? html.length : close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) break;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+    if (inner.startsWith('/')) continue;
+
+    // No self-closing check: `<script/>` opens raw text, it does not stand alone.
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name || !RAW_TEXT_ELEMENTS.has(name[1].toLowerCase())) continue;
+
+    // <plaintext> has no end tag at all: everything after it is text to the end
+    // of the document, so a literal `</plaintext>` closes nothing.
+    if (name[1].toLowerCase() === 'plaintext') {
+      ranges.push([index, html.length]);
+      break;
+    }
+
+    const closeTag = new RegExp(`</${name[1]}\\s*>`, 'gi');
+    closeTag.lastIndex = index;
+    const end = closeTag.exec(html);
+    ranges.push([index, end ? end.index : html.length]);
+    index = end ? end.index + end[0].length : html.length;
+  }
+
+  return ranges;
+}
+
+/**
+ * Whether `position` falls inside one of the ranges, which are ascending and
+ * disjoint by construction. Binary search rather than a scan: this is asked
+ * once per marker and once per candidate title, and a linear answer makes the
+ * pair quadratic on a document with many of both.
+ *
+ * @param {[number, number][]} ranges
+ * @param {number} position
+ * @returns {boolean}
+ */
+function isInRanges(ranges, position) {
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (position < ranges[mid][0]) high = mid - 1;
+    else if (position >= ranges[mid][1]) low = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+/**
+ * Walk html[from, to) and report what it does to the nesting depth.
+ *
+ * A forward scan built on indexOf rather than a regex tokenizer: a pattern like
+ * `<!--[\s\S]*?-->` restarts its search from every `<!--`, which is quadratic on
+ * a run of unterminated comments (measured 728ms for 32k of them) and
+ * exponential when nested inside a repetition. Every step here consumes input.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @param {number} to
+ * @returns {{depth: number, exitAt: number}|null} `depth` is the net change at
+ *   `to`; `exitAt` is where a close tag first tried to rise above the starting
+ *   level, or -1. null means the markup could not be read at all (an
+ *   unterminated comment, tag or raw-text element), which callers treat as
+ *   "don't touch this".
+ */
+function scanNesting(html, from, to) {
+  let index = from;
+  let depth = 0;
+
+  while (index < to) {
+    const open = html.indexOf('<', index);
+    if (open === -1 || open >= to) break;
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1 || close + 3 > to) return null;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1 || close >= to) return null;
+    const inner = html.slice(open + 1, close);
+    index = close + 1;
+
+    if (inner.startsWith('/')) {
+      if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(inner)) continue; // not a close tag
+      if (depth === 0) return { depth, exitAt: open };
+      depth--;
+      continue;
+    }
+
+    const name = /^([a-zA-Z][\w:-]*)/.exec(inner);
+    if (!name) continue; // <!DOCTYPE …>, <?xml …>, or a stray '<'
+    const tag = name[1].toLowerCase();
+
+    // Checked before the self-closing branch: trailing-slash syntax has no
+    // effect on an HTML element, so `<script/>` opens raw text rather than
+    // standing alone, and treating it as self-closing would read the script
+    // body as markup.
+    if (RAW_TEXT_ELEMENTS.has(tag)) {
+      // <plaintext> never ends, so a slice containing one can't be read as
+      // markup at all — refuse rather than guess where it stops.
+      if (tag === 'plaintext') return null;
+      const closeTag = new RegExp(`</${tag}\\s*>`, 'gi');
+      closeTag.lastIndex = index;
+      const end = closeTag.exec(html);
+      if (!end || end.index + end[0].length > to) return null;
+      index = end.index + end[0].length; // consumed whole, depth unchanged
+      continue;
+    }
+
+    if (inner.endsWith('/') || VOID_ELEMENTS.has(tag)) continue;
+
+    depth++;
+  }
+
+  return { depth, exitAt: -1 };
+}
+
+/**
+ * True when html[from, to) is only whitespace, comments and closing tags —
+ * the shape of a document tail (`</div></body></html>`) and of nothing else.
+ *
+ * @param {string} html
+ * @param {number} from
+ * @returns {boolean}
+ */
+function isStructuralTail(html, from) {
+  let index = from;
+
+  while (index < html.length) {
+    const open = html.indexOf('<', index);
+    if (open === -1) break;
+    if (html.slice(index, open).trim() !== '') return false; // stray text
+
+    if (html.startsWith('<!--', open)) {
+      const close = html.indexOf('-->', open + 4);
+      if (close === -1) return false;
+      index = close + 3;
+      continue;
+    }
+
+    const close = tagEnd(html, open);
+    if (close === -1) return false;
+    if (!/^\/[a-zA-Z][\w:-]*\s*$/.test(html.slice(open + 1, close))) return false;
+    index = close + 1;
+  }
+
+  return html.slice(index).trim() === '';
+}
+
+/**
+ * Locate each CV section in a rendered document as a [start, end) slice.
+ *
+ * A section runs from its marker comment to the next one — the extent comes
+ * from the markers, never from matching tags. That matters more than it looks:
+ * when extent is derived by pairing tags, any markup the scanner reads wrongly
+ * yields a *plausible but wrong* extent, and moving it truncates the CV. Here a
+ * misread can only make a section fail the balance check below, and a section
+ * that fails is left alone. Mistakes cost the feature, not the document.
+ *
+ * It also means a section is whatever sits between two markers, so a template
+ * that marks sections with a bare heading —
+ *
+ *   <!-- EDUCATION -->
+ *   <h2 class="section-title">Education</h2>
+ *   <div class="edu-item">BSc</div>
+ *
+ * — moves its heading and body together, rather than being refused.
+ *
+ * Each slice must be balanced: as many elements closed as opened, never rising
+ * above the level it started at. That single check does double duty. It rejects
+ * a slice that would leave markup unclosed, and it establishes that every
+ * accepted section sits at the same nesting level as its neighbours, so filling
+ * one section's place with another can't move it into a container of its own
+ * (`<div class="education-layout"><!-- EDUCATION -->…</div>` fails, because its
+ * slice closes a div it never opened).
+ *
+ * Identity comes from the rendered section title, resolved through the same
+ * alias table validateCvSectionOrder() uses, so the reorder and the guard
+ * cannot disagree about what a section is. A marker with no `.section-title`
+ * under it (`<!-- HEADER -->`) is not a section — which is also what leaves a
+ * cover letter untouched.
+ *
+ * @param {string} html
+ * @returns {{
+ *   blocks: {key: string, start: number, end: number, title: string}[],
+ *   ambiguous: Set<string>,
+ *   unrecognized: Map<string, string>,
+ * }} `blocks` are the movable sections, each carrying its title as rendered (see
+ *   displayTitle). `ambiguous` holds keys whose extent could not be established.
+ *   `unrecognized` maps key -> title for sections the alias table cannot name,
+ *   which are movable but can never match a configured name.
+ */
+function extractSectionBlocks(html) {
+  // A marker quoted inside a script or style is text, not a section boundary.
+  const inert = rawTextRanges(html);
+  const markers = [...html.matchAll(SECTION_MARKER_RE)]
+    .filter(marker => !isInRanges(inert, marker.index));
+  const blocks = [];
+  const ambiguous = new Set();
+
+  for (let i = 0; i < markers.length; i++) {
+    const start = markers[i].index;
+    const next = i + 1 < markers.length ? markers[i + 1].index : html.length;
+
+    // A title quoted inside a script is text too, so it cannot name a section:
+    // taking it would label this block from markup that only looks like a
+    // heading, and apply the user's ordering to the wrong section.
+    const title = findSectionTitle(html, start, next, inert);
+    if (!title) continue;
+    const text = normalizeSectionTitle(title);
+    if (!text) continue;
+    const key = sectionKey(text);
+
+    const scan = scanNesting(html, start, next);
+    if (!scan) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    // The last section has no following marker to bound it, so it ends where
+    // its content first tries to close an element it doesn't own — the parent's
+    // closing tag. Everything after that must be document tail: anything else
+    // means the scan stopped in the wrong place (raw text it misread, say), and
+    // trusting it would move a fragment.
+    const end = scan.exitAt === -1 ? next : scan.exitAt;
+    const bounded = scan.exitAt === -1 ? scan : scanNesting(html, start, end);
+    if (!bounded || bounded.depth !== 0 || (end !== next && !isStructuralTail(html, end))) {
+      ambiguous.add(key);
+      continue;
+    }
+
+    blocks.push({ key, start, end, title: displayTitle(title) });
+  }
+
+  // Titles the alias table doesn't cover. sectionKey() falls back to the
+  // normalized title, so such a block is real and movable but can never match a
+  // configured name — and without this, a CV rendered with titles outside
+  // SECTION_ALIASES makes cv.sections do nothing at all, silently.
+  const unrecognized = new Map();
+  for (const block of blocks) {
+    if (!CV_SECTION_KEYS.includes(block.key)) unrecognized.set(block.key, block.title);
+  }
+
+  return { blocks, ambiguous, unrecognized };
+}
+
+/**
+ * Render the CV's sections in the order declared by `cv.sections` in
+ * config/profile.yml (#2533).
+ *
+ * The named sections are permuted among the slots they already occupy;
+ * everything else stays exactly where the template put it. So a list is a local
+ * statement ("these sections, in this order") rather than a full table of
+ * contents the user has to keep in sync — a section added by a later release
+ * lands where upstream put it instead of breaking the config. Moving a section
+ * past its neighbours is therefore a rotation: name the sections it displaces
+ * too, in the order they should end up in.
+ *
+ * Runs before validateCvSectionOrder(), so the guard still judges what will
+ * actually be printed — this satisfies the guard rather than bypassing it, which
+ * is what separates it from --allow-reorder.
+ *
+ * No `cv.sections` → the input string is returned unchanged.
+ *
+ * @param {string} html
+ * @param {string[]} order - Canonical section keys, e.g. ['skills', 'education'].
+ * @returns {string}
+ */
+export function reorderCvSections(html, order) {
+  if (!Array.isArray(order) || order.length === 0) return html;
+  if (order.length < 2) {
+    // Not an error, but not a no-op worth staying quiet about either: one name
+    // states no relationship, so there is nothing to apply and the user would
+    // otherwise be left thinking the setting took effect.
+    console.warn(`⚠️  config/profile.yml cv.sections lists only "${displayTitle(order[0])}". An order needs at least two sections — one name states no relationship, so nothing was changed.`);
+    return html;
+  }
+
+  // No early return on an empty block list: a CV whose sections are all
+  // ambiguous produces none, and silently doing nothing is the failure mode
+  // this feature exists to remove. The per-name loop below reports first.
+  const { blocks, ambiguous, unrecognized } = extractSectionBlocks(html);
+
+  const byKey = new Map();
+  for (const block of blocks) {
+    if (!byKey.has(block.key)) byKey.set(block.key, block);
+  }
+
+  const chosen = [];
+  const unresolved = [];
+  const seen = new Set();
+  for (const name of order) {
+    // `name` comes from a config file and is quoted straight into console
+    // output, so it gets the same treatment as a rendered title: displayTitle()
+    // strips C0/C1 controls and bidi overrides (either can repaint a terminal
+    // line so a warning appears to say something the tool never printed) and
+    // bounds the length so one long entry cannot bury the message.
+    const shown = displayTitle(name);
+    if (seen.has(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}" more than once — keeping its first position.`);
+      continue;
+    }
+    seen.add(name);
+    if (!CV_SECTION_KEYS.includes(name)) {
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", which is not a CV section — ignoring it. Recognized: ${CV_SECTION_KEYS.join(', ')}.`);
+      continue;
+    }
+    const block = byKey.get(name);
+    if (block) {
+      chosen.push(block);
+    } else if (ambiguous.has(name)) {
+      // Present, but its markup doesn't stand on its own — it opens or closes
+      // elements outside itself, so moving it would leave tags unbalanced.
+      // Reported rather than skipped quietly: the section stays where the
+      // template put it, and the user would otherwise see a setting that
+      // silently does nothing.
+      console.warn(`⚠️  config/profile.yml cv.sections lists "${shown}", but this CV's markup does not enclose that section on its own — leaving it in place, because moving it would leave tags unbalanced.`);
+    } else {
+      // Recognized and unambiguous but with no block. Ordinarily that just means
+      // the section isn't in this CV (an optional one with no entries is
+      // stripped before the PDF step), which is not worth a warning on its own.
+      unresolved.push(name);
+    }
+  }
+
+  // It is worth one when the CV also renders titles the alias table can't name,
+  // because then "not in this CV" may be a misreading: the section could be
+  // sitting right there under a heading nothing could identify.
+  //
+  // Whether that is what happened is not knowable here — an unresolved name may
+  // equally be an optional section with no entries. So the report states only
+  // what is checkable (this name matched nothing; these titles are unidentified)
+  // and leaves the conclusion to the reader. Deliberately not conditioned on
+  // whether the document changed: a name that did nothing did nothing, whether
+  // or not its neighbours moved, and treating "output identical" as the failure
+  // signal misreads an order that was already satisfied.
+  const reportUnresolved = () => {
+    if (unresolved.length === 0 || unrecognized.size === 0) return;
+    const names = unresolved.map(name => `"${displayTitle(name)}"`).join(', ');
+    const titles = [...unrecognized.values()].map(title => `"${title}"`).join(', ');
+    console.warn(`⚠️  config/profile.yml cv.sections names ${names}, which matched no section in this CV. The CV also renders ${unrecognized.size} section title(s) the section-order alias table doesn't recognize (${titles}) — if one of those is the section you meant, its title needs an entry in SECTION_ALIASES in generate-pdf.mjs. Otherwise the name has no effect and can be dropped.`);
+  };
+  if (chosen.length < 2) {
+    reportUnresolved();
+    return html;
+  }
+
+  // The slots are the named sections' own positions, in document order; the
+  // sections fill them in the configured order. No separate sibling check is
+  // needed: every accepted block is balanced, so they all sit at the same
+  // nesting level by construction.
+  const slots = [...chosen].sort((a, b) => a.start - b.start);
+
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < slots.length; i++) {
+    out += html.slice(cursor, slots[i].start);
+    out += html.slice(chosen[i].start, chosen[i].end);
+    cursor = slots[i].end;
+  }
+
+  const reordered = out + html.slice(cursor);
+  reportUnresolved();
+  return reordered;
 }
 
 /**
@@ -636,6 +1150,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Apply the user's declared section order (config/profile.yml `cv.sections`)
+  // before the guard runs, so the guard judges the document that will be
+  // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
+  // the same file from workspaceRoot, and cv.md is read from there too, so an
+  // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
+  // two files — style from the workspace, section order from the checkout —
+  // and validated the workspace's CV against the checkout's declared order.
+  html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
+
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
 
   // Normalize text for ATS compatibility (issue #1)
@@ -725,6 +1248,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // One profile governs the whole batch, so the declared order is read once
+  // rather than per entry. Anchored to workspaceRoot for the same reason the
+  // single render is: it is the anchor readStyleTokens() and the cv.md read
+  // already use, so one profile.yml supplies every setting.
+  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -760,6 +1288,10 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
+      // Same order as the single render: reorder first so the guard judges the
+      // document that will actually be printed. Without this the batch path
+      // rendered N CVs with cv.sections silently inert.
+      html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       html = normalizeTextForATS(html).html;
 

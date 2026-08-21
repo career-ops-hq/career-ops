@@ -17,9 +17,9 @@
 //
 // Tests extract the real bash snippets from batch-runner.sh so the tests and
 // the implementation can never drift apart.
-import { pass, fail, getBash } from './helpers.mjs';
+import { pass, fail, rmSync, getBash } from './helpers.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync, mkdtempSync as _mdt } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
