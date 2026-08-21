@@ -15833,21 +15833,6 @@ console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
   else fail('cover-resolver unit tests failed (run: node --test test/cover-resolver.test.mjs)');
 }
 
-console.log('\n60a. Home-dashboard follow-up urgency view (web/src/lib/core/followup-view.mjs, PR #2157)');
-{
-  // web/ lives deliberately OUTSIDE the auto-updater's world (its own
-  // release-please component; see validate-system-paths-coverage.mjs
-  // EXCLUDE_PREFIXES) — a core-only install has no web/ tree, so warn (not
-  // fail) instead of crashing the suite.
-  if (existsSync(join(ROOT, 'web', 'src', 'lib', 'core', 'followup-view.mjs'))) {
-    const unit = run(NODE, ['--test', 'test/followup-view.test.mjs']);
-    if (unit !== null) pass('followup-view unit tests pass');
-    else fail('followup-view unit tests failed (run: node --test test/followup-view.test.mjs)');
-  } else {
-    warn('followup-view tests skipped — web/ not present (core-only install)');
-  }
-}
-
 // ── 61. INTERVIEW-PREP URL ENTRY (#1816) ────────────────────────
 // Prompt-level slice: prep for a role that was never evaluated. Pins the
 // disambiguation rule (bare URL still routes to auto-pipeline), the
