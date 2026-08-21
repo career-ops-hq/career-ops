@@ -1,13 +1,22 @@
+// resolveTailoredCover locates the tailored COVER LETTER PDF the pdf mode wrote to
+// output/cover-…-{company}-….pdf — a sibling of resolveTailoredCv (web/src/lib/apply/cv.ts)
+// that must NEVER return a CV file, even when the CV's slug matches.
+//
+// Lives under web/tests/ so the web CI collects it and the core runner never has to
+// know it exists — no test-all.mjs hook, no update-system.mjs registration.
+//
+// Run (from web/, as `npm test` does):  node --test tests/lib/apply-cover-resolver.test.mjs
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
-import { resolveTailoredCover } from "../web/src/lib/apply/cover.ts";
-
-// resolveTailoredCover locates the tailored COVER LETTER PDF the pdf mode wrote to
-// output/cover-…-{company}-….pdf — a sibling of resolveTailoredCv (web/src/lib/apply/cv.ts)
-// that must NEVER return a CV file, even when the CV's slug matches.
+// cover.ts reaches career-ops.ts through the "@/" tsconfig alias, which plain
+// `node --test` does not resolve; the helper installs a hook for it. The import
+// must be dynamic so the hook is registered before the specifier resolves.
+import "../helpers/web-ts-alias-loader.mjs";
+const { resolveTailoredCover } = await import("../../src/lib/apply/cover.ts");
 
 function fixture(files) {
   const root = mkdtempSync(join(tmpdir(), "career-ops-cover-"));

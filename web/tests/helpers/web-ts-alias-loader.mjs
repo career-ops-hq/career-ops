@@ -4,20 +4,31 @@
 // Node 22 already type-strips .ts on import — this hook is ONLY about specifier
 // resolution, not transpilation.
 //
-// Usage: node --import ./test/helpers/web-ts-alias-loader.mjs --test test/some.test.mjs
+// Usage: import this module for side effect, THEN reach the aliased module with a
+// dynamic import, so the hook is installed before that specifier is resolved:
+//
+//   import "../helpers/web-ts-alias-loader.mjs";
+//   const { thing } = await import("../../src/lib/thing.ts");
+//
+// A static `import … from "…/thing.ts"` would NOT work: ESM resolves every static
+// specifier in a module before any of its bodies run, so the hook would still be
+// uninstalled at the moment it is needed.
 import { register } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 // register() re-imports THIS file in a separate loader realm to install the
-// resolve() hook below — guard so the --import preload only registers once.
+// resolve() hook below — guard so repeated imports only register once.
 if (!globalThis.__careerOpsWebAliasRegistered) {
   globalThis.__careerOpsWebAliasRegistered = true;
-  register(import.meta.url, pathToFileURL(`${process.cwd()}/`));
+  register(import.meta.url, import.meta.url);
 }
 
-const WEB_SRC = path.join(process.cwd(), "web", "src");
+// Anchored to this file, not process.cwd(): `npm test` runs from web/ while a
+// root-level `node --test web/tests/…` runs from the repo root, and the alias
+// must resolve to the same web/src either way.
+const WEB_SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 const HAS_EXT = /\.(m?[jt]sx?|json)$/i;
 
 export async function resolve(specifier, context, nextResolve) {

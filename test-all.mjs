@@ -15833,16 +15833,6 @@ console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
   else fail('cover-resolver unit tests failed (run: node --test test/cover-resolver.test.mjs)');
 }
 
-console.log('\n60a. Tailored cover PDF resolver (web/src/lib/apply/cover.ts)');
-{
-  // web/src TS libs use the "@/" tsconfig path alias, which only webpack/SWC
-  // understand — the tiny loader teaches plain `node --test` to follow it (no
-  // ts-node/tsx in this repo; Node 22 already type-strips .ts on import).
-  const unit = run(NODE, ['--import', './test/helpers/web-ts-alias-loader.mjs', '--test', 'test/apply-cover-resolver.test.mjs']);
-  if (unit !== null) pass('apply/cover.ts resolveTailoredCover unit tests pass');
-  else fail('resolveTailoredCover unit tests failed (run: node --import ./test/helpers/web-ts-alias-loader.mjs --test test/apply-cover-resolver.test.mjs)');
-}
-
 // ── 61. INTERVIEW-PREP URL ENTRY (#1816) ────────────────────────
 // Prompt-level slice: prep for a role that was never evaluated. Pins the
 // disambiguation rule (bare URL still routes to auto-pipeline), the
