@@ -10,6 +10,27 @@ import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;
+// Upper bound on the extra wait for a same-origin child frame to populate, and
+// the poll interval inside it. Only spent when such a frame exists at all.
+const FRAME_CONTENT_TIMEOUT_MS = 6_000;
+const FRAME_CONTENT_POLL_MS = 500;
+
+/**
+ * Same-origin test used to decide whether a child frame is part of the posting
+ * or somebody else's widget. Deliberately strict: about:blank, data: frames,
+ * tag managers and ad iframes all fail it, so only the ATS's own embedded
+ * document contributes text and apply controls.
+ */
+export function sameOrigin(frameUrl, pageUrl) {
+  try {
+    const a = new URL(frameUrl);
+    const b = new URL(pageUrl);
+    if (a.protocol !== 'http:' && a.protocol !== 'https:') return false;
+    return a.origin === b.origin;
+  } catch {
+    return false;
+  }
+}
 
 // The default Playwright headless UA contains "HeadlessChrome", which Cloudflare
 // and similar WAFs flag — portals like pracuj.pl then serve a 403 challenge page
@@ -180,7 +201,13 @@ async function resolveDnsCached(hostname) {
   try {
     const addresses = await hostResolver(hostname);
     if (addresses.length === 0) {
-      throw new Error(`DNS resolution returned no addresses for ${hostname}`);
+      // Tagged so the route guard can tell "this host does not exist" apart from
+      // "this host resolves into private space". The first is a dead third-party
+      // script, the second is an egress-guard hit. Only the second says anything
+      // about the page being checked.
+      const missing = new Error(`DNS resolution returned no addresses for ${hostname}`);
+      missing.livenessCode = 'dns_no_addresses';
+      throw missing;
     }
     dnsCache.set(hostname, addresses);
     return addresses;
@@ -235,7 +262,36 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         return route.continue();
       } catch (err) {
         console.warn(`Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
-        page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        // A host that resolves to nothing is a DEAD THIRD-PARTY SCRIPT, not a
+        // statement about the posting. Measured 2026-08-14 over a 217-URL
+        // recheck: 78 live postings were returned as `uncertain` because an
+        // analytics or ad host on the page no longer exists — 53 on
+        // personalisation.visitorqueue.com, 17 on s7.addthis.com (AddThis was
+        // shut down in 2023), the rest on fluidads and cloudfront. One was
+        // opened by hand to confirm: 11,178 characters of live posting and a
+        // working apply control, called uncertain because of a dead tracker.
+        //
+        // The request is still aborted either way, so the egress guard loses
+        // nothing. Only the VERDICT stops being poisoned, and only for a
+        // subresource: if the main document itself cannot resolve, that is a
+        // real finding about the posting and still counts.
+        // Whether this was the main document or a subresource can only be asked
+        // of a real Playwright request. Callers may pass a lighter route double
+        // (the test suite does, with request() returning just a url()), and for
+        // those the answer is unknowable — so default to TRUE, which keeps the
+        // pre-existing behaviour of poisoning the verdict. The relaxation only
+        // applies where we can positively establish it was a subresource.
+        const request = typeof route?.request === 'function' ? route.request() : null;
+        const canTell =
+          typeof request?.isNavigationRequest === 'function' &&
+          typeof request?.frame === 'function' &&
+          typeof page?.mainFrame === 'function';
+        const isMainDocument = canTell
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
+        if (err?.livenessCode !== 'dns_no_addresses' || isMainDocument) {
+          page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        }
         return route.abort('blockedbyclient');
       }
     });
@@ -250,7 +306,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
 
     const finalUrl = page.url();
     const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
-    const applyControls = await page.evaluate(() => {
+    const extractApplyControls = () => {
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
       );
@@ -281,13 +337,103 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
           return label;
         })
         .filter(Boolean);
-    });
+    };
+
+    let applyControls = await page.evaluate(extractApplyControls);
+    let frameText = '';
+
+    // Some ATS render the whole posting inside a same-origin iframe and leave the
+    // top-level document as an empty shell. iCIMS is the reference case: measured
+    // 2026-08-14, the outer document of a LIVE posting held 13 characters and no
+    // apply control, so classifyLiveness reached `insufficient_content` and called
+    // it expired. 92 live postings were closed that way in one sweep, and a false
+    // `expired` is the expensive direction — it is written to scan-history as
+    // skipped_expired and dedup-filters the job out of every later scan.
+    //
+    // Reading same-origin child frames cannot resurrect a dead posting: a removed
+    // iCIMS job answers HTTP 410 at the top level (verified on two fabricated job
+    // ids and one genuinely dead posting), so it short-circuits on status long
+    // before any content check, and its error frame carries zero apply controls.
+    // The frame ATTACHES fast but FILLS late. Measured on iCIMS 2026-08-14: the
+    // same-origin child frame is present at 2000ms with 0 characters and only
+    // populates between 3000 and 4000ms, so reading it at HYDRATION_WAIT_MS gets
+    // an empty document and changes nothing. Poll until it has content, bounded.
+    // The cost is only paid on pages that actually have a same-origin child
+    // frame, so the ATS that render inline are unaffected.
+    // Frame aggregation is an enhancement, never a requirement. Callers may pass
+    // a lightweight page object that only implements goto/url/evaluate — the
+    // test doubles in test-all.mjs do — and such a caller must keep getting the
+    // top-level verdict rather than a navigation_error.
+    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
+
+    const childFrames = () =>
+      !supportsFrames
+        ? []
+        : page.frames().filter((frame) => {
+            if (frame === page.mainFrame()) return false;
+            try {
+              return sameOrigin(frame.url() || '', finalUrl); // excludes about:blank, ads, tag managers
+            } catch {
+              return false;
+            }
+          });
+
+    // A 404/410 is decided by the status line alone, so no amount of frame
+    // content can change it. Without this, a dead posting whose error page also
+    // renders into an iframe pays the poll while that error page fills, purely
+    // to be told what the status already said. Measured on two dead iCIMS
+    // postings: 5822ms and 3314ms end to end, the spread being poll iterations.
+    //
+    // The status rule is NOT restated here. classifyLiveness owns it, so this
+    // asks it and keys off the code it returns; a duplicated `status === 410`
+    // would be a second copy of that rule waiting to drift.
+    const topLevelVerdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+    if (topLevelVerdict.code === 'http_gone') {
+      return topLevelVerdict;
+    }
+
+    if (childFrames().length > 0) {
+      const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
+      // Wait for EVERY qualifying frame, not merely the first one to fill: with
+      // two same-origin frames the posting could otherwise be read while still
+      // empty. Measured across five iCIMS tenants there is exactly one
+      // qualifying frame per page, so in practice this is the same loop.
+      for (;;) {
+        let anyEmpty = false;
+        for (const frame of childFrames()) {
+          try {
+            const probe = await frame.evaluate(() => document.body?.innerText ?? '');
+            if (!probe.trim()) anyEmpty = true;
+          } catch {
+            // detached mid-poll; try again on the next tick
+          }
+        }
+        if (!anyEmpty || Date.now() >= deadline) break;
+        await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
+      }
+    }
+
+    for (const frame of childFrames()) {
+      try {
+        const text = await frame.evaluate(() => document.body?.innerText ?? '');
+        if (text && text.trim()) frameText += '\n' + text;
+        applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
+      } catch {
+        // detached or cross-origin mid-read; the top-level reading still stands
+      }
+    }
 
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
     }
 
-    return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+    return classifyLiveness({
+      status,
+      requestedUrl: url,
+      finalUrl,
+      bodyText: bodyText + frameText,
+      applyControls,
+    });
   } catch (err) {
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };

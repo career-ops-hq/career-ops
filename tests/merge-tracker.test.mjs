@@ -211,6 +211,54 @@ try {
   } else {
     fail(`equal-score re-eval mishandled: ${sameRow.trim()} | ${same.output.trim()}`);
   }
+
+  // --- Unscoreable re-evals must NOT overwrite a real score (#2803) -----------
+  // parseScore() maps every documented no-score sentinel (N/A / — / -, AGENTS.md
+  // #1799) to 0, so a re-eval that failed to fetch used to read as a genuine
+  // zero, trip the downgrade path above, and overwrite the real score with the
+  // sentinel — unrecoverably, since the tracker is gitignored and no .bak is
+  // written. "No score" is not "scored zero": the row must be left untouched.
+  const NA_SEED = '| 4 | 2026-06-01 | DoorDash | Senior Associate, Finance & Strategy | 4.0/5 | Evaluated | ❌ | '
+    + '[4](../reports/4-dd.md) | good |\n';
+  for (const sentinel of ['N/A', '—', '-']) {
+    // The re-eval carries a DIFFERENT report number ([9]) so the assertion can
+    // prove the row keeps its own report link rather than adopting the re-eval's.
+    const r = runMergeDetailed({
+      '9-dd.tsv': `9\t2026-06-25\tDoorDash\tSenior Associate, Finance & Strategy\tEvaluated\t${sentinel}\t❌\t[9](reports/9-dd.md)\tfetch failed\n`,
+    }, { rows: NA_SEED });
+    const row = r.tracker.split('\n').find(l => /DoorDash/.test(l)) || '';
+    const scoreKept = /\|\s*4\.0\/5\s*\|/.test(row);
+    const reportKept = /\[4\]\(/.test(row) && !/\[9\]/.test(row);
+    const skippedCleanly = /⏭️1 skipped/.test(r.output)
+      && !/🔄1 updated/.test(r.output) && !/DOWNGRADE/.test(r.output);
+    if (scoreKept && reportKept && skippedCleanly) {
+      pass(`an unscoreable "${sentinel}" re-eval keeps the score and report link, and is skipped (#2803)`);
+    } else {
+      fail(`"${sentinel}" re-eval mishandled — row: ${row.trim()} | out: ${r.output.trim()}`);
+    }
+  }
+
+  // The guard only fires when a real score would be lost. A sentinel re-eval of a
+  // row that is itself unscored has nothing to lose, so it still writes through
+  // and refreshes the row (date/notes/report) rather than being skipped — the
+  // documented sentinel contract for backfilled rows (#1799) is preserved.
+  const NOSCORE_SEED = '| 6 | 2026-06-01 | Globex | Data Eng | N/A | Evaluated | ❌ | '
+    + '[6](../reports/6-globex.md) | pending eval |\n';
+  const naOntoNa = runMergeDetailed({
+    '6-globex.tsv': '6\t2026-06-25\tGlobex\tData Eng\tEvaluated\tN/A\t❌\t[6](reports/6-globex.md)\trefetch, still no score\n',
+  }, { rows: NOSCORE_SEED });
+  const naOntoNaRow = naOntoNa.tracker.split('\n').find(l => /Globex/.test(l)) || '';
+  const wroteThrough = /🔄1 updated/.test(naOntoNa.output) && !/⏭️1 skipped/.test(naOntoNa.output);
+  // Counters alone can lie — assert the row actually took the re-eval's date,
+  // report and notes (keeping the existing note first, per mergeNotes #2483).
+  const refreshed = /\|\s*2026-06-25\s*\|/.test(naOntoNaRow)
+    && /\[6\]\(reports\/6-globex\.md\)/.test(naOntoNaRow)
+    && /pending eval\. Re-eval 2026-06-25.*refetch, still no score/.test(naOntoNaRow);
+  if (wroteThrough && refreshed) {
+    pass('a sentinel re-eval of an already-unscored row writes through, refreshing date/report/notes (nothing to lose)');
+  } else {
+    fail(`sentinel re-eval of an unscored row was mishandled: ${naOntoNaRow.trim()} | ${naOntoNa.output.trim()}`);
+  }
 } catch (e) {
   fail(`merge-tracker.mjs tests crashed: ${e.message}`);
 }

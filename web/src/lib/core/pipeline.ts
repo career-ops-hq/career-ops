@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "./scan";
@@ -40,15 +41,20 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
   }
 
   const scanUrl = pathToFileURL(rootScript("scan")).href;
+  const localTodayUrl = pathToFileURL(path.join(careerOpsRoot(), "lib", "local-today.mjs")).href;
   const code = `
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
+import { localToday } from ${JSON.stringify(localTodayUrl)};
 let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => { input += d; });
 process.stdin.on("end", async () => {
   try {
     const offers = JSON.parse(input);
-    const date = new Date().toISOString().slice(0, 10);
+    // LOCAL calendar day, not the UTC one — west of Greenwich, an evening
+    // add would otherwise stamp scan-history.tsv's first_seen a day ahead,
+    // opening scan.mjs's recheck/cooldown gate a day late for this row (#3070).
+    const date = localToday();
     await appendToPipeline(offers);
     await appendToScanHistory(offers, date, "added");
     process.stdout.write(JSON.stringify({ added: offers.length }));

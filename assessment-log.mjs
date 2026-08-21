@@ -33,6 +33,16 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const LOG_PATH = join(CAREER_OPS, 'data/assessments.tsv');
 
+const KNOWN_FLAGS = ['--self-test', '--summary', '--help', '-h'];
+const ADD_VALUE_FLAGS = ['--company', '--report', '--platform', '--subject', '--threshold', '--score', '--stale'];
+
+const USAGE = `Usage:
+  node assessment-log.mjs add --company <name> [--report <num>] --platform <vendor> --subject <topic> [--threshold <pct>] [--score <pct>] [--stale "<note>"]
+  node assessment-log.mjs                         # print the assessment log as JSON
+  node assessment-log.mjs --summary               # print a human-readable summary
+  node assessment-log.mjs --self-test             # run the in-memory test suite
+  node assessment-log.mjs --help                  # print this usage block and exit (-h is an alias)`;
+
 const HEADER_COMMENT = [
   '# assessments.tsv — append-only skills-assessment log (user layer). Never rewrite rows.',
   '# {YYYY-MM-DD}\\t{company}\\t{report#|-}\\t{platform}\\t{subject}\\t{threshold%|-}\\t{score%|-}\\t{stale_note}',
@@ -143,7 +153,7 @@ function addEntry(args) {
     row = buildRow(fields, today);
   } catch (e) {
     console.error(`assessment-log: ${e.message}`);
-    console.error('Usage: node assessment-log.mjs add --company <name> [--report <num>] --platform <vendor> --subject <topic> [--threshold <pct>] [--score <pct>] [--stale "<note>"]');
+    console.error(USAGE);
     process.exit(1);
   }
   // Append-only: existing rows are never rewritten. Create with header comment on first use.
@@ -273,6 +283,33 @@ function printSummary(result) {
 
 function main() {
   const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  // Values passed to the add subcommand remain positional data even when they
+  // start with a dash (for example an explicitly unknown "-" percentage).
+  // Only a leading-dash argument outside those value slots is a CLI flag.
+  const consumedValueIndices = new Set();
+  if (args[0] === 'add') {
+    args.forEach((arg, index) => {
+      if (ADD_VALUE_FLAGS.includes(arg) && args[index + 1] !== undefined && !args[index + 1].startsWith('--')) {
+        consumedValueIndices.add(index + 1);
+      }
+    });
+  }
+
+  const validFlags = args[0] === 'add' ? [...KNOWN_FLAGS, ...ADD_VALUE_FLAGS] : KNOWN_FLAGS;
+  const unknownFlags = args.filter((arg, index) =>
+    arg.startsWith('-') && !consumedValueIndices.has(index) && !validFlags.includes(arg));
+  if (unknownFlags.length) {
+    console.error(`assessment-log: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${validFlags.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
   if (args.includes('--self-test')) { selfTest(); return; }
   if (args[0] === 'add') { addEntry(args.slice(1)); return; }
 

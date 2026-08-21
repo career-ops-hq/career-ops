@@ -27,6 +27,9 @@ for (const relativePath of [
   'tracker-aliases.json',
   'tracker-parse.mjs',
   'tracker-utils.mjs',
+  // tracker-utils imports the shared lock-contention helpers (#2777 fix):
+  // a fixture that carries tracker-utils has to carry its import too.
+  'pipeline-lock.mjs',
   'lib/context-budget.mjs',
   'utils/token-tracker.mjs',
 ]) {

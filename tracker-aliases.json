@@ -11,7 +11,13 @@
   "score": "score",
   "status": "status",
   "pdf": "pdf",
+  "materials": "pdf",
   "report": "report",
+  "apply link": "applylink",
+  "apply": "applylink",
+  "follow-up": "followup",
+  "follow up": "followup",
+  "followup": "followup",
   "notes": "notes",
   "url": "url"
 }
