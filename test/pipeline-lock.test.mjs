@@ -22,7 +22,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS } from '../pipeline-lock.mjs';
+import {
+  acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
+  lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
+} from '../pipeline-lock.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -264,6 +267,64 @@ test('acquirePipelineLock: a recover guard abandoned by a crashed process still 
     const lock = await acquirePipelineLock(p, { timeoutMs: 1000, retryMs: 20, staleMs: 1 });
     lock.release();
     assert.equal(existsSync(guardDir), false, 'the abandoned recover guard should have been cleaned up');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The verdict itself. A cross-process reproduction of the bug below is
+// inherently a race — it needs a rival acquirer to win the mkdir inside the
+// microseconds between the verdict and the rm — so the decision is asserted
+// directly instead. What the caller does with each verdict is the other half,
+// and it is a two-line branch right at the call site.
+test('lockRecoveryVerdict: an absent directory is VANISHED, never STALE — "gone" is not a licence to delete', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    // Nothing at the path at all: the exact state that produced
+    // `canRecover:VANISHED->true` in the trace, immediately before a rival
+    // acquirer created a fresh lock there and had it deleted underneath it.
+    assert.equal(lockRecoveryVerdict(lockDir, 1), RECOVER_VANISHED);
+    // The distinction that matters: a caller that deletes on STALE and only on
+    // STALE cannot destroy a lock it never observed.
+    assert.notEqual(lockRecoveryVerdict(lockDir, 1), RECOVER_STALE);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing meanings', () => {
+  const root = fixtureRoot();
+  try {
+    const dead = join(root, 'data', 'dead.lock');
+    writeCrashedHolder(dead);
+    assert.equal(lockRecoveryVerdict(dead, 1), RECOVER_STALE, 'a crashed holder is still reclaimable');
+
+    const live = join(root, 'data', 'live.lock');
+    mkdirSync(live, { recursive: true });
+    writeFileSync(join(live, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: 'live', started_at: new Date().toISOString(),
+    }), 'utf-8');
+    backdate(live, OWNERLESS_GRACE_MS * 50);
+    assert.equal(lockRecoveryVerdict(live, 1), RECOVER_LIVE, 'a live owner is never stale, however old');
+
+    const fresh = join(root, 'data', 'fresh.lock');
+    mkdirSync(fresh, { recursive: true });
+    assert.equal(lockRecoveryVerdict(fresh, 1), RECOVER_LIVE, 'ownerless but inside the grace floor (#2304)');
+
+    const aged = join(root, 'data', 'aged.lock');
+    mkdirSync(aged, { recursive: true });
+    backdate(aged, OWNERLESS_GRACE_MS * 5);
+    assert.equal(lockRecoveryVerdict(aged, 1), RECOVER_STALE, 'ownerless past the floor still ages out (#2304)');
+
+    // #2984: unreadable is not ownerless, and must not become VANISHED either —
+    // that would hand the caller the same delete by a different route.
+    const opaque = join(root, 'data', 'opaque.lock');
+    mkdirSync(opaque, { recursive: true });
+    mkdirSync(join(opaque, 'owner.json'));
+    backdate(opaque, OWNERLESS_GRACE_MS * 5);
+    assert.equal(lockRecoveryVerdict(opaque, 1), RECOVER_LIVE, 'a stamp we could not read protects the lock');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

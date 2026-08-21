@@ -101,17 +101,26 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 }
 
 // ── 3b. "Could not look" is never "recoverable" ──────────────────────
-// The third face of #2777: lockCanRecover's stat catch answered `true`
+// The third face of #2777: the recovery judgment's stat catch answered `true`
 // (recoverable) to EVERY stat failure, so a Windows EPERM on a mid-flight
 // directory let a caller delete a live lock created microseconds ago — its
 // winner then died with ENOENT writing owner.json. Only ENOENT (genuinely
 // vanished) may answer "nothing to recover"; both locks must carry the guard.
+//
+// The SHAPE of that answer now differs by file, so this asserts the rule rather
+// than one spelling of it. pipeline-lock.mjs — the definition — returns a
+// verdict, because "vanished" and "stale" are different answers and only one of
+// them licenses a delete: acting on "it was gone when I looked" destroys a lock
+// a rival acquirer created in the interim. The copies still return a boolean.
+// What every implementor must do is discriminate on ENOENT and never hand
+// "could not look" to the caller as recoverable.
 {
+  const ENOENT_ONLY = /return err\?\.code === 'ENOENT'(?:;|\s*\?\s*RECOVER_VANISHED\s*:\s*RECOVER_LIVE;)/;
   for (const file of protocolImplementors()) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     ok(
-      /return err\?\.code === 'ENOENT';/.test(src),
-      `${file}: lockCanRecover's stat catch answers recoverable ONLY on ENOENT`,
+      ENOENT_ONLY.test(src),
+      `${file}: the recovery judgment's stat catch answers recoverable ONLY on ENOENT`,
     );
     ok(
       !/catch\s*\{\s*\n\s*return true;/.test(src),
