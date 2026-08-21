@@ -20,7 +20,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
 
 // Import the deterministic provider
-import hnProvider from './src/providers/hackernews.mjs';
+import hnProvider from './providers/hackernews.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
 const PORTALS_PATH = 'portals.yml';
@@ -43,15 +43,21 @@ export async function extractWithAI(rawText, model) {
     const result = await model.generateContent(prompt);
     const response = result.response.text();
     const clean = response.replace(/```yaml|```/g, '').trim();
-    const parsed = yaml.load(clean);
-    
+
+    let parsed;
+    try {
+      parsed = yaml.load(clean);
+    } catch {
+      return null; // Always return null on parse errors
+    }
+
     if (!parsed || typeof parsed !== 'object') return null;
     return {
       company: (parsed.company || parsed.COMPANY || '').trim(),
       title: (parsed.title || parsed.TITLE || '').trim(),
       location: (parsed.location || parsed.LOCATION || 'Remote/Unknown').trim()
     };
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -63,11 +69,8 @@ async function main() {
   const myKeywords = loadKeywords();
   const { seen } = loadSeenUrls();
 
-  // STEP 1: Deterministic Fetch (Zero-Keys)
-  // We use the existing provider logic. No playwright needed.
   console.log(`🔍 Fetching latest HN Hiring data...`);
   
-  // Mocking the context for the provider
   const ctx = { fetchJson: async (url) => (await fetch(url)).json() };
   const rawJobs = await hnProvider.fetch({ name: 'HN' }, ctx);
 
@@ -76,9 +79,10 @@ async function main() {
   // STEP 2: The Architecture Branch
   if (apiKey) {
     console.log(`✨ AI Key detected. Processing with Gemini...`);
+    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+      model: modelName,
       systemInstruction: `Extract job data. Match: [${myKeywords.join(', ')}]. Format: YAML (company, title, location).`,
     });
 
