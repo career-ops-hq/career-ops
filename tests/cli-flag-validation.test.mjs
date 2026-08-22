@@ -6,7 +6,7 @@
 // the script reports a result for inputs nobody asked for at exit 0. Already
 // fixed in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
 // dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
-// and fix-slugs.mjs (#2980).
+// fix-slugs.mjs (#2980), and application-artifacts.mjs (#2774).
 //
 // HERMETIC: paths use tmpdir fixtures; nothing reads or writes the real data.
 import { test } from 'node:test';
@@ -36,6 +36,7 @@ const SCRIPTS = [
   ['fix-slugs.mjs', '--fle'],
   ['linkedin-join.mjs', '--csvv'],
   ['linkedin-join.mjs', '--sinse'],
+  ['application-artifacts.mjs', '--reprot'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -64,6 +65,32 @@ test('fix-slugs.mjs --help --bogus still errors', () => {
   const r = runScript('fix-slugs.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `fix-slugs.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
+});
+
+
+test('application-artifacts.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('application-artifacts.mjs', '--help');
+  assert.equal(r.status, 0, `application-artifacts.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'application-artifacts.mjs --help printed no usage block');
+});
+
+test('application-artifacts.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('application-artifacts.mjs', '-h');
+  assert.equal(r.status, 0, `application-artifacts.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'application-artifacts.mjs -h printed no usage block');
+});
+
+test('application-artifacts.mjs --help --bogus still errors', () => {
+  const r = runScript('application-artifacts.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `application-artifacts.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// --help must not reach the required-argument check: before #2774 the flag was
+// swallowed by parseArgs's strict mode and reported as an unknown option.
+test('application-artifacts.mjs --help wins over the missing-required-args error', () => {
+  const r = runScript('application-artifacts.mjs', '--help');
+  assert.doesNotMatch(r.all, /Unknown option/i, '--help was still treated as an unrecognized option');
 });
 
 
