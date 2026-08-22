@@ -74,6 +74,18 @@ test('--applied-days -5 is rejected instead of silently accepting a negative win
   assert.match(result.stderr, /--applied-days requires a non-negative integer, got "-5"/);
 });
 
+test('--applied-days 1.5 is rejected, not truncated to 1', () => {
+  const result = runCadence('--applied-days', '1.5');
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.match(result.stderr, /--applied-days requires a non-negative integer, got "1\.5"/);
+});
+
+test('--applied-days 10days is rejected, not truncated to 10', () => {
+  const result = runCadence('--applied-days', '10days');
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.match(result.stderr, /--applied-days requires a non-negative integer, got "10days"/);
+});
+
 test('--applied-days=10 (equals form) reaches analysis instead of being silently discarded', () => {
   // Whether analysis then succeeds depends on this machine's own
   // data/applications.md (there is no path override for this script), so this

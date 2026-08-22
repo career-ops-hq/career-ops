@@ -36,7 +36,17 @@ const overdueOnly = args.includes('--overdue-only');
 // can't see the `=` form and used to silently discard it, falling back to the
 // default cadence for a value the caller did supply (#2401/#2402 defect class).
 const appliedDaysRaw = flagValue(args, '--applied-days');
-const appliedDaysOverride = appliedDaysRaw !== undefined ? parseInt(appliedDaysRaw, 10) : null;
+
+// Whole-string match, not a bare parseInt: parseInt('1.5', 10) is 1 and
+// parseInt('10days', 10) is 10 — both truncate a bad value into a plausible
+// one instead of rejecting it, which is the exact silent-wrong-answer shape
+// this file is being fixed to close. Exported so a value's actual numeric
+// effect can be asserted directly, rather than only "the CLI didn't error".
+const APPLIED_DAYS_RE = /^\d+$/;
+export function parseAppliedDaysOverride(raw) {
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+}
+const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
