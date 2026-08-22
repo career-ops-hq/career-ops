@@ -320,7 +320,7 @@ function resolveRow(rows) {
   if (flags.report !== null) {
     const num = parseInt(flags.report, 10);
     return resolveCandidates(
-      rows.filter(r => extractTrackerReportNumbers(r.report).includes(num)),
+      rows.filter(r => extractTrackerReportNumbers(r.report, r.notes).includes(num)),
       {
         notFound: `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
           'use --row N to select by tracker #.)',
@@ -399,7 +399,7 @@ const target = resolveRow(rows);
 // teaches callers to pass --force, which disables it everywhere including the
 // cases it was written for.
 if (isBareNumericSelector && !flags.force) {
-  const reportNums = extractTrackerReportNumbers(target.report);
+  const reportNums = extractTrackerReportNumbers(target.report, target.notes);
   const mismatched = reportNums.filter(num => num !== target.num);
   if (mismatched.length > 0) {
     failWith(
@@ -425,7 +425,7 @@ if (isBareNumericSelector && !flags.force) {
   // not see. Bare "#N" then names two applications at once and must not write.
   if (reportNums.length === 0) {
     const num = parseInt(selector, 10);
-    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report, r.notes).includes(num));
     if (linkers.length > 0) {
       const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
       failWith(
