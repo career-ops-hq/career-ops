@@ -4,8 +4,8 @@
 // Backward-compatible: with no config and no named files, resolves the base
 // templates/cv-template.html (name "standard"), identical to prior behavior.
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
@@ -78,12 +78,17 @@ export function parseMeta(path) {
   return meta;
 }
 
-export function listTemplates(kind, { dir = DEFAULT_TEMPLATES_DIR, format = 'html' } = {}) {
-  const cfg = KINDS[kind];
-  if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
-  assertFormat(format);
-  if (!existsSync(dir)) return [];
+function isDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function scanTemplateDir(dir, cfg, format, isRoot) {
   const out = [];
+  if (!existsSync(dir)) return out;
   for (const file of readdirSync(dir)) {
     const parsed = parseFilename(cfg.prefix, file);
     if (!parsed || parsed.format !== format) continue;
@@ -95,9 +100,51 @@ export function listTemplates(kind, { dir = DEFAULT_TEMPLATES_DIR, format = 'htm
       path,
       format: parsed.format,
       meta,
+      isRoot,
     });
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+export function listTemplates(kind, { dir = DEFAULT_TEMPLATES_DIR, format = 'html' } = {}) {
+  const cfg = KINDS[kind];
+  if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
+  assertFormat(format);
+  const out = [];
+
+  // Scan root templates directory
+  out.push(...scanTemplateDir(dir, cfg, format, true));
+
+  // Scan immediate subdirectories (one level only, not recursive)
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir)) {
+      const subdir = resolve(dir, entry);
+      if (!isDirectory(subdir)) continue;
+      // Skip the shared sections/ directory
+      if (entry === 'sections') continue;
+      out.push(...scanTemplateDir(subdir, cfg, format, false));
+    }
+  }
+
+  // Deduplicate by name: prefer root-level templates over packed ones
+  const seen = new Map();
+  for (const t of out) {
+    const existing = seen.get(t.name);
+    if (!existing) {
+      seen.set(t.name, t);
+    } else if (existing.isRoot && !t.isRoot) {
+      // existing is from root dir, t is from subdir — keep existing (root preferred)
+    } else if (!existing.isRoot && t.isRoot) {
+      // t is from root dir, existing is from subdir — replace with root
+      seen.set(t.name, t);
+    }
+    // If both from same level (both root or both subdirs), keep first encountered (stable)
+  }
+
+  // Strip isRoot before returning (internal only)
+  return Array.from(seen.values())
+    .map(({ isRoot, ...rest }) => rest)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function validateTemplate(path, kind) {
@@ -136,6 +183,23 @@ export function resolveTemplate(kind, name, opts = {}) {
 
   const explicit = Boolean(name && String(name).trim());
   let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath }) || 'standard');
+
+  // Prefer discovered templates (includes one-level packs)
+  const discovered = listTemplates(kind, { dir, format });
+  const match = discovered.find((t) => t.name === chosen);
+  if (match) {
+    if (format === 'html') {
+      const v = validateTemplate(match.path, kind);
+      if (!v.ok) {
+        throw new Error(
+          `Template ${match.path} missing required placeholders: ${v.missing.map((m) => `{{${m}}}`).join(', ')}`
+        );
+      }
+    }
+    return match.path;
+  }
+
+  // Fallback: construct filename directly (backward compatibility for flat templates)
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
   let path = resolve(dir, fileFor(chosen));
