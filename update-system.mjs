@@ -1021,24 +1021,88 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // using the original merge-base would mistake the previous update's files
   // for user edits. Keep the merge-base fallback for installations without a
   // recorded updater commit.
-  let baseline = null;
+  //
+  // The most-recent matching updater commit is not automatically the correct
+  // (i.e. most recent) baseline, though: an install that received a
+  // legitimate out-of-band sync with upstream AFTER its last `apply` run (a
+  // manually merged PR, e.g. #25 in this fork's own history) has a
+  // merge-base with upstream that is NEWER than that stale updater commit.
+  // Anchoring on the stale commit makes every file the out-of-band sync
+  // touched look "changed locally" — including files the install never
+  // touched — which is exactly what stuck package.json and tracker-utils.mjs
+  // (and ~220 other files) as permanently "diverged" in #32.
+  //
+  // Picking the more recent candidate fixes it. Ancestry is the definitive
+  // signal whenever it applies — deterministic, immune to clock skew and
+  // rewritten history — so try it first. But this fork's own history has the
+  // updater commit and the merge-base sitting on commits with NO ancestor
+  // relation to each other at all (a stale side-branch auto-update commit vs.
+  // a later, independently-merged upstream sync): `merge-base --is-ancestor`
+  // fails in BOTH directions for that pair, and ancestry alone has no way to
+  // order them. Commit time (`%ct`) is the fallback for that genuinely
+  // unrelated case only — it is rewritable (rebase/amend/cherry-pick), so it
+  // is deliberately not the primary signal.
+  let mergeBaseCandidate = null;
   try {
-    const updaterCommit = runGit(
+    mergeBaseCandidate = runGit('merge-base', 'HEAD', upstreamRef) || null;
+  } catch {
+    mergeBaseCandidate = null;
+  }
+
+  let updaterCommit = null;
+  try {
+    const found = runGit(
       'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD',
     ).trim();
-    if (updaterCommit) {
-      runGit('merge-base', '--is-ancestor', updaterCommit, 'HEAD');
-      baseline = updaterCommit;
+    if (found) {
+      runGit('merge-base', '--is-ancestor', found, 'HEAD');
+      updaterCommit = found;
     }
   } catch {
-    baseline = null;
+    updaterCommit = null;
   }
-  if (!baseline) {
+
+  const isAncestor = (maybeAncestor, maybeDescendant) => {
     try {
-      baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+      runGit('merge-base', '--is-ancestor', maybeAncestor, maybeDescendant);
+      return true;
     } catch {
-      baseline = null;
+      return false;
     }
+  };
+
+  const commitTimeOf = (sha) => {
+    try {
+      return parseInt(runGit('log', '-1', '--format=%ct', sha).trim(), 10);
+    } catch {
+      return NaN;
+    }
+  };
+
+  let baseline = null;
+  if (updaterCommit && mergeBaseCandidate) {
+    if (updaterCommit === mergeBaseCandidate) {
+      baseline = updaterCommit;
+    } else if (isAncestor(updaterCommit, mergeBaseCandidate)) {
+      // updaterCommit precedes mergeBaseCandidate: an out-of-band sync moved
+      // the true last-synced point forward past the recorded updater commit.
+      baseline = mergeBaseCandidate;
+    } else if (isAncestor(mergeBaseCandidate, updaterCommit)) {
+      // The common, intended case: the updater commit is the later, tighter
+      // baseline.
+      baseline = updaterCommit;
+    } else {
+      // Genuinely unrelated — ancestry cannot order them. Fall back to
+      // commit time; an unreadable timestamp keeps the pre-existing
+      // behavior of preferring the updater commit.
+      const updaterTime = commitTimeOf(updaterCommit);
+      const mergeBaseTime = commitTimeOf(mergeBaseCandidate);
+      baseline = (Number.isFinite(mergeBaseTime) && mergeBaseTime > updaterTime)
+        ? mergeBaseCandidate
+        : updaterCommit;
+    }
+  } else {
+    baseline = updaterCommit || mergeBaseCandidate;
   }
 
   const changedLocally = new Set(diffNames(baseline || 'HEAD'));
