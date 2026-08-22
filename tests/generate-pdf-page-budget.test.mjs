@@ -315,10 +315,15 @@ try {
   const externalInputRun = runPdf([externalInput, externalInputPdf]);
   const externalTempFiles = readdirSync(externalInputRoot)
     .filter((name) => name.startsWith('.career-ops-render-'));
-  if (externalInputRun.status === 0 && existsSync(externalInputPdf) && externalTempFiles.length === 0) {
-    pass('generate-pdf keeps temporary HTML workspace-scoped for external input paths');
+  if (
+    externalInputRun.status !== 0 &&
+    externalInputRun.output.includes('Refusing to write the PDF outside the tracker workspace') &&
+    !existsSync(externalInputPdf) &&
+    externalTempFiles.length === 0
+  ) {
+    pass('generate-pdf rejects external input paths before creating temporary files');
   } else {
-    fail(`generate-pdf leaked a temporary HTML file beside external input: ${externalTempFiles.join(', ')}`);
+    fail(`generate-pdf mishandled an external input path: ${externalInputRun.output.trim()}`);
   }
 
   // Observe the temporary path before renderer cleanup. The CLI rejects an
