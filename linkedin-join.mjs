@@ -549,7 +549,11 @@ export function joinConnections(connections, targetList, { known = new Set(), in
       return a.company.localeCompare(b.company);
     });
 
-  return { targets, matchedConnections: matched.size };
+  // targetCount is merged.length, NOT the caller's raw list length: dedup
+  // collapses strong-equivalent targets, so counting the input would report two
+  // target companies for the single Akamai / Akamai Technologies target the
+  // output actually contains.
+  return { targets, matchedConnections: matched.size, targetCount: merged.length };
 }
 
 // --- Output ----------------------------------------------------------------
@@ -862,14 +866,14 @@ function main() {
     targetList = [{ company: companyQuery, source: 'query', tokens, tracker: null }];
   }
 
-  const { targets, matchedConnections } = joinConnections(filtered, targetList, { known, includeWeak });
+  const { targets, matchedConnections, targetCount } = joinConnections(filtered, targetList, { known, includeWeak });
 
   const result = {
     targets,
     totals: {
       connections: connections.length,
       connectionsConsidered: filtered.length,
-      targets: new Set(targetList.map(t => t.tokens.key)).size,
+      targets: targetCount,
       matchedCompanies: targets.length,
       matchedConnections,
     },

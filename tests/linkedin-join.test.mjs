@@ -224,3 +224,16 @@ test('an undated row cannot satisfy "connections made in/after YYYY"', () => {
   const kept = connections.filter(c => c.connectedYear != null && c.connectedYear >= 2020);
   assert.deepEqual(kept.map(c => c.name), ['Dated One']);
 });
+
+test('the reported target count reflects merged targets, not the raw input list', () => {
+  const conn = [{
+    name: 'Jane Doe', company: 'Akamai Technologies', title: 'Eng', linkedin: '', email: '',
+    connectedOn: '2020-01-01', connectedYear: 2020, tokens: companyTokens('Akamai Technologies'),
+  }];
+  const { targets, targetCount } = joinConnections(conn, [
+    { company: 'Akamai', source: 'tracker', tokens: companyTokens('Akamai'), tracker: { num: '7' } },
+    { company: 'Akamai Technologies', source: 'portals', tokens: companyTokens('Akamai Technologies'), tracker: null },
+  ]);
+  assert.equal(targets.length, 1);
+  assert.equal(targetCount, 1, 'counting raw keys would report 2 for one merged target');
+});
