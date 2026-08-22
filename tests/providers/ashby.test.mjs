@@ -188,6 +188,42 @@ try {
     pass('ashby.fetch() folds secondaryLocations (region/locality/country) into location, deduped, " · "-joined');
   else fail(`ashby.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
 
+  // Remote work model — `workplaceType` / `isRemote` live outside `location`,
+  // which keeps naming the office city on a fully remote posting. Without
+  // folding them in, a location_filter blocking that city silently drops a
+  // remote role. `workplaceType` is authoritative when present; `isRemote` is
+  // the fallback. See formatLocation() in providers/ashby.mjs.
+  const workModel = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          { title: 'Remote via workplaceType', location: 'San Francisco', isRemote: true, workplaceType: 'Remote' },
+          { title: 'Hybrid despite isRemote', location: 'New York', isRemote: true, workplaceType: 'Hybrid' },
+          { title: 'Onsite', location: 'Austin', isRemote: false, workplaceType: 'Onsite' },
+          { title: 'isRemote fallback, no workplaceType', location: 'Seattle', isRemote: true },
+          { title: 'Already says remote', location: 'Remote - US', isRemote: true, workplaceType: 'Remote' },
+          { title: 'Blank workplaceType falls back', location: 'Denver', isRemote: true, workplaceType: '   ' },
+        ],
+      }),
+    },
+  );
+
+  const workModelExpected = [
+    'San Francisco · Remote',
+    'New York',
+    'Austin',
+    'Seattle · Remote',
+    'Remote - US',
+    'Denver · Remote',
+  ];
+  const workModelActual = workModel.map((r) => r.location);
+  if (JSON.stringify(workModelActual) === JSON.stringify(workModelExpected)) {
+    pass('ashby.fetch() appends "Remote" from workplaceType/isRemote; workplaceType wins over isRemote; no duplicate "Remote"');
+  } else {
+    fail(`ashby.fetch() work-model locations = ${JSON.stringify(workModelActual)} (expected ${JSON.stringify(workModelExpected)})`);
+  }
+
   if (fetched[1]?.title === '' && fetched[1]?.url === '' && fetched[1]?.location === ''
       && fetched[1]?.salary === null && fetched[1]?.postedAt === undefined)
     pass('ashby.fetch() tolerates a sparse job (empty strings, null salary, undefined postedAt for a bad date)');

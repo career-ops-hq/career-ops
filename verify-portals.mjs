@@ -31,6 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 
@@ -285,7 +286,9 @@ export async function probeSlug(
 export function boardTitleOwner(html) {
   const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
   if (!m) return null;
-  const title = m[1].replace(/\s+/g, ' ').trim();
+  // Decode before collapsing whitespace: `&nbsp;` is a space once decoded, and
+  // collapsing first would leave it as literal text in the middle of a name.
+  const title = decodeEntities(m[1]).replace(/\s+/g, ' ').trim();
   if (!title) return null;
   return title.replace(/\s+jobs$/i, '').trim() || null;
 }

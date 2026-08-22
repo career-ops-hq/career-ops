@@ -81,11 +81,17 @@ function assertInsideWorkspace(absPath, label) {
   let canonical;
   try {
     canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
-  } catch {
+  } catch (err) {
     // Canonicalization failed (realpath raced away, permission error): containment
     // is unprovable, so fail closed rather than fall back to a lexical form that a
-    // symlinked ancestor could slip past.
-    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+    // symlinked ancestor could slip past. Named as its own failure, not as an
+    // escape: an intermittent CI-only hit of this guard (#3162) was undiagnosable
+    // while both branches threw the same message — "escapes" points a reader at
+    // the path, when the actual event was realpath failing underneath it.
+    throw new Error(
+      `${label} could not be canonicalized against the tracker workspace`
+      + ` (${/** @type {any} */ (err)?.code || 'realpath failed'} on ${probe}): ${absPath}`,
+    );
   }
   const rel = relative(__workspaceRoot, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {

@@ -3,12 +3,27 @@
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
 import { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT } from '../user-agent.mjs';
+import { providerFetchContext } from './_ip-guard.mjs';
 
 export { BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+async function fetchWithTimeout(url, opts = {}, consume) {
+  // Mark this request as provider traffic for the whole of its async life, so
+  // the patched dns.lookup validates the addresses it resolves (#3096). The
+  // guard is scoped rather than global because _dns-cache.mjs patches
+  // node:dns process-wide, and loopback has to keep working for everything
+  // that is not a provider fetch — see providers/_ip-guard.mjs.
+  //
+  // AsyncLocalStorage.run wraps the ENTIRE fetch, not just the call that
+  // starts it: the DNS lookup happens inside connect, well after the
+  // synchronous part of fetch() has returned, and the context has to still be
+  // entered when it does.
+  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
+}
+
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

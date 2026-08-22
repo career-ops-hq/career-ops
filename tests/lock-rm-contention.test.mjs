@@ -94,8 +94,12 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
       `${file} does not treat a non-EEXIST mkdir answer as fatal (Windows says EPERM under contention)`,
     );
     ok(
-      /return err\?\.code === 'ENOENT';/.test(src),
-      `${file} answers "recoverable" only on ENOENT, never on "could not look"`,
+      /import\s*\{[^}]*lockRecoveryVerdict[^}]*\}\s*from\s*'\.\/pipeline-lock\.mjs'/.test(src),
+      `${file} imports the recovery judgment from pipeline-lock`,
+    );
+    ok(
+      !/function lockCanRecover/.test(src) && !/function lockRecoveryVerdict/.test(src),
+      `${file} defines no second copy of the recovery judgment`,
     );
   }
 }
@@ -107,23 +111,29 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 // winner then died with ENOENT writing owner.json. Only ENOENT (genuinely
 // vanished) may answer "nothing to recover"; both locks must carry the guard.
 //
-// The SHAPE of that answer now differs by file, so this asserts the rule rather
-// than one spelling of it. pipeline-lock.mjs — the definition — returns a
-// verdict, because "vanished" and "stale" are different answers and only one of
-// them licenses a delete: acting on "it was gone when I looked" destroys a lock
-// a rival acquirer created in the interim. The copies still return a boolean.
-// What every implementor must do is discriminate on ENOENT and never hand
-// "could not look" to the caller as recoverable.
+// There is now exactly ONE place to assert this, which is the point: section 3
+// requires every other implementor to import the judgment rather than carry a
+// copy, so the rule is checked where it is decided instead of four times over.
+// Four correct copies were never the goal — #2984 asked for one definition, and
+// a repo that merely keeps its copies in agreement is one patch away from the
+// drift that produced all three faces of #2777.
+//
+// The verdict is tri-state because "vanished" and "stale" are different answers
+// and only one of them licenses a delete: acting on "it was gone when I looked"
+// destroys a lock a rival acquirer created in the interim.
 {
-  const ENOENT_ONLY = /return err\?\.code === 'ENOENT'(?:;|\s*\?\s*RECOVER_VANISHED\s*:\s*RECOVER_LIVE;)/;
+  const src = readFileSync(join(ROOT, 'pipeline-lock.mjs'), 'utf-8');
+  ok(
+    /return err\?\.code === 'ENOENT' \? RECOVER_VANISHED : RECOVER_LIVE;/.test(src),
+    'pipeline-lock.mjs: the stat catch answers VANISHED only on ENOENT, never on "could not look"',
+  );
+  ok(
+    !/return err\?\.code === 'ENOENT';/.test(src),
+    'pipeline-lock.mjs: the judgment is a verdict, not a boolean that conflates vanished with stale',
+  );
   for (const file of protocolImplementors()) {
-    const src = readFileSync(join(ROOT, file), 'utf-8');
     ok(
-      ENOENT_ONLY.test(src),
-      `${file}: the recovery judgment's stat catch answers recoverable ONLY on ENOENT`,
-    );
-    ok(
-      !/catch\s*\{\s*\n\s*return true;/.test(src),
+      !/catch\s*\{\s*\n\s*return true;/.test(readFileSync(join(ROOT, file), 'utf-8')),
       `${file}: no bare catch{return true} remains in a recovery judgment`,
     );
   }

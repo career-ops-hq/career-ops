@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync, rmSync as _rmSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -326,6 +326,51 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
     }
   }
   return out;
+}
+
+/**
+ * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
+ * reach `ROOT/node_modules` from.
+ *
+ * The PDF sandboxes are created under `ROOT/output` and run a copy of
+ * generate-pdf.mjs, whose siblings theme-style.mjs and tracker-utils.mjs both
+ * `import * as yaml from 'js-yaml'`. That specifier resolves by walking parent
+ * directories up into `ROOT/node_modules`, and the walk starts from the
+ * importer's REALPATH, because --preserve-symlinks is off by default. On a
+ * checkout whose `output/` is symlinked out of the repo -- the layout people
+ * adopt as the manual workaround for #524 -- the walk begins outside the repo,
+ * never reaches `ROOT/node_modules`, and every spawned script dies with
+ * ERR_MODULE_NOT_FOUND before parsing a single argument. The suite then reports
+ * 20 behaviour regressions in assertions that never ran (#3165).
+ *
+ * Relocating those sandboxes to `tmpdir()` does NOT fix this: tmpdir is outside
+ * the repo too. They work today only because `ROOT/output` happens to be
+ * physically inside it, which is the assumption worth removing rather than
+ * relocating. Linking the package into the sandbox's own `node_modules` --
+ * beside the `playwright` stub each sandbox already writes there -- makes the
+ * sandbox self-sufficient wherever it physically lives.
+ *
+ * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
+ * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @returns {string} Path to the package as seen from inside the sandbox.
+ */
+export function linkRepoPackage(sandboxDir, pkgName) {
+  const source = join(ROOT, 'node_modules', pkgName);
+  const dest = join(sandboxDir, 'node_modules', pkgName);
+  if (existsSync(dest)) return dest;
+  if (!existsSync(source)) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  }
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    // 'junction' is ignored on POSIX, and on Windows it is the one link type
+    // granted without Developer Mode or elevation -- the privilege whose absence
+    // aborted a whole suite in #2828. The copy below is the last resort.
+    symlinkSync(source, dest, 'junction');
+  } catch {
+    cpSync(source, dest, { recursive: true });
+  }
+  return dest;
 }
 
 let bashCache = null;
