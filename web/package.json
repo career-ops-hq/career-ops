@@ -30,12 +30,12 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
+    "@types/node": "25.9.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.18",
     "tailwindcss": "^4.2.2",
-    "typescript": "^7.0.0"
+    "typescript": "7.0.2"
   },
   "overrides": {
     "postcss": "$postcss",
