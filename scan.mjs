@@ -29,6 +29,12 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+ *   node scan.mjs --since 7                    # postings from the last 7 days
+ *   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+ *   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+ *   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+ *   node scan.mjs --quiet                      # suppress the manifesto footer
+ *   node scan.mjs --help                       # print this usage block and exit
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
@@ -46,8 +52,10 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -91,80 +99,13 @@ const CONCURRENCY = 10;
 
 // ── Title filter ────────────────────────────────────────────────────
 
-// Compile a lowercased keyword into a matcher. Short all-letter acronyms
-// (2-3 chars: cfo, coo, sdr, bdr, gsi…) match on WORD BOUNDARIES so "COO" no
-// longer matches "Coordinator", "SDR" no longer matches anything mid-word, etc.
-// Multi-word phrases and keywords containing non-letters (".NET", "SAP ",
-// "L&D") keep fast, permissive substring matching.
-export function compileKeyword(kw) {
-  if (/^[a-z]{2,3}$/.test(kw)) {
-    const re = new RegExp(`\\b${kw}\\b`);
-    return (lower) => re.test(lower);
-  }
-  return (lower) => lower.includes(kw);
-}
-
-// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
-// must appear in the title, in any order. `title_filter.positive` is otherwise
-// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
-// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
-// cannot hit inside another word. Either way an entry expresses one exact
-// spelling and nothing else, and real titles vary in separator and word order:
-//
-//   "Director of Engineering" misses  Director - Software Engineering
-//                                     Director Engineering (Mobile Platform)
-//                                     Senior Director, Platform Engineering
-//
-// The combinations are {level} x {, - of none} x {optional domain word}: no
-// hand-maintained list of literal spellings converges, and every miss is
-// silent — the summary reports one "filtered by title" count that cannot tell
-// a well-tuned filter from a leaking one (#2544).
-//
-// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
-// would turn the perfectly ordinary keyword "C++" into "c", which matches
-// almost every title — trading a silent drop for a silent flood.
-const AND_SEPARATOR = /\s+\+\s+/;
-
-/**
- * Compile one `positive` entry into a matcher.
- *
- * Entries without " + " keep their exact previous behaviour, so existing
- * configs are unaffected.
- *
- * @param {string} keyword - already trimmed and lowercased.
- * @returns {(lower: string) => boolean}
- */
-export function compilePositiveKeyword(keyword) {
-  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
-  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
-  if (terms.length === 0) return compileKeyword(keyword);
-  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
-  // still matched on a word boundary and cannot hit "vp" inside another word.
-  const matchers = terms.map(compileKeyword);
-  return (lower) => matchers.every(m => m(lower));
-}
-
-export function buildTitleFilter(titleFilter) {
-  // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
-  // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
-    .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
-    .filter(k => k.length > 0)
-    .map(compile);
-  // AND-groups are a POSITIVE-side feature only. On the negative side an entry
-  // is a veto, and " + " there would read as "reject when both appear", which
-  // is a different and much easier thing to write as two entries.
-  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
-  const negative = normalize(titleFilter?.negative, compileKeyword);
-
-  return (title) => {
-    const lower = (title || '').toLowerCase();
-    const hasPositive = positive.length === 0 || positive.some(m => m(lower));
-    const hasNegative = negative.some(m => m(lower));
-    return hasPositive && !hasNegative;
-  };
-}
+// How a title_filter matches a title lives in title-keywords.mjs, because
+// openrouter-runner.mjs filters titles too and cannot import this file (scan.mjs
+// creates data/ at import time). It called a second, hand-kept copy of this
+// logic until the two drifted; there is now one implementation and this file
+// re-exports it, so existing importers — scan-ats-full.mjs and test-all.mjs's
+// sections 11b and 44 among them — keep resolving it from here.
+export { compileKeyword, compilePositiveKeyword, buildTitleFilter };
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -184,6 +125,8 @@ function compiledPositiveMatchers(positiveList) {
 // Returns the raw (as-written in portals.yml) `title_filter.positive` keywords
 // that matched a given title — used to scope `content_filter.by_title_keyword`
 // overrides to only the categories that opted into a stricter content check.
+// "Raw" includes a `word:` prefix if the entry carries one, so a
+// `by_title_keyword` key must be written exactly as the positive entry is.
 export function matchedTitleKeywords(title, titleFilter) {
   const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
   const lower = (title || '').toLowerCase();
@@ -197,6 +140,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 // Semantics (case-insensitive substring, in this order):
 //   - Empty / whitespace-only / non-string location → pass (don't penalize
 //     missing or malformed provider data)
+//   - `block_hard` matches → reject (the only tier `always_allow` cannot
+//     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
 //     the home region is an option, even though "france" is blocked)
@@ -334,6 +279,7 @@ export function buildLocationFilter(locationFilter) {
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
+  const blockHard = compileLocationKeywordList(locationFilter.block_hard);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
@@ -341,6 +287,21 @@ export function buildLocationFilter(locationFilter) {
     // Nothing to judge on either field → pass (don't penalize missing data).
     if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    // `block_hard` is the ONE tier always_allow cannot override. It exists because
+    // a European city name can be a whole word inside a non-European location, so
+    // word-boundary matching (#2087) does not catch it and always_allow's
+    // unconditional win silently discards the user's own block entry:
+    //
+    //   "Porto Alegre, Rio Grande do Sul, Brazil"  always_allow "Porto" beats block "Brazil"
+    //   "USA - New York - Malta"                   always_allow "Malta" beats block "USA"
+    //
+    // Both configs already listed the country under `block`. Plain `block` cannot
+    // be promoted wholesale — always_allow was added in #650 precisely so a
+    // multi-location posting survives one blocked city ("Stockholm · London ·
+    // Madrid" must not die on a London entry) — so the user marks the entries
+    // that are country-level and therefore never a false rejection. Opt-in and
+    // additive: a config without `block_hard` behaves exactly as before.
+    if (blockHard.length > 0 && blockHard.some(matches)) return false;
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never
     // rejected because of what its URL happens to contain.
@@ -1023,7 +984,13 @@ function daysBetweenIsoDates(start, end) {
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
 
-export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+// `today` defaults to the LOCAL calendar day, not the UTC one. This function
+// gates a COOLDOWN (`today < cooldownUntil`) — the user asked not to see a
+// posting until a date — and the UTC day is tomorrow for a west-of-Greenwich
+// evening run, so the cooldown opened a day early (#3070). The recheck window
+// below reads one day high the same way. Callers may still pass `today`
+// explicitly; only the default moves.
+export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
@@ -1102,6 +1069,139 @@ export function normalizeUrlForDedup(url) {
 }
 
 /**
+ * The leading checkbox marker of a `data/pipeline.md` entry.
+ *
+ * Only ` ` and `x` are recognized, matching the pre-existing gates: `- [!]`
+ * marks a URL that could not be fetched, which is not evidence a posting was
+ * surfaced.
+ *
+ * Anchored, because the URL it guards is then matched anywhere in the entry: a
+ * hand-written note that happens to contain checkbox syntax mid-sentence and a
+ * link would otherwise seed that link and silently bury a live posting. Leading
+ * whitespace is tolerated so an indented entry still dedupes, as it did when the
+ * URL had to sit immediately after the checkbox.
+ */
+const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
+
+/**
+ * As `PIPELINE_CHECKBOX_RE`, but rejecting indentation.
+ *
+ * The company/role gate stays exactly as strict as the `^- \[` anchor it
+ * replaces: widening it would seed *more* role keys, and one role key suppresses
+ * every other posting that shares it.
+ */
+const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+
+/**
+ * The `~~…~~` wrapper an expired entry is written with.
+ *
+ * Matched only at the start of the entry body, never searched for line-wide.
+ * `~` is a legal URL character and a documented `note:` column may carry its own
+ * strikethrough, so treating `~` as a global signal both truncates real URLs and
+ * strips live entries of their pair. Expiry is a property of the entry, so it is
+ * read at the entry boundary.
+ */
+const PIPELINE_STRIKETHROUGH_RE = /^~~([\s\S]*?)~~/;
+
+/**
+ * A URL inside a pipeline entry.
+ *
+ * Terminates on whitespace and `|` only. `|` cannot appear unencoded in a URL
+ * and is this format's cell separator, so it is the one safe boundary; every
+ * other character stays legal. `~` (RFC 3986 unreserved) and `)` (a sub-delim)
+ * in particular must not terminate the match — excluding them truncated `~user`
+ * paths and parenthesised region suffixes, and a truncated URL both stops
+ * deduping and seeds a bare-origin key that everything else on that host then
+ * false-matches against.
+ *
+ * `local:` entries are deliberately not matched — the gates this feeds have
+ * always been http(s)-only.
+ */
+const PIPELINE_URL_RE = /https?:\/\/[^\s|]+/;
+
+/**
+ * Split a `data/pipeline.md` checkbox line into its entry body and expiry state.
+ *
+ * The body is whatever follows the checkbox, unwrapped when the entry is struck
+ * out, so every caller parses the same cell sequence either way. An unclosed
+ * wrapper still reads as expired: the opening `~~` is the marker.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @param {RegExp} checkboxRe - Which checkbox anchor this gate accepts.
+ * @returns {{body: string, expired: boolean}|null} Null when the line is not an
+ *   entry at all.
+ */
+function pipelineEntry(line, checkboxRe) {
+  const checkbox = line.match(checkboxRe);
+  if (!checkbox) return null;
+
+  const rest = line.slice(checkbox[0].length);
+  if (!rest.startsWith('~~')) return { body: rest, expired: false };
+
+  const closed = rest.match(PIPELINE_STRIKETHROUGH_RE);
+  return { body: closed ? closed[1] : rest.slice(2), expired: true };
+}
+
+/**
+ * Extract the job URL from a `data/pipeline.md` checkbox line, wherever it sits.
+ *
+ * Six line shapes are documented across the modes, and only the one
+ * `appendToPipeline` writes leads with the URL. The others lead with a report
+ * number (`#NNN`, `modes/pipeline.md`), a report link
+ * (`[NNN](reports/…)`, `reconcile-pipeline.mjs`), a pre-screen marker (`#--`,
+ * `modes/pipeline.md`), or a strikethrough (`~~…~~`, `modes/pipeline.md` and
+ * `modes/oferta.md`). Anchoring the URL to the checkbox missed all five.
+ *
+ * An expired entry still seeds a URL key; only its company/role pair is withheld
+ * (see `extractPipelineCompanyRole`).
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {string|null} The URL, or null when the line carries none.
+ */
+function extractPipelineUrl(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_RE);
+  if (!entry) return null;
+
+  const match = entry.body.match(PIPELINE_URL_RE);
+  return match ? match[0] : null;
+}
+
+/**
+ * Extract the company/role pair from a `data/pipeline.md` checkbox line.
+ *
+ * Company and role are the two cells *after* the URL cell, not cells 1 and 2 —
+ * see `extractPipelineUrl` for why the URL is not always first.
+ *
+ * Two shapes deliberately yield nothing, mirroring the `status !== 'added'`
+ * rule the scan-history branch of `collectSeenCompanyRoles` already applies:
+ *
+ * - **Expired entries** (`~~…~~`). Strikethrough is how the pipeline records the
+ *   same state scan-history records as `skipped_expired`; seeding a dead
+ *   posting's role key would let a dead SF URL bury a live NY req. Read at the
+ *   entry boundary, so a `note:` column containing its own strikethrough leaves
+ *   a live entry's pair intact.
+ * - **Pre-screen discards** (`#-- | {url} | skipped (…)`). The cell after the
+ *   URL is a discard reason, not a company.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {{company: string, role: string}|null} The pair, or null when the
+ *   line has none to contribute.
+ */
+function extractPipelineCompanyRole(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_STRICT_RE);
+  if (!entry || entry.expired) return null;
+
+  const cells = entry.body.split('|').map(cell => cell.trim());
+  if (cells[0].startsWith('#--')) return null;
+
+  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
+  if (urlIndex === -1) return null;
+
+  const [company = '', role = ''] = cells.slice(urlIndex + 1);
+  return { company, role };
+}
+
+/**
  * Build the seen-URL set from already-read source texts. An absent file is
  * passed as '' (the readIfExists convention shared with
  * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
@@ -1119,9 +1219,12 @@ export function collectSeenUrls(sources = {}, policy = {}) {
     else recheckEligible++;
   }
 
-  // pipeline.md — extract URLs from checkbox lines
-  for (const match of pipelineText.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-    seen.add(normalizeUrlForDedup(match[1]));
+  // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
+  // line (see extractPipelineUrl: five of the six documented shapes lead with a
+  // report number, a report link, or a strikethrough rather than the URL).
+  for (const line of pipelineText.split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (url) seen.add(normalizeUrlForDedup(url));
   }
 
   // applications.md — extract URLs from report links and any inline URLs
@@ -1477,10 +1580,15 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     add(company, title);
   }
 
-  // pipeline.md — "- [ ] {url} | {company} | {title}" plus optional trailing
-  // columns (location, compensation, posted:/trust:/note: segments).
-  for (const match of pipelineText.matchAll(/^- \[[ x]\]\s+\S+\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?:\|[^\n]*)?$/gm)) {
-    add(match[1], match[2]);
+  // pipeline.md — company/title are the two cells after the URL cell, plus
+  // optional trailing columns (location, compensation, posted:/trust:/note:
+  // segments). The URL is not always first, and expired/pre-screen shapes
+  // contribute no pair at all — see extractPipelineCompanyRole. Same failure the
+  // applications.md branch above fixed in #954: a positional regex read the
+  // wrong cells, so the seen-set keyed on garbage.
+  for (const line of pipelineText.split('\n')) {
+    const pair = extractPipelineCompanyRole(line);
+    if (pair) add(pair.company, pair.role);
   }
 
   return seen;
@@ -2130,8 +2238,43 @@ function guardStatusFor(code) {
   return 'skipped_invalid_url';
 }
 
+// ── CLI args ────────────────────────────────────────────────────────
+// #2270: `node scan.mjs --help` used to run a full live scan and write to
+// pipeline.md/scan-history.tsv instead of printing usage — the flag was
+// never checked at all. Same shape as scan-ats-full.mjs (#1633/#1635),
+// reply-watch.mjs (#2743/#2745) and dedup-tracker.mjs (#2744/#2746), shared
+// via lib/cli-flags.mjs's validateFlags() (#2775).
+const KNOWN_FLAGS = [
+  '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
+  '--include-blacklisted', '--company', '--posted-after', '--posted-before',
+  '--since', '--quiet', '--help', '-h',
+];
+
+// Flags whose space-separated value is the NEXT argv token (the `--flag=value`
+// form is self-contained and never needs this). --throttle is deliberately
+// excluded: only its bare and `--throttle=<ms>` forms are read below, so a
+// following token is never its value.
+const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
+
+const USAGE = `Usage:
+  node scan.mjs                              # scan all enabled companies
+  node scan.mjs --dry-run                    # preview without writing files
+  node scan.mjs --company Cohere             # scan a single company
+  node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
+  node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
+  node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
+  node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+  node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+  node scan.mjs --since 7                    # postings from the last 7 days
+  node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+  node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --quiet                      # suppress the manifesto footer
+  node scan.mjs --help                       # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
@@ -2334,7 +2477,12 @@ async function main() {
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day. This one value does two things that both care which day it is:
+  // it is the `today` buildCooldownFilter compares against, and it is the
+  // firstSeen date written into scan-history.tsv. On the UTC day a
+  // west-of-Greenwich evening scan opened cooldowns early AND stamped history
+  // rows with tomorrow, which then read one day old on the next recheck (#3070).
+  const date = localToday();
   const windows = loadReApplyWindows();
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;

@@ -13,13 +13,26 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'pat
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import * as yaml from 'js-yaml';
+// One definition for both locks: this module and pipeline-lock.mjs implement
+// the same directory-lock protocol on purpose, and #2777 showed how the two
+// copies drift — pipeline-lock learned that Windows answers mkdir/rm with
+// EPERM/EACCES/EBUSY under contention while this file still treated anything
+// but EEXIST as fatal, killing a writer and losing its item.
+import {
+  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
+  lockRecoveryVerdict, RECOVER_STALE,
+} from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
  * Minimum age before directory age alone may condemn an ownerless lock or
- * recover guard. See `lockCanRecover` for why the age check needs a floor.
+ * recover guard. See `lockRecoveryVerdict` for why the age check needs a floor.
+ *
+ * Re-exported rather than redeclared: the floor is applied inside that function
+ * now, so a local copy would be a constant this file no longer enforces — free
+ * to drift from the one that actually decides.
  */
-export const OWNERLESS_GRACE_MS = 1_000;
+export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
 
 /**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
@@ -219,27 +232,6 @@ function sleep(ms) {
 }
 
 /**
- * Determine whether a process id still belongs to a live process.
- *
- * The tracker lock stores the owner PID in `owner.json`. When another process
- * finds an existing lock, this check lets it distinguish a valid live owner from
- * a crashed process that left a stale lock directory behind. `EPERM` counts as
- * alive because the process exists even if the current user cannot signal it.
- *
- * @param {number} pid - Process id recorded by the lock owner.
- * @returns {boolean} True when the process appears to still exist.
- */
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
-
-/**
  * Read lock ownership metadata from a tracker lock directory.
  *
  * The metadata contains the owner PID, a unique release token, the acquisition
@@ -262,41 +254,12 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
-/**
- * Decide whether an existing lock can be safely recovered.
- *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * That age fallback needs a floor. Two directories are ownerless by
- * construction, not by accident: a lock between its `mkdirSync` and its
- * `owner.json` write, and the recover guard, which never carries `owner.json`
- * at all. Judging those on `age > staleMs` alone lets a caller with an
- * aggressive staleMs delete a directory created microseconds ago — either
- * stealing a winner's lock inside its acquisition window, or evicting a live
- * guard and putting two callers inside the decide-then-delete window the guard
- * exists to serialize. OWNERLESS_GRACE_MS is a lower bound on that patience,
- * never a cap: a larger caller staleMs still wins, and a genuinely abandoned
- * directory still ages out, so a crash while holding the guard cannot disable
- * recovery for good.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
- * @returns {boolean} True when the caller may remove and recreate the lock.
- */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch {
-    return true;
-  }
-}
+// The recovery judgment comes from pipeline-lock rather than a second copy of
+// it. "Mirrors pipeline-lock" was the previous arrangement, and mirroring is
+// precisely what drifts: this copy still answered a bare boolean, so "the
+// directory was gone when I looked" reached the caller as a licence to DELETE
+// whatever is at that path now — a lock a rival acquirer may have created in
+// between, whose winner then dies with ENOENT writing its own owner.json.
 
 /**
  * Acquire an exclusive filesystem lock for one tracker mutation.
@@ -328,7 +291,19 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   let attempts = 0;
   let staleRecovered = false;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
+  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // There is no separate maxWaitMs knob here, so the ceiling is the same
+  // multiple of timeoutMs the definition defaults to.
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+  });
+  for (;;) {
+    if (holderStillWedged() || ceilingReached()) break;
     attempts++;
     try {
       mkdirSync(lockDir);
@@ -340,12 +315,18 @@ export async function acquireTrackerLock(lockDir, options = {}) {
           tracker: options.tracker ?? '',
         }, null, 2));
       } catch (ownerErr) {
+        // ENOENT writing owner.json means the just-won lock directory is
+        // gone: another caller (mis)judged it reclaimable and deleted it.
+        // A lost race, not a failure — re-enter the loop and compete again
+        // (mirrors pipeline-lock; dying here loses the caller's write).
+        if (ownerErr?.code === 'ENOENT') continue;
         // We created the dir but could not record ownership. An empty,
         // owner-less lock dir would block every future locker until the
         // staleMs age-out — remove what we just created before rethrowing.
-        // Scoped to the owner write only: the mkdir EEXIST contention path
-        // is still handled by the outer catch.
-        rmSync(lockDir, { recursive: true, force: true });
+        // Scoped to the owner write only: the mkdir contention path is still
+        // handled by the outer catch. Best-effort removal: a contended rm
+        // must not mask ownerErr, and the orphan ages out regardless.
+        rmLockArtifactSync(lockDir);
         throw ownerErr;
       }
 
@@ -409,43 +390,72 @@ export async function acquireTrackerLock(lockDir, options = {}) {
             ownerVerified = true;
             verifiedDir = afterRead;
           }
-          removeLock(lockDir);
+          // Best-effort, mirroring pipeline-lock's release: ownership was
+          // verified above, so a contended rm (Windows EPERM/EBUSY while
+          // another process stats the directory) must not kill a caller whose
+          // work already succeeded — the orphaned lock ages out via
+          // lockRecoveryVerdict. Injected removeLock hooks (fault tests) keep
+          // their errors: only the known contention codes are swallowed.
+          try {
+            removeLock(lockDir);
+          } catch (rmErr) {
+            if (!isRmContention(rmErr)) throw rmErr;
+          }
           released = true;
         },
       };
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
+      // Not just EEXIST: Windows reports a lock directory that is mid-create
+      // or mid-remove by another process as EPERM/EACCES. That is contention,
+      // not failure — treating it as fatal is how a concurrent writer dies and
+      // its write is lost (#2777, measured on windows-latest).
+      if (!isMkdirContention(err)) throw err;
+      noteWaiting();
 
       let hasRecoverGuard = false;
       try {
         mkdirSync(recoverGuardDir);
         hasRecoverGuard = true;
       } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
+        if (!isMkdirContention(guardErr)) throw guardErr;
         // A process killed between creating the guard and its cleanup leaves
         // the guard behind forever, permanently disabling stale-lock recovery
         // for every future writer. The guard normally lives for milliseconds,
         // so an old one is judged stale by the same age rule as a
         // metadata-free lock and removed; the next loop iteration can then
         // take the guard and run recovery.
-        if (lockCanRecover(recoverGuardDir, staleMs)) {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+        //
+        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
+        // the guard is mid-flight right now, and reasoning about the age of a
+        // directory we cannot even stat reliably would evict a live guard.
+        // STALE only: a guard already gone needs no eviction, and evicting on
+        // that answer deletes the guard another caller has just taken.
+        if (guardErr.code === 'EEXIST'
+          && lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            staleRecovered = true;
-            continue;
+          // STALE only. VANISHED means the lock was absent when we looked, and
+          // by the time this line runs another acquirer may have won the mkdir
+          // and be partway through writing owner.json — deleting on that answer
+          // destroys a live lock and kills its winner with ENOENT.
+          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
+            if (rmLockArtifactSync(lockDir)) {
+              staleRecovered = true;
+              continue;
+            }
+            // rm hit contention: another process is touching the stale lock at
+            // this instant — back off instead of treating the collision as fatal.
           }
         } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
+          rmLockArtifactSync(recoverGuardDir);
         }
       }
 
-      await sleep(retryMs);
+      await sleep(backoffMs());
     }
   }
 
@@ -502,12 +512,81 @@ export async function openTrackerTransaction(appsFile, options = {}) {
 }
 
 /**
+ * Codes Windows raises when a rename-over-existing-file loses a race for the
+ * destination handle. Same portability gap this module already documents for
+ * mkdir/rm (#2777): POSIX `rename(2)` atomically replaces the destination and
+ * cannot fail this way, so these never fire on Linux/macOS.
+ */
+const RENAME_CONTENTION_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+/** Backoff schedule for a contended rename. Worst case ~193ms, then rethrow. */
+export const RENAME_RETRY_DELAYS_MS = [1, 2, 5, 10, 25, 50, 100];
+
+/**
+ * Is this error Windows saying "the destination is busy right now"?
+ *
+ * Exported for the same reason `pipeline-lock.mjs` exports `isMkdirContention`
+ * and `isRmContention`: one definition, testable, and no second copy to drift.
+ *
+ * @param {unknown} err - Error thrown by a rename attempt.
+ * @returns {boolean} True when the rename should be retried.
+ */
+export function isRenameContention(err) {
+  return RENAME_CONTENTION_CODES.has(err?.code);
+}
+
+/**
+ * Block the current thread for `ms` without an event-loop turn.
+ *
+ * `writeFileAtomic` is synchronous by contract (every tracker writer calls it
+ * inside a held lock), so the backoff cannot be a promise.
+ *
+ * @param {number} ms - Milliseconds to sleep.
+ * @returns {void}
+ */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * `renameSync` that survives Windows contention for the destination handle.
+ *
+ * Windows refuses a rename whose destination is open by anyone else at that
+ * instant, and answers EPERM/EACCES/EBUSY. The holder is usually not another
+ * writer of ours (they are serialized by the tracker lock) but a transient
+ * reader: an antivirus scanner, the Search indexer, or a concurrent
+ * `readFileSync` from a reporting script. The handle is released in
+ * milliseconds, so a short backoff converts a lost write into a completed one.
+ *
+ * This mirrors `isMkdirContention` / `isRmContention` in pipeline-lock.mjs.
+ * Same reasoning as #2777: treating portable-looking contention as fatal is how
+ * a write gets LOST, and the tracker is the canonical store.
+ *
+ * @param {string} tmpPath - Source path (the fully written temporary file).
+ * @param {string} path - Destination path to replace.
+ * @param {(from: string, to: string) => void} [rename] - Injectable rename, for tests.
+ * @returns {void}
+ */
+export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(tmpPath, path);
+      return;
+    } catch (err) {
+      if (!isRenameContention(err) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw err;
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+/**
  * Replace a tracker file atomically using a same-directory temporary file.
  *
- * Writing into the same directory keeps the final `renameSync` atomic on normal
+ * Writing into the same directory keeps the final rename atomic on normal
  * filesystems and avoids exposing a partially written `applications.md` to other
- * readers. If the write or rename fails, the temporary file is cleaned up before
- * the original error is rethrown.
+ * readers. The rename retries through short Windows contention (see
+ * `renameSyncWithRetry`). If the write or rename ultimately fails, the temporary
+ * file is cleaned up before the original error is rethrown.
  *
  * @param {string} path - Final file path to replace.
  * @param {string} content - Complete file content to write.
@@ -517,7 +596,7 @@ export function writeFileAtomic(path, content) {
   const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
+    renameSyncWithRetry(tmpPath, path);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;

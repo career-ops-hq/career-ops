@@ -36,6 +36,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -122,34 +123,76 @@ export function normalizeListing(anchors, finalUrl, max = DEFAULT_LISTING_MAX) {
   return { url: finalUrl, jobs };
 }
 
+const VALUE_FLAGS = ['--mode', '--max', '--max-chars', '--timeout'];
+const KNOWN_FLAGS = [...VALUE_FLAGS, '--help', '-h'];
+
+// One synopsis, used by both --help and the no_url error, so the two cannot
+// drift apart: the error's own copy already omitted --timeout.
+const USAGE_SYNOPSIS = 'browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N] [--timeout MS]';
+
+const USAGE = `Usage:
+  node ${USAGE_SYNOPSIS}
+
+  --mode jd|listing   jd (default) returns { url, title, text }; listing returns { url, jobs }
+  --max N             listing: maximum postings to return (default ${DEFAULT_LISTING_MAX})
+  --max-chars N       jd: text cap (default ${JD_TEXT_CAP}); raise it for a long JD
+  --timeout MS        navigation timeout (default ${DEFAULT_TIMEOUT_MS})
+  --help, -h          Show this help`;
+
 /**
- * Parse CLI args into { url, mode, max, timeout }. Index-based so a flag value
- * (e.g. the `listing` in `--mode listing`) is never mistaken for the URL, and an
- * explicit `0` is honored instead of being silently replaced by the default.
- * Exported for tests.
+ * Parse CLI args into { url, mode, max, maxChars, timeout }.
+ *
+ * Value reads go through lib/cli-flags.mjs so BOTH accepted forms reach the
+ * extractor. The hand-rolled loop this replaces matched tokens exactly against
+ * its own `FLAGS` set, so `--max-chars=50000` was never recognized as a flag:
+ * it fell to the `!tok.startsWith('--')` branch, was not the URL either, and
+ * the run silently proceeded at the 12000 default — a JD truncated at the tail
+ * for a caller who explicitly asked for more. Same silent-wrong-answer shape as
+ * the `--from=…` class in #2401/#2402 that lib/cli-flags.mjs exists to end.
+ *
+ * The URL is still found positionally, and an explicit `0` is still honored
+ * rather than silently replaced by the default.
+ *
  * @param {string[]} argv - process.argv.slice(2)
  */
 export function parseArgs(argv) {
-  const FLAGS = new Set(['--mode', '--max', '--max-chars', '--timeout']);
-  let url;
-  let mode = 'jd';
-  let max = DEFAULT_LISTING_MAX;
-  let maxChars = JD_TEXT_CAP;
-  let timeout = DEFAULT_TIMEOUT_MS;
-  for (let i = 0; i < argv.length; i++) {
-    const tok = argv[i];
-    if (FLAGS.has(tok)) {
-      const val = argv[++i]; // consume the next token as this flag's value
-      const n = Number(val);
-      if (tok === '--mode' && val != null) mode = val;
-      else if (tok === '--max' && Number.isInteger(n) && n >= 0) max = n;
-      else if (tok === '--max-chars' && Number.isInteger(n) && n > 0) maxChars = n;
-      else if (tok === '--timeout' && Number.isInteger(n) && n > 0) timeout = n;
-    } else if (!tok.startsWith('--') && url === undefined) {
-      url = tok;
+  const args = Array.isArray(argv) ? argv : [];
+
+  // A value token consumed by a space-separated flag is not the URL. Mirrors
+  // validateFlags' own adjacency rule: only a token that does not itself start
+  // with `--` is treated as a value, so `--mode --max 5` leaves `--max` to be
+  // reported rather than swallowed as the mode.
+  const consumed = new Set();
+  args.forEach((a, i) => {
+    if (VALUE_FLAGS.includes(a) && args[i + 1] !== undefined && !args[i + 1].startsWith('--')) {
+      consumed.add(i + 1);
     }
+  });
+
+  let url;
+  for (let i = 0; i < args.length; i++) {
+    const tok = args[i];
+    if (typeof tok !== 'string' || consumed.has(i)) continue;
+    if (!tok.startsWith('-') && url === undefined) url = tok;
   }
-  return { url, mode, max, maxChars, timeout };
+
+  // Each numeric read keeps its own range rule: `--max` admits 0 (a listing
+  // capped at nothing is a meaningful request), the other two do not.
+  const num = (flag, ok, fallback) => {
+    if (!hasFlag(args, flag)) return fallback;
+    const n = Number(flagValue(args, flag));
+    return Number.isInteger(n) && ok(n) ? n : fallback;
+  };
+
+  const modeVal = hasFlag(args, '--mode') ? flagValue(args, '--mode') : undefined;
+
+  return {
+    url,
+    mode: modeVal == null ? 'jd' : modeVal,
+    max: num('--max', (n) => n >= 0, DEFAULT_LISTING_MAX),
+    maxChars: num('--max-chars', (n) => n > 0, JD_TEXT_CAP),
+    timeout: num('--timeout', (n) => n > 0, DEFAULT_TIMEOUT_MS),
+  };
 }
 
 // Read the raw DOM inside the page: title, main visible text, and visible
@@ -182,10 +225,26 @@ async function readDom(page) {
 }
 
 async function main() {
-  const { url, mode, max, maxChars, timeout } = parseArgs(process.argv.slice(2));
+  const args = process.argv.slice(2);
+
+  // Before anything launches a browser, because each of these used to fail in a
+  // way that named the wrong thing (measured on 764f20f8):
+  //   `--max-char 5000 <url>`  the typo was skipped, `5000` became the URL and
+  //                            the real one was discarded — reported as
+  //                            `invalid URL`, which is not what was wrong.
+  //   `<url> --bogus`          skipped entirely; the scan ran and exited 0.
+  //   `--help`                 exit 1 with a `no_url` error, never usage.
+  //   `-h`                     one dash, so it was read AS the URL: `invalid URL`.
+  // requireOperand: this script has nothing more specific to say about a missing
+  // operand than the shared message, and without it `--max-chars --help` prints
+  // usage and exits 0 with the malformed flag never reported (the ordering
+  // CodeRabbit caught on #2961).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+  const { url, mode, max, maxChars, timeout } = parseArgs(args);
 
   if (!url) {
-    console.error(JSON.stringify({ error: 'usage: browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N]', code: 'no_url' }));
+    console.error(JSON.stringify({ error: `usage: ${USAGE_SYNOPSIS}`, code: 'no_url' }));
     process.exit(1);
   }
   if (mode !== 'jd' && mode !== 'listing') {

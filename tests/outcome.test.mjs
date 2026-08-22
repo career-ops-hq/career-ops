@@ -1,6 +1,6 @@
 // tests/outcome.test.mjs — Unit test suite for outcome.mjs (#1722).
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, utimesSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, realpathSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -191,7 +191,10 @@ try {
   // Test 10: Root-layout trackers own the same workspace as data-layout
   // trackers. Outcome artifacts and an overridden PDF manifest must follow
   // that workspace rather than the installed script or the workspace parent.
-  const rootLayoutDir = mkdtempSync(join(tmpdir(), 'cops-outcome-root-layout-'));
+  // macOS exposes mkdtempSync paths through /var while child processes may
+  // report the canonical /private/var spelling. Compare one canonical path so
+  // this workspace-ownership assertion is platform-independent.
+  const rootLayoutDir = realpathSync(mkdtempSync(join(tmpdir(), 'cops-outcome-root-layout-')));
   try {
     const rootTracker = join(rootLayoutDir, 'applications.md');
     const customManifest = join(rootLayoutDir, 'custom', 'pdf-index.tsv');
@@ -216,7 +219,7 @@ try {
       },
       encoding: 'utf-8',
     }));
-    const expectedDir = join(realpathSync(rootLayoutDir), 'data', 'outcomes', '7_root-corp_platform-engineer');
+    const expectedDir = join(rootLayoutDir, 'data', 'outcomes', '7_root-corp_platform-engineer');
     check('Root-layout outcome directory stays under workspace/data', rootResult.outcomeDir === expectedDir);
     check('Outcome honors CAREER_OPS_PDF_INDEX', readFileSync(join(expectedDir, 'submitted_cv.pdf'), 'utf8') === 'ROOT-LAYOUT-PDF');
   } finally {

@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -13,12 +14,18 @@ import {
 import { join, relative } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
-const sandbox = mkdtempSync(join(outputRoot, 'page-budget-test-'));
-const externalOutput = mkdtempSync(join(outputRoot, 'page-budget-external-'));
+// realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
+// and a module's node_modules walk from a file's REALPATH, while
+// `process.argv[1]` keeps whatever spelling the caller used. On a checkout with
+// a symlinked output/ the two disagree, so generate-pdf.mjs's `isMain` guard is
+// false and the spawned script exits 0 having done nothing at all -- assertions
+// then fail against empty output rather than against behaviour (#3165).
+const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-test-')));
+const externalOutput = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-external-')));
 const externalInputRoot = mkdtempSync(join(tmpdir(), 'career-ops-pdf-external-input-'));
 const script = join(sandbox, 'generate-pdf.mjs');
 const input = join(sandbox, 'two-pages.html');
@@ -39,6 +46,14 @@ copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
 copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs'));
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
+copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+
+// theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
+// which resolves by walking up into the repo's node_modules -- from the
+// sandbox's REALPATH, so a checkout with a symlinked output/ never reaches it
+// and every spawned generate-pdf dies before parsing argv (#3165). Link the
+// package in beside the playwright stub so the sandbox stands on its own.
+linkRepoPackage(sandbox, 'js-yaml');
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',
@@ -176,14 +191,21 @@ try {
   }
 
   const withinBudgetPdf = join(sandbox, 'within-budget.pdf');
-  const withinBudget = runPdf([input, withinBudgetPdf, '--max-pages=2']);
+  // The common installation layout has the tracker workspace at the same
+  // directory as the installed script. Keep that path explicitly covered so
+  // workspace scoping remains a no-op for the default case.
+  const defaultTracker = join(sandbox, 'applications.md');
+  writeFileSync(defaultTracker, '# Applications\n', 'utf-8');
+  const withinBudget = runPdf([input, withinBudgetPdf, '--max-pages=2'], {
+    CAREER_OPS_TRACKER: defaultTracker,
+  });
   if (
     withinBudget.status === 0 &&
     existsSync(withinBudgetPdf) &&
     countPages(withinBudgetPdf) === 2 &&
     manifestHasPdf(withinBudgetPdf)
   ) {
-    pass('generate-pdf ignores page-like content and accepts the structural rendered page count');
+    pass('generate-pdf keeps default output working when tracker workspace equals install directory');
   } else {
     fail(`generate-pdf rejected a PDF inside its page budget: ${withinBudget.output.trim()}`);
   }
@@ -287,7 +309,6 @@ try {
   } else {
     fail(`generate-pdf followed an output symlink outside its workspace: ${symlinkEscape.output.trim()}`);
   }
-
   // An external input path must not move the renderer's temporary HTML out of
   // the tracker workspace via the CLI's baseDir derivation.
   const externalInputPdf = join(sandbox, 'external-input.pdf');

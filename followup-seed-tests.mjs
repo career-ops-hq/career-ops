@@ -41,8 +41,15 @@ let failed = 0;
 function pass(m) { console.log(`PASS ${m}`); passed++; }
 function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
+// Mirror of followup-seed.mjs's todayStr(): the LOCAL date, not the UTC one.
+// This helper used toISOString() too, so tests 1 and 4 asserted the seed's
+// today against UTC's today. They agree only while the host is west of nothing
+// — every US evening after 20:00 Eastern the two dates differ and both
+// assertions would have gone red. The bug and its test were the same mistake.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 // --- sandbox helpers --------------------------------------------------------
@@ -196,29 +203,65 @@ function cleanup(sandbox) {
   cleanup(sb);
 }
 
-// ── Test 4: date resolution order — --date beats notes; notes beat today; column never used ──
+// ── Test 4: date resolution order and its LABEL ──
+// --date > notes > the `date` column > today, and every result says which one
+// it was. The column was previously excluded outright; #2607 made it the
+// fallback because the thing it was excluded in favour of — today — silently
+// resets an old application's follow-up clock.
 {
   const sb = makeSandbox();
-  // Column date is 2026-01-01 (would be very wrong if ever used).
+  // Column date is 2026-01-01: it must not outrank --date or a notes date.
   writeTracker(sb, [trackerRow(1, '2026-01-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
   const withDate = run(['1', '--date', '2026-06-25', '--json'], sb);
   const parsed = JSON.parse(withDate.stdout);
   if (parsed.appliedDate === '2026-06-25') pass('4. --date beats notes date');
   else fail(`4. --date beats notes date — got ${parsed.appliedDate}`);
-  if (parsed.appliedDate !== '2026-01-01') pass('4. tracker date column never used');
-  else fail('4. tracker date column never used — got column date');
+  if (parsed.appliedDate !== '2026-01-01') pass('4. tracker date column does not outrank --date or notes');
+  else fail('4. tracker date column does not outrank --date or notes — got column date');
   cleanup(sb);
 
-  // Unit-level: resolveAppliedDate directly.
+  // Unit-level: resolveAppliedDate directly. Returns {appliedDate, appDateSource}
+  // so a caller can tell a measured date from a proxy or a guess.
   const mod = await import(pathToFileURL(SCRIPT).href);
-  const rowWithNotes = { notes: 'Applied 2026-06-20. Some other text.' };
-  if (mod.resolveAppliedDate(rowWithNotes, null) === '2026-06-20') pass('4. resolveAppliedDate: notes beat today (no explicit date)');
-  else fail('4. resolveAppliedDate: notes beat today');
-  if (mod.resolveAppliedDate(rowWithNotes, '2026-07-01') === '2026-07-01') pass('4. resolveAppliedDate: explicit date wins over notes');
-  else fail('4. resolveAppliedDate: explicit date wins over notes');
-  const rowNoNotes = { notes: 'no date here' };
-  if (mod.resolveAppliedDate(rowNoNotes, null) === todayStr()) pass('4. resolveAppliedDate: falls back to today');
-  else fail('4. resolveAppliedDate: falls back to today');
+  const rowWithNotes = { notes: 'Applied 2026-06-20. Some other text.', date: '2026-01-01' };
+  const fromNotes = mod.resolveAppliedDate(rowWithNotes, null);
+  if (fromNotes.appliedDate === '2026-06-20' && fromNotes.appDateSource === 'notes') pass('4. resolveAppliedDate: notes beat the date column, labelled "notes"');
+  else fail(`4. resolveAppliedDate: notes beat the date column — got ${JSON.stringify(fromNotes)}`);
+  const explicit = mod.resolveAppliedDate(rowWithNotes, '2026-07-01');
+  if (explicit.appliedDate === '2026-07-01' && explicit.appDateSource === 'explicit') pass('4. resolveAppliedDate: explicit date wins over notes');
+  else fail(`4. resolveAppliedDate: explicit date wins over notes — got ${JSON.stringify(explicit)}`);
+
+  // A note with no apply date at all now yields the evaluation date, labelled.
+  const rowNoNotes = { notes: 'no date here', date: '2026-01-01' };
+  const fallback = mod.resolveAppliedDate(rowNoNotes, null);
+  if (fallback.appliedDate === '2026-01-01' && fallback.appDateSource === 'evaluation-date') pass('4. resolveAppliedDate: falls back to the evaluation date, labelled');
+  else fail(`4. resolveAppliedDate: falls back to the evaluation date — got ${JSON.stringify(fallback)}`);
+
+  // ...and today survives only as the last resort, when there is no usable
+  // column date either. Still labelled, so it is never mistaken for measured.
+  const rowNothing = { notes: 'no date here', date: '' };
+  const lastResort = mod.resolveAppliedDate(rowNothing, null);
+  if (lastResort.appliedDate === todayStr() && lastResort.appDateSource === 'today') pass('4. resolveAppliedDate: today is the last resort, and is labelled');
+  else fail(`4. resolveAppliedDate: today last resort — got ${JSON.stringify(lastResort)}`);
+
+  // THE PATH THAT SHIPPED UNCOVERED (#2610 review): notes that DO carry
+  // application dates, every one of which belongs to another row. The matcher
+  // correctly returns null, and that used to fall through to today unlabelled —
+  // so a three-week-old application looked brand new and its follow-up clock
+  // reset with nothing on screen to say so. The case above only covers notes
+  // with no dates at all, which is why this one was never exercised.
+  const rowAllForeign = {
+    notes: 'Same posting as #140 (applied 2026-07-20); sibling #141 applied 2026-07-21. Not yet submitted.',
+    date: '2026-01-01',
+  };
+  const allForeign = mod.resolveAppliedDate(rowAllForeign, null);
+  if (allForeign.appliedDate === '2026-01-01' && allForeign.appDateSource === 'evaluation-date') {
+    pass('4. resolveAppliedDate: notes whose apply dates are ALL cross-references fall back to the evaluation date, labelled');
+  } else {
+    fail(`4. resolveAppliedDate: all-cross-referenced notes — expected the labelled evaluation date, got ${JSON.stringify(allForeign)}`);
+  }
+  if (allForeign.appliedDate !== todayStr()) pass('4. resolveAppliedDate: a foreign-dates-only note does not silently reset the clock to today');
+  else fail('4. resolveAppliedDate: a foreign-dates-only note reset the follow-up clock to today');
 }
 
 // ── Test 5: missing file gets exact canonical header; append preserves bytes ──
@@ -488,6 +531,45 @@ function cleanup(sandbox) {
   if (res.code === 0) pass('17. ownerless lock older than the grace period is still recovered');
   else fail(`17. ownerless lock older than the grace period is still recovered — got ${res.code}\n${res.stdout}${res.stderr}`);
   cleanup(sb);
+}
+
+// ── Test 18: the pin's (set …) stamp is the LOCAL date, not UTC ──────────────
+{
+  // Two zones 26 hours apart, so their wall-clock dates can never both equal
+  // the UTC date: at any instant UTC+14 and UTC-12 are on different days.
+  // A UTC stamp is identical in both, so "the two differ" is a complete test
+  // that cannot pass by accident of when it runs. Asserting against the host's
+  // own today would go green trivially in CI, where TZ is UTC — which is
+  // exactly how this bug survived: two existing assertions did just that.
+  const setDates = ['Etc/GMT-14', 'Etc/GMT+12'].map((TZ) => { // POSIX sign: UTC+14, UTC-12
+    const sb = makeSandbox();
+    writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
+    // --date pins the applied date, so nextDate is fixed and only the (set …)
+    // stamp — the thing under test — can vary between the two runs.
+    const res = run(['1', '--date', '2026-06-20'], sb, { TZ });
+    const override = res.code === 0
+      ? parseNextOverrides(readFileSync(sb.followups, 'utf-8')).get(1)
+      : null;
+    cleanup(sb);
+    return override?.setDate ?? null;
+  });
+
+  if (setDates.every(Boolean)) pass('18. both zone runs seeded a pin');
+  else fail(`18. both zone runs seeded a pin — got ${JSON.stringify(setDates)}`);
+
+  if (setDates[0] && setDates[1] && setDates[0] !== setDates[1]) {
+    pass(`18. (set …) differs between UTC+14 and UTC-12, i.e. it is local (${setDates[0]} vs ${setDates[1]})`);
+  } else {
+    fail(`18. (set …) is the same in UTC+14 and UTC-12 — still stamping UTC (${setDates[0]} vs ${setDates[1]})`);
+  }
+
+  // …and each is genuinely that zone's calendar day, not merely different.
+  ['Etc/GMT-14', 'Etc/GMT+12'].forEach((TZ, i) => {
+    if (!setDates[i]) return;
+    const expected = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+    if (setDates[i] === expected) pass(`18. (set …) matches the ${TZ} calendar day`);
+    else fail(`18. (set …) for ${TZ} — expected ${expected}, got ${setDates[i]}`);
+  });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

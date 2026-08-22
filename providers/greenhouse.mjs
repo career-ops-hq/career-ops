@@ -3,6 +3,12 @@
 
 // Greenhouse provider — hits the public boards-api JSON endpoint.
 // Handles both explicit `api:` URLs and auto-detection from `careers_url`.
+// Requests the board with `content=true` (#3175) so each posting carries its
+// full body as plain-text `description`; scan.mjs's content_filter,
+// country_eligibility filter and visa_filter all read that field, and without
+// it every Greenhouse board passed those filters blind.
+
+import { decodeEntities } from './_html-entities.mjs';
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -114,6 +120,31 @@ export function buildOfficeMap(json) {
   return map;
 }
 
+// ── Posting body → plain text ────────────────────────────────────────
+// With content=true the list response embeds each posting's body as
+// DOUBLE-encoded HTML: the JSON string carries entity-escaped markup
+// (`&lt;p&gt;`), so the first decode pass reveals the real tags, and
+// text-level entities (`&amp;`, `&#39;`) only become decodable once those
+// tags are gone. Plain text is what the description-consuming filters match
+// against — substring matching over raw HTML misses keywords split by a tag
+// and pads matches into attribute soup.
+//
+// The result is capped like alibaba's full-text JDs to keep scan payloads
+// sane: a 10 KB/posting body is normal for Greenhouse, not an outlier.
+
+const DESCRIPTION_CAP = 4000;
+
+/**
+ * Entity-decoded markup → stripped plain text. Exported for tests.
+ * @param {unknown} content
+ */
+export function contentToText(content) {
+  if (typeof content !== 'string' || !content) return '';
+  const html = decodeEntities(content);
+  const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+  return decodeEntities(noMedia.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+}
+
 /** @type {Provider} */
 export default {
   id: 'greenhouse',
@@ -131,9 +162,17 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
     assertGreenhouseUrl(apiUrl);
+    // content=true embeds each posting's body in the list response (one
+    // request, no per-job detail fetches). searchParams.set is idempotent, so
+    // an entry.api that already pins the param can't end up with a duplicate.
+    const listUrl = new URL(apiUrl);
+    listUrl.searchParams.set('content', 'true');
+    // Re-validate the final href: the guard chain runs on the exact string
+    // that goes over the wire, not just the pre-param base.
+    const listHref = assertGreenhouseUrl(listUrl.href);
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertGreenhouseUrl above it guarantees the final hostname stays in the allowlist.
-    const json = /** @type {any} */ (await ctx.fetchJson(apiUrl, { redirect: 'error' }));
+    const json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
 
@@ -167,11 +206,16 @@ export default {
         const offices = officeMap.get(j.id);
         if (offices && offices.size > 0) location = [location, ...offices].join(' · ');
       }
+      const description = contentToText(j.content);
       return {
         title: j.title || '',
         url: j.absolute_url,
         company: entry.name,
         location,
+        // Omitted entirely when the board ships no body — same shape as
+        // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable
+        // from an empty string downstream.
+        ...(description ? { description } : {}),
         postedAt: toEpochMs(j.first_published),
       };
     });

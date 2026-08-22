@@ -11,7 +11,7 @@ data/*
 !data/offers/
 !data/parser-output/
 # Received offers/contracts, promise notes, prep reports (PII — never commit)
-data/offers/*
+data/offers/*   
 !data/offers/.gitkeep
 data/parser-output/**
 !data/parser-output/**/
@@ -58,10 +58,15 @@ writing-samples/*
 config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
+# Fork-local path declarations — this checkout's own files, read by
+# update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
+# project, and must survive the sync that overwrites update-system.mjs (#2421).
+config/local-paths.txt
 portals.yml
 modes/_profile.md
 modes/_custom.md
 modes/_brief.md
+voice-dna.md
 .update-dismissed
 .update-lock
 .manifesto-noted
