@@ -24,7 +24,7 @@
  * all reuse it with no prod-vs-test drift.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
@@ -253,8 +253,24 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
       warnSkip(root, `unreadable — ${err.message}`);
       continue;
     }
+    // A symlink to a plugin repo is a directory for our purposes: plugins.local/
+    // exists so a developer can work on a plugin from its own checkout, and
+    // linking it in is the natural way to do that. Dirent.isDirectory() is false
+    // for a symlink, so those were silently skipped -- no warning, the plugin
+    // simply never appeared in `plugins.mjs list`. statSync resolves the link;
+    // a broken one throws and is treated as not-a-directory rather than crashing
+    // discovery for every other plugin.
+    const isDirLike = (e) => {
+      if (e.isDirectory()) return true;
+      if (!e.isSymbolicLink()) return false;
+      try {
+        return statSync(path.join(root, e.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    };
     const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .filter(e => isDirLike(e) && !e.name.startsWith('_') && !e.name.startsWith('.'))
       .map(e => e.name)
       .sort();
     for (const name of dirs) {

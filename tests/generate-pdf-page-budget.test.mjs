@@ -4,18 +4,25 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'fs';
 import { join, relative } from 'path';
-import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
-const sandbox = mkdtempSync(join(outputRoot, 'page-budget-test-'));
-const externalOutput = mkdtempSync(join(outputRoot, 'page-budget-external-'));
+// realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
+// and a module's node_modules walk from a file's REALPATH, while
+// `process.argv[1]` keeps whatever spelling the caller used. On a checkout with
+// a symlinked output/ the two disagree, so generate-pdf.mjs's `isMain` guard is
+// false and the spawned script exits 0 having done nothing at all -- assertions
+// then fail against empty output rather than against behaviour (#3165).
+const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-test-')));
+const externalOutput = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-external-')));
 const script = join(sandbox, 'generate-pdf.mjs');
 const input = join(sandbox, 'two-pages.html');
 const defaultOverflowInput = join(sandbox, 'three-pages.html');
@@ -36,6 +43,13 @@ copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs')
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+
+// theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
+// which resolves by walking up into the repo's node_modules -- from the
+// sandbox's REALPATH, so a checkout with a symlinked output/ never reaches it
+// and every spawned generate-pdf dies before parsing argv (#3165). Link the
+// package in beside the playwright stub so the sandbox stands on its own.
+linkRepoPackage(sandbox, 'js-yaml');
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',

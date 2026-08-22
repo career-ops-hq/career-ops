@@ -284,6 +284,19 @@ title_filter:
   # else: real titles vary in separator and word order, and every variant your
   # list does not literally contain is dropped in silence.
   #
+  # Prefix an entry with `word:` to demand a WHOLE WORD at any length, in either
+  # list. This matters most on the negative side, where a short word hides inside
+  # longer ones: a bare "Intern" also rejects every "Internal" and
+  # "International" title, and if you keep "Internal Tools" as a positive it can
+  # then never match at all, because the negative fires inside the positive's own
+  # text. `word:Intern` rejects "Operations Intern" and leaves both alone.
+  #
+  # Anchoring is opt-in per entry ON PURPOSE. A `word:` prefix also adds the
+  # RIGHT-hand boundary, which a negative usually wants to keep: "Crypto" is
+  # there to catch "Cryptocurrency" too. So anchor the entries that need it and
+  # add the suffix forms you still want gone, the way the negative list below
+  # pairs `word:Intern` with `word:Interns` and a plain `Internship`.
+  #
   # Use " + " (with spaces) to require SEVERAL terms in any order:
   #
   #   - "director + engineering"   matches "Director of Engineering",
@@ -341,7 +354,15 @@ title_filter:
   negative:
     # [CUSTOMIZE] Add keywords for roles you want to exclude
     - "Junior"
-    - "Intern"
+    # Whole-word: a bare "Intern" is a substring, so it also rejected every
+    # "Internal" and "International" title and made the "Internal Tools"
+    # positive above unmatchable. The next two entries are the other half of
+    # that change, since anchoring stops "Intern" reaching the suffix forms the
+    # loose substring had been catching by accident. "Internship" stays a plain
+    # substring so it also covers "Internships" and "Internship Programme".
+    - "word:Intern"
+    - "word:Interns"
+    - "Internship"
     - ".NET"
     - "Java "
     - "iOS"
@@ -742,7 +763,7 @@ search_queries:
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, senjob,
+# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
@@ -988,6 +1009,19 @@ search_queries:
 #   # (above) for precision, same recall-first approach VDAB uses.
 #   enabled: true
 #
+# - name: MyCareersFuture — Software     # Singapore's national job bank (WSG)
+#   provider: mycareersfuture
+#   mycareersfuture:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted.
+#     keywords: ["software engineer", "backend developer"]  # explicit override
+#     size: 100            # optional results per page (1-100, server-capped at 100)
+#   max_pages: 5           # optional page cap (100 jobs/page, default 5, max 20)
+#   # No location option: results carry only coarse district names (e.g.
+#   # "D01 Marina, Raffles Place") — use location_filter (above) for
+#   # precision, same recall-first approach VDAB/Job Bank Canada use.
+#   enabled: true
+#
 # - name: Glints — Indonesia             # SE-Asia aggregator (SG/ID/MY/VN)
 #   provider: glints
 #   searchKeywords: "AI Engineer"
@@ -1184,6 +1218,31 @@ search_queries:
 #
 # company_aliases:
 #   Fin: [Intercom]
+
+# ── aggregator: true (optional, per entry) ────────────────────────────
+# Marks a tracked_companies entry as a MULTI-EMPLOYER BOARD rather than one
+# employer — a job platform, a VC portfolio board, a recruiting marketplace that
+# posts partner companies' roles under its own ATS account.
+#
+# Everything in the post-tracking layer assumes "same company + same title = the
+# same opening". On such a board that assumption is false: two identical titles
+# are two different employers' jobs. detect-reposts.mjs therefore skips flagged
+# companies entirely, and company-history.mjs reports
+# `postingChurn: aggregator-not-evaluated` for them — deliberately NOT
+# `none-detected`, which would claim a clean result from a check that never ran.
+#
+# It has to be config rather than something inferred: measured on a real
+# scan-history, an aggregator's clusters are indistinguishable by shape from
+# legitimate ones (both around 2 sightings over 2 dates). See #2703.
+#
+# Scanning is unaffected — the postings are real and worth finding. Only the
+# repost inference over them is meaningless. Companies with no flag are
+# untouched, so leaving this out changes nothing.
+#
+#   - name: SomeBoard
+#     careers_url: https://jobs.lever.co/someboard
+#     provider: lever
+#     aggregator: true
 
 tracked_companies:
 
@@ -2332,6 +2391,7 @@ job_boards:
     provider: consider
     consider_board: wingman
     enabled: false
+    aggregator: true          # portfolio board: many employers under one entry
     notes: "Swiss VC portfolio board (Consider)"
 
   # ── Swiss startup job boards ───────────────────────────────────────
@@ -2343,6 +2403,7 @@ job_boards:
     careers_url: https://joinup.ch/browse/jobs
     provider: joinup
     enabled: false
+    aggregator: true          # many employers under one entry
     notes: "Swiss startup job platform (newest SSR page)"
   # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
   # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote

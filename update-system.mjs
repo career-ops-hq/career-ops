@@ -62,11 +62,6 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
-  // .gitattributes governs how every other path below is written to disk, and
-  // `apply` checks paths out one at a time in this order: if it landed later,
-  // everything before it would be written under the old core.autocrlf setting
-  // on an existing install, silently (once text=auto is live, git status stays
-  // clean and only a second update would repair it).
   '.gitattributes',
   'modes/README.md',
   'modes/_shared.md',
@@ -160,6 +155,9 @@ const SYSTEM_PATHS = [
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
   'lib/latex-escape.mjs',
+  'scan-hn.mjs',
+  'scripts/check-syntax.mjs',
+  'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
   'lib/context-budget.test.mjs',
@@ -200,18 +198,14 @@ const SYSTEM_PATHS = [
   'company-funded.mjs',
   'match-star.mjs',
   'jd-skill-gap.mjs',
-  'story-provenance-check.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
   'seeds/',
-  'scripts/check-syntax.mjs',
   'tests/',
   'user-agent.mjs',
   'doctor.mjs',
-  // doctor.mjs imports this one: an install that receives the new doctor
-  // without it would crash on startup.
   'jsonc-parse.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
@@ -250,6 +244,7 @@ const SYSTEM_PATHS = [
   'followup-seed.mjs',
   'followup-seed-tests.mjs',
   'profile-language.mjs',
+  'title-keywords.mjs',
   'gemini-eval.mjs',
   'ollama-eval.mjs',
   'openai-eval.mjs',
@@ -495,6 +490,32 @@ export function localUserPaths(root = ROOT) {
     }
     if (path.split(/[\\/]/).includes('..')) {
       reject(path, 'paths must stay inside the repo');
+    }
+    // Canonical spelling, required BEFORE the collision check below.
+    //
+    // That check compares strings exactly (`path === sys`), and
+    // userLayerViolations() later compares against git's changed-path format,
+    // which is always canonical. A non-canonical spelling therefore matches
+    // NEITHER: `./merge-tracker.mjs` sails past the collision check, and is
+    // never recognised as the file it names when the safety check runs. The
+    // declaration silently protects nothing while the updater overwrites the
+    // file — the data loss this feature exists to prevent, reachable from a
+    // plausible typo.
+    //
+    // Rejected rather than normalised, deliberately. Normalising would accept
+    // several spellings for one path and leave this file disagreeing with what
+    // git reports; refusing keeps one path to one spelling, and says so.
+    if (path.includes('\\')) {
+      reject(path, 'paths use forward slashes, matching how git reports them');
+    }
+    // A single trailing slash is the documented directory-prefix form, so it is
+    // dropped before the segment check rather than read as an empty segment.
+    const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+    if (segments.includes('')) {
+      reject(path, 'paths must not contain an empty segment (a repeated separator)');
+    }
+    if (segments.includes('.')) {
+      reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
     }
     const collision = SYSTEM_PATHS.find((sys) =>
       sys.endsWith('/') ? path.startsWith(sys) : path === sys,
@@ -768,144 +789,13 @@ export function gitStatusEntries(root = ROOT) {
   return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
 }
 
-/**
- * Characters that can legally precede a regex literal. A `/` after any of them
- * opens a pattern; after an identifier, a closing bracket or a literal it is
- * division. Nothing else distinguishes the two.
- */
-const REGEX_LITERAL_PREDECESSORS = new Set(
-  ['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'],
-);
-
-/**
- * Consume a quoted literal starting at `start`, returning its raw inner text
- * and the offset just past the closing quote. Escapes are copied through
- * verbatim, which keeps the previous contract (the entries are source text,
- * not decoded values) while stopping `\'` from ending the literal early.
- */
-function readStringLiteral(source, start, quote) {
-  let value = '';
-  let index = start + 1;
-  while (index < source.length && source[index] !== quote) {
-    if (source[index] === '\\') {
-      value += source.slice(index, index + 2);
-      index += 2;
-      continue;
-    }
-    value += source[index];
-    index += 1;
-  }
-  return { value, end: index + 1 };
-}
-
-/**
- * Consume a regex literal starting at `start` and return the offset just past
- * it. An unterminated pattern, or one broken by a newline, was not a regex
- * after all, so the scan resumes one character in rather than swallowing the
- * rest of the file.
- */
-function skipRegexLiteral(source, start) {
-  let index = start + 1;
-  let inCharacterClass = false;
-  while (index < source.length) {
-    const char = source[index];
-    if (char === '\\') {
-      index += 2;
-      continue;
-    }
-    if (char === '\n') return start + 1;
-    if (char === '[') inCharacterClass = true;
-    else if (char === ']') inCharacterClass = false;
-    else if (char === '/' && !inCharacterClass) return index + 1;
-    index += 1;
-  }
-  return start + 1;
-}
-
-/**
- * Read a string-literal array out of updater source text.
- *
- * The source is scanned left to right rather than pattern-matched, because a
- * regex cannot tell code from prose. Comments, string literals, escapes and
- * regex literals are each consumed whole, and the array ends at the bracket
- * that returns depth to zero rather than at the first `];` in the text. So
- * `//` inside `'https://host/file'` stays part of the path, an apostrophe in
- * `// upstream's own files` does not open a string that eats the next entry,
- * `// means "do not touch"` adds no phantom path, a `];` inside a comment does
- * not end the array early, and a commented-out declaration is never selected.
- * None of these threw before: the caller got a plausible-looking list that was
- * wrong.
- *
- * That matters most where this reads a source we did not write: apply() calls
- * it on the TARGET updater fetched from FETCH_HEAD, so one apostrophe added
- * upstream would corrupt the manifest on every client that upgrades, not on
- * the machine where it was typed (#3099).
- *
- * Known limit: template-literal interpolation is treated as ordinary text. A
- * path manifest has no reason to contain one, and reading it properly would
- * need a parser rather than a scanner.
- *
- * @param {string} source - Updater source text.
- * @param {string} name - Array binding to read, e.g. 'SYSTEM_PATHS'.
- * @returns {string[]} Declared entries, in source order. Empty when absent.
- */
 export function extractArrayFromSource(source, name) {
-  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*\\[`, 'y');
-  const entries = [];
-  let depth = 0;
-  let previous = '';
-  let index = 0;
-
-  while (index < source.length) {
-    const char = source[index];
-    const pair = source.slice(index, index + 2);
-
-    if (pair === '//') {
-      const end = source.indexOf('\n', index);
-      index = end === -1 ? source.length : end;
-      continue;
-    }
-    if (pair === '/*') {
-      const end = source.indexOf('*/', index + 2);
-      index = end === -1 ? source.length : end + 2;
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      const literal = readStringLiteral(source, index, char);
-      if (depth > 0) entries.push(literal.value);
-      previous = char;
-      index = literal.end;
-      continue;
-    }
-    if (char === '/' && REGEX_LITERAL_PREDECESSORS.has(previous)) {
-      index = skipRegexLiteral(source, index);
-      previous = '/';
-      continue;
-    }
-
-    if (depth > 0) {
-      if (char === '[') depth += 1;
-      else if (char === ']') {
-        depth -= 1;
-        if (depth === 0) return entries;
-      }
-    } else if (char === 'c') {
-      declaration.lastIndex = index;
-      if (declaration.test(source)) {
-        depth = 1;
-        index = declaration.lastIndex;
-        continue;
-      }
-    }
-
-    if (!/\s/.test(char)) previous = char;
-    index += 1;
-  }
-
-  // An array that never closes is malformed source. Report nothing rather than
-  // a partial manifest: `apply` merges an empty list away, but would act on a
-  // truncated one.
-  return [];
+  source = source.replace(/(['"])(?:\\.|(?!\1)[\s\S])*\1|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g, (token) => (
+    /^['"]/.test(token) ? token : token.replace(/[^\n]/g, ' ')
+  ));
+  const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
+  if (!match) return [];
+  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
 }
 
 function mergePathLists(...lists) {
@@ -1021,6 +911,55 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
 }
 
 /**
+ * Does the COMMITTED system tree differ between `upstreamRef` and HEAD?
+ *
+ * check() needs this to tell two apart-shaped situations that both look like
+ * "HEAD ≠ upstream main":
+ *
+ *   1. apply() ran successfully at the current version. It checks out
+ *      upstream content and commits it as a NEW local commit, so HEAD can
+ *      never equal upstream main's SHA again — SHA inequality alone is the
+ *      steady state of every healthy install, not drift.
+ *   2. Upstream changed system files this install has not adopted. That is
+ *      real drift worth surfacing (#2630).
+ *
+ * Only content settles it: a ref-to-ref diff scoped to the system paths.
+ * Compared against the COMMITTED state (HEAD), deliberately not the working
+ * tree — uncommitted local edits to system files are the preserved-edit case
+ * apply() already handles with .bak + messaging (#2337), not an update
+ * waiting to happen.
+ *
+ * `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line ending
+ * must not read as drift. Installs that last synced before `.gitattributes`
+ * was introduced carry pre-renormalization blobs that differ from upstream by
+ * line endings alone (#2817 — same rationale as locallyModifiedSystemFiles).
+ *
+ * Failure is conservative by design: an unreadable ref or a git error throws
+ * inside the diff and reads as drift, which preserves the pre-fix behavior
+ * whenever content cannot be verified.
+ *
+ * @param {string[]} systemPaths - Pathspecs scoping the diff (SYSTEM_PATHS).
+ * @param {string} [upstreamRef='FETCH_HEAD'] - Ref holding upstream content.
+ * @param {{git?: (...args: string[]) => string}} [ctx] - Test seam: override
+ *   the git runner (defaults to the module-level git() against ROOT).
+ * @returns {boolean} True when committed system content differs (or cannot
+ *   be proven identical); false when the trees match.
+ */
+export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  if (!systemPaths || systemPaths.length === 0) return false;
+  try {
+    // --quiet: exit 0 when identical; exit 1 when they differ, which
+    // execFileSync surfaces as a throw — indistinguishable here from any
+    // other failure, and every throw lands on the conservative answer.
+    runGit('diff', '--quiet', '--ignore-cr-at-eol', upstreamRef, 'HEAD', '--', ...systemPaths);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1039,20 +978,7 @@ export function prepareMaterializedSkillEntrypointsForStage(paths, root = ROOT) 
  *   2. it differs from the upstream ref. A local fix upstream has since adopted
  *      independently is byte-identical there, so the checkout costs nothing and
  *      warning about it would be noise — the exact case the #2337 reporter
- *      isolated when one of their two fixes survived an update;
- *   3. its content is not content upstream itself published at that path
- *      (#3094). Conditions 1 and 2 assume the merge-base still describes this
- *      install. It does not: apply() installs an update with a raw checkout
- *      plus an ordinary commit, and neither creates ancestry to the fetched
- *      commit, so the merge-base stays pinned to the commit the install was
- *      CLONED at. From the second update on, everything upstream changed since
- *      then differs from that baseline and reads as a local edit, so the
- *      update's own payload is preserved into `.bak` files and silently
- *      dropped — `VERSION` with it, which is why such a run reports the version
- *      it just failed to install. Content upstream published cannot have been
- *      authored here, and the question is asked per file because a stuck
- *      install is a MIXTURE of versions: no single baseline commit describes
- *      it, which is what rules out recording one.
+ *      isolated when one of their two fixes survived an update.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
  * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
@@ -1091,14 +1017,28 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  // Without a merge-base (unrelated histories, a shallow clone) fall back to
-  // HEAD: that still catches uncommitted local edits, which is the common case,
-  // and simply misses local edits already committed.
+  // An updater commit is the installed system snapshot. On a later update,
+  // using the original merge-base would mistake the previous update's files
+  // for user edits. Keep the merge-base fallback for installations without a
+  // recorded updater commit.
   let baseline = null;
   try {
-    baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+    const updaterCommit = runGit(
+      'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD',
+    ).trim();
+    if (updaterCommit) {
+      runGit('merge-base', '--is-ancestor', updaterCommit, 'HEAD');
+      baseline = updaterCommit;
+    }
   } catch {
     baseline = null;
+  }
+  if (!baseline) {
+    try {
+      baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
+    } catch {
+      baseline = null;
+    }
   }
 
   const changedLocally = new Set(diffNames(baseline || 'HEAD'));
@@ -1137,91 +1077,9 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // here also gives the `.bak` failure branch back its single meaning: a backup
   // that genuinely could not be written (permissions, full disk).
   const root = ctx.root || ROOT;
-  const present = [...new Set(atRisk)]
+  return [...new Set(atRisk)]
     .filter((file) => existsSync(join(root, ...file.split('/'))))
     .sort();
-
-  // Condition 3 (#3094). Runs last, on the files that survived everything
-  // above: it needs them to exist on disk to hash them, and on a healthy
-  // install the list is empty by now, so the whole query is skipped.
-  const publishedUpstream = contentPublishedUpstream(present, baseline, upstreamRef, runGit);
-  return present.filter((file) => !publishedUpstream.has(file));
-}
-
-/**
- * Of `files`, those whose CURRENT content upstream published at that same path
- * at some point in `baseline..upstreamRef` (#3094).
- *
- * Content-addressing does the work: git names a blob by a hash of its bytes, so
- * "has upstream ever shipped exactly this?" is a set lookup over IDs, never a
- * text comparison. Two git calls regardless of how many files are checked — the
- * history walk dominates, not the file count.
- *
- * Both the source AND destination ID of each change are collected. The source
- * ID of the oldest change in the window is the content as of the baseline
- * itself, which is what an install that never received that file's update is
- * still holding; taking only destinations would leave a blind spot at the
- * oldest edge of the window.
- *
- * Everything here fails open, returning an empty set so that nothing is
- * filtered and the caller reports what it already knew. A shallow clone has no
- * history to read, and unrelated histories give no `baseline` to bound the walk
- * — the same degradation contract the diffs above follow, for the same reason:
- * a check we cannot compute must never abort the update.
- *
- * @param {string[]} files - existing repo-relative paths, already at risk.
- * @param {string|null} baseline - merge-base commit, or null if there is none.
- * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
- * @param {Function} runGit - git runner bound to the install root.
- * @returns {Set<string>} subset of `files` whose content came from upstream.
- */
-function contentPublishedUpstream(files, baseline, upstreamRef, runGit) {
-  const published = new Set();
-  if (files.length === 0 || !baseline) return published;
-
-  let raw = '';
-  try {
-    // `--raw` lines are `:<srcmode> <dstmode> <srcOID> <dstOID> <status>\t<path>`.
-    // `--full-history` keeps commits history simplification would prune, and
-    // `--no-renames` keeps the question about this exact path. A path git has to
-    // C-quote (a space, a quote) simply will not match a `files` entry and stays
-    // reported — the safe direction, and career-ops ships no such path.
-    raw = runGit('log', '--full-history', '--no-renames', '--format=', '--raw',
-      '--no-abbrev', `${baseline}..${upstreamRef}`, '--', ...files);
-  } catch {
-    return published;
-  }
-
-  const idsByPath = new Map();
-  for (const line of raw.split('\n')) {
-    if (!line.startsWith(':')) continue;
-    const [meta, path] = line.split('\t');
-    if (!path) continue;
-    if (!idsByPath.has(path)) idsByPath.set(path, new Set());
-    const fields = meta.split(' ');
-    for (const id of [fields[2], fields[3]]) {
-      // An added file has an all-zero source ID and a deleted one an all-zero
-      // destination; neither names content.
-      if (id && !/^0+$/.test(id)) idsByPath.get(path).add(id);
-    }
-  }
-  if (idsByPath.size === 0) return published;
-
-  // The worktree copy is hashed, not the committed one: an uncommitted edit is
-  // exactly as overwritable, and `hash-object` applies the same filters git
-  // would on the way in, so a CRLF working file still hashes to the LF blob.
-  let hashes = [];
-  try {
-    hashes = runGit('hash-object', '--', ...files).split('\n').map((h) => h.trim());
-  } catch {
-    return published;
-  }
-  if (hashes.length !== files.length) return published;
-
-  files.forEach((file, i) => {
-    if (idsByPath.get(file)?.has(hashes[i])) published.add(file);
-  });
-  return published;
 }
 
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
@@ -1469,7 +1327,6 @@ async function check() {
   if (remoteRef !== null) {
     try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
   }
-  const systemTreeDrift = Boolean(localCommit && remoteCommit && localCommit !== remoteCommit);
 
   if (rawVersion !== null) {
     try {
@@ -1511,6 +1368,26 @@ async function check() {
     remote = releaseVersion;
   } else if (releaseVersion && compareVersions(releaseVersion, remote) > 0) {
     remote = releaseVersion;
+  }
+
+  // SHA inequality alone is NOT drift. apply() commits upstream content as a
+  // NEW local commit on the install's own history, so after any successful
+  // update HEAD never equals upstream main again — treating SHA mismatch as
+  // drift made every post-apply check report system-files-changed forever.
+  // Settle it on CONTENT instead: fetch upstream (exactly what apply() does)
+  // and diff the committed system tree (#2630's same-version drift intent).
+  // Computed after the offline early-return above, so a machine with no
+  // network never pays for a doomed git fetch. Fetch/diff failure stays
+  // conservative (drift reported), matching the failed-commit-lookup policy
+  // at the top of this function.
+  let systemTreeDrift = false;
+  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+    try {
+      gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
+      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+    } catch {
+      systemTreeDrift = true;
+    }
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {

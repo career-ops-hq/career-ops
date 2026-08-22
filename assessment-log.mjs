@@ -29,6 +29,7 @@
 import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const LOG_PATH = join(CAREER_OPS, 'data/assessments.tsv');
@@ -147,7 +148,10 @@ function addEntry(args) {
     const m = args[i].match(/^--(company|report|platform|subject|threshold|score|stale)$/);
     if (m) { fields[m[1]] = args[i + 1] ?? ''; i++; }
   }
-  const today = new Date().toISOString().slice(0, 10);
+  // LOCAL day: this is the date written into the appended assessments.tsv row,
+  // and the UTC day stamped a user record with a day that had not happened yet
+  // for anyone west of Greenwich (#3070).
+  const today = localToday();
   let row;
   try {
     row = buildRow(fields, today);

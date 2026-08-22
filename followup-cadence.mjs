@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -131,7 +132,14 @@ export function normalizeStatus(raw) {
 
 // --- Date helpers ---
 function today() {
-  return new Date(new Date().toISOString().split('T')[0]);
+  // LOCAL calendar day, UTC midnight anchor. toISOString() gives the UTC DAY,
+  // so west of Greenwich an evening run answered "today" with tomorrow and
+  // every daysSinceApp came out one high — the follow-up came due a day early
+  // (#3070). Same fix as followup-seed (#2765) and set-status (#2932).
+  //
+  // The arithmetic below is unchanged: parseDate() still anchors at UTC
+  // midnight, so only WHICH day this is moves.
+  return new Date(localToday());
 }
 
 export function parseDate(dateStr) {
