@@ -91,7 +91,11 @@ const selfTestMode = hasFlag('--self-test');
 const includeWeak = hasFlag('--include-weak');
 const trackerOnly = hasFlag('--tracker-only');
 const portalsOnly = hasFlag('--portals-only');
-const sinceYear = flagValue('--since') ? parseInt(flagValue('--since'), 10) : null;
+const sinceRaw = flagValue('--since');
+// parseInt('2020x') is 2020 and parseInt('abc') is NaN, which the truthiness
+// check below would read as "no filter" — a silently ignored flag is worse than
+// an error, because the output looks like a filtered result.
+const sinceYear = sinceRaw === null ? null : (/^\d{4}$/.test(sinceRaw) ? Number(sinceRaw) : NaN);
 const csvPath = flagValue('--csv') || DEFAULT_CSV;
 const companyQuery = flagValue('--company');
 
@@ -180,6 +184,13 @@ export function companyTokens(name) {
   return {
     all,
     distinctive: all.filter(t => !GENERIC.has(t)),
+    // Concatenated deliberately, NOT space-joined. LinkedIn employer strings
+    // vary in spacing far more than they vary in words: "GoDaddy"/"Go Daddy",
+    // "PayPal"/"Pay Pal", "Salesforce"/"Sales Force", "ServiceNow"/"Service
+    // Now" are all the same employer typed two ways, and only a separator-free
+    // key matches them. The cost is that "A B" and "AB" collide; the benefit is
+    // five real variants per the tests below, and a contrived collision still
+    // has to survive a human reading both raw names in the output.
     key: all.join(''),
     parenthetical: parens.length ? parens.join(' ') : null,
   };
@@ -461,15 +472,27 @@ const TIER_RANK = { exact: 0, strong: 1, weak: 2 };
  * @returns {{targets: object[], matchedConnections: number}}
  */
 export function joinConnections(connections, targetList, { known = new Set(), includeWeak = false } = {}) {
-  const byKey = new Map();
-  for (const t of targetList) {
-    const existing = byKey.get(t.tokens.key);
-    if (!existing) { byKey.set(t.tokens.key, { ...t, connections: [] }); continue; }
-    // Same company reachable from both lists: keep the tracker view.
-    if (existing.source === 'portals' && t.source === 'tracker') {
-      byKey.set(t.tokens.key, { ...t, connections: existing.connections });
-    }
+  // Deduplicate on MATCH EQUIVALENCE, not on identical keys. A tracker row
+  // "Akamai" and a portals entry "Akamai Technologies" are the same employer
+  // (a strong match — only generic filler differs) but have different keys, so
+  // keying alone leaves both. Every connection then matches both and is
+  // reported twice, with the portals copy captioned "no application yet" about
+  // a company the user has already applied to. Tracker targets are placed
+  // first so the surviving copy is the one carrying tracker context.
+  const merged = [];
+  const ordered = [...targetList].sort((a, b) =>
+    (a.source === 'tracker' ? 0 : 1) - (b.source === 'tracker' ? 0 : 1));
+  for (const t of ordered) {
+    const twin = merged.find(m => {
+      const tier = matchCompany(m.tokens, t.tokens);
+      return tier === 'exact' || tier === 'strong';
+    });
+    // A weak twin is NOT merged: weak means the names may well be different
+    // companies, and collapsing them would invent an equivalence the matcher
+    // itself declines to assert.
+    if (!twin) merged.push({ ...t, connections: [] });
   }
+  const byKey = new Map(merged.map(t => [t.tokens.key, t]));
 
   const matched = new Set();
   for (const conn of connections) {
@@ -590,7 +613,14 @@ function renderTsv(result) {
         c.match === 'exact' ? '' : `Name match ${c.match}: "${c.linkedinCompany}".`,
         'Verify current employer before outreach.',
       ].filter(Boolean).join(' ');
-      const clean = (v) => String(v || '').replace(/[\t\r\n]+/g, ' ').trim();
+      // Cells carry connection-controlled text (name, title, employer). A cell
+      // starting =, +, - or @ executes as a formula when the reviewed TSV is
+      // opened in a spreadsheet, so prefix it with an apostrophe. Applied AFTER
+      // trimming, or leading whitespace would hide the leading character.
+      const clean = (v) => {
+        const value = String(v || '').replace(/[\t\r\n]+/g, ' ').trim();
+        return /^[=+\-@]/.test(value) ? `'${value}` : value;
+      };
       out.push([
         clean(c.name), clean(t.company), 'peer', clean(c.title), '',
         clean(c.email), clean(c.linkedin),
@@ -744,6 +774,11 @@ function main() {
     console.error(`Connections export not found: ${csvPath}\n` +
       'Export it from LinkedIn (Settings → Data Privacy → Get a copy of your data → Connections),\n' +
       'drop Connections.csv in data/, or pass --csv <path>.');
+    return 1;
+  }
+
+  if (Number.isNaN(sinceYear)) {
+    console.error(`--since expects a 4-digit year, got "${sinceRaw}".`);
     return 1;
   }
 

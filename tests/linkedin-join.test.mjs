@@ -159,3 +159,45 @@ test('every target carries a second-degree link the user opens themselves (#2679
   assert.ok(url.includes('keywords=Acme%20%26%20Co'));
   assert.ok(url.includes('network=%5B%22S%22%5D'), 'must filter to 2nd degree');
 });
+
+// --- Review findings from PR #3200 -----------------------------------------
+
+test('the folded key concatenates, because LinkedIn spacing varies more than wording', () => {
+  // Space-joining the key would read as safer and would lose all five of
+  // these, which are one employer typed two ways. The collision it prevents
+  // ("A B" vs "AB") still has to get past a human reading both raw names.
+  assert.equal(tier('GoDaddy', 'Go Daddy'), 'exact');
+  assert.equal(tier('PayPal', 'Pay Pal'), 'exact');
+  assert.equal(tier('Salesforce', 'Sales Force'), 'exact');
+  assert.equal(tier('Red Hat', 'RedHat'), 'exact');
+  assert.equal(tier('ServiceNow', 'Service Now'), 'exact');
+});
+
+test('a strong-equivalent target from both sources is merged, not duplicated', () => {
+  const conn = [{
+    name: 'Jane Doe', company: 'Akamai Technologies', title: 'Eng', linkedin: '', email: '',
+    connectedOn: '2020-01-01', connectedYear: 2020, tokens: companyTokens('Akamai Technologies'),
+  }];
+  const { targets } = joinConnections(conn, [
+    { company: 'Akamai', source: 'tracker', tokens: companyTokens('Akamai'), tracker: { num: '7', status: 'Applied' } },
+    { company: 'Akamai Technologies', source: 'portals', tokens: companyTokens('Akamai Technologies'), tracker: null },
+  ]);
+  assert.equal(targets.length, 1, 'the two spellings are one employer');
+  assert.equal(targets[0].source, 'tracker', 'the surviving copy keeps tracker context');
+  assert.equal(targets[0].tracker.num, '7');
+  const appearances = targets.reduce(
+    (n, t) => n + t.connections.filter(c => c.name === 'Jane Doe').length, 0);
+  assert.equal(appearances, 1, 'the connection must not be reported twice');
+});
+
+test('a weak twin is left alone, since weak may be two different companies', () => {
+  const { targets } = joinConnections([{
+    name: 'A B', company: 'Epic Systems', title: '', linkedin: '', email: '',
+    connectedOn: null, connectedYear: null, tokens: companyTokens('Epic Systems'),
+  }], [
+    { company: 'Epic Systems', source: 'tracker', tokens: companyTokens('Epic Systems'), tracker: { num: '1' } },
+    { company: 'Epic Games', source: 'portals', tokens: companyTokens('Epic Games'), tracker: null },
+  ]);
+  assert.equal(targets.length, 1, 'only Epic Systems matches the connection');
+  assert.equal(targets[0].company, 'Epic Systems');
+});
