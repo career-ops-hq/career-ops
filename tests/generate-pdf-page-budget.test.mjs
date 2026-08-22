@@ -11,7 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'fs';
-import { join, relative } from 'path';
+import { isAbsolute, join, relative } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
@@ -351,11 +351,15 @@ try {
   });
   const tempRelativeToWorkspace = relative(sandbox, observedTempPath);
   const tempRelativeToExternal = relative(externalInputRoot, observedTempPath);
+  const tempInsideWorkspace = tempRelativeToWorkspace !== ''
+    && !tempRelativeToWorkspace.startsWith('..')
+    && !isAbsolute(tempRelativeToWorkspace);
+  const tempInsideExternal = tempRelativeToExternal === ''
+    || (!tempRelativeToExternal.startsWith('..') && !isAbsolute(tempRelativeToExternal));
   if (
     directResult?.outputPath === directPdf &&
-    tempRelativeToWorkspace !== '' &&
-    !tempRelativeToWorkspace.startsWith('..') &&
-    tempRelativeToExternal.startsWith('..')
+    tempInsideWorkspace &&
+    !tempInsideExternal
   ) {
     pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
   } else {
