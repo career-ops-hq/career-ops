@@ -53,12 +53,27 @@ export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
   // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
-  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
-  // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
-  // three letters, so the lone "k" magnitude suffix ("80k") is never eaten, and
-  // prose ("competitive") still fails the numeric match below even after losing
-  // its last three letters.
-  s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  // symbol on both bounds: "$123,684—$254,644 USD").
+  s = s.replace(/[€$£¥]/g, '').trim();
+  // Drop a leading label ("Annual Salary Range: $165,000 - $190,000" -> the
+  // part after the last colon). Advertised-comp strings pulled verbatim from a
+  // JD often carry a prefix like this; labels never contain the numeric range
+  // themselves, so taking everything after the LAST colon is safe. (Known
+  // limitation: a trailing parenthetical containing its own colon, e.g.
+  // "$150,000 (note: negotiable)", would wrongly strip the amount too — rare
+  // enough in practice that a full label-vs-note disambiguation isn't worth it.)
+  const lastColon = s.lastIndexOf(':');
+  if (lastColon !== -1) s = s.slice(lastColon + 1).trim();
+  // Drop a trailing bullet/suffix ("$204.4K - $352K • Offers Equity" -> the range).
+  s = s.split('•')[0].trim();
+  // Drop a trailing cadence phrase ("$220,000 - $400,000 USD per year").
+  s = s.replace(/\s*(per\s+(year|annum)|annually|yearly|a\s+year)\s*$/i, '').trim();
+  // Strip a trailing 3-letter ISO-4217-style alpha token (any case — "450k SEK",
+  // "80-90k eur", or what a cadence-phrase strip above left behind, e.g. "USD").
+  // Exactly three letters, so the lone "k" magnitude suffix ("80k") is never
+  // eaten, and prose ("competitive") still fails the numeric match below even
+  // after losing its last three letters.
+  s = s.replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(numStr.replace(/,/g, ''));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
@@ -377,6 +392,9 @@ function selfTest() {
   assert(parseAmount('$123,684-$254,644 USD')?.mid === 189164, 'US range, symbol on both bounds, hyphen');
   assert(parseAmount('€80,000-€90,000')?.min === 80000, 'EUR range, symbol on both bounds');
   assert(parseAmount('$150,000')?.mid === 150000, 'single value with symbol still works');
+  assert(parseAmount('Annual Annual Salary Range: $165,000 - $190,000')?.mid === 177500, 'leading label before colon stripped');
+  assert(parseAmount('$204.4K – $352K • Offers Equity')?.mid === 278200, 'trailing bullet suffix stripped');
+  assert(parseAmount('$220,000 - $400,000 USD per year')?.mid === 310000, 'trailing cadence phrase + ISO code both stripped');
 
   // parseObservations
   const obs = parseObservations(OBS_FIXTURE);
