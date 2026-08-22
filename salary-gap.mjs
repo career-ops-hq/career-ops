@@ -60,7 +60,16 @@ export function parseAmount(raw) {
   // its last three letters.
   s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
   const toNum = (numStr, kFlag) => {
-    const n = parseFloat(numStr.replace(/,/g, ''));
+    // A period counts as thousands grouping only when it's followed by
+    // exactly three digits and not a fourth ("35.000" -> 35000), so markets
+    // that group with a period (Spain, Germany, Italy, the Netherlands,
+    // Brazil, ...) don't get folded to 1/1000th. Genuine decimals like
+    // "82.5" are untouched since they carry one digit after the point. A
+    // three-place decimal ("1.250") is ambiguous without knowing the
+    // document's locale; reading it as grouped is the safer default for a
+    // salary field (per #3174).
+    const normalized = numStr.replace(/,/g, '').replace(/(\d)\.(?=\d{3}(?!\d))/g, '$1');
+    const n = parseFloat(normalized);
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
   };
   const range = s.match(/^([\d.,]+)\s*(k)?\s*[-–—]\s*([\d.,]+)\s*(k)?$/i);
@@ -377,6 +386,9 @@ function selfTest() {
   assert(parseAmount('$123,684-$254,644 USD')?.mid === 189164, 'US range, symbol on both bounds, hyphen');
   assert(parseAmount('€80,000-€90,000')?.min === 80000, 'EUR range, symbol on both bounds');
   assert(parseAmount('$150,000')?.mid === 150000, 'single value with symbol still works');
+  assert(parseAmount('€35.000 - €45.000')?.min === 35000 && parseAmount('€35.000 - €45.000')?.max === 45000, 'period-grouped range (#3174)');
+  assert(parseAmount('40.000')?.mid === 40000, 'period-grouped single value (#3174)');
+  assert(parseAmount('35.000 - 55.000')?.mid === 45000, 'period-grouped range, no currency symbol (#3174)');
 
   // parseObservations
   const obs = parseObservations(OBS_FIXTURE);

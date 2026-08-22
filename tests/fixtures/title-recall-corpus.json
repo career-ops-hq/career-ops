@@ -1,0 +1,2727 @@
+{
+  "_why": "Recall regression corpus for the shared title matcher (title-keywords.mjs). Guards the guarantee established in #3103/#3104: a change to keyword matching must not silently stop matching real roles. The failure mode is invisible - a narrowed matcher drops postings and the scan summary reports one lower number, which reads identically to a quiet week. Every entry below is a real title observed on a public ATS board; `matches` is what the CURRENT matcher returns. A diff here is not automatically a bug, but it is always a decision that has to be made deliberately rather than discovered months later.",
+  "_provenance": "675 distinct titles observed by scan.mjs and scan-ats-full.mjs across public Greenhouse, Lever, Ashby, Workday and iCIMS boards, 2026-04-20 to 2026-08-22. Titles only - no company, URL, board, or date. Contributed from the corpus used to measure #3103, #3104 and #2970.",
+  "_filter_note": "The filter is deliberately small and self-contained rather than a copy of any real portals.yml: it holds exactly the keywords whose matching behaviour those issues discussed, so the corpus exercises the documented edge cases without depending on a user config that can change underneath the test.",
+  "title_filter": {
+    "positive": [
+      "Smart Contract",
+      "Solana",
+      "Rust Engineer",
+      "Protocol Engineer",
+      "Backend",
+      "Anchor + Solana",
+      "DeFi + Engineer",
+      "Fuel + Rust",
+      "Astar",
+      "Neutron",
+      "Onchain"
+    ],
+    "negative": [
+      "Intern",
+      "Frontend",
+      "Recruiter"
+    ]
+  },
+  "titles": [
+    {
+      "title": "(2 listings: PM-Platform + CSM, 0 SC)",
+      "matches": false
+    },
+    {
+      "title": "(31 listings, 0 SC: SRE/Infra/Data/Capital Markets/Sales/PM/Security-IR)",
+      "matches": false
+    },
+    {
+      "title": "(9 Eng listings, 0 SC: Distinguished/Staff/Data/Forward Deployed — all platform/payment infra)",
+      "matches": false
+    },
+    {
+      "title": "(DNS fail, careers_url dead)",
+      "matches": false
+    },
+    {
+      "title": "(Greenhouse board returns 404)",
+      "matches": false
+    },
+    {
+      "title": "(JS-rendered, listings not in a11y tree)",
+      "matches": false
+    },
+    {
+      "title": "(Notion page timeout 60s, careers board unreachable)",
+      "matches": false
+    },
+    {
+      "title": "(Senior) Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "(Senior) Backend Engineer (f/m/d)",
+      "matches": true
+    },
+    {
+      "title": "(Senior) Backend Engineer, Maps",
+      "matches": true
+    },
+    {
+      "title": "(Senior) Backend Engineer, Marketplace",
+      "matches": true
+    },
+    {
+      "title": "(Senior) Backend Software Engineer (all genders) - Vehicle Perception",
+      "matches": true
+    },
+    {
+      "title": "(Senior) Systems Engineer (Solana) - Remote Germany/Europe (m/f/d)",
+      "matches": true
+    },
+    {
+      "title": "(board open, 0 engineering roles, only iGaming/Design)",
+      "matches": false
+    },
+    {
+      "title": "(bot check / blocked)",
+      "matches": false
+    },
+    {
+      "title": "(careers index — 12 listings, 0 SC)",
+      "matches": false
+    },
+    {
+      "title": "(no SC roles, all 8 eng titles previously seen)",
+      "matches": false
+    },
+    {
+      "title": "(no openings)",
+      "matches": false
+    },
+    {
+      "title": "AI Backend Product Engineer",
+      "matches": true
+    },
+    {
+      "title": "AI Infrastructure Software Engineer — CosmosLab",
+      "matches": false
+    },
+    {
+      "title": "AM Fuel Tank Non-Welder",
+      "matches": false
+    },
+    {
+      "title": "AML Officer",
+      "matches": false
+    },
+    {
+      "title": "APAC - Lead Solutions Architect",
+      "matches": false
+    },
+    {
+      "title": "Account Executive",
+      "matches": false
+    },
+    {
+      "title": "Accountant in Fuel Accounts Payable Team",
+      "matches": false
+    },
+    {
+      "title": "Adjunct Teaching - Asian & Near Eastern Languages - ARAB 361 (Evening School)",
+      "matches": false
+    },
+    {
+      "title": "Administrative Support - Aurora Picadilly St #178",
+      "matches": false
+    },
+    {
+      "title": "Advanced Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "All Levels: Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Anchor",
+      "matches": false
+    },
+    {
+      "title": "Anchor/Producer",
+      "matches": false
+    },
+    {
+      "title": "Anesthesiologist Assistant - Aurora St. Luke's Medical Center, Milwaukee, WI",
+      "matches": false
+    },
+    {
+      "title": "Assistant Store Manager - Kay Jewelers Outlet - Aurora Farms Premium Outlets",
+      "matches": false
+    },
+    {
+      "title": "Assistente Admin I Servicos (Exclusiva para Pessoas com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Assistente Comercial - LDR | RD Station (Remoto) afirmativa para pessoas com deficiência",
+      "matches": false
+    },
+    {
+      "title": "Assistente de Logística | Vaga afirmativa para pessoas com deficiência",
+      "matches": false
+    },
+    {
+      "title": "Associate DeFi Growth Specialist",
+      "matches": false
+    },
+    {
+      "title": "Associate DeFi Growth SpecialistProRel",
+      "matches": false
+    },
+    {
+      "title": "Auxiliar Administrativo de Operações | Monitoração | Vaga Afirmativa para Pessoas com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Auxiliar Administrativo | Vaga Afirmativa para Pessoas com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Auxiliar de Serviços Gerais - Divisão de Farmacêuticos Estabelecidos/Manufatura (EPD-M) - Rio de Janeiro/RJ (Vaga Exclusiva para Pessoa com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "BackEnd Software Engineer (Experienced or Senior)",
+      "matches": true
+    },
+    {
+      "title": "Backend & AI",
+      "matches": true
+    },
+    {
+      "title": "Backend / Server Engineer (Senior or Staff)",
+      "matches": true
+    },
+    {
+      "title": "Backend API’s and Integrations Software Engineer III",
+      "matches": true
+    },
+    {
+      "title": "Backend Compiler Engineer",
+      "matches": true
+    },
+    {
+      "title": "Backend Developer",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer ( India )",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (Contract - LATAM)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (Data Platform)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (Go)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (Solana)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (TypeScript)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer (VPN)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Card Transaction Processing",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Index Data Processing",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Ingestion (Europe/UK timezone)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - ML Platform",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Payments",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Search and Retrieval",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Transaction",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer - Travel Development Department (TDD)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer AI / Machine Learning (Agentic Systems)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer E2 - Ecosystem",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer III",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer III (Hybrid)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer – API Integrationen, Connectoren, Worker/Jobs, Mailer Service, QA",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, AI Engineering: Duo Chat",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Flag Delivery",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Integrations & APIs",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Link (US)",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Markets",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Payments",
+      "matches": true
+    },
+    {
+      "title": "Backend Engineer, Yield",
+      "matches": true
+    },
+    {
+      "title": "Backend Integrations Engineer",
+      "matches": true
+    },
+    {
+      "title": "Backend Senior Software Engineer, Attack and User Emulation Team (AUE)",
+      "matches": true
+    },
+    {
+      "title": "Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Backend Software Engineer (YC experience)",
+      "matches": true
+    },
+    {
+      "title": "Backend Software Engineer (all genders)",
+      "matches": true
+    },
+    {
+      "title": "Backend Software Engineer - Incubations",
+      "matches": true
+    },
+    {
+      "title": "Backend Software Engineering",
+      "matches": true
+    },
+    {
+      "title": "Backend Team manager",
+      "matches": true
+    },
+    {
+      "title": "Backend UM Coordinator",
+      "matches": true
+    },
+    {
+      "title": "Backend developer",
+      "matches": true
+    },
+    {
+      "title": "Backend/ML Engineer",
+      "matches": true
+    },
+    {
+      "title": "Blockchain Developer (Solana)",
+      "matches": true
+    },
+    {
+      "title": "Blockchain Developer (Solana/Rust)",
+      "matches": true
+    },
+    {
+      "title": "Blockchain Developer - Rust",
+      "matches": false
+    },
+    {
+      "title": "Blockchain Engineer",
+      "matches": false
+    },
+    {
+      "title": "Blockchain Engineer (Smart Contract)",
+      "matches": true
+    },
+    {
+      "title": "Blockchain Protocol Engineer (Rust Developer)",
+      "matches": true
+    },
+    {
+      "title": "Blockchain Security Engineer - Senior Level (Solidity / Rust / Golang )",
+      "matches": false
+    },
+    {
+      "title": "Bulk Fuel Specialist (CDL)",
+      "matches": false
+    },
+    {
+      "title": "Bulk Fuel Specialist (Non-CDL)",
+      "matches": false
+    },
+    {
+      "title": "Business Development Lead",
+      "matches": false
+    },
+    {
+      "title": "Business Development Lead – Payments & Fintech",
+      "matches": false
+    },
+    {
+      "title": "Business Development Manager",
+      "matches": false
+    },
+    {
+      "title": "CDL Driver in Training in Anchorage AK",
+      "matches": false
+    },
+    {
+      "title": "CDL Truck Fueler - 2nd Shift",
+      "matches": false
+    },
+    {
+      "title": "COMSEC Manager/Senior ISSO - Aurora, CO",
+      "matches": false
+    },
+    {
+      "title": "Care Management Associate - Must live near San Antonio, Texas",
+      "matches": false
+    },
+    {
+      "title": "Case Manager Aurora Family Services",
+      "matches": false
+    },
+    {
+      "title": "Certified Registered Nurse Anesthetist (CRNA), Weekend OB Part-Time - Aurora Lakeland Medical Center, Elkhorn, WI",
+      "matches": false
+    },
+    {
+      "title": "Cleaner Fueller Shunter Supervisor",
+      "matches": false
+    },
+    {
+      "title": "Consultant Surveillance Officer - STRengthening Infectious disease DEtection Systems (STRIDES) Project",
+      "matches": false
+    },
+    {
+      "title": "Cook - Full Time - Mercy Aurora",
+      "matches": false
+    },
+    {
+      "title": "Coordenador De Desenvolvimento De Marcas - Afirmativa Pessoa com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Corda Solana On-Chain Rust Engineer",
+      "matches": true
+    },
+    {
+      "title": "Core Blockchain Engineer",
+      "matches": false
+    },
+    {
+      "title": "Core Developer - Polkadot Runtime",
+      "matches": false
+    },
+    {
+      "title": "Core Team Member, Ethereum for Public Infrastructure & Commons",
+      "matches": false
+    },
+    {
+      "title": "Create Your Role",
+      "matches": false
+    },
+    {
+      "title": "DC Pipe Yard Associate- 6am Shift M-F $24 Near I5 and Hwy 4",
+      "matches": false
+    },
+    {
+      "title": "Day Warehouse Manager-Aurora IL",
+      "matches": false
+    },
+    {
+      "title": "DeFi Desk - APAC",
+      "matches": false
+    },
+    {
+      "title": "DeFi Engineer",
+      "matches": true
+    },
+    {
+      "title": "DeFi Engineer (UK)",
+      "matches": true
+    },
+    {
+      "title": "DeFi Growth Lead",
+      "matches": false
+    },
+    {
+      "title": "Defi Liquidity Lead",
+      "matches": false
+    },
+    {
+      "title": "Defined Contributions Client Leader I - Virtual",
+      "matches": false
+    },
+    {
+      "title": "Delivery Team Lead - Core Functions - GL D - Defined Duration until December 2029",
+      "matches": false
+    },
+    {
+      "title": "Desarrollador Backend Mid",
+      "matches": true
+    },
+    {
+      "title": "Desarrollador/a Backend Senior (especialista en migraciones) Hibrido",
+      "matches": true
+    },
+    {
+      "title": "Desenvolvedor BackEnd Node - Pleno",
+      "matches": true
+    },
+    {
+      "title": "Desenvolvedor(a) Backend Kotlin - Especialista",
+      "matches": true
+    },
+    {
+      "title": "Desenvolvedor(a) Backend Pleno - Python",
+      "matches": true
+    },
+    {
+      "title": "Diagnostic Backend Developer (m/d/w)",
+      "matches": true
+    },
+    {
+      "title": "Diesel Mechanic Assistant/Fueler",
+      "matches": false
+    },
+    {
+      "title": "Digital Assets Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Director Fuel Supply & Optimization",
+      "matches": false
+    },
+    {
+      "title": "Director of Engineering, Onchain",
+      "matches": true
+    },
+    {
+      "title": "Director, Backend Engineering - Brokerage",
+      "matches": true
+    },
+    {
+      "title": "Director, Institutional Growth",
+      "matches": false
+    },
+    {
+      "title": "Distinguished Software Engineer",
+      "matches": false
+    },
+    {
+      "title": "Dual Fuel Smart Meter Engineer",
+      "matches": false
+    },
+    {
+      "title": "Dual Fuel smart Meter Engineer",
+      "matches": false
+    },
+    {
+      "title": "EVM Project Scheduler",
+      "matches": false
+    },
+    {
+      "title": "Eletricista I B (Vaga Afirmativa para Pessoas com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Eletricista Industrial (Vaga afirmativa para pessoa com deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Eng II, Draft/Product Definition (Onsite)",
+      "matches": false
+    },
+    {
+      "title": "Engine Control Laws and Fuel System Control Principal Engineer P4 (Onsite)",
+      "matches": false
+    },
+    {
+      "title": "Engineer (Full Stack)",
+      "matches": false
+    },
+    {
+      "title": "Engineer IV, Nuclear Fuel Systems",
+      "matches": false
+    },
+    {
+      "title": "Engineering Lead - Crypto and DeFi",
+      "matches": true
+    },
+    {
+      "title": "Engineering Manager, Smart Contracts",
+      "matches": true
+    },
+    {
+      "title": "Especialista em Backend",
+      "matches": true
+    },
+    {
+      "title": "European Biofuels Marketer",
+      "matches": false
+    },
+    {
+      "title": "Evening Anchor",
+      "matches": false
+    },
+    {
+      "title": "EverHealth - Backend Claims Management Specialist",
+      "matches": true
+    },
+    {
+      "title": "Executive Director, STELLAR Program",
+      "matches": false
+    },
+    {
+      "title": "Expressions of Interest - Contract Senior Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "FNP or PA Emergency Medicine- Aurora Sinai 1.0",
+      "matches": false
+    },
+    {
+      "title": "Family NP/PA – Philadelphia (Near The Met & Center City)",
+      "matches": false
+    },
+    {
+      "title": "Feed Mill Worker Labor FM01 - 1st shift - Aurora Feed Mill",
+      "matches": false
+    },
+    {
+      "title": "Field Service Engineer - TIMS&MC-ICP-MS",
+      "matches": false
+    },
+    {
+      "title": "Field Service Engineer III (ICP/Chromatography) Greater Montreal REMOTE",
+      "matches": false
+    },
+    {
+      "title": "Fit4Less Host - Edmonton Kingsway",
+      "matches": false
+    },
+    {
+      "title": "Fit4Less Host - Etobicoke Kipling Queensway",
+      "matches": false
+    },
+    {
+      "title": "Food Service Assistant - Aurora St. Luke's Medical Center",
+      "matches": false
+    },
+    {
+      "title": "Forward Deployed Engineer",
+      "matches": false
+    },
+    {
+      "title": "Founding AI Platform Engineer (MLOps / Backend)",
+      "matches": true
+    },
+    {
+      "title": "Founding Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Founding Core Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Founding Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Freelance Senior Backend Engineer - Kotlin (m/f/d)",
+      "matches": true
+    },
+    {
+      "title": "Front-End Developer (Injective Labs)",
+      "matches": false
+    },
+    {
+      "title": "Front-End Engineer (React Web)",
+      "matches": false
+    },
+    {
+      "title": "Fuel Ambassador - Full Time, Perks!",
+      "matches": false
+    },
+    {
+      "title": "Fuel Associate",
+      "matches": false
+    },
+    {
+      "title": "Fuel Center Cashier",
+      "matches": false
+    },
+    {
+      "title": "Fuel Distribution Planner for Europe 24/7",
+      "matches": false
+    },
+    {
+      "title": "Fuel Inventory Controller",
+      "matches": false
+    },
+    {
+      "title": "Fuel Investigator- Orlando metro area through Miami",
+      "matches": false
+    },
+    {
+      "title": "Fuel Manager",
+      "matches": false
+    },
+    {
+      "title": "Fuel Quality Assurance Engineer",
+      "matches": false
+    },
+    {
+      "title": "Fuel Station Attendant",
+      "matches": false
+    },
+    {
+      "title": "Fuel Supply Scheduler",
+      "matches": false
+    },
+    {
+      "title": "Fuel System Electrician",
+      "matches": false
+    },
+    {
+      "title": "Fuel System Mechanic",
+      "matches": false
+    },
+    {
+      "title": "Fuel Technician-Gulfport, MS",
+      "matches": false
+    },
+    {
+      "title": "Fuel Transport Driver",
+      "matches": false
+    },
+    {
+      "title": "Fuel and Lube Mechanic",
+      "matches": false
+    },
+    {
+      "title": "Fueler/Washer",
+      "matches": false
+    },
+    {
+      "title": "Fueller Shunter Cleaner",
+      "matches": false
+    },
+    {
+      "title": "Fueller/Shunter/Cleaner",
+      "matches": false
+    },
+    {
+      "title": "Fueller/Shunter/Cleaner - Spalding Depot",
+      "matches": false
+    },
+    {
+      "title": "Fuels Handling Equipment (FHE) Supervisor",
+      "matches": false
+    },
+    {
+      "title": "Fuels Technician",
+      "matches": false
+    },
+    {
+      "title": "Full Stack Blockchain Engineer",
+      "matches": false
+    },
+    {
+      "title": "Full Stack Engineer",
+      "matches": false
+    },
+    {
+      "title": "Full Stack Engineer (Senior)",
+      "matches": false
+    },
+    {
+      "title": "Full Stack Engineer, Blockchain",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Blockchain Engineer",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Developer",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Engineer at Kyros",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Engineer, Wallets",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Software Engineer",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Software Engineer - Remote",
+      "matches": false
+    },
+    {
+      "title": "Full-Stack Software Engineer – Remote",
+      "matches": false
+    },
+    {
+      "title": "Full-stack Engineer - Wallets (NYC / MIA)",
+      "matches": false
+    },
+    {
+      "title": "General Manager - Aurora, IL Stock Yards",
+      "matches": false
+    },
+    {
+      "title": "Genomic Breeder (Solanaceae)",
+      "matches": true
+    },
+    {
+      "title": "Graduate/Junior Software Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Growth Engineer / Integration Engineer (Injective Labs)",
+      "matches": false
+    },
+    {
+      "title": "Growth Manager - Asia",
+      "matches": false
+    },
+    {
+      "title": "Hand Solderer, Afternoon Shift (regular/indefinite)",
+      "matches": false
+    },
+    {
+      "title": "Hand Solderer, Day Shift (regular/indefinite)",
+      "matches": false
+    },
+    {
+      "title": "Head of Backend",
+      "matches": true
+    },
+    {
+      "title": "Head of Data",
+      "matches": false
+    },
+    {
+      "title": "Head of DeFi",
+      "matches": false
+    },
+    {
+      "title": "Head of Product",
+      "matches": false
+    },
+    {
+      "title": "Head of Stablecoins",
+      "matches": false
+    },
+    {
+      "title": "High School Biology Teacher (2-Yr Defined Term)",
+      "matches": false
+    },
+    {
+      "title": "IN_Associate_metals & mining_Fuels & Resources S&O_Advisory_Bangalore",
+      "matches": false
+    },
+    {
+      "title": "IN_Manager_Metals&mining_Fuels & Resources S&O_Advisory_Mumbai",
+      "matches": false
+    },
+    {
+      "title": "IN_Senior Associate_AI Backend Engineer_Data and Analytics_Advisory_Bangalore",
+      "matches": true
+    },
+    {
+      "title": "Infrastructure (Rust, Devops)",
+      "matches": false
+    },
+    {
+      "title": "Inpatient Pharmacy Technician I - Aurora BayCare Medical Center",
+      "matches": false
+    },
+    {
+      "title": "Institutional - Lead Solutions Architect",
+      "matches": false
+    },
+    {
+      "title": "Institutional Growth Lead- Greater China",
+      "matches": false
+    },
+    {
+      "title": "Institutional Growth Lead- Japan",
+      "matches": false
+    },
+    {
+      "title": "Junior Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Junior Full Stack Engineer ($250k - $300k salary)",
+      "matches": false
+    },
+    {
+      "title": "Laboratory Technician (Public Works) - West Babylon",
+      "matches": false
+    },
+    {
+      "title": "Lead Backend Development Engineer",
+      "matches": true
+    },
+    {
+      "title": "Lead Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Lead Backend Software Engineer - Sensors and Integrations",
+      "matches": true
+    },
+    {
+      "title": "Lead Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Lead Protocol Engineer (Go / Cryptography)",
+      "matches": true
+    },
+    {
+      "title": "Lead Rust Engineer, Async VM",
+      "matches": true
+    },
+    {
+      "title": "Lead Security Engineer",
+      "matches": false
+    },
+    {
+      "title": "Lead Software Engineer / LMTS - Backend - Bangalore",
+      "matches": true
+    },
+    {
+      "title": "Lead Software Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Lead, Assurance, Office of the Inspector General - GL D - Defined Duration until December 2028 x 2 positions",
+      "matches": false
+    },
+    {
+      "title": "Legal Counsel",
+      "matches": false
+    },
+    {
+      "title": "Linear Accelerator Engineer",
+      "matches": false
+    },
+    {
+      "title": "Linear Machine Operator - 2nd Shift",
+      "matches": false
+    },
+    {
+      "title": "Lähihoitaja / sairaanhoitaja (keikkatyö), Mainiokoti Aurora, Turku",
+      "matches": false
+    },
+    {
+      "title": "Machine Learning Experts: Linear Algebra Exam Audit",
+      "matches": false
+    },
+    {
+      "title": "Maintenance Utility Worker (fueler)",
+      "matches": false
+    },
+    {
+      "title": "Manager, Price Reporting, Biofuels and Feedstocks",
+      "matches": false
+    },
+    {
+      "title": "Manager, Software Engineering",
+      "matches": false
+    },
+    {
+      "title": "Manager, Software Engineering – Backend (Consumer Team) Hyderabad",
+      "matches": true
+    },
+    {
+      "title": "Marketing Associate",
+      "matches": false
+    },
+    {
+      "title": "Mechanical Journeyperson (Millwright) - Defiance (Evergreen)",
+      "matches": false
+    },
+    {
+      "title": "Mecânica(o) Pleno A (Vaga Afirmativa para Pessoas com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Medical Assistant - Primary Care Aurora, Full Time",
+      "matches": false
+    },
+    {
+      "title": "Medior Backend Developer | Python",
+      "matches": true
+    },
+    {
+      "title": "Member Support Consultant | Kingsway (casual)",
+      "matches": false
+    },
+    {
+      "title": "Member of Technical Staff — Software Engineer (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Member of Technical Staff, Custody (Backend Engineer)",
+      "matches": true
+    },
+    {
+      "title": "Member of Technical Staff, Transparency, Billing & Revenue (Backend Engineer)",
+      "matches": true
+    },
+    {
+      "title": "Mid/Senior Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Mid/Senior Smart Contract Engineer (EVM)",
+      "matches": true
+    },
+    {
+      "title": "Mobile App Developer (Injective Labs)",
+      "matches": false
+    },
+    {
+      "title": "Mobile Engineer (React Native)",
+      "matches": false
+    },
+    {
+      "title": "Morning Anchor- DC News Now",
+      "matches": false
+    },
+    {
+      "title": "Morning News Anchor",
+      "matches": false
+    },
+    {
+      "title": "NASTAR Course Setter/Pace Setter - Winter 26-27",
+      "matches": true
+    },
+    {
+      "title": "NASTAR/Events Crew - Winter 26-27",
+      "matches": true
+    },
+    {
+      "title": "Nasdaq - RWA Principal Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "News Anchor",
+      "matches": false
+    },
+    {
+      "title": "News Anchor-Reporter -Minnesota News Network",
+      "matches": false
+    },
+    {
+      "title": "Non-Linear Rates & Structured Notes Strat",
+      "matches": false
+    },
+    {
+      "title": "Nurse Practitioner | 10-15 Patients/Day | Value-Based Care | Anchorage, AK",
+      "matches": false
+    },
+    {
+      "title": "Operador(a) Mistura e Ensaque I - Exclusiva para Pessoas com Deficiência (PcD) - Rio Grande/RS",
+      "matches": false
+    },
+    {
+      "title": "Oportunidades Inclusivas | Pessoas com Deficiência (PcD)",
+      "matches": false
+    },
+    {
+      "title": "PM-Fuel Tank Welder",
+      "matches": false
+    },
+    {
+      "title": "PT Traffic Anchor/Producer",
+      "matches": false
+    },
+    {
+      "title": "Part Time Associate Aurora Winners Homesense smart centre",
+      "matches": false
+    },
+    {
+      "title": "Partnerships Lead, Defi",
+      "matches": false
+    },
+    {
+      "title": "Patient Care Technician (PCT) - Med-Surg Unit - Defiance Hospital",
+      "matches": false
+    },
+    {
+      "title": "Payment / Fiat Engineer (Rust)",
+      "matches": false
+    },
+    {
+      "title": "Pessoa Desenvolvedora Backend Jr.",
+      "matches": true
+    },
+    {
+      "title": "Phlebotomist / Driver (Mobile Blood Drives) - Aurora, IL (Paid training)",
+      "matches": false
+    },
+    {
+      "title": "Planejadora(or) de Manutenção Sênior (Vaga Afirmativa para Pessoas com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Pleno Backend Software Engineer (Camunda) - Campinas/SP",
+      "matches": true
+    },
+    {
+      "title": "Praktikum für Masterstudierende im Bereich Near Patient Care Biostatistics and Mathematics (m/w/d)",
+      "matches": false
+    },
+    {
+      "title": "Primary Care Physician (Vera Whole Health - Anchorage, AK)",
+      "matches": false
+    },
+    {
+      "title": "Principal Backend Development Engineer",
+      "matches": true
+    },
+    {
+      "title": "Principal Backend Development Engineer(C++)",
+      "matches": true
+    },
+    {
+      "title": "Principal Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Principal Mechanical Canister Eng",
+      "matches": false
+    },
+    {
+      "title": "Principal Product Engineer – Virtuoso Backend Flows",
+      "matches": true
+    },
+    {
+      "title": "Principal Software Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Product Applications Engineer / Product Definer, Power Management",
+      "matches": true
+    },
+    {
+      "title": "Product Design Lead",
+      "matches": false
+    },
+    {
+      "title": "Product Manager, Trading",
+      "matches": false
+    },
+    {
+      "title": "Product Marketing Manager",
+      "matches": false
+    },
+    {
+      "title": "Programa de Desenvolvimento - SANB | Carreira em Consultoria de Vendas - Exclusivo para Pessoas com Deficiência (PcD)",
+      "matches": false
+    },
+    {
+      "title": "Project Engineer - Linear",
+      "matches": false
+    },
+    {
+      "title": "Promotor De Merchandising - Curitiba (PR) Exclusiva Pessoas com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Promotor de Merchandising - Taubaté (SP) - Exclusivo Pessoas com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Protocol Engineer (Distributed Systems)",
+      "matches": true
+    },
+    {
+      "title": "Protocol Engineer (Injective Labs)",
+      "matches": true
+    },
+    {
+      "title": "Protocol Engineer - Blockchain",
+      "matches": true
+    },
+    {
+      "title": "Protocol Engineer - Platform",
+      "matches": true
+    },
+    {
+      "title": "Python Backend Engineers: Audit a FastAPI Microservices Exam",
+      "matches": true
+    },
+    {
+      "title": "QA Engineer (Injective Labs)",
+      "matches": false
+    },
+    {
+      "title": "R&D Engineer – Firmware & Linear Drive Control (f/m/d)",
+      "matches": false
+    },
+    {
+      "title": "RN GIG - Flex/Per Diem/PRN - Mercy Aurora and Cassville",
+      "matches": false
+    },
+    {
+      "title": "RWA Principal Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Recovery Room Nurse - Near North",
+      "matches": false
+    },
+    {
+      "title": "Recreation Aide Regular Part Time [IAR AAide11 0.36] AgeCare Aurora",
+      "matches": false
+    },
+    {
+      "title": "Recruiting Operations & Sourcing Contractor",
+      "matches": false
+    },
+    {
+      "title": "Refueling Supplier Engineer",
+      "matches": false
+    },
+    {
+      "title": "Regional Business Manager, Fuel Supply Systems",
+      "matches": false
+    },
+    {
+      "title": "Registered Nurse (RN) - Emergency Department - Defiance Hospital",
+      "matches": false
+    },
+    {
+      "title": "Registered Nurse - Full Time Days- Mercy Aurora OB",
+      "matches": false
+    },
+    {
+      "title": "Reverse Osmosis (RO) Water Plant Operator",
+      "matches": false
+    },
+    {
+      "title": "Rust (CosmWasm) Blockchain Developer",
+      "matches": false
+    },
+    {
+      "title": "Rust / Crypto Developer",
+      "matches": false
+    },
+    {
+      "title": "Rust Engineer",
+      "matches": true
+    },
+    {
+      "title": "Rust Engineer (Solana)",
+      "matches": true
+    },
+    {
+      "title": "Rust Engineer - Core Exchange Backend",
+      "matches": true
+    },
+    {
+      "title": "Rust Engineer, Defi",
+      "matches": true
+    },
+    {
+      "title": "Rust Smart Contract Developer",
+      "matches": true
+    },
+    {
+      "title": "Rust Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "SDET (Money Movement)",
+      "matches": false
+    },
+    {
+      "title": "SDET (Wallet Platform)",
+      "matches": false
+    },
+    {
+      "title": "SE - Functions and Integrations",
+      "matches": false
+    },
+    {
+      "title": "SR Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "STAFF RN - Anchor",
+      "matches": false
+    },
+    {
+      "title": "STRIDES Technical Director",
+      "matches": false
+    },
+    {
+      "title": "Scientist II - ICP Mass Spec - M-F 2nd Shift",
+      "matches": false
+    },
+    {
+      "title": "Seasonal Fuel Delivery Driver (Sign-on Bonus)",
+      "matches": false
+    },
+    {
+      "title": "Security Engineer",
+      "matches": false
+    },
+    {
+      "title": "Security Engineer: Solana C/Rust",
+      "matches": true
+    },
+    {
+      "title": "Security Engineer: Solana/Rust",
+      "matches": true
+    },
+    {
+      "title": "Security Officers Licensed - 2 -3 Shifts- Recognized Top Workplace - Aurora",
+      "matches": false
+    },
+    {
+      "title": "Security Researcher",
+      "matches": false
+    },
+    {
+      "title": "Security Researcher (already in history)",
+      "matches": false
+    },
+    {
+      "title": "Senior / Staff Backend Engineer, Maps",
+      "matches": true
+    },
+    {
+      "title": "Senior APS COE Solution Anchor",
+      "matches": false
+    },
+    {
+      "title": "Senior Application Engineer, IT Engineering",
+      "matches": false
+    },
+    {
+      "title": "Senior Backend & Smart Contract Engineer (Rust/Solana)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Developer",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Developer, SCM Tech Fulfillment",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Contract to Hire)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Foundation)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Go)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Go) | Studio AI",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Go), Tenant Scale: Gitaly",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (L3) - TPV",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (L3)- Revenue",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (L4)- Revenue",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (L5) - Core trading",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (Python), Agent Developer: Flow Components",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (TypeScript / Web3)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer (f/m/x)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Access Control",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - ComparaJá",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Device Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Intercom",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - MarTech",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Payments",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Platform Integrations (Monetization)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer - Solana Mobile",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer – AI Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer – Finapps/Access",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer – Users Infrastructure",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer –Virtualization",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer(Go), Storage Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Ambient AI",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Billing",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Data Ingestion",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Exchange Infrastructure",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Exchange Systems",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Experimentation",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, ISV (Product Infrastructure)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Identity & Access Management",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Markets Engineering",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Onchain",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Payments",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Perpetuals",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Poland (m/f/d)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Pricing Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Romania (m/f/d)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Rust",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Safety",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Trading & Connectivity",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Trust & Safety",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, Trusted Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer, US Exchange",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer- Data Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Engineer- Users Infrastructure",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Developer",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer (New York only)",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer - Agent Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer - GenAI",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer | AI Engine",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer — IoT Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer, Integrations Platform",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer, Subscriptions Enablement",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Software Engineer- Core Services",
+      "matches": true
+    },
+    {
+      "title": "Senior Backend Softwareentwickler",
+      "matches": true
+    },
+    {
+      "title": "Senior Blockchain Engineer - Rust/Solana",
+      "matches": true
+    },
+    {
+      "title": "Senior Compiler Engineer - Backend GPU",
+      "matches": true
+    },
+    {
+      "title": "Senior Cross-Chain Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Data Scientist",
+      "matches": false
+    },
+    {
+      "title": "Senior Data Scientist, Blockchain",
+      "matches": false
+    },
+    {
+      "title": "Senior Data Scientist, Payments",
+      "matches": false
+    },
+    {
+      "title": "Senior Database Engineer (PostgreSQL, Aurora)",
+      "matches": false
+    },
+    {
+      "title": "Senior Engineer (C# backend development)",
+      "matches": true
+    },
+    {
+      "title": "Senior Engineer (WFH, Backend & Full-Stack)",
+      "matches": true
+    },
+    {
+      "title": "Senior Engineer System Software, Software Defined Networking",
+      "matches": true
+    },
+    {
+      "title": "Senior Frontend Engineer",
+      "matches": false
+    },
+    {
+      "title": "Senior Full Stack Rust Engineer, Contract - US",
+      "matches": true
+    },
+    {
+      "title": "Senior Full Stack Software Engineer",
+      "matches": false
+    },
+    {
+      "title": "Senior Full-Stack Engineer (Web3)",
+      "matches": false
+    },
+    {
+      "title": "Senior Full-Stack Software Engineer, Social Commerce",
+      "matches": false
+    },
+    {
+      "title": "Senior Full-stack Engineer (React/Node) (Backend-Focused) - Real Estate",
+      "matches": true
+    },
+    {
+      "title": "Senior Full-stack Engineer (React/Node) (Backend-Focused) - Real Estate - LATAM",
+      "matches": true
+    },
+    {
+      "title": "Senior Full-stack Engineer - Agentic Payments (NYC / MIA)",
+      "matches": false
+    },
+    {
+      "title": "Senior Fullstack Engineer (Backend Focus)",
+      "matches": true
+    },
+    {
+      "title": "Senior II Backend Developer - Foundation",
+      "matches": true
+    },
+    {
+      "title": "Senior ML Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Manager, DeFi Lending Growth",
+      "matches": false
+    },
+    {
+      "title": "Senior Member of Technical Staff-Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Neutronics Engineer - Isotope Production",
+      "matches": true
+    },
+    {
+      "title": "Senior Performance Engineer",
+      "matches": false
+    },
+    {
+      "title": "Senior Platform Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Principal Backend Development Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Principal Backend Development Engineer(C++)",
+      "matches": true
+    },
+    {
+      "title": "Senior Product Engineer",
+      "matches": false
+    },
+    {
+      "title": "Senior Product Engineer [Backend]",
+      "matches": true
+    },
+    {
+      "title": "Senior Product Manager - Agentic Trading",
+      "matches": false
+    },
+    {
+      "title": "Senior Product Marketer",
+      "matches": false
+    },
+    {
+      "title": "Senior Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Protocol Engineer (Verification)",
+      "matches": true
+    },
+    {
+      "title": "Senior Python Backend Engineer, Financial Systems",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer (backend)",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer - AI Code Evaluation (Codex / Claude Code)",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer - Pye Finance",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer - Web3 Tech Lead",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Engineer — USA",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Rust Smart Contract Developer",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer (EVM)",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer (Rust, Solana)",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer (SVM)",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer (Solana/Rust)",
+      "matches": true
+    },
+    {
+      "title": "Senior Smart Contract Engineer, Solidity",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Architect, Blockchain & DeFi",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Developer (Data & Backend Development)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Cards",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Crypto Payments",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Fiat Integrations",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): FinCrime",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Layer 1 Crypto Payments",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Layer 1 Digital Asset",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Ledger - Reporting",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Backend): Ledger - Wallets",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (Solana) (Full Remote)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer (backend)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer - Backend Engineering",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer - DeFi",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer - Special Projects",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer | Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer – Client Identity (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend (Consumer - Growth Foundations)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend (Consumer - Prediction Markets)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend (Consumer - Risk)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend (Money Movement)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend (Recoveries)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend - Distributed Systems",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend - Infra/Platform, VenturaOS",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend - Platform (Core AI Automation)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend - Platform (Tokens & Wrapped Assets)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Backend, Monetization",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Blockchain (Smart Contracts)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Consensus",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer, Data Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Frontend",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer, Frontend (Money Movement)",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer, Full Stack (Coinbase Advisor - Agentic Trading)",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer, Generalist",
+      "matches": false
+    },
+    {
+      "title": "Senior Software Engineer, Safety Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer, Smart Contracts (Sapphire)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer- Backend (Platform)",
+      "matches": true
+    },
+    {
+      "title": "Senior Software Engineer/ Software Developer (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Senior Solana Blockchain Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Solana Developer",
+      "matches": true
+    },
+    {
+      "title": "Senior Solana Developer (Blockchain)",
+      "matches": true
+    },
+    {
+      "title": "Senior Solana Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Solana Engineer - Core Protocol Architect",
+      "matches": true
+    },
+    {
+      "title": "Senior Solidity / Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Specialty Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Staff Backend Engineer ($500k - $1.5m salary)",
+      "matches": true
+    },
+    {
+      "title": "Senior Staff Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior Staff Full Stack Engineer ($500k - $1.5m salary)",
+      "matches": false
+    },
+    {
+      "title": "Senior Staff Software Engineer Backend",
+      "matches": true
+    },
+    {
+      "title": "Senior System Software Engineer, Software Defined Networking",
+      "matches": true
+    },
+    {
+      "title": "Senior Systems Engineer – Fuel Cell Systems",
+      "matches": false
+    },
+    {
+      "title": "Senior Systems Engineer, Product Definition",
+      "matches": true
+    },
+    {
+      "title": "Senior Technician, Drafting/Product Definition (Hybrid)",
+      "matches": false
+    },
+    {
+      "title": "Senior VP- Backend Developer",
+      "matches": true
+    },
+    {
+      "title": "Senior Visual Designer",
+      "matches": false
+    },
+    {
+      "title": "Senior/Principal Electrical Engineer - Fuel Cell Systems",
+      "matches": false
+    },
+    {
+      "title": "Senior/Staff Backend Software Engineer",
+      "matches": true
+    },
+    {
+      "title": "Senior/Staff DeFi Engineer",
+      "matches": true
+    },
+    {
+      "title": "Shunter/Fueller/Cleaner",
+      "matches": false
+    },
+    {
+      "title": "Smart Contract / Fullstack Engineer",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Developer (Solana)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (EVM)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (EVM/Low-Level Execution)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (Rust + CosmWasm)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (Solana + Rust)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (Solana+Rust)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (Solidity)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer (no Web3/Blockchain experience required)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer - Rust",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Engineer - SVM",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract Lead",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract SWE (Solana Rust)",
+      "matches": true
+    },
+    {
+      "title": "Smart Contract/Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Software Architect, Autonomous Vehicles - Backend and AI Agents",
+      "matches": true
+    },
+    {
+      "title": "Software Defined Vehicle Senior Hardware in the Loop (HIL) Engineer",
+      "matches": true
+    },
+    {
+      "title": "Software Development Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer (Backend), Foundation",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer (Trading)",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer - 2027 Interns",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer - 2027 New Grads",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer - Backend Platform",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer - Crypto Wallet",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer - EVM",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer - Smart Contract, Bridge",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer - Solana",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer - Stellar",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer 1 (Backend UI and AI)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer 2 (Backend AI)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer II (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer II (Full-Stack)",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer II - Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer II, Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer II/ Software Developer (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend (Consumer - Risk)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend (Infrastructure & Platform)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend (Node.js)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend (Product)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend (Python)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Backend Engineer- Credit Coverage",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Enterprise Applications (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineer, Frontend / Full Stack (Identity Platform)",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer, Frontend/ Full Stack (Trading)",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer, Games",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer, Security",
+      "matches": false
+    },
+    {
+      "title": "Software Engineer-II Backend",
+      "matches": true
+    },
+    {
+      "title": "Software Engineering LMTS - Backend Distributed Systems",
+      "matches": true
+    },
+    {
+      "title": "Software Engineering Technical Leader, Backend (Hybrid)",
+      "matches": true
+    },
+    {
+      "title": "Software Engineering- MTS (Backend + Infra)",
+      "matches": true
+    },
+    {
+      "title": "Solana Blockchain Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Developer",
+      "matches": true
+    },
+    {
+      "title": "Solana Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Engineer - High-Speed Web3 Build",
+      "matches": true
+    },
+    {
+      "title": "Solana PERP DEX: Superis Labs - Software Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Solana Platform Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Program Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Protocol Engineer VP",
+      "matches": true
+    },
+    {
+      "title": "Solana Rust Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solana/Rust Program Engineer",
+      "matches": true
+    },
+    {
+      "title": "Solidity Engineer",
+      "matches": false
+    },
+    {
+      "title": "Solidity and Rust Smart Contract Developer",
+      "matches": true
+    },
+    {
+      "title": "Solidity on Solana SDK SE",
+      "matches": true
+    },
+    {
+      "title": "Solutions Engineering Manager",
+      "matches": false
+    },
+    {
+      "title": "Sr Backend Engineer (Eats Merchant)",
+      "matches": true
+    },
+    {
+      "title": "Sr Backend Engineer, Flag Delivery",
+      "matches": true
+    },
+    {
+      "title": "Sr. Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Sr. Backend Engineer, Historical APIs",
+      "matches": true
+    },
+    {
+      "title": "Sr. Data Analyst, Payments",
+      "matches": false
+    },
+    {
+      "title": "Sr. Engineer - Cloud Backend (Hybrid) - Sunnyvale",
+      "matches": true
+    },
+    {
+      "title": "Sr. Fuel Tax Accountant",
+      "matches": false
+    },
+    {
+      "title": "Sr. New Product Development Engineer, ICP",
+      "matches": false
+    },
+    {
+      "title": "Sr. Performance Engineer, Trading Infrastructure",
+      "matches": false
+    },
+    {
+      "title": "Sr. Software Development Engineer (Backend Dev - C/C++)",
+      "matches": true
+    },
+    {
+      "title": "Sr. Software Engineer II, Backend (Rust)",
+      "matches": true
+    },
+    {
+      "title": "Sr. Software Engineer, Client Backend",
+      "matches": true
+    },
+    {
+      "title": "Sr. Solana Blockchain Engineer (USA/Global Hybrid)",
+      "matches": true
+    },
+    {
+      "title": "Sr. Staff Software Development Engineer (Backend Dev - C/C++)",
+      "matches": true
+    },
+    {
+      "title": "Sr. Zero Trust Engineer III (6794)",
+      "matches": true
+    },
+    {
+      "title": "Staff / Principal Rust Engineer, AI Coding Agent Evaluator",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer ($300k - $500k salary)",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer (Digital Foot Print)",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer (Rust)",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer - Mimir Query, Databases | Canada | Remote",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer - Mimir Query, Databases | USA | Remote",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer - Monitoring and Anomaly Detection (Monetization)",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer, AI Platform",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer, Data Streaming",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer, Gatekeeper",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer, Historical APIs",
+      "matches": true
+    },
+    {
+      "title": "Staff Backend Engineer, Passwordless",
+      "matches": true
+    },
+    {
+      "title": "Staff Engineer (Solana)",
+      "matches": true
+    },
+    {
+      "title": "Staff Engineer, Full Stack (Wallet Platform)",
+      "matches": false
+    },
+    {
+      "title": "Staff Engineer, Trading Automation and Backend Platforms",
+      "matches": true
+    },
+    {
+      "title": "Staff Full Stack Engineer",
+      "matches": false
+    },
+    {
+      "title": "Staff Full Stack Engineer ($300k - $500k salary)",
+      "matches": false
+    },
+    {
+      "title": "Staff Infrastructure Engineer",
+      "matches": false
+    },
+    {
+      "title": "Staff Platform Engineer, Observability",
+      "matches": false
+    },
+    {
+      "title": "Staff Process Development Engineer (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Staff Product Designer (Trading)",
+      "matches": false
+    },
+    {
+      "title": "Staff Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Rust Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Rust Protocol Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff SRE Engineer (Platform)",
+      "matches": false
+    },
+    {
+      "title": "Staff Smart Contract Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer",
+      "matches": false
+    },
+    {
+      "title": "Staff Software Engineer (SRE)",
+      "matches": false
+    },
+    {
+      "title": "Staff Software Engineer - Backend",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer – Backend (Typescript / .Nodejs / AWS )",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend (Consumer - Prediction Markets)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend (Consumer - Risk)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend (DevEx)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend - FinHub (Ledger)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend - Payments Platform",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Backend - Platform (Payment Rails)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Data Platform",
+      "matches": false
+    },
+    {
+      "title": "Staff Software Engineer, Full Stack",
+      "matches": false
+    },
+    {
+      "title": "Staff Software Engineer, Passport & Commerce (Backend)",
+      "matches": true
+    },
+    {
+      "title": "Staff Software Engineer, Solana Staking Protocol",
+      "matches": true
+    },
+    {
+      "title": "Staff Solana Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Solana Program Engineer",
+      "matches": true
+    },
+    {
+      "title": "Staff Systems Engineer – Low Latency & Networking",
+      "matches": false
+    },
+    {
+      "title": "Staff/Senior Security Engineer - DeFi",
+      "matches": true
+    },
+    {
+      "title": "Store Manager Indefinido 36h ECI Genil",
+      "matches": false
+    },
+    {
+      "title": "Systems Engineer (Rust)",
+      "matches": false
+    },
+    {
+      "title": "Systems Engineer - Hydraulics and Fuels (Experienced or Lead)",
+      "matches": false
+    },
+    {
+      "title": "Team Lead Engineering - Backend (f/m/d)",
+      "matches": true
+    },
+    {
+      "title": "Tech Lead (Backend): Cards",
+      "matches": true
+    },
+    {
+      "title": "Tech Lead (Backend): Fraud",
+      "matches": true
+    },
+    {
+      "title": "Tech Lead, Backend",
+      "matches": true
+    },
+    {
+      "title": "Technical Support, ICP",
+      "matches": false
+    },
+    {
+      "title": "Technical Writer/Researcher (Solana Security)",
+      "matches": true
+    },
+    {
+      "title": "Territory Manager - Anchorage, Alaska",
+      "matches": false
+    },
+    {
+      "title": "Trader",
+      "matches": false
+    },
+    {
+      "title": "Trading Engineer",
+      "matches": false
+    },
+    {
+      "title": "Traffic Anchor",
+      "matches": false
+    },
+    {
+      "title": "Truck Fueler - 3rd Shift",
+      "matches": false
+    },
+    {
+      "title": "Técnica(o) de Meio Ambiente (Vaga Afirmativa para Pessoas com Deficiência)",
+      "matches": false
+    },
+    {
+      "title": "Técnico Qualidade Operacional I - Afirmativa para Pessoa com Deficiência",
+      "matches": false
+    },
+    {
+      "title": "Undefined (DO NOT USE)",
+      "matches": false
+    },
+    {
+      "title": "VP of Marketing",
+      "matches": false
+    },
+    {
+      "title": "VP, Engineering",
+      "matches": false
+    },
+    {
+      "title": "VP, Protocol / Backend Engineer",
+      "matches": true
+    },
+    {
+      "title": "Vice President - Low Carbon Fuels & Environmental Markets",
+      "matches": false
+    },
+    {
+      "title": "Vice President, Senior Backend Developer - Lending/Commercial (Mumbai)",
+      "matches": true
+    },
+    {
+      "title": "Visual Merchandiser - Aurora, CO",
+      "matches": false
+    },
+    {
+      "title": "Wallet Engineer (React Web)",
+      "matches": false
+    },
+    {
+      "title": "Weekend Anchor",
+      "matches": false
+    },
+    {
+      "title": "Weekend Anchor / Reporter",
+      "matches": false
+    },
+    {
+      "title": "Weekend Anchor MSJ",
+      "matches": false
+    },
+    {
+      "title": "Weekend Anchor/Producer/MMJ",
+      "matches": false
+    },
+    {
+      "title": "Weekend Anchor/Reporter",
+      "matches": false
+    },
+    {
+      "title": "Weekend Sports Anchor",
+      "matches": false
+    },
+    {
+      "title": "Zero Trust Engineer (R-00205)",
+      "matches": true
+    },
+    {
+      "title": "ull Stack Developer (UI + Backend), GCP & AI, AVP",
+      "matches": true
+    }
+  ]
+}

@@ -361,7 +361,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   //
   // A mistyped --file was previously ignored, so the script silently reported
   // on data/active-interviews.md instead of the path that was asked for.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  //
+  // requireOperand: without it, `--file --min-threshold` reads --min-threshold
+  // as the file path and `--min-threshold --summary` parses to NaN and falls
+  // back to the default of 1 — both silently, at exit 0 (#3087). Neither flag
+  // has a more specific missing-value message of its own.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   if (selfTestMode) {
     runSelfTest();
