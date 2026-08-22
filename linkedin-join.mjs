@@ -284,20 +284,30 @@ const MONTHS = {
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 
+/** True when an ISO yyyy-mm-dd names a day that actually exists. */
+function isRealDate(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
 /** Parse LinkedIn's "03 Aug 2026" (or an ISO date) into `{iso, year, raw}`. */
 export function parseConnectedOn(value) {
   const s = String(value || '').trim();
   if (!s) return { iso: null, year: null, raw: '' };
 
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) return { iso: s, year: Number(m[1]), raw: s };
+  if (m) return isRealDate(s) ? { iso: s, year: Number(m[1]), raw: s } : { iso: null, year: null, raw: s };
 
   m = /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/.exec(s);
   if (m) {
     const month = MONTHS[m[2].slice(0, 3).toLowerCase()];
     if (month) {
       const iso = `${m[3]}-${String(month).padStart(2, '0')}-${String(Number(m[1])).padStart(2, '0')}`;
-      return { iso, year: Number(m[3]), raw: s };
+      // Regex shape is not calendar validity: "31 Feb" and "29 Feb 2026" (not a
+      // leap year) both match the pattern. Round-trip through Date so an
+      // impossible day is reported unparsed rather than becoming a real-looking
+      // ISO string that later date math silently accepts.
+      if (isRealDate(iso)) return { iso, year: Number(m[3]), raw: s };
     }
   }
   return { iso: null, year: null, raw: s };
@@ -767,13 +777,28 @@ function selfTest() {
 
 // --- Main ------------------------------------------------------------------
 
+/**
+ * Read a file, or null when it cannot be read for ANY reason.
+ *
+ * Deliberately not `existsSync` + `readFileSync`: existsSync answers true for a
+ * directory, and the read then throws a raw EISDIR stack at the user. Missing
+ * optional inputs, an unreadable data/ mount and a permission error are all the
+ * same answer here — "no input from this source".
+ */
+function readOrNull(path) {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function main() {
   if (selfTestMode) return selfTest();
 
-  if (!existsSync(csvPath)) {
-    console.error(`Connections export not found: ${csvPath}\n` +
-      'Export it from LinkedIn (Settings → Data Privacy → Get a copy of your data → Connections),\n' +
-      'drop Connections.csv in data/, or pass --csv <path>.');
+  if (trackerOnly && portalsOnly) {
+    console.error('--tracker-only and --portals-only are mutually exclusive: '
+      + 'together they exclude every target source. Pass neither to search both.');
     return 1;
   }
 
@@ -782,27 +807,46 @@ function main() {
     return 1;
   }
 
-  const { connections, quality } = parseConnections(readFileSync(csvPath, 'utf8'));
+  // existsSync is true for a directory, and readFileSync then throws EISDIR as
+  // a raw node:fs stack. Every input goes through readOrNull so a bad path,
+  // permission error or missing data/ dir is a CLI message, not a crash.
+  const csvText = readOrNull(csvPath);
+  if (csvText === null) {
+    console.error(`Connections export not readable: ${csvPath}\n` +
+      'Export it from LinkedIn (Settings → Data Privacy → Get a copy of your data → Connections),\n' +
+      'drop Connections.csv in data/, or pass --csv <path> pointing at the file.');
+    return 1;
+  }
+
+  const { connections, quality } = parseConnections(csvText);
 
   const skippedTargets = [];
   let targetList = [];
-  if (!portalsOnly && existsSync(TRACKER_PATH)) {
-    const t = parseTrackerTargets(readFileSync(TRACKER_PATH, 'utf8'));
+  const trackerText = portalsOnly ? null : readOrNull(TRACKER_PATH);
+  if (trackerText !== null) {
+    const t = parseTrackerTargets(trackerText);
     targetList = targetList.concat(t.targets);
     skippedTargets.push(...t.skipped);
   }
-  if (!trackerOnly && existsSync(PORTALS_PATH)) {
-    const p = parsePortalTargets(readFileSync(PORTALS_PATH, 'utf8'));
+  const portalsText = trackerOnly ? null : readOrNull(PORTALS_PATH);
+  if (portalsText !== null) {
+    const p = parsePortalTargets(portalsText);
     targetList = targetList.concat(p.targets);
     skippedTargets.push(...p.skipped);
   }
 
-  const known = existsSync(CONTACTS_PATH)
-    ? parseKnownContacts(readFileSync(CONTACTS_PATH, 'utf8'))
-    : new Set();
+  const contactsText = readOrNull(CONTACTS_PATH);
+  const known = contactsText === null ? new Set() : parseKnownContacts(contactsText);
 
+  // "connections made in/after YYYY" cannot be true of a connection with no
+  // parseable date, so undated rows are excluded rather than waved through.
+  // Counted, not silently dropped: this feature is judged on recall, and a
+  // vanished warm intro the user never learns about is the expensive failure.
+  const undatedExcluded = sinceYear
+    ? connections.filter(c => c.connectedYear == null).length
+    : 0;
   const filtered = sinceYear
-    ? connections.filter(c => c.connectedYear == null || c.connectedYear >= sinceYear)
+    ? connections.filter(c => c.connectedYear != null && c.connectedYear >= sinceYear)
     : connections;
 
   // --company answers a direct question about one name, which may not be in the
@@ -829,7 +873,7 @@ function main() {
       matchedCompanies: targets.length,
       matchedConnections,
     },
-    quality: { ...quality, skippedTargets },
+    quality: { ...quality, skippedTargets, undatedExcludedBySince: undatedExcluded },
     filters: {
       includeWeak,
       since: sinceYear,

@@ -201,3 +201,26 @@ test('a weak twin is left alone, since weak may be two different companies', () 
   assert.equal(targets.length, 1, 'only Epic Systems matches the connection');
   assert.equal(targets[0].company, 'Epic Systems');
 });
+
+test('impossible calendar dates are reported unparsed, not turned into real-looking ISO', () => {
+  // The regex shape matches; the calendar does not. 2026 is not a leap year.
+  assert.equal(parseConnectedOn('31 Feb 2026').iso, null);
+  assert.equal(parseConnectedOn('29 Feb 2026').iso, null);
+  assert.equal(parseConnectedOn('2026-02-31').iso, null);
+  // Genuine dates, including a real leap day, still parse.
+  assert.equal(parseConnectedOn('29 Feb 2024').iso, '2024-02-29');
+  assert.equal(parseConnectedOn('03 Aug 2026').iso, '2026-08-03');
+  assert.equal(parseConnectedOn('2026-08-03').iso, '2026-08-03');
+});
+
+test('an undated row cannot satisfy "connections made in/after YYYY"', () => {
+  const csv = [
+    'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+    'Dated,One,https://x,,Datavant,Eng,03 Aug 2026',
+    'Undated,Two,https://y,,Datavant,Eng,',
+  ].join('\n');
+  const { connections } = parseConnections(csv);
+  assert.equal(connections.length, 2);
+  const kept = connections.filter(c => c.connectedYear != null && c.connectedYear >= 2020);
+  assert.deepEqual(kept.map(c => c.name), ['Dated One']);
+});
