@@ -196,7 +196,7 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null,
       // same confirmation a user would provide after reviewing the preview.
       output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: { ...process.env, GIT_CONFIG_GLOBAL: cfg, CAREER_OPS_UPDATE_CONFIRM: '1' },
+        env: { ...hermeticEnv(cfg), CAREER_OPS_UPDATE_CONFIRM: '1' },
       });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
 
