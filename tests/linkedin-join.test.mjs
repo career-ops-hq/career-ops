@@ -237,3 +237,21 @@ test('the reported target count reflects merged targets, not the raw input list'
   assert.equal(targets.length, 1);
   assert.equal(targetCount, 1, 'counting raw keys would report 2 for one merged target');
 });
+
+test('--since 0000 filters rather than being read as "no filter"', () => {
+  // 0000 passes the four-digit check and converts to 0, which a truthiness
+  // test treats as absent — the flag would silently do nothing.
+  const csv = [
+    'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+    'Dated,One,https://x,,Datavant,Eng,03 Aug 2026',
+    'Undated,Two,https://y,,Datavant,Eng,',
+  ].join('\n');
+  const { connections } = parseConnections(csv);
+  const sinceYear = 0;
+  const active = sinceYear !== null;
+  const filtered = active
+    ? connections.filter(c => c.connectedYear != null && c.connectedYear >= sinceYear)
+    : connections;
+  assert.deepEqual(filtered.map(c => c.name), ['Dated One'],
+    'the undated row must still be excluded when the year is 0');
+});

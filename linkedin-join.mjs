@@ -846,10 +846,14 @@ function main() {
   // parseable date, so undated rows are excluded rather than waved through.
   // Counted, not silently dropped: this feature is judged on recall, and a
   // vanished warm intro the user never learns about is the expensive failure.
-  const undatedExcluded = sinceYear
+  // `sinceYear !== null`, not truthiness: --since 0000 passes the four-digit
+  // check and converts to 0, which a truthy test reads as "no filter" — the
+  // same silently-ignored-flag failure the NaN guard above exists to prevent.
+  const sinceActive = sinceYear !== null;
+  const undatedExcluded = sinceActive
     ? connections.filter(c => c.connectedYear == null).length
     : 0;
-  const filtered = sinceYear
+  const filtered = sinceActive
     ? connections.filter(c => c.connectedYear != null && c.connectedYear >= sinceYear)
     : connections;
 
