@@ -2,7 +2,7 @@
 
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
@@ -81,4 +81,29 @@ try {
   }
 } catch (e) {
   fail(`sync-pdf-flags.mjs tests crashed: ${e.message}`);
+}
+
+{
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-unknown-flag-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, PDF_MANIFEST);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--dry-rn', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    const unchanged = readFileSync(tracker, 'utf-8') === TRACKER_HEADER;
+
+    if (result.status === 1 && /unknown option.*--dry-rn/i.test(result.stderr) && unchanged) {
+      pass('sync-pdf-flags rejects unknown options before changing the tracker');
+    } else {
+      fail(`unknown option changed the tracker or returned the wrong result: status=${result.status}, stderr=${JSON.stringify(result.stderr)}, unchanged=${unchanged}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }

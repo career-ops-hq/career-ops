@@ -15,6 +15,7 @@ func TestDeriveNoteFields(t *testing.T) {
 		payRange string
 		paySrc   string
 		last     string
+		postedOn string
 	}{
 		{
 			name: "remote with posted comma range and rejection date",
@@ -227,6 +228,141 @@ func TestDeriveNoteFields(t *testing.T) {
 			paySrc:   "est",
 			last:     "2026-06-16",
 		},
+		{
+			name: "valuation and funding figures are not pay",
+			app: model.CareerApplication{
+				Date:  "2026-07-16",
+				Notes: "Series C, $600M valuation (not pay) — real hiring signal; $70M Series C closed 8mo ago; $124M total raised; advertised comp range is broken data, confirm real number",
+			},
+			payRange: "",
+			last:     "2026-07-16",
+		},
+		{
+			name: "pay range still wins over an adjacent valuation figure",
+			app: model.CareerApplication{
+				Date:  "2026-06-08",
+				Notes: "$7.6B valuation, Remote. $122-149K (POSTED)",
+			},
+			workMode: "Remote",
+			payRange: "$122-149K",
+			paySrc:   "POSTED",
+			last:     "2026-06-08",
+		},
+		{
+			name: "billion-scale valuation alone is not pay",
+			app: model.CareerApplication{
+				Date:  "2026-04-11",
+				Notes: "Series H drone logistics, $7.6B valuation, Remote Canada",
+			},
+			workMode: "Remote",
+			payRange: "",
+			last:     "2026-04-11",
+		},
+		{
+			name: "posted date populates PostedOn without becoming last contact",
+			app: model.CareerApplication{
+				Date:  "2026-08-06",
+				Notes: "Santa Clara, CA; posted 2026-08-07",
+			},
+			location: "Santa Clara, CA",
+			workMode: "Full",
+			last:     "2026-08-06",
+			postedOn: "2026-08-07",
+		},
+		{
+			name: "a real interaction still wins last contact over the posting date",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "Austin, TX; Posted: 2026-05-20. Recruiter screen 2026-06-14",
+			},
+			location: "Austin, TX",
+			workMode: "Full",
+			last:     "2026-06-14",
+			postedOn: "2026-05-20",
+		},
+		{
+			name: "the POSTED pay marker carries no date and sets no PostedOn",
+			app: model.CareerApplication{
+				Date:  "2026-06-04",
+				Notes: "Remote US. Base $174,986-209,983 (POSTED)",
+			},
+			workMode: "Remote",
+			payRange: "$174,986-209,983",
+			paySrc:   "POSTED",
+			last:     "2026-06-04",
+		},
+		{
+			// The regression the segment anchor exists to prevent. With a
+			// word-boundary match this date was read as posting metadata AND
+			// stripped from the last-contact scan, so a recruiter interaction
+			// that really happened vanished and the row fell back to its applied
+			// date. Prose is not a segment: "posted" mid-sentence stays contact.
+			name: "prose \"posted\" is a real interaction, not posting metadata",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "Recruiter posted 2026-07-20 update on the req",
+			},
+			last: "2026-07-20",
+		},
+		{
+			name: "a posting segment is still read when the note leads with it",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "posted 2026-05-11 | Remote US",
+			},
+			workMode: "Remote",
+			last:     "2026-06-01",
+			postedOn: "2026-05-11",
+		},
+		{
+			// Edge 1 of the two the review asked to pin: the colon form with no
+			// space. It is unambiguously a segment, so it must populate PostedOn
+			// — and, having done so, must not also count as contact.
+			name: "posted:<date> with no space is a posting segment",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "Remote US; posted:2026-07-15",
+			},
+			workMode: "Remote",
+			last:     "2026-06-01",
+			postedOn: "2026-07-15",
+		},
+		{
+			// The bare form requires a space, so this sets no PostedOn. It is
+			// not contact either — reISODate needs a word boundary the welded
+			// "posted2026" does not give it — so the row keeps its applied date
+			// and the malformed token is inert on both paths.
+			name: "\"posted\" welded to the date is inert, not a segment",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "Remote US; posted2026-07-15",
+			},
+			workMode: "Remote",
+			last:     "2026-06-01",
+		},
+		{
+			// Edge 2: two posting dates in one note. A re-post replaces the req,
+			// so the column has to show the live one — the first match would pin
+			// the row to a requisition that no longer exists.
+			name: "with two posting dates the most recent one wins",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "posted: 2026-03-02 | reposted; posted: 2026-07-19",
+			},
+			last:     "2026-06-01",
+			postedOn: "2026-07-19",
+		},
+		{
+			name: "stripping a posting segment cannot weld its neighbours together",
+			app: model.CareerApplication{
+				Date:  "2026-06-01",
+				Notes: "Austin, TX; posted: 2026-05-20; screen 2026-06-14",
+			},
+			location: "Austin, TX",
+			workMode: "Full",
+			last:     "2026-06-14",
+			postedOn: "2026-05-20",
+		},
 	}
 
 	for _, tc := range cases {
@@ -250,6 +386,9 @@ func TestDeriveNoteFields(t *testing.T) {
 			if tc.app.LastContact != tc.last {
 				t.Errorf("LastContact = %q, want %q", tc.app.LastContact, tc.last)
 			}
+			if tc.app.PostedOn != tc.postedOn {
+				t.Errorf("PostedOn = %q, want %q", tc.app.PostedOn, tc.postedOn)
+			}
 		})
 	}
 }
@@ -270,6 +409,7 @@ func TestPayCeiling(t *testing.T) {
 		"165-185K CHF":     185_000,
 		"120K €":           120_000,
 		"80-120K UAH":      120_000,
+		"$7.6B":            7_600_000_000,
 		"":                 0,
 	}
 	for span, want := range cases {
@@ -289,27 +429,27 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 		{
 			name:    "single bare symbol ($)",
 			input:   []string{"$"},
-			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$))`,
+			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$))`,
 		},
 		{
 			name:    "single ISO code (PLN)",
 			input:   []string{"PLN"},
-			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN))`,
+			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN))`,
 		},
 		{
 			name:    "two ISO codes (PLN, UAH)",
 			input:   []string{"PLN", "UAH"},
-			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:PLN|UAH))`,
+			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN|UAH))`,
 		},
 		{
 			name:    "mixed bare + ISO ($ bare, PLN ISO)",
 			input:   []string{"$", "PLN"},
-			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:\$|PLN))`,
+			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$|PLN))`,
 		},
 		{
 			name:    "metachar token (escaped via QuoteMeta)",
 			input:   []string{"A.B"},
-			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMm]?)?|\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMm]?)?\s+(?:A\.B))`,
+			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:A\.B))`,
 		},
 	}
 	for _, tc := range cases {
@@ -368,7 +508,7 @@ func TestIsBareSymbol(t *testing.T) {
 		{"JPY", false}, {"INR", false}, {"SEK", false}, {"BRL", false},
 		// Edge cases
 		{"", true},
-		{"A.B", false}, 
+		{"A.B", false},
 		{"Chf", false},
 		{"123", true},
 	}

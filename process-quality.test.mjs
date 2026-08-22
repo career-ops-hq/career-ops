@@ -357,6 +357,27 @@ const summaryOut = execFileSync('node', [scriptPath, '--summary'], {
 ok('--summary produces human-readable output', summaryOut.includes('Process Quality Signal'));
 
 // ============================================================================
+// 11. Documented example friction patterns (#2651) — regression coverage for
+// the illustrative examples in process-quality.mjs's header comment and
+// docs/SCRIPTS.md, confirming they parse cleanly through extractFriction.
+// This is not new parsing logic — just a guard against the doc examples
+// silently drifting out of sync with FRICTION_TAG's actual behavior.
+// ============================================================================
+console.log('\n--- 11. documented example friction patterns (#2651) ---');
+
+const documentedExamples = [
+  { reason: 'call scheduled for a rejection with no info beyond what email would convey' },
+  { reason: 'prescreen repeated info already given in a prior round' },
+  { reason: 'interview rescheduled 2+ times same week' },
+  { reason: 'no confirmation after stated timeline passed' },
+];
+
+for (const { reason } of documentedExamples) {
+  const notes = `[process-friction: ${reason}]`;
+  eq(`documented example parses: "${reason}"`, extractFriction({ Notes: notes }), { hasFriction: true, reason });
+}
+
+// ============================================================================
 // RESULTS
 // ============================================================================
 console.log(`\n${'='.repeat(78)}`);

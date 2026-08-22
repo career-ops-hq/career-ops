@@ -40,6 +40,50 @@ try {
   // and swallowed "a2" instead of passing the malformed entity through.
   if (decodeEntities('X&#1a2;Y') === 'X&#1a2;Y') pass('decodeEntities does not let hex letters leak into the decimal branch');
   else fail(`decimal/hex leak regression: ${JSON.stringify(decodeEntities('X&#1a2;Y'))}`);
+
+  // ── XML 1.0 §2.2 Char: legal to construct, not legal to emit ──────
+  // Upstreamed from providers/jobvite.mjs (#2623), whose private copy of this
+  // decoder had grown stricter than the shared one. Everything below used to
+  // decode into a job title, and from there into the tracker and every
+  // generated document.
+  const eq = (label, actual, expected) => {
+    if (actual === expected) pass(label);
+    else fail(`${label} — got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+  };
+
+  eq('decodeEntities refuses NUL (&#0;)', decodeEntities('Sr&#0;Manager'), 'Sr&#0;Manager');
+  eq('decodeEntities refuses a hex NUL (&#x00;)', decodeEntities('Sr&#x00;Manager'), 'Sr&#x00;Manager');
+  eq('decodeEntities refuses a C0 control (&#8;)', decodeEntities('A&#8;B'), 'A&#8;B');
+  eq('decodeEntities refuses a C0 control (&#x1F;)', decodeEntities('A&#x1F;B'), 'A&#x1F;B');
+  eq('decodeEntities refuses the U+FFFE noncharacter', decodeEntities('A&#xFFFE;B'), 'A&#xFFFE;B');
+  eq('decodeEntities refuses the U+FFFF noncharacter', decodeEntities('A&#xFFFF;B'), 'A&#xFFFF;B');
+
+  // The three C0 characters §2.2 does permit. These appear in real postings and
+  // callers already normalize whitespace, so rejecting them would be a
+  // regression, not extra safety.
+  eq('decodeEntities still decodes tab (&#9;)', decodeEntities('A&#9;B'), 'A\tB');
+  eq('decodeEntities still decodes LF (&#10;)', decodeEntities('A&#10;B'), 'A\nB');
+  eq('decodeEntities still decodes CR (&#13;)', decodeEntities('A&#13;B'), 'A\rB');
+
+  // Boundary pairs either side of each excluded range — the off-by-one a hand
+  // written range check gets wrong.
+  eq('decodeEntities decodes U+0020, the first printable', decodeEntities('A&#32;B'), 'A B');
+  eq('decodeEntities decodes U+D7FF, last before the surrogates', decodeEntities('A&#xD7FF;B'), 'A퟿B');
+  eq('decodeEntities refuses U+DFFF, last surrogate', decodeEntities('A&#xDFFF;B'), 'A&#xDFFF;B');
+  eq('decodeEntities decodes U+E000, first after the surrogates', decodeEntities('A&#xE000;B'), 'AB');
+  eq('decodeEntities decodes U+FFFD, the replacement char', decodeEntities('A&#xFFFD;B'), 'A�B');
+  eq('decodeEntities decodes U+10000, first astral', decodeEntities('A&#x10000;B'), 'A\u{10000}B');
+  eq('decodeEntities decodes U+10FFFF, the last code point', decodeEntities('A&#x10FFFF;B'), 'A\u{10FFFF}B');
+
+  // C1 controls stay legal per §2.2 and are deliberately unchanged — this pins
+  // the documented non-goal so a future HTML5 windows-1252 remap is a conscious
+  // decision rather than an accident.
+  eq('decodeEntities still decodes a C1 reference unchanged (&#146;)', decodeEntities('A&#146;B'), 'AB');
+
+  // No entity survives as a half-decoded fragment: a rejected reference must
+  // come back byte-identical, including its terminating semicolon.
+  eq('a rejected entity keeps its exact source text',
+    decodeEntities('&#0;&#xD800;&#x110000;&#xFFFF;'), '&#0;&#xD800;&#x110000;&#xFFFF;');
 } catch (e) {
   fail(`_html-entities tests crashed: ${e.message}`);
 }

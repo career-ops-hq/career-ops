@@ -97,7 +97,77 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── 3. URL-level failures must NOT seed ─────────────────────────────────────
+// ── 3. Every documented pipeline.md line shape ──────────────────────────────
+// The gate above only ever exercised the shape `appendToPipeline` writes — the
+// one line that leads with the URL. Five other shapes are documented across the
+// modes, and the old positional regex read `\S+` as the URL cell on all of them,
+// shifting both captures one column left and seeding a *wrong* key rather than
+// merely missing one. Cases are transcribed from the docs that specify them, so
+// this fails if the documented format changes.
+//
+// Seeding is deliberately asymmetric, mirroring the `status !== 'added'` rule
+// the scan-history source applies above: live entries seed a pair, expired
+// (`~~…~~`) and pre-screen-discard entries seed none.
+{
+  const SHAPES = [
+    // modes/pipeline.md → "Format of pipeline.md" (what appendToPipeline writes).
+    ['- [ ] https://boards.greenhouse.io/acme/jobs/1 | Acme Corp | Staff Engineer',
+      ['Acme Corp', 'Staff Engineer'], 'pending entry (URL first)'],
+    // modes/pipeline.md → workflow step 2f and the "Processed" example.
+    ['- [x] #143 | https://jobs.example.com/posting/2 | Acme Corp | AI PM | 4.2/5 | PDF ✅',
+      ['Acme Corp', 'AI PM'], 'processed entry led by a report number'],
+    // reconcile-pipeline.mjs → the line it writes when moving an entry to Processed.
+    ['- [x] [144](reports/144-acme-2026-01-01.md) | https://jobs.example.com/posting/3 | Acme Corp | Solutions Architect | 3.1/5 | PDF ❌',
+      ['Acme Corp', 'Solutions Architect'], 'processed entry led by a report link'],
+    // modes/pipeline.md → pre-screen gate. One cell follows the URL, and it is a
+    // discard reason; the old regex keyed on `{url}::skipped (pre-screen…)`.
+    ['- [x] #-- | https://jobs.example.com/posting/4 | skipped (pre-screen mismatch: not a North Star archetype)',
+      null, 'pre-screen discard seeds no pair'],
+    // modes/pipeline.md → liveness sweep step 3.
+    ['- [x] ~~https://jobs.example.com/posting/5 | Acme Corp | Backend Engineer~~ — posting expired (liveness sweep)',
+      null, 'expired entry with a URL seeds no pair'],
+    // modes/oferta.md → liveness gate; modes/auto-pipeline.md → Step 0.5 / 0.6.
+    ['- [x] ~~Acme Corp | Data Engineer~~ — oferta nieaktywna',
+      null, 'expired entry without a URL seeds no pair'],
+  ];
+
+  const sb = sandbox({ pipeline: SHAPES.map(([line]) => line).join('\n') + '\n' });
+  const seen = seenFor(sb);
+
+  for (const [, expected, label] of SHAPES) {
+    if (expected) {
+      if (seen.has(companyRoleDedupKey(...expected))) pass(`pipeline.md: ${label}`);
+      else fail(`pipeline.md: ${label} — expected key ${companyRoleDedupKey(...expected)}`);
+    }
+  }
+
+  // Strikethrough is read at the entry boundary, not line-wide. A documented
+  // `note:` column may carry its own `~~…~~`, and a whole-line check would strip
+  // that live entry of its pair — re-opening the duplicate-resurfacing this PR
+  // exists to close.
+  {
+    const noted = sandbox({
+      pipeline: '- [ ] https://ex.com/n/1 | Anduril | Data Engineer | note: replaces ~~old req~~\n',
+    });
+    if (seenFor(noted).has(companyRoleDedupKey('Anduril', 'Data Engineer'))) {
+      pass('pipeline.md: a `note:` column containing ~~strikethrough~~ still seeds a live pair');
+    } else {
+      fail('a live entry lost its pair because a trailing note contained ~~strikethrough~~');
+    }
+    rmSync(noted.dir, { recursive: true, force: true });
+  }
+
+  // The negative half matters as much as the positive one: a fix that parsed all
+  // six shapes uniformly would let a dead posting bury a live req.
+  const live = SHAPES.filter(([, e]) => e).map(([, e]) => companyRoleDedupKey(...e));
+  const extra = [...seen].filter(k => !live.includes(k));
+  if (extra.length === 0) pass('pipeline.md: expired and pre-screen shapes seed no company/role key');
+  else fail(`pipeline.md: unexpected keys seeded — [${extra.join(', ')}]`);
+
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 4. URL-level failures must NOT seed ─────────────────────────────────────
 // skipped_expired is not evidence the role was surfaced. Seeding from it would
 // let a dead Costa Mesa URL permanently bury a live DC req; because an expired
 // posting is recorded as skipped_expired rather than added, this self-heals.
@@ -113,7 +183,7 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   }
 }
 
-// ── 4. Seeding honours the recheck TTL ──────────────────────────────────────
+// ── 5. Seeding honours the recheck TTL ──────────────────────────────────────
 // The role key mirrors the URL key, so it must not outlive it.
 {
   const sb = sandbox({
@@ -129,7 +199,7 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── 5. applications.md still seeds (no regression) ──────────────────────────
+// ── 6. applications.md still seeds (no regression) ──────────────────────────
 // Header-aware parse (#954) must keep working, including a customized layout
 // with an extra column that no consumer recognizes.
 {
@@ -150,7 +220,7 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── 6. Header and separator cells are not roles ─────────────────────────────
+// ── 7. Header and separator cells are not roles ─────────────────────────────
 {
   const sb = sandbox({
     history: `${HISTORY_HEADER}\nhttps://ex.com/a/1\t2026-07-18\tgreenhouse\tStrategic Finance\tAnduril\tadded\tCosta Mesa\n`,
@@ -163,7 +233,7 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── 7. Absent sources are not an error ──────────────────────────────────────
+// ── 8. Absent sources are not an error ──────────────────────────────────────
 // A fresh install has no scan-history or pipeline yet.
 {
   const sb = sandbox();
@@ -177,7 +247,7 @@ const KEY = companyRoleDedupKey('Anduril', 'Strategic Finance');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── 8. END-TO-END: two real scan runs over a three-city board ───────────────
+// ── 9. END-TO-END: two real scan runs over a three-city board ───────────────
 // The only check here that would have caught the original bug. Every unit above
 // passes against a build where main() simply never passes the extra sources —
 // the defect lived in the wiring, so it has to be observed through the CLI.

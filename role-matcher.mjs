@@ -81,6 +81,41 @@ export const BASELINE_TOKENS = new Set([
 ]);
 
 /**
+ * Lowercase a title and fold accented Latin letters onto their ASCII base.
+ *
+ * Every rule below matches against ASCII vocabulary, so an accent used to act
+ * as a word separator rather than a letter: "Sênior" became ["s", "nior"],
+ * leaving a phantom "nior" token that no stopword list covers. Folding first
+ * keeps the accented spelling in the same vocabulary as the plain one.
+ *
+ * Only accents that NFD decomposes are folded. Letters with no canonical
+ * decomposition (ø, ł, ß, đ) still reach the ASCII filter unchanged, exactly
+ * as before.
+ *
+ * `\p{Mn}` (nonspacing mark), not `\p{Diacritic}`: the latter also matches
+ * standalone characters such as "·", "^" and "`", which are separators in a
+ * title. Deleting those would glue neighbouring words into one token.
+ *
+ * @param {unknown} value - Raw title, possibly not a string.
+ * @returns {string} Lowercased, accent-folded text.
+ */
+function normalizeTitle(value) {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    // Only marks sitting on an ASCII Latin base. Stripping EVERY \p{Mn} also
+    // reached marks that carry meaning in other scripts: Devanagari matras
+    // (कंपनी and कपनी became one token), Cyrillic breve (Йогурт -> иогурт) and
+    // Japanese dakuten (バックエンド -> ハックエント, voiced kana folded onto
+    // unvoiced). Latin accent-folding — the reason this function exists, per
+    // the Sênior case — is unchanged, because those marks always follow an
+    // ASCII base once the title is lowercased.
+    .replace(/(?<=[a-z])\p{Mn}/gu, '')
+    .normalize('NFC');
+}
+
+/**
  * Convert a role title into content tokens used for fuzzy matching.
  *
  * The tokenizer keeps long descriptive words and a narrow set of short
@@ -92,9 +127,7 @@ export const BASELINE_TOKENS = new Set([
  * @returns {string[]} Ordered role-title tokens.
  */
 export function roleTokens(role) {
-  const text = typeof role === 'string' ? role : String(role ?? '');
-  return text
-    .toLowerCase()
+  return normalizeTitle(role)
     // Replace with a generic baseline token, not empty space: a bare "Member
     // of Technical Staff" (no suffix) or a one-word-suffix MTS title (e.g.
     // "...Staff, Backend") would otherwise tokenize to 0 or 1 words, and
@@ -103,17 +136,23 @@ export function roleTokens(role) {
     // itself. "engineer" is already a BASELINE_TOKENS entry, so it pads the
     // token count without ever being the sole reason two titles match.
     .replace(MTS_PREFIX, ' engineer ')
-    .replace(/[^a-z0-9\s]/g, ' ')
+    // Collapse slashed short acronyms into one token BEFORE punctuation is
+    // stripped: "(CI/CD)" would otherwise become "ci cd" and both halves get
+    // dropped by the length filter, making the qualifier invisible to the
+    // matcher. A sibling req whose only qualifier is such an acronym (e.g.
+    // "Senior SWE, Infrastructure (CI/CD)" vs "Senior SWE, Infrastructure")
+    // tokenized identically to the bare title and got merged over it (#2165).
+    // "cicd" / "tcpip" / "uiux" survive as content tokens.
+    .replace(/\b([a-z0-9]{1,3})\/([a-z0-9]{1,3})\b/g, '$1$2')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
 function extractSeniorities(title) {
-  const text = typeof title === 'string' ? title : String(title ?? '');
   return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
+    normalizeTitle(title)
+      .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
       .split(/\s+/)
       .filter(w => SENIORITY_TOKENS.has(w))
   );

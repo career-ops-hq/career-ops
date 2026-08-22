@@ -135,6 +135,30 @@ cv:
   # (e.g. "use the modern template").
   # template: modern
   # For a restrained Chinese technical CV, use: template: zh-minimal
+  #
+  # (Optional) Section order for the generated CV (#2533). The sections you name
+  # are placed into the slots they already occupy, in the order you list them;
+  # every section you leave out stays exactly where the template puts it — so a
+  # section added by a later release lands where upstream put it instead of
+  # breaking this list.
+  #
+  # Moving a section past its neighbours is a rotation, so name the sections it
+  # displaces too. To render Skills before Education with the built-in template
+  # (which ends Education → Certifications → Awards → Skills):
+  #
+  #   sections: [skills, education, certifications, awards]
+  #
+  # Recognized names: summary, competencies, experience, projects, education,
+  # certifications, awards, skills. An unrecognized name is reported and ignored.
+  #
+  # Applies to the HTML output only. With output_format: latex the order comes
+  # from templates/cv-template.tex and this setting does nothing.
+  #
+  # This exists so the order can live in your profile instead of in
+  # templates/cv-template.html, which update-system.mjs restores on every update.
+  # cv.md stays the source of truth: the section-order guard still compares the
+  # rendered CV against it, and still fails if they disagree.
+  # sections: [skills, education, certifications, awards]
 
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #
@@ -258,6 +282,26 @@ cover_letter:
 # half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
+
+# ── Two-pass triage gate ────────────────────────────────────────────────────
+#
+# Used by `/career-ops pipeline`. Before running the full A-G evaluation on
+# every URL in a batch, a lightweight first pass (`modes/triage.md`) scores each
+# role from a compact profile brief (`modes/_brief.md`) and filters out the ones
+# that would clearly disqualify — so the expensive full evaluation only runs on
+# roles that pass. On a mixed batch this cuts total tokens by roughly half.
+#
+#   triage_threshold  — minimum triage score (out of 5) to proceed to full
+#                       evaluation. Roles at 3.0–(threshold) are MARGINAL and
+#                       shown to you; below 3.0 they are filtered silently.
+#                       Default (key absent): 3.5.
+#   triage_min_urls   — batches with fewer surviving URLs than this skip triage
+#                       and go straight to full evaluation (triage overhead
+#                       isn't worth it on a handful of roles). Default: 5.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
 
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #

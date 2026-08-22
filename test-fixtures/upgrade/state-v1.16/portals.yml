@@ -1,0 +1,13 @@
+title_filter:
+  positive: ["platform engineer", "devops", "sre", "infrastructure"]
+  negative: ["intern", "junior"]
+companies:
+  - name: ExampleSoft
+    ats: greenhouse
+    slug: examplesoft
+  - name: Initech
+    ats: lever
+    slug: initech
+  - name: Umbrella Cloud
+    ats: ashby
+    slug: umbrella-cloud

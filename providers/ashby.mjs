@@ -11,8 +11,11 @@
 // Ashby a longer timeout plus a backoff+jitter retry (the backoff spaces
 // requests out to dodge rate-limiting).
 // See .planning/codebase/ashby-scan-abort-diagnosis.md.
+import { fetchJsonWithRetry } from './_http.mjs';
+
 const ASHBY_TIMEOUT_MS = 30_000;
 const ASHBY_RETRIES = 2;
+const ASHBY_BACKOFF_BASE_MS = 1_000;
 
 // Annualization multipliers for different compensation intervals
 const INTERVAL_MULTIPLIERS = {
@@ -106,11 +109,6 @@ function resolveApiUrl(entry) {
   return `https://api.ashbyhq.com/posting-api/job-board/${match[1]}?includeCompensation=true`;
 }
 
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
 function toEpochMs(value) {
   if (!value) return undefined;
@@ -125,6 +123,24 @@ function toEpochMs(value) {
 // Canada-only and gets wrongly removed by scan.mjs's location_filter. We fold
 // in each secondary's region, locality, and country so the filter can match
 // (e.g. "Europe", "Berlin", "Germany"). Deduped, joined with " · ".
+// Remote work model: Ashby's posting-api exposes `workplaceType`
+// ("Remote" | "Hybrid" | "Onsite") and `isRemote` (boolean) as fields SEPARATE
+// from `location`, which keeps naming the office/HQ city even for a fully
+// remote role. Folding only the location strings therefore renders a remote
+// posting as e.g. "San Francisco", and a `location_filter` that blocks that
+// city drops a role the candidate could actually take. Appending "Remote"
+// makes the work model visible to scan.mjs's string matching without
+// discarding the city, so both `allow: ["Remote"]` and city-based filters keep
+// working.
+//
+// `workplaceType` wins whenever it is present: the two fields can disagree, and
+// boards in the wild carry `isRemote: true` together with
+// `workplaceType: "Hybrid"` for office-anchored roles. Trusting `isRemote`
+// alone would label those "Remote" and defeat a remote-only filter. `isRemote`
+// remains the fallback for payloads that omit `workplaceType`.
+//
+// Mirrors existing behavior in bamboohr.mjs, gem.mjs, and thehub.mjs, which
+// already append "Remote" from their own providers' remote flags.
 /** @param {any} j */
 function formatLocation(j) {
   const parts = [];
@@ -141,6 +157,9 @@ function formatLocation(j) {
       }
     }
   }
+  const wt = typeof j.workplaceType === 'string' ? j.workplaceType.trim().toLowerCase() : '';
+  const isRemote = wt ? wt === 'remote' : j.isRemote === true;
+  if (isRemote && !parts.some((p) => /remote/i.test(p))) parts.push('Remote');
   return [...new Set(parts)].join(' · ');
 }
 
@@ -161,28 +180,40 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`ashby: cannot derive API URL for ${entry.name}`);
     assertAshbyUrl(apiUrl);
-    let lastErr;
-    for (let attempt = 0; attempt <= ASHBY_RETRIES; attempt++) {
-      if (attempt > 0) {
-        // exponential backoff + jitter — spaces out retries to dodge Ashby rate-limiting
-        const backoff = 1000 * 2 ** (attempt - 1) + Math.floor(Math.random() * 500);
-        await sleep(backoff, ctx);
-      }
-      try {
-        const json = /** @type {any} */ (await ctx.fetchJson(apiUrl, { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' }));
-        const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
-        return jobs.map(/** @param {any} j */ (j) => ({
-          title: j.title || '',
-          url: j.jobUrl || '',
-          company: entry.name,
-          location: formatLocation(j),
-          salary: parseCompensation(j),
-          postedAt: toEpochMs(j.publishedAt),
-        }));
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr;
+    // Shared retry rather than a local loop (#3072). The local one caught
+    // EVERY error, so a board that is gone was asked three times: 404, 401 and
+    // 410 each bought a second and third request that could only fail again.
+    // withRetry stops on the first non-retryable status via isRetryableError,
+    // and 22% of Ashby boards are permanently 404 (#2840) — re-probing those
+    // is the traffic that provokes the single-host throttle in #2839.
+    //
+    // It also honours Ashby's own Retry-After on a 429, which the local
+    // backoff discarded, while CLAMPING it so a misconfigured
+    // `Retry-After: 86400` cannot stall a sweep.
+    //
+    // ASHBY_RETRIES is passed through as the policy, so the attempt budget is
+    // unchanged — only which errors are worth spending it on. The longer
+    // per-request timeout above still applies: it is the Ashby latency floor
+    // this provider was given a bespoke timeout for, and it travels as `opts`.
+    const json = /** @type {any} */ (await fetchJsonWithRetry(
+      ctx,
+      apiUrl,
+      { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' },
+      // baseDelayMs is ashby's own 1000ms, not the shared 500ms default. The
+      // longer backoff is deliberate here — see the header: Ashby rate-limits
+      // repeated unauthenticated hits, and spacing requests out is why this
+      // provider had a bespoke loop at all. Only WHICH errors are retried
+      // changes; the timing is preserved.
+      { retries: ASHBY_RETRIES, baseDelayMs: ASHBY_BACKOFF_BASE_MS },
+    ));
+    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    return jobs.map(/** @param {any} j */ (j) => ({
+      title: j.title || '',
+      url: j.jobUrl || '',
+      company: entry.name,
+      location: formatLocation(j),
+      salary: parseCompensation(j),
+      postedAt: toEpochMs(j.publishedAt),
+    }));
   },
 };

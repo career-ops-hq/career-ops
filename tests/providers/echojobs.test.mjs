@@ -39,13 +39,58 @@ try {
     fail(`normalizeEchojobsJob => ${JSON.stringify(n)}`);
   }
 
-  // remote fallback when no listed place
+  // remote/hybrid fallback when no listed place — kept distinguishable (#2258)
+  // so a location_filter.block: ["Hybrid"] rule can still catch a hybrid role;
+  // collapsing both to "Remote" would make that block unmatchable.
   const remote = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/1', locations: [], remote_type: 'remote' });
   const hybrid = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/2', remote_type: 'hybrid' });
-  if (remote?.location === 'Remote' && hybrid?.location === 'Remote') {
-    pass('normalizeEchojobsJob falls back to "Remote" for a placeless remote OR hybrid role');
+  if (remote?.location === 'Remote' && hybrid?.location === 'Hybrid') {
+    pass('normalizeEchojobsJob falls back to "Remote" for a placeless remote role, "Hybrid" for a placeless hybrid one (#2258)');
   } else {
     fail(`remote/hybrid fallback => ${JSON.stringify([remote?.location, hybrid?.location])}`);
+  }
+
+  // on_site with no listed place gets no location fallback at all — only
+  // remote/hybrid roles are placeless-tolerant.
+  const onSiteNoPlace = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/3', remote_type: 'on_site' });
+  if (onSiteNoPlace?.location === '') {
+    pass('normalizeEchojobsJob leaves location empty for a placeless on_site role (no false Remote/Hybrid)');
+  } else {
+    fail(`on_site placeless fallback => ${JSON.stringify(onSiteNoPlace?.location)}`);
+  }
+
+  // a hybrid role that DOES list a city keeps the city and gains the marker,
+  // so block: ["Hybrid"] is not half-working (#2258).
+  const hybridWithCity = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/4', locations: ['Berlin'], remote_type: 'hybrid' });
+  if (hybridWithCity?.location === 'Berlin · Hybrid') {
+    pass('normalizeEchojobsJob appends the Hybrid marker to a hybrid role that lists a city (#2258)');
+  } else {
+    fail(`hybrid with city => ${JSON.stringify(hybridWithCity?.location)}`);
+  }
+
+  // the marker is never doubled when the board already spells it out
+  const hybridSpelledOut = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/5', locations: ['Berlin (Hybrid)'], remote_type: 'hybrid' });
+  if (hybridSpelledOut?.location === 'Berlin (Hybrid)') {
+    pass('normalizeEchojobsJob does not double the marker when the location already says Hybrid');
+  } else {
+    fail(`hybrid already spelled out => ${JSON.stringify(hybridSpelledOut?.location)}`);
+  }
+
+  // a placed remote role is left alone — only hybrid gets a marker appended
+  const remoteWithCity = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/6', locations: ['Berlin'], remote_type: 'remote' });
+  if (remoteWithCity?.location === 'Berlin') {
+    pass('normalizeEchojobsJob leaves a placed remote role untouched (no marker beyond the #2258 scope)');
+  } else {
+    fail(`remote with city => ${JSON.stringify(remoteWithCity?.location)}`);
+  }
+
+  // remote_type is a third-party field: casing/whitespace must not smuggle an
+  // unmarked hybrid through.
+  const hybridOddCasing = normalizeEchojobsJob({ title: 'X', url: 'https://jobs.lever.co/x/7', locations: ['Berlin'], remote_type: ' Hybrid ' });
+  if (hybridOddCasing?.location === 'Berlin · Hybrid') {
+    pass('normalizeEchojobsJob matches remote_type case/whitespace-insensitively');
+  } else {
+    fail(`hybrid odd casing => ${JSON.stringify(hybridOddCasing?.location)}`);
   }
 
   // company fallback to the entry name
@@ -61,44 +106,32 @@ try {
   if (normalizeEchojobsJob({ title: 'X' }) === null) pass('normalizeEchojobsJob drops an item with no url');
   else fail('url-less item should be dropped');
 
-  // fetch() — pagination: accumulates across pages, stops on a short page, and
-  // pins the feed request to echojobs.io with redirect:'error'.
-  const page1 = { jobs: Array.from({ length: 100 }, (_, i) => ({ title: `Job ${i}`, url: `https://jobs.ashbyhq.com/acme/${i}`, company_name: 'Acme' })) };
-  const page2 = { jobs: [{ title: 'Last', url: 'https://jobs.ashbyhq.com/acme/last', company_name: 'Acme' }] };
-  const calls = [];
+  // fetch() — retired (#2976): throws immediately, names the cause, and never
+  // touches the network (the feed sits behind a bot-protection checkpoint, and
+  // career-ops does not work around bot protection).
+  let networkCalls = 0;
   const ctx = {
     transport: 'http',
-    fetchJson: async (url, options) => {
-      calls.push(url);
-      if (options?.redirect !== 'error') throw new Error(`fetchJson without redirect:'error': ${JSON.stringify(options)}`);
-      if (new URL(url).hostname !== 'echojobs.io') throw new Error(`fetchJson off-host: ${url}`);
-      return new URL(url).searchParams.get('page') === '1' ? page1 : page2;
+    fetchJson: async (url) => {
+      networkCalls++;
+      throw new Error(`fetchJson should not be called, got: ${url}`);
     },
-    fetchText: async () => { throw new Error('fetchText should not be called'); },
+    fetchText: async () => {
+      networkCalls++;
+      throw new Error('fetchText should not be called');
+    },
   };
-  const jobs = await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' }, ctx);
-  if (jobs.length === 101) pass('echojobs.fetch() accumulates across pages and stops on the short page (100 + 1)');
-  else fail(`echojobs.fetch() returned ${jobs.length} jobs, expected 101`);
-  if (calls.length === 2) pass('echojobs.fetch() stopped after the short second page (2 requests)');
-  else fail(`echojobs.fetch() made ${calls.length} page requests, expected 2`);
-
-  // max_pages override caps pagination
-  const cappedCalls = [];
-  await echojobs.fetch(
-    { name: 'EchoJobs', provider: 'echojobs', max_pages: 1 },
-    { transport: 'http', fetchJson: async (u) => { cappedCalls.push(u); return page1; }, fetchText: async () => {} },
-  );
-  if (cappedCalls.length === 1) pass('echojobs.fetch() respects max_pages (stops after 1 page)');
-  else fail(`echojobs.fetch() max_pages=1 made ${cappedCalls.length} page calls`);
-
-  // unexpected shape throws
-  let threw = false;
+  let fetchErr = null;
   try {
-    await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' },
-      { transport: 'http', fetchJson: async () => ({ oops: true }), fetchText: async () => {} });
-  } catch { threw = true; }
-  if (threw) pass('echojobs.fetch() throws on an unexpected API response shape');
-  else fail('echojobs.fetch() should throw when the response has no jobs array');
+    await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' }, ctx);
+  } catch (e) {
+    fetchErr = e;
+  }
+  if (networkCalls === 0 && fetchErr && /this feed is gone/i.test(fetchErr.message) && /#2976/.test(fetchErr.message)) {
+    pass('echojobs.fetch() throws a retirement message naming the cause (#2976) without touching the network');
+  } else {
+    fail(`echojobs.fetch() should throw a retirement message with zero network calls, got: networkCalls=${networkCalls}, error=${fetchErr ? fetchErr.message : '(did not throw)'}`);
+  }
 
 } catch (e) {
   fail(`echojobs provider tests crashed: ${e.message}`);

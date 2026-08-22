@@ -17,8 +17,7 @@
  * Run: node detect-reposts.test.mjs
  */
 
-import { detectReposts, parseScanHistory } from './detect-reposts.mjs';
-import { roleFuzzyMatch } from './role-matcher.mjs';
+import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from './detect-reposts.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -283,6 +282,42 @@ eq('company with trailing whitespace trimmed', detectReposts([
 ]).length, 1);
 
 // ============================================================================
+// 4.5 companyKey + normalized-company clustering (#2093)
+// ============================================================================
+console.log('\n--- 4.5 companyKey / normalized-company (#2093) ---');
+
+// companyKey unit behavior
+eq('companyKey prefers the stored normCompany column', companyKey({ company: 'Ignored LLC', normCompany: 'acme' }), 'acme');
+eq('companyKey falls back to normalizing the raw company', companyKey({ company: 'Acme Inc.' }), 'acme');
+eq('companyKey "Acme, Inc." == "ACME Inc" (punctuation/case folded)', companyKey({ company: 'Acme, Inc.' }), companyKey({ company: 'ACME Inc' }));
+eq('companyKey "Acme Inc." == "Acme" (legal-suffix stripped)', companyKey({ company: 'Acme Inc.' }), companyKey({ company: 'Acme' }));
+eq('companyKey unicode-only name falls back to raw lowercase', companyKey({ company: 'Тинькофф' }), 'тинькофф');
+ok('companyKey keeps two distinct unicode-only names apart (no empty over-merge)', companyKey({ company: 'Тинькофф' }) !== companyKey({ company: 'Сбербанк' }));
+
+// (a) stored normalized column clusters "Acme Inc." + "Acme"
+eq('stored normCompany clusters "Acme Inc." + "Acme"', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', normCompany: 'acme', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'Acme', normCompany: 'acme', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+// (b) backward compat: rows without the column cluster via raw-normalize fallback
+eq('fallback clusters "Acme Inc." + "Acme" with no stored column', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'Acme', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+eq('fallback clusters "Acme, Inc." + "ACME Inc" (punctuation/case)', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme, Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://a.com/2', company: 'ACME Inc', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 1);
+
+// Distinct companies must NOT merge under normalization
+eq('distinct companies not merged by normalization', detectReposts([
+  row({ url: 'https://a.com/1', company: 'Acme Inc.', title: 'Backend Engineer Platform' }),
+  row({ url: 'https://b.com/2', company: 'Beta Corp', date: d('2026-02-01'), dateStr: '2026-02-01' }),
+]).length, 0);
+
+// ============================================================================
 // 5. detectReposts — title matching
 // ============================================================================
 console.log('\n--- 5. title matching ---');
@@ -344,11 +379,22 @@ eq('91 days -> NOT flagged', detectReposts([
   row({ url: 'https://x.com/2', date: d('2026-04-02'), dateStr: '2026-04-02' }),
 ], 90).length, 0);
 
-// Window = 0: same-day only
-eq('window=0, same day, different URL -> flagged', detectReposts([
+// Window = 0 admits same-day clusters only, which the default 1-day span floor
+// then rejects — the two bounds have no overlap, so --window 0 can no longer
+// return anything. Asserted so the degenerate combination is a documented
+// outcome rather than a surprise.
+eq('window=0 with the default span floor -> nothing can be flagged', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
   row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
-], 0).length, 1);
+], 0).length, 0);
+
+// The same rows with the floor lowered: this keeps coverage of the window=0
+// path itself, and proves the assertion above is the FLOOR talking rather than
+// the window silently dropping same-day rows for some other reason.
+eq('window=0, same day, different URL, span floor 0 -> flagged', detectReposts([
+  row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+  row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+], 0, 0).length, 1);
 
 eq('window=0, 1 day apart -> NOT flagged', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
@@ -446,10 +492,22 @@ eq('unsorted input dates -> still works (sorted internally)', unsortedResult.len
 eq('unsorted: firstSeen = 2026-01-01', unsortedResult[0]?.firstSeen, '2026-01-01');
 eq('unsorted: lastSeen = 2026-03-01', unsortedResult[0]?.lastSeen, '2026-03-01');
 
-// Same date, different URLs
-eq('same date, different URLs -> flagged', detectReposts([
+// Same date, different URLs — two openings listed side by side in one sweep,
+// not one opening re-listed. `first_seen` is a SCANNER observation date, so a
+// zero-day span means both URLs were already live when the scanner arrived and
+// carries no evidence about re-listing at all. This was the defect behind three
+// companies reading as `reposts-detected` on 2026-08-11.
+eq('same date, different URLs -> NOT flagged (concurrent, not reposted)', detectReposts([
   row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
   row({ url: 'https://x.com/2', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+], 90).length, 0);
+
+// One day apart is the smallest real signal and must survive, so the rule above
+// reads as "a zero span is not evidence" rather than "close sightings are
+// suspicious".
+eq('one day apart, different URLs -> flagged', detectReposts([
+  row({ url: 'https://x.com/1', date: d('2026-01-01'), dateStr: '2026-01-01' }),
+  row({ url: 'https://x.com/2', date: d('2026-01-02'), dateStr: '2026-01-02' }),
 ], 90).length, 1);
 
 // ============================================================================
@@ -646,6 +704,29 @@ try {
   eq('TSV with empty company: rows parsed (2)', emptyCoParsed.length, 2);
   eq('TSV with empty company: no clusters (filtered by detectReposts)', detectReposts(emptyCoParsed, 90).length, 0);
 
+  // #2093 — normalized-company column: writer stores it (trailing col 12),
+  // parser prefers it as the clustering key so "Acme Inc." and "Acme" cluster.
+  const normTsv = [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company',
+    'https://a.com/1\t2026-01-01\tgreenhouse\tBackend Engineer Platform\tAcme Inc.\tadded\tRemote\t\t\t\t\tacme',
+    'https://a.com/2\t2026-02-01\tgreenhouse\tBackend Engineer Platform\tAcme\tadded\tRemote\t\t\t\t\tacme',
+  ].join('\n');
+  const normParsed = parseScanHistory(normTsv);
+  eq('#2093: normalized_company (col 12) parsed into normCompany', normParsed[0]?.normCompany, 'acme');
+  eq('#2093: "Acme Inc." + "Acme" cluster via stored normalized column', detectReposts(normParsed, 90).length, 1);
+
+  // Backward compat: legacy 7-column rows lack the column. Clustering falls back
+  // to normalizing the raw company on the fly, so old and new rows still key the
+  // same and cluster together — nothing depends on the writer having run.
+  const legacyTsv = [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+    'https://a.com/1\t2026-01-01\tgreenhouse\tBackend Engineer Platform\tAcme Inc.\tadded\tRemote',
+    'https://a.com/2\t2026-02-01\tgreenhouse\tBackend Engineer Platform\tAcme\tadded\tRemote',
+  ].join('\n');
+  const legacyParsed = parseScanHistory(legacyTsv);
+  eq('#2093 backward-compat: legacy rows carry empty normCompany', legacyParsed[0]?.normCompany, '');
+  eq('#2093 backward-compat: legacy "Acme Inc." + "Acme" still cluster (raw fallback)', detectReposts(legacyParsed, 90).length, 1);
+
   // Headerless 5-column TSV parsing test (Older scan-history and seed file backward compat)
   const headerlessTsv = [
     'https://a.com/1\t2026-01-01\tgreenhouse\tBackend Engineer Platform\tAcme',
@@ -783,9 +864,291 @@ eq('SW: distinct roles not grouped', detectReposts([
 ], 90).length, 1);
 
 // ============================================================================
+// 10.6 Grouping equivalence with the pre-#2383 algorithm
+// ============================================================================
+console.log('\n--- 10.6 grouping equivalence (#2383) ---');
+
+// A second, independently written implementation of the whole detector. The
+// clusters coming out of detect-reposts.mjs must be byte-identical to what this
+// one produces, including their order and the order of appearances inside them.
+//
+// Its history: it began as the pre-#2383 file copied verbatim, guarding a pure
+// speed change (a nested title loop became a bucket Map plus an inverted token
+// index). It is no longer a frozen copy of anything — the phantom-repost fix
+// changed what the detector COMPUTES, so this reference was updated in the same
+// commit, exactly as the note here has always required. What it still buys is a
+// second opinion on the parts most easily broken by accident: grouping order,
+// same-date input order, URL dedup, and the two date bounds. It is deliberately
+// written in the straightforward nested-loop style rather than mirroring the
+// real file's structure, so a shared bug has to be reasoned into both.
+//
+// If detect-reposts.mjs ever changes what it computes (window rules, span
+// rules, cluster shape, dedup policy, title identity) rather than how fast it
+// computes it, this copy must be updated in the same commit. A silent
+// divergence failing here is the intended behaviour, not a nuisance.
+function legacyBuildRepostCluster(clusterRows, windowDays, minSpan) {
+  const byUrl = new Map();
+  for (const r of clusterRows) {
+    if (!byUrl.has(r.url) || r.date < byUrl.get(r.url).date) byUrl.set(r.url, r);
+  }
+  const deduped = [...byUrl.values()];
+  if (deduped.length < 2) return null;
+  const sorted = [...deduped].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const span = daysBetween(first.date, last.date);
+  if (span > windowDays) return null;
+  if (span < minSpan) return null;
+  return {
+    company: clusterRows[0].company,
+    role: last.title,
+    repostCount: sorted.length,
+    firstSeen: first.dateStr,
+    lastSeen: last.dateStr,
+    daysSpan: span,
+    appearances: sorted.map(r => ({ url: r.url, date: r.dateStr, title: r.title })),
+  };
+}
+
+function legacyDetectRepostsInGroup(rows, windowDays, minSpan) {
+  // Grouping by title identity, written as the naive quadratic scan: every row
+  // is compared against every other with a freshly recomputed key. The real
+  // file does this with a single-pass Map; agreeing here is the point.
+  const titleGroups = [];
+  const used = new Set();
+  for (const r of rows) {
+    if (used.has(r)) continue;
+    const group = [r];
+    used.add(r);
+    for (const other of rows) {
+      if (used.has(other)) continue;
+      if (titleIdentityKey(r.title) === titleIdentityKey(other.title)) {
+        group.push(other);
+        used.add(other);
+      }
+    }
+    titleGroups.push(group);
+  }
+
+  const results = [];
+  for (const group of titleGroups) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => (a.date < b.date ? -1 : 1));
+    let cluster = [];
+    for (const r of sorted) {
+      if (cluster.length === 0) { cluster = [r]; continue; }
+      const span = daysBetween(cluster[0].date, r.date);
+      if (span <= windowDays) {
+        cluster.push(r);
+      } else {
+        if (cluster.length >= 2) {
+          const built = legacyBuildRepostCluster(cluster, windowDays, minSpan);
+          if (built) results.push(built);
+        }
+        cluster = cluster.filter(cr => daysBetween(cr.date, r.date) <= windowDays);
+        cluster.push(r);
+      }
+    }
+    if (cluster.length >= 2) {
+      const built = legacyBuildRepostCluster(cluster, windowDays, minSpan);
+      if (built) results.push(built);
+    }
+  }
+  return results;
+}
+
+function legacyDetectReposts(rows, windowDays = 90, minSpan = 1) {
+  if (!Array.isArray(rows)) return [];
+  const valid = rows
+    .filter(r =>
+      r && typeof r === 'object' && r.status === 'added' &&
+      typeof r.url === 'string' && r.url.trim() &&
+      r.date instanceof Date && !Number.isNaN(r.date.getTime()) &&
+      typeof r.company === 'string' && r.company.trim() &&
+      typeof r.title === 'string' && r.title.trim()
+    )
+    .map(r => ({ ...r, url: r.url.trim(), company: r.company.trim(), title: r.title.trim() }));
+  if (valid.length < 2) return [];
+
+  const byCompany = new Map();
+  for (const r of valid) {
+    const key = companyKey(r);
+    if (!byCompany.has(key)) byCompany.set(key, []);
+    byCompany.get(key).push(r);
+  }
+
+  const clusters = [];
+  for (const [, groupRows] of byCompany) {
+    if (groupRows.length < 2) continue;
+    clusters.push(...legacyDetectRepostsInGroup(groupRows, windowDays, minSpan));
+  }
+  return clusters.sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
+}
+
+// Compares full cluster output, not just cluster counts: eq() stringifies, so
+// this catches a changed cluster order, a changed appearance order inside a
+// cluster, or a different `role`/`company` representative being picked.
+function sameAsLegacy(label, rows, windowDays = 90, minSpan = 1) {
+  eq(label, detectReposts(rows, windowDays, minSpan), legacyDetectReposts(rows, windowDays, minSpan));
+}
+
+// Compact row builder for the corpora below.
+function eqRow(url, dateStr, title, company = 'Acme', status = 'added') {
+  return { url, date: d(dateStr), dateStr, title, company, status, portal: 'greenhouse', location: '' };
+}
+
+function dayStr(offset) {
+  // Walks forward from 2026-01-01 without needing a calendar in the caller.
+  const base = Date.UTC(2026, 0, 1) + offset * 86400000;
+  return new Date(base).toISOString().slice(0, 10);
+}
+
+// (a) Many DISTINCT titles at one company — the shape from the issue. Nothing
+// collapses, so this is the corpus where the old loop paid for every pair.
+const distinctCorpus = Array.from({ length: 120 }, (_, i) =>
+  eqRow(`https://x.com/d${i}`, dayStr(i % 200), `Backend Engineer, Squad ${'Zephyr'}${i}`)
+);
+sameAsLegacy('equivalence: 120 distinct titles, one company', distinctCorpus);
+
+// (b) Many EXACT duplicates — the case bucketing collapses in one pass. Dates
+// are spread so the sliding window produces several overlapping clusters.
+const exactCorpus = Array.from({ length: 60 }, (_, i) =>
+  eqRow(`https://x.com/e${i}`, dayStr(i * 7), 'Senior Backend Engineer, Payments')
+);
+sameAsLegacy('equivalence: 60 exact duplicates spread over a year', exactCorpus);
+
+// (c) Fuzzy-but-not-exact variants. These are the pairs that must still reach
+// roleFuzzyMatch through the token index rather than being filtered out.
+sameAsLegacy('equivalence: fuzzy word-order variants', [
+  eqRow('https://x.com/f1', dayStr(0), 'Senior Backend Engineer Payments'),
+  eqRow('https://x.com/f2', dayStr(20), 'Backend Engineer Payments Senior'),
+  eqRow('https://x.com/f3', dayStr(40), 'Senior Backend Engineer Payments Processing'),
+  eqRow('https://x.com/f4', dayStr(60), 'Backend Engineer Payments Processing Senior'),
+  eqRow('https://x.com/f5', dayStr(80), 'Engineering Manager Platform Infrastructure'),
+]);
+
+// (d) Near-misses that must NOT match: shared baseline vocabulary only, a
+// sub-baseline seniority on one side, and a specialization suffix. If the token
+// index ever let one of these through, the clusters would differ here.
+sameAsLegacy('equivalence: near-miss titles stay separate', [
+  eqRow('https://x.com/n1', dayStr(0), 'Software Engineer'),
+  eqRow('https://x.com/n2', dayStr(10), 'Software Developer'),
+  eqRow('https://x.com/n3', dayStr(20), 'Associate Product Manager, Marketplace'),
+  eqRow('https://x.com/n4', dayStr(30), 'Product Manager, Marketplace'),
+  eqRow('https://x.com/n5', dayStr(40), 'Senior Analytics Engineer'),
+  eqRow('https://x.com/n6', dayStr(50), 'Senior Analytics Engineer, People Analytics'),
+]);
+
+// (e) Case variants inside one title bucket. The new code compares the FIRST
+// row's raw title on behalf of the whole bucket, so this proves that choosing a
+// different-cased representative cannot change a verdict or the emitted `role`.
+sameAsLegacy('equivalence: mixed-case duplicates of one title', [
+  eqRow('https://x.com/c1', dayStr(0), 'Senior Backend Engineer, Payments'),
+  eqRow('https://x.com/c2', dayStr(10), 'SENIOR BACKEND ENGINEER, PAYMENTS'),
+  eqRow('https://x.com/c3', dayStr(20), 'senior backend engineer, payments'),
+  eqRow('https://x.com/c4', dayStr(30), 'Senior Backend Engineer Payments'),
+]);
+
+// (f) Same-date rows. The date sort in detectRepostsInGroup uses a comparator
+// that returns 1 rather than 0 for equal dates, so its result depends on the
+// order rows arrive in. This corpus fails loudly if grouping stops preserving
+// original array order.
+sameAsLegacy('equivalence: same-date rows keep input order', [
+  eqRow('https://x.com/s1', dayStr(0), 'Data Engineer, Ingestion'),
+  eqRow('https://x.com/s2', dayStr(0), 'Data Engineer, Ingestion'),
+  eqRow('https://x.com/s3', dayStr(0), 'data engineer, ingestion'),
+  eqRow('https://x.com/s4', dayStr(0), 'Data Engineer Ingestion'),
+  eqRow('https://x.com/s5', dayStr(0), 'Data Engineer, Ingestion'),
+]);
+
+// (g) Singletons: companies with one row, and titles that group alone. These
+// take the early-exit paths in the new grouping and must still be no-ops.
+sameAsLegacy('equivalence: singleton companies and singleton titles', [
+  eqRow('https://a.com/1', dayStr(0), 'Backend Engineer, Checkout', 'Alpha'),
+  eqRow('https://b.com/1', dayStr(5), 'Frontend Engineer, Checkout', 'Beta'),
+  eqRow('https://c.com/1', dayStr(10), 'Security Engineer, Identity', 'Gamma'),
+  eqRow('https://c.com/2', dayStr(15), 'Security Engineer, Identity', 'Gamma'),
+  eqRow('https://d.com/1', dayStr(20), 'Compiler Engineer, Toolchain', 'Delta'),
+]);
+
+// (h) Mixed corpus: several companies, duplicate URLs, non-added statuses,
+// out-of-order dates, shared vocabulary. Generated from a seeded LCG so a
+// failure is reproducible rather than a one-off.
+let seed = 20260731;
+const rand = (n) => {
+  // Math.imul, not `*`: the product overflows 2^53, so plain multiplication
+  // rounds the low bits away and the generator degenerates. Measured over 3000
+  // draws mod 6 it returned {0:909, 1:1, 2:1022, 3:12, 4:1056} and never once
+  // returned 5, so the corpus never picked the last entry of a six-item list
+  // (the "Machine Learning" domain was unreachable).
+  seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+  // Take the HIGH bits: an LCG's low bits have a very short period (these cycle
+  // 0,1,2,3 under `% 4`). Each row draws eight times and the company is the
+  // seventh draw, so it landed on the same phase every row and all 300 rows got
+  // a single company, despite the comment above promising several.
+  return (seed >>> 16) % n;
+};
+const levels = ['', 'Senior ', 'Staff ', 'Principal ', 'Associate '];
+const domains = ['Backend', 'Frontend', 'Platform', 'Security', 'Analytics', 'Machine Learning'];
+const kinds = ['Engineer', 'Developer', 'Manager'];
+const teams = ['Checkout', 'Marketplace', 'Billing', 'Ingestion', 'Trust'];
+const statuses = ['added', 'added', 'added', 'added', 'skipped_expired'];
+const mixedCorpus = Array.from({ length: 300 }, (_, i) => {
+  const title = `${levels[rand(levels.length)]}${domains[rand(domains.length)]} ${kinds[rand(kinds.length)]}, ${teams[rand(teams.length)]}`;
+  // Deliberate URL reuse (i % 7) so the URL-dedup path inside clusters runs.
+  return eqRow(
+    `https://mix.com/${i % 7 === 0 ? i - (i % 7) : i}`,
+    dayStr(rand(240)),
+    rand(9) === 0 ? title.toUpperCase() : title,
+    `Company${rand(4)}`,
+    statuses[rand(statuses.length)]
+  );
+});
+sameAsLegacy('equivalence: 300-row mixed corpus (seeded)', mixedCorpus);
+sameAsLegacy('equivalence: same mixed corpus at window=30', mixedCorpus, 30);
+// window=0 needs the span floor lowered to 0 as well, or both sides return an
+// empty list and the comparison confirms nothing.
+sameAsLegacy('equivalence: same mixed corpus at window=0, span floor 0', mixedCorpus, 0, 0);
+// The span floor itself, compared against the reference on the full corpus.
+sameAsLegacy('equivalence: same mixed corpus at span floor 0', mixedCorpus, 90, 0);
+sameAsLegacy('equivalence: same mixed corpus at span floor 30', mixedCorpus, 90, 30);
+
+// The mixed corpus is only meaningful if it actually produces clusters — an
+// all-empty comparison would pass no matter what the grouping did.
+ok('equivalence corpus is non-trivial (mixed corpus yields clusters)', detectReposts(mixedCorpus, 90).length > 0);
+ok('equivalence corpus is non-trivial (exact-duplicate corpus yields clusters)', detectReposts(exactCorpus, 90).length > 0);
+
+// ============================================================================
 // 11. Performance
 // ============================================================================
 console.log('\n--- 11. performance ---');
+
+// #2383 regression guard. 4000 rows at ONE company with distinct titles is the
+// reachable worst case: scan-history.tsv is append-only with one row per
+// scanned posting, so a large employer accumulates thousands of distinct
+// titles and nothing collapses. The pre-#2383 nested loop took ~45s on this
+// machine for this shape; the bucketed version takes a fraction of a second.
+// The budget is deliberately loose (a whole order of magnitude of headroom
+// over the observed runtime) so it is not a wall-clock flake on a loaded CI
+// box, while still failing hard if the quadratic loop ever comes back.
+const bigDistinct = [];
+for (let i = 0; i < 4000; i++) {
+  // One unique discriminating token per title and otherwise only baseline
+  // vocabulary, so no two of these fuzzy-match (the overlap would be
+  // [backend, engineer], both baseline) and the expected cluster count is
+  // exactly the number of planted reposts below.
+  bigDistinct.push(eqRow(`https://big.com/u${i}`, dayStr(i % 200), `Backend Engineer, Zephyr${i}`, 'BigCo'));
+}
+// 25 planted exact reposts (distinct URL, same title, 10 days apart) so the
+// guard cannot pass by silently returning nothing.
+for (let i = 0; i < 25; i++) {
+  bigDistinct.push(eqRow(`https://big.com/r${i}`, dayStr((i % 200) + 10), `Backend Engineer, Zephyr${i}`, 'BigCo'));
+}
+const bigStart = Date.now();
+const bigClusters = detectReposts(bigDistinct, 90);
+const bigElapsed = Date.now() - bigStart;
+eq('4025 rows at one company: exactly the 25 planted reposts found', bigClusters.length, 25);
+ok(`4025 rows at one company completes under 10s (#2383 quadratic guard, took ${bigElapsed}ms)`, bigElapsed < 10000);
 
 // Smoke tests only — no wall-clock thresholds (flaky on CI)
 const perfRows = Array.from({ length: 100 }, (_, i) => row({
@@ -834,6 +1197,23 @@ const windowJson = JSON.parse(windowOut);
 ok('--window produces valid JSON output', typeof windowJson === 'object' && 'metadata' in windowJson);
 eq('--window sets windowDays in metadata', windowJson.metadata.windowDays, 30);
 
+// Test --min-span flag.
+//
+// This asserts on the VALUE reaching metadata, not merely on a zero exit,
+// because the failure this guards against exits non-zero for a reason that has
+// nothing to do with the flag's logic: validateFlags reads KNOWN_FLAGS, which
+// lives in a different block from every line that consumes --min-span. Adding
+// the flag everywhere else and forgetting that list produces "unrecognized
+// flag(s): --min-span" from code that is otherwise complete and correct — and
+// two branches can each append to that list and merge without git ever
+// reporting a conflict, so nothing outside a running CLI catches it.
+const minSpanOut = execFileSync('node', [scriptPath, '--min-span', '3'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+const minSpanJson = JSON.parse(minSpanOut);
+eq('--min-span sets minSpanDays in metadata', minSpanJson.metadata.minSpanDays, 3);
+
 // Test --summary flag
 const summaryOut = execFileSync('node', [scriptPath, '--summary'], {
   encoding: 'utf-8', timeout: 10000,
@@ -867,6 +1247,112 @@ const noWindowOut = execFileSync('node', [scriptPath, '--window'], {
 });
 const noWindowJson = JSON.parse(noWindowOut);
 eq('--window without value falls back to 90', noWindowJson.metadata.windowDays, 90);
+
+// Test --help flag
+const helpOut = execFileSync('node', [scriptPath, '--help'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+ok('--help prints usage', helpOut.includes('Usage:'));
+ok('--help documents --summary', helpOut.includes('--summary'));
+ok('--help documents --window', helpOut.includes('--window'));
+ok('--help documents --min-span', helpOut.includes('--min-span'));
+ok('--help documents --self-test', helpOut.includes('--self-test'));
+ok('--help documents --help', helpOut.includes('--help'));
+
+// --min-span in both accepted forms, since it reads through flagValue. The
+// `=` form is the one a hand-rolled indexOf() lookup drops silently.
+const spanEqOut = execFileSync('node', [scriptPath, '--min-span=30'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span=30 is honoured (not silently dropped)', JSON.parse(spanEqOut).metadata.minSpanDays, 30);
+
+const spanSpaceOut = execFileSync('node', [scriptPath, '--min-span', '30'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span 30 is honoured', JSON.parse(spanSpaceOut).metadata.minSpanDays, 30);
+
+const badSpanOut = execFileSync('node', [scriptPath, '--min-span', 'abc'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span abc falls back to 1', JSON.parse(badSpanOut).metadata.minSpanDays, 1);
+
+// Anything that is not a plain non-negative integer falls back rather than
+// being half-read. The negative case is the dangerous one: it silently DISABLES
+// the guard --min-span exists to set, so concurrent openings would be reported
+// as reposts again with nothing to indicate the value was rejected. "7abc" is
+// the same class — parseInt() reads it as 7 and runs with a number nobody typed.
+const flagFallbackCases = [
+  ['--min-span', '-5', 'minSpanDays', 1, 'negative --min-span falls back (never disables the floor)'],
+  ['--min-span', '7abc', 'minSpanDays', 1, 'partially numeric --min-span falls back (not read as 7)'],
+  ['--min-span', '1.5', 'minSpanDays', 1, 'non-integer --min-span falls back'],
+  ['--window', '-1', 'windowDays', 90, 'negative --window falls back (never rejects every cluster)'],
+  ['--window', '60abc', 'windowDays', 90, 'partially numeric --window falls back'],
+];
+for (const [flag, value, field, expected, label] of flagFallbackCases) {
+  const out = execFileSync('node', [scriptPath, flag, value], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  eq(label, JSON.parse(out).metadata[field], expected);
+}
+
+// `--min-span=` supplies an EMPTY value, which must fall back too. Number('')
+// is 0, so a validator written with Number()/Number.isInteger() would read this
+// as a deliberate zero and quietly disable the floor.
+const emptySpanOut = execFileSync('node', [scriptPath, '--min-span='], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span= (empty value) falls back to 1, not 0', JSON.parse(emptySpanOut).metadata.minSpanDays, 1);
+
+// 0 remains a legitimate explicit value on both flags — the fallback rules must
+// not swallow it, or the floor could never be switched off on purpose.
+const zeroSpanOut = execFileSync('node', [scriptPath, '--min-span', '0'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+eq('--min-span 0 is honoured as an explicit zero', JSON.parse(zeroSpanOut).metadata.minSpanDays, 0);
+
+// All-digits is not enough on its own. A long digit run converts to Infinity,
+// which is this file's original defect in a new place: an infinite floor
+// rejects every cluster, an infinite window is unbounded, and JSON.stringify
+// writes Infinity as `null` — so metadata would report a value that is not the
+// one in effect. An UNSAFE integer is the quiet version: 9007199254740993
+// silently becomes ...992, a number nobody typed.
+const overflowCases = [
+  ['--min-span', '9'.repeat(400), 'minSpanDays', 1, 'overflow --min-span falls back (never becomes an infinite floor)'],
+  ['--window', '9'.repeat(400), 'windowDays', 90, 'overflow --window falls back (never becomes an unbounded window)'],
+  ['--min-span', '9007199254740993', 'minSpanDays', 1, 'unsafe-integer --min-span falls back rather than losing precision'],
+];
+for (const [flag, value, field, expected, label] of overflowCases) {
+  const out = execFileSync('node', [scriptPath, flag, value], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  const meta = JSON.parse(out).metadata;
+  eq(label, meta[field], expected);
+}
+
+// The metadata block must always round-trip a real number, since it is what a
+// consumer reads to learn which rules produced the clusters. `null` there means
+// an Infinity got through.
+const metaSanity = JSON.parse(execFileSync('node', [scriptPath, '--min-span', '9'.repeat(400)], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+})).metadata;
+ok('metadata.minSpanDays is always a finite number, never null', Number.isFinite(metaSanity.minSpanDays));
+ok('metadata.windowDays is always a finite number, never null', Number.isFinite(metaSanity.windowDays));
+
+// Test -h flag
+const hOut = execFileSync('node', [scriptPath, '-h'], {
+  encoding: 'utf-8', timeout: 10000,
+  cwd: dirname(scriptPath),
+});
+ok('-h prints usage', hOut.includes('Usage:'));
 
 // ============================================================================
 // RESULTS

@@ -16,6 +16,8 @@ import {
   type ScanEvent,
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
+import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
+import { isScannerMissing } from "@/lib/explore-error.mjs";
 
 export type Phase =
   | "idle"
@@ -57,9 +59,15 @@ type ExploreCtx = {
   status: string;
   partial: boolean;
   error: string;
+  /** The failure was the structured "scanner absent from this checkout" 400,
+   *  not a runtime scan error, so it drives the "full toolkit" panel over a retry. */
+  scannerMissing: boolean;
   added: Set<string>;
   adding: Set<string>;
   discover: () => Promise<void>;
+  /** Load the SUPPLY-loop offers Today's "Fresh matches this week" already
+   *  fetched from /api/whats-new, straight into the results phase — no scan. */
+  loadFresh: () => Promise<void>;
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
   reset: () => void;
@@ -98,6 +106,7 @@ type ResultSnapshot = {
   partial: boolean;
   status: string;
   error: string;
+  scannerMissing: boolean;
   added: string[];
   aiTrace: AiTraceChunk[];
   aiCost: AiCost;
@@ -121,6 +130,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState("");
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState("");
+  const [scannerMissing, setScannerMissing] = useState(false);
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [mode, setModeState] = useState<ExploreMode>("scan");
@@ -157,6 +167,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setDroppedNoDate(0);
     setPartial(false);
     setError("");
+    setScannerMissing(false);
     setStatus("Casting the net across the ATS network…");
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
@@ -168,6 +179,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let sawScannerMissing = false; // the structured 400 (data-only checkout), not a runtime scan error
     let companiesScannedAcc = 0; // 0 at the end = the directories never downloaded → degraded, not empty
     let capHitAcc = false; // scan was capped (only a slice of the universe searched)
     let datasetIssueAcc = false; // some ATS dataset was stale/empty/unreachable
@@ -178,9 +190,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(f),
       });
-      if (r.status === 400) {
+      // Every non-OK response is decided from the parsed body, not the status.
+      // A failed response never carries a scan stream, so reading one would
+      // parse a JSON error object as scan events and report "no readable
+      // output" instead of the server's actual message.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "The scanner isn't available.";
+        sawScannerMissing = isScannerMissing(d);
+        sawError = d.error || (sawScannerMissing ? "The scanner isn't available." : `Discovery failed (${r.status}).`);
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -266,6 +283,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
+      setScannerMissing(sawScannerMissing);
       setPhase("failed");
     } else if (capHitAcc || datasetIssueAcc || droppedNoDateAcc > 0 || companiesScannedAcc === 0) {
       // Maintainer's RULE (#1199): it is NOT "all caught up" if the scan was capped,
@@ -275,6 +293,53 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("degraded");
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
+    }
+  }, []);
+
+  // Today's "See all N" link (#84) routes here with ?view=fresh instead of leaving
+  // the user on a bare config form. Re-fetch the same free, zero-token /api/whats-new
+  // history the dashboard already reads and drop it straight into the results phase
+  // — no scan, so it never touches sources/companiesScanned like discover() does.
+  const loadFresh = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setPhase("casting");
+    setStatus("Loading fresh matches…");
+    setOffers([]);
+    setMatchCount(0);
+    setCompaniesScanned(0);
+    setCompaniesAvailable(0);
+    setCapHit(false);
+    setDroppedNoDate(0);
+    setPartial(false);
+    setSources({});
+    setError("");
+    try {
+      // A finite ceiling, not `all`: explorer-view renders every offer it gets,
+      // so an unbounded list would be an unbounded DOM. `count` below stays the
+      // complete total, which is what the header actually reports.
+      const r = await fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`);
+      if (!r.ok) {
+        setError(`Couldn't load fresh matches (${r.status}).`);
+        setPhase("failed");
+        return;
+      }
+      const d = await r.json().catch(() => null);
+      if (!d || !Array.isArray(d.offers)) {
+        setError("Couldn't load fresh matches — unexpected response.");
+        setPhase("failed");
+        return;
+      }
+      const list: DiscoveredOffer[] = d.offers;
+      setOffers(list);
+      const count = Number(d.count);
+      setMatchCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : list.length);
+      setPhase(list.length > 0 ? "results" : "empty-current");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load fresh matches.");
+      setPhase("failed");
+    } finally {
+      runningRef.current = false;
     }
   }, []);
 
@@ -329,6 +394,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setStatus("");
     setPartial(false);
     setError("");
+    setScannerMissing(false);
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     try {
@@ -360,6 +426,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
+    setScannerMissing(false);
     setStatus("Casting across the open web…");
     if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
 
@@ -374,6 +441,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let sawScannerMissing = false; // the structured 400 (capability absent from this checkout), not a runtime error
     const handle = (chunks: AiTraceChunk[]) => {
       for (const ch of chunks) {
         if (ch.kind === "offer") {
@@ -405,9 +473,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         setPhase("blocked");
         return;
       }
-      if (r.status === 400) {
+      // Same rule as the scan path, and this is the call site the status-based
+      // check actually broke: /api/explore/ai returns three different 400s
+      // (malformed JSON, missing parameters, MODE_MISSING), and all three were
+      // reported as "this checkout has no scanner". MODE_MISSING carries its own
+      // copy about AI search, which the scanner panel overwrote.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "AI search isn't available.";
+        sawScannerMissing = isScannerMissing(d);
+        sawError = d.error || (sawScannerMissing ? "AI search isn't available." : `AI search failed (${r.status}).`);
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -432,6 +506,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
+      setScannerMissing(sawScannerMissing);
       setPhase("failed");
     } else {
       setPhase("empty-loose");
@@ -469,6 +544,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(!!snap.partial);
     setStatus(typeof snap.status === "string" ? snap.status : "");
     setError(typeof snap.error === "string" ? snap.error : "");
+    setScannerMissing(!!snap.scannerMissing);
     setAdded(new Set(Array.isArray(snap.added) ? snap.added : []));
     setAiTrace(Array.isArray(snap.aiTrace) ? snap.aiTrace : []);
     setAiCost(snap.aiCost ?? { searches: 0, candidates: 0, fetches: 0 });
@@ -485,23 +561,23 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     try {
       const snap: ResultSnapshot = {
         v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
-        partial, status, error, added: [...added], aiTrace, aiCost, aiIntent,
+        partial, status, error, scannerMissing, added: [...added], aiTrace, aiCost, aiIntent,
       };
       sessionStorage.setItem(RESULTS_KEY, JSON.stringify(snap));
     } catch {
       /* sessionStorage full/unavailable — non-fatal */
     }
-  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, added, aiTrace, aiCost, aiIntent]);
+  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, scannerMissing, added, aiTrace, aiCost, aiIntent]);
 
   const value = useMemo(
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding,
-      discover, addToPipeline, applyPatch, reset,
+      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
+      discover, loadFresh, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

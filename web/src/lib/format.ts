@@ -3,35 +3,12 @@
 // core: normalize-statuses.mjs (aliases) + the Go TUI dashboard (score/status
 // colours = the current state-of-the-art).
 
-// Spanish + legacy aliases → canonical English tokens (normalize-statuses.mjs).
-const STATUS_ALIAS: Record<string, string> = {
-  evaluada: "EVALUATED",
-  evaluado: "EVALUATED",
-  condicional: "EVALUATED",
-  hold: "EVALUATED",
-  evaluar: "EVALUATED",
-  verificar: "EVALUATED",
-  aplicada: "APPLIED",
-  aplicado: "APPLIED",
-  enviada: "APPLIED",
-  sent: "APPLIED",
-  respondida: "RESPONDED",
-  respondido: "RESPONDED",
-  contestada: "RESPONDED",
-  entrevista: "INTERVIEW",
-  oferta: "OFFER",
-  rechazada: "REJECTED",
-  rechazado: "REJECTED",
-  descartada: "DISCARDED",
-  descartado: "DISCARDED",
-  cerrada: "DISCARDED",
-  cancelada: "DISCARDED",
-  duplicado: "DISCARDED",
-  repost: "DISCARDED",
-  monitor: "SKIP",
-  no_aplicar: "SKIP",
-  "no aplicar": "SKIP",
-};
+// Alias → canonical stage. Lives in status-alias.mjs so a `node --test` unit
+// test can load it and assert it still covers templates/states.yml (#2917);
+// a hand-maintained copy is what drifted in #2249 and again after #2705.
+import { canonStatus } from "@/lib/status-alias.mjs";
+
+export { canonStatus };
 
 export const CANONICAL_STATES = [
   "Evaluated",
@@ -39,22 +16,18 @@ export const CANONICAL_STATES = [
   "Responded",
   "Interview",
   "Offer",
+  "Hired",
   "Rejected",
   "Discarded",
   "SKIP",
 ] as const;
 
-export function canonStatus(s: string): string {
-  const k = s.trim().toLowerCase();
-  if (k === "" || k === "—" || k === "-") return "DISCARDED";
-  return STATUS_ALIAS[k] ?? s.toUpperCase();
-}
-
-/** Status dot colour, mirroring the Go TUI: green interview/offer, sky applied/
- *  responded, red skip/rejected, gray discarded, neutral evaluated. */
+/** Status dot colour, mirroring the Go TUI: green hired/interview/offer, sky
+ *  applied/responded, red skip/rejected, gray discarded, neutral evaluated. */
 export function statusDot(status: string): string {
   const c = canonStatus(status);
-  if (c.includes("INTERVIEW") || c.includes("OFFER")) return "bg-emerald-400";
+  // Hired is the terminal win — the best outcome, never a neutral gray dot.
+  if (c.includes("HIRED") || c.includes("INTERVIEW") || c.includes("OFFER")) return "bg-emerald-400";
   if (c.includes("APPLIED") || c.includes("RESPONDED")) return "bg-sky-400";
   if (c.includes("REJECTED") || c.includes("SKIP")) return "bg-red-400";
   if (c.includes("DISCARDED")) return "bg-zinc-600";

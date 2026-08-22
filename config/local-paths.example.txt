@@ -1,0 +1,29 @@
+# local-paths.txt — files this checkout owns, that upstream does not ship.
+#
+# Copy this file to `config/local-paths.txt` (gitignored) and list anything you
+# keep in your own fork: a nightly runner, an .mcp.json, a .gitattributes, a
+# fixtures directory. Every path listed here is treated exactly like cv.md —
+# `update-system.mjs apply` will never write to it, and the coverage guard
+# (`validate-system-paths-coverage.mjs`) stops reporting it as an orphan.
+#
+# Without this file, saying "that one is mine" means editing USER_PATHS inside
+# update-system.mjs — the file `apply` overwrites and git re-merges on every
+# sync, so the statement is guaranteed to conflict (#2421).
+#
+# Format
+#   - one repo-relative path per line
+#   - `#` starts a comment; blank lines are ignored
+#   - a trailing `/` means "this directory and everything under it"
+#
+# Refused, loudly, rather than honoured:
+#   - a path the system layer already ships (it would stop updating with no
+#     other signal — if you really mean to fork a system file, that is a
+#     different problem and worth an issue)
+#   - absolute paths, or anything containing `..`
+#
+# Examples — delete these and write your own:
+
+# run-nightly.ps1
+# .mcp.json
+# .gitattributes
+# qa-fixtures/

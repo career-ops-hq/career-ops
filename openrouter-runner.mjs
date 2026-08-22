@@ -22,12 +22,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+import { buildTitleFilter } from './title-keywords.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -425,7 +427,7 @@ async function fetchJobPage(url) {
   // Plain HTTP fallback
   try {
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
+      headers: { 'User-Agent': DEFAULT_USER_AGENT }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
@@ -443,23 +445,26 @@ async function fetchJobPage(url) {
 // search-query companies are handled by the full /career-ops scan pipeline.
 // `rawOverride` lets tests feed YAML text directly (see test-all.mjs drift guard).
 // ---------------------------------------------------------------------------
-function normKeywords(v) {
-  if (!Array.isArray(v)) return [];
-  return v.map(x => String(x ?? '').toLowerCase().trim()).filter(Boolean);
-}
-
 export function parsePortals(rawOverride) {
   const raw = rawOverride ?? readFile('portals.yml');
   if (!raw) throw new Error('portals.yml not found');
   const config = yaml.load(raw) || {};
 
-  const tf = config.title_filter || {};
-  const positive = normKeywords(tf.positive);
-  const negative = normKeywords(tf.negative);
-  function titleMatches(title) {
-    const t = String(title ?? '').toLowerCase();
-    return positive.some(k => t.includes(k)) && !negative.some(k => t.includes(k));
-  }
+  // The shared predicate rather than a second copy of the matching rules. This
+  // path kept its own `includes` loop, and the two had drifted three ways: an
+  // empty positive list accepted every title in scan.mjs and rejected every
+  // title here, AND-groups worked only in scan.mjs, and a non-string YAML entry
+  // was dropped there but coerced into a live keyword here. A `word:` prefix
+  // would have become the fourth — read as literal text, it would have matched
+  // nothing, so the shipped `word:Intern` would stop rejecting "Operations
+  // Intern" here while still working in scan.mjs.
+  //
+  // Side effect worth naming, since it changes this path's verdicts rather than
+  // just its structure: it now also gets the 2-3 char rule. Measured over 2324
+  // real titles that moves one verdict, and it moves it the permissive way —
+  // the negative "iOS" had been matching inside "Biosamples". Nothing becomes
+  // newly rejected.
+  const titleMatches = buildTitleFilter(config.title_filter);
 
   // Companies with a direct JSON `api:` endpoint (the no-CLI scan path).
   const tracked = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
@@ -677,7 +682,12 @@ async function cmdEvaluate(input, ctx) {
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
     const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    // AGENTS.md: a tracker-addition TSV is a SINGLE data line of 9 tab-separated
+    // columns. merge-tracker.mjs reads the whole file as ONE record (no line
+    // splitting), so a leading header row makes parts[4]/parts[5] the literal
+    // "status"/"score" and the evaluation is skipped ("cannot tell score from
+    // status"). Write only the data line.
+    writeFile(tsvFile, tsvLine);
 
     console.log(`\n✅ Report saved: ${relPath}`);
     console.log('\n─── EVALUATION ──────────────────────────────────────\n');
