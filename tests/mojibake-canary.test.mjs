@@ -15,21 +15,60 @@ import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nmojibake-canary — double-encoded UTF-8 detection in templates/ and modes/');
 
-// Lead byte range: Latin-1/cp1252 characters that correspond to a
-// UTF-8 lead byte for a 2-byte (C2-DF), 3-byte (E0-EF), or 4-byte
-// (F0-F4) sequence that got misread as single Latin-1/cp1252 bytes.
-const LEAD = '\u00c2-\u00f4';
+// Full WHATWG windows-1252 index table for bytes 0x80-0x9F (0xA0-0xFF
+// are identity-mapped to U+00A0-U+00FF, same as Latin-1).
+const CP1252_HIGH = [
+  0x20ac,0x0081,0x201a,0x0192,0x201e,0x2026,0x2020,0x2021,
+  0x02c6,0x2030,0x0160,0x2039,0x0152,0x008d,0x017d,0x008f,
+  0x0090,0x2018,0x2019,0x201c,0x201d,0x2022,0x2013,0x2014,
+  0x02dc,0x2122,0x0161,0x203a,0x0153,0x009d,0x017e,0x0178,
+];
 
-// Continuation range: what a UTF-8 continuation byte (0x80-0xBF)
-// decodes to when misread. 0xA0-0xBF map 1:1 to U+00A0-U+00BF under
-// both Latin-1 and Windows-1252. 0x80-0x9F only have defined
-// *characters* under Windows-1252 (the far more common real-world
-// mis-decode) — those are the curly quotes, em dash, euro sign, etc.
-// responsible for smart-quote mojibake like "itâ€™s".
-const CONT_WIN1252 = '\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178';
-const CONT_LATIN1 = '\u00a0-\u00bf';
+// codepoint -> the raw byte value it represents, so a mis-decoded
+// character can be mapped back to what it actually was on disk.
+const CODEPOINT_TO_BYTE = new Map();
+for (let b = 0; b < 0x80; b++) CODEPOINT_TO_BYTE.set(b, b);
+for (let b = 0xa0; b <= 0xff; b++) CODEPOINT_TO_BYTE.set(b, b);
+for (let i = 0; i < 32; i++) CODEPOINT_TO_BYTE.set(CP1252_HIGH[i], 0x80 + i);
 
-const MOJIBAKE_RE = new RegExp(`[${LEAD}][${CONT_WIN1252}${CONT_LATIN1}]`);
+// The legal range for a UTF-8 sequence's FIRST continuation byte
+// depends on the lead byte, not just "any byte 0x80-0xBF" — E0, ED,
+// F0, and F4 are narrower than the rest to rule out overlong
+// encodings and the surrogate / out-of-Unicode-range gaps. This
+// extra precision is what tells "ôž" (Slovak, not mojibake — ô's
+// byte 0xF4 only legally continues into 0x80-0x8F, and ž's byte
+// 0x9E falls outside that) apart from an actual mis-decode.
+function allowedContinuationRange(leadByte) {
+  if (leadByte >= 0xc2 && leadByte <= 0xdf) return [0x80, 0xbf];
+  if (leadByte === 0xe0) return [0xa0, 0xbf];
+  if (leadByte >= 0xe1 && leadByte <= 0xec) return [0x80, 0xbf];
+  if (leadByte === 0xed) return [0x80, 0x9f];
+  if (leadByte >= 0xee && leadByte <= 0xef) return [0x80, 0xbf];
+  if (leadByte === 0xf0) return [0x90, 0xbf];
+  if (leadByte >= 0xf1 && leadByte <= 0xf3) return [0x80, 0xbf];
+  if (leadByte === 0xf4) return [0x80, 0x8f];
+  return null;
+}
+
+// Scans a string for one adjacent (lead, continuation) pair that forms
+// a legal UTF-8 byte relationship when reinterpreted as raw bytes.
+// Returns the offending pair and its index, or null.
+function findMojibakePair(text) {
+  const chars = [...text];
+  for (let i = 0; i < chars.length - 1; i++) {
+    const leadCp = chars[i].codePointAt(0);
+    const contCp = chars[i + 1].codePointAt(0);
+    if (leadCp < 0xc2 || leadCp > 0xf4) continue;
+    const leadByte = CODEPOINT_TO_BYTE.get(leadCp);
+    const contByte = CODEPOINT_TO_BYTE.get(contCp);
+    if (leadByte === undefined || contByte === undefined) continue;
+    const range = allowedContinuationRange(leadByte);
+    if (range && contByte >= range[0] && contByte <= range[1]) {
+      return { pair: chars[i] + chars[i + 1], index: i };
+    }
+  }
+  return null;
+}
 
 /**
  * Check if a line contains any mojibake fingerprint.
@@ -37,7 +76,7 @@ const MOJIBAKE_RE = new RegExp(`[${LEAD}][${CONT_WIN1252}${CONT_LATIN1}]`);
  * @returns {boolean} True if mojibake is detected.
  */
 function containsMojibake(line) {
-  return MOJIBAKE_RE.test(line);
+  return findMojibakePair(line) !== null;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +120,33 @@ for (const text of legitimateUnicode) {
 }
 if (allLegitimatePassed) {
   pass('containsMojibake does NOT flag legitimate Unicode (café, 日本語, مرحبا, naïve façade, Мир, 你好)');
+}
+
+// Regression guard for the false-positive class CodeRabbit flagged on PR #3205:
+// two adjacent accented Latin-Extended letters whose codepoints each *look* like
+// a plausible UTF-8 lead/continuation byte on their own, but do NOT form a legal
+// lead/continuation byte pair. Slovak "ô" (byte 0xF4) is the top of the lead
+// range and only legally continues into 0x80-0x8F, so "ôž"/"ôš" are real words,
+// not mis-decodes — the old flat character class wrongly flagged them. Same shape
+// of bug in German, Portuguese, Czech, Turkish, etc.
+const latinExtendedCleanWords = [
+  'môžeš',          // Slovak — CodeRabbit's exact example (ô + ž)
+  'kôš',            // Slovak — CodeRabbit's exact example (ô + š)
+  'Größe',          // German
+  'não',            // Portuguese
+  'žluťoučký kůň',  // Czech
+  'güneş',          // Turkish
+];
+
+let allLatinExtendedPassed = true;
+for (const text of latinExtendedCleanWords) {
+  if (containsMojibake(text)) {
+    fail(`containsMojibake incorrectly flagged legitimate Latin-Extended text: "${text}"`);
+    allLatinExtendedPassed = false;
+  }
+}
+if (allLatinExtendedPassed) {
+  pass('containsMojibake does NOT flag adjacent-diacritic Latin-Extended words (môžeš, kôš, Größe, não, žluťoučký kůň, güneş)');
 }
 
 // ---------------------------------------------------------------------------
