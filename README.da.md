@@ -89,7 +89,7 @@ Bygget af en, der brugte det til at vurdere 740+ stillinger, generere 100+ skræ
 | **Portalskanner**              | 45+ virksomheder konfigureret (Anthropic, OpenAI, ElevenLabs, Retool, n8n…) + forespørgsler via Ashby, Greenhouse, Lever, Wellfound            |
 | **Batch-behandling**           | Parallel vurdering via `claude -p`-workers                                                                                                      |
 | **TUI-dashboard**              | Terminal-UI til at gennemse, filtrere og sortere pipelinen                                                                                       |
-| **Human-in-the-Loop**          | AI vurderer og anbefaler, du beslutter og handler. Systemet sender aldrig ansøgninger — det sidste ord er altid dit                            |
+| **Human-in-the-Loop**          | AI vurderer og anbefaler, du beslutter og handler. Systemet sender aldrig ansøgninger — det sidste ord er altid dit <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                            |
 | **Pipeline-integritet**        | Automatisk merge, deduplikering, statusnormalisering, datakvalitetstjek                                                                          |
 
 ## Hurtig start

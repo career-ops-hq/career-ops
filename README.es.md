@@ -102,7 +102,7 @@ Construido por alguien que lo usó para evaluar 740+ ofertas, generar 100+ CVs p
 | **Scanner de portales**    | 45+ empresas pre-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + queries en Ashby, Greenhouse, Lever, Wellfound |
 | **Batch**                  | Evaluación en paralelo con workers `claude -p`                                                                                 |
 | **Dashboard TUI**          | Terminal UI para navegar, filtrar y ordenar tu pipeline                                                                        |
-| **Human-in-the-Loop**      | La IA evalúa y recomienda, tú decides y actuas. El sistema nunca envía una aplicación -- tú siempre tienes la última palabra   |
+| **Human-in-the-Loop**      | La IA evalúa y recomienda, tú decides y actúas. El sistema nunca envía una candidatura: tú siempre tienes la última palabra <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->   |
 | **Integridad de pipeline** | Merge automático, dedup, normalización de estados, health checks                                                               |
 
 ## Inicio rápido
