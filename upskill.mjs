@@ -374,12 +374,19 @@ export function computeTargetedGaps(jdText, knownText) {
 }
 
 // --- Main ---
-function analyze(minReports, options = {}) {
-  if (!existsSync(APPS_FILE)) {
+export function analyze(minReports, options = {}) {
+  // Test seams (mirroring reports-index.mjs's documented reportsDir/cachePath):
+  // each defaults to the module's real path, so production behavior is
+  // unchanged. Overridable so the aggregate gap-derivation can be exercised
+  // against fixtures without a live tracker/CV — see the #2762 regression test.
+  const appsFile = options.appsFile ?? APPS_FILE;
+  const cvFile = options.cvFile ?? CV_FILE;
+  const profileFile = options.profileFile ?? PROFILE_FILE;
+  if (!existsSync(appsFile)) {
     return { error: 'No applications tracker found. Run some evaluations first.' };
   }
 
-  const lines = readFileSync(APPS_FILE, 'utf-8').split('\n');
+  const lines = readFileSync(appsFile, 'utf-8').split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
 
@@ -404,7 +411,7 @@ function analyze(minReports, options = {}) {
     // FIRST: a cache hit yields the Machine Summary with NO body read, which is
     // the whole point of #2385. The report body is read only as a fallback below
     // (#2762 — reading it up front here defeated the read-reduction).
-    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    const candidates = new Set([join(dirname(appsFile), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
     let entry = null;
     let reportPath = null;
     for (const p of candidates) {
@@ -424,9 +431,15 @@ function analyze(minReports, options = {}) {
     if (summary) {
       hasMachineSummary = true;
       if (typeof summary.score === 'number' && Number.isFinite(summary.score)) score = summary.score;
-      if ('hard_stops' in summary || 'soft_gaps' in summary) {
+      // Condition on NON-EMPTY gaps, not key presence: the canonical Machine
+      // Summary emits `hard_stops: []` / `soft_gaps: []` when empty (batch-prompt
+      // #323), so a presence check would set haveSummaryGaps for a report that
+      // actually lists its gaps only in the body Gap table — suppressing the
+      // fallback body read below and silently dropping those gaps (#2762).
+      const summaryGaps = [...normalizeList(summary.hard_stops), ...normalizeList(summary.soft_gaps)];
+      if (summaryGaps.length > 0) {
         haveSummaryGaps = true;
-        gapDescriptions.push(...normalizeList(summary.hard_stops), ...normalizeList(summary.soft_gaps));
+        gapDescriptions.push(...summaryGaps);
       }
     }
     // Fallback: read + parse the body only when the summary can't supply the
@@ -464,8 +477,8 @@ function analyze(minReports, options = {}) {
   }
 
   const knownText = knownSkillsText(
-    readOptionalText(CV_FILE),
-    readOptionalText(PROFILE_FILE),
+    readOptionalText(cvFile),
+    readOptionalText(profileFile),
     warnProfileUnparseable,
   );
   const knownSkills = extractSkills(knownText);
@@ -904,7 +917,7 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 // Handled via lib/cli-flags.mjs's validateFlags() (#2775), same shape as
 // doctor.mjs (#2874) — checked before --self-test/--url-text/--min-reports
 // are read, and before --help, so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
+const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--no-cache', '--self-test', '--help', '-h'];
 
 // Only --min-reports and --url-text take their value as the next argv token.
 const VALUE_FLAGS = ['--min-reports', '--url-text'];
