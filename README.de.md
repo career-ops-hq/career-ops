@@ -111,7 +111,7 @@ Gebaut von jemandem, der damit 740+ Stellenanzeigen bewertet, 100+ personalisier
 | **Portal-Scanner** | 45+ vorkonfigurierte Unternehmen (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) plus eigene Queries über Ashby, Greenhouse, Lever und Wellfound |
 | **Batch Processing** | Parallele Bewertung mit headless CLI-Workern (`claude -p` / `opencode run`) |
 | **Dashboard TUI** | Terminal-UI zum Durchsuchen, Filtern und Sortieren deiner Pipeline |
-| **Human-in-the-Loop** | KI bewertet und empfiehlt, du entscheidest. Das System sendet niemals automatisch Bewerbungen ab |
+| **Human-in-the-Loop** | KI bewertet und empfiehlt, du entscheidest. Das System reicht niemals eine Bewerbung ein — die finale Entscheidung liegt immer bei dir <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **Pipeline-Integrität** | Automatisches Mergen, Deduplizieren, Status-Normalisierung und Health Checks |
 
 ## Schnellstart
