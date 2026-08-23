@@ -78,26 +78,104 @@ export function parseMeta(path) {
   return meta;
 }
 
+// Build the entry a discovered template file contributes.
+function entryFor(parsed, path, pack) {
+  const meta = parseMeta(path);
+  return {
+    name: parsed.name,
+    displayName: meta.name || prettify(parsed.name),
+    path,
+    format: parsed.format,
+    meta,
+    pack,
+  };
+}
+
+// Discover every template of `kind`/`format` under `dir`: the flat files that
+// have always lived there, plus one level of *template packs* (#3202).
+//
+// A pack is a subdirectory holding its own `<prefix>.<name>.<format>` next to
+// its own `sections/`. That co-location is the whole point: build-cv-html.mjs
+// resolves partials relative to the template file, so a pack gets its own DOM
+// without touching the `sections/` every flat template shares.
+//
+// The template name comes from the *filename*, exactly as it does for a flat
+// template — never from the directory name. `templates/ats/cv-template.ats.html`
+// is template "ats" because of the file, and the directory could be called
+// anything. That keeps one naming rule instead of two.
+//
+// Packs are one level deep only. Nothing here recurses: a pack's `sections/`
+// must not be mistaken for a nested pack, and an arbitrarily deep walk over a
+// user-writable directory is a cost (and a surface) with no use case behind it.
+//
+// Symlinked directories are skipped. `Dirent.isDirectory()` is false for a
+// symlink, so this falls out of the dirent type rather than needing a check —
+// but it is load-bearing, not incidental: following one would let a link inside
+// templates/ pull a template in from anywhere on the filesystem. Symlinked
+// template *files* still resolve as they always have; only the pack walk is
+// restricted.
+//
+// Returns Map<name, entry>. A name claimed twice throws — see assertNoCollision.
+function discover(kind, { dir, format }) {
+  const cfg = KINDS[kind];
+  const found = new Map();
+  if (!existsSync(dir)) return found;
+
+  const claim = (parsed, path, pack) => {
+    if (parsed.format !== format) return;
+    const prior = found.get(parsed.name);
+    if (prior) assertNoCollision(parsed.name, prior.path, path, dir);
+    found.set(parsed.name, entryFor(parsed, path, pack));
+  };
+
+  // Flat templates. Unchanged from before packs existed, including the fact
+  // that a symlinked file is read through like any other.
+  for (const file of readdirSync(dir)) {
+    const parsed = parseFilename(cfg.prefix, file);
+    if (parsed) claim(parsed, resolve(dir, file), null);
+  }
+
+  // Packs, one level down.
+  for (const d of readdirSync(dir, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    const packDir = resolve(dir, d.name);
+    let inner;
+    try {
+      inner = readdirSync(packDir);
+    } catch {
+      continue; // unreadable directory is not a pack
+    }
+    for (const file of inner) {
+      const parsed = parseFilename(cfg.prefix, file);
+      if (parsed) claim(parsed, resolve(packDir, file), d.name);
+    }
+  }
+
+  return found;
+}
+
+// A template name resolves to exactly one file, enforced when it is discovered
+// rather than settled by a precedence rule.
+//
+// Precedence would have to pick a winner while both files exist and both look
+// correct — during a migration from a flat template to a pack, say — and the
+// loser would simply stop being rendered, silently, with nothing in the output
+// naming the file that won. Failing at discovery costs one clear error and
+// makes the ambiguity impossible to ship past.
+function assertNoCollision(name, a, b, dir) {
+  const rel = (p) => p.slice(dir.length + 1) || p;
+  const [x, y] = [rel(a), rel(b)].sort();
+  throw new Error(
+    `Template name "${name}" is claimed by two files: ${x} and ${y}. `
+      + `A name must resolve to one template — rename one, or remove the one you no longer use.`
+  );
+}
+
 export function listTemplates(kind, { dir = DEFAULT_TEMPLATES_DIR, format = 'html' } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
   assertFormat(format);
-  if (!existsSync(dir)) return [];
-  const out = [];
-  for (const file of readdirSync(dir)) {
-    const parsed = parseFilename(cfg.prefix, file);
-    if (!parsed || parsed.format !== format) continue;
-    const path = resolve(dir, file);
-    const meta = parseMeta(path);
-    out.push({
-      name: parsed.name,
-      displayName: meta.name || prettify(parsed.name),
-      path,
-      format: parsed.format,
-      meta,
-    });
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return [...discover(kind, { dir, format }).values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function validateTemplate(path, kind) {
@@ -138,21 +216,30 @@ export function resolveTemplate(kind, name, opts = {}) {
   let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath }) || 'standard');
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
-  let path = resolve(dir, fileFor(chosen));
-  if (!existsSync(path)) {
-    if (fallback && chosen !== 'standard') {
-      chosen = 'standard';
-      path = resolve(dir, fileFor(chosen));
-    }
-    if (!existsSync(path)) {
-      throw new Error(`Template not found for kind=${kind} name=${chosen} (${fileFor(chosen)})`);
-    }
+  // Resolution goes through the same discovery as listTemplates, so a name that
+  // lists is a name that resolves. Constructing `dir/fileFor(chosen)` directly
+  // would find flat templates only: a pack would list fine and then throw here,
+  // which is the failure mode that passes review because the demo path works.
+  // Every by-name caller lands here — build-cv-latex.mjs, generate-cover-letter.mjs.
+  const found = discover(kind, { dir, format });
+
+  let entry = found.get(chosen);
+  if (!entry && fallback && chosen !== 'standard') {
+    chosen = 'standard';
+    entry = found.get(chosen);
   }
+  if (!entry) {
+    throw new Error(`Template not found for kind=${kind} name=${chosen} (${fileFor(chosen)})`);
+  }
+  const path = entry.path;
   if (format === 'html') {
     const v = validateTemplate(path, kind);
     if (!v.ok) {
+      // Name the file that is actually short, not the flat filename it would
+      // have had. For a pack these differ, and the flat name points at nothing.
+      const where = entry.pack ? `${entry.pack}/${fileFor(chosen)}` : fileFor(chosen);
       throw new Error(
-        `Template ${fileFor(chosen)} missing required placeholders: ${v.missing.map((m) => `{{${m}}}`).join(', ')}`
+        `Template ${where} missing required placeholders: ${v.missing.map((m) => `{{${m}}}`).join(', ')}`
       );
     }
   }
