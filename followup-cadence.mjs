@@ -18,6 +18,7 @@ import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -31,8 +32,21 @@ const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
-const appliedDaysIdx = args.indexOf('--applied-days');
-const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
+// flagValue (not indexOf) so `--applied-days=10` is honored too — indexOf()
+// can't see the `=` form and used to silently discard it, falling back to the
+// default cadence for a value the caller did supply (#2401/#2402 defect class).
+const appliedDaysRaw = flagValue(args, '--applied-days');
+
+// Whole-string match, not a bare parseInt: parseInt('1.5', 10) is 1 and
+// parseInt('10days', 10) is 10 — both truncate a bad value into a plausible
+// one instead of rejecting it, which is the exact silent-wrong-answer shape
+// this file is being fixed to close. Exported so a value's actual numeric
+// effect can be asserted directly, rather than only "the CLI didn't error".
+const APPLIED_DAYS_RE = /^\d+$/;
+export function parseAppliedDaysOverride(raw) {
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+}
+const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
@@ -923,6 +937,7 @@ function printSummary(result) {
 // ── CLI flags + help ────────────────────────────────────────────────
 
 const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
@@ -933,17 +948,29 @@ const USAGE = `Usage:
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-  } else {
-    const result = analyze();
+  // Must run inside this guard, not at module top level: CADENCE (above) is a
+  // module-level singleton built at import time, and test-all.mjs section 12
+  // dynamic-imports this module in-process to read it — validating the host
+  // process's own argv there would false-positive on the test runner's flags.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-    if (summaryMode) {
-      printSummary(result);
-    } else {
-      console.log(JSON.stringify(result, null, 2));
-    }
-
-    if (result.error) process.exit(1);
+  // positiveInteger() (used to build CADENCE above) treats a NaN/negative value
+  // as "absent" and silently keeps the default — exactly the wrong-answer-at-
+  // exit-0 shape this fix exists to close. A value that was actually SUPPLIED
+  // must fail loudly instead of being swallowed the same way a bad flag NAME
+  // used to be.
+  if (appliedDaysRaw !== undefined && !(Number.isFinite(appliedDaysOverride) && appliedDaysOverride >= 0)) {
+    console.error(`Error: --applied-days requires a non-negative integer, got "${appliedDaysRaw}"`);
+    process.exit(1);
   }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
