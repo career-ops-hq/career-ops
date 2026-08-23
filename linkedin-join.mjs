@@ -60,6 +60,11 @@
  *      node linkedin-join.mjs --tsv            (contacts.tsv-shaped rows on stdout)
  *      node linkedin-join.mjs --csv <path>     (override the export location)
  *      node linkedin-join.mjs --self-test
+ *      node linkedin-join.mjs --help
+ *
+ * Argv goes through lib/cli-flags.mjs, so every flag accepts both `--flag value`
+ * and `--flag=value`, an unrecognized flag exits 1 rather than falling through to
+ * default behaviour, and a value flag with no operand is a usage error.
  *
  * --tsv PRINTS, never appends: review the rows, then paste the keepers into
  * data/contacts.tsv so contacts.mjs and `contacto` pick them up.
@@ -71,6 +76,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CSV = join(CAREER_OPS, 'data/Connections.csv');
@@ -79,25 +85,46 @@ const PORTALS_PATH = join(CAREER_OPS, 'portals.yml');
 const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
 
 const args = process.argv.slice(2);
-const hasFlag = (f) => args.includes(f);
-const flagValue = (f) => {
-  const i = args.indexOf(f);
-  return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
-};
 
-const summaryMode = hasFlag('--summary');
-const tsvMode = hasFlag('--tsv');
-const selfTestMode = hasFlag('--self-test');
-const includeWeak = hasFlag('--include-weak');
-const trackerOnly = hasFlag('--tracker-only');
-const portalsOnly = hasFlag('--portals-only');
-const sinceRaw = flagValue('--since');
+// lib/cli-flags.mjs rather than a local indexOf() lookup. A hand-rolled parser
+// cannot see `--flag=value`, so `--csv=/other.csv` silently discarded the path
+// and the tool read data/Connections.csv instead, printing a plausible report
+// about a file nobody asked for. Same defect class as #2401/#2402.
+const VALUE_FLAGS = ['--since', '--csv', '--company'];
+const KNOWN_FLAGS = [
+  '--summary', '--tsv', '--self-test', '--include-weak',
+  '--tracker-only', '--portals-only', ...VALUE_FLAGS, '--help', '-h',
+];
+
+const USAGE = `Usage: node linkedin-join.mjs [options]
+
+Joins a LinkedIn Connections.csv export against tracker + portals.yml companies
+to answer "do I know anyone here?". Offline, read-only, zero token cost.
+
+  --company <name>   Answer for ONE company; says so explicitly when nobody matches
+  --summary          Human-readable output grouped by company (default: JSON)
+  --tsv              contacts.tsv-shaped rows on stdout (never appends)
+  --tracker-only     Only companies in data/applications.md
+  --portals-only     Only portals.yml scanner targets
+  --include-weak     Include weak name matches (noisier)
+  --since <YYYY>     Only connections made in/after this 4-digit year
+  --csv <path>       Override the export location
+  --self-test        Run the inline checks
+  --help, -h         Show this message`;
+
+const summaryMode = hasFlag(args, '--summary');
+const tsvMode = hasFlag(args, '--tsv');
+const selfTestMode = hasFlag(args, '--self-test');
+const includeWeak = hasFlag(args, '--include-weak');
+const trackerOnly = hasFlag(args, '--tracker-only');
+const portalsOnly = hasFlag(args, '--portals-only');
+const sinceRaw = flagValue(args, '--since') ?? null;
 // parseInt('2020x') is 2020 and parseInt('abc') is NaN, which the truthiness
 // check below would read as "no filter" — a silently ignored flag is worse than
 // an error, because the output looks like a filtered result.
 const sinceYear = sinceRaw === null ? null : (/^\d{4}$/.test(sinceRaw) ? Number(sinceRaw) : NaN);
-const csvPath = flagValue('--csv') || DEFAULT_CSV;
-const companyQuery = flagValue('--company');
+const csvPath = flagValue(args, '--csv') || DEFAULT_CSV;
+const companyQuery = flagValue(args, '--company') ?? null;
 
 // --- Company name normalization -------------------------------------------
 
@@ -798,6 +825,12 @@ function readOrNull(path) {
 }
 
 function main() {
+  // Inside main(), not at module scope: validateFlags exits the process, and a
+  // test importing this module for its exports must never trigger that on the
+  // test runner's argv. requireOperand catches `--csv --summary`, where the
+  // operand is missing and the next token is another flag.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
   if (selfTestMode) return selfTest();
 
   if (trackerOnly && portalsOnly) {
