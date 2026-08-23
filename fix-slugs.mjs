@@ -27,6 +27,7 @@
  *   node fix-slugs.mjs --fix         # write the resolved slugs back to portals.yml
  *   node fix-slugs.mjs --apply       # alias for --fix
  *   node fix-slugs.mjs --file <path> # use a specific portals file
+ *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
@@ -34,8 +35,20 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+
+const KNOWN_FLAGS = ['--apply', '--dry-run', '--file', '--fix', '--help', '-h'];
+const VALUE_FLAGS = ['--file'];
+
+const USAGE = `Usage:
+  node fix-slugs.mjs               # dry run (default, safe) — prints the diff, writes nothing
+  node fix-slugs.mjs --dry-run     # same as above, explicit
+  node fix-slugs.mjs --fix         # write the resolved slugs back to portals.yml
+  node fix-slugs.mjs --apply       # alias for --fix
+  node fix-slugs.mjs --file <path> # use a specific portals file
+  node fix-slugs.mjs --help        # show this message (-h is an alias)`;
 
 /** Matches a `tracked_companies` list-item start line: `  - name: Foo`. */
 const NAME_LINE_RE = /^([ \t]*)-\s*name:\s*(.+?)\s*$/;
@@ -320,11 +333,22 @@ function printDiff(fixes, { dryRun }) {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  if (hasFlag(args, '--file')) {
+    const rawVal = flagValue(args, '--file');
+    if (rawVal === undefined || rawVal === '' || rawVal.startsWith('-')) {
+      console.error('Error: --file requires a value');
+      process.exit(1);
+    }
+  }
+
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   const fix = args.includes('--fix') || args.includes('--apply');
   const dryRun = !fix; // default is always safe — writing requires an explicit flag
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '');
+  const fileVal = flagValue(args, '--file');
+  const filePath = resolve(fileVal || DEFAULT_PORTALS_PATH);
 
   if (!existsSync(filePath)) {
     console.log(`fix-slugs: no portals file at ${filePath} — nothing to fix.`);

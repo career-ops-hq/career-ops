@@ -52,8 +52,10 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -97,80 +99,13 @@ const CONCURRENCY = 10;
 
 // ── Title filter ────────────────────────────────────────────────────
 
-// Compile a lowercased keyword into a matcher. Short all-letter acronyms
-// (2-3 chars: cfo, coo, sdr, bdr, gsi…) match on WORD BOUNDARIES so "COO" no
-// longer matches "Coordinator", "SDR" no longer matches anything mid-word, etc.
-// Multi-word phrases and keywords containing non-letters (".NET", "SAP ",
-// "L&D") keep fast, permissive substring matching.
-export function compileKeyword(kw) {
-  if (/^[a-z]{2,3}$/.test(kw)) {
-    const re = new RegExp(`\\b${kw}\\b`);
-    return (lower) => re.test(lower);
-  }
-  return (lower) => lower.includes(kw);
-}
-
-// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
-// must appear in the title, in any order. `title_filter.positive` is otherwise
-// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
-// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
-// cannot hit inside another word. Either way an entry expresses one exact
-// spelling and nothing else, and real titles vary in separator and word order:
-//
-//   "Director of Engineering" misses  Director - Software Engineering
-//                                     Director Engineering (Mobile Platform)
-//                                     Senior Director, Platform Engineering
-//
-// The combinations are {level} x {, - of none} x {optional domain word}: no
-// hand-maintained list of literal spellings converges, and every miss is
-// silent — the summary reports one "filtered by title" count that cannot tell
-// a well-tuned filter from a leaking one (#2544).
-//
-// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
-// would turn the perfectly ordinary keyword "C++" into "c", which matches
-// almost every title — trading a silent drop for a silent flood.
-const AND_SEPARATOR = /\s+\+\s+/;
-
-/**
- * Compile one `positive` entry into a matcher.
- *
- * Entries without " + " keep their exact previous behaviour, so existing
- * configs are unaffected.
- *
- * @param {string} keyword - already trimmed and lowercased.
- * @returns {(lower: string) => boolean}
- */
-export function compilePositiveKeyword(keyword) {
-  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
-  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
-  if (terms.length === 0) return compileKeyword(keyword);
-  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
-  // still matched on a word boundary and cannot hit "vp" inside another word.
-  const matchers = terms.map(compileKeyword);
-  return (lower) => matchers.every(m => m(lower));
-}
-
-export function buildTitleFilter(titleFilter) {
-  // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
-  // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
-    .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
-    .filter(k => k.length > 0)
-    .map(compile);
-  // AND-groups are a POSITIVE-side feature only. On the negative side an entry
-  // is a veto, and " + " there would read as "reject when both appear", which
-  // is a different and much easier thing to write as two entries.
-  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
-  const negative = normalize(titleFilter?.negative, compileKeyword);
-
-  return (title) => {
-    const lower = (title || '').toLowerCase();
-    const hasPositive = positive.length === 0 || positive.some(m => m(lower));
-    const hasNegative = negative.some(m => m(lower));
-    return hasPositive && !hasNegative;
-  };
-}
+// How a title_filter matches a title lives in title-keywords.mjs, because
+// openrouter-runner.mjs filters titles too and cannot import this file (scan.mjs
+// creates data/ at import time). It called a second, hand-kept copy of this
+// logic until the two drifted; there is now one implementation and this file
+// re-exports it, so existing importers — scan-ats-full.mjs and test-all.mjs's
+// sections 11b and 44 among them — keep resolving it from here.
+export { compileKeyword, compilePositiveKeyword, buildTitleFilter };
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -190,6 +125,8 @@ function compiledPositiveMatchers(positiveList) {
 // Returns the raw (as-written in portals.yml) `title_filter.positive` keywords
 // that matched a given title — used to scope `content_filter.by_title_keyword`
 // overrides to only the categories that opted into a stricter content check.
+// "Raw" includes a `word:` prefix if the entry carries one, so a
+// `by_title_keyword` key must be written exactly as the positive entry is.
 export function matchedTitleKeywords(title, titleFilter) {
   const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
   const lower = (title || '').toLowerCase();
@@ -1047,7 +984,13 @@ function daysBetweenIsoDates(start, end) {
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
 
-export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+// `today` defaults to the LOCAL calendar day, not the UTC one. This function
+// gates a COOLDOWN (`today < cooldownUntil`) — the user asked not to see a
+// posting until a date — and the UTC day is tomorrow for a west-of-Greenwich
+// evening run, so the cooldown opened a day early (#3070). The recheck window
+// below reads one day high the same way. Callers may still pass `today`
+// explicitly; only the default moves.
+export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
@@ -2534,7 +2477,12 @@ async function main() {
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day. This one value does two things that both care which day it is:
+  // it is the `today` buildCooldownFilter compares against, and it is the
+  // firstSeen date written into scan-history.tsv. On the UTC day a
+  // west-of-Greenwich evening scan opened cooldowns early AND stamped history
+  // rows with tomorrow, which then read one day old on the next recheck (#3070).
+  const date = localToday();
   const windows = loadReApplyWindows();
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;

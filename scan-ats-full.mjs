@@ -35,11 +35,12 @@
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import path from 'path';
 import * as yaml from 'js-yaml';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
@@ -137,7 +138,7 @@ function writeCheckpoint(cp) {
     mkdirSync(CACHE_DIR, { recursive: true });
     const tmp = `${CHECKPOINT_PATH}.tmp`;
     writeFileSync(tmp, JSON.stringify(cp), 'utf-8');
-    renameSync(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint
+    renameSyncWithRetry(tmp, CHECKPOINT_PATH); // atomic: a crash mid-write can't corrupt the checkpoint; retries Windows contention
     return true;
   } catch (err) {
     console.error(`\n⚠ checkpoint write failed (${err.message}) — sweep continues, --resume unavailable`);

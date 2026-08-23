@@ -33,6 +33,7 @@ import { randomUUID } from 'crypto';
 // classifiers live in pipeline-lock.mjs so the next finding lands once.
 import {
   isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+  lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
 
 const DEFAULT_STALE_MS = 30_000;
@@ -50,7 +51,11 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 // This is a lower bound on patience, never a cap: a larger caller staleMs
 // still wins, and a genuinely abandoned directory still ages out, so a crash
 // while holding the guard cannot disable recovery for good.
-export const OWNERLESS_GRACE_MS = 1_000;
+//
+// Re-exported rather than redeclared: the floor is applied inside
+// lockRecoveryVerdict now, so a local copy of the number would be a constant
+// this file no longer enforces — free to drift from the one that decides.
+export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -82,30 +87,12 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM'; // exists, just not signalable by this user
-  }
-}
-
-// Conservative: a lock whose recorded owner is still running is never stale,
-// however old it is. Age is the fallback only when there's no readable owner.
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch (err) {
-    // Only a vanished directory means "nothing to recover". Any other stat
-    // failure — a Windows EPERM/EBUSY mid-flight — is "could not look", and
-    // answering "recoverable" to that deletes a LIVE lock (#2777, third face).
-    return err?.code === 'ENOENT';
-  }
-}
+// The recovery judgment comes from pipeline-lock rather than a fourth copy of
+// it, for the reason stated at the import: a finding lands once. This file's
+// copy had drifted twice over — it still answered a bare boolean, so "the
+// directory was gone when I looked" reached the caller as a licence to DELETE
+// whatever is at that path now, and it predated #2984, so an unreadable owner
+// stamp fell through to the age rule and could condemn a live lock.
 
 /**
  * Blocks until the lock on `filePath` is held, then returns a handle whose
@@ -173,14 +160,20 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
         // A process killed between taking the guard and cleaning it up would
         // otherwise disable stale recovery forever. The guard normally lives
         // for milliseconds, so an old one is judged by the same age rule.
-        if (lockCanRecover(recoverGuardDir, staleMs)) {
+        // STALE only: a guard already gone needs no eviction, and evicting on
+        // that answer deletes the guard another caller has just taken.
+        if (lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
           rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
+          // STALE only. VANISHED means the lock was absent when we looked, and
+          // by the time this line runs another acquirer may have won the mkdir
+          // and be partway through writing owner.json — deleting on that answer
+          // destroys a live lock and kills its winner with ENOENT.
+          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
             rmLockArtifactSync(lockDir);
             continue; // retry acquisition immediately
           }
