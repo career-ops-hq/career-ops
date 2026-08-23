@@ -120,20 +120,49 @@ function throws(label, fn, ...patterns) {
 }
 
 {
-  // Following a symlinked directory would let a link dropped in templates/ pull
-  // a template in from anywhere on the filesystem.
+  // A pack kept outside the repo and linked in is a supported setup: career-ops
+  // sanctions a symlinked user layer (#524), and refusing the link would drop
+  // the template from the registry silently. Skipping buys no protection
+  // either — whoever can create the link can create a real directory instead.
   const dir = fixtureDir();
   const outside = mkdtempSync(join(tmpdir(), 'packs-outside-'));
-  writeFileSync(join(outside, 'cv-template.smuggled.html'), CV_BODY);
+  writeFileSync(join(outside, 'cv-template.linked.html'), CV_BODY);
   let linked = true;
   try {
-    symlinkSync(outside, join(dir, 'linked'), 'dir');
+    symlinkSync(outside, join(dir, 'linked-pack'), 'dir');
   } catch {
     linked = false; // no symlink privilege (Windows CI)
   }
-  if (!linked) pass('symlink guard not exercised — no symlink privilege on this host');
-  else if (!names(dir).includes('smuggled')) pass('a symlinked pack directory is skipped');
-  else fail('a symlinked directory pulled a template in from outside templates/');
+  if (!linked) {
+    pass('symlinked-pack case not exercised — no symlink privilege on this host');
+  } else if (!names(dir).includes('linked')) {
+    fail('a symlinked pack directory was skipped — an out-of-repo pack must still be discoverable');
+  } else if (resolveTemplate('cv', 'linked', { dir }).endsWith('cv-template.linked.html')) {
+    pass('a symlinked pack directory is followed, and resolves by name');
+  } else {
+    fail('a symlinked pack listed but did not resolve to its template');
+  }
+}
+
+{
+  // A link pointing nowhere is not a pack, and must not throw the whole listing.
+  const dir = fixtureDir();
+  let linked = true;
+  try {
+    symlinkSync(join(tmpdir(), 'packs-no-such-target-' + Date.now()), join(dir, 'broken'), 'dir');
+  } catch {
+    linked = false;
+  }
+  if (!linked) {
+    pass('broken-symlink case not exercised — no symlink privilege on this host');
+  } else {
+    try {
+      names(dir);
+      pass('a broken symlink is skipped without breaking discovery');
+    } catch (e) {
+      fail(`a broken symlink broke discovery: ${e.message}`);
+    }
+  }
 }
 
 {

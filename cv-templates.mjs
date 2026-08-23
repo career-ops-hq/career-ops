@@ -4,7 +4,7 @@
 // Backward-compatible: with no config and no named files, resolves the base
 // templates/cv-template.html (name "standard"), identical to prior behavior.
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
@@ -108,12 +108,28 @@ function entryFor(parsed, path, pack) {
 // must not be mistaken for a nested pack, and an arbitrarily deep walk over a
 // user-writable directory is a cost (and a surface) with no use case behind it.
 //
-// Symlinked directories are skipped. `Dirent.isDirectory()` is false for a
-// symlink, so this falls out of the dirent type rather than needing a check —
-// but it is load-bearing, not incidental: following one would let a link inside
-// templates/ pull a template in from anywhere on the filesystem. Symlinked
-// template *files* still resolve as they always have; only the pack walk is
-// restricted.
+// Symlinked directories are followed, which needs an explicit stat because
+// `Dirent.isDirectory()` is false for a symlink.
+//
+// Refusing them looks like the safer default and isn't. A symlink grants no
+// capability its creator lacked: anyone who can drop `templates/mine` as a link
+// can drop it as a real directory holding the same file, so skipping buys no
+// protection against a hostile template — it only makes a legitimate one
+// vanish. The repo's actual symlink guards are on a different axis, and both
+// stay intact: resolveInsideRepo() in reconcile-pipeline.mjs resolves
+// user-supplied path *arguments* before a boundary check, and contacts.mjs
+// refuses to *write* through a link escaping the project. Discovery does
+// neither — it enumerates a directory the project owns and only ever reads.
+//
+// Cycles are not a concern precisely because this walk is one level and never
+// recurses; a link pointing at its own ancestor is read once as a directory
+// and contributes whatever template files sit at its top level.
+//
+// The deciding cost is silent invisibility. career-ops sanctions a symlinked
+// user layer (#524), so a pack maintained outside the repo is a supported
+// setup, and skipping it would drop the template from the registry with
+// nothing said — the same failure this file refuses to accept for name
+// collisions.
 //
 // Returns Map<name, entry>. A name claimed twice throws — see assertNoCollision.
 function discover(kind, { dir, format }) {
@@ -137,8 +153,16 @@ function discover(kind, { dir, format }) {
 
   // Packs, one level down.
   for (const d of readdirSync(dir, { withFileTypes: true })) {
-    if (!d.isDirectory()) continue;
     const packDir = resolve(dir, d.name);
+    if (!d.isDirectory()) {
+      // statSync follows the link; it throws on a broken one, which is not a pack.
+      if (!d.isSymbolicLink()) continue;
+      try {
+        if (!statSync(packDir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+    }
     let inner;
     try {
       inner = readdirSync(packDir);
