@@ -56,6 +56,7 @@ Table with:
 - Remote (full/hybrid/onsite)
 - Team size (if mentioned)
 - **Culture screen** (see `_shared.md` § Scoring System): pass / caution / fail, with the specific evidence found or missing — not just a score, name what you saw
+- **Interview process screen** (see `_shared.md` § Scoring System): pass / caution / fail, naming the specific interview stages found (or their absence) — e.g., "take-home + system design" vs. "3 rounds of algorithm interviews"
 - TL;DR in 1 sentence
 
 ### Geo-mismatch check
