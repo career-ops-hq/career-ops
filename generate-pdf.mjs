@@ -76,7 +76,11 @@ function refreshRootCache() {
     // reads CAREER_OPS_TRACKER at call time, so this keeps refreshRootCache's
     // re-read-on-change contract while a symlinked data/ no longer escapes.
     const root = resolveWorkspaceRootFor(__dirname);
-    __rootCache = { key, root, canonical: realpathSync(root) };
+    // resolveWorkspaceRootFor already realpaths the derived root (falling back to
+    // the lexical form only when it cannot be canonicalized), so a second
+    // realpathSync here would be a no-op on the happy path and would throw on the
+    // missing-root path instead of degrading gracefully. Reuse the resolved root.
+    __rootCache = { key, root, canonical: root };
   }
   return __rootCache;
 }
