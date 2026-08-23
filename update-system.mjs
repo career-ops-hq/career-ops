@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -1459,15 +1459,20 @@ function gitShowRaw(spec) {
  * a failed update into exactly the exposure the file exists to prevent, and
  * doing it silently. Mirrors discover-ats.mjs and followup-seed.mjs.
  *
+ * Lazy-imports `renameSyncWithRetry` (see the top-of-file self-loading note —
+ * a static import of tracker-utils.mjs here would crash a pre-#1245 client's
+ * old→new re-exec the same way a static scaffolder/ import would, #1706).
+ *
  * @param {string} filePath - Absolute path to write.
  * @param {string} content - Full file content.
- * @returns {void}
+ * @returns {Promise<void>}
  */
-function writeGitignoreAtomic(filePath, content) {
+async function writeGitignoreAtomic(filePath, content) {
+  const { renameSyncWithRetry } = await import('./tracker-utils.mjs');
   const tmpPath = `${filePath}.tmp-${process.pid}`;
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     // The original is still intact: the rename either happened or it did not.
     try { rmSync(tmpPath, { force: true }); } catch { /* already gone */ }
@@ -1861,13 +1866,13 @@ async function apply() {
         // already carries its own final newline; the guard is only for a blob that
         // somehow lacks one.
         const seed = upstreamGitignore.endsWith('\n') ? upstreamGitignore : `${upstreamGitignore}\n`;
-        writeGitignoreAtomic(gitignorePath, seed);
+        await writeGitignoreAtomic(gitignorePath, seed);
         trackGitignore();
         console.log('Restored .gitignore (it was missing).');
       } else {
         const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
         if (added.length > 0) {
-          writeGitignoreAtomic(gitignorePath, text);
+          await writeGitignoreAtomic(gitignorePath, text);
           trackGitignore();
           console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
         }

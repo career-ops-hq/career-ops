@@ -1219,6 +1219,31 @@ search_queries:
 # company_aliases:
 #   Fin: [Intercom]
 
+# ── aggregator: true (optional, per entry) ────────────────────────────
+# Marks a tracked_companies entry as a MULTI-EMPLOYER BOARD rather than one
+# employer — a job platform, a VC portfolio board, a recruiting marketplace that
+# posts partner companies' roles under its own ATS account.
+#
+# Everything in the post-tracking layer assumes "same company + same title = the
+# same opening". On such a board that assumption is false: two identical titles
+# are two different employers' jobs. detect-reposts.mjs therefore skips flagged
+# companies entirely, and company-history.mjs reports
+# `postingChurn: aggregator-not-evaluated` for them — deliberately NOT
+# `none-detected`, which would claim a clean result from a check that never ran.
+#
+# It has to be config rather than something inferred: measured on a real
+# scan-history, an aggregator's clusters are indistinguishable by shape from
+# legitimate ones (both around 2 sightings over 2 dates). See #2703.
+#
+# Scanning is unaffected — the postings are real and worth finding. Only the
+# repost inference over them is meaningless. Companies with no flag are
+# untouched, so leaving this out changes nothing.
+#
+#   - name: SomeBoard
+#     careers_url: https://jobs.lever.co/someboard
+#     provider: lever
+#     aggregator: true
+
 tracked_companies:
 
   # -- AI Labs & LLM providers --
@@ -2366,6 +2391,7 @@ job_boards:
     provider: consider
     consider_board: wingman
     enabled: false
+    aggregator: true          # portfolio board: many employers under one entry
     notes: "Swiss VC portfolio board (Consider)"
 
   # ── Swiss startup job boards ───────────────────────────────────────
@@ -2377,6 +2403,7 @@ job_boards:
     careers_url: https://joinup.ch/browse/jobs
     provider: joinup
     enabled: false
+    aggregator: true          # many employers under one entry
     notes: "Swiss startup job platform (newest SSR page)"
   # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
   # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote

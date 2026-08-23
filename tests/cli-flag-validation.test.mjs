@@ -41,7 +41,7 @@ for (const [script, typo] of SCRIPTS) {
     const r = runScript(script, typo, 'some-value');
     assert.equal(r.status, 1, `${script} ${typo} exited ${r.status}, want 1`);
     assert.match(r.all, /unrecognized flag/i, `${script} did not name the unrecognized flag`);
-    assert.match(r.all, new RegExp(typo.replace(/^--/, '--')), `${script} did not echo ${typo} back`);
+    assert.ok(r.all.includes(typo), `${script} did not echo ${typo} back`);
   });
 }
 
@@ -117,4 +117,60 @@ test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', (
   assert.equal(rShortFlagEq.status, 1, '--file=-h must exit 1 without treating -h as a filename');
   assert.match(rShortFlagEq.all, /--file requires a value/);
   assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
+});
+
+// --- missing operand for a RECOGNIZED value-taking flag (#3087) ------------
+//
+// A different defect than an unrecognized flag: the flag is spelled right,
+// but nothing (or another flag) follows it, so flagValue()/indexOf() reads
+// the wrong thing as the value and the script proceeds on it silently at
+// exit 0 — doctor.mjs diagnosing a directory literally named "--json" is the
+// sharpest case. validateFlags's `requireOperand` option closes this for
+// callers that opt in; each case below fails inside validateFlags itself,
+// before any data/ access, so — like the --today/--summary case above — no
+// fixture is needed.
+
+test('doctor: --target --json does not diagnose a directory named "--json"', () => {
+  const r = runScript('doctor.mjs', '--target', '--json');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--target requires a value/);
+});
+
+test('detect-reposts: --window --summary does not silently fall back to the default window', () => {
+  const r = runScript('detect-reposts.mjs', '--window', '--summary');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--window requires a value/);
+});
+
+test('process-quality: --file --min-threshold does not read --min-threshold as a path', () => {
+  const r = runScript('process-quality.mjs', '--file', '--min-threshold');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--file requires a value/);
+});
+
+test('process-quality: --min-threshold --summary does not silently fall back to threshold 1', () => {
+  const r = runScript('process-quality.mjs', '--min-threshold', '--summary');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--min-threshold requires a value/);
+});
+
+test('weekly-digest: --dir --summary does not scan a directory named "--summary"', () => {
+  const r = runScript('weekly-digest.mjs', '--dir', '--summary');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--dir requires a value/);
+});
+
+// archive-posting.mjs hand-rolls its own argv loop rather than going through
+// validateFlags, so its --company/--role handling needed its own adjacency
+// check (the same class of bug through a different door — see archive-posting.mjs).
+test('archive-posting: --company --pipeline does not set the company slug to "--pipeline"', () => {
+  const r = runScript('archive-posting.mjs', 'https://example.com/job', '--company', '--pipeline');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--company requires a value/);
+});
+
+test('archive-posting: --role --dry-run does not set the role slug to "--dry-run"', () => {
+  const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--role requires a value/);
 });

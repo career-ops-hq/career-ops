@@ -37,6 +37,15 @@
  *      role but never merges titles that differ by a city, country, language,
  *      segment or seniority word.
  *
+ * ONE CASE THE TITLE RULE CANNOT SETTLE: a multi-employer aggregator. Its board
+ * carries many different employers' postings under its own name, so identical
+ * titles there are genuinely different jobs and every rule above rests on an
+ * assumption that does not hold — same company + same title = same opening.
+ * Mark such an entry `aggregator: true` in portals.yml and this skips it
+ * entirely (see loadAggregatorCompanies, #2703). It has to be config: measured
+ * on a real history, an aggregator's clusters are indistinguishable by shape
+ * from legitimate ones.
+ *
  * Run: node detect-reposts.mjs             (JSON to stdout)
  *      node detect-reposts.mjs --summary   (human-readable table)
  *      node detect-reposts.mjs --window 60 (override 90-day window)
@@ -47,15 +56,21 @@
  * Issue #1205 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
+// Namespace import, not default: js-yaml 5.x drops the default export, and
+// #2656 migrated the rest of the repo for exactly that reason.
+import * as yaml from 'js-yaml';
 
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
+// Same resolution scan.mjs uses, so a sandboxed run overrides both together.
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
 const DEFAULT_WINDOW_DAYS = 90;
 
 // Smallest first_seen span a cluster may have and still count as a repost.
@@ -186,6 +201,64 @@ export function companyKey(row) {
   return stored || normalizeCompanyName(raw) || raw.toLowerCase();
 }
 
+// Companies the user has marked `aggregator: true` in portals.yml, as a Set of
+// keys in the SAME space companyKey() produces, so the two can be compared
+// directly without re-deriving anything.
+//
+// Why this needs config rather than a heuristic: a multi-employer board posts
+// many different employers' roles under its own name, so identical titles there
+// are genuinely different jobs — the one case where title identity is not
+// enough. That cannot be inferred from the rows. Measured on a real history:
+// the aggregator's clusters and the legitimate ones are indistinguishable by
+// shape (both median 2 sightings over 2 dates, 1 row per date); the best
+// threshold available removed under half the aggregator clusters and needed a
+// magic number to do it. See #2703.
+//
+// portals.yml is a USER-LAYER file and may be absent (a fresh install, a
+// sandboxed test, CI). Absent, unreadable or malformed all degrade to "no
+// aggregators", which is exactly the behaviour before this existed — the
+// detector must never fail because an optional config is missing.
+// Returns a Map of key -> the raw name as written in portals.yml, not a bare
+// Set. The key is what the detector matches on; the raw name is what a reader
+// has to see. company-history.mjs renders a card for a flagged company even
+// when it has no tracker rows and no clusters, and without the original name
+// that card would be titled with the normalized key — "joinupch" rather than
+// "joinup.ch". Map.has() is identical to Set.has() on the matching path.
+// BOTH collections, not just tracked_companies. A multi-employer board is far
+// likelier to live under `job_boards` — that is what the section is for — and
+// the two entries this template ships the flag on (Founderful, joinup.ch) are
+// both there. Reading only one collection made the shipped default load ZERO
+// aggregators while looking configured, which is the worst version of this: a
+// flag the user can see in their own config and that silently does nothing.
+export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
+  const found = new Map();
+  try {
+    if (!existsSync(portalsPath)) return found;
+    const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!entry || entry.aggregator !== true) continue;
+        const raw = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!raw) continue;
+        const key = normalizeCompanyName(raw) || raw.toLowerCase();
+        if (key && !found.has(key)) found.set(key, raw);
+      }
+    }
+  } catch {
+    // A malformed portals.yml is scan.mjs's problem to report, not this
+    // script's problem to crash on.
+    return found;
+  }
+  return found;
+}
+
+// Set or Map — both answer .has(key), and every caller only asks that. Keeps a
+// hand-built Set working in tests while the loader returns a Map.
+export function isKeyLookup(value) {
+  return value instanceof Set || value instanceof Map;
+}
+
 // Canonical identity of a role TITLE, for deciding whether two listings are the
 // same opening. The key is the title's set of words: accent-folded, lowercased,
 // stripped of punctuation, deduplicated and sorted.
@@ -248,8 +321,17 @@ function loadScanHistory(path = SCAN_HISTORY_PATH) {
 // dates all fall within `windowDays` of each other, and (d) those dates span at
 // least `minSpanDays` — see constraint 1 in the header.
 //
+// `aggregators` is an optional Set of company keys (see loadAggregatorCompanies)
+// whose boards carry many employers' postings. Those companies are skipped
+// entirely: an identical title there is a different employer's job, so the one
+// assumption every other rule rests on — same company + same title means same
+// opening — does not hold. Omitted or empty, nothing is skipped.
+//
+// The parameter is passed in rather than read from disk here so this stays a
+// pure function of its arguments, which is what lets the tests drive it.
+//
 // Exported so external tests can call detectReposts() directly on a row list.
-export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS, minSpan = MIN_REPOST_SPAN_DAYS) {
+export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS, minSpan = MIN_REPOST_SPAN_DAYS, aggregators = null) {
   if (!Array.isArray(rows)) return [];
   const valid = rows
     .filter(r =>
@@ -280,9 +362,12 @@ export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS, minSpan = 
     byCompany.get(key).push(row);
   }
 
+  const skip = isKeyLookup(aggregators) ? aggregators : null;
+
   const clusters = [];
-  for (const [, groupRows] of byCompany) {
+  for (const [key, groupRows] of byCompany) {
     if (groupRows.length < 2) continue;
+    if (skip && skip.has(key)) continue;
     clusters.push(...detectRepostsInGroup(groupRows, windowDays, minSpan));
   }
   return clusters.sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
@@ -416,10 +501,10 @@ function buildRepostCluster(clusterRows, windowDays, minSpan = MIN_REPOST_SPAN_D
 }
 
 // --- Summary mode ---
-function printSummary(clusters) {
+function printSummary(clusters, aggregatorCount = 0) {
   console.log(`\n${'='.repeat(78)}`);
   console.log('  Repost Detector — career-ops');
-  console.log(`  window: ${windowDays} days | min span: ${minSpanDays} day(s) | clusters: ${clusters.length}`);
+  console.log(`  window: ${windowDays} days | min span: ${minSpanDays} day(s) | aggregators skipped: ${aggregatorCount} | clusters: ${clusters.length}`);
   console.log(`${'='.repeat(78)}\n`);
 
   if (clusters.length === 0) {
@@ -559,6 +644,41 @@ function runSelfTest() {
   check(genuineClusters.length === 1, 'genuine repost across two scan dates is still flagged');
   check(genuineClusters[0]?.daysSpan === 34, 'genuine repost keeps its real 34-day span');
 
+  // --- Aggregator skip (#2703): the one case title identity cannot settle,
+  // because an identical title on a multi-employer board is a different
+  // employer's job. Same fixture, flagged vs not, so the skip is the only
+  // variable. ---
+  check(
+    detectReposts(genuine, DEFAULT_WINDOW_DAYS, MIN_REPOST_SPAN_DAYS, new Set(['umbrella'])).length === 0,
+    'a company marked aggregator produces no clusters',
+  );
+  check(
+    detectReposts(genuine, DEFAULT_WINDOW_DAYS, MIN_REPOST_SPAN_DAYS, new Set(['someoneelse'])).length === 1,
+    'flagging a DIFFERENT company leaves this one detected (the skip is keyed, not global)',
+  );
+  check(
+    detectReposts(genuine, DEFAULT_WINDOW_DAYS, MIN_REPOST_SPAN_DAYS, new Set()).length === 1,
+    'an empty aggregator set changes nothing',
+  );
+  check(
+    detectReposts(genuine, DEFAULT_WINDOW_DAYS, MIN_REPOST_SPAN_DAYS, null).length === 1,
+    'a null aggregator set changes nothing (pre-#2703 behaviour)',
+  );
+  // The key space must match companyKey's, or the Set silently never matches —
+  // a skip that quietly does nothing is worse than no skip at all.
+  check(
+    detectReposts(
+      [
+        scanRow('https://jobs.example.com/acme/1', '2026-01-08', 'Data Engineer', 'Acme Inc.'),
+        scanRow('https://jobs.example.com/acme/2', '2026-02-11', 'Data Engineer', 'ACME, INC'),
+      ],
+      DEFAULT_WINDOW_DAYS,
+      MIN_REPOST_SPAN_DAYS,
+      new Set([normalizeCompanyName('Acme Inc.')]),
+    ).length === 0,
+    'the aggregator key is normalized the same way companyKey normalizes rows',
+  );
+
   // A repost re-listed with the words reordered/repunctuated is still one role.
   const reworded = [
     scanRow('https://jobs.example.com/hooli/a', '2026-01-28', 'Forward Deployed Engineer - Sweden', 'Hooli'),
@@ -592,6 +712,63 @@ function runSelfTest() {
     titleIdentityKey('Operations Manager') !== titleIdentityKey('Senior Operations Manager'),
     'titleIdentityKey keeps seniority words distinct',
   );
+  // --- loadAggregatorCompanies against REAL yaml written to disk, not a
+  // hand-built Set: the parse and the key derivation are the parts that can
+  // silently produce an empty Set, and an empty Set looks exactly like
+  // "no aggregators configured". ---
+  {
+    // One private directory rather than predictable names in the shared temp
+    // dir: `co-aggr-<pid>.yml` can be pre-created as a symlink by anyone else
+    // on the machine, and writeFileSync follows it. mkdtempSync gives a path
+    // nobody can guess ahead of time, and one rmSync cleans all of it up.
+    const fixtures = mkdtempSync(join(tmpdir(), 'co-aggr-'));
+    try {
+      const tmp = join(fixtures, 'portals.yml');
+      writeFileSync(tmp, [
+        'tracked_companies:',
+        '  - name: Plain Co',
+        '    provider: lever',
+        '  - name: Board One',
+        '    provider: lever',
+        '    aggregator: true',
+        '  - name: Board Two Inc.',
+        '    aggregator: true',
+        '  - name: Explicitly Not',
+        '    aggregator: false',
+        '  - name: Stringy',
+        '    aggregator: "true"',
+        'job_boards:',
+        '  - name: Board Under Boards',
+        '    aggregator: true',
+        '',
+      ].join('\n'), 'utf-8');
+      const keys = loadAggregatorCompanies(tmp);
+      check(keys.has(normalizeCompanyName('Board One')), 'aggregator: true is picked up');
+      check(keys.has(normalizeCompanyName('Board Two Inc.')), 'a suffixed name is normalized into the companyKey space');
+      // A multi-employer board is likelier to be configured here than under
+      // tracked_companies, and both entries portals.example.yml flags are.
+      check(keys.has(normalizeCompanyName('Board Under Boards')), 'a flagged entry under job_boards counts too');
+      check(!keys.has(normalizeCompanyName('Plain Co')), 'an entry without the flag is not an aggregator');
+      check(!keys.has(normalizeCompanyName('Explicitly Not')), 'aggregator: false is not an aggregator');
+      // YAML would give the string "true" here. Accepting it would make the
+      // flag's meaning depend on quoting; rejecting it keeps `=== true` honest.
+      check(!keys.has(normalizeCompanyName('Stringy')), 'a quoted "true" is not the boolean true');
+      check(keys.size === 3, 'exactly the three flagged entries are returned');
+
+      check(loadAggregatorCompanies(join(fixtures, 'does-not-exist.yml')).size === 0, 'a missing portals.yml yields no aggregators, no crash');
+
+      const bad = join(fixtures, 'malformed.yml');
+      writeFileSync(bad, 'tracked_companies: [unclosed\n', 'utf-8');
+      check(loadAggregatorCompanies(bad).size === 0, 'a malformed portals.yml yields no aggregators, no crash');
+
+      const unflagged = join(fixtures, 'unflagged.yml');
+      writeFileSync(unflagged, 'job_boards:\n  - name: Somewhere\n', 'utf-8');
+      check(loadAggregatorCompanies(unflagged).size === 0, 'a config whose entries carry no flag yields no aggregators');
+    } finally {
+      rmSync(fixtures, { recursive: true, force: true });
+    }
+  }
+
   check(titleIdentityKey('—') === '—', 'a title that folds to nothing falls back to its raw text rather than an empty key');
   check(
     titleIdentityKey('シニアエンジニア') !== titleIdentityKey('データアナリスト'),
@@ -617,23 +794,33 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // Inside the main-module guard, not at import time: company-history.mjs
   // imports detectReposts/parseScanHistory from here, so a top-level check
   // would judge the IMPORTER's argv.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: without it, `--window --summary` reads --summary as the
+  // window value; flagValue() has no adjacency check, parseInt('--summary')
+  // is NaN, and windowDays silently falls back to DEFAULT_WINDOW_DAYS at exit
+  // 0 instead of reporting the malformed flag (#3087). Nothing more specific
+  // to say than the shared message.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   if (selfTestMode) {
     runSelfTest();
   }
 
   const rows = loadScanHistory();
-  const clusters = detectReposts(rows, windowDays, minSpanDays);
+  const aggregators = loadAggregatorCompanies();
+  const clusters = detectReposts(rows, windowDays, minSpanDays, aggregators);
 
   if (summaryMode) {
-    printSummary(clusters);
+    printSummary(clusters, aggregators.size);
   } else {
     console.log(JSON.stringify({
       metadata: {
         windowDays,
         minSpanDays,
         totalRows: rows.length,
+        // Reported so a reader can tell "no aggregators configured" from
+        // "aggregators configured and skipped" — otherwise a mis-keyed flag
+        // that silently matches nothing looks identical to a working one.
+        aggregatorCompanies: aggregators.size,
         clusters: clusters.length,
       },
       clusters,

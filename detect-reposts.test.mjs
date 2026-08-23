@@ -1240,13 +1240,22 @@ const badWindowOut = execFileSync('node', [scriptPath, '--window', 'abc'], {
 const badWindowJson = JSON.parse(badWindowOut);
 eq('--window abc falls back to 90', badWindowJson.metadata.windowDays, 90);
 
-// Test --window with no value (falls back to default)
-const noWindowOut = execFileSync('node', [scriptPath, '--window'], {
-  encoding: 'utf-8', timeout: 10000,
-  cwd: dirname(scriptPath),
-});
-const noWindowJson = JSON.parse(noWindowOut);
-eq('--window without value falls back to 90', noWindowJson.metadata.windowDays, 90);
+// Test --window with no value: a usage error, not a silent fallback (#3087).
+// This used to fall back to the 90-day default silently at exit 0 — the same
+// shape as `--window abc` above, except there `abc` is a value the caller
+// actually typed (just an invalid one), while a bare trailing `--window` has
+// no value at all. requireOperand distinguishes the two: a missing operand is
+// now a validateFlags usage error, before the script ever computes a window.
+try {
+  execFileSync('node', [scriptPath, '--window'], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  ok('--window without value exits non-zero', false);
+} catch (e) {
+  ok('--window without value exits non-zero', e.status === 1);
+  ok('--window without value reports the missing operand', /--window requires a value/.test(e.stderr || ''));
+}
 
 // Test --help flag
 const helpOut = execFileSync('node', [scriptPath, '--help'], {
