@@ -107,12 +107,25 @@ export function cell(v) {
  * @returns {string} Absolute canonical tracker path.
  */
 export function resolveTrackerPath(rootDir) {
-  const raw = process.env.CAREER_OPS_TRACKER
+  return canonicalizeTrackerPath(rawTrackerPath(rootDir));
+}
+
+/**
+ * The tracker path before canonicalization: the lexical location, with no
+ * symlink along the path resolved. resolveTrackerPath() realpaths this for the
+ * lock key; workspace derivation uses the raw form instead (see
+ * resolveWorkspaceRootFor) so a symlinked `data/` does not realpath the
+ * workspace out of the repo (#3169).
+ *
+ * @param {string} rootDir - The career-ops repository root.
+ * @returns {string} Uncanonicalized tracker path.
+ */
+function rawTrackerPath(rootDir) {
+  return process.env.CAREER_OPS_TRACKER
     ? process.env.CAREER_OPS_TRACKER
     : existsSync(join(rootDir, 'data/applications.md'))
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');
-  return canonicalizeTrackerPath(raw);
 }
 
 /**
@@ -133,6 +146,40 @@ export function resolveTrackerPath(rootDir) {
 export function resolveWorkspaceRoot(trackerPath) {
   const trackerDir = dirname(trackerPath);
   return basename(trackerDir) === 'data' ? dirname(trackerDir) : trackerDir;
+}
+
+/**
+ * Workspace root for a script started from `rootDir`, derived from the
+ * *uncanonicalized* tracker path. Unlike
+ * `resolveWorkspaceRoot(resolveTrackerPath(rootDir))`, this does not realpath the
+ * tracker first, so a workspace that only symlinks its `data/` directory (the
+ * natural workaround for #524) still resolves to the repo rather than the
+ * symlink's target (#3169). Pointing `CAREER_OPS_TRACKER` at a genuinely external
+ * workspace keeps moving the whole set together (#2471), since the raw path is
+ * then the external tracker itself.
+ *
+ * Use this for a workspace's own files — cv.md, config/, output — that live
+ * beside the tracker in the repo. For `data/` siblings that must follow the
+ * symlink (e.g. pdf-index.tsv), keep using resolveWorkspaceRoot() on the
+ * canonical tracker path.
+ *
+ * @param {string} rootDir - The career-ops repository root.
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRootFor(rootDir) {
+  const lexicalRoot = resolveWorkspaceRoot(resolve(rawTrackerPath(rootDir)));
+  // Canonicalize the derived ROOT (not the tracker) so it agrees with the
+  // realpathed cwd and paths the containment checks compare against. Otherwise a
+  // symlinked ANCESTOR (e.g. /tmp -> /private/tmp) leaves this root lexical while
+  // those paths are canonical: isWorkspaceOutputPath()'s lexical stage would then
+  // refuse the write, and workspaceRelativeManifestPath() would blank the entry.
+  // Realpathing the root does not re-follow data/ (a child of the root), so the
+  // symlinked-data fix stands.
+  try {
+    return realpathSync(lexicalRoot);
+  } catch {
+    return lexicalRoot;
+  }
 }
 
 /**
