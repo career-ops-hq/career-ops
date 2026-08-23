@@ -129,7 +129,7 @@ CV, PDF and reuse decision stay together.
   --version N      tailored-CV version (default: 1)
   --root DIR       output root (default: output)
   --init           create the directories as well as printing the paths
-  --help           show this message`;
+  --help, -h       show this message`;
 
 async function main() {
   validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
