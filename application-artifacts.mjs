@@ -106,6 +106,11 @@ export function writeReuseDecision(paths, {
 // option (#2774), so the built-in help flag looked like a typo. Handled via
 // lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
 // flags before --help so `--help --bogus` still errors.
+//
+// requireOperand is opted in because this script has no value validation of
+// its own to say anything better: without it `--report --help` consumed the
+// next token, printed usage and exited 0 (the #2961 class), so a malformed
+// flag went unreported.
 const KNOWN_FLAGS = ['--report', '--company', '--role', '--version', '--root', '--init', '--help', '-h'];
 
 // Every flag except --init takes its value as the next argv token.
@@ -127,7 +132,7 @@ CV, PDF and reuse decision stay together.
   --help           show this message`;
 
 async function main() {
-  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   const { values } = parseArgs({
     options: {
       report: { type: 'string' },

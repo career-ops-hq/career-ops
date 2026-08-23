@@ -93,6 +93,25 @@ test('application-artifacts.mjs --help wins over the missing-required-args error
   assert.doesNotMatch(r.all, /Unknown option/i, '--help was still treated as an unrecognized option');
 });
 
+// requireOperand (#2961 class): a value flag with no operand must be reported
+// BEFORE --help, or `--report --help` prints usage at exit 0 and the malformed
+// flag is never named.
+test('application-artifacts.mjs rejects a value flag with no operand', () => {
+  for (const flag of ['--report', '--company', '--role', '--version', '--root']) {
+    const r = runScript('application-artifacts.mjs', flag);
+    assert.equal(r.status, 1, `bare ${flag} exited ${r.status}, want 1`);
+    assert.match(r.all, new RegExp(`\\${flag} requires a value`), `bare ${flag} was not reported`);
+  }
+
+  const rHelp = runScript('application-artifacts.mjs', '--report', '--help');
+  assert.equal(rHelp.status, 1, '--report --help must exit 1, not print usage at 0');
+  assert.match(rHelp.all, /--report requires a value/);
+
+  const rNext = runScript('application-artifacts.mjs', '--report', '--company', 'Acme');
+  assert.equal(rNext.status, 1, '--report --company must not treat --company as the value');
+  assert.match(rNext.all, /--report requires a value/);
+});
+
 
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
