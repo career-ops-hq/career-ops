@@ -1,0 +1,69 @@
+name: i18n drift check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'modes/**'
+      - 'i18n-drift.mjs'
+
+# Cancel stale runs on force-push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Translation drift report
+    runs-on: ubuntu-latest
+    # This job is informational only — it never blocks a merge.
+    # Once the baseline is clean and all language maintainers have been
+    # notified, promote to `fail` by setting --threshold 1.0.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '18'
+
+      # No npm install needed — i18n-drift.mjs uses only Node built-ins.
+
+      - name: Run i18n drift check (warn only)
+        id: drift
+        run: |
+          # Run the full scan and capture output; never fail CI.
+          node i18n-drift.mjs --summary > drift-summary.txt 2>&1 || true
+          cat drift-summary.txt
+
+      - name: Post drift summary as step summary
+        if: always()
+        run: |
+          echo "## i18n drift report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Structural coverage of translated modes vs their canonical sources." >> $GITHUB_STEP_SUMMARY
+          echo "100 % means every heading in the English/canonical file has a" >> $GITHUB_STEP_SUMMARY
+          echo "counterpart in the translation; lower % = drift." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat drift-summary.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_See [i18n-drift.mjs](../blob/${{ github.sha }}/i18n-drift.mjs)" \
+            "and issue [#3168](https://github.com/santifer/career-ops/issues/3168) for details._" \
+            >> $GITHUB_STEP_SUMMARY
+
+      - name: Full drift report (artifact)
+        if: always()
+        run: node i18n-drift.mjs > drift-full.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: i18n-drift-report
+          path: |
+            drift-summary.txt
+            drift-full.txt
+          if-no-files-found: ignore

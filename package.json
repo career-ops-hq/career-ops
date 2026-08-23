@@ -65,7 +65,9 @@
     "build:dashboard": "node build-dashboard.mjs",
     "serve:dashboard": "cd dashboard && go run . --path ..",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
-    "manifesto": "node manifesto.mjs"
+    "manifesto": "node manifesto.mjs",
+    "i18n:drift": "node i18n-drift.mjs",
+    "i18n:drift:summary": "node i18n-drift.mjs --summary"
   },
   "keywords": [
     "ai",
