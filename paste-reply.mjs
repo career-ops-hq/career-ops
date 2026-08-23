@@ -46,6 +46,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
@@ -131,7 +132,7 @@ export function appendCandidate(candidate, candidatesPath = CANDIDATES_PATH) {
   // can never leave the real candidates file truncated/corrupted.
   const tmpPath = `${candidatesPath}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(candidates, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, candidatesPath);
+  renameSyncWithRetry(tmpPath, candidatesPath);
   return candidates.length;
 }
 
