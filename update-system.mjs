@@ -40,15 +40,15 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 
-function createReexecMarker() {
-  const directory = mkdtempSync(join(tmpdir(), 'career-ops-reexec-'));
+export function createReexecMarker() {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-reexec-')));
   const path = join(directory, 'marker');
   const token = randomBytes(32).toString('hex');
   writeFileSync(path, token, { encoding: 'utf8', mode: 0o600 });
   return { path, token };
 }
 
-function consumeReexecMarker() {
+export function consumeReexecMarker() {
   const suppliedPath = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
   const token = process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
   if (!suppliedPath || !token) {

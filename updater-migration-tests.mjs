@@ -7,8 +7,10 @@
  * newly introduced system paths without touching user data.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
 import { spawnSync } from 'child_process';
+import { dirname } from 'path';
+import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -121,6 +123,27 @@ if (forgedLegacyReexec.status !== 0 &&
   pass('legacy reexec without an existing backup branch cannot authorize initial apply');
 } else {
   fail('legacy reexec without an existing backup branch can authorize initial apply');
+}
+
+const marker = createReexecMarker();
+const previousMarkerPath = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+const previousMarkerToken = process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
+try {
+  process.env.CAREER_OPS_UPDATE_REEXEC_MARKER = marker.path;
+  process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN = marker.token;
+  const firstConsume = consumeReexecMarker();
+  const secondConsume = consumeReexecMarker();
+  if (firstConsume && !secondConsume && !existsSync(marker.path)) {
+    pass('created reexec marker authorizes exactly once');
+  } else {
+    fail('created reexec marker does not authorize exactly once');
+  }
+} finally {
+  if (previousMarkerPath === undefined) delete process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+  else process.env.CAREER_OPS_UPDATE_REEXEC_MARKER = previousMarkerPath;
+  if (previousMarkerToken === undefined) delete process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
+  else process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN = previousMarkerToken;
+  rmSync(dirname(marker.path), { recursive: true, force: true });
 }
 
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
