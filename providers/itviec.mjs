@@ -63,8 +63,9 @@ const COMPANY_LINK_RE = /href=["'](?:https?:\/\/itviec\.com)?\/companies\/[^"']+
 /** Location: the div with a title attribute right after the map-pin icon. */
 const LOCATION_RE = /#map-pin"?><\/use><\/svg>\s*<div[^>]*title=["']([^"']*)["']/i;
 
-/** Relative publication label, e.g. "Posted\n1 day ago". */
-const POSTED_LABEL_RE = /(?:Posted|Đăng)\s*:?\s*(?:<\/\w+>\s*)?([^.<]{0,40}?ago|today|hôm nay)/i;
+/** Relative publication label: English "Posted … ago" or Vietnamese "Đăng … trước". */
+const POSTED_LABEL_RE =
+  /(?:Posted|Đăng)\s*:?\s*(?:<\/\w+>\s*)?([^.<]{0,40}?(?:ago|trước)|today|hôm nay)/i;
 
 /** @param {any} ctx @param {number} ms */
 function sleep(ctx, ms) {
@@ -122,7 +123,10 @@ const CITY_SLUGS = /** @type {const} */ ({
 export function cityPath(location) {
   const key = String(location ?? '').trim().toLowerCase();
   if (!key) return null;
-  if (CITY_SLUGS[key]) return CITY_SLUGS[key];
+  // Own-property check: a user string like "constructor" or "toString" must
+  // resolve to null, not to an inherited Object.prototype member whose source
+  // text would then be interpolated into the request URL.
+  if (Object.hasOwn(CITY_SLUGS, key)) return CITY_SLUGS[key];
   for (const [candidate, slug] of Object.entries(CITY_SLUGS)) {
     if (key.includes(candidate)) return slug;
   }
@@ -242,7 +246,10 @@ export function parseListingPage(html) {
  * @param {string} url
  */
 export function assertParsedSomething(html, url) {
-  if (!/href=["'](?:https?:\/\/itviec\.com)?\/it-jobs\/[a-z0-9-]+-\d{4}/i.test(String(html ?? ''))) return;
+  // The numeric suffix check is deliberately loose (\d+, not \d{4}): this is a
+  // heuristic that answers "is this still a listing page", so it must err
+  // toward throwing rather than toward silence.
+  if (!/href=["'](?:https?:\/\/itviec\.com)?\/it-jobs\/[a-z0-9-]+-\d+/i.test(String(html ?? ''))) return;
   throw new Error(
     `itviec: ${url} still contains job cards but none could be parsed — the listing markup changed`,
   );

@@ -129,6 +129,15 @@ try {
   } else {
     fail(`unknown-city drift: ${buildListUrl({ searchLocation: 'Berlin' }, 1)}`);
   }
+  // Prototype-member names must resolve to null, not to an inherited
+  // Object.prototype member interpolated into the URL (CodeRabbit, #3229).
+  if (buildListUrl({ searchLocation: 'constructor' }, 1) === 'https://itviec.com/it-jobs'
+      && buildListUrl({ searchLocation: 'toString' }, 1) === 'https://itviec.com/it-jobs'
+      && buildListUrl({ searchLocation: 'valueOf' }, 1) === 'https://itviec.com/it-jobs') {
+    pass('buildListUrl(): Object.prototype member names are treated as unknown locations');
+  } else {
+    fail(`prototype drift: ${JSON.stringify(['constructor', 'toString', 'valueOf'].map((k) => buildListUrl({ searchLocation: k }, 1)))}`);
+  }
   // A slash inside the keyword must never create a second path segment — the
   // provider strips it, so "node/js" stays one segment.
   if (buildListUrl({ searchKeywords: 'node/js' }, 1) === 'https://itviec.com/it-jobs/nodejs') {
@@ -203,6 +212,27 @@ try {
     fail('unparseable label must omit postedAt, not fabricate one');
   }
 
+  // The Vietnamese-locale variant: "Đăng … trước" instead of "Posted … ago"
+  // (Copilot review, #3229). parsePostedAt already knows the units; the label
+  // regex must surface them.
+  const vi = parsePostedAt('Đăng 3 ngày trước', now);
+  if (typeof vi === 'number' && Math.abs(vi - (now - 3 * 86_400_000)) < 1000) {
+    pass('parsePostedAt() reads Vietnamese relative labels (ngày/tuần/tháng/giờ … trước)');
+  } else {
+    fail(`Vietnamese label drift: ${String(vi)}`);
+  }
+  {
+    const VI_CARD = CARD_MINIMAL
+      .replace(/Posted\s*3 weeks ago/, 'Đăng 2 tuần trước')
+      .replace(/mb-bank-0508/g, 'vi-card-0001');
+    const [viJob] = parseListingPage(VI_CARD);
+    if (viJob && typeof viJob.postedAt === 'number' && Math.abs(viJob.postedAt - (now - 14 * 86_400_000)) < 5000) {
+      pass('a Vietnamese-locale card yields postedAt too');
+    } else {
+      fail(`Vietnamese card drift: ${JSON.stringify(viJob && viJob.postedAt)}`);
+    }
+  }
+
   // The full card carries a real epoch ms from its "1 day ago" label.
   if (senior && typeof senior.postedAt === 'number' && Math.abs(senior.postedAt - (now - 86_400_000)) < 5000) {
     pass('postedAt is derived from the card\u2019s own relative label');
@@ -239,6 +269,34 @@ try {
     pass('a genuinely empty page does not throw — only an unparsed one does');
   } else {
     fail('an empty listing page must be allowed, or a quiet board reads as broken');
+  }
+
+  // The guard's posting-link shape must not depend on an exact digit count in
+  // the slug suffix (Copilot review, #3229): a page whose slugs end in a
+  // different-width code is still a listing page.
+  let threwOtherWidth = false;
+  try {
+    assertParsedSomething('<a href="/it-jobs/junior-dev-123456">Junior Dev</a>', 'https://itviec.com/it-jobs');
+  } catch {
+    threwOtherWidth = true;
+  }
+  if (threwOtherWidth) {
+    pass('assertParsedSomething() throws for posting slugs with non-4-digit suffixes too');
+  } else {
+    fail('the guard must not hinge on the suffix being exactly four digits');
+  }
+  // Category links carry no numeric suffix and are not evidence of postings —
+  // a search page full of them is genuinely empty.
+  let categoryOnly = false;
+  try {
+    assertParsedSomething('<a href="/it-jobs/java">Java</a> <a href="/it-jobs/php">PHP</a>', 'https://itviec.com/it-jobs');
+  } catch {
+    categoryOnly = true;
+  }
+  if (!categoryOnly) {
+    pass('category links without a numeric suffix do not read as postings');
+  } else {
+    fail('skill-tag/category links were mistaken for job cards');
   }
 
   // ── fetch(): pagination, dedup, and the stop condition ──
