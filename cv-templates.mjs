@@ -144,15 +144,21 @@ function discover(kind, { dir, format }) {
     found.set(parsed.name, entryFor(parsed, path, pack));
   };
 
+  // One listing serves both passes. Reading twice would let the flat pass and
+  // the pack pass see different directory states, and the collision check spans
+  // them: a file present for one read and gone for the other decides whether a
+  // name is ambiguous. A single snapshot makes that verdict reproducible.
+  const top = readdirSync(dir, { withFileTypes: true });
+
   // Flat templates. Unchanged from before packs existed, including the fact
   // that a symlinked file is read through like any other.
-  for (const file of readdirSync(dir)) {
-    const parsed = parseFilename(cfg.prefix, file);
-    if (parsed) claim(parsed, resolve(dir, file), null);
+  for (const d of top) {
+    const parsed = parseFilename(cfg.prefix, d.name);
+    if (parsed) claim(parsed, resolve(dir, d.name), null);
   }
 
   // Packs, one level down.
-  for (const d of readdirSync(dir, { withFileTypes: true })) {
+  for (const d of top) {
     const packDir = resolve(dir, d.name);
     if (!d.isDirectory()) {
       // statSync follows the link; it throws on a broken one, which is not a pack.
