@@ -212,6 +212,10 @@ export default {
       url: j.jobUrl || '',
       company: entry.name,
       location: formatLocation(j),
+      // Ashby's posting-api list ships `descriptionPlain` for free (same
+      // payload, no per-job request) — mirrors lever. Enables scan.mjs's
+      // content_filter / visa_filter.
+      description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
       salary: parseCompensation(j),
       postedAt: toEpochMs(j.publishedAt),
     }));

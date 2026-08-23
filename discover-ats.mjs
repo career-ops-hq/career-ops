@@ -31,10 +31,11 @@
  * Issue #1864 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync, writeFileSync, renameSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -1024,7 +1025,7 @@ async function main() {
     // mid-write can't leave the user's portals.yml truncated.
     const tmpPath = `${PORTALS_PATH}.tmp-${process.pid}`;
     writeFileSync(tmpPath, insertIntoTrackedCompanies(current, snippets), 'utf-8');
-    renameSync(tmpPath, PORTALS_PATH);
+    renameSyncWithRetry(tmpPath, PORTALS_PATH);
     written = true;
   } else if (opts.write && fresh.length && !existsSync(PORTALS_PATH)) {
     warnings.push(`--write given but portals.yml not found at ${PORTALS_PATH} — printing entries instead`);

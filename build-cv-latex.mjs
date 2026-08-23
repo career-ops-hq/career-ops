@@ -45,8 +45,12 @@ function buildProjects(entries) {
   for (const e of entries) {
     if (!e) continue;
     const context = e.context ? ` \\emph{$|$ ${escapeLatex(e.context)}}` : '';
+    const url = sanitizeUrl(e.url);
+    const nameFormatted = url
+      ? `\\href{${escapeLatex(url, 'url')}}{\\textbf{${escapeLatex(e.name)}}}`
+      : `\\textbf{${escapeLatex(e.name)}}`;
     const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
-    blocks.push(`    \\resumeProjectHeading\n      {\\textbf{${escapeLatex(e.name)}}${context}}{${escapeLatex(e.dates)}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
+    blocks.push(`    \\resumeProjectHeading\n      {${nameFormatted}${context}}{${escapeLatex(e.dates || '')}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
   }
   return blocks.join('\n\n');
 }

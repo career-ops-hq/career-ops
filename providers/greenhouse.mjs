@@ -8,7 +8,7 @@
 // country_eligibility filter and visa_filter all read that field, and without
 // it every Greenhouse board passed those filters blind.
 
-import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText } from './_html-to-text.mjs';
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -125,24 +125,16 @@ export function buildOfficeMap(json) {
 // DOUBLE-encoded HTML: the JSON string carries entity-escaped markup
 // (`&lt;p&gt;`), so the first decode pass reveals the real tags, and
 // text-level entities (`&amp;`, `&#39;`) only become decodable once those
-// tags are gone. Plain text is what the description-consuming filters match
-// against — substring matching over raw HTML misses keywords split by a tag
-// and pads matches into attribute soup.
-//
-// The result is capped like alibaba's full-text JDs to keep scan payloads
-// sane: a 10 KB/posting body is normal for Greenhouse, not an outlier.
-
-const DESCRIPTION_CAP = 4000;
+// tags are gone. That pipeline (and its rationale) now lives in
+// _html-to-text.mjs, shared with the providers added in #3175's phase 2;
+// this wrapper keeps greenhouse's tested export name.
 
 /**
  * Entity-decoded markup → stripped plain text. Exported for tests.
  * @param {unknown} content
  */
 export function contentToText(content) {
-  if (typeof content !== 'string' || !content) return '';
-  const html = decodeEntities(content);
-  const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  return decodeEntities(noMedia.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+  return htmlToText(content);
 }
 
 /** @type {Provider} */

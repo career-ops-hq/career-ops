@@ -677,7 +677,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // interview-prep/sessions instead of the directory that was asked for —
   // the same silent discard #2402 already fixed here for the `--from=` form
   // (#2919). Inside the main-module guard so importers are unaffected.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: --from/--to already reject a swallowed flag indirectly
+  // (isValidDateStr fails on e.g. "--dir" below), but --dir has no validation
+  // at all — `--dir --from 2020-01-01` would silently scan a directory
+  // literally named "--from" at exit 0 (#3087). Opting in here closes that
+  // gap; it only changes the --from/--to message in the same edge case, from
+  // "Invalid --from/--to date" to "requires a value" — still a clear, non-zero
+  // exit either way.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   if (args.includes('--self-test')) {
     await runSelfTest();

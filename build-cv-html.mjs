@@ -384,6 +384,11 @@ function buildProjects(entries, partial) {
       const badge = e.badge
         ? `<span class="project-badge">${escapeHtml(e.badge)}</span>`
         : '';
+      const nameText = escapeHtml(e.name || '');
+      const url = sanitizeUrl(e.url);
+      const nameHtml = url
+        ? `<a href="${url}">${nameText}</a>`
+        : nameText;
       // Prefer a single description; fall back to joining bullets into one line so
       // a bullets-shaped payload still renders inside the .project-desc block.
       const descText = e.description
@@ -395,7 +400,7 @@ function buildProjects(entries, partial) {
         ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
         : '';
       return `<div class="project">
-    <div class="project-title">${escapeHtml(e.name)}${badge}</div>${desc}${tech}
+    <div class="project-title">${nameHtml}${badge}</div>${desc}${tech}
   </div>`;
     }).join('\n  ');
   }
@@ -409,8 +414,13 @@ function buildProjects(entries, partial) {
       ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
       ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
     ]);
+    const nameText = escapeHtml(e.name || '');
+    const url = sanitizeUrl(e.url);
+    const nameHtml = url
+      ? `<a href="${url}">${nameText}</a>`
+      : nameText;
     return fillEntry(entryTemplate, blocks, {
-      NAME:  escapeHtml(e.name || ''),
+      NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
       TECH:  escapeHtml(e.tech || ''),
