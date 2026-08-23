@@ -45,6 +45,10 @@ try {
   else fail('malformed dead-board rows were not ignored on reload');
   if (shouldSkipDeadBoard(reloaded, 'lever', board, now + 29 * 86_400_000) && !shouldSkipDeadBoard(reloaded, 'lever', board, now + 30 * 86_400_000)) pass('retired boards re-probe at the 30-day boundary');
   else fail('retired board re-probe window has the wrong boundary');
+  const failedProbeAt = now + 30 * 86_400_000;
+  recordBoardResult(reloaded, 'lever', board, 429, failedProbeAt);
+  if (reloaded.get(`lever\t${board}`)?.lastChecked === failedProbeAt && shouldSkipDeadBoard(reloaded, 'lever', board, failedProbeAt + 1)) pass('a failed retired-board probe refreshes its re-probe timestamp');
+  else fail('a failed retired-board probe did not refresh its re-probe timestamp');
   const partial = new Map();
   recordBoardResult(partial, 'lever', board, 404, now);
   recordBoardResult(partial, 'lever', board, 500, now);

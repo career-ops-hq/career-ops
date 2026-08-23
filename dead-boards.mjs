@@ -2,7 +2,7 @@
 // Only a real HTTP 404 may advance a miss counter. Throttles, transport
 // failures and DNS errors mean "unknown", never "dead".
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export const DEAD_BOARD_HEADER = 'ats\tboard\tmisses\tlast_checked';
@@ -41,7 +41,11 @@ export function recordBoardResult(rows, ats, board, status, now = Date.now()) {
   }
   const previous = rows.get(rowKey);
   if (status !== 404) {
-    if (!previous || previous.misses < DEAD_BOARD_MISSES) rows.delete(rowKey);
+    if (!previous || previous.misses < DEAD_BOARD_MISSES) {
+      rows.delete(rowKey);
+    } else {
+      rows.set(rowKey, { ...previous, lastChecked: now });
+    }
     return;
   }
   const misses = Math.min(DEAD_BOARD_MISSES, (previous?.misses || 0) + 1);
@@ -53,5 +57,7 @@ export function saveDeadBoards(file, rows) {
   const body = [...rows.values()]
     .sort((a, b) => a.ats.localeCompare(b.ats) || a.board.localeCompare(b.board))
     .map((row) => `${row.ats}\t${row.board}\t${row.misses}\t${new Date(row.lastChecked).toISOString()}`);
-  writeFileSync(file, `${DEAD_BOARD_HEADER}\n${body.length ? `${body.join('\n')}\n` : ''}`, 'utf8');
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${DEAD_BOARD_HEADER}\n${body.length ? `${body.join('\n')}\n` : ''}`, 'utf8');
+  renameSync(tmp, file);
 }
