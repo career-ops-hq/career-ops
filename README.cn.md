@@ -93,7 +93,7 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 | **平台扫描器** | 预配置 45+ 家公司（Anthropic、OpenAI、ElevenLabs、Retool、n8n...），支持跨 Ashby、Greenhouse、Lever、Wellfound 的自定义查询 |
 | **批量处理** | 使用 `claude -p` worker 并行评估 |
 | **Dashboard TUI** | 在终端 UI 中浏览、筛选和排序你的求职管道 |
-| **人类在环** | AI 负责评估和建议，你负责决定和行动。系统绝不会自动提交申请，最终决定始终在你手上 |
+| **人类在环** | AI 负责评估和建议，你负责决定和行动。系统绝不会提交申请，最终决定始终在你手上 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **管道完整性** | 自动合并、去重、状态标准化和健康检查 |
 
 ## 快速开始
