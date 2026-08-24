@@ -12,8 +12,15 @@ export const DESCRIPTION_CAP = 4000;
 
 // A tag ends at an unquoted `>`. Attribute values may contain angle brackets,
 // so the common `<[^>]+>` shortcut can stop midway through a tag and expose
-// the remaining attributes as description text.
-const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+// the remaining attributes as description text. Requiring content between the
+// brackets preserves a literal `<>`, as the old matcher did.
+const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')+>/g;
+const HTML_MEDIA_RE = /<(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
+
+/** @param {string} content */
+function stripMarkup(content) {
+  return content.replace(HTML_MEDIA_RE, ' ').replace(HTML_TAG_RE, ' ');
+}
 
 /**
  * Entity-decoded markup → stripped plain text.
@@ -32,7 +39,10 @@ const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
  */
 export function htmlToText(content) {
   if (typeof content !== 'string' || !content) return '';
-  const html = decodeEntities(content);
-  const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  return decodeEntities(noMedia.replace(HTML_TAG_RE, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+  // Strip literal markup before decoding: quote entities inside a quoted
+  // attribute are data, and decoding them first would turn them into false
+  // delimiters. The second strip handles entity-escaped tags revealed by the
+  // first decode; the final decode retains the existing double-decode behavior.
+  const decoded = decodeEntities(stripMarkup(content));
+  return decodeEntities(stripMarkup(decoded)).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
 }
