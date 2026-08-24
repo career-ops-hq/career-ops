@@ -1779,58 +1779,6 @@ async function apply() {
       console.error(`Stale system-file prune step failed: ${err.message}`);
     }
 
-    // tests/ and test-fixtures/ are both auto-discovered and EXECUTED
-    // (tests/**/*.test.mjs run directly; test-fixtures/upgrade/<state>/ dirs are
-    // enumerated by seed-fixture.mjs's listStates() and exercised by its
-    // --self-test, which fails if a stale state lacks expected.json/required
-    // files). Stale files left behind by upstream renames would run twice,
-    // crash the suite, or make the self-test iterate a state that no longer
-    // ships upstream. `git checkout` never deletes upstream-removed files (see
-    // the limitation note in rollback below) — prune tracked extras against
-    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked local
-    // experiments in these dirs are never touched.
-    for (const prunePrefix of ['tests/', 'test-fixtures/']) {
-      try {
-        let remoteFiles = new Set();
-        try {
-          remoteFiles = new Set(
-            git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', prunePrefix)
-              .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
-          );
-        } catch {
-          // The dir may not exist in older targets (ls-tree throws) — nothing
-          // to prune. This is the only expected-and-silent failure here.
-        }
-        // An empty set means FETCH_HEAD has no such dir at all (older target, or
-        // ls-tree quietly returning nothing) — pruning against it would delete
-        // every local file under the prefix. Only prune when the remote actually
-        // ships the directory.
-        if (remoteFiles.size > 0) {
-          const localFiles = git('ls-files', '--', prunePrefix).split('\n').filter(Boolean);
-          for (const f of localFiles) {
-            if (!remoteFiles.has(f.replace(/\\/g, '/'))) {
-              // Per-file isolation: one failed unlink (locked file, permissions)
-              // must not abort pruning the rest.
-              try {
-                unlinkSync(join(ROOT, f));
-                // Raw path only: `updated` entries are reused as git pathspecs by
-                // revertPaths() and the scoped commit below. Pushed only after a
-                // successful unlink so failed deletions never enter `updated`.
-                updated.push(f);
-                console.log(`Pruned stale file: ${f}`);
-              } catch (err) {
-                console.error(`Failed to prune stale file ${f}: ${err.message}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // Unexpected failure (e.g. ls-files threw) — surface it instead of
-        // silently skipping the prune step.
-        console.error(`Stale-file prune step failed for ${prunePrefix}: ${err.message}`);
-      }
-    }
-
     // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
     // above; this one cannot be, because it is the one system file users also
     // write to. A raw checkout would delete their rules silently — the same
