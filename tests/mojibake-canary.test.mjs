@@ -50,22 +50,44 @@ function allowedContinuationRange(leadByte) {
   return null;
 }
 
-// Scans a string for one adjacent (lead, continuation) pair that forms
-// a legal UTF-8 byte relationship when reinterpreted as raw bytes.
-// Returns the offending pair and its index, or null.
+// How many continuation bytes a given lead byte requires -- checking
+// only the first continuation byte is not enough for 3- and 4-byte
+// sequences: two unrelated legitimate characters can coincidentally
+// satisfy just the first check (e.g. "é" (0xE9, a 3-byte lead) followed
+// by an em dash (0x97, a valid first continuation byte) in ordinary
+// text like "Café—menu" -- there is no real third byte, so this was
+// never a genuine encoded sequence).
+function continuationByteCount(leadByte) {
+  if (leadByte >= 0xc2 && leadByte <= 0xdf) return 1;
+  if (leadByte >= 0xe0 && leadByte <= 0xef) return 2;
+  if (leadByte >= 0xf0 && leadByte <= 0xf4) return 3;
+  return 0;
+}
+
+// Scans for a lead byte followed by its FULL required run of valid
+// continuation bytes (not just the first). Only the first continuation
+// byte is range-restricted per lead (see allowedContinuationRange);
+// the rest just need the generic 0x80-0xBF continuation range. Returns
+// the matched span and index, or null.
 function findMojibakePair(text) {
   const chars = [...text];
-  for (let i = 0; i < chars.length - 1; i++) {
+  for (let i = 0; i < chars.length; i++) {
     const leadCp = chars[i].codePointAt(0);
-    const contCp = chars[i + 1].codePointAt(0);
     if (leadCp < 0xc2 || leadCp > 0xf4) continue;
     const leadByte = CODEPOINT_TO_BYTE.get(leadCp);
-    const contByte = CODEPOINT_TO_BYTE.get(contCp);
-    if (leadByte === undefined || contByte === undefined) continue;
-    const range = allowedContinuationRange(leadByte);
-    if (range && contByte >= range[0] && contByte <= range[1]) {
-      return { pair: chars[i] + chars[i + 1], index: i };
+    if (leadByte === undefined) continue;
+    const needed = continuationByteCount(leadByte);
+    if (needed === 0 || i + needed >= chars.length) continue;
+    const firstRange = allowedContinuationRange(leadByte);
+    let ok = true;
+    for (let j = 1; j <= needed; j++) {
+      const cp = chars[i + j].codePointAt(0);
+      const byte = CODEPOINT_TO_BYTE.get(cp);
+      if (byte === undefined) { ok = false; break; }
+      const range = j === 1 ? firstRange : [0x80, 0xbf];
+      if (byte < range[0] || byte > range[1]) { ok = false; break; }
     }
+    if (ok) return { pair: chars.slice(i, i + 1 + needed).join(''), index: i };
   }
   return null;
 }
@@ -101,6 +123,16 @@ containsMojibake(japaneseMojibakeLine)
   ? pass('containsMojibake correctly flags double-encoded Japanese mojibake')
   : fail('containsMojibake failed to flag double-encoded Japanese mojibake');
 
+const smartQuoteMojibakeLine = 'it\u00e2\u20ac\u2122s'; // â€™s — the real right-single-quote mojibake
+containsMojibake(smartQuoteMojibakeLine)
+  ? pass('containsMojibake correctly flags smart-quote mojibake (â€™s)')
+  : fail('containsMojibake failed to flag smart-quote mojibake (â€™s)');
+
+const ligatureMojibakeLine = '\u00ef\u00ac\u0081x'; // ï¬ plus invisible U+0081 control character + x
+containsMojibake(ligatureMojibakeLine)
+  ? pass('containsMojibake correctly flags ligature mojibake (ï¬)')
+  : fail('containsMojibake failed to flag ligature mojibake (ï¬)');
+
 // Should NOT flag legitimate Unicode
 const legitimateUnicode = [
   'café',           // French with accent
@@ -109,6 +141,7 @@ const legitimateUnicode = [
   'naïve façade',   // French with diacritics
   'Мир',           // Russian
   '你好',          // Chinese
+  'Café—menu',     // CodeRabbit's exact example: café + em dash + "menu" must NOT be flagged
 ];
 
 let allLegitimatePassed = true;
@@ -196,6 +229,8 @@ for (const tree of treesToScan) {
   walkAndCheck(tree.path, tree.relativePath);
 }
 
-if (filesWithMojibake === 0) {
+if (filesScanned === 0) {
+  fail('Repo-wide scan found 0 files — check scan root paths (templates/ and modes/ exist?)');
+} else if (filesWithMojibake === 0) {
   pass(`No mojibake found in ${filesScanned} files across templates/ and modes/`);
 }
