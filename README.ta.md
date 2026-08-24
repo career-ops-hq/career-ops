@@ -113,7 +113,7 @@ career-ops ஒரு **Agentic** அமைப்பு. நீங்கள் �
 | **Portal Scanner** | Anthropic, OpenAI, ElevenLabs, Retool, n8n உள்ளிட்ட 45-க்கும் மேற்பட்ட நிறுவனங்களும், Ashby, Greenhouse, Lever, Wellfound போன்ற தளங்களுக்கான முன்கூட்டியே அமைக்கப்பட்ட தேடல்களும். |
 | **Batch Processing** | Headless CLI Workers (`claude -p` / `opencode run`) மூலம் பல வேலை வாய்ப்புகளை இணையாக மதிப்பிடுகிறது. |
 | **Dashboard TUI** | Terminal-இல் உங்கள் Pipeline-ஐ உலாவ, வடிகட்ட, மற்றும் வரிசைப்படுத்த உதவும் Dashboard. |
-| **Human-in-the-Loop** | AI மதிப்பீடு செய்து பரிந்துரைக்கிறது; ஆனால் இறுதி முடிவும் செயல்பாடும் உங்களுடையது. career-ops தானாக எந்த விண்ணப்பத்தையும் சமர்ப்பிக்காது. |
+| **Human-in-the-Loop** | AI மதிப்பீடு செய்து பரிந்துரைக்கிறது; ஆனால் இறுதி முடிவும் செயல்பாடும் உங்களுடையது. career-ops எந்த விண்ணப்பத்தையும் சமர்ப்பிக்காது. <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **Pipeline Integrity** | தானியங்கி Merge, Duplicate நீக்கம், நிலை (Status) ஒருமைப்படுத்தல், மற்றும் Health Checks. |
 | **Beyond the CV** | `deep` Mode நிறுவனத்தின் AI திட்டம், சமீபத்திய மாற்றங்கள், Engineering கலாச்சாரம் மற்றும் உங்கள் Profile-ஐ எவ்வாறு வெளிப்படுத்த வேண்டும் என்பதைக் கண்டறிய உதவுகிறது. `contacto` Mode சரியான Hiring Manager, Recruiter அல்லது Team உறுப்பினரை கண்டறிந்து, ஒவ்வொரு தொடர்பு வகைக்கும் ஏற்ற 300 எழுத்துகளுக்குள் LinkedIn செய்தியை உருவாக்குகிறது. `email` Mode மதிப்பீட்டு அறிக்கை அல்லது Job Description-இலிருந்து தொழில்முறை Email வரைவை உருவாக்குகிறது. career-ops எந்த Email-ஐயும் அனுப்பவோ, விண்ணப்பிக்கவோ, எந்த நடவடிக்கையையும் தானாக மேற்கொள்ளவோ செய்யாது. விண்ணப்பம் உங்களை வரிசையில் சேர்க்கும்; ஆனால் ஆய்வுதான் உரையாடலைத் தொடங்கும். |
 

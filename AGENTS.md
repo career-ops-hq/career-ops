@@ -67,10 +67,14 @@ On the first message of each session, run silently:
 node update-system.mjs check
 ```
 
-If `{"status": "update-available", "local": ..., "remote": ..., "changelog": ...}` → tell the user:
-> "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+If `{"status": "update-available", "reason": ..., "local": ..., "remote": ..., "changelog": ...}` → tell the user:
 
-If yes → `node update-system.mjs apply`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
+- If `reason` is `system-files-changed`:
+  > "career-ops system files differ from v{local}. Re-apply v{local} to restore them? Your data (CV, profile, tracker, reports) will NOT be touched."
+- Otherwise:
+  > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+
+If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
 
 ## What is career-ops
 
