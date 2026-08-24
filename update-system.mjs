@@ -831,6 +831,28 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
     .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
 }
 
+// A stale-file prune candidate can still be load-bearing for a file this same
+// run just decided to KEEP because the user modified it (see
+// `locallyModifiedSystemFiles` + the `preservedPaths` handling in `apply()`) —
+// e.g. a user's custom CV template referencing a font file upstream no longer
+// ships. Deleting the referenced asset out from under a preserved file leaves
+// the preserved file silently broken (missing font, broken image) even though
+// the file itself survived. Scoped to preserved HTML/CSS files' on-disk
+// content, since those are the only preserved file types known to reference
+// other system files by relative path.
+export function isReferencedByPreservedFile(candidatePath, preservedPaths, readFile = (path) => readFileSync(path, 'utf-8')) {
+  const basename = normalizeRepoPath(candidatePath).split('/').pop();
+  if (!basename) return false;
+  return preservedPaths.some((preservedPath) => {
+    if (!/\.(html|css)$/i.test(preservedPath)) return false;
+    try {
+      return readFile(join(ROOT, ...preservedPath.split('/'))).includes(basename);
+    } catch {
+      return false;
+    }
+  });
+}
+
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
 // loads without a missing-module crash. Today this is the entry plus its only
 // local import; resolveReexecCheckout derives the real set from the fetched
@@ -1761,7 +1783,17 @@ async function apply() {
       }
       if (remoteFiles.size > 0) {
         const localFiles = git('ls-files').split('\n').filter(Boolean);
-        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+        // A file just preserved above because THIS install modified it (e.g. a
+        // custom cv-template.*.html no longer shipped upstream) must never also
+        // be deleted here as "stale" — the two checks used to run independently,
+        // so a preserved file with no upstream counterpart was backed up to
+        // .bak by the block above and then unlinked by this one in the same run.
+        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        for (const f of staleCandidates) {
+          if (isReferencedByPreservedFile(f, preservedPaths)) {
+            console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
+            continue;
+          }
           try {
             unlinkSync(join(ROOT, f));
             updated.push(f);
