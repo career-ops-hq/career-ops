@@ -10,6 +10,11 @@ import { decodeEntities } from './_html-entities.mjs';
 // normal on these boards, and scan payloads must stay sane.
 export const DESCRIPTION_CAP = 4000;
 
+// A tag ends at an unquoted `>`. Attribute values may contain angle brackets,
+// so the common `<[^>]+>` shortcut can stop midway through a tag and expose
+// the remaining attributes as description text.
+const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+
 /**
  * Entity-decoded markup → stripped plain text.
  *
@@ -29,5 +34,5 @@ export function htmlToText(content) {
   if (typeof content !== 'string' || !content) return '';
   const html = decodeEntities(content);
   const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  return decodeEntities(noMedia.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+  return decodeEntities(noMedia.replace(HTML_TAG_RE, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
 }

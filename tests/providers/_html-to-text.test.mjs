@@ -35,6 +35,15 @@ try {
     fail(`tag stripping = ${JSON.stringify(htmlToText('<p>Hello <b>world</b></p>'))}`);
   }
 
+  const quotedAngles = htmlToText(
+    `<p>Requires 5&amp;gt;3 years <a title="x > y" data-note='a > b' href="z">apply here</a> today</p>`
+  );
+  if (quotedAngles === 'Requires 5>3 years apply here today') {
+    pass('htmlToText() keeps quoted angle brackets inside tag attributes');
+  } else {
+    fail(`quoted angle attribute = ${JSON.stringify(quotedAngles)}`);
+  }
+
   if (htmlToText('<style>.x{color:red}</style><script>evil()</script><p>Body</p>') === 'Body') {
     pass("htmlToText() drops <script>/<style> WITH their contents");
   } else {
