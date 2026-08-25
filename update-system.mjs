@@ -145,6 +145,7 @@ const SYSTEM_PATHS = [
   'GEMINI.md',
   'KIMI.md',
   'build-dashboard.mjs',
+  'clean-markers.mjs',
   'generate-pdf.mjs',
   'theme-style.mjs',
   'generate-latex.mjs',
