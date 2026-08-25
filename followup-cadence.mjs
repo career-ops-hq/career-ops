@@ -601,7 +601,13 @@ export function loadSelfIdentities(profilePath = PROFILE_FILE) {
   const out = new Set();
   const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
   push(raw.candidate?.email);
-  for (const alt of raw.candidate?.alternate_emails || []) push(alt);
+  // Only iterate an actual array. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // down entirely over a cosmetic config mistake, which is the opposite of the fail-open behaviour
+  // this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
   return out;
 }
 

@@ -38,6 +38,30 @@ try {
 
   if (loadSelfIdentities('/nonexistent/profile.yml').size === 0) pass('an absent profile yields no identities rather than throwing');
   else fail('absent profile did not yield an empty set');
+
+  // A hand-edited profile can hold a mapping here instead of a list. `for...of` on an object throws,
+  // and SELF_IDENTITIES is initialised at import time, so that would take the whole module down at
+  // load over a cosmetic config mistake.
+  const { mkdtempSync, writeFileSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const dir = mkdtempSync(join(tmpdir(), 'self-ids-'));
+  const profile = join(dir, 'profile.yml');
+
+  writeFileSync(profile, 'candidate:\n  email: a@b.c\n  alternate_emails: { work: me@x.y }\n');
+  let mapped;
+  try {
+    mapped = loadSelfIdentities(profile);
+    pass('a mapping under alternate_emails does not throw');
+  } catch (err) {
+    fail(`a mapping under alternate_emails threw: ${err.message}`);
+  }
+  if (mapped && mapped.size === 1 && mapped.has('a@b.c')) pass('the malformed key is ignored and candidate.email still loads');
+  else fail(`mapping case produced ${mapped && [...mapped]}`);
+
+  writeFileSync(profile, 'candidate:\n  email: a@b.c\n  alternate_emails:\n    - me@x.y\n');
+  const listed = loadSelfIdentities(profile);
+  if (listed.size === 2 && listed.has('me@x.y')) pass('a proper list of alternate_emails is read');
+  else fail(`list case produced ${[...listed]}`);
 } catch (err) {
   fail(`self-contact suite threw: ${err.message}`);
 }
