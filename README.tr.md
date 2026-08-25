@@ -84,7 +84,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), diğer adıyla **careerops**), herhangi bir yapay zekâ kodlama CLI'sini eksiksiz bir iş arama komuta merkezine dönüştürür. Başvurularınızı elle bir tabloda takip etmek yerine, şunları yapan yapay zekâ destekli bir hattınız olur:
 
-- **İlanları değerlendirir** -- yapılandırılmış A-H değerlendirmesiyle (bütüncül 1.0-5.0 puana giden beş puanlama boyutu)
+- **İlanları değerlendirir** -- yapılandırılmış A-H değerlendirmesiyle (bütüncül 1-5 puana giden beş puanlama boyutu)
 - **Kişiselleştirilmiş PDF'ler üretir** -- her iş ilanına özel, ATS uyumlu CV'ler
 - **Portalları otomatik tarar** (Greenhouse, Ashby, Lever, şirket sayfaları)
 - **Toplu işler** -- alt-ajanlarla 10+ ilanı paralel değerlendirir
@@ -117,7 +117,7 @@ career-ops, [CareerOps Manifestosu](https://career-ops.org/manifesto?utm_source=
 | **Portal Tarayıcı**       | 45+ önceden yapılandırılmış şirket (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound genelinde özel sorgular |
 | **Toplu İşleme**          | Headless CLI çalışanlarıyla paralel değerlendirme (`claude -p` / `opencode run`)                                                        |
 | **Dashboard TUI**         | Hattınızı gezmek, filtrelemek ve sıralamak için terminal arayüzü                                                                          |
-| **İnsan Onaylı Döngü**    | Yapay zekâ değerlendirir ve önerir, siz karar verir ve harekete geçersiniz. Sistem asla bir başvuru göndermez -- son söz her zaman sizindir |
+| **İnsan Onaylı Döngü**    | Yapay zekâ değerlendirir ve önerir, siz karar verir ve harekete geçersiniz. Sistem asla bir başvuru göndermez -- son söz her zaman sizindir <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **Hat Bütünlüğü**         | Otomatik birleştirme, tekrar tespiti, durum normalizasyonu, sağlık kontrolleri                                                            |
 | **CV'nin Ötesinde**       | Şirket araştırması ([`deep`](modes/deep.md)) yapay zekâ stratejisini, son hamleleri, mühendislik kültürünü ve profilinizin alması gereken açıyı ortaya çıkarır. Kişi bulma ([`contacto`](modes/contacto.md)) ulaşılmaya değer işe alım uzmanını, recruiter'ı veya ekip üyesini belirler ve her kişi türüne uyarlanmış ≤300 karakterlik bir LinkedIn mesajı taslağı hazırlar. Resmi başvuru e-postası taslakları ([`email`](modes/email.md)) değerlendirilmiş bir raporu veya yapıştırılan iş ilanını -- hiçbir şey göndermeden, iletmeden veya tıklamadan -- bir konu satırına, gövdeye ve ek kontrol listesine dönüştürür. Başvurular sizi kuyruğa sokar; araştırma size bir sohbet kazandırır. |
 

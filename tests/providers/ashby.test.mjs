@@ -324,6 +324,33 @@ try {
     }
   }
 
+  // ── Description (#3175 phase 2) ──
+  // Ashby's posting-api list ships descriptionPlain for free (same payload,
+  // no per-job request) — mapped verbatim, mirroring lever. A non-string
+  // value degrades to '' rather than leaking a wrong type into the pipeline.
+  const withDesc = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          { title: 'Writer', jobUrl: 'https://jobs.ashbyhq.com/acme/w1', descriptionPlain: 'Own the blog.\nShip weekly.' },
+          { title: 'No body' },
+          { title: 'Bad body', descriptionPlain: 42 },
+        ],
+      }),
+    },
+  );
+  if (withDesc[0]?.description === 'Own the blog.\nShip weekly.') {
+    pass('ashby.fetch() carries descriptionPlain through untouched when it is a string');
+  } else {
+    fail(`row 0 description = ${JSON.stringify(withDesc[0]?.description)}`);
+  }
+  if (withDesc[1]?.description === '' && withDesc[2]?.description === '') {
+    pass('ashby.fetch() emits "" for a missing / non-string descriptionPlain');
+  } else {
+    fail(`descriptions = ${JSON.stringify([withDesc[1]?.description, withDesc[2]?.description])}`);
+  }
+
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);
 }

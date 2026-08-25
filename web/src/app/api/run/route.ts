@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -205,8 +205,19 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      // pdf keeps 600s because its render+mark phase runs AFTER this timer; a
+      // plain evaluate has no such phase, so it can use almost the whole 800s
+      // budget. 285s was cutting real evaluations off mid-run — reading the mode
+      // and profile, fetching the posting, ~25 Bash calls and a few web searches
+      // routinely run past it — and the SIGTERM then surfaced as "didn't save a
+      // report" (see the close handler), blaming the CLI for a limit we imposed
+      // (#3124). 780s leaves ~20s under maxDuration for a graceful shutdown.
+      const killMs = killMsForKind(kind);
+      // Set by the killer so the close handler can tell "we timed it out" apart
+      // from "the CLI exited on its own" — different failures, different message.
+      let killedByTimeout = false;
       killer = setTimeout(() => {
+        killedByTimeout = true;
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
       // Declared before send() so send() can clear it the moment it sees the
@@ -380,6 +391,19 @@ export async function POST(req: Request) {
         // run could still start a brand-new render (and re-touch the tracker)
         // after the stream — and its writeToken guard — is already gone.
         if (closed) return;
+        // A timeout is the ROOT cause behind every "no report / not clean"
+        // symptom the gates below test, so classify it FIRST, for any kind.
+        // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
+        // save a report" and sends the user to re-check a CLI that was working
+        // fine (#3124). code is null here (killed by signal), which the gates
+        // would read as a generic non-clean exit.
+        if (killedByTimeout) {
+          send({
+            type: "error",
+            msg: timeoutMessage(killMs, kind),
+          });
+          return close();
+        }
         // A final JSONL line with no trailing newline stays in `buf` forever
         // otherwise — flush it through the same parser so the usage/result event it
         // usually carries (the last one of a run) isn't lost. Ahead of the pdf branch,

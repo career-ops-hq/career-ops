@@ -51,7 +51,33 @@ const PDF_PAGE_MARGIN = '0.6in';
 // /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
 // When CAREER_OPS_TRACKER points at another workspace, that workspace—not the
 // installed script directory—is the safe boundary for input and output.
-const __workspaceRoot = realpathSync(workspaceRoot);
+//
+// Derived at USE time, not frozen at import (#3162, root-caused occurrence 6):
+// the root reads CAREER_OPS_TRACKER, and a sibling test that legitimately sets
+// that variable for its own fixture — and correctly restores it afterwards —
+// still poisoned this module for the whole process if the import happened to
+// land inside that window. A `const` cannot un-read an env var, so the guard
+// then compared perfectly valid repo paths against another test's temp dir and
+// refused to write, intermittently and only under the full suite. Memoized on
+// the variable's own value: same cost as the const while nothing changes, and
+// self-correcting the moment it does. Same defect class as #3159.
+let __rootCache = { key: null, root: null, canonical: null };
+function refreshRootCache() {
+  const key = process.env.CAREER_OPS_TRACKER || '';
+  if (__rootCache.key !== key) {
+    // Always re-derive: falling back to the import-time const when the variable
+    // is unset would hand back the very value the poisoned import froze.
+    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
+    __rootCache = { key, root, canonical: realpathSync(root) };
+  }
+  return __rootCache;
+}
+// Two accessors on purpose, so each call site keeps the exact semantics it had:
+// the containment guard compares canonical forms (a symlinked ancestor must not
+// read as an escape), while the manifest/output helpers work in the lexical form
+// the rest of the module and its callers use.
+function currentWorkspaceRoot() { return refreshRootCache().root; }
+function canonicalWorkspaceRoot() { return refreshRootCache().canonical; }
 
 /**
  * Assert that an already-resolved absolute path stays inside the tracker workspace,
@@ -93,9 +119,17 @@ function assertInsideWorkspace(absPath, label) {
       + ` (${/** @type {any} */ (err)?.code || 'realpath failed'} on ${probe}): ${absPath}`,
     );
   }
-  const rel = relative(__workspaceRoot, canonical);
+  const workspace = canonicalWorkspaceRoot();
+  const rel = relative(workspace, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+    // #3162: an intermittent macOS-CI-only hit of this branch happens on paths
+    // that are lexically inside the sandbox, and canonicalization SUCCEEDS
+    // before it. Print both sides so the next occurrence names the disagreeing
+    // ancestor outright instead of asking a reader to reconstruct it.
+    throw new Error(
+      `${label} escapes the tracker workspace: ${absPath}`
+      + ` (workspaceRoot=${workspace} canonical=${canonical} rel=${rel})`,
+    );
   }
   return absPath;
 }
@@ -923,7 +957,7 @@ function countRenderedPdfPages(pdfBuffer) {
  * @param {string} [rootDir] - Workspace root used as the manifest base.
  * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   if (!pathValue) return '';
   const rel = relative(rootDir, resolve(pathValue));
   if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
@@ -931,7 +965,7 @@ export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot
 }
 
 /** @deprecated Use workspaceRelativeManifestPath. */
-export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+export function repoRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   return workspaceRelativeManifestPath(pathValue, rootDir);
 }
 
@@ -955,7 +989,7 @@ function nearestExistingPath(pathValue) {
  * Resolving the nearest existing ancestor catches output directories that are
  * symlinks to another location before Chromium writes through them.
  */
-export function isWorkspaceOutputPath(pathValue, rootDir = workspaceRoot) {
+export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot()) {
   const root = resolve(rootDir);
   const candidate = resolve(pathValue);
   const lexical = relative(root, candidate);

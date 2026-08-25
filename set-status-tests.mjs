@@ -1351,5 +1351,68 @@ for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
   }
 }
 
+// ── #3075: --report resolves a report link kept in Notes ────────────────────
+// merge-tracker learned this layout in 8668ac1 — a customized tracker with no
+// dedicated Report column keeps the link in Notes prose. set-status read only
+// the Report cell, so --report could not find a row merge-tracker linked
+// happily, and the error even advised --row for the wrong reason.
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | Materials | Apply Link | Follow-up | Notes |
+|---|------|---------|------|-------|--------|-----------|------------|-----------|-------|
+| 7 | 2026-06-01 | Acme | Staff Eng | 4.2/5 | Applied | CV v3 | https://acme.example/jobs/7 | 2026-06-14 | strong fit; report [12](reports/012-acme-2026-06-01.md) |
+`;
+
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '12', 'Interview', '--dry-run'], sb);
+      if (r.code === 0) pass('#3075: --report resolves a report link kept in the Notes cell');
+      else fail(`#3075: --report 12 failed on a custom layout (code=${r.code}) ${(r.stderr || r.stdout).split('\n')[0]}`);
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a report nobody links is still not found. Without this,
+  // making the lookup match anything would pass the assertion above.
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '99', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: an unlinked report number is still not found');
+      else fail('#3075: --report 99 resolved a row nothing links');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: Notes is prose, so the fallback is scoped to reports/.
+  // A job-posting URL and an unrelated markdown link both sit in Notes here.
+  {
+    const NOISY = CUSTOM.replace(
+      'strong fit; report [12](reports/012-acme-2026-06-01.md)',
+      'applied via https://acme.example/jobs/9 — see [9](../notes/9-thing.md)',
+    );
+    const sb = makeSandbox(NOISY);
+    try {
+      const r = runSetStatus(['--report', '9', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: a non-report link in Notes does not claim a report number');
+      else fail('#3075: --report 9 matched a non-report markdown link in Notes');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a real Report cell still wins over anything in Notes.
+  {
+    const CONFLICT = TRACKER_9.replace(
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | — |',
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | also [77](reports/077-other.md) |',
+    );
+    const sb = makeSandbox(CONFLICT);
+    try {
+      const r = runSetStatus(['--report', '77', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: Notes is a fallback only — a populated Report cell wins');
+      else fail('#3075: a Notes link overrode a populated Report cell');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
