@@ -204,7 +204,10 @@ function joinItems(items) {
 function parsePartial(source) {
   // Step 1: locate the ENTRY zone.
   const entryZoneMatch = /<!--ENTRY-->([\s\S]*?)<!--\/ENTRY-->/.exec(source);
-  const entryZone = entryZoneMatch ? entryZoneMatch[1] : source;
+  if (!entryZoneMatch) {
+    throw new Error('Malformed partial: missing <!--ENTRY-->...<!--/ENTRY--> tags');
+  }
+  const entryZone = entryZoneMatch[1];
 
   // Step 2: extract named conditional-block definitions from the entry zone.
   const blockRe = /<!--([A-Z][A-Z0-9_]+)-->([\s\S]*?)<!--\/\1-->/g;
@@ -277,8 +280,11 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
     for (const [name, { value, present }] of blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
-      const markup = present ? block.present.replace(`{{${name}}}`, () => value) : block.absent;
-      out = out.replace(`{{${name}}}`, () => markup);
+      const scalarKey = name.endsWith('_BLOCK') ? name.slice(0, -6) : name;
+      const markup = present 
+        ? block.present.replace(new RegExp(`\\{\\{(${name}|${scalarKey})\\}\\}`, 'g'), () => value) 
+        : block.absent;
+      out = out.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), () => markup);
     }
   }
 
@@ -548,7 +554,7 @@ function buildSkills(categories, partial) {
       ITEMS_TEXT:  escapeHtml(joinItems(c.items)),
     }, blockValues);
   }).join('\n');
-  return items;
+  return `<div class="skills-grid">\n${items}\n  </div>`;
 }
 
 // Rebuild the whole .contact-row block. Its markup uses fixed "|" separators
@@ -889,6 +895,10 @@ async function runSelfTest() {
     console.error('Self-test failed: awards section is missing .award-item class');
     process.exit(1);
   }
+  if (!html.includes('class="skills-grid"')) {
+    console.error('Self-test failed: skills section is missing .skills-grid wrapper');
+    process.exit(1);
+  }
 
   // Guard that partials-based rendering produces the correct field values.
   if (!html.includes('Test Corp') || !html.includes('Test Engineer')) {
@@ -936,7 +946,8 @@ async function runSelfTest() {
     process.exit(1);
   }
   // The partial should emit an empty <span class="cert-org"> for alignment.
-  if (!certHtml.includes('class="cert-org"')) {
+  const orgCount = (certHtml.match(/class="cert-org"/g) || []).length;
+  if (orgCount !== 2) {
     console.error('Self-test failed: cert-org empty-block not emitted for table alignment');
     process.exit(1);
   }
