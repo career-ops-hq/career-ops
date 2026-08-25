@@ -112,17 +112,24 @@ if (forgedReexec.status !== 0 &&
   fail('forged reexec marker can authorize initial apply');
 }
 
+const legacyBranch = `backup-pre-update-99.99.99-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`;
+const createdLegacyBranch = spawnSync('git', ['branch', legacyBranch, 'HEAD'], { encoding: 'utf8' });
 const forgedLegacyReexec = runApplyWithEnv({
   CAREER_OPS_UPDATE_REEXEC: '1',
-  CAREER_OPS_UPDATE_BACKUP_BRANCH: 'backup-pre-update-1.26.0-20260818T120000Z',
+  CAREER_OPS_UPDATE_BACKUP_BRANCH: legacyBranch,
   CAREER_OPS_UPDATE_CONFIRM: '1',
 });
-if (forgedLegacyReexec.status !== 0 &&
+if (createdLegacyBranch.status !== 0) {
+  fail(`could not create the matching backup branch fixture: ${createdLegacyBranch.stderr}`);
+} else if (forgedLegacyReexec.status !== 0 &&
     /Installation requires explicit confirmation/.test(forgedLegacyReexec.stderr) &&
     !existsSync('.update-lock')) {
-  pass('legacy reexec without an existing backup branch cannot authorize initial apply');
+  pass('legacy reexec with a matching backup branch still needs an active parent lock');
 } else {
-  fail('legacy reexec without an existing backup branch can authorize initial apply');
+  fail('legacy reexec with a matching backup branch can authorize initial apply without an active parent lock');
+}
+if (createdLegacyBranch.status === 0) {
+  spawnSync('git', ['branch', '-D', legacyBranch], { encoding: 'utf8' });
 }
 
 const marker = createReexecMarker();

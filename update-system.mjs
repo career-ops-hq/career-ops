@@ -81,6 +81,12 @@ function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
   }
+  // A matching backup branch is durable state, not proof that a parent updater
+  // is currently running. Legacy children have no authenticated marker, so
+  // the parent's active update lock is the remaining proof of a real reexec.
+  if (!existsSync(join(ROOT, '.update-lock'))) {
+    return false;
+  }
   const backupBranch = process.env.CAREER_OPS_UPDATE_BACKUP_BRANCH || '';
   if (!/^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/.test(backupBranch)) {
     return false;
