@@ -53,6 +53,11 @@ function record(dir, args) {
     env: { ...process.env, CAREER_OPS_TRACKER: join(dir, 'data', 'applications.md') },
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
+  // Exit status, not just "it spawned". outcome.mjs writes outcome.md BEFORE
+  // it updates the tracker, so a failure after the journal write leaves every
+  // file these tests look for while r.error stays undefined — the assertions
+  // below would pass on a command that failed.
+  assert.equal(r.status, 0, `outcome.mjs ${args.join(' ')} exited ${r.status}: ${r.stderr || r.stdout}`);
   return r;
 }
 
