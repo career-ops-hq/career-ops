@@ -35,6 +35,7 @@ const {
   normalizeStatus,
   resolveCadenceConfig,
   loadProfileCadence,
+  parseAppliedDaysOverride,
 } = await import('./followup-cadence.mjs');
 
 let passed = 0;
@@ -217,6 +218,34 @@ eq(
   'the pinned default profile resolves to DEFAULT_CADENCE',
   resolveCadenceConfig({ profilePath: DEFAULT_CADENCE_PROFILE, appliedDays: null }),
   DEFAULT_CADENCE,
+);
+
+// --- parseAppliedDaysOverride (--applied-days value validation) ---
+//
+// A whole-string match, not a bare parseInt: parseInt truncates '1.5' to 1
+// and '10days' to 10 instead of rejecting them, which would silently apply a
+// value the caller never actually supplied — the same wrong-answer-at-exit-0
+// shape #3196 fixed for the flag NAME.
+eq("parseAppliedDaysOverride('10') is 10", parseAppliedDaysOverride('10'), 10);
+eq("parseAppliedDaysOverride('0') is 0", parseAppliedDaysOverride('0'), 0);
+eq("parseAppliedDaysOverride('1.5') is rejected, not truncated to 1", parseAppliedDaysOverride('1.5'), null);
+eq("parseAppliedDaysOverride('10days') is rejected, not truncated to 10", parseAppliedDaysOverride('10days'), null);
+eq("parseAppliedDaysOverride('-5') is rejected (no negative window)", parseAppliedDaysOverride('-5'), null);
+eq("parseAppliedDaysOverride('abc') is rejected", parseAppliedDaysOverride('abc'), null);
+eq('parseAppliedDaysOverride(undefined) is null (flag absent)', parseAppliedDaysOverride(undefined), null);
+
+// End-to-end: the parsed override actually reaches the effective cadence,
+// not just "the CLI didn't error" — CodeRabbit's review on #3199 flagged that
+// a passing flag-validation test alone doesn't prove the value took effect.
+eq(
+  "resolveCadenceConfig honors parseAppliedDaysOverride('10') as applied_first",
+  resolveCadenceConfig({ profilePath: DEFAULT_CADENCE_PROFILE, appliedDays: parseAppliedDaysOverride('10') }).applied_first,
+  10,
+);
+eq(
+  'resolveCadenceConfig falls back to the default when the override is rejected',
+  resolveCadenceConfig({ profilePath: DEFAULT_CADENCE_PROFILE, appliedDays: parseAppliedDaysOverride('10days') }).applied_first,
+  DEFAULT_CADENCE.applied_first,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);
