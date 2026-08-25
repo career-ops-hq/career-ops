@@ -12,13 +12,13 @@
  * Imports directly from report-lead.mjs (the single source of truth) so the
  * test and production code can never drift out of sync.
  *
- * Run (from web/, as `npm test` does):  node --test tests/lib/core/report-lead.test.mjs
- * From the repo root:                   node --test web/tests/lib/core/report-lead.test.mjs
+ * Run (from web/, as `npm test` does):  node --test tests/lib/report-lead.test.mjs
+ * From the repo root:                   node --test web/tests/lib/report-lead.test.mjs
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickLeadSection } from '../../../src/lib/core/report-lead.mjs';
+import { pickLeadSection } from '../../src/lib/core/report-lead.mjs';
 
 const s = (heading, letter = null, content = 'body') => ({ heading, letter, content });
 
