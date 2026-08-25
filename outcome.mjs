@@ -27,7 +27,7 @@ import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   normalizeCompany,
-  pathIsInside,
+  pathIsInsideCanonical,
   resolvePdfIndexPath,
   resolveTrackerPath,
   resolveWorkspaceRoot,
@@ -266,15 +266,20 @@ if (flags.cv) {
 // not which case found it, is what keeps deletion scoped to generated CVs. An
 // explicit --cv pointing outside output/ (e.g. into the user's home directory)
 // is never a candidate, and neither is the cv.md fallback (Case D), since it
-// never sets isPdf. pathIsInside() (tracker-utils.mjs) is applied to BOTH the
-// PDF and its manifest-sourced HTML companion — the manifest is host-writable
-// data, so a malformed or manipulated html column must never be trusted to
-// point outside output/ without being re-checked here too.
+// never sets isPdf. pathIsInsideCanonical() (tracker-utils.mjs) is applied to
+// BOTH the PDF and its manifest-sourced HTML companion — the manifest is
+// host-writable data, so a malformed or manipulated html column must never be
+// trusted to point outside output/ without being re-checked here too.
+//
+// Canonical, not merely lexical: resolve() does not follow symlinks, so a link
+// inside output/ pointing elsewhere would otherwise spell itself as contained
+// and have its target deleted. Deletion is unrecoverable, so this boundary
+// resolves symlinks before trusting it.
 let cvFromOutputDir = false;
 let htmlResolvedPath = null;
 const outputDir = resolve(repoRoot, 'output');
 const resolvedCvAbs = cvResolvedPath ? resolve(cvResolvedPath) : null;
-if (isPdf && resolvedCvAbs && pathIsInside(resolvedCvAbs, outputDir)) {
+if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
   cvFromOutputDir = true;
   const manifestPath = resolvePdfIndexPath(appsFile);
   if (existsSync(manifestPath)) {
@@ -287,7 +292,7 @@ if (isPdf && resolvedCvAbs && pathIsInside(resolvedCvAbs, outputDir)) {
         const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
         if (rowPdfPath === resolvedCvAbs && fields[2]) {
           const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
-          if (existsSync(htmlFull) && pathIsInside(resolve(htmlFull), outputDir)) {
+          if (existsSync(htmlFull) && pathIsInsideCanonical(htmlFull, outputDir)) {
             htmlResolvedPath = htmlFull;
           }
           break;

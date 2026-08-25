@@ -1,6 +1,6 @@
 // tests/outcome.test.mjs — Unit test suite for outcome.mjs (#1722).
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, realpathSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync, realpathSync, symlinkSync, utimesSync } from 'fs';
 import { join, win32 as win32Path, posix as posixPath } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -359,6 +359,49 @@ try {
 
   check('A real POSIX path inside output/ is still correctly accepted',
     pathIsInside('/repo/output/acme.pdf', '/repo/output', posixPath) === true);
+
+  // Test 18: a symlink inside output/ must not carry --clean-output's deletion
+  // outside the boundary (code review on PR #2911). resolve() does not follow
+  // symlinks, so the lexical check alone accepted `output/link/acme.pdf` while
+  // the file really lived in a sibling directory — and deleted it. Deletion is
+  // unrecoverable, so this is a real fixture with a real symlink rather than a
+  // unit call: the whole resolve/contain/archive/delete chain has to be exercised
+  // end to end for the assertion to mean anything.
+  const symRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cops-outcome-symlink-')));
+  try {
+    const symWs = join(symRoot, 'ws');
+    const outsideDir = join(symRoot, 'outside');
+    mkdirSync(join(symWs, 'data'), { recursive: true });
+    mkdirSync(join(symWs, 'output'), { recursive: true });
+    mkdirSync(outsideDir, { recursive: true });
+
+    const symTracker = join(symWs, 'data', 'applications.md');
+    writeFileSync(symTracker, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-07-01 | Acme Corp | Senior Backend Engineer | 4.5/5 | Applied | - | [1](reports/1-acme.md) | Applied online |
+`);
+    writeFileSync(join(symWs, 'cv.md'), '# GENERIC MASTER CV\n');
+
+    const victim = join(outsideDir, 'acme.pdf');
+    writeFileSync(victim, 'IRREPLACEABLE-USER-DATA');
+    symlinkSync(outsideDir, join(symWs, 'output', 'link'));
+
+    const symRes = JSON.parse(execFileSync(NODE, [
+      OUTCOME_SCRIPT, '1', 'rejected', '--cv', join('output', 'link', 'acme.pdf'), '--clean-output', '--json',
+    ], {
+      cwd: symWs,
+      env: { ...process.env, CAREER_OPS_TRACKER: symTracker },
+      encoding: 'utf-8',
+    }));
+
+    check('A symlinked path escaping output/ is never deleted', existsSync(victim));
+    check('Symlink-escaping path contents are intact', readFileSync(victim, 'utf-8') === 'IRREPLACEABLE-USER-DATA');
+    check('Symlink-escaping path is not reported as removed', symRes.cleanup.removed.length === 0);
+  } finally {
+    rmSync(symRoot, { recursive: true, force: true });
+  }
 
 } finally {
   rmSync(testDir, { recursive: true, force: true });

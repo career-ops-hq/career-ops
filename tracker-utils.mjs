@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, existsSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -194,6 +194,64 @@ export function canonicalizeTrackerPath(path) {
 export function pathIsInside(childPath, parentDir, pathMod = { relative, isAbsolute, sep }) {
   const relativePath = pathMod.relative(parentDir, childPath);
   return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${pathMod.sep}`) && !pathMod.isAbsolute(relativePath));
+}
+
+/**
+ * Walk up to the nearest ancestor that exists on disk.
+ *
+ * `lstatSync`, not `statSync`: a symlink must count as existing in its own
+ * right, so the caller canonicalizes the link itself rather than walking past
+ * it to a parent that looks contained.
+ *
+ * @param {string} pathValue - Absolute candidate path.
+ * @returns {string} The candidate, or its nearest existing ancestor.
+ */
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Check containment both lexically AND canonically (symlinks resolved).
+ *
+ * `pathIsInside` compares strings, which is right for a boundary that is only
+ * ever about spelling (the lock-name guard) and for the injected-`pathMod`
+ * tests that exercise win32/posix rules on paths that do not exist. It is NOT
+ * enough before deleting: `resolve()` never follows symlinks, so an `output/`
+ * containing a link to somewhere else lets a path spell itself as contained
+ * while pointing outside — and the deletion is unrecoverable.
+ *
+ * Mirrors `isWorkspaceOutputPath` in generate-pdf.mjs, which guards the far
+ * lower-stakes *write* path. Lives here so a third copy is not needed; that
+ * one should be migrated onto this rather than left to drift (see #2911).
+ *
+ * @param {string} childPath - Candidate path to validate.
+ * @param {string} parentDir - Required parent directory boundary.
+ * @returns {boolean} True only when the path is inside both lexically and after
+ *   resolving symlinks. False if canonicalization fails for any reason.
+ */
+export function pathIsInsideCanonical(childPath, parentDir) {
+  const parent = resolve(parentDir);
+  const child = resolve(childPath);
+  if (!pathIsInside(child, parent)) return false;
+
+  try {
+    const canonicalParent = realpathSync(parent);
+    const canonicalChild = realpathSync(nearestExistingPath(child));
+    return pathIsInside(canonicalChild, canonicalParent);
+  } catch {
+    return false;
+  }
 }
 
 /**
