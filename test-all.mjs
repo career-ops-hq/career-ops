@@ -296,6 +296,7 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
