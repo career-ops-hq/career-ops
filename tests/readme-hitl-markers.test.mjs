@@ -48,4 +48,15 @@ for (const file of readmes) {
   } else {
     pass(`${file}: marker present, inside its table row`);
   }
+
+  // Wholesale-drift control: every README describes the report as A-H. This
+  // deliberately does NOT try to catch phrasing variants (French and Arabic
+  // write ranges with a preposition, "de A à F" / "من A إلى F", which is how
+  // two stale lines survived three sweeps in Aug 2026) — variants need human
+  // audit; this only catches a translation with no current structure at all.
+  if (content.includes('A-H') || content.includes('A–H')) {
+    pass(`${file}: mentions the A-H report structure`);
+  } else {
+    fail(`${file}: never mentions A-H — translation predates the current report structure`);
+  }
 }
