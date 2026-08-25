@@ -49,6 +49,34 @@ for (const file of readmes) {
     pass(`${file}: marker present, inside its table row`);
   }
 
+  // The marker is an anchor, and until now nothing read what it anchors: a
+  // README whose row had been hedged still passed, because the comment was
+  // present and inside a table row. That is the wrong half to check on its own.
+  //
+  // The hedge cannot be caught in 17 languages, but it does not have to be.
+  // Every translation is derived from the English source, so a hedge that
+  // enters there propagates to all of them faithfully -- with every marker
+  // still in place and this suite still green. Checking README.md is what
+  // closes that door; the marker check continues to carry the translations.
+  if (file === 'README.md') {
+    // Strip the comment before scanning: the marker QUOTES the hedges it
+    // forbids, so a scan of the raw line matches the anchor's own warning
+    // text and fails a correctly-worded row.
+    const prose = line.replace(/<!--[\s\S]*?-->/g, '');
+    if (/never submits an application/i.test(prose)) {
+      pass(`${file}: the row states the prohibition in absolute terms`);
+    } else {
+      fail(`${file}: the HITL row no longer says "never submits an application"`);
+    }
+    const HEDGES = /\b(usually|generally|normally|typically|by default|unless|without your permission|automatically|by itself)\b/i;
+    const hedge = prose.match(HEDGES);
+    if (hedge) {
+      fail(`${file}: the HITL row hedges with "${hedge[0]}" -- the guarantee is absolute, not a default`);
+    } else {
+      pass(`${file}: no hedge in the guarantee row`);
+    }
+  }
+
   // Wholesale-drift control: every README describes the report as A-H. This
   // deliberately does NOT try to catch phrasing variants (French and Arabic
   // write ranges with a preposition, "de A à F" / "من A إلى F", which is how
