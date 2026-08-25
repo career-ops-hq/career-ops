@@ -12,13 +12,13 @@
  * Imports directly from awaiting-view.mjs (the single source of truth) so the
  * test and production code can never drift out of sync.
  *
- * Run (from web/, as `npm test` does):  node --test tests/lib/core/awaiting-view.test.mjs
- * From the repo root:                   node --test web/tests/lib/core/awaiting-view.test.mjs
+ * Run (from web/, as `npm test` does):  node --test tests/lib/awaiting-view.test.mjs
+ * From the repo root:                   node --test web/tests/lib/awaiting-view.test.mjs
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectAwaitingDecision } from '../../../src/lib/core/awaiting-view.mjs';
+import { selectAwaitingDecision } from '../../src/lib/core/awaiting-view.mjs';
 
 const row = (num, score, status = 'Evaluated', date = '2026-07-01') =>
   ({ num: String(num), score, status, date, company: `Co${num}` });
