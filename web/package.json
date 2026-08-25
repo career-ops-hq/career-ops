@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {

@@ -43,7 +43,13 @@ const USAGE = `Usage:
 
 CLIs: ${VALID_CLIS.join(', ')}`;
 
-validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+// requireOperand: without it, `--target --json` reads --json as the target
+// path (argv[targetIdx + 1] below has no adjacency check of its own), and the
+// doctor silently diagnoses a directory literally named "--json" at exit 0
+// (#3087) — this is the onboarding entrypoint, so that's a user told to
+// create files that already exist. Nothing more specific to say than the
+// shared message.
+validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
 const targetIdx = argv.indexOf('--target');
 const projectRoot =

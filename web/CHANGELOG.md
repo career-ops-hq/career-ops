@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.0](https://github.com/santifer/career-ops/compare/web-v0.7.1...web-v0.8.0) (2026-08-25)
+
+
+### Features
+
+* **web:** restrict the local dashboard API to same-origin and loopback ([b3974e6](https://github.com/santifer/career-ops/commit/b3974e6104d83c2714fd0d071898a7c7b9f68726))
+
+
+### Bug Fixes
+
+* **deps:** update web npm dependencies (major) ([1207eae](https://github.com/santifer/career-ops/commit/1207eae4b5799cb92602c99737fd2f0cee1319c9))
+* **web:** give the methodology link a real tap target and a new-tab cue ([#3023](https://github.com/santifer/career-ops/issues/3023)) ([344a116](https://github.com/santifer/career-ops/commit/344a116de15fd98c1e1d48aae9bf08bbdc4f067e))
+* **web:** keep child stderr out of the status response on the crash path ([#3022](https://github.com/santifer/career-ops/issues/3022)) ([883ebec](https://github.com/santifer/career-ops/commit/883ebec33c1c775bb295c4b4eecca31fc53066da))
+* **web:** keep the query string in the Explore dedup key so distinct postings don't collapse ([#3082](https://github.com/santifer/career-ops/issues/3082)) ([275e213](https://github.com/santifer/career-ops/commit/275e2137fb804a762caed8bed34194c5920b71c4))
+* **web:** keep the run stream alive during silent agent phases ([#3026](https://github.com/santifer/career-ops/issues/3026)) ([aaeb114](https://github.com/santifer/career-ops/commit/aaeb114238283ce3cc44b7b3e2168ed2d22c56a8))
+* **web:** report the uncapped weekly match count while keeping the render bounded ([#2662](https://github.com/santifer/career-ops/issues/2662)) ([6e9f029](https://github.com/santifer/career-ops/commit/6e9f0299dff6fc0903b97b349390408d1f859571))
+* **web:** stamp pipeline first_seen with the local day, not UTC ([#3081](https://github.com/santifer/career-ops/issues/3081)) ([809e93b](https://github.com/santifer/career-ops/commit/809e93b419094dcc77c8f3d3f1a1c31c578a547a))
+
 ## [0.7.1](https://github.com/santifer/career-ops/compare/web-v0.7.0...web-v0.7.1) (2026-08-20)
 
 

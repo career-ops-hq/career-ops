@@ -56,11 +56,11 @@ The Claude Code row uses concrete model names because that lineup is well-establ
 
 Every other reference to tier elsewhere in the modes (batch.md, pipeline.md, etc.) MUST refer to it only as "the economy/standard/premium tier" or "the tier's model" -- never repeat a hardcoded model/provider name outside this table. This keeps the routing logic model-agnostic: if any CLI's mapping changes, only that row in this table needs to change.
 
-**Output parity:** The model used for evaluation never changes the A-F report structure, headers, or sections. All three tiers produce an evaluation in the exact same format described below and in `modes/oferta.md`.
+**Output parity:** The model used for evaluation never changes the A-H report structure, headers, or sections. All three tiers produce an evaluation in the exact same format described below and in `modes/oferta.md`.
 
 ## Scoring System
 
-The evaluation uses 6 blocks (A-F) with a global score of 1-5:
+The evaluation scores five dimensions, integrated into one global score of 1-5. (These are the scoring dimensions, not the report's blocks — the report structure is A-H and lives in `modes/oferta.md`.)
 
 | Dimension | What it measures |
 |-----------|-----------------|
