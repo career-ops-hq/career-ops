@@ -22,6 +22,20 @@
 // colon-suffixed "word", and an entry is one keyword, not a sentence.
 export const WORD_PREFIX = 'word:';
 
+// `stem:` is the other half of the same question, and it exists because the two
+// halves are NOT the same setting seen from two sides.
+//
+// `word:agent` says "agent, and nothing longer" — it rejects Agentforce.
+// `stem:agent` says "a word that STARTS with agent" — it keeps Agentforce and
+// Agentic, and drops Reagents, where the keyword lands mid-word.
+// A bare `agent`, today's default, keeps all three.
+//
+// So a plain substring is not "the loose option"; it is two loosenesses at once,
+// and only one of them is usually wanted. `stem:` lets an entry ask for the one
+// it means. Under today's substring default that is already a narrowing rather
+// than a no-op: it is what separates Agentforce from Reagents (#3103).
+export const STEM_PREFIX = 'stem:';
+
 function escapeForRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -36,6 +50,9 @@ function escapeForRegExp(s) {
 // to the literal characters p, {, L, } — no error, and the anchor is simply off.
 const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 const anchoredPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}(?!${WORD_CHAR})`, 'u');
+// Same left boundary, no right one: the keyword must start a word, and the word
+// may continue past it.
+const stemPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}`, 'u');
 
 /**
  * Compile a lowercased keyword into a matcher.
@@ -68,6 +85,14 @@ export function compileKeyword(kw) {
     // titles this prefix exists to protect. \p{M} covers combining marks, so a
     // decomposed "é" does not split a word either.
     const re = anchoredPattern(escapeForRegExp(bare));
+    return (lower) => re.test(lower);
+  }
+  if (kw.startsWith(STEM_PREFIX)) {
+    const bare = kw.slice(STEM_PREFIX.length).trim();
+    // Same reading as a bare `word:`: a stray prefix with nothing after it is a
+    // typo, and matching nothing is the safe half of that trade.
+    if (!bare) return () => false;
+    const re = stemPattern(escapeForRegExp(bare));
     return (lower) => re.test(lower);
   }
   if (/^[a-z]{2,3}$/.test(kw)) {

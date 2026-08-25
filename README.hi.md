@@ -84,7 +84,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहते हैं) किसी भी AI coding CLI को एक पूर्ण job search command center में बदल देता है। Applications को spreadsheet में manually track करने की जगह, आपको एक AI-powered pipeline मिलती है जो:
 
-- **Offers evaluate करती है** एक structured A-H evaluation के साथ (पाँच dimensions जो 1.0-5.0 का score देते हैं)
+- **Offers evaluate करती है** एक structured A-H evaluation के साथ (पाँच dimensions जो 1-5 का score देते हैं)
 - **Tailored PDFs generate करती है** -- job description के अनुसार customize किए गए ATS-optimized CVs
 - **Portals scan करती है** automatically (Greenhouse, Ashby, Lever, company pages)
 - **Batch में process करती है** -- sub-agents के साथ parallel में 10+ offers evaluate करती है
