@@ -15,47 +15,15 @@
 
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath } from 'url';
-import { load as yamlLoad } from 'js-yaml';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { parseMachineSummary, splitEntry, loadReportsIndex } from './reports-index.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
-
-const MACHINE_SUMMARY_FIELDS = new Set([
-  'company',
-  'role',
-  'score',
-  'legitimacy_tier',
-  'archetype',
-  'final_decision',
-  'hard_stops',
-  'soft_gaps',
-  'top_strengths',
-  'risk_level',
-  'confidence',
-  'next_action',
-  // Optional context fields accepted for future reports.
-  'domain',
-  'seniority',
-  'remote',
-  'team_size',
-  // Issue 1380: predicted skip/discard reasons from the agent.
-  'discard_reasons',
-  'advertised_comp',
-  'via',
-  'company_confidential',
-  'risk_summary',
-  // Work-authorization / visa-sponsorship tier from Block A (report + Machine
-  // Summary only). Allowlisted so it round-trips; no consumer logic yet.
-  'work_auth',
-  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
-  // Allowlisted so it round-trips; no consumer logic yet.
-  'reports_to',
-]);
 
 // --- CLI args ---
 const args = process.argv.slice(2);
@@ -158,23 +126,10 @@ function normalizeScalar(value) {
   return null;
 }
 
-function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
-  if (!fenceMatch) return null;
-
-  const raw = fenceMatch[1].trim();
-  if (!raw) return null;
-
-  try {
-    const parsed = yamlLoad(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([key]) => MACHINE_SUMMARY_FIELDS.has(key))
-    );
-  } catch {
-    return null;
-  }
-}
+// The canonical Machine-Summary parser + core allowlist now live in
+// reports-index.mjs (imported above). parseMachineSummary returns the FULL
+// object; splitEntry(parsed).summary applies the CORE_SUMMARY_FIELDS filter this
+// script historically relied on.
 
 // --- Via channel analysis (#1596 follow-up) ---
 // Pure: group submitted applications by their Via channel (agency/recruiter
@@ -623,7 +578,10 @@ function readTextIfExists(path) {
 }
 
 // --- Parse a single report file ---
-function parseReport(reportPath) {
+// `index` (optional): a loadReportsIndex() handle. When provided, the Machine
+// Summary comes from the stat-validated cache (no re-parse); the report body is
+// still read for the Block A table, scoring table, URL, and Gap table below.
+function parseReport(reportPath, index) {
   const content = readTextIfExists(reportPath);
   if (content === null) return null;
   const report = {
@@ -647,7 +605,14 @@ function parseReport(reportPath) {
     gaps: [],
   };
 
-  const machineSummary = parseMachineSummary(content);
+  const entry = index ? index.get(reportPath) : null;
+  let machineSummary;
+  if (entry) {
+    machineSummary = entry.summary; // core-filtered (may be null for no-fence reports)
+  } else {
+    const parsed = parseMachineSummary(content);
+    machineSummary = parsed ? splitEntry(parsed).summary : null;
+  }
   if (machineSummary) {
     report.machineSummary = machineSummary;
     report.company = normalizeScalar(machineSummary.company) || report.company;
@@ -927,12 +892,17 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-function analyze() {
+function analyze(options = {}) {
   const entries = parseTracker();
 
   if (entries.length === 0) {
     return { error: 'No applications found in tracker.' };
   }
+
+  // Shared, stat-validated Machine-Summary cache over reports/ — one parser and
+  // one on-disk cache across analyze-patterns/upskill/salary-gap. --no-cache
+  // threads through to skip both reading and writing the JSON.
+  const index = loadReportsIndex({ noCache: options.noCache });
 
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
@@ -950,7 +920,7 @@ function analyze() {
       ]);
       for (const candidate of candidates) {
         if (!withinReports(candidate)) continue;
-        reportData = parseReport(candidate);
+        reportData = parseReport(candidate, index);
         if (reportData) break;
       }
     }
@@ -1397,16 +1367,20 @@ function printSummary(result) {
 }
 
 // --- Run ---
-if (args.includes('--self-test')) {
-  runSelfTest();
+// isMain guard so importing this module (e.g. from a test) is side-effect-free.
+const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain) {
+  if (args.includes('--self-test')) {
+    runSelfTest();
+  }
+
+  const result = analyze({ noCache: args.includes('--no-cache') });
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-const result = analyze();
-
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (result.error) process.exit(1);

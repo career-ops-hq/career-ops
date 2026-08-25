@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { parseMachineSummary, loadReportsIndex } from './reports-index.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -245,22 +246,9 @@ export function readOptionalText(filePath) {
   }
 }
 
-// --- Machine Summary + Gap table parsing ---
-// Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
-function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
-  if (!fenceMatch) return null;
-  const raw = fenceMatch[1].trim();
-  if (!raw) return null;
-  try {
-    const parsed = yamlLoad(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
+// --- Gap table parsing ---
+// The canonical Machine-Summary parser now lives in reports-index.mjs (imported
+// above) — one parser shared across analyze-patterns/upskill/salary-gap.
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
   if (value === null || value === undefined || value === '') return [];
@@ -386,14 +374,27 @@ export function computeTargetedGaps(jdText, knownText) {
 }
 
 // --- Main ---
-function analyze(minReports) {
-  if (!existsSync(APPS_FILE)) {
+export function analyze(minReports, options = {}) {
+  // Test seams (mirroring reports-index.mjs's documented reportsDir/cachePath):
+  // each defaults to the module's real path, so production behavior is
+  // unchanged. Overridable so the aggregate gap-derivation can be exercised
+  // against fixtures without a live tracker/CV — see the #2762 regression test.
+  const appsFile = options.appsFile ?? APPS_FILE;
+  const cvFile = options.cvFile ?? CV_FILE;
+  const profileFile = options.profileFile ?? PROFILE_FILE;
+  if (!existsSync(appsFile)) {
     return { error: 'No applications tracker found. Run some evaluations first.' };
   }
 
-  const lines = readFileSync(APPS_FILE, 'utf-8').split('\n');
+  const lines = readFileSync(appsFile, 'utf-8').split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
+
+  // Shared, stat-validated Machine-Summary cache over reports/. The summary
+  // supplies score + hard_stops/soft_gaps without re-parsing YAML; we only read
+  // the report body as a FALLBACK (the Gap table and `| Global |` score row)
+  // when the summary can't supply the score or the gap keys — see #2385.
+  const index = loadReportsIndex({ noCache: options.noCache });
 
   let reportsLinked = 0;
   let reportsRead = 0;
@@ -406,24 +407,63 @@ function analyze(minReports) {
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
-    // The read is attempted directly instead of probing with existsSync first,
-    // which costs a full stat per report and races with the read (#2385).
-    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
-    let content = null;
+    // Resolve each contained candidate through the shared, stat-validated index
+    // FIRST: a cache hit yields the Machine Summary with NO body read, which is
+    // the whole point of #2385. The report body is read only as a fallback below
+    // (#2762 — reading it up front here defeated the read-reduction).
+    const candidates = new Set([join(dirname(appsFile), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    let entry = null;
+    let reportPath = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
-      content = readTextIfExists(p);
-      if (content !== null) break;
+      const e = index.get(p);
+      if (e) { entry = e; reportPath = p; break; }
     }
-    if (content === null) continue;
+    if (!entry) continue;
     reportsRead += 1;
-    const { score, gapText, hasMachineSummary } = parseReportGaps(content);
+
+    // Machine Summary comes from the shared index (no re-parse, no re-read).
+    const summary = entry.summary ?? null;
+    let score = null;
+    let hasMachineSummary = false;
+    let haveSummaryGaps = false;
+    const gapDescriptions = [];
+    if (summary) {
+      hasMachineSummary = true;
+      if (typeof summary.score === 'number' && Number.isFinite(summary.score)) score = summary.score;
+      // Condition on NON-EMPTY gaps, not key presence: the canonical Machine
+      // Summary emits `hard_stops: []` / `soft_gaps: []` when empty (batch-prompt
+      // #323), so a presence check would set haveSummaryGaps for a report that
+      // actually lists its gaps only in the body Gap table — suppressing the
+      // fallback body read below and silently dropping those gaps (#2762).
+      const summaryGaps = [...normalizeList(summary.hard_stops), ...normalizeList(summary.soft_gaps)];
+      if (summaryGaps.length > 0) {
+        haveSummaryGaps = true;
+        gapDescriptions.push(...summaryGaps);
+      }
+    }
+    // Fallback: read + parse the body only when the summary can't supply the
+    // score or the gap descriptions (legacy reports, or a Machine Summary
+    // missing keys). This is the ONLY path that reads the report body.
+    if (score === null || !haveSummaryGaps) {
+      const content = readTextIfExists(reportPath);
+      if (content !== null) {
+        const fb = parseReportGaps(content);
+        if (fb.hasMachineSummary) hasMachineSummary = true;
+        if (score === null && Number.isFinite(fb.score)) score = fb.score;
+        // parseReportGaps re-adds the summary's hard_stops/soft_gaps; only take
+        // its text when we haven't already sourced gaps from the cached summary,
+        // so a report with summary gaps isn't double-counted.
+        if (!haveSummaryGaps && fb.gapText) gapDescriptions.push(fb.gapText);
+      }
+    }
+
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
     parsedReports.push({
       num: row.num,
       score: Number.isFinite(trackerScore) ? trackerScore : score,
-      gapText,
+      gapText: gapDescriptions.join('\n'),
     });
   }
 
@@ -437,8 +477,8 @@ function analyze(minReports) {
   }
 
   const knownText = knownSkillsText(
-    readOptionalText(CV_FILE),
-    readOptionalText(PROFILE_FILE),
+    readOptionalText(cvFile),
+    readOptionalText(profileFile),
     warnProfileUnparseable,
   );
   const knownSkills = extractSkills(knownText);
@@ -606,6 +646,30 @@ soft_gaps:
     }
     if (!/compactText\(targetText\)/.test(selfSrc)) {
       failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
+    }
+  }
+
+  // Read-reduction ordering (#2385 / #2762): the aggregate loop must resolve
+  // each linked report through the shared, stat-validated index BEFORE reading
+  // its body, so a cache hit skips the body read entirely. Reading the body up
+  // front (the old `content = readTextIfExists(p)` in the candidate loop)
+  // silently defeated #2385. Guard the ordering at the source level, matching
+  // the #1894 regression check above.
+  {
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    const start = src.indexOf('function analyze(');
+    const end = src.indexOf('function printSummary(', start);
+    const analyzeSrc = start >= 0 && end > start ? src.slice(start, end) : '';
+    const idxGetAt = analyzeSrc.indexOf('index.get(');
+    const bodyReadAt = analyzeSrc.indexOf('readTextIfExists(');
+    if (idxGetAt < 0) {
+      failures.push('read-reduction: analyze() no longer resolves reports through index.get() (#2385)');
+    }
+    if (idxGetAt >= 0 && bodyReadAt >= 0 && idxGetAt > bodyReadAt) {
+      failures.push('read-reduction: analyze() reads the report body before consulting the index — defeats #2385 (#2762)');
+    }
+    if (/readTextIfExists\(\s*p\s*\)/.test(analyzeSrc)) {
+      failures.push('read-reduction: analyze() still reads the body straight off a candidate path before the index (#2762)');
     }
   }
 
@@ -853,7 +917,7 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 // Handled via lib/cli-flags.mjs's validateFlags() (#2775), same shape as
 // doctor.mjs (#2874) — checked before --self-test/--url-text/--min-reports
 // are read, and before --help, so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
+const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--no-cache', '--self-test', '--help', '-h'];
 
 // Only --min-reports and --url-text take their value as the next argv token.
 const VALUE_FLAGS = ['--min-reports', '--url-text'];
@@ -871,6 +935,7 @@ if (isMain) {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (args.includes('--self-test')) runSelfTest();
+  const noCache = args.includes('--no-cache');
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
   const urlTextIdx = args.indexOf('--url-text');
@@ -1008,7 +1073,7 @@ if (isMain) {
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 
-    const result = analyze(MIN_REPORTS);
+    const result = analyze(MIN_REPORTS, { noCache });
     if (args.includes('--summary')) {
       printSummary(result);
     } else {
