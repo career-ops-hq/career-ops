@@ -333,10 +333,23 @@ export function completedReportNames(entries) {
  * @returns {boolean}
  */
 export function hasNewCompletedReport(beforeEntries, afterEntries) {
+  return newCompletedReportName(beforeEntries, afterEntries) != null;
+}
+
+/** Basename of the first completed report that appeared after `beforeEntries`. */
+export function newCompletedReportName(beforeEntries, afterEntries) {
   const before = completedReportNames(beforeEntries);
   const after = completedReportNames(afterEntries);
   for (const name of after) {
-    if (!before.has(name)) return true;
+    if (!before.has(name)) return name;
   }
-  return false;
+  return null;
+}
+
+/** Leading report number from a new completed report, or null. */
+export function newCompletedReportNum(beforeEntries, afterEntries) {
+  const name = newCompletedReportName(beforeEntries, afterEntries);
+  if (!name) return null;
+  const n = parseInt(name, 10);
+  return Number.isFinite(n) ? n : null;
 }
