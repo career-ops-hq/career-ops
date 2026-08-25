@@ -577,7 +577,37 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's own addresses, so a note that mentions them is not reported as somebody to chase.
+ *
+ * Tracker notes routinely cite your own mailbox while recording where a search ran — e.g. "searched
+ * both accounts (personal + me@work.example) for this thread" written to establish that a reply was
+ * NOT received. extractContacts has no concept of self, so it reads that as a repliable human and
+ * the row advertises a contact that cannot be written to. That is worse than reporting no contact:
+ * it makes an un-chaseable row look actionable.
+ *
+ * Read from config/profile.yml rather than hardcoded, so it stays correct per profile. Fails open —
+ * an absent or unreadable profile yields an empty set, because a missing profile must never start
+ * deleting real contacts.
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  for (const alt of raw.candidate?.alternate_emails || []) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -648,7 +678,8 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // A note citing your own mailbox is not a person to follow up with.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
