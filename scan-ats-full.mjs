@@ -50,6 +50,7 @@ import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -684,7 +685,11 @@ async function main() {
   // inactionable. It used to infer that from sinceMs being set, which stopped
   // being true once #2418 taught scan.mjs --since to set it too (#2495).
   const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day, matching scan.mjs (#3070). This value is the first_seen stamped
+  // into the SHARED data/scan-history.tsv, which shouldDedupScanHistoryRow then
+  // measures against localToday() and detect-reposts groups by. Two scanners
+  // that disagree about what day it is put one posting on two dates.
+  const date = localToday();
 
   // Same defensive default as completedSources/counters below: a version-1
   // checkpoint that lost its offers array would otherwise set this to undefined

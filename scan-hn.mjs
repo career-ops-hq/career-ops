@@ -18,6 +18,7 @@ import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
@@ -113,7 +114,9 @@ async function main() {
 
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
-    await appendToScanHistory(newOffers, new Date().toISOString().slice(0, 10), 'added');
+    // LOCAL day, matching scan.mjs (#3070) — this is the first_seen that
+    // shouldDedupScanHistoryRow later measures against localToday().
+    await appendToScanHistory(newOffers, localToday(), 'added');
     console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
 }

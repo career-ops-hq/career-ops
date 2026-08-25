@@ -21,6 +21,7 @@ import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -257,7 +258,10 @@ async function main() {
   mkdirSync('data', { recursive: true });
 
   const { seen } = loadSeenUrls();
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day, matching scan.mjs (#3070). Interamt is a German portal, so this
+  // scanner runs east of Greenwich, where the UTC day is YESTERDAY for the first
+  // hours of the user's own day — the mirror-image half of the same defect.
+  const date = localToday();
 
   const lastScanDate = NO_DATE_FILTER ? null : loadLastScanDate();
   if (NO_DATE_FILTER) {
