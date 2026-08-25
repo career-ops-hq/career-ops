@@ -14,13 +14,13 @@ try {
 } catch (e) {}
 
 import { readFileSync, existsSync } from 'fs';
-import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
 
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
 const PORTALS_PATH = 'portals.yml';
@@ -118,6 +118,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error("Fatal:", err.message); process.exit(1); });
 }
