@@ -2040,7 +2040,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
       console.error(
         `Warning: ${filePath} header has ${onDisk.trim().split('\t').length} columns but this build writes `
         + `${SCAN_RUNS_HEADER.trim().split('\t').length}. Rows below the header are positionally offset and `
-        + `stats.mjs will exclude them. Delete the header line to let the next run rewrite it.`,
+        + `stats.mjs will exclude them. Move ${filePath} aside to start a fresh file — deleting only the header does NOT recover it, because the file still exists and the next run would read the first data row as the header.`,
       );
     }
   }

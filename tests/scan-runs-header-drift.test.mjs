@@ -46,6 +46,18 @@ try {
   }
 
   {
+    // The all-drifted result must not carry a null lastRunDate into the summary template, which
+    // would render `Runs: 0 recorded (last null)` and read as an empty file rather than an
+    // unreadable one.
+    const r = computeRunStats(header + widerRow);
+    if (r.lastRunDate === null && r.totalRuns === 0 && r.driftedRows > 0) {
+      pass('the all-drifted result is distinguishable from an empty file (totalRuns 0 + driftedRows > 0)');
+    } else {
+      fail(`all-drifted shape was ${JSON.stringify(r)}`);
+    }
+  }
+
+  {
     // Narrow rows keep their existing treatment — this must not change.
     const r = computeRunStats(header + '2026-01-03T00:00:00Z\tcompleted\t5\n');
     if (r === null || r.totalRuns === 0) pass('a torn (too narrow) row is still skipped as before');

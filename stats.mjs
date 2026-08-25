@@ -596,13 +596,19 @@ function printSummary(stats) {
     console.log('Follow-ups: — no data (data/follow-ups.md missing)');
   }
   const r = stats.runs;
-  if (r) {
+  if (r && r.totalRuns === 0 && r.driftedRows > 0) {
+    // Every row was excluded, so there is no last run to name and no average worth printing.
+    // Rendering the normal line here would read `0 recorded (last null) | avg 0 found`, which
+    // looks like an empty file rather than an unreadable one.
+    console.log(`Runs:       none readable — all ${r.driftedRows} row(s) in scan-runs.tsv are wider than its header, so their columns cannot be read by name.`);
+    console.log('            Recover by moving scan-runs.tsv aside; the next scan writes a fresh file with a current header.');
+  } else if (r) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
     if (r.driftedRows > 0) {
       // Say it rather than quietly averaging whichever rows still line up: those may be a small
       // and unrepresentative tail of the file.
-      console.log(`            ${r.driftedRows} row(s) excluded — wider than scan-runs.tsv's header, so their columns cannot be read by name. Delete the header line to let the next scan rewrite it.`);
+      console.log(`            ${r.driftedRows} row(s) excluded — wider than scan-runs.tsv's header, so their columns cannot be read by name. Move the file aside to start a fresh one.`);
     }
   } else {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
