@@ -22,7 +22,21 @@
  * @returns {ExtractedJson}
  */
 export function extractJsonObject(text) {
-  const s = text.replace(/```(?:json)?/gi, "");
+  // Strip only a fence that WRAPS the message, never every fence in it.
+  //
+  // A global strip reaches inside JSON string values: an answer containing a
+  // code block arrives as {"answer":"...```js\nfoo()\n```..."} and comes back
+  // as "...js\nfoo()\n...", with `truncated: false` — clean success, corrupted
+  // text, straight into a prefilled application form. Applicants describing
+  // technical work are exactly the population that pastes code fences.
+  //
+  // Anchored replacements cannot reach a value, because a fence inside a JSON
+  // string is neither at the start nor the end of the message. Prose before the
+  // fence is fine either way: the scanner below seeks the first `{`, and a
+  // trailing fence sits past the matching `}`.
+  const s = text
+    .replace(/^\s*```(?:json)?[^\S\n]*\n?/i, "")
+    .replace(/\n?[^\S\n]*```\s*$/, "");
   const start = s.indexOf("{");
   if (start === -1) return { obj: null, truncated: false };
 
