@@ -59,10 +59,16 @@ for (const file of readmes) {
   // still in place and this suite still green. Checking README.md is what
   // closes that door; the marker check continues to carry the translations.
   if (file === 'README.md') {
-    // Strip the comment before scanning: the marker QUOTES the hedges it
-    // forbids, so a scan of the raw line matches the anchor's own warning
-    // text and fails a correctly-worded row.
-    const prose = line.replace(/<!--[\s\S]*?-->/g, '');
+    // Read only the row prose outside the exact marker comment. The marker
+    // QUOTES the hedges it forbids, so scanning the whole line would match the
+    // anchor's own warning text and fail a correctly-worded row.
+    const markerStart = line.indexOf(MARKER);
+    const markerEnd = line.indexOf('-->', markerStart);
+    if (markerEnd === -1) {
+      fail(`${file}: HITL marker comment is not closed`);
+      continue;
+    }
+    const prose = `${line.slice(0, markerStart)}${line.slice(markerEnd + 3)}`;
     if (/never submits an application/i.test(prose)) {
       pass(`${file}: the row states the prohibition in absolute terms`);
     } else {
