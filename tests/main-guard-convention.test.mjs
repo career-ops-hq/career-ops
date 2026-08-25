@@ -114,6 +114,10 @@ test('isMainModule refuses a filesystem path instead of quietly returning false'
   assert.throws(() => isMainModule(join(ROOT, 'check-table-freshness.mjs')), /filesystem path/,
     'a path must throw, not return false');
   assert.throws(() => isMainModule('C:\\repo\\pdf.mjs'), /filesystem path/, 'a Windows path must throw too');
+  // Drive-RELATIVE, no separator: still a path, and it parses as a one-letter
+  // URL scheme, so it reached the "not a file: URL" branch and returned false.
+  assert.throws(() => isMainModule('C:repo\\pdf.mjs'), /filesystem path/,
+    'a drive-relative Windows path must throw, not return false');
   assert.throws(() => isMainModule(''), TypeError);
   assert.throws(() => isMainModule(undefined), TypeError);
 });
