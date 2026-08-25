@@ -192,6 +192,11 @@ function walk(dir, out = []) {
 const EXEMPT = new Map([
   // The helper is the one place allowed to read the entry path.
   ['lib/is-main-module.mjs', 'is the comparison'],
+  // #1706 requires update-system.mjs to be self-loading (a pre-#1245 client
+  // checks out this single file and re-execs it), so it inlines the guard
+  // instead of importing it. The exemption covers the source scan ONLY; the
+  // behaviour test at the bottom of this file pins its semantics.
+  ['update-system.mjs', 'self-loading per #1706; behaviour-pinned below'],
   // This file quotes the pattern in its detector self-test and error messages.
   ['tests/main-guard-convention.test.mjs', 'quotes the pattern to test the detector'],
   // Assigns argv[1] inside a spawned child's preamble so the copied script's
@@ -200,28 +205,6 @@ const EXEMPT = new Map([
   // Asserts that a bash-embedded node snippet reads its input file via ITS OWN
   // argv[1] (injection safety, not a main-guard); the literal lives in strings.
   ['tests/batch-runner-jd-prefetch.test.mjs', 'asserts another script\u2019s argv[1] usage in strings'],
-]);
-
-// ── The #3170 ratchet ───────────────────────────────────────────────────────
-//
-// Converting ~60 entrypoints is too wide for one reviewable change, so it lands
-// in batches. The naive order — convert everything, then add this test — leaves
-// the tree unguarded for the whole series, which is exactly the window in which
-// a sixty-first hand-rolled guard slips in unnoticed.
-//
-// So the test ships FIRST, and every not-yet-converted file is listed here. The
-// list only ever SHRINKS: each batch deletes its own entries, and the dead-entry
-// check below FAILS if a listed file no longer references the entry path, so a
-// conversion cannot land without shrinking it. A newly added entrypoint is not
-// on this list and is therefore caught from day one.
-//
-// When the last entry goes, delete PENDING, its uses, and this comment. A
-// ratchet that outlives its job is just a permanent hole.
-const PENDING = new Set([
-  'plugin-audit.mjs',
-  'plugins.mjs',
-  'update-system.mjs',
-  'validate-plugin-registry.mjs',
 ]);
 
 function entryRefViolations(src) {
@@ -238,7 +221,7 @@ test('no file outside the helper reads the process entry path', () => {
   const offenders = [];
   for (const file of walk(ROOT)) {
     const rel = relative(ROOT, file).split('\\').join('/');
-    if (EXEMPT.has(rel) || PENDING.has(rel)) continue;
+    if (EXEMPT.has(rel)) continue;
     const hits = entryRefViolations(readFileSync(file, 'utf-8'));
     if (hits.length) offenders.push(`${rel}:${hits.join(',')}`);
   }
@@ -254,20 +237,11 @@ test('no file outside the helper reads the process entry path', () => {
   );
 });
 
-test('neither the exemption list nor the ratchet carries a dead entry', () => {
-  // An exemption that outlives its reference is a hole waiting for a new one,
-  // and a PENDING entry that outlives its conversion silently un-guards a file
-  // that is already correct. Same check, both lists.
+test('the exemption list carries no dead entries', () => {
+  // An exemption that outlives its reference is a hole waiting for a new one.
   for (const [rel] of EXEMPT) {
     const src = readFileSync(join(ROOT, rel), 'utf-8');
     assert.ok(ENTRY_REF.test(src), `${rel} no longer references the entry path — remove its exemption`);
-  }
-  for (const rel of PENDING) {
-    const src = readFileSync(join(ROOT, rel), 'utf-8');
-    assert.ok(
-      ENTRY_REF.test(src),
-      `${rel} is converted but still listed in PENDING — delete it from the ratchet (#3170)`,
-    );
   }
 });
 
@@ -281,4 +255,36 @@ test('the convention check can actually see a violation', () => {
   assert.deepEqual(entryRefViolations(laundered), [1], 'the detector misses the variable-indirection evasion');
   assert.deepEqual(entryRefViolations('const isMain = isMainModule(import.meta.url);'), [], 'the detector flags the fix');
   assert.deepEqual(entryRefViolations('// process.argv[1] is explained here\n * and here (JSDoc body)'), [], 'comment lines must be excused');
+});
+
+test("update-system.mjs's inlined guard realpaths both sides", (t) => {
+  // The #1706 self-loading rule buys it an exemption from the import, not from
+  // being correct. Asserted on BEHAVIOUR, not on source text: a source-shape
+  // check passes on a rewrite that keeps the words and loses the realpath.
+  const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  assert.ok(
+    !/^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]/m.test(src),
+    'update-system.mjs grew a static relative import — that breaks the old→new re-exec (#1706)',
+  );
+
+  const linked = linkedRoot('main-guard-updater-');
+  if (!linked) return t.skip('directory symlinks unavailable on this machine');
+  const { link, cleanup } = linked;
+  try {
+    // An unrecognized subcommand is the only branch that proves the tail ran
+    // and writes NOTHING: `check` hits the network, and every other command
+    // (`dismiss` included) touches the real repo through the symlink.
+    const viaLink = spawnSync(process.execPath, [join(link, 'update-system.mjs'), '--probe-not-a-command'], {
+      cwd: ROOT, encoding: 'utf-8', timeout: 60_000,
+    });
+    assert.match(
+      viaLink.stdout,
+      /Usage: node update-system\.mjs/,
+      `the updater printed no usage through a symlink (exit ${viaLink.status}) — its inlined ` +
+        'guard stopped realpathing both sides, and every update silently no-ops (#3170)',
+    );
+    assert.equal(viaLink.status, 1, 'the usage branch must still exit non-zero');
+  } finally {
+    cleanup();
+  }
 });
