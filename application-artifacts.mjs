@@ -11,8 +11,8 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { parseArgs } from 'util';
-import { fileURLToPath } from 'url';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const DEFAULT_OUTPUT_ROOT = resolve('output');
 const DECISIONS = new Set(['reuse', 'reuse-with-edits', 'regenerate']);
@@ -154,7 +154,7 @@ async function main() {
   console.log(JSON.stringify(paths, null, 2));
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMainModule(import.meta.url)) {
   main().catch((error) => {
     console.error(`application-artifacts: ${error.message}`);
     process.exitCode = 1;
