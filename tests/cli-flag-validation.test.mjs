@@ -93,26 +93,6 @@ test('application-artifacts.mjs --help wins over the missing-required-args error
   assert.doesNotMatch(r.all, /Unknown option/i, '--help was still treated as an unrecognized option');
 });
 
-// requireOperand (#2961 class): a value flag with no operand must be reported
-// BEFORE --help, or `--report --help` prints usage at exit 0 and the malformed
-// flag is never named.
-test('application-artifacts.mjs rejects a value flag with no operand', () => {
-  for (const flag of ['--report', '--company', '--role', '--version', '--root']) {
-    const r = runScript('application-artifacts.mjs', flag);
-    assert.equal(r.status, 1, `bare ${flag} exited ${r.status}, want 1`);
-    assert.match(r.all, new RegExp(`\\${flag} requires a value`), `bare ${flag} was not reported`);
-  }
-
-  const rHelp = runScript('application-artifacts.mjs', '--report', '--help');
-  assert.equal(rHelp.status, 1, '--report --help must exit 1, not print usage at 0');
-  assert.match(rHelp.all, /--report requires a value/);
-
-  const rNext = runScript('application-artifacts.mjs', '--report', '--company', 'Acme');
-  assert.equal(rNext.status, 1, '--report --company must not treat --company as the value');
-  assert.match(rNext.all, /--report requires a value/);
-});
-
-
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
   assert.equal(r.status, 1);
@@ -221,6 +201,30 @@ test('archive-posting: --role --dry-run does not set the role slug to "--dry-run
   const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--role requires a value/);
+});
+
+// application-artifacts.mjs opts in rather than carrying its own guard, so
+// every one of its value flags relies on requireOperand. `--report --help` is
+// the shape that matters: without the option it printed usage at exit 0 and
+// the malformed flag was never named.
+test('application-artifacts.mjs rejects a value flag with no operand', () => {
+  for (const flag of ['--report', '--company', '--role', '--version', '--root']) {
+    const r = runScript('application-artifacts.mjs', flag);
+    assert.equal(r.status, 1, `bare ${flag} exited ${r.status}, want 1`);
+    assert.ok(r.all.includes(`${flag} requires a value`), `bare ${flag} was not reported`);
+  }
+});
+
+test('application-artifacts: --report --help does not print usage at exit 0', () => {
+  const r = runScript('application-artifacts.mjs', '--report', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--report requires a value/);
+});
+
+test('application-artifacts: --report --company does not read "--company" as the value', () => {
+  const r = runScript('application-artifacts.mjs', '--report', '--company', 'Acme');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--report requires a value/);
 });
 
 // linkedin-join.mjs hand-rolled its argv before #3200 review, so `--csv=<path>`
