@@ -149,6 +149,19 @@ function writeCheckpoint(cp) {
   }
 }
 
+// Dead-board memory is useful resumability metadata, but a cache write must
+// never discard the matches from a long-running sweep. Keep it best-effort,
+// just like the main checkpoint write above.
+function saveDeadBoardsBestEffort(rows) {
+  try {
+    saveDeadBoards(DEAD_BOARDS_PATH, rows);
+    return true;
+  } catch (err) {
+    console.error(`\n⚠ dead-board cache write failed (${err.message}) — sweep continues`);
+    return false;
+  }
+}
+
 // Cheap content fingerprint of a source's company list. --resume relies on the
 // dataset order being byte-for-byte reproducible; a same-length regeneration
 // with different members would pass a bare length check and silently resume at
@@ -883,7 +896,7 @@ async function main() {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
-        saveDeadBoards(DEAD_BOARDS_PATH, deadBoards);
+        saveDeadBoardsBestEffort(deadBoards);
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
@@ -893,13 +906,18 @@ async function main() {
             // totalCompaniesScanned was bumped by the FULL entries.length up
             // front; a checkpoint must store only work actually attempted, or
             // a resumed run (which re-adds its own slice) double-counts the
-            // completed portion in the final summary.
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done),
+            // completed portion in the final summary. Retired boards were not
+            // attempted and must not be counted as scanned either.
+            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done) - deadBoardsSkipped,
             totalErrors: totalErrors + errors,
           },
         });
       }
     }, () => resolverOutage);
+    // parallelEach reports a completed callback even when a retired board was
+    // skipped, so remove those entries from the live scan total after the
+    // source pass. The retired count remains visible separately.
+    totalCompaniesScanned -= deadBoardsSkipped;
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
@@ -927,7 +945,7 @@ async function main() {
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
-    if (!opts.dryRun) saveDeadBoards(DEAD_BOARDS_PATH, deadBoards);
+    if (!opts.dryRun) saveDeadBoardsBestEffort(deadBoards);
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
