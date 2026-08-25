@@ -34,14 +34,36 @@ if (rootSuites.length > 0) {
   fail('no root-level *.test.mjs found — this guard can no longer detect an unregistered suite');
 }
 
-// 2. The registration itself. Substring rather than a parse of the `scripts`
-//    array on purpose: a suite reached by any mechanism at all — the list, an
-//    inline `node --test`, a future glob — names the file somewhere in the
-//    harness, and this guard is about "nothing runs it", not about which
-//    section does.
-const unregistered = rootSuites.filter((name) => !harness.includes(name));
+// 2. The registration itself. Deliberately NOT a parse of the `scripts` array:
+//    a suite reached by any mechanism at all — that list, an inline
+//    `node --test`, a future glob — names the file, and the question here is
+//    "does anything run this", not "which section does".
+//
+//    A bare substring is too generous in the other direction, though. This file
+//    names jd-similarity.test.mjs in its own header, and test-all.mjs carries
+//    filenames in prose too, so a suite dropped from `scripts` while its name
+//    survived in a comment would still read as registered. Two narrowings close
+//    that without giving up the mechanism-agnostic part: comments do not count,
+//    and the name must sit inside quotes — which every real registration does
+//    and no prose mention does.
+const code = harness
+  .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
+  .replace(/^\s*\/\/.*$/gm, ' '); // whole-line comments
+
+const QUOTES = new Set(["'", '"', '`']);
+/** True when `name` appears quoted in executable code, optionally behind a path. */
+function isRegistered(name) {
+  for (let i = code.indexOf(name); i !== -1; i = code.indexOf(name, i + 1)) {
+    const before = code[i - 1];
+    const after = code[i + name.length];
+    if (QUOTES.has(after) && (QUOTES.has(before) || before === '/')) return true;
+  }
+  return false;
+}
+
+const unregistered = rootSuites.filter((name) => !isRegistered(name));
 if (unregistered.length === 0) {
-  pass('every root-level *.test.mjs is named in test-all.mjs');
+  pass('every root-level *.test.mjs is named in executable code in test-all.mjs');
 } else {
   fail(
     `${unregistered.length} root-level suite(s) are never run — nothing in test-all.mjs names them:\n` +
