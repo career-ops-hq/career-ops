@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     execFileSync(nodeBin, args, {
       cwd: root,
       encoding: "utf8",
-      env: { ...process.env, PATH: `${process.env.PATH}:/home/ranjit/tools/node-v22.14.0-linux-x64/bin` }
+      env: { ...process.env }
     });
 
     let pdfFile: string | null = null;
