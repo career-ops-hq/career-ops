@@ -299,7 +299,7 @@ try {
   check('Escaping HTML path is never archived as submitted_cv.html', !existsSync(join(escapeRes.outcomeDir, 'submitted_cv.html')));
   check('Cleanup never records a path outside output/', !touchedPaths.some(p => p.endsWith('gamma-outside.html')));
   check('The contained PDF still resolves and cleans up normally (containment check still recognizes real output/ files)',
-    !existsSync(join(testDir, 'output', 'gamma.pdf')) && escapeRes.cleanup.removed.some(p => p.endsWith('output/gamma.pdf')));
+    !existsSync(join(testDir, 'output', 'gamma.pdf')) && escapeRes.cleanup.removed.some(p => p.endsWith(join('output', 'gamma.pdf'))));
 
   // Test 17: Windows UNC path containment (CodeRabbit finding on PR #2911).
   // This calls the actual pathIsInside() from tracker-utils.mjs — the same

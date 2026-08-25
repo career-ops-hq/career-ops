@@ -25,7 +25,10 @@ import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveTrackerPath, normalizeCompany, pathIsInside } from './tracker-utils.mjs';
+import {
+  resolveTrackerPath, normalizeCompany, pathIsInside,
+  resolveWorkspaceRoot, resolvePdfIndexPath,
+} from './tracker-utils.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
 
@@ -203,9 +206,8 @@ matchedRow = candidates[0];
 
 const companySlug = slugify(matchedRow.company);
 const roleSlug = slugify(matchedRow.role);
-const trackerDir = dirname(appsFile);
-const repoRoot = dirname(trackerDir);
-const outcomeDir = join(trackerDir, 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
+const repoRoot = resolveWorkspaceRoot(appsFile);
+const outcomeDir = join(repoRoot, 'data', 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 
@@ -232,7 +234,7 @@ if (flags.cv) {
 
   // Case C: Lookup data/pdf-index.tsv to find PDF mapping for the linked report number.
   if (!cvResolvedPath) {
-    const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+    const manifestPath = resolvePdfIndexPath(appsFile);
     if (existsSync(manifestPath)) {
       try {
         const manifestText = readFileSync(manifestPath, 'utf-8');
@@ -271,7 +273,7 @@ const outputDir = resolve(repoRoot, 'output');
 const resolvedCvAbs = cvResolvedPath ? resolve(cvResolvedPath) : null;
 if (isPdf && resolvedCvAbs && pathIsInside(resolvedCvAbs, outputDir)) {
   cvFromOutputDir = true;
-  const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+  const manifestPath = resolvePdfIndexPath(appsFile);
   if (existsSync(manifestPath)) {
     try {
       const manifestText = readFileSync(manifestPath, 'utf-8');
