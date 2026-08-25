@@ -1,3 +1,4 @@
+import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -87,33 +88,11 @@ export default {
   },
 };
 
-function fromCodePoint(cp) {
-  try {
-    return String.fromCodePoint(cp);
-  } catch {
-    return '';
-  }
-}
-
-// Decode the XML entities that appear in Personio job text: numeric (&#38; /
-// &#x27;) and the named five. Numeric forms are decoded first; &amp; is decoded
-// LAST so a literal "&amp;lt;" yields "&lt;" rather than over-decoding to "<".
-function decodeXmlEntities(s) {
-  return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => fromCodePoint(parseInt(d, 10)))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
 // Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
 function extractText(inner) {
   const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
   if (cdata) return cdata[1].trim();
-  return decodeXmlEntities(inner).trim();
+  return decodeEntities(inner).trim();
 }
 
 // Looped to a fixed point rather than a single pass: a single global replace
@@ -238,11 +217,11 @@ export function parsePersonioHtml(html, companyName, host) {
 
     const titleMatch = block.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/);
     if (!titleMatch) continue;
-    const title = decodeXmlEntities(stripTags(titleMatch[1])).trim();
+    const title = decodeEntities(stripTags(titleMatch[1])).trim();
     if (!title) continue;
 
     const locMatch = block.match(/<span\b[^>]*class="[^"]*jobMetaText[^"]*"[^>]*>([\s\S]*?)<\/span>/);
-    const location = locMatch ? decodeXmlEntities(stripTags(locMatch[1])).trim() : '';
+    const location = locMatch ? decodeEntities(stripTags(locMatch[1])).trim() : '';
 
     seen.add(id);
     jobs.push({

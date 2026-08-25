@@ -61,6 +61,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
 - Single-column layout (no sidebars, no parallel columns)
 - Standard headers: "Professional Summary", "Work Experience", "Education", "Skills", "Certifications", "Projects"
+- Optional sections (Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, Skills) are dropped entirely — header included — when their array is empty or absent
 - No text in images/SVGs
 - No critical info in PDF headers/footers (ATS ignores them)
 - UTF-8, selectable text (not rasterized)
@@ -165,7 +166,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     }
   ],
   "projects": [
-    { "name": "Project Name", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
+    { "name": "Project Name", "url": "https://github.com/...", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
   ],
   "education": [
     { "title": "B.S. Computer Science", "org": "University Name", "year": "2022", "description": "Optional line." }
@@ -201,8 +202,8 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
 | `summary` | string | Personalized summary with keywords. |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
-| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected). |
-| `projects[]` | object | `name`, `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
+| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
 | `education[]` | object | `title` (degree), `org` (institution), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |

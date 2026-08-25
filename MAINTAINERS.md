@@ -8,8 +8,15 @@ This file lists who maintains career-ops and how contributors grow into review a
 |------|-----|-------|
 | Lead maintainer | [@santifer](https://github.com/santifer) | All areas; final say on architecture, scoring, and the data contract |
 | Reviewer | [@FReptar0](https://github.com/FReptar0) | Dashboard, tracker, CI, updater — triage, labels, first-pass reviews; his approvals unblock merges |
+| Area owner | [@Scott-Emberson](https://github.com/Scott-Emberson) | Test-suite infrastructure (`tests/`) and the Go dashboard (`dashboard/`) — code owner on both, so PRs touching them route to him for review |
 
 Reviewers and additional maintainers are added as the contributor ladder below produces them. This list growing slowly is by design — see "Trust & access" below.
+
+**Area owner** is the rung between reviewer and maintainer: write access plus named ownership of a specific area, so review of that area routes to the person carrying it instead of queueing behind one.
+
+Be clear about what that means, because it is stronger than "routing": this repository requires code-owner review, so **a PR touching an owned area cannot merge until its owner approves**. Ownership never *skips* review either — branch protection requires an approval on every PR, for everyone on this list, including the lead maintainer.
+
+A blocking gate whose owner is away is worse than no gate, and it fails invisibly: PRs simply sit there looking normal. So the expectation attached to an area is not availability, it is **saying so**. An owner who is busy for a week says it and the area is lifted for that week, with nothing lost and nothing implied. That is the supported path; force-merging past branch protection is not.
 
 ## The contributor ladder
 

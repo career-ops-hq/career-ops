@@ -84,7 +84,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), also known as **careerops**) turns any AI coding CLI into a full job search command center. Instead of manually tracking applications in a spreadsheet, you get an AI-powered pipeline that:
 
-- **Evaluates offers** with a structured evaluation -- blocks A-F scored across 5 weighted dimensions, plus block G, a separate posting-legitimacy assessment that never affects the 1-5 score
+- **Evaluates offers** into a structured report -- blocks A through H, with a global 1-5 score reached by holistic judgement across five dimensions rather than an arithmetic formula. Block G is a separate posting-legitimacy assessment that never affects the score; block H is drafted only at 4.5 and above
 - **Generates tailored PDFs** -- ATS-optimized CVs customized per job description
 - **Scans portals** automatically (Greenhouse, Ashby, Lever, company pages)
 - **Processes in batch** -- evaluate 10+ offers in parallel with sub-agents
@@ -108,7 +108,7 @@ career-ops is the first reference implementation of [the CareerOps Manifesto](ht
 | Feature                  | Description                                                                                                                              |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auto-Pipeline**        | Paste a URL, get a full evaluation + PDF + tracker entry                                                                                 |
-| **A-G Evaluation**       | Role summary, CV match, level strategy, comp research, personalization, interview prep (STAR+R) -- plus a Block G posting-legitimacy check that flags scams and ghost jobs, and a Work-Auth signal that flags an explicit no-sponsorship JD as a hard blocker |
+| **A-H Evaluation**       | Role summary, CV match, level strategy, comp research, personalization, interview prep (STAR+R) -- plus a Block G posting-legitimacy check that flags scams and ghost jobs, and a Work-Auth signal that flags an explicit no-sponsorship JD as a hard blocker |
 | **Interview Story Bank** | Accumulates STAR+Reflection stories across evaluations -- 5-10 master stories that answer any behavioral question                        |
 | **Negotiation Scripts**  | Salary negotiation frameworks, geographic discount pushback, competing offer leverage                                                    |
 | **ATS PDF Generation**   | Keyword-injected CVs with Space Grotesk + DM Sans design                                                                                 |
@@ -118,7 +118,7 @@ career-ops is the first reference implementation of [the CareerOps Manifesto](ht
 | **Funded Company Discovery** | Review-first `company:funded` command surfaces recently funded companies and source diagnostics from structured public feeds without editing your data |
 | **Batch Processing**     | Parallel evaluation with headless CLI workers (`claude -p` / `opencode run`)                                                             |
 | **Dashboard TUI**        | Terminal UI to browse, filter, and sort your pipeline                                                                                    |
-| **Human-in-the-Loop**    | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call               |
+| **Human-in-the-Loop**    | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Pipeline Integrity**   | Automated merge, dedup, status normalization, health checks                                                                              |
 | **Interview Suite**      | Time-blocked prep plans, practice sessions with feedback, post-interview debriefs ([`interview/`](modes/interview/README.md)), and a company red-flag detector ([`interview-redflag`](modes/interview-redflag.md)) |
 | **Offer Stage**          | Contract reading companion -- clause walk plus a lawyer question list ([`offer-prep`](modes/offer-prep.md)) -- and a desired/advertised/actual salary-gap analyzer (`salary-gap.mjs`) |
@@ -335,7 +335,7 @@ You paste a job URL or description
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-G Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
 │  (reads cv.md)   │
 └────────┬─────────┘
          │
@@ -453,7 +453,7 @@ Because an `ANTHROPIC_API_KEY` in your environment takes precedence over your lo
 career-ops runs on any major AI coding CLI — Claude Code, Codex, Gemini / Antigravity, OpenCode, Grok, Qwen and more — through the open Agent Skill Standard, so it is never locked to a single vendor. Use the CLI you already have.
 
 **How do I install career-ops on Windows?**
-career-ops runs on Windows. If skills fail to load with a symlink error during install, the fix is in [docs/FAQ.md](docs/FAQ.md). Full steps are in [docs/SETUP.md](docs/SETUP.md).
+career-ops runs on Windows. Platform-specific setup and the known sharp edges — Git Bash discovery, line endings, Task Scheduler — are in [docs/WINDOWS.md](docs/WINDOWS.md). If skills fail to load with a symlink error during install, the fix is in [docs/FAQ.md](docs/FAQ.md). Full steps are in [docs/SETUP.md](docs/SETUP.md).
 
 **Does career-ops auto-apply to jobs for me?**
 No. career-ops is a filter, not a spray-and-pray auto-applier. The AI evaluates, ranks and drafts; you review and decide. It never submits, sends, or clicks anything — you always have the final call. That human-in-the-loop design is the whole point.

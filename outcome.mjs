@@ -26,8 +26,11 @@ import { createHash } from 'crypto';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
-  resolveTrackerPath, normalizeCompany, pathIsInside,
-  resolveWorkspaceRoot, resolvePdfIndexPath,
+  normalizeCompany,
+  pathIsInside,
+  resolvePdfIndexPath,
+  resolveTrackerPath,
+  resolveWorkspaceRoot,
 } from './tracker-utils.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';

@@ -18,20 +18,44 @@
  *   data, paths, etc.) is SKIPPED. A green `--only` run is NOT a green
  *   suite. Always run the full suite (no flags) before pushing.
  *
- * Provider tests live in tests/providers/{name}.test.mjs and are
- * auto-discovered — no registration needed. To add a test for a new
- * provider, create that one file; do not add a section to this file.
+ * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
+ * Anything matching tests/**\/*.test.mjs is auto-discovered — no registration,
+ * no section number. Provider tests are one case of this
+ * (tests/providers/{name}.test.mjs), not the only one.
+ *
+ * Why it matters beyond tidiness: a numbered section means editing the end of
+ * this file, and the section number is a global label picked by hand. Six
+ * contributors doing that at once in Aug-2026 all picked `60a` and each merge
+ * forced a rebase on the other five - about fifteen rebases and six serialized
+ * CI runs for six lines of test code. A new file collides with nobody, so
+ * those PRs can all land in parallel.
+ *
+ * The inline sections below are history, not a pattern to copy.
  */
 
 
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+
+// Windows keeps a handle open on a just-exited child process's working files
+// for a short window (antivirus and Search Indexer widen it), so removing a
+// fixture directory the suite created inside the repo can fail with EPERM even
+// though every assertion passed. `force: true` does not cover that — it
+// suppresses ENOENT, not EPERM — and most of these removals sit in `finally`
+// blocks, so one unlucky cleanup aborted the whole run with a stack trace and
+// a non-zero exit. That reads as a broken test suite on Windows when nothing
+// is broken, and it leaves the fixture dir behind for the next run to trip on.
+//
+// Node retries exactly this class of error (EBUSY/EMFILE/ENFILE/ENOTEMPTY/
+// EPERM) with linear backoff when given maxRetries, so default it everywhere
+// rather than at ~95 individual call sites. An explicit option still wins.
+const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
 import { join, dirname, basename, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 /**
@@ -150,7 +174,26 @@ async function runDiscovered(filter = null) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
-    await import(pathToFileURL(f).href);
+    // Neither guard above survives contact with an uncaught THROW, which ends
+    // the run just as completely and rather more quietly: node unwinds straight
+    // out of test-all, finish() never prints its summary, and every suite
+    // sorting after this one silently never runs. That does not read as a
+    // broken suite — it reads as a finished one, so the screen of green above
+    // the cut looks like a pass. (Measured on a Windows box with no symlink
+    // privilege: tests/intake.test.mjs threw at import and took 2067 of 3693
+    // checks with it, with no verdict line at all — #2828.) A discovered suite
+    // is a guest, not a co-host: its crash is one failure, not the end of the
+    // run.
+    try {
+      await import(pathToFileURL(f).href);
+    } catch (err) {
+      fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+      // The throw site, not just the message: a suite that dies mid-import
+      // leaves no other clue how far it got.
+      for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+        if (line.trim()) console.log(`      ${line.trim()}`);
+      }
+    }
   }
 }
 
@@ -234,6 +277,12 @@ mjsFiles.forEach((f, i) => {
 
 console.log('\n2. Script execution (graceful on empty data)');
 
+// How much of its budget a script may consume before the suite says so. High
+// enough that ordinary CI variance stays quiet, low enough to leave room to act
+// before the kill: at 0.75 a 30s script warns at 22.5s, nearly a full run of
+// headroom.
+const SLOW_SCRIPT_WARN_FRACTION = 0.75;
+
 const scripts = [
   { name: 'cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
   { name: 'verify-pipeline.mjs', expectExit: 0 },
@@ -256,12 +305,14 @@ const scripts = [
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
   { name: 'salary-gap.mjs --self-test', expectExit: 0 },
+  { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
+  { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
@@ -274,7 +325,21 @@ const scripts = [
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
-  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0 },
+  // The one script in this list that genuinely needs longer than the shared
+  // budget. It spawns competing writer processes for 27 contention cases, and
+  // that cost is the behaviour under test rather than slack to be trimmed.
+  //
+  // Measured on current main on a 24-core Windows box, four consecutive runs:
+  // 13.4s, 17.8s, 19.8s, 20.1s — already 67% of the default 30s before a
+  // 2-core CI runner's load is added. On windows-latest it crossed the line and
+  // was killed mid-matrix (`exit null, signal SIGTERM`), while every other
+  // check on the same commit passed (#2906).
+  //
+  // Raised here rather than in run()'s default so the outlier is treated as an
+  // outlier: every other script keeps the 30s bound, and a NEW script that
+  // starts taking half a minute still fails loudly instead of inheriting a
+  // budget sized for this one.
+  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
@@ -359,14 +424,61 @@ try {
     'utf-8'
   );
 
-  for (const { name, allowFail } of scripts) {
+  for (const script of scripts) {
+    const { name, allowFail, timeoutMs } = script;
     const parts = name.split(' ');
     const scriptFile = parts[0];
     const args = parts.slice(1);
+    // WHETHER a budget was declared is read from the key's presence, never
+    // inferred from its value. Every in-band sentinel here is also a value
+    // somebody could write, and each one costs a bug: the first draft used
+    // `??` for the budget and truthiness for the override, so `timeoutMs: 0`
+    // meant "no budget" to one line and "default" to the next; the second used
+    // `null` as its absent-marker, so an explicit `timeoutMs: null` skipped
+    // validation and silently took the default. `hasOwn` cannot be spoofed by
+    // a value, so the question has one answer.
+    //
+    // A declared-but-unusable value then fails loudly rather than falling back.
+    // This list is hand-edited, so a bad entry is a typo in the suite's own
+    // definition, and quietly substituting the default would hide it behind the
+    // very budget it was trying to set. `timeoutMs: undefined` is caught too —
+    // writing the key at all is a claim, and an unusable claim is a mistake.
+    // Integer, not merely finite: execFileSync rejects a fractional timeout with
+    // ERR_OUT_OF_RANGE, so `timeoutMs: 0.5` would pass a "looks like a number"
+    // check here and then blow up inside the run with an error about neither
+    // this list nor this script. Validation that stops short of what the
+    // consumer accepts just moves the failure somewhere less legible.
+    const declared = Object.hasOwn(script, 'timeoutMs');
+    if (declared && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+      fail(`${name} declares an unusable timeoutMs (${String(timeoutMs)}) — must be a positive integer number of milliseconds`);
+      continue;
+    }
+    const budgetMs = declared ? timeoutMs : DEFAULT_SCRIPT_TIMEOUT_MS;
+    const startedAt = Date.now();
+    // Spread rather than defaulted: `{ timeout: undefined }` reads to
+    // execFileSync as "no timeout at all", which would turn a hung script into
+    // a hung CI job. Absent means absent, so run()'s own default stands.
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(declared ? { timeout: timeoutMs } : {}),
     });
+    const elapsedMs = Date.now() - startedAt;
+    // A budget a script can raise for itself is a place to hide in, unless
+    // something still notices it creeping. Nothing did: the reason
+    // tracker-writer-lock-tests.mjs was killed rather than flagged is that
+    // spending 29 of its 30 seconds looked exactly like spending 2 — the suite
+    // reported "runs OK" either way, right up to the run where it did not.
+    //
+    // So the ceiling is not the only signal any more. A script that eats most
+    // of its budget says so while it is still passing, which is the point at
+    // which someone can act. This is a WARNING rather than a failure on
+    // purpose: a loaded runner is a normal reason to be slow, and turning that
+    // into a red run would trade one false failure for another.
+    if (result !== null && elapsedMs > budgetMs * SLOW_SCRIPT_WARN_FRACTION) {
+      warn(`${name} used ${(elapsedMs / 1000).toFixed(1)}s of its ${(budgetMs / 1000).toFixed(0)}s budget `
+        + `(${Math.round((elapsedMs / budgetMs) * 100)}%) — it is passing, but it is close to being killed for time`);
+    }
     if (result !== null) {
       pass(`${name} runs OK`);
     } else if (allowFail) {
@@ -376,6 +488,55 @@ try {
       // failure arrives as a bare `<name> crashed`: no stack, no assertion
       // text, no exit code, and nothing a reader can act on.
       fail(`${name} crashed${formatRunFailure()}`);
+    }
+  }
+
+  // assessment-log.mjs CLI contract (#2797): help aliases print one shared
+  // usage block, unknown leading-dash arguments fail loudly, and the existing
+  // add/summary paths still accept ordinary values that merely contain dashes.
+  {
+    const assessmentCli = (...argv) => spawnSync(NODE, [join(scriptTmp, 'assessment-log.mjs'), ...argv], {
+      cwd: scriptTmp,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const helpR = assessmentCli('--help');
+    const hR = assessmentCli('-h');
+    if (helpR.status === 0 && hR.status === 0 && helpR.stdout.includes('Usage:')
+        && helpR.stdout.includes('--self-test') && hR.stdout === helpR.stdout
+        && helpR.stderr === '' && hR.stderr === '') {
+      pass('assessment-log.mjs --help/-h print the shared usage block and exit 0 (#2797)');
+    } else {
+      fail(`assessment-log.mjs help handling broken: ${JSON.stringify({ help: { status: helpR.status, stdout: helpR.stdout, stderr: helpR.stderr }, h: { status: hR.status, stdout: hR.stdout, stderr: hR.stderr } })}`);
+    }
+
+    const typoR = assessmentCli('--sumary');
+    const misplacedAddFlagR = assessmentCli('--company', 'Acme-Co');
+    if (typoR.status === 1 && typoR.stderr.includes('unrecognized flag')
+        && typoR.stderr.includes('--sumary') && typoR.stderr.includes('Valid flags:')
+        && typoR.stderr.includes('Usage:') && typoR.stdout === ''
+        && misplacedAddFlagR.status === 1 && misplacedAddFlagR.stderr.includes('--company')) {
+      pass('assessment-log.mjs rejects and names an unrecognized leading-dash flag (#2797)');
+    } else {
+      fail(`assessment-log.mjs unknown flag handling broken: ${JSON.stringify({ typo: { status: typoR.status, stdout: typoR.stdout, stderr: typoR.stderr }, misplacedAddFlag: { status: misplacedAddFlagR.status, stdout: misplacedAddFlagR.stdout, stderr: misplacedAddFlagR.stderr } })}`);
+    }
+
+    const addR = assessmentCli(
+      'add', '--company', 'Acme-Co', '--platform', 'eSkill', '--subject',
+      '-Data-Analysis', '--threshold', '70', '--score', '85'
+    );
+    const summaryR = assessmentCli('--summary');
+    let added = null;
+    try { added = JSON.parse(addR.stdout); } catch {}
+    if (addR.status === 0 && added?.added === true
+        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === '-Data-Analysis'
+        && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
+        && summaryR.stdout.includes('Data-Analysis')) {
+      pass('assessment-log.mjs preserves add/summary flags and dash-containing values (#2797 regression)');
+    } else {
+      fail(`assessment-log.mjs existing CLI behavior regressed: ${JSON.stringify({ add: { status: addR.status, stdout: addR.stdout, stderr: addR.stderr }, summary: { status: summaryR.status, stdout: summaryR.stdout, stderr: summaryR.stderr } })}`);
     }
   }
 
@@ -853,6 +1014,102 @@ try {
     applyControls: ['Apply for this job'],
   });
 
+  // --- iframe-embedded postings -------------------------------------------
+  // Some ATS (iCIMS) render the posting inside a same-origin iframe and leave
+  // the top-level document as a ~13-character shell, which used to reach
+  // insufficient_content and return `expired` for a live job.
+  //
+  // `fillAfter` models the part that made the first attempt at this fix a
+  // no-op: the frame ATTACHES immediately but POPULATES late (measured 0 chars
+  // at 2000ms, 3887 at 4000ms), so a reader that does not wait sees an empty
+  // document and nothing changes.
+  const framedPage = ({ status = 200, finalUrl, shellText = 'Careers', frames = [] }) => {
+    const page = {};
+    const main = { __main: true };
+    const built = frames.map((spec) => {
+      let textReads = 0;
+      return {
+        url: () => spec.url,
+        async evaluate(fn) {
+          // Both extractors mention innerText, so discriminate on the selector
+          // call that only the apply-control extractor makes.
+          const isControls = String(fn).includes('querySelectorAll');
+          const filled = textReads >= (spec.fillAfter ?? 0);
+          if (!isControls) textReads += 1;
+          if (isControls) return filled ? (spec.controls ?? []) : [];
+          return filled ? spec.text : '';
+        },
+      };
+    });
+    let evalCall = 0;
+    Object.assign(page, {
+      async goto() { return { status: () => status }; },
+      async waitForTimeout() {},
+      url() { return finalUrl; },
+      frames() { return [main, ...built]; },
+      mainFrame() { return main; },
+      async evaluate() { evalCall += 1; return evalCall === 1 ? shellText : []; },
+    });
+    return page;
+  };
+
+  const SHELL = 'https://careers-example.icims.com/jobs/1/role/job';
+  const framedLive = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Senior Analyst. '.repeat(30), controls: ['Apply for this job online'], fillAfter: 2 }],
+  }), SHELL);
+  if (framedLive.result === 'active' && framedLive.code === 'apply_control_visible') {
+    pass('liveness reads a same-origin posting frame that populates late');
+  } else {
+    fail(`late-filling posting frame not read: ${JSON.stringify(framedLive)}`);
+  }
+
+  const crossOrigin = await checkUrlLiveness(framedPage({
+    finalUrl: SHELL,
+    frames: [{ url: 'https://ads.example.net/widget', text: 'Sponsored. '.repeat(30), controls: ['Apply now'] }],
+  }), SHELL);
+  if (crossOrigin.result === 'expired' && crossOrigin.code === 'insufficient_content') {
+    pass('a cross-origin frame cannot make an empty shell look active');
+  } else {
+    fail(`cross-origin frame leaked into the verdict: ${JSON.stringify(crossOrigin)}`);
+  }
+
+  const goneWithFrame = await checkUrlLiveness(framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: 'Job not found. '.repeat(30), controls: ['Apply for this job online'] }],
+  }), SHELL);
+  if (goneWithFrame.result === 'expired' && goneWithFrame.code === 'http_gone') {
+    pass('HTTP 410 still wins over a frame carrying an apply control');
+  } else {
+    fail(`410 precedence lost to frame aggregation: ${JSON.stringify(goneWithFrame)}`);
+  }
+
+  // A 410 must not pay the frame poll: the status already decided it, and a
+  // dead posting whose error page renders into an iframe would otherwise wait
+  // for that error page to fill before saying what it knew at byte one.
+  // Count only the 500ms poll waits; the 2000ms hydration wait always happens.
+  let pollWaits = 0;
+  const gonePage = framedPage({
+    status: 410,
+    finalUrl: SHELL,
+    frames: [{ url: SHELL + '?in_iframe=1', text: '', controls: [], fillAfter: 999 }],
+  });
+  gonePage.waitForTimeout = async (ms) => { if (ms === 500) pollWaits += 1; };
+  const goneFast = await checkUrlLiveness(gonePage, SHELL);
+  if (goneFast.result === 'expired' && goneFast.code === 'http_gone' && pollWaits === 0) {
+    pass('HTTP 410 short-circuits before the frame poll (no wait spent)');
+  } else {
+    fail(`410 did not short-circuit: ${JSON.stringify(goneFast)}, poll waits=${pollWaits}`);
+  }
+
+  const legacyDouble = await checkUrlLiveness(livePage(), URL);
+  if (legacyDouble.result === 'active') {
+    pass('a page object without frames()/mainFrame() still returns a top-level verdict');
+  } else {
+    fail(`frame aggregation broke a frameless page object: ${JSON.stringify(legacyDouble)}`);
+  }
+
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
       isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
       !isChallengeResult({ result: 'expired', code: 'http_gone' }) &&
@@ -964,6 +1221,10 @@ try {
   // the whole section off the network.
   const restoreHostResolver = setHostResolver(async (hostname) => {
     if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    // A shut-down analytics vendor: the name still appears in the page, but it
+    // resolves to nothing at all. Distinct from the loopback case above, which
+    // resolves fine and is blocked for being private.
+    if (hostname === 'dead-analytics-vendor.invalid') return [];
     // Every other host in this section is a stand-in for a normal public site.
     return ['93.184.216.34'];
   });
@@ -1049,6 +1310,67 @@ try {
     } else {
       fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
     }
+
+    // A dead THIRD-PARTY host must not decide the verdict for the posting.
+    // Analytics vendors get shut down and their script tags stay in career
+    // pages forever; without this, every posting on such a page reports
+    // uncertain. The route double here is real-shaped (isNavigationRequest and
+    // frame), because that is the only way the guard can tell a subresource
+    // from the main document.
+    const deadThirdParty = (navigation) => {
+      let cb = null;
+      let abortCount = 0;
+      const main = {};
+      return {
+        _blockedByGuard: null,
+        // The verdict is only half the claim. The other half is that the egress
+        // guard still ABORTS the request in both cases — relaxing the verdict
+        // must not quietly start letting a non-resolving host through.
+        get abortCount() { return abortCount; },
+        mainFrame: () => main,
+        async route(_pattern, callback) { cb = callback; },
+        async goto() {
+          await cb({
+            request: () => ({
+              url: () => 'https://dead-analytics-vendor.invalid/widget.js',
+              isNavigationRequest: () => navigation,
+              frame: () => (navigation ? main : {}),
+            }),
+            abort: async () => { abortCount += 1; },
+            continue: async () => {},
+          });
+          return { status: () => 200 };
+        },
+        async waitForTimeout() {},
+        url: () => 'https://careers.example.com/jobs/1',
+        async evaluate() {
+          this._n = (this._n || 0) + 1;
+          return this._n === 1 ? 'Senior Analyst. '.repeat(30) : ['Apply for this job'];
+        },
+      };
+    };
+
+    const subresourcePage = deadThirdParty(false);
+    const subresourceDead = await checkUrlLiveness(subresourcePage, 'https://careers.example.com/jobs/1');
+    if (subresourceDead.result === 'active' && subresourcePage.abortCount === 1) {
+      pass('a dead third-party subresource is still aborted, but no longer decides the verdict');
+    } else {
+      fail(
+        `dead third-party subresource handled wrongly: ${JSON.stringify(subresourceDead)}, ` +
+        `aborts=${subresourcePage.abortCount} (want result active, aborts 1)`
+      );
+    }
+
+    const mainDocPage = deadThirdParty(true);
+    const mainDocDead = await checkUrlLiveness(mainDocPage, 'https://careers.example.com/jobs/1');
+    if (mainDocDead.result === 'uncertain' && mainDocDead.code === 'blocked_host' && mainDocPage.abortCount === 1) {
+      pass('a non-resolving MAIN DOCUMENT is aborted and still returns blocked_host');
+    } else {
+      fail(
+        `main-document DNS failure handled wrongly: ${JSON.stringify(mainDocDead)}, ` +
+        `aborts=${mainDocPage.abortCount} (want uncertain/blocked_host, aborts 1)`
+      );
+    }
   } finally {
     // Always put the real resolver back, even if an assertion above throws:
     // a leaked stub would silently answer for every later suite in this process.
@@ -1056,6 +1378,146 @@ try {
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
+}
+
+// ── 3b. ARCHIVE-POSTING EGRESS GUARD (#1956) ────────────────────
+//
+// archive-posting.mjs drives Playwright at a URL the user pastes in (or that
+// arrives via data/pipeline.md), and used to navigate with zero egress
+// safeguards — so a hostile posting link could render an internal service or a
+// cloud metadata endpoint straight into a PDF. It now wires up the *same*
+// two-layer guard liveness-browser.mjs exports rather than carrying a second
+// implementation, so these tests pin the wiring, not a copy of the guard logic.
+try {
+  const { archiveUrl, installEgressGuard } = await import(
+    pathToFileURL(join(ROOT, 'archive-posting.mjs')).href
+  );
+  const { setHostResolver } = await import(
+    pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
+  );
+
+  // Stop each run the moment navigation starts: everything after goto() is PDF
+  // rendering and a writeFile into jds/, which these assertions don't need and
+  // must not perform.
+  const STOP = 'archive-guard-test-stop';
+
+  // Records what the guard did, and never lets the flow reach page.pdf().
+  function makeMockBrowser({ landedUrl = 'https://example.com/job/1' } = {}) {
+    const state = { routeCallback: null, contextCreated: false, closed: false };
+    const context = {
+      async route(pattern, callback) {
+        state.pattern = pattern;
+        state.routeCallback = callback;
+      },
+      async newPage() {
+        return {
+          async goto() {
+            if (state.stopAtGoto) throw new Error(STOP);
+            return { status: () => 200 };
+          },
+          url: () => landedUrl,
+          async waitForTimeout() { throw new Error(STOP); },
+          async title() { return ''; },
+          async $eval() { return ''; },
+        };
+      },
+      async close() { state.closed = true; },
+    };
+    const browser = {
+      async newContext() {
+        state.contextCreated = true;
+        return context;
+      },
+    };
+    return { browser, state };
+  }
+
+  // Drives a registered route handler and reports the verdict it reached.
+  async function runGuard(requestUrl) {
+    const { browser, state } = makeMockBrowser();
+    state.stopAtGoto = true;
+    await archiveUrl(browser, 'https://example.com/job/1').catch(() => {});
+    if (!state.routeCallback) return { registered: false };
+    let verdict = null;
+    await state.routeCallback({
+      request: () => ({ url: () => requestUrl }),
+      abort: async (code) => { verdict = { action: 'abort', code }; },
+      continue: async () => { verdict = { action: 'continue' }; },
+    });
+    return { registered: true, verdict, pattern: state.pattern };
+  }
+
+  // 1. Pre-navigation refusal — an obviously-internal target must not reach
+  //    Playwright at all, so no context is ever created.
+  const { browser: preBrowser, state: preState } = makeMockBrowser();
+  let preError = null;
+  await archiveUrl(preBrowser, 'http://169.254.169.254/latest/meta-data/')
+    .catch((err) => { preError = err; });
+  if (preError && /restricted destination/.test(preError.message) && !preState.contextCreated) {
+    pass('archive-posting refuses a private-IP target before opening a browser context');
+  } else {
+    fail(`archive-posting pre-navigation guard failed: error=${preError?.message ?? 'none'}, contextCreated=${preState.contextCreated}`);
+  }
+
+  // 2. The guard is registered on the context for every request, not just the
+  //    page's first hop — a page-scoped route wouldn't cover the whole flow.
+  const registration = await runGuard('https://example.com/assets/logo.png');
+  if (registration.registered && registration.pattern === '**/*') {
+    pass('archive-posting registers the egress guard on the context for all requests');
+  } else {
+    fail(`archive-posting did not register a context-wide route: ${JSON.stringify(registration)}`);
+  }
+
+  // 3. Legitimate subresources still go through — a guard that blocks
+  //    everything would pass a naive block-only test while breaking archiving.
+  if (registration.verdict?.action === 'continue') {
+    pass('archive-posting egress guard allows legitimate public requests');
+  } else {
+    fail(`archive-posting egress guard blocked a legitimate request: ${JSON.stringify(registration.verdict)}`);
+  }
+
+  // 4. Redirect hop straight to a literal private address.
+  const literalHop = await runGuard('http://10.0.0.5/internal');
+  if (literalHop.verdict?.action === 'abort' && literalHop.verdict.code === 'blockedbyclient') {
+    pass('archive-posting egress guard blocks a redirect hop to a literal private IP');
+  } else {
+    fail(`archive-posting egress guard let a private-IP hop through: ${JSON.stringify(literalHop.verdict)}`);
+  }
+
+  // 5. The case the literal-host check cannot see: a public-looking hostname
+  //    that resolves into loopback. Without the DNS layer this hop is allowed,
+  //    which is the whole reason validateUrlSecurity is reused here.
+  const restoreArchiveResolver = setHostResolver(async (hostname) => (
+    hostname === 'ssrf-blocked-host.local' ? ['127.0.0.1'] : ['93.184.216.34']
+  ));
+  try {
+    const dnsHop = await runGuard('http://ssrf-blocked-host.local/sensitive-internal');
+    if (dnsHop.verdict?.action === 'abort' && dnsHop.verdict.code === 'blockedbyclient') {
+      pass('archive-posting egress guard blocks a hostname that resolves to loopback');
+    } else {
+      fail(`archive-posting egress guard missed a DNS-resolved private target: ${JSON.stringify(dnsHop.verdict)}`);
+    }
+  } finally {
+    restoreArchiveResolver();
+  }
+
+  // 6. Landed-URL re-check after navigation. A first-hop-only check is the
+  //    classic miss, so the settled URL is asserted too.
+  const { browser: landedBrowser } = makeMockBrowser({ landedUrl: 'http://169.254.169.254/latest/meta-data/' });
+  let landedError = null;
+  await archiveUrl(landedBrowser, 'https://example.com/job/1')
+    .catch((err) => { landedError = err; });
+  if (landedError && /after redirect/.test(landedError.message)) {
+    pass('archive-posting refuses to render a page that landed on a private address');
+  } else {
+    fail(`archive-posting landed-URL guard failed: ${landedError?.message ?? 'no error'}`);
+  }
+
+  if (typeof installEgressGuard !== 'function') {
+    fail('archive-posting does not export installEgressGuard');
+  }
+} catch (e) {
+  fail(`archive-posting egress guard tests crashed: ${e.message}`);
 }
 
 // ── 4. DASHBOARD BUILD ──────────────────────────────────────────
@@ -1889,8 +2351,10 @@ const patternsMachineFields = readFile('analyze-patterns.mjs').match(/const MACH
 if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
+  /^reports_to:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
-  /['"]company_confidential['"]/.test(patternsMachineFields)
+  /['"]company_confidential['"]/.test(patternsMachineFields) &&
+  /['"]reports_to['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
@@ -2534,6 +2998,206 @@ if (
   }
 }
 
+// --- Block G AI-screening disclosure signal (#2892, jurisdiction-compliance-lens umbrella #2026) ---
+{
+  // 1. Jurisdiction table exists, parses as YAML, and all three verified
+  //    seeds (US-NY-NYC, US-IL, EU) are complete per the header schema.
+  const asdPath = join(ROOT, 'templates', 'jurisdiction-ai-screening-disclosure.yml');
+  if (!existsSync(asdPath)) {
+    fail('templates/jurisdiction-ai-screening-disclosure.yml missing (#2892)');
+  } else {
+    try {
+      const asdRaw = readFileSync(asdPath, 'utf-8');
+      const asd = yaml.load(asdRaw);
+      const j = asd?.jurisdictions || {};
+      const rowComplete = (row) =>
+        row &&
+        typeof row.jurisdiction_name === 'string' && row.jurisdiction_name.length > 0 &&
+        typeof row.law_name === 'string' && row.law_name.length > 0 &&
+        typeof row.effective === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.effective) &&
+        typeof row.requires === 'string' && row.requires.length > 0 &&
+        Array.isArray(row.disclosure_language_examples) && row.disclosure_language_examples.length > 0 &&
+        typeof row.official_source?.url === 'string' && row.official_source.url.length > 0 &&
+        typeof row.legal_basis === 'string' && row.legal_basis.length > 0 &&
+        Array.isArray(row.sources) && row.sources.length > 0 &&
+        Boolean(row.as_of);
+
+      // CodeRabbit finding 1 (#2896): a state-wide US-NY key is wrong — Local
+      // Law 144 splits into a job-location-keyed audit duty and a candidate-
+      // residency-keyed (five boroughs) notice duty. The row must be keyed
+      // city-specifically and carry BOTH condition fields explicitly, so a
+      // generic "New York, USA" profile can never be mistaken for a match.
+      const nyRow = j['US-NY-NYC'];
+      const nyRowCityKeyed =
+        !j['US-NY'] && // the old state-wide key must be gone, not just supplemented
+        rowComplete(nyRow) &&
+        String(nyRow.effective) === '2023-07-05' &&
+        nyRow.law_name.includes('Local Law 144') &&
+        typeof nyRow.job_location_condition === 'string' && nyRow.job_location_condition.length > 0 &&
+        typeof nyRow.candidate_residency_condition === 'string' &&
+        /five boroughs|Manhattan/i.test(nyRow.candidate_residency_condition) &&
+        /New York State|not\s+NYC|not\s+sufficient/i.test(nyRow.candidate_residency_condition);
+
+      // CodeRabbit finding 2 (#2896): the EU AI Act's high-risk obligations
+      // for stand-alone Annex III systems were provisionally deferred (May
+      // 2026 Digital Omnibus agreement) from 2026-08-02 to 2027-12-02, and
+      // official_source.url must point at an actual EU institutional source
+      // (EUR-Lex or a *.europa.eu page) — not a third-party summary site.
+      const euRow = j['EU'];
+      const euRowCorrected =
+        rowComplete(euRow) &&
+        String(euRow.effective) === '2027-12-02' &&
+        euRow.law_name.includes('2024/1689') &&
+        /europa\.eu/i.test(euRow.official_source.url) &&
+        /Digital Omnibus/i.test(euRow.enforcement_notes || '') &&
+        /2026-08-02/.test(euRow.enforcement_notes || '') &&
+        /provisional/i.test(euRow.enforcement_notes || '');
+
+      if (
+        nyRowCityKeyed &&
+        rowComplete(j['US-IL']) && j['US-IL'].law_name.includes('820 ILCS 42') &&
+        euRowCorrected
+      ) {
+        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the provisional Digital Omnibus deferral, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
+      } else {
+        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the provisional Digital Omnibus deferral from the original 2026-08-02 date) (#2896)');
+      }
+
+      if (
+        asdRaw.includes('CONTRIBUTION RULE') &&
+        asdRaw.includes('NEVER-ASSERT RULE') &&
+        asdRaw.includes('never a third-party mirror')
+      ) {
+        pass('jurisdiction-ai-screening-disclosure.yml header documents the contribution rule, the never-assert rule, and the official-source-only requirement (#2892)');
+      } else {
+        fail('jurisdiction-ai-screening-disclosure.yml header missing the contribution rule, never-assert rule, and/or official-source-only requirement (#2892)');
+      }
+    } catch (e) {
+      fail(`templates/jurisdiction-ai-screening-disclosure.yml does not parse as YAML: ${e.message} (#2892)`);
+    }
+  }
+
+  // 2. oferta.md carries Signal 15 with both the presence-based (a) and
+  //    corroborating-only (b) halves, the jurisdiction derivation mirroring
+  //    the agency-licensing/immigration-status pattern, and the not-legal-advice note.
+  const asdStart = ofertaMode.indexOf('**15. AI-Screening Disclosure**');
+  const asdEnd = ofertaMode.indexOf('### Output format:', Math.max(asdStart, 0));
+  const asdSection = asdStart >= 0 && asdEnd > asdStart ? ofertaMode.slice(asdStart, asdEnd) : '';
+  if (
+    asdSection &&
+    asdSection.includes('templates/jurisdiction-ai-screening-disclosure.yml') &&
+    asdSection.includes('config/profile.yml') &&
+    asdSection.includes('fires standalone') &&
+    asdSection.includes('corroborating-only') &&
+    asdSection.includes('never fires standalone') &&
+    asdSection.includes('No table row for the candidate') &&
+    asdSection.includes('not legal advice')
+  ) {
+    pass('oferta Block G Signal 15 pins the jurisdiction table reference, config/profile.yml jurisdiction derivation, presence-based standalone trigger, corroborating-only absence trigger, silent skip for no-row jurisdictions, not-legal-advice note (#2892)');
+  } else {
+    fail('oferta Block G missing/incomplete AI-screening disclosure section — needs table reference, config/profile.yml jurisdiction derivation, presence-based (a) firing standalone, absence-based (b) as corroborating-only (never standalone), silent skip for no-row jurisdictions, not-legal-advice note (#2892)');
+  }
+
+  // 2b. CodeRabbit finding 1 (#2896): a candidate profile that just says
+  //     "New York, USA" (state-level, no city) must NOT be treated as a
+  //     match for the NYC candidate-residency condition — the rule text
+  //     must say so explicitly, not leave it to inference.
+  if (
+    asdSection.includes('US-NY-NYC') &&
+    asdSection.includes('New York, USA" or "New York State" location string is NOT sufficient') &&
+    asdSection.includes('Buffalo or Albany') &&
+    asdSection.includes('candidate_residency_condition') &&
+    asdSection.includes('job_location_condition')
+  ) {
+    pass('oferta Block G Signal 15 explicitly rejects a state-wide "New York, USA"/"New York State" profile location as a match for the NYC candidate-residency condition, and distinguishes job_location_condition (not evaluated by this signal) from candidate_residency_condition (the only half this signal can check) (#2896 CodeRabbit finding 1)');
+  } else {
+    fail('oferta Block G Signal 15 must explicitly state that a generic "New York, USA"/"New York State" profile location does NOT satisfy the US-NY-NYC candidate-residency condition (Buffalo/Albany counter-example), and must distinguish job_location_condition from candidate_residency_condition (#2896 CodeRabbit finding 1)');
+  }
+
+  // 3. Hard rule: never fetches or scrapes official_source.url (zero-fetch pillar)
+  if (asdSection.includes('never fetches or scrapes anything')) {
+    pass('oferta AI-screening disclosure signal pins the never-fetch/scrape hard rule (#2892)');
+  } else {
+    fail('oferta AI-screening disclosure signal missing the never-fetch/scrape hard rule (#2892)');
+  }
+
+  // 4. Phrasing discipline holds in the report-facing text: the blockquote
+  //    templates describe the statutory fact + posting silence — never an
+  //    accusation that the employer skipped a required disclosure.
+  const asdQuoteLines = asdSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const asdAccusatory = asdQuoteLines.filter((l) =>
+    /(this|the)\s+employer\s+(is|was|are|were|failed|did\s+not)\s+(breaking|violating|skipped|non-compliant)/i.test(l)
+  );
+  if (asdSection && asdQuoteLines.length >= 2 && asdAccusatory.length === 0) {
+    pass('AI-screening disclosure report templates state statutory fact + posting silence only — no "employer failed/violated/non-compliant" assertions (#2892)');
+  } else {
+    fail(`AI-screening disclosure phrasing discipline broken: ${asdAccusatory.length ? `accusatory blockquote line(s): ${asdAccusatory[0].trim().slice(0, 80)}` : 'expected 2+ blockquote output templates (presence + corroborating-only) in the section'} (#2892)`);
+  }
+
+  // 5. Deferred follow-up (#2676 cross-reference, #1404/#1405 analytics layer)
+  //    is explicitly noted as out of scope, not silently absorbed.
+  if (asdSection.includes('#2676') && asdSection.includes('#1404/#1405')) {
+    pass('oferta AI-screening disclosure signal explicitly defers the #2676 cross-reference and #1404/#1405 analytics-layer follow-up (#2892)');
+  } else {
+    fail('oferta AI-screening disclosure signal should explicitly note the #2676 cross-reference and #1404/#1405 analytics-layer follow-up as deferred, not attempted here (#2892)');
+  }
+
+  // 6. Risk Summary row exists and follows the "activates automatically" pattern
+  const riskSummarySection = ofertaMode.slice(
+    ofertaMode.indexOf('## Risk Summary (after Block G)'),
+    ofertaMode.indexOf('Block format:')
+  );
+  if (
+    riskSummarySection.includes('AI-screening disclosure') &&
+    riskSummarySection.includes('activates automatically once the check exists')
+  ) {
+    pass('oferta Risk Summary table carries the AI-screening disclosure row, activating automatically once the check exists (#2892)');
+  } else {
+    fail('oferta Risk Summary table missing the AI-screening disclosure row (or missing the "activates automatically" phrasing) (#2892)');
+  }
+
+  // 7. templates/README.md documents the new table
+  const templatesReadme = readFile('templates/README.md');
+  if (templatesReadme.includes('jurisdiction-ai-screening-disclosure.yml')) {
+    pass('templates/README.md documents jurisdiction-ai-screening-disclosure.yml (#2892)');
+  } else {
+    fail('templates/README.md missing an entry for jurisdiction-ai-screening-disclosure.yml (#2892)');
+  }
+
+  // 8. batch/batch-prompt.md Machine Summary schema carries the new
+  //    ai_screening_disclosure risk_summary key (source of truth for downstream parsers)
+  const batchPrompt = readFile('batch/batch-prompt.md');
+  if (batchPrompt.includes('ai_screening_disclosure:')) {
+    pass('batch/batch-prompt.md Machine Summary schema includes the ai_screening_disclosure risk_summary key (#2892)');
+  } else {
+    fail('batch/batch-prompt.md Machine Summary schema missing the ai_screening_disclosure risk_summary key (#2892)');
+  }
+
+  // 9. check-table-freshness.mjs discovers the new table automatically —
+  //    schema-agnostic discovery, no per-table registration required (#2036).
+  //    CodeRabbit finding 3 (#2896): don't assert an exact row count (this
+  //    table explicitly invites community-contributed rows, per its own
+  //    header) — assert the three seed keys are present and every discovered
+  //    row carries as_of, so a legitimate 4th+ row never breaks this test,
+  //    but a missing seed or a row without as_of still fails it.
+  try {
+    const freshnessMod = await import('./check-table-freshness.mjs');
+    const asdDoc = yaml.load(asdPath && existsSync(asdPath) ? readFileSync(asdPath, 'utf-8') : '');
+    const rows = freshnessMod.extractRows(asdDoc || {});
+    const discoveredKeys = new Set(rows.map((r) => r.row?.jurisdiction));
+    const seedKeys = ['US-NY-NYC', 'US-IL', 'EU'];
+    const allSeedsDiscovered = seedKeys.every((k) => discoveredKeys.has(k));
+    const allRowsHaveAsOf = rows.length > 0 && rows.every((r) => !r.missingAsOf);
+    if (allSeedsDiscovered && allRowsHaveAsOf) {
+      pass(`check-table-freshness.mjs extractRows() auto-discovers all 3 seed rows (US-NY-NYC, US-IL, EU) of jurisdiction-ai-screening-disclosure.yml with as_of present, tolerating future community-contributed rows (${rows.length} rows discovered) — no registration step needed (#2036, #2896 CodeRabbit finding 3)`);
+    } else {
+      fail(`check-table-freshness.mjs extractRows() did not cleanly discover the seed rows of jurisdiction-ai-screening-disclosure.yml — discovered keys: ${[...discoveredKeys].join(', ') || '(none)'}, missing seeds: ${seedKeys.filter((k) => !discoveredKeys.has(k)).join(', ') || 'none'}, any missing as_of: ${!allRowsHaveAsOf} (#2896)`);
+    }
+  } catch (e) {
+    fail(`could not import check-table-freshness.mjs to verify auto-discovery: ${e.message} (#2892)`);
+  }
+}
+
 // --- Block G pay-transparency range-width signal (#2019, re-scoped #2280) ---
 {
   // Maintainer direction (#2280): the jurisdiction table is gone — no
@@ -3136,6 +3800,16 @@ if (
   fail('pipeline mode missing batch liveness sweep for unconfirmed entries');
 }
 
+if (
+  pipelineMode.includes('Concurrency is conditional on the extraction tool') &&
+  pipelineMode.includes('multiple workers must never share one browser session') &&
+  pipelineMode.includes('When in doubt, use the sequential path')
+) {
+  pass('pipeline mode prevents parallel Playwright session cross-contamination (#2551)');
+} else {
+  fail('pipeline mode still permits unsafe parallel Playwright workers (#2551)');
+}
+
 // --- salary tracking mode wiring (#1656 PR-2) ---
 const trackerModeDoc = readFile('modes/tracker.md');
 const patternsModeDoc = readFile('modes/patterns.md');
@@ -3175,6 +3849,20 @@ if ((batchPromptDoc.match(/advertised_comp/g) || []).length >= 2) {
   pass('batch prompt carries advertised_comp in both Machine Summary fences');
 } else {
   fail('batch prompt missing advertised_comp in one or both Machine Summary fences');
+}
+
+// One YAML fence at a time, each bounded to its own step. A count over the
+// whole file passes when one fence carries the key twice and the other carries
+// it not at all, and an unbounded tail lets any later line stand in for the
+// Step 3 fence.
+const step2SchemaSection = batchPromptDoc.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
+const step2SchemaFence = step2SchemaSection.match(/```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+const step3Section = batchPromptDoc.match(/### Step 3 \u2014 Save the Report[\s\S]*?### Step 4 \u2014/)?.[0] ?? '';
+const step3SummaryFence = step3Section.match(/## Machine Summary\s*\n+```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+if (/^reports_to:/m.test(step2SchemaFence) && /^reports_to:/m.test(step3SummaryFence)) {
+  pass('batch prompt carries reports_to in both Machine Summary fences');
+} else {
+  fail('batch prompt missing reports_to in one or both Machine Summary fences');
 }
 
 // ── upskill Learning Plan trust model (#1740, phase 2b) ──
@@ -4426,7 +5114,7 @@ tracked_companies:
 console.log('\n10b. Portal slug validator');
 
 try {
-  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError } =
+  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError, boardIdentityMatches, boardTitleOwner } =
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
@@ -4441,6 +5129,239 @@ try {
     pass('verify-portals derives common slug suffixes (e.g. deepsetai)');
   } else {
     fail('verify-portals missing deepsetai suffix for Deepset');
+  }
+
+  // ── ASCII fold (#2930) ──
+  // The bug: `[^a-z0-9\s]` turned an accented letter into a SEPARATOR, so
+  // "Telefónica" became the two words "telef nica" and never produced
+  // "telefonica" — the slug the board actually uses. --add then reported a live
+  // board as missing. "Société Générale" shattered into four fragments, so even
+  // the first-word heuristic yielded "soci" instead of "societe".
+  const accented = [
+    ['Telefónica', 'telefonica'],
+    ['Société Générale', 'societegenerale'],
+    ['Nestlé', 'nestle'],
+    ['Ørsted', 'orsted'],   // ø does not decompose under NFD
+    ['Æon', 'aeon'],        // æ expands to two letters
+    // Letters NFD does not decompose: the stroke/bar is part of the glyph, so
+    // stripping combining marks leaves them and [^a-z0-9] deletes them
+    // (CodeRabbit, reviewing #2927). No substring luck here — "Işık" derived
+    // "isk" and never "isik", so --add probed a slug no board uses.
+    ['Işık', 'isik'],       // Turkish dotless ı
+    ['Ħamrun', 'hamrun'],   // Maltese ħ
+    ['Ŧorne', 'torne'],     // ŧ
+    ['Ŋaro', 'ngaro'],      // ŋ romanises as "ng", not "n"
+  ];
+  const missedFold = accented.filter(([name, want]) => !deriveSlugCandidates(name).includes(want));
+  if (missedFold.length === 0) {
+    pass('verify-portals ASCII-folds accented names to the slug the board actually uses');
+  } else {
+    fail(`verify-portals slug fold missed: ${missedFold.map(([n, w]) => `${n}->${w}`).join(', ')}`);
+  }
+
+  // The fold must not turn every name into a match: a distinct company must
+  // still derive a distinct slug. Without this, returning a constant passes.
+  if (!deriveSlugCandidates('Telefónica').includes('vodafone') && deriveSlugCandidates('Société Générale').includes('societe')) {
+    pass('verify-portals fold keeps distinct names distinct and preserves the first-word candidate');
+  } else {
+    fail('verify-portals fold collapsed distinct names or lost the first-word candidate');
+  }
+
+  // A name with no Latin content folds to '' — a real answer (ATS slugs are
+  // ASCII), which runAdd now reports as such instead of "needs a company name".
+  if (deriveSlugCandidates('楽天').length === 0 && deriveSlugCandidates('Сбербанк').length === 0) {
+    pass('verify-portals derives no slug from a name with no Latin content');
+  } else {
+    fail('verify-portals derived an ASCII slug from a non-Latin name');
+  }
+
+  // ── First-word suffixes are probe-only, never repair candidates (#2937) ──
+  // Crossing the bare first word with an invented suffix does not build a
+  // variant of the company's name, it builds a DIFFERENT company's name:
+  // "Nimbus Data" yields `nimbusai`, `nimbustech`, `nimbuslabs`. That is fine
+  // for `--add`, where a human reads the slug next to the name and picks one.
+  // It is not fine for discoverAlternates, whose `suggested` fix-slugs --fix
+  // writes into portals.yml unreviewed. The bare first word stays on BOTH sets
+  // on purpose: it adds no token the company lacks, and boards really are often
+  // just the brand (the "Diabolocom" row below relies on it).
+  const probeSet = deriveSlugCandidates('Nimbus Data');
+  const repairSet = deriveSlugCandidates('Nimbus Data', { firstWordSuffixes: false });
+  const coined = ['nimbusai', 'nimbustech', 'nimbusio', 'nimbushq', 'nimbuslabs', 'nimbus.tech', 'nimbus.io'];
+  const ownName = ['nimbusdata', 'nimbus-data', 'nimbus_data', 'nimbus', 'nimbusdataai', 'nimbusdata.io'];
+  if (
+    coined.every((s) => probeSet.includes(s)) &&
+    ownName.every((s) => probeSet.includes(s)) &&
+    coined.every((s) => !repairSet.includes(s)) &&
+    ownName.every((s) => repairSet.includes(s))
+  ) {
+    pass('verify-portals keeps first-word suffixes for --add and drops them from the repair set');
+  } else {
+    fail(`verify-portals first-word-suffix split wrong: probe=${JSON.stringify(probeSet)} repair=${JSON.stringify(repairSet)}`);
+  }
+
+  // End to end: the tracked company is "Nimbus Data" and its board has 404'd.
+  // The only live board belongs to "Nimbus AI". Nothing on the repair path
+  // checks identity, so a coined candidate becomes a portals.yml write that
+  // relabels another employer's postings. It must go unresolved instead.
+  const wrongEmployerBoard = 'https://boards-api.greenhouse.io/v1/boards/nimbusai/jobs';
+  const nimbusFetch = async (url) => {
+    if (url === wrongEmployerBoard) return { jobs: [{ id: 7788, title: 'VP Marketing' }] };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [nimbus] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: nimbusFetch },
+  );
+  if (nimbus.status === 'missing' && !nimbus.suggested) {
+    pass('verify-portals does not suggest a board matched only by a truncation of the name');
+  } else {
+    fail(`verify-portals adopted another employer's board: ${JSON.stringify(nimbus.suggested)}`);
+  }
+
+  // The other half of #2937. The bare first word stays in the repair set on
+  // purpose, so "Nimbus Data" still probes `nimbus`, and narrowing the set
+  // further would break the "Diabolocom" row below. The candidate
+  // is not the problem; adopting it unchecked is. Greenhouse publishes the
+  // board owner's name at /v1/boards/{slug}, so the repair path can ask who
+  // owns the board instead of inferring identity from the slug it guessed.
+  const bareOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/nimbus';
+  const bareFetch = async (url) => {
+    if (url === `${bareOwnerUrl}/jobs`) return { jobs: [{ id: 991, title: 'VP Marketing' }] };
+    if (url === bareOwnerUrl) return { name: 'Nimbus AI', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [bare] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: bareFetch },
+  );
+  if (bare.status === 'missing' && !bare.suggested) {
+    pass('verify-portals refuses a live board whose Greenhouse owner is a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched owner: ${JSON.stringify(bare.suggested)}`);
+  }
+
+  // The check must not cost the legitimate repair it exists to protect: a
+  // board that really is the brand still resolves. "Stripe Inc" 404s on every
+  // whole-name form and the live `stripe` board is owned by "Stripe".
+  const stripeOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/stripe';
+  const stripeFetch = async (url) => {
+    if (url === `${stripeOwnerUrl}/jobs`) return { jobs: [{ id: 12, title: 'Engineer' }] };
+    if (url === stripeOwnerUrl) return { name: 'Stripe', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [stripeCo] = await verifyCompanies(
+    [{ name: 'Stripe Inc', careers_url: 'https://job-boards.greenhouse.io/stripe-inc' }],
+    { fetchJson: stripeFetch },
+  );
+  if (stripeCo.suggested?.ats === 'greenhouse' && stripeCo.suggested?.slug === 'stripe') {
+    pass('verify-portals still adopts a brand-only board when the owner matches');
+  } else {
+    fail(`verify-portals lost the legitimate brand repair: ${JSON.stringify(stripeCo.suggested)}`);
+  }
+
+  // Token-prefix, not substring: "Apex" must not match "Apexon", but a trailing
+  // legal or descriptive word is the same company under a longer name.
+  // Canonical equality, not prefix. A shorter tracked name is NOT evidence that a
+  // longer board name is the same company: Mercury and Mercury Systems, Scale and
+  // Scale AI, Northrop and Northrop Grumman are all real, distinct employers. Only
+  // tokens that carry no identity (leading article, trailing legal designator) may
+  // be dropped before comparing.
+  const identityCases = [
+    ['Stripe Inc', 'Stripe', true],           // trailing legal designator
+    ['Acme', 'Acme Corp', true],              // designator on the other side
+    ['Acme S.A.', 'Acme', true],              // punctuated designator
+    ['The Trade Desk', 'Trade Desk', true],   // leading article
+    ['The Walt Disney Company', 'Walt Disney', true],
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced ampersand reads as a word
+    ['AT&T', 'ATT', true],                    // unspaced ampersand is punctuation
+    ['Café Corp', 'Cafe', true],              // accents fold
+    ['Mercury', 'Mercury Systems', false],    // real, different employer
+    ['Scale', 'Scale AI', false],
+    ['Northrop', 'Northrop Grumman', false],
+    ['Nimbus Data', 'Nimbus', false],         // prefix only: send it to --add
+    ['Nimbus Data', 'Nimbus AI', false],
+    ['Apex', 'Apexon', false],                // substring, not a token
+    ['Nimbus Data', '', false],
+    ['', 'Nimbus', false],
+  ];
+  const identityBad = identityCases.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (identityBad.length === 0) {
+    pass('verify-portals boardIdentityMatches requires canonical equality, not a token prefix');
+  } else {
+    fail(`verify-portals boardIdentityMatches wrong on: ${JSON.stringify(identityBad)}`);
+  }
+
+  // ── The ampersand rule runs BEFORE the ASCII fold (#2938) ──
+  // asciiFold resolves every '&' itself, so only the RAW string still separates
+  // a spaced ampersand (a word: 'Hims & Hers' -> hims and hers) from an unspaced
+  // one (punctuation: 'AT&T' -> att). Move the '&' rule after the fold and the
+  // distinction is gone in whichever direction the fold's `punctuation` mode
+  // picks: under 'delete' 'Hims & Hers' quietly loses its 'and'; under the
+  // default 'space' 'AT&T' splits into two tokens. Each pair pins one direction
+  // — the true row alone would still pass if the tokens collapsed the other way.
+  const ampersandOrder = [
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced '&' became the word 'and'
+    ['Hims & Hers', 'Hims Hers', false],      // ...and it is really there, not dropped
+    ['AT&T', 'ATT', true],                    // unspaced '&' was deleted, not spaced out
+    ['AT&T', 'AT T', false],                  // ...so it must not read as two tokens
+  ];
+  const ampersandBad = ampersandOrder.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (ampersandBad.length === 0) {
+    pass('verify-portals handles the ampersand before folding, so spaced and unspaced stay distinct');
+  } else {
+    fail(`verify-portals ampersand-before-fold ordering broken on: ${JSON.stringify(ampersandBad)}`);
+  }
+
+  // The fold is `asciiFold`, not a local strip-the-combining-marks pass, so the
+  // Latin letters that do NOT decompose under NFD come with it. Before this, the
+  // `[^a-z0-9\s]` strip deleted them outright: 'Işık' canonicalized to [isk] and
+  // never matched its own board titled "Isik".
+  const nonDecomposing = [
+    ['Işık Holding', 'Isik Holding', true],        // Turkish dotless ı
+    ['Møller Group', 'Moller Group', true],        // ø
+    ['Großmann AG', 'Grossmann', true],            // ß expands to two letters
+    ['Đại Việt Corp', 'Dai Viet', true],           // đ, plus marks that do decompose
+    ['Møller Group', 'Miller Group', false],       // folding must not merge employers
+  ];
+  const nonDecomposingBad = nonDecomposing.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (nonDecomposingBad.length === 0) {
+    pass('verify-portals inherits the non-decomposing Latin fold (ı, ø, ß, đ) from asciiFold');
+  } else {
+    fail(`verify-portals non-decomposing fold wrong on: ${JSON.stringify(nonDecomposingBad)}`);
+  }
+
+  // #3019: Lever and Ashby answer "whose board is this" only through the board
+  // page title. Tracked "Nimbus Data" 404s, the live Lever board `nimbus` is
+  // titled "Nimbus AI", and the repair must refuse it exactly as Greenhouse does.
+  const leverJson = async (url) => {
+    if (url === 'https://api.lever.co/v0/postings/nimbus') return [{ id: 1 }];
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const leverText = async (url) => {
+    if (url === 'https://jobs.lever.co/nimbus') return '<title>Nimbus AI jobs</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [leverMismatch] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: leverJson, fetchText: leverText },
+  );
+  if (leverMismatch.status === 'missing' && !leverMismatch.suggested) {
+    pass('verify-portals refuses a Lever board whose page title names a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched Lever owner: ${JSON.stringify(leverMismatch.suggested)}`);
+  }
+
+  // The title suffix is stripped, not required: Lever titles the board with the
+  // bare name while Ashby appends "Jobs".
+  if (
+    boardTitleOwner('<title>deepset Jobs</title>') === 'deepset' &&
+    boardTitleOwner('<title>Diabolocom</title>') === 'Diabolocom' &&
+    boardTitleOwner('<title>  Lever Demo 2 jobs </title>') === 'Lever Demo 2' &&
+    boardTitleOwner('<html><body>no title</body></html>') === null
+  ) {
+    pass('verify-portals boardTitleOwner reads the owner out of a board page title');
+  } else {
+    fail('verify-portals boardTitleOwner mis-parsed a board page title');
   }
 
   if (
@@ -4488,6 +5409,15 @@ try {
     if (url === 'https://api.eu.lever.co/v0/postings/diabolocom') return [{}, {}];
     const err = new Error('HTTP 404'); err.status = 404; throw err;
   };
+  // Lever and Ashby publish no owner in their posting APIs, so the repair path
+  // reads the board page title instead (#3019). Injected here so the suite never
+  // reaches the network: without this the defaults would fetch jobs.lever.co and
+  // jobs.ashbyhq.com for real, and the fixtures would pass or fail on live data.
+  const mockFetchText = async (url) => {
+    if (url === 'https://jobs.ashbyhq.com/deepsetai') return '<title>deepset Jobs</title>';
+    if (url === 'https://jobs.eu.lever.co/diabolocom') return '<title>Diabolocom</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
   const results = await verifyCompanies([
     { name: 'Live', careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Empty', careers_url: 'https://job-boards.greenhouse.io/empty' },
@@ -4497,8 +5427,8 @@ try {
     { name: 'Off', enabled: false, careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Lever Live', careers_url: 'https://jobs.lever.co/acme-lv' },
     { name: 'Lever EU Live', careers_url: 'https://jobs.eu.lever.co/acme-eu' },
-    { name: 'Diabolocom EU Discovery', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
-  ], { fetchJson: mockFetch });
+    { name: 'Diabolocom', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
+  ], { fetchJson: mockFetch, fetchText: mockFetchText });
   const byName = Object.fromEntries(results.map((r) => [r.name, r]));
   if (
     results.length === 8 &&
@@ -4508,9 +5438,9 @@ try {
     byName['Lever Live'].status === 'live' &&
     byName['Lever EU Live'].status === 'live' &&
     byName.Deepset.suggested?.ats === 'ashby' && byName.Deepset.suggested?.slug === 'deepsetai' &&
-    byName['Diabolocom EU Discovery'].suggested?.ats === 'lever' &&
-    byName['Diabolocom EU Discovery'].suggested?.slug === 'diabolocom' &&
-    byName['Diabolocom EU Discovery'].suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
+    byName.Diabolocom.suggested?.ats === 'lever' &&
+    byName.Diabolocom.suggested?.slug === 'diabolocom' &&
+    byName.Diabolocom.suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
   ) {
     pass('verify-portals classifies live / empty / unresolved / non-ATS (disabled excluded)');
   } else {
@@ -4883,6 +5813,33 @@ try {
     fail('fix-slugs.mjs --dry-run wrote to portals.yml — must require --fix/--apply');
   }
   rmSync(dryRunTmp, { recursive: true, force: true });
+
+  // CLI flag validation (#2980)
+  const helpOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--help'], { encoding: 'utf-8' });
+  const hOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '-h'], { encoding: 'utf-8' });
+  if (helpOut.status === 0 && hOut.status === 0 &&
+      helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('fix-slugs.mjs') &&
+      hOut.stdout === helpOut.stdout) {
+    pass('fix-slugs.mjs --help/-h print usage and exit 0');
+  } else {
+    fail(`fix-slugs.mjs --help/-h failed => status=${helpOut.status}/${hOut.status}`);
+  }
+
+  const badFlagOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--dryrun'], { encoding: 'utf-8' });
+  if (badFlagOut.status === 1 && badFlagOut.stderr.includes('unrecognized flag(s): --dryrun') && badFlagOut.stderr.includes('Valid flags:')) {
+    pass('fix-slugs.mjs rejects unrecognized flags with exit 1');
+  } else {
+    fail(`fix-slugs.mjs bad flag handling => status=${badFlagOut.status} stderr=${badFlagOut.stderr}`);
+  }
+
+  const missingFileOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file'], { encoding: 'utf-8' });
+  const fileFlagNextOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', '--fix'], { encoding: 'utf-8' });
+  if (missingFileOut.status === 1 && missingFileOut.stderr.includes('--file requires a value') &&
+      fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
+    pass('fix-slugs.mjs rejects missing --file value with exit 1');
+  } else {
+    fail(`fix-slugs.mjs missing --file value handling => bare: ${missingFileOut.status} nextFlag: ${fileFlagNextOut.status}`);
+  }
 } catch (e) {
   fail(`slug auto-fixer tests crashed: ${e.message}`);
 }
@@ -5364,7 +6321,7 @@ console.log('\n12c. Materialized skill index mode');
   // both platforms tested but are not worth depending on.
   const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
   writeFileSync(emptyExcludes, '');
-  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigPath, GIT_CONFIG_SYSTEM: gitConfigPath };
+  const gitEnv = hermeticGitEnv(gitConfigPath);
   const gitRun = (args, opts = {}) => execFileSync('git', args, {
     cwd: fixtureRoot,
     encoding: 'utf-8',
@@ -5470,6 +6427,69 @@ console.log('\n12c. Materialized skill index mode');
     // The staging-precondition branch already reported all three assertions
     // individually; re-reporting here would double-count and re-bury the cause.
     if (!e?.alreadyReported) fail(`skill entrypoint index-mode test crashed: ${e.message}`);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    rmSync(gitConfigRoot, { recursive: true, force: true });
+  }
+}
+
+// The block above pins the file layers and the runtime layer, but it can only
+// prove the pin holds against whatever the machine running it happens to carry.
+// On a clean machine an injected-config leak stays invisible, and the pin could
+// be removed with every assertion still green - which is how this one got in.
+// So inject the leak on purpose and assert the pin absorbs it (CodeRabbit,
+// reviewing #2567).
+{
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-'));
+  const gitConfigRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-gitinject-cfg-'));
+  try {
+    const gitConfigPath = join(gitConfigRoot, 'gitconfig');
+    writeFileSync(gitConfigPath, '');
+    const emptyExcludes = join(gitConfigRoot, 'empty-excludes');
+    writeFileSync(emptyExcludes, '');
+    // The ignore rule an agent-tool user plausibly carries machine-wide, in the
+    // one layer GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM do not cover.
+    const ambientExcludes = join(gitConfigRoot, 'ambient-ignore');
+    writeFileSync(ambientExcludes, '.agents/\n');
+    // Through hermeticGitEnv, not around it: this asserts the production
+    // construction absorbs the injection, so dropping the pin there turns this
+    // red rather than leaving it green on a clean machine.
+    const gitEnv = hermeticGitEnv(gitConfigPath, {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.excludesFile',
+      GIT_CONFIG_VALUE_0: ambientExcludes,
+    });
+    const gitRun = (args) => execFileSync('git', args, {
+      cwd: fixtureRoot,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: gitEnv,
+    }).trim();
+
+    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
+    mkdirSync(canonicalDir, { recursive: true });
+    gitRun(['init']);
+    const excludePath = join(fixtureRoot, '.git', 'info', 'exclude');
+    mkdirSync(dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, '');
+    gitRun(['config', 'core.excludesFile', emptyExcludes]);
+    writeFileSync(join(canonicalDir, 'SKILL.md'), '---\nname: career-ops\n---\n');
+
+    let staged = '';
+    try {
+      gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
+      staged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
+    } catch {
+      // Left empty: the assertion below is the report.
+    }
+    if (staged) {
+      pass('injected GIT_CONFIG_* core.excludesFile cannot reach the skill fixture (#2567)');
+    } else {
+      fail('injected GIT_CONFIG_* core.excludesFile reached the fixture - the runtime config layer is unpinned (#2567)');
+    }
+  } catch (e) {
+    fail(`injected git-config isolation test crashed: ${e.message}`);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
     rmSync(gitConfigRoot, { recursive: true, force: true });
@@ -5962,6 +6982,49 @@ try {
     pass('non-string entries (null, numbers, undefined) are filtered out without crashing');
   } else {
     fail('mixed-type keyword lists should not crash and should still match string entries');
+  }
+
+  // Case 9b: block_hard beats always_allow — a European city name that is a whole
+  // word inside a non-European location. Word-boundary matching (#2087) cannot
+  // catch these because both sides are genuine whole words, and the pre-existing
+  // `always_allow`-wins rule discarded the user's own country-level block entry.
+  const hardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+    block_hard: ['brazil', 'usa'],
+  });
+  const homonyms = [
+    ['Porto Alegre, Rio Grande do Sul, Brazil', 'city name shared with a Portuguese city'],
+    ['USA - Example State - Malta', 'city name shared with a European country'],
+  ];
+  const leaks = homonyms.filter(([loc]) => hardFilter(loc) !== false);
+  if (leaks.length === 0) {
+    pass('block_hard rejects a non-European location whose city name matches always_allow');
+  } else {
+    fail(`block_hard failed to reject: ${leaks.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9c: block_hard does NOT widen rejection — a genuine multi-location
+  // posting must still survive a plain `block` entry, which is the whole reason
+  // always_allow exists (#650). This is the regression guard for that feature.
+  if (hardFilter('Amsterdam, Netherlands') === true) {
+    pass('block_hard leaves a genuine always_allow hit untouched');
+  } else {
+    fail('block_hard must not reject a location that only matches always_allow');
+  }
+
+  // Case 9d: additive and backward compatible — the same config with no
+  // block_hard key behaves exactly as it did before this tier existed.
+  const noHardFilter = buildLocationFilter({
+    always_allow: ['porto', 'malta', 'amsterdam'],
+    allow: ['europe', 'remote'],
+    block: ['brazil', 'usa'],
+  });
+  if (noHardFilter('Porto Alegre, Rio Grande do Sul, Brazil') === true) {
+    pass('without block_hard, always_allow still wins over block (unchanged semantics)');
+  } else {
+    fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
   }
 
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
@@ -7016,6 +8079,98 @@ try {
   } else {
     fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
   }
+  // #2607 — a note citing ANOTHER row's apply date must not win. Notes routinely
+  // reference a sibling requisition's timeline for context, and that citation
+  // reads exactly like this row's own date to a positional scan.
+  const crossRefNote =
+    'STRATEGY DECISION NEEDED: #154 Sr PM M&A is already live in the same ATS '
+    + '(applied 2026-08-04) - recommend applying anyway. TIER A flagship CV '
+    + 'required. APPLIED 2026-08-06 - submitted directly by Jason.';
+  if (cadence.parseAppliedDate(crossRefNote) === '2026-08-06') {
+    pass('parseAppliedDate ignores a date cited about another row (#2607)');
+  } else {
+    fail(`parseAppliedDate cross-reference: got ${JSON.stringify(cadence.parseAppliedDate(crossRefNote))}, want 2026-08-06`);
+  }
+  // The reference's scope ends at a sentence boundary — otherwise any note that
+  // mentions a sibling row would lose its own date.
+  if (cadence.parseAppliedDate('Sibling #140 was slow. Applied 2026-08-06.') === '2026-08-06') {
+    pass('parseAppliedDate: a sentence boundary ends the row-reference scope');
+  } else {
+    fail('parseAppliedDate should keep its own date after a sentence break');
+  }
+  // ...but a SEMICOLON is not a boundary: it joins independent clauses inside
+  // one sentence, so the subject carries across it and the date is still the
+  // referenced row's.
+  const semicolonRef = '#154 is already live; applied 2026-08-04. Not submitted here yet.';
+  if (cadence.parseAppliedDate(semicolonRef) === null) {
+    pass('parseAppliedDate: a semicolon does NOT end the scope of a reference that has no date yet');
+  } else {
+    fail(`parseAppliedDate semicolon scope: got ${JSON.stringify(cadence.parseAppliedDate(semicolonRef))}, want null`);
+  }
+  // ...but once the citation HAS been given its own date, a separator does end
+  // it, and what follows is this row's. This is the mixed shape #2610 review
+  // called out: the note names a sibling AND records this submission, which is
+  // the common case when two roles are live at one employer. Reading the whole
+  // note as the sibling's throws away a real measured date.
+  //
+  // It is also the pair a future simplification would silently re-break — the
+  // two cases differ only by whether a date precedes the separator, so they are
+  // asserted together on purpose.
+  for (const [note, want, why] of [
+    ['#154 Sr PM (applied 2026-08-04); applied 2026-06-15', '2026-06-15', 'semicolon, citation already dated'],
+    ['#154 Sr PM (applied 2026-08-04) | applied 2026-06-15', '2026-06-15', 'pipe, citation already dated'],
+    // No space after the separator. A full stop needs trailing whitespace to
+    // avoid firing on "3.5", but `;` and `|` never appear inside numbers, and a
+    // hand-typed note writes ";applied" as readily as "; applied".
+    ['#154 Sr PM (applied 2026-08-04);applied 2026-06-15', '2026-06-15', 'unspaced semicolon'],
+    ['#154 Sr PM (applied 2026-08-04)|applied 2026-06-15', '2026-06-15', 'unspaced pipe'],
+    ['#154 is already live;applied 2026-08-04.', null, 'unspaced separator, citation NOT yet dated'],
+    ['#154 Sr PM (applied 2026-08-04)', null, 'citation dated, nothing after it'],
+  ]) {
+    const got = cadence.parseAppliedDate(note);
+    if (got === want) pass(`parseAppliedDate: ${why} → ${JSON.stringify(want)}`);
+    else fail(`parseAppliedDate ${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  }
+  // When EVERY apply-date belongs to another row, the note does not state this
+  // row's date. Degrade to the labelled evaluation-date fallback rather than
+  // report a real-but-foreign date as measured.
+  const onlyForeign = 'Same posting as #140 (applied 2026-07-20). Not yet submitted.';
+  if (cadence.parseAppliedDate(onlyForeign) === null) {
+    pass('parseAppliedDate returns null when every applied date is a cross-reference');
+  } else {
+    fail(`parseAppliedDate should not adopt a foreign date, got ${JSON.stringify(cadence.parseAppliedDate(onlyForeign))}`);
+  }
+  {
+    const r = cadence.resolveAppliedDate({ notes: onlyForeign, date: '2026-07-25' });
+    if (r.appliedDate === '2026-07-25' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate labels a cross-reference-only note as the evaluation-date fallback');
+    } else {
+      fail(`resolveAppliedDate cross-ref-only: got ${JSON.stringify(r)}`);
+    }
+  }
+  // A `#NNN` carrying a req/job/posting/ref label is THIS row's ATS identifier,
+  // not a pointer at another tracker row. Without this scoping the row's own
+  // posting id disqualified the row's own apply date — a false positive that
+  // costs a real measured date, so the extra rule earns its keep (#2610 review).
+  for (const [note, why] of [
+    ['Req #1311 - applied 2026-08-06.', 'req'],
+    ['Job ID #65136; applied 2026-08-06.', 'job id'],
+    ['Posting #4471 — applied 2026-08-06.', 'posting'],
+    ['Ref #R2857957 applied 2026-08-06.', 'ref'],
+  ]) {
+    if (cadence.parseAppliedDate(note) === '2026-08-06') {
+      pass(`parseAppliedDate reads a "${why}"-labelled #id as this row's own, not a cross-reference`);
+    } else {
+      fail(`parseAppliedDate "${why}"-labelled id: got ${JSON.stringify(cadence.parseAppliedDate(note))}, expected 2026-08-06`);
+    }
+  }
+  // ...and the exemption must not blunt the rule it scopes: a BARE #NNN in the
+  // same shape is still a cross-reference.
+  if (cadence.parseAppliedDate('Sibling #1311 - applied 2026-08-06.') === null) {
+    pass('parseAppliedDate still treats a bare #id in the same shape as a cross-reference');
+  } else {
+    fail('the req-label exemption swallowed a genuine cross-reference');
+  }
   // A malformed value must be rejected, not silently truncated to a plausible
   // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
   // measured application date and quietly shift the whole cadence — worse than
@@ -7207,6 +8362,16 @@ try {
       // via tracker-utils, so the fixture has to carry both — same reason
       // tracker-aliases.json is copied for tracker-parse.mjs (#2704).
       copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(e2eTmp, 'tracker-utils.mjs'));
+      // ...and tracker-utils imports the shared lock-contention helpers
+      // (#2777 fix), so the fixture carries that import too.
+      copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(e2eTmp, 'pipeline-lock.mjs'));
+      // ...and followup-cadence now resolves "today" as the LOCAL calendar day
+      // via lib/local-today.mjs (#3070), so the fixture carries that too.
+      mkdirSync(join(e2eTmp, 'lib'), { recursive: true });
+      copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(e2eTmp, 'lib', 'local-today.mjs'));
+      // ...and followup-cadence now delegates flag validation to the shared
+      // lib/cli-flags.mjs helper, so the fixture carries that too.
+      copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs
@@ -7674,15 +8839,48 @@ try {
     const cvPath = join(cliTmp, 'cv.md');
     const adPath = join(cliTmp, 'article-digest.md');
     writeFileSync(cvPath, '# CV\n\n## Projects\n\n- **Existing** (OSS) -- here\n');
-    const payloadPath = join(cliTmp, 'p.json');
-    writeFileSync(payloadPath, JSON.stringify({
+    const payloadPath = join(cliTmp, 'payload-with-dash.json');
+    const cliPayload = {
       cv: { section: 'Projects', dedupKey: 'CliProj', entry: '- **CliProj** (OSS) -- desc' },
       articleDigest: { dedupKey: 'CliProj', entry: '## CliProj -- Tagline\n\n**Hero metrics:** x' },
-    }));
+    };
+    writeFileSync(payloadPath, JSON.stringify(cliPayload));
     const env = { ...process.env, CAREER_OPS_CV: cvPath, CAREER_OPS_ARTICLE_DIGEST: adPath };
 
+    const helpOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--help'], { env, encoding: 'utf-8' });
+    const hOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '-h'], { env, encoding: 'utf-8' });
+    if (helpOut.status === 0 && hOut.status === 0 &&
+        helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('--stdin') &&
+        hOut.stdout === helpOut.stdout) {
+      pass('add-entry CLI --help/-h print usage and exit 0');
+    } else {
+      fail(`add-entry CLI help handling => ${JSON.stringify({ help: { status: helpOut.status, stdout: helpOut.stdout, stderr: helpOut.stderr }, h: { status: hOut.status, stdout: hOut.stdout, stderr: hOut.stderr } })}`);
+    }
+
+    const missingPayloadPath = join(cliTmp, 'missing-payload.json');
+    const badFlag = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), missingPayloadPath, '--sumary'], { env, encoding: 'utf-8' });
+    if (badFlag.status === 1 && /unrecognized flag/.test(badFlag.stderr) && badFlag.stderr.includes('--sumary') &&
+        !badFlag.stderr.includes('could not parse payload') &&
+        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      pass('add-entry CLI rejects an unrecognized flag before reading or writing payload data');
+    } else {
+      fail(`add-entry CLI unknown flag handling => ${JSON.stringify({ status: badFlag.status, stdout: badFlag.stdout, stderr: badFlag.stderr })}`);
+    }
+
+    const stdinDryRun = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--stdin', '--dry-run'], {
+      env,
+      encoding: 'utf-8',
+      input: JSON.stringify(cliPayload),
+    });
+    if (stdinDryRun.status === 0 && JSON.parse(stdinDryRun.stdout).dryRun === true &&
+        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      pass('add-entry CLI keeps --stdin and --dry-run working together');
+    } else {
+      fail(`add-entry CLI --stdin --dry-run => ${JSON.stringify({ status: stdinDryRun.status, stdout: stdinDryRun.stdout, stderr: stdinDryRun.stderr })}`);
+    }
+
     execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath, '--dry-run'], { env, encoding: 'utf-8' });
-    if (!readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) pass('add-entry CLI --dry-run writes nothing');
+    if (!readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) pass('add-entry CLI --dry-run writes nothing and accepts a payload path containing dashes');
     else fail('add-entry CLI --dry-run should not write');
 
     const realOut = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
@@ -7698,6 +8896,51 @@ try {
     else fail(`add-entry CLI re-run => ${JSON.stringify(rerun)}`);
   } finally {
     rmSync(cliTmp, { recursive: true, force: true });
+  }
+
+  // Non-Latin CVs (#2849). normalizeKey stripped [^a-z0-9], so every heading and
+  // dedupKey in a Japanese/Russian/Hindi CV keyed to '' — which made `add`
+  // UNUSABLE, not inaccurate: the non-empty-dedupKey guard rejected a key the
+  // user had supplied, and two different headings both keying to '' matched
+  // each other, so an entry could land under the wrong section.
+  {
+    const jpTmp = mkdtempSync(join(tmpdir(), 'career-ops-add-jp-'));
+    try {
+      const cvPath = join(jpTmp, 'cv.md');
+      writeFileSync(cvPath, '# CV\n\n## \u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\n\n- \u65E2\u5B58\n\n## \u8077\u52D9\u7D4C\u6B74\n\n- \u65E2\u5B58\n');
+      const payloadPath = join(jpTmp, 'p.json');
+      writeFileSync(payloadPath, JSON.stringify({ cv: {
+        section: '\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        dedupKey: '\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9',
+        entry: '- **\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9**',
+      } }));
+      const env = { ...process.env, CAREER_OPS_CV: cvPath };
+      const out = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      out.cv.status === 'added'
+        ? pass('add-entry: a non-Latin dedupKey is accepted and the entry is added (#2849)')
+        : fail(`add-entry: non-Latin payload => ${JSON.stringify(out.cv)}`);
+
+      const rerun = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
+      rerun.cv.status === 'duplicate'
+        ? pass('add-entry: a non-Latin entry is idempotent on re-run (#2849)')
+        : fail(`add-entry: non-Latin re-run => ${JSON.stringify(rerun.cv)}`);
+
+      // A different heading must not collide via a shared empty key.
+      const p2 = join(jpTmp, 'p2.json');
+      writeFileSync(p2, JSON.stringify({ cv: {
+        section: '\u8077\u52D9\u7D4C\u6B74',
+        dedupKey: '\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+        entry: '- **\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8**',
+      } }));
+      execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), p2], { env, encoding: 'utf-8' });
+      const finalCv = readFileSync(cvPath, 'utf-8');
+      const [projSection, workSection] = finalCv.split('## \u8077\u52D9\u7D4C\u6B74');
+      (workSection || '').includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8') && !projSection.includes('\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8')
+        ? pass('add-entry: two different non-Latin sections stay distinct (#2849)')
+        : fail(`add-entry: entry landed under the wrong non-Latin section:\n${finalCv}`);
+    } finally {
+      rmSync(jpTmp, { recursive: true, force: true });
+    }
   }
 
 } catch (e) {
@@ -9472,6 +10715,122 @@ try {
   fail(`merge-tracker fuzzy dedup tests crashed: ${e.message}`);
 }
 
+// buildRow used to emit rows from a hardcoded column list (num/date/company/
+// [via]/role/[location]/score/status/pdf/report/notes/[url]), ignoring the
+// actual header width. On a customized tracker with extra columns (e.g.
+// `… | Materials | Apply Link | Follow-up | Notes`) every merged row came out
+// NARROWER than the header, so header-driven readers (set-status.mjs) could no
+// longer parse them: the row's status became unaddressable through the
+// supported write path. Rows must round-trip at the header's exact width, with
+// unmapped cells as '—' and the report link preserved in Notes when the layout
+// has no Report column.
+console.log('\n🧪 Testing merge-tracker custom header width (extra columns, no Report column)...');
+try {
+  const widthTmp = mkdtempSync(join(tmpdir(), 'career-ops-width-'));
+  try {
+    mkdirSync(join(widthTmp, 'data'));
+    mkdirSync(join(widthTmp, 'reports'));
+    const additionsDir = join(widthTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(widthTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | Materials | Apply Link | Follow-up | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----------|------------|-----------|-------|\n' +
+      '| 1 | 2026-01-04 | StreamCo | Platform Engineer | 4.4/5 | Applied | ✅ | https://apply.example/1 | 2026-01-12 | existing |\n');
+    for (const n of ['003-acme-2026-01-05', '004-acme-2026-01-06']) {
+      writeFileSync(join(widthTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    writeFileSync(join(additionsDir, '003-acme.tsv'),
+      '3\t2026-01-05\tAcme\tData Engineer\tEvaluated\t4.6/5\t❌\t[3](reports/003-acme-2026-01-05.md)\tnew eval\n');
+
+    const widthEnv = { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir };
+    const widthResult = run(NODE, ['merge-tracker.mjs'], { env: widthEnv });
+    if (widthResult === null) {
+      fail('merge-tracker.mjs crashed on a 10-column custom-header tracker');
+    } else {
+      const lines = readFileSync(tracker, 'utf-8').split('\n').filter(l => l.startsWith('|'));
+      const headerWidth = lines[0].split('|').length;
+      const acmeRow = lines.find(l => l.includes('Acme'));
+
+      if (acmeRow && acmeRow.split('|').length === headerWidth) {
+        pass('merged row matches the header’s exact column count');
+      } else {
+        fail(`merged row width ${acmeRow ? acmeRow.split('|').length : 'n/a'} != header width ${headerWidth} (row: ${acmeRow})`);
+      }
+
+      const cells = acmeRow ? acmeRow.split('|').map(s => s.trim()) : [];
+      // Header-derived positions: 5=Score, 6=Status, 7=Materials(pdf), 8=Apply Link, 9=Follow-up, 10=Notes.
+      if (cells[5] === '4.6/5' && cells[6] === 'Evaluated') {
+        pass('score and status landed in their header-declared columns');
+      } else {
+        fail(`score/status misplaced: score cell='${cells[5]}', status cell='${cells[6]}'`);
+      }
+
+      if (cells[8] === '—' && cells[9] === '—') {
+        pass('columns career-ops has no field for are written as "—"');
+      } else {
+        fail(`unmapped columns not '—': apply link='${cells[8]}', follow-up='${cells[9]}'`);
+      }
+
+      // The merge normalizes the link relative to the tracker's directory
+      // (data/ → ../reports/…), so match on label + filename, not the raw TSV path.
+      if (/\[3\]\([^)]*reports\/003-acme-2026-01-05\.md\)/.test(cells[10] || '')) {
+        pass('report link preserved in Notes when the layout has no Report column');
+      } else {
+        fail(`report link dropped: notes cell='${cells[10]}'`);
+      }
+
+      // Round-trip half: a re-evaluation of the same report must UPDATE the row
+      // it just wrote (extractReportNum falls back to the Notes-embedded link),
+      // not append a duplicate.
+      writeFileSync(join(additionsDir, '003-acme-reeval.tsv'),
+        '3\t2026-01-06\tAcme\tData Engineer\tEvaluated\t4.8/5\t❌\t[3](reports/003-acme-2026-01-05.md)\tre-eval\n');
+      const rerun = run(NODE, ['merge-tracker.mjs'], { env: widthEnv });
+      if (rerun === null) {
+        fail('merge-tracker.mjs crashed on re-evaluation against a Notes-embedded report link');
+      } else {
+        const after = readFileSync(tracker, 'utf-8').split('\n').filter(l => l.includes('Acme'));
+        if (after.length === 1 && after[0].includes('4.8/5')) {
+          pass('re-evaluation updated the row via the Notes-embedded report link (no duplicate)');
+        } else {
+          fail(`re-evaluation dedup broken: ${after.length} Acme rows, expected 1 updated to 4.8/5`);
+        }
+      }
+
+      // Rebuild-preservation half: updating an EXISTING row must keep the
+      // user-entered values in columns career-ops has no field for (the
+      // seeded StreamCo row carries an Apply Link URL and a Follow-up date).
+      // Without seeding from the row's current cells, the '—' fill would
+      // wipe both on every update.
+      writeFileSync(join(additionsDir, '004-streamco.tsv'),
+        '4\t2026-01-07\tStreamCo\tPlatform Engineer\tEvaluated\t4.7/5\t❌\t[4](reports/004-acme-2026-01-06.md)\tre-eval of seeded row\n');
+      const preserveRun = run(NODE, ['merge-tracker.mjs'], { env: widthEnv });
+      if (preserveRun === null) {
+        fail('merge-tracker.mjs crashed while updating a row with populated custom columns');
+      } else {
+        const scRows = readFileSync(tracker, 'utf-8').split('\n').filter(l => l.includes('StreamCo'));
+        // Cell-exact assertions, not whole-row substrings: they prove each value
+        // sits in ITS OWN header-declared column (a substring match would pass
+        // with the URL shifted under the wrong header — the very bug this suite
+        // guards), and an exact equality is not URL substring "sanitization",
+        // which CodeQL rightly flags as a tainted pattern to copy.
+        const scCells = scRows.length === 1 ? scRows[0].split('|').map(s => s.trim()) : [];
+        if (scRows.length === 1 && scCells[5] === '4.7/5'
+            && scCells[8] === 'https://apply.example/1' && scCells[9] === '2026-01-12') {
+          pass('update preserved user-entered Apply Link and Follow-up cells');
+        } else {
+          fail(`custom-column values lost on update: ${scRows[0]}`);
+        }
+      }
+    }
+  } finally {
+    rmSync(widthTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker custom header width tests crashed: ${e.message}`);
+}
+
 // merge-tracker used to clobber an Applied row when a sibling req's only
 // distinguishing qualifier was a slashed acronym: "(CI/CD)" tokenized to
 // nothing, the fuzzy tier matched, and the update path rewrote the existing
@@ -9794,6 +11153,54 @@ try {
     : fail(`foldStatusInput('TEKLİF') = ${JSON.stringify(foldStatusInput('TEKLİF'))}, expected "teklif"`);
 } catch (e) {
   fail(`Turkish casing guard crashed: ${e.message}`);
+}
+
+// ── ROLE TITLES IN NON-LATIN SCRIPTS (#2781) ──────────────────────
+// roleTokens ran an [a-z0-9\s] strip, so every non-Latin role title tokenized
+// to []. merge-tracker's dedup then never matched two spellings of the SAME
+// role at the same company, and a re-evaluation was appended as a duplicate row
+// instead of updating the existing one — while the Latin equivalent merged
+// cleanly. normalizeTitle also stripped every \p{Mn}, folding Devanagari
+// matras, Cyrillic breve and Japanese dakuten onto their bases.
+console.log('\n🧪 Testing role tokenization across scripts (#2781)...');
+try {
+  const { roleTokens, roleFuzzyMatch } = await import(pathToFileURL(join(ROOT, 'role-matcher.mjs')).href);
+
+  const empty = ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A', '\u0938\u0949\u092B\u094D\u091F\u0935\u0947\u092F\u0930 \u0907\u0902\u091C\u0940\u0928\u093F\u092F\u0930'].filter((t) => roleTokens(t).length === 0);
+  empty.length === 0
+    ? pass('space-separated non-Latin role titles produce tokens (#2781)')
+    : fail(`role titles still tokenize to nothing: ${empty.join(', ')}`);
+
+  const samePairs = [
+    ['Backend Engineer, Payments', 'Backend Engineer (Payments)'],
+    ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A, \u043F\u043B\u0430\u0442\u0435\u0436\u0438', '\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A (\u043F\u043B\u0430\u0442\u0435\u0436\u0438)'],
+  ];
+  const notMatched = samePairs.filter(([a, b]) => !roleFuzzyMatch(a, b));
+  notMatched.length === 0
+    ? pass('the same role written with different punctuation matches in every script (#2781)')
+    : fail(`same-role pairs did not match: ${notMatched.map(([a]) => a).join('; ')}`);
+
+  const diffPairs = [
+    ['Backend Engineer', 'Data Scientist'],
+    ['\u0411\u044D\u043A\u0435\u043D\u0434-\u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A', '\u0410\u043D\u0430\u043B\u0438\u0442\u0438\u043A \u0434\u0430\u043D\u043D\u044B\u0445'],
+  ];
+  const wronglyMatched = diffPairs.filter(([a, b]) => roleFuzzyMatch(a, b));
+  wronglyMatched.length === 0
+    ? pass('different roles stay distinct in every script (#2781)')
+    : fail(`widening merged different roles: ${wronglyMatched.map(([a, b]) => `${a}/${b}`).join('; ')}`);
+
+  // Marks that carry meaning survive; Latin accent-folding is unchanged (#2209).
+  const marks = [
+    ['\u0915\u0902\u092A\u0928\u0940', '\u0915\u092A\u0928\u0940', false, 'Devanagari matra'],
+    ['\u0419\u043E\u0433\u0443\u0440\u0442', '\u0418\u043E\u0433\u0443\u0440\u0442', false, 'Cyrillic breve'],
+    ['S\u00EAnior Backend Engineer', 'Senior Backend Engineer', true, 'Latin accent folding (#2209)'],
+  ];
+  const markWrong = marks.filter(([a, b, must]) => (roleTokens(a).join(' ') === roleTokens(b).join(' ')) !== must);
+  markWrong.length === 0
+    ? pass('meaningful marks survive while Latin accents still fold (#2781)')
+    : fail(`mark handling wrong: ${markWrong.map(([a, b, m, why]) => `${a}/${b} expected ${m ? 'same' : 'different'} (${why})`).join('; ')}`);
+} catch (e) {
+  fail(`role tokenization guard crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER: DISTINCT NON-LATIN COMPANIES (#2429) ───────────
@@ -11129,10 +12536,14 @@ try {
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
+  // The runner now prefetches JDs with curl. Keep this offline fixture
+  // deterministic and exercise the existing WebFetch fallback instead of
+  // waiting on a public example.com request.
+  writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
   } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
 
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` };
@@ -11379,10 +12790,13 @@ function makeTierFixture(profileYml) {
     'printf "%s\\n" "$@" > "$BATCH_ARG_FILE"',
     'exit 0',
   ].join('\n') + '\n');
+  // This fixture tests worker/model routing, not network access. Make the
+  // runner's optional JD prefetch fail fast and use its fallback path.
+  writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
   } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
   return { tmp, batchDir, fakeBin };
 }
@@ -13261,6 +14675,37 @@ try {
     fail(`match-star scorer: exact tag match regressed (expected 3, got ${leadershipExactTag})`);
   }
 
+  // Non-Latin story banks (#2847). tokenize() stripped [^a-z0-9\s], so a story
+  // written in Russian or Hindi produced [] and scored 0 against a question in
+  // the SAME language — the matcher was inert, not degraded, for anyone whose
+  // language.output is not English.
+  {
+    const mk = (title, theme, action, result, tags = []) => ({ title, theme, action, result, tags });
+    const ru = mk('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439', '\u043F\u043B\u0430\u0442\u0435\u0436\u0438', '\u0412\u043E\u0437\u0433\u043B\u0430\u0432\u0438\u043B \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044E \u043F\u043B\u0430\u0442\u0451\u0436\u043D\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B', '\u0421\u043D\u0438\u0437\u0438\u043B \u043E\u0442\u043A\u0430\u0437\u044B', ['\u043F\u043B\u0430\u0442\u0435\u0436\u0438']);
+    const hi = mk('\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928', '\u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u093E \u0928\u0947\u0924\u0943\u0924\u094D\u0935', '\u0935\u093F\u092B\u0932\u0924\u093E\u090F\u0902 \u0918\u091F\u093E\u0908\u0902', ['\u092D\u0941\u0917\u0924\u093E\u0928']);
+
+    const ruTokens = tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u0438 \u043F\u043B\u0430\u0442\u0435\u0436\u0435\u0439');
+    const hiTokens = tokenize('\u092E\u0941\u091D\u0947 \u092D\u0941\u0917\u0924\u093E\u0928 \u092E\u093E\u0907\u0917\u094D\u0930\u0947\u0936\u0928 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902 \u092C\u0924\u093E\u090F\u0902');
+
+    tokenize('\u041C\u0438\u0433\u0440\u0430\u0446\u0438\u044F').length > 0 && tokenize('\u092D\u0941\u0917\u0924\u093E\u0928').length > 0
+      ? pass('match-star: non-Latin text produces tokens (#2847)')
+      : fail('match-star: non-Latin text still tokenizes to nothing');
+
+    score(ru, ruTokens, []) > 0 && score(hi, hiTokens, []) > 0
+      ? pass('match-star: a story matches a question in its own language (#2847)')
+      : fail(`match-star: same-language match still scores 0 (ru=${score(ru, ruTokens, [])}, hi=${score(hi, hiTokens, [])})`);
+
+    // The widening must not make everything match everything.
+    score(ru, tokenize('\u0420\u0430\u0441\u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u043E \u043D\u0430\u0439\u043C\u0435 \u043A\u043E\u043C\u0430\u043D\u0434\u044B'), []) === 0
+      ? pass('match-star: an unrelated same-language question still scores 0 (#2847)')
+      : fail('match-star: widening made an unrelated question match');
+
+    // Devanagari matras must survive; without \p{M} they become spaces.
+    tokenize('\u092D\u0941\u0917\u0924\u093E\u0928')[0] === '\u092D\u0941\u0917\u0924\u093E\u0928'
+      ? pass('match-star: Devanagari matras survive tokenization (#2847)')
+      : fail(`match-star: matras stripped — token came back as ${JSON.stringify(tokenize('\u092D\u0941\u0917\u0924\u093E\u0928'))}`);
+  }
+
   // match-star.mjs file must exist (existsSync-guarded in the script itself)
   if (existsSync(join(ROOT, 'match-star.mjs'))) {
     pass('match-star.mjs: file present in repo root');
@@ -14309,6 +15754,106 @@ try {
   } else {
     fail('titles mode missing error handling for absent cv.md / portals.yml');
   }
+
+  // A mode that can only ADD keeps whatever the list started as — on day zero
+  // that is the template's 37, copied on doctor's instruction. #2751.
+  if (
+    titlesFlat.includes('may be proposed for removal on exactly one ground') &&
+    titlesFlat.includes('`cv.md` does not support it')
+  ) {
+    pass('titles mode can retire a keyword, on CV evidence alone');
+  } else {
+    fail('titles mode should be able to propose removals, grounded in cv.md');
+  }
+
+  // The user-layer guarantee. portals.yml may hold an evening of hand-pruning,
+  // so removal is per-keyword and confirmed, never a regeneration.
+  if (
+    titlesFlat.includes('There is no bulk "replace" and no silent rewrite') &&
+    titlesFlat.includes('one keyword at a time')
+  ) {
+    pass('titles mode never regenerates a curated portals.yml — removals are per-keyword and confirmed');
+  } else {
+    fail('titles mode missing the no-silent-rewrite guarantee for the user-layer portals.yml');
+  }
+
+  // Emptying `positive` makes the scanner match every posting on every board —
+  // strictly worse than the wrong keyword the removal was meant to fix.
+  // The failure mode that makes removal dangerous: reading "cv.md does not
+  // support it" as a string test. On one real setup 39 of 49 curated keywords
+  // are absent from cv.md as strings, and most of them are correct. #2751.
+  if (
+    titlesFlat.includes('never that it contains the word') &&
+    titlesFlat.includes('plausible candidate for a posting carrying this keyword')
+  ) {
+    pass('titles mode defines removal support as capability, not wording');
+  } else {
+    fail('titles mode must say that CV support means the capability, not the literal keyword');
+  }
+
+  // A phrase search proves the document MENTIONS a protection, not that it
+  // GRANTS one: 'the last remaining positive keyword' matches a sentence
+  // permitting its removal exactly as well as one forbidding it. Scope each
+  // check to the prohibition block, so a protection that drifts out of
+  // "Never remove:" fails here instead of passing on its own wording.
+  const neverStart = titlesFlat.indexOf('Never remove:');
+  const neverEnd = titlesFlat.indexOf('Show removals under their own heading');
+  const neverRemove =
+    neverStart >= 0 && neverEnd > neverStart ? titlesFlat.slice(neverStart, neverEnd) : '';
+  if (
+    neverRemove.includes('the last remaining positive keyword') &&
+    neverRemove.includes('`title_filter.negative`') &&
+    neverRemove.includes('the user added during this session')
+  ) {
+    pass(
+      'titles mode forbids removing the last positive keyword, the negative list and user-added keywords — inside the prohibition block, not merely somewhere in the document',
+    );
+  } else {
+    fail(
+      'titles mode must list the last positive keyword, title_filter.negative and user-added keywords under "Never remove:"',
+    );
+  }
+
+  // Every removal carries its own stated reason in both branches — that is what
+  // makes the diff reviewable rather than a list the user has to trust.
+  if (
+    titlesFlat.includes('list them individually with the reason') &&
+    titlesFlat.includes('it still goes through the diff with its reason')
+  ) {
+    pass('titles mode attaches a reason to each proposed removal, in both the template and edited cases');
+  } else {
+    fail('titles mode should require a per-removal reason rather than a bare removal list');
+  }
+
+  // portals.yml stores keywords and not who wrote them, so "the user added this
+  // in a previous run" is unknowable. The mode must say so, otherwise unknowable
+  // reads as false and a curated keyword loses its protection. #2751.
+  if (
+    titlesFlat.includes('`portals.yml` records no provenance') &&
+    titlesFlat.includes('treat it as unknowable rather than as false') &&
+    titlesFlat.includes('inference, not a record')
+  ) {
+    pass('titles mode treats keyword ownership as unknowable, never inferring the template from silence');
+  } else {
+    fail('titles mode must state that portals.yml records no provenance, so unknown ownership defaults to keep');
+  }
+
+  // The way out of an empty list is the CV this mode already reads; the
+  // template is the second option, not the first (#2751).
+  if (
+    titlesFlat.includes('derive the list from `cv.md` here rather than sending the user away') &&
+    titlesFlat.includes('or start from an example and edit it')
+  ) {
+    pass('titles mode answers an empty positive list from cv.md, with the template offered second');
+  } else {
+    fail('titles mode should derive from cv.md on an empty list rather than pointing at the template first');
+  }
+
+  if (titlesFlat.includes('ONE diff under separate headings')) {
+    pass('titles mode shows additions and removals in one diff, under separate headings');
+  } else {
+    fail('titles mode should show removals under their own heading in the same diff');
+  }
 } catch (e) {
   fail(`modes/titles.md missing or unreadable: ${e.message}`);
 }
@@ -14384,6 +15929,36 @@ console.log('\n59b. Pipeline lock (pipeline-lock.mjs)');
   const unit = run(NODE, ['--test', 'test/pipeline-lock.test.mjs']);
   if (unit !== null) pass('pipeline-lock unit tests pass');
   else fail('pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)');
+}
+
+console.log('\n59c. The exported script budget matches the one run() enforces');
+{
+  // DEFAULT_SCRIPT_TIMEOUT_MS and the `timeout: 30000` literal inside run() are
+  // the same number held in two places, because that execFileSync call is kept
+  // byte-identical on purpose — editing it makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // the line. A comment asks the two to stay in step, and a comment is not a
+  // mechanism: if they drift, the slow-script warning starts measuring against
+  // a budget nobody is enforcing, and the first sign is a script killed at a
+  // limit the suite never mentioned. Read the literal back and compare.
+  // Anchored on run()'s own `(exe, args, …)` call signature rather than on
+  // `execFileSync` alone: that file has six other execFileSync calls, and a
+  // pattern that takes the FIRST match would start comparing against whichever
+  // one grows a `timeout:` first — a guard quietly measuring the wrong number,
+  // which is worse than no guard because it still reports green.
+  //
+  // Zero or several matches is therefore a failure in its own right, not a
+  // reason to fall back to a best guess.
+  const helpersSrc = readFileSync(join(ROOT, 'tests', 'helpers.mjs'), 'utf-8');
+  const enforced = [...helpersSrc.matchAll(/execFileSync\(\s*exe\s*,\s*args\s*,\s*\{[^}]*?timeout:\s*([1-9]\d*)\s*(?=[,}])/g)];
+  if (enforced.length !== 1) {
+    fail(`expected exactly one timeout literal in run()'s execFileSync call, found ${enforced.length}`
+      + ' — if that call was refactored or duplicated, update this check alongside it');
+  } else if (Number(enforced[0][1]) === DEFAULT_SCRIPT_TIMEOUT_MS) {
+    pass(`run()'s enforced timeout (${enforced[0][1]}ms) matches the exported DEFAULT_SCRIPT_TIMEOUT_MS`);
+  } else {
+    fail(`budget drift: run() enforces ${enforced[0][1]}ms but DEFAULT_SCRIPT_TIMEOUT_MS is ${DEFAULT_SCRIPT_TIMEOUT_MS}ms`);
+  }
 }
 
 console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
@@ -14507,6 +16082,58 @@ try {
     pass('computeRunStats returns null for empty/unknown-schema files');
   } else {
     fail('computeRunStats should return null for empty/unknown-schema input');
+  }
+
+  // checkFollowupsSchema: a malformed follow-ups table must be distinguishable
+  // from an empty one (#2971). computeFollowupStats and followup-cadence.mjs
+  // both skip rows whose num/appNum don't parse, so a wrong column order
+  // reports as zero follow-ups with no error — the case these assertions pin.
+  const FUP_HEADER = '| num | appNum | date | company | role | channel | contact | notes |\n|-----|--------|------|---------|------|---------|---------|-------|\n';
+  const goodFups = FUP_HEADER
+    + '| 1 | 45 | 2026-08-03 | Acme Corp | Software Engineer | LinkedIn DM | A. Recruiter | scheduling nudge |\n'
+    + '| 2 | 23 | 2026-08-03 | BigCo | Staff Engineer | Email reply | B. Hiring | feedback ask |\n';
+  const goodSchema = stats.checkFollowupsSchema(goodFups);
+  if (goodSchema.present && goodSchema.sawSeparator && goodSchema.dataRows === 2
+      && goodSchema.parsed === 2 && goodSchema.unparsedLines.length === 0) {
+    pass('checkFollowupsSchema accepts the documented column order');
+  } else {
+    fail(`checkFollowupsSchema wrong output for a valid table: ${JSON.stringify(goodSchema)}`);
+  }
+
+  // The real-world shape that regressed: plausible 6-column header, company
+  // name where appNum belongs, so parseInt() returns NaN on every row.
+  const wrongOrder = '| Date | Company | Tracker # | Channel | Type | Details |\n|------|---------|-----------|---------|------|---------|\n'
+    + '| 2026-08-03 | Acme Corp | 45 | LinkedIn DM | Scheduling nudge | silent since Jul 28 |\n'
+    + '| 2026-08-03 | BigCo | 23 | Email reply | Feedback ask | replied to rejection |\n';
+  const wrongSchema = stats.checkFollowupsSchema(wrongOrder);
+  const wrongStats = stats.computeFollowupStats(wrongOrder, new Map([[45, 'Applied']]));
+  if (wrongSchema.dataRows === 2 && wrongSchema.parsed === 0
+      && wrongSchema.unparsedLines.length === 2 && wrongStats.totalFollowups === 0) {
+    pass('checkFollowupsSchema flags a wrong column order that computeFollowupStats silently reads as zero');
+  } else {
+    fail(`checkFollowupsSchema missed a wrong column order: ${JSON.stringify(wrongSchema)} / stats ${JSON.stringify(wrongStats)}`);
+  }
+
+  const partialSchema = stats.checkFollowupsSchema(goodFups + '| oops | BigCo | 2026-08-05 | x | y | z | w | v |\n');
+  if (partialSchema.dataRows === 3 && partialSchema.parsed === 2 && partialSchema.unparsedLines.length === 1) {
+    pass('checkFollowupsSchema reports partially-parseable tables with the offending line number');
+  } else {
+    fail(`checkFollowupsSchema wrong output for a partial table: ${JSON.stringify(partialSchema)}`);
+  }
+
+  // An absent file, an empty file, a header with no rows yet, and a table
+  // missing its delimiter row are four different states and must not collapse.
+  const absent = stats.checkFollowupsSchema(null);
+  const headerOnly = stats.checkFollowupsSchema(FUP_HEADER);
+  const noDelimiter = stats.checkFollowupsSchema('| num | appNum | date |\n| 1 | 45 | 2026-08-03 |\n');
+  const pinsOnly = stats.checkFollowupsSchema('# Follow-Ups Tracker\n\n- next #56 2026-08-24 (set 2026-08-17)\n');
+  if (!absent.present && absent.dataRows === 0
+      && headerOnly.present && headerOnly.sawSeparator && headerOnly.dataRows === 0
+      && noDelimiter.present && !noDelimiter.sawSeparator && noDelimiter.pipeLines === 2 && noDelimiter.dataRows === 0
+      && pinsOnly.present && pinsOnly.pipeLines === 0) {
+    pass('checkFollowupsSchema separates absent / header-only / missing-delimiter / pins-only files');
+  } else {
+    fail(`checkFollowupsSchema conflated empty-ish states: ${JSON.stringify({ absent, headerOnly, noDelimiter, pinsOnly })}`);
   }
 
   const portalsYml = 'tracked_companies:\n  - name: Acme\n  - name: GlobalCorp\n  - name: DeadInc\n  - name: NetworkDead\njob_boards: []';
@@ -15362,6 +16989,111 @@ try {
   }
 } catch (e) {
   fail(`rejection-latency wiring check: ${e.message}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n72. formatRunFailure keeps the END of an over-long stream (#3035)');
+
+try {
+  // A red run is the only time this output is read, so what it keeps decides
+  // whether a CI failure is actionable. It kept the head. For the suites here,
+  // which print a tick per assertion, the head is the setup that PASSED and the
+  // tail carries the `Results:` line and the newest cases — so the later a case
+  // was added, the more certain it was to be cut. windows-latest cut
+  // agent-inbox-tests.mjs mid-word, one assertion short of the §8 verdict added
+  // specifically to attribute that failure.
+  //
+  // Drive it through a real failing run() rather than by reaching into the
+  // module's private lastFailure, so this covers the path CI actually takes.
+  const CAP = 1200;
+  const HEAD = 'HEAD-MARKER-AN-EARLY-STACK-WOULD-SIT-HERE';
+  const marker = 'TAIL-MARKER-THE-RESULTS-LINE-SITS-HERE';
+  const FILL = 8000;
+  // One line, no newlines. formatRunFailure re-indents every newline in the
+  // clipped text, which would inflate any length measured off the rendered
+  // string; a newline-free payload keeps the arithmetic below exact.
+  //
+  // Exit from the write CALLBACK, not the next statement: stdout to a pipe is
+  // async, and process.exit() discards whatever has not flushed — which would
+  // silently shrink the fixture and make the cap assertion pass for the wrong
+  // reason.
+  const okOut = run(NODE, ['-e',
+    `process.stdout.write('${HEAD}' + 'x'.repeat(${FILL}) + '${marker}', () => process.exit(1));`]);
+  const streamLen = HEAD.length + FILL + marker.length;
+
+  if (okOut !== null) {
+    fail('formatRunFailure fixture: the child was expected to exit non-zero');
+  } else {
+    const rendered = formatRunFailure(CAP);
+
+    if (rendered.includes(marker)) {
+      pass('formatRunFailure keeps the tail of an over-long stdout (the failure summary)');
+    } else {
+      fail('formatRunFailure dropped the tail — a red run loses its newest assertions and its Results line');
+    }
+
+    // Never zero head: an early stack trace is the other common shape, and
+    // keeping only the tail would just invert the bug rather than fix it.
+    if (rendered.includes(HEAD)) {
+      pass('formatRunFailure still keeps the head (an early stack trace survives too)');
+    } else {
+      fail('formatRunFailure dropped the head — tail-only inverts the original defect');
+    }
+
+    if (/\.\.\. \(\d+ more chars elided\)/.test(rendered)) {
+      pass('formatRunFailure marks the elision with the dropped-character count');
+    } else {
+      fail('formatRunFailure elides silently — a reader cannot tell output is missing');
+    }
+
+    // The cap is a promise about the returned string, so the marker's own
+    // width has to come out of the budget rather than sit on top of it.
+    //
+    // Measure via the reported dropped-count rather than off `rendered`: the
+    // caller re-indents newlines and prefixes ` (exit N)\n    stdout: `, so the
+    // rendered length is not the clipped length. kept = streamLen - dropped is
+    // exact, and this fixture has no newlines of its own to be re-indented.
+    const elided = rendered.match(/\.\.\. \((\d+) more chars elided\)/);
+    if (!elided) {
+      fail('formatRunFailure cap check: no elision marker to measure against');
+    } else {
+      const dropped = Number(elided[1]);
+      const markerLen = `\n    ... (${dropped} more chars elided)\n`.length;
+      const clipped = (streamLen - dropped) + markerLen;
+      if (clipped <= CAP) {
+        pass(`formatRunFailure keeps the clipped stream within maxChars, marker included (${clipped} <= ${CAP})`);
+      } else {
+        fail(`formatRunFailure overruns its own cap: ${clipped} chars returned for maxChars=${CAP} (marker not budgeted)`);
+      }
+    }
+
+    // Squeeze the content budget down to exactly two characters — the smallest
+    // that can still hold both ends. Math.floor(budget * 0.35) is 0 below
+    // budget 3, so without a floor the head vanishes here and the tail takes
+    // everything, which is the inversion this whole case exists to prevent.
+    //
+    // Own fixture with single-character boundaries that appear nowhere else in
+    // the rendered output — not in ` (exit 1)`, not in `stdout: `, not in the
+    // marker — so "both ends survived" is asserted precisely rather than by
+    // matching a letter that could have come from anywhere.
+    const TINY_FILL = 500;
+    const okTiny = run(NODE, ['-e',
+      `process.stdout.write('<' + 'x'.repeat(${TINY_FILL}) + '>', () => process.exit(1));`]);
+    if (okTiny !== null) {
+      fail('formatRunFailure tiny-budget fixture: the child was expected to exit non-zero');
+    } else {
+      const tinyLen = TINY_FILL + 2;
+      const tinyCap = `\n    ... (${tinyLen} more chars elided)\n`.length + 2;
+      const tiny = formatRunFailure(tinyCap);
+      if (tiny.includes('<') && tiny.includes('>')) {
+        pass('formatRunFailure keeps both ends even at a two-character content budget');
+      } else {
+        fail(`formatRunFailure drops an end at a two-character budget (head=${tiny.includes('<')}, tail=${tiny.includes('>')})`);
+      }
+    }
+  }
+} catch (e) {
+  fail(`formatRunFailure clipping check: ${e.message}`);
 }
 
 await runDiscovered();

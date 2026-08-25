@@ -20,6 +20,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
 } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
@@ -215,16 +216,7 @@ async function main() {
   const args = process.argv.slice(2);
 
   const positional = args.filter(a => !a.startsWith('-'));
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length > 0) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    process.exit(1);
-  }
-
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
+  validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const candidatesPath = positional[0] || DEFAULT_CANDIDATES_PATH;
   ensureCandidatesFile(candidatesPath);

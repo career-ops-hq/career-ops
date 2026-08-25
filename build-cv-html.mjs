@@ -64,8 +64,12 @@ const DEFAULT_SECTION_TITLES = {
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
 function escapeHtml(text) {
-  if (typeof text !== 'string') return '';
-  return text
+  // Blank out only truly absent/structural values. A number or boolean scalar
+  // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
+  // not vanish: the old `typeof text !== 'string' → ''` guard silently dropped
+  // numeric years/dates from the CV while `present` stayed true.
+  if (text === null || text === undefined || typeof text === 'object') return '';
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -380,6 +384,11 @@ function buildProjects(entries, partial) {
       const badge = e.badge
         ? `<span class="project-badge">${escapeHtml(e.badge)}</span>`
         : '';
+      const nameText = escapeHtml(e.name || '');
+      const url = sanitizeUrl(e.url);
+      const nameHtml = url
+        ? `<a href="${url}">${nameText}</a>`
+        : nameText;
       // Prefer a single description; fall back to joining bullets into one line so
       // a bullets-shaped payload still renders inside the .project-desc block.
       const descText = e.description
@@ -391,7 +400,7 @@ function buildProjects(entries, partial) {
         ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
         : '';
       return `<div class="project">
-    <div class="project-title">${escapeHtml(e.name)}${badge}</div>${desc}${tech}
+    <div class="project-title">${nameHtml}${badge}</div>${desc}${tech}
   </div>`;
     }).join('\n  ');
   }
@@ -405,8 +414,13 @@ function buildProjects(entries, partial) {
       ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
       ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
     ]);
+    const nameText = escapeHtml(e.name || '');
+    const url = sanitizeUrl(e.url);
+    const nameHtml = url
+      ? `<a href="${url}">${nameText}</a>`
+      : nameText;
     return fillEntry(entryTemplate, blocks, {
-      NAME:  escapeHtml(e.name || ''),
+      NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
       TECH:  escapeHtml(e.tech || ''),
