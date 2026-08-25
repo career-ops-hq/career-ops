@@ -297,6 +297,23 @@ title_filter:
   # add the suffix forms you still want gone, the way the negative list below
   # pairs `word:Intern` with `word:Interns` and a plain `Internship`.
   #
+  # Prefix an entry with `stem:` for the half in between. A plain keyword is
+  # loose on BOTH sides, and usually only one of them was meant:
+  #
+  #   agent         Agentforce yes   Agents yes   Reagents yes   <- the default
+  #   stem:agent    Agentforce yes   Agents yes   Reagents NO    <- must START a word
+  #   word:agent    Agentforce NO    Agents NO    Reagents NO    <- the whole word
+  #
+  # So `stem:` is for a keyword that begins a longer word you also want — "Crypto"
+  # reaching "Cryptocurrency", "Fellows" reaching "Fellowship" — without it also
+  # landing in the middle of an unrelated one. It is what separates "Rust
+  # Engineer" from "Zero Trust Engineer" while keeping "Rust Engineering".
+  #
+  # It does NOT cover a keyword that ENDS a longer word instead of starting it:
+  # "Automation" inside the German compound "Gebäudeautomation" still needs the
+  # plain form. That side has no prefix, deliberately — the plain default already
+  # serves it, and nothing has been measured that the pair cannot express.
+  #
   # Use " + " (with spaces) to require SEVERAL terms in any order:
   #
   #   - "director + engineering"   matches "Director of Engineering",

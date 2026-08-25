@@ -69,7 +69,7 @@
 
 career-ops 能將任何 AI 程式碼 CLI 轉化為完整的求職指揮中心。不再需要手動用試算表追蹤應徵紀錄，而是獲得一個 AI 驅動的管道，能夠：
 
-- **評估職缺** — 結構化的 A-F 評估報告（五個維度組成 1.0-5.0 的評分）
+- **評估職缺** — 結構化的 A-H 評估報告（五個維度組成 1-5 的評分）
 - **生成客製化 PDF** — 針對每份職缺描述進行 ATS 最佳化的履歷
 - **自動掃描求職平台**（Greenhouse、Ashby、Lever、企業頁面）
 - **批次處理** — 透過子代理並行評估 10 份以上的職缺
@@ -95,7 +95,7 @@ career-ops 具有代理能力：Claude Code 透過 Playwright 瀏覽求職頁面
 | **平台掃描器**   | 預設超過 45 家企業（Anthropic、OpenAI、ElevenLabs、Retool、n8n...）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自訂查詢 |
 | **批次處理**     | 使用 `claude -p` 工作器並行評估                                                                                        |
 | **儀表板 TUI**   | 在終端機 UI 中瀏覽、篩選及排序你的求職管道                                                                             |
-| **人機協作**     | AI 負責評估與建議，你負責決策與行動。系統絕不自動送出應徵 — 最終決定永遠在你手上                                       |
+| **人機協作**     | AI 負責評估與建議，你負責決策與行動。系統絕不送出應徵 — 最終決定永遠在你手上 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                                       |
 | **管道完整性**   | 自動合併、去重、狀態正規化、健康檢查                                                                                   |
 
 ## 快速開始
@@ -168,7 +168,7 @@ career-ops 是一個具有多種模式的單一斜線指令：
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F 評估        │  匹配度、缺口、薪酬調查、STAR 故事
+│  A-H 評估        │  匹配度、缺口、薪酬調查、STAR 故事
 │  （讀取 cv.md）  │
 └────────┬─────────┘
          │
