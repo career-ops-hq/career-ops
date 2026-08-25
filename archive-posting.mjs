@@ -115,11 +115,24 @@ function parseCliArgs(args) {
       dryRun = true;
     } else if (arg.startsWith('--company=')) {
       overrideCompany = arg.slice('--company='.length).trim();
-    } else if (arg === '--company' && args[i + 1]) {
+    } else if (arg === '--company') {
+      // The old `args[i + 1]` truthiness check consumed the NEXT flag as the
+      // company name whenever --company was given with no value (e.g.
+      // `--company --pipeline` set overrideCompany to "--pipeline" and left
+      // pipeline mode off, silently, at exit 0 (#3087)). A value that starts
+      // with `--` is another flag, not a company name.
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--company requires a value.');
+        process.exit(1);
+      }
       overrideCompany = args[++i].trim();
     } else if (arg.startsWith('--role=')) {
       overrideRole = arg.slice('--role='.length).trim();
-    } else if (arg === '--role' && args[i + 1]) {
+    } else if (arg === '--role') {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--role requires a value.');
+        process.exit(1);
+      }
       overrideRole = args[++i].trim();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.slice('--report='.length).trim();

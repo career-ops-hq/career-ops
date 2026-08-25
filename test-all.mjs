@@ -55,7 +55,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 /**
@@ -5114,7 +5114,7 @@ tracked_companies:
 console.log('\n10b. Portal slug validator');
 
 try {
-  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError } =
+  const { deriveSlugCandidates, parseAtsSlug, verifyCompanies, classifyFetchError, boardIdentityMatches, boardTitleOwner } =
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
@@ -5175,6 +5175,195 @@ try {
     fail('verify-portals derived an ASCII slug from a non-Latin name');
   }
 
+  // ── First-word suffixes are probe-only, never repair candidates (#2937) ──
+  // Crossing the bare first word with an invented suffix does not build a
+  // variant of the company's name, it builds a DIFFERENT company's name:
+  // "Nimbus Data" yields `nimbusai`, `nimbustech`, `nimbuslabs`. That is fine
+  // for `--add`, where a human reads the slug next to the name and picks one.
+  // It is not fine for discoverAlternates, whose `suggested` fix-slugs --fix
+  // writes into portals.yml unreviewed. The bare first word stays on BOTH sets
+  // on purpose: it adds no token the company lacks, and boards really are often
+  // just the brand (the "Diabolocom" row below relies on it).
+  const probeSet = deriveSlugCandidates('Nimbus Data');
+  const repairSet = deriveSlugCandidates('Nimbus Data', { firstWordSuffixes: false });
+  const coined = ['nimbusai', 'nimbustech', 'nimbusio', 'nimbushq', 'nimbuslabs', 'nimbus.tech', 'nimbus.io'];
+  const ownName = ['nimbusdata', 'nimbus-data', 'nimbus_data', 'nimbus', 'nimbusdataai', 'nimbusdata.io'];
+  if (
+    coined.every((s) => probeSet.includes(s)) &&
+    ownName.every((s) => probeSet.includes(s)) &&
+    coined.every((s) => !repairSet.includes(s)) &&
+    ownName.every((s) => repairSet.includes(s))
+  ) {
+    pass('verify-portals keeps first-word suffixes for --add and drops them from the repair set');
+  } else {
+    fail(`verify-portals first-word-suffix split wrong: probe=${JSON.stringify(probeSet)} repair=${JSON.stringify(repairSet)}`);
+  }
+
+  // End to end: the tracked company is "Nimbus Data" and its board has 404'd.
+  // The only live board belongs to "Nimbus AI". Nothing on the repair path
+  // checks identity, so a coined candidate becomes a portals.yml write that
+  // relabels another employer's postings. It must go unresolved instead.
+  const wrongEmployerBoard = 'https://boards-api.greenhouse.io/v1/boards/nimbusai/jobs';
+  const nimbusFetch = async (url) => {
+    if (url === wrongEmployerBoard) return { jobs: [{ id: 7788, title: 'VP Marketing' }] };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [nimbus] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: nimbusFetch },
+  );
+  if (nimbus.status === 'missing' && !nimbus.suggested) {
+    pass('verify-portals does not suggest a board matched only by a truncation of the name');
+  } else {
+    fail(`verify-portals adopted another employer's board: ${JSON.stringify(nimbus.suggested)}`);
+  }
+
+  // The other half of #2937. The bare first word stays in the repair set on
+  // purpose, so "Nimbus Data" still probes `nimbus`, and narrowing the set
+  // further would break the "Diabolocom" row below. The candidate
+  // is not the problem; adopting it unchecked is. Greenhouse publishes the
+  // board owner's name at /v1/boards/{slug}, so the repair path can ask who
+  // owns the board instead of inferring identity from the slug it guessed.
+  const bareOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/nimbus';
+  const bareFetch = async (url) => {
+    if (url === `${bareOwnerUrl}/jobs`) return { jobs: [{ id: 991, title: 'VP Marketing' }] };
+    if (url === bareOwnerUrl) return { name: 'Nimbus AI', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [bare] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: bareFetch },
+  );
+  if (bare.status === 'missing' && !bare.suggested) {
+    pass('verify-portals refuses a live board whose Greenhouse owner is a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched owner: ${JSON.stringify(bare.suggested)}`);
+  }
+
+  // The check must not cost the legitimate repair it exists to protect: a
+  // board that really is the brand still resolves. "Stripe Inc" 404s on every
+  // whole-name form and the live `stripe` board is owned by "Stripe".
+  const stripeOwnerUrl = 'https://boards-api.greenhouse.io/v1/boards/stripe';
+  const stripeFetch = async (url) => {
+    if (url === `${stripeOwnerUrl}/jobs`) return { jobs: [{ id: 12, title: 'Engineer' }] };
+    if (url === stripeOwnerUrl) return { name: 'Stripe', content: '' };
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [stripeCo] = await verifyCompanies(
+    [{ name: 'Stripe Inc', careers_url: 'https://job-boards.greenhouse.io/stripe-inc' }],
+    { fetchJson: stripeFetch },
+  );
+  if (stripeCo.suggested?.ats === 'greenhouse' && stripeCo.suggested?.slug === 'stripe') {
+    pass('verify-portals still adopts a brand-only board when the owner matches');
+  } else {
+    fail(`verify-portals lost the legitimate brand repair: ${JSON.stringify(stripeCo.suggested)}`);
+  }
+
+  // Token-prefix, not substring: "Apex" must not match "Apexon", but a trailing
+  // legal or descriptive word is the same company under a longer name.
+  // Canonical equality, not prefix. A shorter tracked name is NOT evidence that a
+  // longer board name is the same company: Mercury and Mercury Systems, Scale and
+  // Scale AI, Northrop and Northrop Grumman are all real, distinct employers. Only
+  // tokens that carry no identity (leading article, trailing legal designator) may
+  // be dropped before comparing.
+  const identityCases = [
+    ['Stripe Inc', 'Stripe', true],           // trailing legal designator
+    ['Acme', 'Acme Corp', true],              // designator on the other side
+    ['Acme S.A.', 'Acme', true],              // punctuated designator
+    ['The Trade Desk', 'Trade Desk', true],   // leading article
+    ['The Walt Disney Company', 'Walt Disney', true],
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced ampersand reads as a word
+    ['AT&T', 'ATT', true],                    // unspaced ampersand is punctuation
+    ['Café Corp', 'Cafe', true],              // accents fold
+    ['Mercury', 'Mercury Systems', false],    // real, different employer
+    ['Scale', 'Scale AI', false],
+    ['Northrop', 'Northrop Grumman', false],
+    ['Nimbus Data', 'Nimbus', false],         // prefix only: send it to --add
+    ['Nimbus Data', 'Nimbus AI', false],
+    ['Apex', 'Apexon', false],                // substring, not a token
+    ['Nimbus Data', '', false],
+    ['', 'Nimbus', false],
+  ];
+  const identityBad = identityCases.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (identityBad.length === 0) {
+    pass('verify-portals boardIdentityMatches requires canonical equality, not a token prefix');
+  } else {
+    fail(`verify-portals boardIdentityMatches wrong on: ${JSON.stringify(identityBad)}`);
+  }
+
+  // ── The ampersand rule runs BEFORE the ASCII fold (#2938) ──
+  // asciiFold resolves every '&' itself, so only the RAW string still separates
+  // a spaced ampersand (a word: 'Hims & Hers' -> hims and hers) from an unspaced
+  // one (punctuation: 'AT&T' -> att). Move the '&' rule after the fold and the
+  // distinction is gone in whichever direction the fold's `punctuation` mode
+  // picks: under 'delete' 'Hims & Hers' quietly loses its 'and'; under the
+  // default 'space' 'AT&T' splits into two tokens. Each pair pins one direction
+  // — the true row alone would still pass if the tokens collapsed the other way.
+  const ampersandOrder = [
+    ['Hims & Hers', 'Hims and Hers', true],   // spaced '&' became the word 'and'
+    ['Hims & Hers', 'Hims Hers', false],      // ...and it is really there, not dropped
+    ['AT&T', 'ATT', true],                    // unspaced '&' was deleted, not spaced out
+    ['AT&T', 'AT T', false],                  // ...so it must not read as two tokens
+  ];
+  const ampersandBad = ampersandOrder.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (ampersandBad.length === 0) {
+    pass('verify-portals handles the ampersand before folding, so spaced and unspaced stay distinct');
+  } else {
+    fail(`verify-portals ampersand-before-fold ordering broken on: ${JSON.stringify(ampersandBad)}`);
+  }
+
+  // The fold is `asciiFold`, not a local strip-the-combining-marks pass, so the
+  // Latin letters that do NOT decompose under NFD come with it. Before this, the
+  // `[^a-z0-9\s]` strip deleted them outright: 'Işık' canonicalized to [isk] and
+  // never matched its own board titled "Isik".
+  const nonDecomposing = [
+    ['Işık Holding', 'Isik Holding', true],        // Turkish dotless ı
+    ['Møller Group', 'Moller Group', true],        // ø
+    ['Großmann AG', 'Grossmann', true],            // ß expands to two letters
+    ['Đại Việt Corp', 'Dai Viet', true],           // đ, plus marks that do decompose
+    ['Møller Group', 'Miller Group', false],       // folding must not merge employers
+  ];
+  const nonDecomposingBad = nonDecomposing.filter(([a, b, want]) => boardIdentityMatches(a, b) !== want);
+  if (nonDecomposingBad.length === 0) {
+    pass('verify-portals inherits the non-decomposing Latin fold (ı, ø, ß, đ) from asciiFold');
+  } else {
+    fail(`verify-portals non-decomposing fold wrong on: ${JSON.stringify(nonDecomposingBad)}`);
+  }
+
+  // #3019: Lever and Ashby answer "whose board is this" only through the board
+  // page title. Tracked "Nimbus Data" 404s, the live Lever board `nimbus` is
+  // titled "Nimbus AI", and the repair must refuse it exactly as Greenhouse does.
+  const leverJson = async (url) => {
+    if (url === 'https://api.lever.co/v0/postings/nimbus') return [{ id: 1 }];
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const leverText = async (url) => {
+    if (url === 'https://jobs.lever.co/nimbus') return '<title>Nimbus AI jobs</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
+  const [leverMismatch] = await verifyCompanies(
+    [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
+    { fetchJson: leverJson, fetchText: leverText },
+  );
+  if (leverMismatch.status === 'missing' && !leverMismatch.suggested) {
+    pass('verify-portals refuses a Lever board whose page title names a different company');
+  } else {
+    fail(`verify-portals adopted a mismatched Lever owner: ${JSON.stringify(leverMismatch.suggested)}`);
+  }
+
+  // The title suffix is stripped, not required: Lever titles the board with the
+  // bare name while Ashby appends "Jobs".
+  if (
+    boardTitleOwner('<title>deepset Jobs</title>') === 'deepset' &&
+    boardTitleOwner('<title>Diabolocom</title>') === 'Diabolocom' &&
+    boardTitleOwner('<title>  Lever Demo 2 jobs </title>') === 'Lever Demo 2' &&
+    boardTitleOwner('<html><body>no title</body></html>') === null
+  ) {
+    pass('verify-portals boardTitleOwner reads the owner out of a board page title');
+  } else {
+    fail('verify-portals boardTitleOwner mis-parsed a board page title');
+  }
+
   if (
     classifyFetchError({ status: 404 }) === 'slug_gone' &&
     classifyFetchError({ name: 'AbortError' }) === 'network' &&
@@ -5220,6 +5409,15 @@ try {
     if (url === 'https://api.eu.lever.co/v0/postings/diabolocom') return [{}, {}];
     const err = new Error('HTTP 404'); err.status = 404; throw err;
   };
+  // Lever and Ashby publish no owner in their posting APIs, so the repair path
+  // reads the board page title instead (#3019). Injected here so the suite never
+  // reaches the network: without this the defaults would fetch jobs.lever.co and
+  // jobs.ashbyhq.com for real, and the fixtures would pass or fail on live data.
+  const mockFetchText = async (url) => {
+    if (url === 'https://jobs.ashbyhq.com/deepsetai') return '<title>deepset Jobs</title>';
+    if (url === 'https://jobs.eu.lever.co/diabolocom') return '<title>Diabolocom</title>';
+    const err = new Error('HTTP 404'); err.status = 404; throw err;
+  };
   const results = await verifyCompanies([
     { name: 'Live', careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Empty', careers_url: 'https://job-boards.greenhouse.io/empty' },
@@ -5229,8 +5427,8 @@ try {
     { name: 'Off', enabled: false, careers_url: 'https://job-boards.greenhouse.io/live' },
     { name: 'Lever Live', careers_url: 'https://jobs.lever.co/acme-lv' },
     { name: 'Lever EU Live', careers_url: 'https://jobs.eu.lever.co/acme-eu' },
-    { name: 'Diabolocom EU Discovery', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
-  ], { fetchJson: mockFetch });
+    { name: 'Diabolocom', careers_url: 'https://job-boards.greenhouse.io/does-not-exist-diabolocom' },
+  ], { fetchJson: mockFetch, fetchText: mockFetchText });
   const byName = Object.fromEntries(results.map((r) => [r.name, r]));
   if (
     results.length === 8 &&
@@ -5240,9 +5438,9 @@ try {
     byName['Lever Live'].status === 'live' &&
     byName['Lever EU Live'].status === 'live' &&
     byName.Deepset.suggested?.ats === 'ashby' && byName.Deepset.suggested?.slug === 'deepsetai' &&
-    byName['Diabolocom EU Discovery'].suggested?.ats === 'lever' &&
-    byName['Diabolocom EU Discovery'].suggested?.slug === 'diabolocom' &&
-    byName['Diabolocom EU Discovery'].suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
+    byName.Diabolocom.suggested?.ats === 'lever' &&
+    byName.Diabolocom.suggested?.slug === 'diabolocom' &&
+    byName.Diabolocom.suggested?.url === 'https://api.eu.lever.co/v0/postings/diabolocom'
   ) {
     pass('verify-portals classifies live / empty / unresolved / non-ATS (disabled excluded)');
   } else {
@@ -5615,6 +5813,33 @@ try {
     fail('fix-slugs.mjs --dry-run wrote to portals.yml — must require --fix/--apply');
   }
   rmSync(dryRunTmp, { recursive: true, force: true });
+
+  // CLI flag validation (#2980)
+  const helpOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--help'], { encoding: 'utf-8' });
+  const hOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '-h'], { encoding: 'utf-8' });
+  if (helpOut.status === 0 && hOut.status === 0 &&
+      helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('fix-slugs.mjs') &&
+      hOut.stdout === helpOut.stdout) {
+    pass('fix-slugs.mjs --help/-h print usage and exit 0');
+  } else {
+    fail(`fix-slugs.mjs --help/-h failed => status=${helpOut.status}/${hOut.status}`);
+  }
+
+  const badFlagOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--dryrun'], { encoding: 'utf-8' });
+  if (badFlagOut.status === 1 && badFlagOut.stderr.includes('unrecognized flag(s): --dryrun') && badFlagOut.stderr.includes('Valid flags:')) {
+    pass('fix-slugs.mjs rejects unrecognized flags with exit 1');
+  } else {
+    fail(`fix-slugs.mjs bad flag handling => status=${badFlagOut.status} stderr=${badFlagOut.stderr}`);
+  }
+
+  const missingFileOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file'], { encoding: 'utf-8' });
+  const fileFlagNextOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', '--fix'], { encoding: 'utf-8' });
+  if (missingFileOut.status === 1 && missingFileOut.stderr.includes('--file requires a value') &&
+      fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
+    pass('fix-slugs.mjs rejects missing --file value with exit 1');
+  } else {
+    fail(`fix-slugs.mjs missing --file value handling => bare: ${missingFileOut.status} nextFlag: ${fileFlagNextOut.status}`);
+  }
 } catch (e) {
   fail(`slug auto-fixer tests crashed: ${e.message}`);
 }
@@ -6069,110 +6294,6 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
 }
 
 console.log('\n12c. Materialized skill index mode');
-
-/**
- * Build a git environment nothing ambient can reach into.
- *
- * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
- * close the RUNTIME layer: GIT_CONFIG_COUNT with its KEY_n / VALUE_n pairs is
- * applied AFTER every config file, so an ambient `core.excludesFile` injected
- * that way overrides even the one a fixture sets for itself, and the isolation
- * silently stops holding - the exact leak this pinning exists to close,
- * arriving through the one door left open (#2567).
- *
- * COUNT is set to 0 rather than deleting the variables: it is a single
- * authoritative value, and git reads KEY_n / VALUE_n only up to COUNT, so any
- * stragglers are inert without having to enumerate them.
- *
- * `base` exists so the regression case below can hand in a parent environment
- * carrying the injection. Both callers share this one construction on purpose:
- * a test that hand-rolled its own env would keep passing if the pin were
- * dropped here, which is how the gap got in.
- */
-function hermeticGitEnv(gitConfigPath, base = process.env) {
-  const env = {
-    ...base,
-    GIT_CONFIG_COUNT: '0',
-    GIT_CONFIG_GLOBAL: gitConfigPath,
-    GIT_CONFIG_SYSTEM: gitConfigPath,
-  };
-  // These two DO have to be enumerated, because COUNT governs KEY_n / VALUE_n
-  // and nothing else, and neither of them is a config FILE that GLOBAL/SYSTEM
-  // could shadow. Both survive all three pins above:
-  //
-  //   GIT_CONFIG_PARAMETERS  the channel git uses to hand `-c` down to a
-  //                          subprocess, so it reaches every git invocation.
-  //                          Measured: with it set, a commit made through this
-  //                          env took its author from the ambient value.
-  //   GIT_CONFIG             redirects the `git config` command, reads AND
-  //                          writes. Both fixtures below call `git config` to
-  //                          set themselves up, so with it set that write lands
-  //                          in the ambient file instead of the fixture: the
-  //                          setting never takes effect, and the suite mutates
-  //                          a file outside its own temp dir.
-  delete env.GIT_CONFIG_PARAMETERS;
-  delete env.GIT_CONFIG;
-  return env;
-}
-
-// Asserted through hermeticGitEnv rather than around it, and on BEHAVIOUR rather
-// than on the absence of a key: a check that the returned object lacks the two
-// names would pass on any implementation that deletes them, including one that
-// deletes them after git has already been handed the environment. What matters
-// is that the injection does not reach git.
-{
-  const root = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-env-'));
-  try {
-    const pinned = join(root, 'gitconfig');
-    writeFileSync(pinned, '');
-    const ambient = join(root, 'ambient-config');
-    writeFileSync(ambient, '[user]\n\tname = ambient-leak\n');
-    const repo = join(root, 'repo');
-    mkdirSync(repo, { recursive: true });
-
-    const gitEnv = hermeticGitEnv(pinned, {
-      ...process.env,
-      GIT_CONFIG_PARAMETERS: "'user.name=parameters-leak'",
-      GIT_CONFIG: ambient,
-    });
-    const gitRun = (args) => execFileSync('git', args, {
-      cwd: repo, encoding: 'utf-8', timeout: 30000, env: gitEnv,
-    }).trim();
-
-    gitRun(['init']);
-    let seenName = '';
-    try {
-      seenName = gitRun(['config', 'user.name']);
-    } catch (err) {
-      // `git config <key>` exits 1 for "not set", which is the outcome this
-      // block asserts. Anything else means the probe never ran: 128 for a
-      // broken repo, 129 for a bad invocation. Swallowing those would turn a
-      // failed probe into evidence that the isolation works.
-      if (err?.status !== 1) throw err;
-      seenName = '';
-    }
-    if (seenName === '') {
-      pass('hermeticGitEnv keeps an ambient GIT_CONFIG_PARAMETERS / GIT_CONFIG out of git');
-    } else {
-      fail(`ambient config reached git through hermeticGitEnv: user.name = ${seenName}`);
-    }
-
-    // The write half. Both fixtures in this file configure themselves with
-    // `git config`, and under an ambient GIT_CONFIG that write leaves the
-    // fixture entirely - so the setting silently does not apply, and the suite
-    // edits a file it does not own.
-    gitRun(['config', 'core.excludesFile', join(root, 'excludes')]);
-    const landedLocally = readFileSync(join(repo, '.git', 'config'), 'utf-8').includes('excludesFile');
-    const escaped = readFileSync(ambient, 'utf-8').includes('excludesFile');
-    if (landedLocally && !escaped) {
-      pass("a fixture's own `git config` write stays inside the fixture");
-    } else {
-      fail(`git config write escaped the fixture: local=${landedLocally} ambient=${escaped}`);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
 
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
@@ -8244,6 +8365,13 @@ try {
       // ...and tracker-utils imports the shared lock-contention helpers
       // (#2777 fix), so the fixture carries that import too.
       copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(e2eTmp, 'pipeline-lock.mjs'));
+      // ...and followup-cadence now resolves "today" as the LOCAL calendar day
+      // via lib/local-today.mjs (#3070), so the fixture carries that too.
+      mkdirSync(join(e2eTmp, 'lib'), { recursive: true });
+      copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(e2eTmp, 'lib', 'local-today.mjs'));
+      // ...and followup-cadence now delegates flag validation to the shared
+      // lib/cli-flags.mjs helper, so the fixture carries that too.
+      copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs
@@ -12408,10 +12536,14 @@ try {
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
+  // The runner now prefetches JDs with curl. Keep this offline fixture
+  // deterministic and exercise the existing WebFetch fallback instead of
+  // waiting on a public example.com request.
+  writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
   } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
 
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` };
@@ -12658,10 +12790,13 @@ function makeTierFixture(profileYml) {
     'printf "%s\\n" "$@" > "$BATCH_ARG_FILE"',
     'exit 0',
   ].join('\n') + '\n');
+  // This fixture tests worker/model routing, not network access. Make the
+  // runner's optional JD prefetch fail fast and use its fallback path.
+  writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
   } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
   return { tmp, batchDir, fakeBin };
 }
@@ -15815,7 +15950,7 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
   // Zero or several matches is therefore a failure in its own right, not a
   // reason to fall back to a best guess.
   const helpersSrc = readFileSync(join(ROOT, 'tests', 'helpers.mjs'), 'utf-8');
-  const enforced = [...helpersSrc.matchAll(/execFileSync\(\s*exe\s*,\s*args\s*,\s*\{[^}]*?timeout:\s*(\d+)/g)];
+  const enforced = [...helpersSrc.matchAll(/execFileSync\(\s*exe\s*,\s*args\s*,\s*\{[^}]*?timeout:\s*([1-9]\d*)\s*(?=[,}])/g)];
   if (enforced.length !== 1) {
     fail(`expected exactly one timeout literal in run()'s execFileSync call, found ${enforced.length}`
       + ' — if that call was refactored or duplicated, update this check alongside it');
