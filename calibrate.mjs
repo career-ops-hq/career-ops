@@ -326,17 +326,9 @@ function selfTest() {
 // Entry guard (repo convention, cf. outcome.mjs / linkedin-join.mjs): without
 // it, importing this module to unit-test its exports would run the whole CLI
 // against the real tracker inside the test process.
-import { realpathSync } from 'fs';
-import { pathToFileURL } from 'url';
-const isMain = process.argv[1] && (() => {
-  // Realpath BOTH sides: Node resolves import.meta.url through the entry's
-  // realpath while argv[1] keeps the caller's spelling, so a symlinked
-  // checkout would otherwise silently no-op the CLI (#3170 class).
-  try { return pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url; }
-  catch { return false; }
-})();
+import { isMainModule } from './lib/is-main-module.mjs';
 
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) selfTest();
 

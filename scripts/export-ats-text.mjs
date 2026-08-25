@@ -9,6 +9,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as yaml from 'js-yaml';
+import { isMainModule } from '../lib/is-main-module.mjs';
 
 /**
  * Sanitizes plain text for ATS forms (converting bullets, dashes, quotes, and stripping emojis/non-breaking spaces).
@@ -366,11 +367,8 @@ export function formatAtsText(profile = {}, options = {}) {
   return Object.values(sections).join('\n\n');
 }
 
-// Main CLI execution guard
-const currentScriptPath = resolve(fileURLToPath(import.meta.url));
-const entryScriptPath = process.argv[1] ? resolve(process.argv[1]) : '';
-
-if (entryScriptPath === currentScriptPath || (process.argv[1] && process.argv[1].endsWith('export-ats-text.mjs'))) {
+// Main CLI execution guard (repo convention: lib/is-main-module.mjs, #3170)
+if (isMainModule(import.meta.url)) {
   const { values } = parseArgs({
     options: {
       section: { type: 'string' },
