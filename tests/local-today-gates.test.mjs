@@ -166,40 +166,65 @@ test('check-table-freshness --today still overrides, and reports the date it use
 // call site hands the writer a UTC-derived day — which is the whole defect.
 test('every appendToScanHistory call site is handed a local-day value', () => {
   const callers = ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs'];
+  const CALL = 'appendToScanHistory(';
   const offenders = [];
 
   for (const file of callers) {
     const src = readFileSync(join(ROOT, file), 'utf8');
-    const lines = src.split('\n');
 
     // The day argument is the only date-shaped argument the writer takes, so a
     // toISOString() anywhere in a call site's argument list is the bug. This
     // deliberately does NOT scan the whole file: scan.mjs uses toISOString()
     // legitimately elsewhere for UTC-midnight round-tripping, which
     // lib/local-today.mjs's own docstring blesses.
-    lines.forEach((line, i) => {
-      const at = line.indexOf('appendToScanHistory(');
-      if (at === -1) return;
-      if (line.trimStart().startsWith('export async function')) return; // the definition
-      // Everything from the call to end of line, NOT a `([^)]*)` capture: the
-      // offending form is `appendToScanHistory(offers, new Date().toISOString()
-      // .slice(0, 10), 'added')`, and a non-greedy capture stops at the `)` of
-      // `new Date()` — so the argument list reads as `offers, new Date(` and
-      // the very form this exists to catch slips through. (It did, until the
-      // fix was reverted to check.)
-      if (/toISOString/.test(line.slice(at))) {
-        offenders.push(`${file}:${i + 1} — ${line.trim()}`);
+    // Whole-source with balanced parens, NOT line by line, and NOT a
+    // `([^)]*)` capture. Both of the obvious shortcuts miss a real reintroduction:
+    //
+    //   `([^)]*)`   stops at the `)` closing `new Date()`, so the inline form
+    //               `appendToScanHistory(offers, new Date().toISOString()...)`
+    //               reads as `offers, new Date(` and passes. (It did — the
+    //               first draft of this guard let scan-hn.mjs through.)
+    //   per-line    misses a wrapped call, where the offending argument sits on
+    //               a different line from the callee.
+    //
+    // Paren counting here ignores parens inside strings and comments. That is
+    // acceptable for this narrow job — matching the argument list of one known
+    // function in four known files — and a miscount can only widen the slice,
+    // never narrow it, so it cannot hide an offender.
+    const lineOf = (idx) => src.slice(0, idx).split('\n').length;
+
+    for (let from = 0; ; ) {
+      const at = src.indexOf(CALL, from);
+      if (at === -1) break;
+      from = at + 1;
+      if (/export\s+async\s+function\s+$/.test(src.slice(Math.max(0, at - 40), at))) continue;
+
+      const open = at + CALL.length - 1;
+      let depth = 0;
+      let end = src.length;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')' && --depth === 0) { end = i; break; }
       }
-    });
+      const args = src.slice(open + 1, end);
+      if (/toISOString/.test(args)) {
+        offenders.push(`${file}:${lineOf(at)} — appendToScanHistory(${args.replace(/\s+/g, ' ').trim()})`);
+      }
+    }
 
     // A call site passing a bare `date` identifier is only correct if that
-    // identifier was assigned from localToday(). Catch the assignment too,
-    // otherwise moving the UTC expression one line up defeats the check above.
-    lines.forEach((line, i) => {
-      if (/^\s*const\s+date\s*=/.test(line) && /toISOString/.test(line)) {
-        offenders.push(`${file}:${i + 1} — ${line.trim()}`);
+    // identifier came from localToday(). Catch the assignment too, or moving the
+    // UTC expression one line up defeats the check above. Read to the
+    // terminating `;` so a wrapped assignment is covered as well.
+    const assign = /(?:^|\n)[^\S\n]*const[^\S\n]+date[^\S\n]*=/g;
+    for (let m; (m = assign.exec(src)); ) {
+      const start = m.index + m[0].length;
+      const semi = src.indexOf(';', start);
+      const expr = src.slice(start, semi === -1 ? src.length : semi);
+      if (/toISOString/.test(expr)) {
+        offenders.push(`${file}:${lineOf(m.index + 1)} — const date =${expr.replace(/\s+/g, ' ')};`);
       }
-    });
+    }
   }
 
   assert.deepEqual(
