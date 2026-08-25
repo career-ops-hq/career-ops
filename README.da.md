@@ -63,7 +63,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), også kendt som **careerops**) forvandler et hvilket som helst AI-CLI til en komplet kommandocentral for jobsøgning. I stedet for manuelt at spore ansøgninger i et regneark får du en AI-drevet pipeline, der:
 
-- **Vurderer stillinger** med et struktureret A–F-system (fem dimensioner, der giver en score på 1,0-5,0)
+- **Vurderer stillinger** med et struktureret A–H-system (fem dimensioner, der giver en score på 1-5)
 - **Genererer skræddersyede PDF'er** — ATS-optimerede CV'er tilpasset hver stilling
 - **Skanner portaler** automatisk (Greenhouse, Ashby, Lever, virksomheders karrieresider)
 - **Batch-behandler** — vurderer 10+ stillinger parallelt via sub-agenter
@@ -161,7 +161,7 @@ Du indsætter en stillings-URL eller -beskrivelse
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A–F-vurdering   │  Match, mangler, lønundersøgelse, STAR-historier
+│  A–H-vurdering   │  Match, mangler, lønundersøgelse, STAR-historier
 │  (læser cv.md)   │
 └────────┬─────────┘
          │

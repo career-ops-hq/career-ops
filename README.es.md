@@ -78,7 +78,7 @@
 
 career-ops convierte cualquier CLI de IA en un centro de mando de búsqueda de empleo. En vez de trackear aplicaciones en un spreadsheet, tienes un pipeline AI que:
 
-- **Evalúa ofertas** con una evaluación estructurada A-F (cinco dimensiones que alimentan una puntuación de 1.0-5.0)
+- **Evalúa ofertas** con una evaluación estructurada A-H (cinco dimensiones que alimentan una puntuación de 1-5)
 - **Genera PDFs personalizados** -- CVs ATS-optimizados por oferta
 - **Escanea portales** automaticamente (Greenhouse, Ashby, Lever, webs de empresas)
 - **Procesa en batch** -- evalúa 10+ ofertas en paralelo con sub-agentes
@@ -95,7 +95,7 @@ Construido por alguien que lo usó para evaluar 740+ ofertas, generar 100+ CVs p
 | Feature                    | Descripción                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **Auto-Pipeline**          | Pega una URL, obtiene evaluación + PDF + entrada en tracker                                                                    |
-| **Evaluación A-F**         | Resumen del rol, match con CV, estrategia de nivel, research de comp, personalización, prep de entrevista (STAR+R) -- más una verificación de legitimidad de la oferta (Bloque G) que detecta estafas y ofertas fantasma |
+| **Evaluación A-H**         | Resumen del rol, match con CV, estrategia de nivel, research de comp, personalización, prep de entrevista (STAR+R) -- más una verificación de legitimidad de la oferta (Bloque G) que detecta estafas y ofertas fantasma |
 | **Banco de historias**     | Acumula historias STAR+Reflexión entre evaluaciones -- 5-10 historias maestras que responden cualquier pregunta behavioral     |
 | **Scripts de negociación** | Frameworks de negociación salarial, pushback de descuentos geográficos, leverage de ofertas competidoras                       |
 | **PDFs ATS**               | CVs con keywords inyectados, diseño Space Grotesk + DM Sans                                                                    |
@@ -183,7 +183,7 @@ Pegas una URL o descripción de oferta
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Evaluación A-F  │  Match, gaps, comp research, historias STAR
+│  Evaluación A-H  │  Match, gaps, comp research, historias STAR
 │  (lee cv.md)     │
 └────────┬─────────┘
          │

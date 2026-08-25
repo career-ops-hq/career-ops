@@ -34,6 +34,8 @@ function runScript(script, ...args) {
 const SCRIPTS = [
   ['fix-slugs.mjs', '--dryrun'],
   ['fix-slugs.mjs', '--fle'],
+  ['linkedin-join.mjs', '--csvv'],
+  ['linkedin-join.mjs', '--sinse'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -173,4 +175,33 @@ test('archive-posting: --role --dry-run does not set the role slug to "--dry-run
   const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--role requires a value/);
+});
+
+// linkedin-join.mjs hand-rolled its argv before #3200 review, so `--csv=<path>`
+// was discarded and the tool read the default export instead: a plausible
+// report about a file nobody asked for, exit 0. The `=` form is the case a
+// typo-only table would not catch.
+test('linkedin-join.mjs honours the --flag=value form', () => {
+  const r = runScript('linkedin-join.mjs', '--csv=/nonexistent/probe.csv', '--summary');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.ok(r.all.includes('/nonexistent/probe.csv'),
+    'the supplied path was discarded — the script fell back to its default export');
+});
+
+test('linkedin-join.mjs rejects a value flag with no operand', () => {
+  const r = runScript('linkedin-join.mjs', '--csv', '--summary');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--csv requires a value/i);
+});
+
+test('linkedin-join.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('linkedin-join.mjs', '--help');
+  assert.equal(r.status, 0, `--help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i);
+});
+
+test('linkedin-join.mjs --help --bogus still errors', () => {
+  const r = runScript('linkedin-join.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
 });

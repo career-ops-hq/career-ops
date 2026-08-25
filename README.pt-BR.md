@@ -67,7 +67,7 @@
 
 career-ops transforma qualquer CLI de código com IA em uma central completa de busca de emprego. Em vez de acompanhar candidaturas manualmente em planilha, você tem um pipeline com IA que:
 
-- **Avalia vagas** com uma avaliação estruturada A-F (cinco dimensões que geram uma pontuação de 1.0-5.0)
+- **Avalia vagas** com uma avaliação estruturada A-H (cinco dimensões que geram uma pontuação de 1-5)
 - **Gera PDFs personalizados** -- CVs otimizados para ATS, ajustados por descrição de vaga
 - **Escaneia portais** automaticamente (Greenhouse, Ashby, Lever, páginas de empresas)
 - **Processa em lote** -- avalia 10+ vagas em paralelo com subagentes
@@ -86,7 +86,7 @@ Construído por alguém que usou isso para avaliar 740+ vagas, gerar 100+ CVs pe
 | Funcionalidade                       | Descrição                                                                                                                                      |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auto-Pipeline**                    | Cole uma URL e receba avaliação completa + PDF + entrada no tracker                                                                            |
-| **Avaliação em 6 blocos**            | Resumo da vaga, aderência ao CV, estratégia de senioridade, pesquisa de compensação, personalização, preparação para entrevista (STAR+R) -- além de uma verificação de legitimidade da vaga (Bloco G) que sinaliza golpes e vagas-fantasma       |
+| **Avaliação A-H**            | Resumo da vaga, aderência ao CV, estratégia de senioridade, pesquisa de compensação, personalização, preparação para entrevista (STAR+R) -- além de uma verificação de legitimidade da vaga (Bloco G) que sinaliza golpes e vagas-fantasma       |
 | **Banco de histórias de entrevista** | Acumula histórias STAR+Reflection ao longo das avaliações -- 5-10 histórias principais que respondem qualquer pergunta comportamental          |
 | **Scripts de negociação**            | Frameworks para negociação salarial, resposta a desconto geográfico e alavanca com ofertas concorrentes                                        |
 | **Geração de PDF ATS**               | CVs com injeção de palavras-chave usando design com Space Grotesk + DM Sans                                                                    |
@@ -166,7 +166,7 @@ Você cola a URL ou descrição da vaga
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Avaliação A-F   │  Aderência, gaps, pesquisa de compensação, histórias STAR
+│  Avaliação A-H   │  Aderência, gaps, pesquisa de compensação, histórias STAR
 │  (lê cv.md)      │
 └────────┬─────────┘
          │
