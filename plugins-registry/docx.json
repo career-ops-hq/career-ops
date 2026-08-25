@@ -1,0 +1,16 @@
+{
+  "name": "career-ops-plugin-docx",
+  "id": "docx",
+  "repo": "https://github.com/rubicon/career-ops-plugin-docx",
+  "author": "rubicon",
+  "hooks": [
+    "export"
+  ],
+  "description": "Export your cv.md to a clean, ATS-friendly Word .docx, honoring #### nested sub-roles for fractional, interim, and umbrella engagements.",
+  "requiredEnv": [],
+  "allowedHosts": [],
+  "skill": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "sha": "9252dc84c09dbb597c995190b82322109cf84805"
+}

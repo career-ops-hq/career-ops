@@ -1,0 +1,23 @@
+{
+  "id": "linkedin-alerts",
+  "name": "career-ops-plugin-linkedin-alerts",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "LinkedIn job alert ingest — parse LinkedIn alert emails from your Gmail inbox, normalize tracking links to canonical job URLs, and surface them in the career-ops pipeline.",
+  "repo": "https://github.com/Schlaflied/career-ops-plugin-linkedin-alerts",
+  "sha": "de54949b7dc642a6f6106a0ce18f0031e46f61ee",
+  "hooks": [
+    "ingest"
+  ],
+  "requiredEnv": [
+    "GMAIL_CLIENT_ID",
+    "GMAIL_CLIENT_SECRET",
+    "GMAIL_REFRESH_TOKEN"
+  ],
+  "allowedHosts": [
+    "oauth2.googleapis.com",
+    "gmail.googleapis.com"
+  ],
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/1394",
+  "addedAt": "2026-07-01"
+}

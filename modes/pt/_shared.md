@@ -20,6 +20,8 @@
 **REGRA: NUNCA fazer hardcode de métricas de proof points.** Leia-as de `cv.md` e `article-digest.md` no momento da avaliação.
 **REGRA: Para métricas de artigos/projetos, `article-digest.md` tem prioridade sobre `cv.md`** (`cv.md` pode conter números desatualizados).
 **REGRA: Leia `_profile.md` DEPOIS deste arquivo. As personalizações do usuário em `_profile.md` sobrescrevem os valores padrão aqui.**
+**REGRA: NUNCA afirme que o usuário é autor/criador de um projeto, repositório, biblioteca, ferramenta, framework ou artefato open-source, a menos que isso esteja explicitamente atribuído a ele em `cv.md` ou `article-digest.md`.** Confundir "usar uma ferramenta" com "tê-la criado" (o usuário usa X → o usuário criou X) é o padrão de invenção mais comum, e é proibido.
+**REGRA: Palavras-chave são reformuladas, nunca inventadas.** Reordene, reformule, enfatize — mas nunca invente. Se uma alegação não estiver respaldada por um arquivo dentro do escopo, pergunte ao usuário; sem resposta, omita. Silêncio sobre um tema é melhor do que detalhe inventado.
 
 ---
 
@@ -40,7 +42,7 @@ A avaliação usa 6 blocos (A-F) com uma nota global de 1-5:
 - 4.5+ → Match forte, recomendado aplicar imediatamente
 - 4.0-4.4 → Bom match, vale a pena aplicar
 - 3.5-3.9 → Razoável mas não ideal, aplicar apenas se houver motivo específico
-- Abaixo de 3.5 → Recomendado não aplicar (veja Ethical Use no CLAUDE.md)
+- Abaixo de 3.5 → Recomendado não aplicar (veja Ethical Use no AGENTS.md)
 
 ## North Star -- Vagas-Alvo
 

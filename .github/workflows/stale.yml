@@ -12,7 +12,7 @@ jobs:
   stale:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/stale@v11
         with:
           stale-issue-message: >
             This issue has been automatically marked as stale because it has not had
@@ -30,5 +30,8 @@ jobs:
           days-before-pr-close: 14
           stale-issue-label: 'stale'
           stale-pr-label: 'stale'
-          exempt-issue-labels: 'pinned,security,roadmap'
-          exempt-pr-labels: 'pinned,security'
+          exempt-issue-labels: 'pinned,security,roadmap,adoptable'
+          # adoption/* PRs are governed by the adoption ladder (pr-adoption.yml),
+          # which pings, warns, and hands the close to a human. Two clocks on
+          # one PR would race each other.
+          exempt-pr-labels: 'pinned,security,adoption/track,adoption/pinged,adoption/warned,adoption/ready'

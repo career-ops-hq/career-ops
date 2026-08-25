@@ -5,52 +5,70 @@
 # Rule: The status field in applications.md must contain EXACTLY
 # one of these values (case-insensitive). No markdown bold (**),
 # no dates, no extra text. Dates go in the date column.
+#
+# `terminal: true` marks a state with no further one-way lifecycle order
+# among the other terminal states (they still supersede any non-terminal,
+# earlier-stage state). States without a `terminal` key are treated as
+# non-terminal and ordered by their position in this list. Consumed by
+# tracker-sync-check.mjs's compareLifecycle() (issue #1504) so a new state
+# added here can't silently fall through as "unrecognized."
 
 states:
   - id: evaluated
     label: Evaluated
-    aliases: [evaluada]
+    aliases: [evaluada, condicional, hold, evaluar, verificar, değerlendirildi, degerlendirildi]
     description: Offer evaluated with report, pending decision
     dashboard_group: evaluated
 
   - id: applied
     label: Applied
-    aliases: [aplicado, enviada, aplicada, sent]
+    aliases: [aplicado, enviada, aplicada, sent, başvuruldu, basvuruldu]
     description: Application submitted
     dashboard_group: applied
 
   - id: responded
     label: Responded
-    aliases: [respondido]
+    aliases: [respondido, "yanıt verildi", yanıt_verildi, "yanit verildi", yanit_verildi]
     description: Company has responded (not yet interview)
     dashboard_group: responded
 
   - id: interview
     label: Interview
-    aliases: [entrevista]
+    aliases: [entrevista, mülakat, mulakat]
     description: Active interview process
     dashboard_group: interview
 
   - id: offer
     label: Offer
-    aliases: [oferta]
+    aliases: [oferta, teklif]
     description: Offer received
     dashboard_group: offer
+    terminal: true
 
   - id: rejected
     label: Rejected
-    aliases: [rechazado, rechazada]
+    aliases: [rechazado, rechazada, reddedildi]
     description: Rejected by company
     dashboard_group: rejected
+    terminal: true
 
   - id: discarded
     label: Discarded
-    aliases: [descartado, descartada, cerrada, cancelada]
+    aliases: [descartado, descartada, cerrada, cancelada, "iptal edildi", iptal_edildi, "ıptal edildi", ıptal_edildi]
     description: Discarded by candidate or offer closed
     dashboard_group: discarded
+    terminal: true
 
   - id: skip
     label: SKIP
-    aliases: [no_aplicar, no aplicar, skip, monitor]
+    aliases: [no_aplicar, no aplicar, skip, monitor, geo blocker, geo_blocker, "uygun değil", uygun_değil, "uygun degil", uygun_degil]
     description: Doesn't fit, don't apply
     dashboard_group: skip
+    terminal: true
+
+  - id: hired
+    label: Hired
+    aliases: [contratado, contratada, hired, accepted, accept, "kabul edildi", kabul_edildi, "işe alındı", "ise alindi", "işe alindi"]
+    description: Offer accepted, job landed!
+    dashboard_group: hired
+    terminal: true

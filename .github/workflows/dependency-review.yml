@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Dependency Review
         # TODO: remove continue-on-error once the Dependency graph is enabled in
@@ -20,7 +20,7 @@ jobs:
         # workaround to unblock PRs — note that fail-on-severity: high is still
         # configured but will not block merges while continue-on-error is true.
         continue-on-error: true
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5.0.0
         with:
           fail-on-severity: high
           comment-summary-in-pr: always

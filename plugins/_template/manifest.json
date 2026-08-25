@@ -1,0 +1,13 @@
+{
+  "id": "{{NAME}}",
+  "name": "{{NAME}}",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "TODO: one mission-framed line describing what this plugin does.",
+  "hooks": ["ingest"],
+  "requiredEnv": [],
+  "allowedHosts": [],
+  "skill": "skill.md",
+  "humanInTheLoop": true,
+  "homepage": "https://github.com/your-user/career-ops-plugin-{{NAME}}"
+}

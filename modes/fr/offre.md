@@ -103,7 +103,7 @@ Inclure aussi :
 
 Sauvegarder l'evaluation complete dans `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
-- `{###}` = prochain numero sequentiel (3 chiffres, zero-padded)
+- `{###}` = prochain numero sequentiel (3 chiffres, zero-padded). Pour l'allouer de maniere atomique et eviter les conditions de concurrence, vous devez executer `node reserve-report-num.mjs` pour reserver le numero (stdout renvoie `{###}`), ecrire le rapport, puis executer `node reserve-report-num.mjs --release {###}` pour liberer le sentinel.
 - `{company-slug}` = nom d'entreprise en minuscules, sans espaces (utiliser des tirets)
 - `{YYYY-MM-DD}` = date du jour
 

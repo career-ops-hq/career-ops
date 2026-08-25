@@ -2,6 +2,10 @@ name: Bug Report
 description: Report a bug in career-ops
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **Privacy first.** career-ops runs locally. **Never** paste your CV, scan results, pipeline data, job listings, or other personal info — issues are **public forever**. Keep your data on your machine; share only sanitized snippets.
   - type: checkboxes
     id: coc
     attributes:

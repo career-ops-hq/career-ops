@@ -1,0 +1,20 @@
+{
+  "name": "career-ops",
+  "metadata": {
+    "description": "AI job search command center — evaluate offers, tailor CVs, scan portals, track applications",
+    "version": "1.29.0"
+  },
+  "owner": {
+    "name": "santifer",
+    "url": "https://santifer.io"
+  },
+  "plugins": [
+    {
+      "name": "career-ops",
+      "source": "./",
+      "description": "AI job search pipeline — evaluate offers, tailor CVs, scan portals, track applications",
+      "category": "productivity",
+      "version": "1.29.0"
+    }
+  ]
+}

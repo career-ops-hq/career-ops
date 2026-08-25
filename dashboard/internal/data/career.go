@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,15 +17,37 @@ import (
 var (
 	reReportLink     = regexp.MustCompile(`\[(\d+)\]\(([^)]+)\)`)
 	reScoreValue     = regexp.MustCompile(`(\d+\.?\d*)/5`)
-	reArchetype      = regexp.MustCompile(`(?i)\*\*Arquetipo(?:\s+detectado)?\*\*\s*\|\s*(.+)`)
+	reArchetype      = regexp.MustCompile(`(?i)\*\*(?:Arquetipo|Archetype)(?:\s+(?:detectado|detected))?\*\*\s*\|\s*(.+)`)
 	reTlDr           = regexp.MustCompile(`(?i)\*\*TL;DR\*\*\s*\|\s*(.+)`)
 	reTlDrColon      = regexp.MustCompile(`(?i)\*\*TL;DR:\*\*\s*(.+)`)
 	reRemote         = regexp.MustCompile(`(?i)\*\*Remote\*\*\s*\|\s*(.+)`)
 	reComp           = regexp.MustCompile(`(?i)\*\*Comp\*\*\s*\|\s*(.+)`)
-	reArchetypeColon = regexp.MustCompile(`(?i)\*\*Arquetipo:\*\*\s*(.+)`)
+	reArchetypeColon = regexp.MustCompile(`(?i)\*\*(?:Arquetipo|Archetype):\*\*\s*(.+)`)
+	reArchetypeYAML  = regexp.MustCompile(`(?m)^archetype:\s*"?([^"\n]+)"?\s*$`)
 	reReportURL      = regexp.MustCompile(`(?m)^\*\*URL:\*\*\s*(https?://\S+)`)
 	reBatchID        = regexp.MustCompile(`(?m)^\*\*Batch ID:\*\*\s*(\d+)`)
+	reDiscardReasons = regexp.MustCompile(`(?s)discard_reasons:\s*\n((?:\s*-\s*.+?\n)+)`)
+	reDiscardItem    = regexp.MustCompile(`\s*-\s*([^\n]+)`)
 )
+
+// resolveReportPath converts a report link from the tracker into a path
+// relative to careerOpsPath. Links are normally relative to the tracker
+// file's own directory (see merge-tracker.mjs link normalization, #760);
+// legacy trackers may still carry root-relative links, so fall back to the
+// raw link when the tracker-relative resolution does not exist on disk.
+func resolveReportPath(careerOpsPath, trackerPath, link string) string {
+	resolved := filepath.Join(filepath.Dir(trackerPath), link)
+	if _, err := os.Stat(resolved); err != nil {
+		legacy := filepath.Join(careerOpsPath, link)
+		if _, err2 := os.Stat(legacy); err2 == nil {
+			resolved = legacy
+		}
+	}
+	if rel, err := filepath.Rel(careerOpsPath, resolved); err == nil {
+		return rel
+	}
+	return link
+}
 
 // ParseApplications reads applications.md and returns parsed applications.
 // It tries both {path}/applications.md and {path}/data/applications.md for compatibility.
@@ -44,6 +67,12 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 	apps := make([]model.CareerApplication, 0)
 	num := 0
 
+	// Map columns by header name rather than fixed position, so a customized or
+	// reordered tracker (e.g. an inserted Location column) does not desync the
+	// reader. Falls back to the legacy fixed layout when no header is present.
+	// This matches the Node tracker tooling, which became header-aware in #954.
+	cols := resolveTrackerColumns(lines)
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "# ") || strings.HasPrefix(line, "|---") || strings.HasPrefix(line, "| #") {
@@ -53,55 +82,54 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			continue
 		}
 
-		// Detect delimiter: if line contains tabs, use tab-aware splitting
-		var fields []string
-		if strings.Contains(line, "\t") {
-			// Mixed format: starts with "| " then tab-separated
-			line = strings.TrimPrefix(line, "|")
-			line = strings.TrimSpace(line)
-			parts := strings.Split(line, "\t")
-			for _, p := range parts {
-				fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
-			}
-		} else {
-			// Pure pipe format
-			line = strings.Trim(line, "|")
-			parts := strings.Split(line, "|")
-			for _, p := range parts {
-				fields = append(fields, strings.TrimSpace(p))
-			}
-		}
-
+		fields := splitTrackerRow(line)
 		if len(fields) < 8 {
 			continue
 		}
 
-		num++
-		app := model.CareerApplication{
-			Number:  num,
-			Date:    fields[1],
-			Company: fields[2],
-			Role:    fields[3],
-			Status:  fields[5],
-			HasPDF:  strings.Contains(fields[6], "\u2705"),
+		at := func(name string) string {
+			if idx, ok := cols[name]; ok && idx >= 0 && idx < len(fields) {
+				return fields[idx]
+			}
+			return ""
 		}
 
-		// Parse score (field 4 = Score column)
-		app.ScoreRaw = fields[4]
-		if sm := reScoreValue.FindStringSubmatch(fields[4]); sm != nil {
+		num++
+		trackerNumber := num
+		if parsedNumber, err := strconv.Atoi(at("num")); err == nil {
+			trackerNumber = parsedNumber
+		}
+		app := model.CareerApplication{
+			Number:  trackerNumber,
+			Date:    at("date"),
+			Company: at("company"),
+			Role:    at("role"),
+			Status:  at("status"),
+			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
+		}
+
+		// Parse score from the Score column.
+		app.ScoreRaw = at("score")
+		if sm := reScoreValue.FindStringSubmatch(at("score")); sm != nil {
 			app.Score, _ = strconv.ParseFloat(sm[1], 64)
 		}
 
-		// Parse report link
-		if rm := reReportLink.FindStringSubmatch(fields[7]); rm != nil {
+		// Parse report link. Tracker links are written relative to the
+		// tracker file itself (e.g. ../reports/... when the tracker lives in
+		// data/), so resolve against the tracker's directory and normalize
+		// back to a careerOpsPath-relative path, which is what every
+		// consumer joins against. Legacy root-relative links are kept as a
+		// fallback when the resolved file does not exist.
+		if rm := reReportLink.FindStringSubmatch(at("report")); rm != nil {
 			app.ReportNumber = rm[1]
-			app.ReportPath = rm[2]
+			app.ReportPath = resolveReportPath(careerOpsPath, filePath, rm[2])
 		}
 
-		// Notes (field 8 if exists)
-		if len(fields) > 8 {
-			app.Notes = fields[8]
-		}
+		// Notes column, when present.
+		app.Notes = at("notes")
+
+		// Lift location / work mode / pay / last-contact out of the notes free-text
+		deriveNoteFields(&app)
 
 		apps = append(apps, app)
 	}
@@ -476,23 +504,25 @@ func NormalizeStatus(raw string) string {
 	}
 
 	switch {
-	// Most restrictive first — accepts both English and Spanish
-	case strings.Contains(s, "no aplicar") || strings.Contains(s, "no_aplicar") || s == "skip" || strings.Contains(s, "geo blocker"):
+	// Most restrictive first — accepts English, Spanish, and Turkish
+	case s == "hired" || s == "contratado" || s == "contratada" || s == "accepted" || s == "accept" || s == "kabul edildi" || s == "kabul_edildi" || s == "işe alındı" || s == "ise alindi":
+		return "hired"
+	case strings.Contains(s, "no aplicar") || strings.Contains(s, "no_aplicar") || s == "skip" || strings.Contains(s, "geo blocker") || strings.Contains(s, "uygun değil") || strings.Contains(s, "uygun_değil") || strings.Contains(s, "uygun degil") || strings.Contains(s, "uygun_degil"):
 		return "skip"
-	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista"):
+	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista") || strings.Contains(s, "mülakat") || strings.Contains(s, "mulakat"):
 		return "interview"
-	case s == "offer" || strings.Contains(s, "oferta"):
+	case s == "offer" || strings.Contains(s, "oferta") || strings.Contains(s, "teklif"):
 		return "offer"
-	case strings.Contains(s, "responded") || strings.Contains(s, "respondido"):
+	case strings.Contains(s, "responded") || strings.Contains(s, "respondido") || strings.Contains(s, "yanıt verildi") || strings.Contains(s, "yanıt_verildi") || strings.Contains(s, "yanit verildi") || strings.Contains(s, "yanit_verildi"):
 		return "responded"
-	case strings.Contains(s, "applied") || strings.Contains(s, "aplicado") || s == "enviada" || s == "aplicada" || s == "sent":
+	case strings.Contains(s, "applied") || strings.Contains(s, "aplicado") || s == "enviada" || s == "aplicada" || s == "sent" || strings.Contains(s, "başvuruldu") || strings.Contains(s, "basvuruldu"):
 		return "applied"
-	case strings.Contains(s, "rejected") || strings.Contains(s, "rechazado") || s == "rechazada":
+	case strings.Contains(s, "rejected") || strings.Contains(s, "rechazado") || s == "rechazada" || strings.Contains(s, "reddedildi"):
 		return "rejected"
 	case strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
-		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup"):
+		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi"):
 		return "discarded"
-	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "monitor" || s == "evaluar" || s == "verificar":
+	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "monitor" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi"):
 		return "evaluated"
 	default:
 		return s
@@ -512,6 +542,8 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 		archetype = cleanTableCell(m[1])
 	} else if m := reArchetypeColon.FindStringSubmatch(text); m != nil {
 		archetype = cleanTableCell(m[1])
+	} else if m := reArchetypeYAML.FindStringSubmatch(text); m != nil {
+		archetype = strings.TrimSpace(m[1])
 	}
 
 	// Try table-format TL;DR first (most reports), then colon format
@@ -537,45 +569,316 @@ func LoadReportSummary(careerOpsPath, reportPath string) (archetype, tldr, remot
 	return
 }
 
+// splitTrackerRow splits a tracker table line into trimmed cell values, using
+// the same delimiter logic as ParseApplications: a mixed "| " + tab-separated
+// body, or a pure pipe-delimited row. Field 0 is the first real column (num), so
+// the returned indices match the legacy layout (Status is field 5).
+func splitTrackerRow(line string) []string {
+	line = strings.TrimSpace(line)
+	var fields []string
+	if strings.Contains(line, "\t") {
+		// Mixed format: starts with "| " then tab-separated.
+		line = strings.TrimPrefix(line, "|")
+		line = strings.TrimSpace(line)
+		for _, p := range strings.Split(line, "\t") {
+			fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
+		}
+	} else {
+		// Pure pipe format.
+		line = strings.Trim(line, "|")
+		for _, p := range strings.Split(line, "|") {
+			fields = append(fields, strings.TrimSpace(p))
+		}
+	}
+	return fields
+}
+
+// trackerHeaderAliases maps a lowercased header cell to a canonical field name.
+// Mirrors HEADER_ALIASES in tracker-parse.mjs (including the Spanish aliases) so
+// the Go data layer tolerates the same customized layouts as the Node tracker
+// tooling after #954.
+var trackerHeaderAliases = map[string]string{
+	"#": "num", "num": "num", "date": "date",
+	"company": "company", "empresa": "company",
+	"via": "via", "role": "role", "puesto": "role",
+	"location": "location", "score": "score", "status": "status",
+	"pdf": "pdf", "report": "report", "notes": "notes",
+}
+
+// legacyTrackerColumns is the original fixed layout in splitTrackerRow field
+// space (num=0 … notes=8), used when no recognizable header row is present.
+var legacyTrackerColumns = map[string]int{
+	"num": 0, "date": 1, "company": 2, "role": 3, "score": 4,
+	"status": 5, "pdf": 6, "report": 7, "notes": 8,
+}
+
+// detectTrackerColumns scans for the table header row and maps canonical field
+// names to column indices in splitTrackerRow field space. It returns nil unless
+// the essential columns are all present, so a stray pipe line cannot yield a
+// bogus mapping and the caller falls back to legacyTrackerColumns. Mirrors
+// detectColumns in tracker-parse.mjs (#954).
+func detectTrackerColumns(lines []string) map[string]int {
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
+		cells := splitTrackerRow(line)
+		m := make(map[string]int)
+		for i, c := range cells {
+			if name, ok := trackerHeaderAliases[strings.ToLower(c)]; ok {
+				// Unconditional assign: with a duplicated header name the LAST
+				// occurrence wins, matching detectColumns in tracker-parse.mjs
+				// (which this function mirrors) — first-wins here made the two
+				// runtimes map the same header row differently.
+				m[name] = i
+			}
+		}
+		complete := true
+		for _, k := range []string{"num", "company", "role", "score", "status"} {
+			if _, ok := m[k]; !ok {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			return m
+		}
+	}
+	return nil
+}
+
+// resolveTrackerColumns returns the header-detected column map, falling back to
+// the legacy fixed layout when no header row is found.
+func resolveTrackerColumns(lines []string) map[string]int {
+	if m := detectTrackerColumns(lines); m != nil {
+		return m
+	}
+	return legacyTrackerColumns
+}
+
 // UpdateApplicationStatus updates the status of an application in applications.md.
 func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, newStatus string) error {
+	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
+}
+
+// UpdateApplicationStatusAndNotes atomically updates both the Status cell and
+// the Notes cell for an application row. It is used by the discard reason
+// picker (Issue 1380) to commit `DISCARD: <reason>` alongside the new status
+// in a single file write, preventing a second partial update from leaving the
+// tracker in a half-written state.
+//
+// notesAppend is appended (with a space separator if notes are non-empty) to
+// whatever the Notes cell already contains. Pass an empty string to leave
+// notes unchanged.
+func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerApplication, newStatus, notesAppend string) (returnErr error) {
 	filePath := filepath.Join(careerOpsPath, "applications.md")
-	content, err := os.ReadFile(filePath)
-	if err != nil {
+	if _, err := os.Stat(filePath); err != nil {
 		filePath = filepath.Join(careerOpsPath, "data", "applications.md")
-		content, err = os.ReadFile(filePath)
-		if err != nil {
+		if _, err := os.Stat(filePath); err != nil {
 			return err
 		}
 	}
+	filePath, err := canonicalPath(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve tracker path: %w", err)
+	}
+
+	lock, err := acquireTrackerLock(filePath, defaultTrackerLockOptions())
+	if err != nil {
+		return fmt.Errorf("acquire tracker lock: %w", err)
+	}
+	defer func() {
+		if err := lock.release(); err != nil {
+			releaseErr := fmt.Errorf("release tracker lock: %w", err)
+			if returnErr == nil {
+				returnErr = releaseErr
+			} else {
+				returnErr = errors.Join(returnErr, releaseErr)
+			}
+		}
+	}()
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
 
 	lines := strings.Split(string(content), "\n")
-	found := false
+	cols := resolveTrackerColumns(lines)
+	statusIdx, statusOk := cols["status"]
+	if !statusOk {
+		return fmt.Errorf("status column not found in tracker")
+	}
+	notesIdx, notesOk := cols["notes"]
+	if notesAppend != "" && !notesOk {
+		return fmt.Errorf("notes column not found in tracker, cannot append notes")
+	}
 
+	found := false
 	for i, line := range lines {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			continue
 		}
-		// Match by report number
-		if app.ReportNumber != "" && strings.Contains(line, fmt.Sprintf("[%s]", app.ReportNumber)) {
-			// Replace the status field
-			lines[i] = replaceStatusInLine(line, app.Status, newStatus)
-			found = true
-			break
+		if app.ReportNumber == "" || !strings.Contains(line, fmt.Sprintf("[%s]", app.ReportNumber)) {
+			continue
 		}
+		// Update status
+		updated, ok := replaceStatusInLine(line, app.Status, newStatus, statusIdx)
+		if !ok {
+			return fmt.Errorf("failed to replace status: status cell '%s' not matched in row", app.Status)
+		}
+		// Optionally append to notes
+		if notesAppend != "" {
+			var ok bool
+			updated, ok = appendNotesInLine(updated, notesAppend, notesIdx)
+			if !ok {
+				return fmt.Errorf("failed to append notes: notes column index %d out of bounds", notesIdx)
+			}
+		}
+		lines[i] = updated
+		found = true
+		break
 	}
 
 	if !found {
 		return fmt.Errorf("application not found: report %s", app.ReportNumber)
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644)
+	return writeFileAtomic(filePath, []byte(strings.Join(lines, "\n")))
 }
 
-// replaceStatusInLine replaces the old status with new status in a table line.
-func replaceStatusInLine(line, oldStatus, newStatus string) string {
-	// Case-insensitive replacement of the status field
-	return strings.Replace(line, oldStatus, newStatus, 1)
+// appendNotesInLine appends text to the Notes cell of a tracker row without
+// disturbing any other cell. notesField is the 0-based column index returned
+// by resolveTrackerColumns.
+func appendNotesInLine(line, text string, notesField int) (string, bool) {
+	if notesField < 0 {
+		return line, false
+	}
+	if strings.Contains(line, "\t") {
+		prefix, body, found := strings.Cut(line, "|")
+		if !found {
+			return line, false
+		}
+		cells := strings.Split(body, "\t")
+		if notesField < len(cells) {
+			old := strings.TrimSpace(cells[notesField])
+			if old == "" {
+				cells[notesField] = " " + text + " "
+			} else {
+				cells[notesField] = " " + old + " " + text + " "
+			}
+			return prefix + "|" + strings.Join(cells, "\t"), true
+		}
+		return line, false
+	}
+
+	segments := strings.Split(line, "|")
+	if notesField+1 < len(segments) {
+		old := strings.TrimSpace(segments[notesField+1])
+		if old == "" {
+			segments[notesField+1] = " " + text + " "
+		} else {
+			segments[notesField+1] = " " + old + " " + text + " "
+		}
+		return strings.Join(segments, "|"), true
+	}
+	return line, false
+}
+
+// replaceStatusInLine rewrites only the Status cell of a tracker row, leaving
+// every other cell untouched. The previous implementation used
+// strings.Replace(line, oldStatus, …, 1), which replaces the first occurrence of
+// the status text anywhere in the row — so a status word appearing as a
+// substring of an earlier cell (e.g. Company "Applied Materials") was rewritten
+// instead of the Status cell, corrupting that cell while the status appeared to
+// stay unchanged (#1180). Matching is whole-cell (never a substring) and, as the
+// old comment claimed but the code did not, case-insensitive.
+//
+// statusField is the Status column index in splitTrackerRow field space (5 in
+// the legacy layout), resolved from the table header so a customized layout
+// (e.g. an inserted Location column) targets the right cell.
+func replaceStatusInLine(line, oldStatus, newStatus string, statusField int) (string, bool) {
+	want := strings.TrimSpace(oldStatus)
+
+	// Mixed "| " + tab-separated format (mirrors ParseApplications). The body is
+	// tab-split, so cell index equals the field index.
+	if strings.Contains(line, "\t") {
+		prefix, body, found := strings.Cut(line, "|")
+		if !found {
+			return line, false
+		}
+		cells := strings.Split(body, "\t")
+		if idx := statusCellIndex(cells, statusField, want); idx >= 0 {
+			cells[idx] = spliceCellValue(cells[idx], newStatus)
+			return prefix + "|" + strings.Join(cells, "\t"), true
+		}
+		return line, false
+	}
+
+	// Pure pipe format. strings.Split keeps the segments between pipes; content
+	// cell N is segment N+1 (segment 0 is the empty text before the leading
+	// pipe), so the Status field maps to segment statusField+1.
+	segments := strings.Split(line, "|")
+	if idx := statusCellIndex(segments, statusField+1, want); idx >= 0 {
+		segments[idx] = spliceCellValue(segments[idx], newStatus)
+		return strings.Join(segments, "|"), true
+	}
+	return line, false
+}
+
+// statusCellIndex returns the index of the Status cell. It prefers the canonical
+// column (canonicalIdx, matching ParseApplications) and verifies it by value; if
+// that doesn't match — e.g. a custom tracker layout — it falls back to the first
+// cell that equals want exactly. Matching is whole-cell and case-insensitive,
+// never a substring, so a status word inside an earlier cell is never hit.
+//
+// Final fallback: when neither check matches (the in-memory status went stale —
+// e.g. set-status.mjs or merge-tracker.mjs rewrote the row while the dashboard
+// was open), trust canonicalIdx anyway *if* its current content normalizes to a
+// recognized canonical status. That keeps the #1180 guarantee (never rewrite a
+// non-status cell) while dropping the requirement that the UI's snapshot of the
+// old status still matches the file.
+// Returns -1 when nothing matches, so the caller leaves the row untouched rather
+// than corrupt a guess.
+func statusCellIndex(cells []string, canonicalIdx int, want string) int {
+	if canonicalIdx < len(cells) && strings.EqualFold(strings.TrimSpace(cells[canonicalIdx]), want) {
+		return canonicalIdx
+	}
+	for i, c := range cells {
+		if strings.EqualFold(strings.TrimSpace(c), want) {
+			return i
+		}
+	}
+	if canonicalIdx >= 0 && canonicalIdx < len(cells) && isCanonicalStatusValue(cells[canonicalIdx]) {
+		return canonicalIdx
+	}
+	return -1
+}
+
+// isCanonicalStatusValue reports whether a cell's content reads as one of the
+// known tracker statuses (in any accepted spelling/language), i.e. whether it
+// is safe to treat the cell as the Status column.
+func isCanonicalStatusValue(cell string) bool {
+	switch NormalizeStatus(cell) {
+	case "evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip":
+		return true
+	}
+	return false
+}
+
+// spliceCellValue swaps a cell's inner value while preserving its surrounding
+// whitespace, so "| Applied |" becomes "| Interview |" rather than "|Interview|".
+func spliceCellValue(cell, newVal string) string {
+	trimmed := strings.TrimSpace(cell)
+	if trimmed == "" {
+		if len(cell) >= 2 {
+			half := len(cell) / 2
+			return cell[:half] + newVal + cell[half:]
+		}
+		return " " + newVal + " "
+	}
+	start := strings.Index(cell, trimmed)
+	return cell[:start] + newVal + cell[start+len(trimmed):]
 }
 
 // cleanTableCell removes trailing pipes and whitespace from a table cell value.
@@ -630,7 +933,9 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 			}
 		}
 
-		if norm == "offer" {
+		// A hire proves an offer was received and accepted, so it counts here
+		// too — same reasoning as everOffer in stats.mjs's computeFunnel().
+		if norm == "offer" || norm == "hired" {
 			pm.TotalOffers++
 		}
 		if norm != "skip" && norm != "rejected" && norm != "discarded" {
@@ -644,11 +949,16 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 
 	// Funnel: each stage counts all apps that reached at least that stage.
 	// An app in "interview" has passed through evaluated -> applied -> responded -> interview.
+	// "hired" is terminal success and proves every earlier stage (a landed job
+	// proves the offer, the interviews, the response, and the submission), so it
+	// counts into all four tiers — matching computeFunnel() in stats.mjs, the
+	// canonical funnel definition, whose docstring already describes this exact
+	// math as mirroring this function.
 	total := len(apps)
-	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"]
-	interview := statusCounts["interview"] + statusCounts["offer"]
-	offer := statusCounts["offer"]
+	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	offer := statusCounts["offer"] + statusCounts["hired"]
 
 	pm.FunnelStages = []model.FunnelStage{
 		{Label: "Evaluated", Count: total, Pct: 100.0},
@@ -733,4 +1043,58 @@ func safePct(part, whole int) float64 {
 		return 0
 	}
 	return float64(part) / float64(whole) * 100
+}
+
+// LoadReportDiscardReasons parses predicted discard reasons from a report file.
+func LoadReportDiscardReasons(careerOpsPath, reportPath string) []string {
+	if reportPath == "" {
+		return nil
+	}
+	p := reportPath
+	if strings.Contains(p, "](") {
+		idx := strings.Index(p, "](")
+		p = p[idx+2:]
+		p = strings.TrimSuffix(p, ")")
+	}
+	fullPath := filepath.Join(careerOpsPath, p)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil
+	}
+	text := string(content)
+
+	match := reDiscardReasons.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return nil
+	}
+
+	itemsMatch := reDiscardItem.FindAllStringSubmatch(match[1], -1)
+	var reasons []string
+	for _, item := range itemsMatch {
+		reasons = append(reasons, strings.TrimSpace(item[1]))
+	}
+	return reasons
+}
+
+// SaveAnonymousStat records an anonymized win stat to data/reported-hires.tsv.
+func SaveAnonymousStat(careerOpsPath string, role string, weeks int) error {
+	dirPath := filepath.Join(careerOpsPath, "data")
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return err
+	}
+	filePath := filepath.Join(dirPath, "reported-hires.tsv")
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err == nil && fi.Size() == 0 {
+		_, _ = f.WriteString("Date\tRoleType\tWeeksToHire\n")
+	}
+
+	dateStr := time.Now().Format("2006-01-02")
+	_, err = f.WriteString(fmt.Sprintf("%s\t%s\t%d\n", dateStr, role, weeks))
+	return err
 }

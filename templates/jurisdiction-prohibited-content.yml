@@ -1,0 +1,85 @@
+# Jurisdiction-Prohibited Content Table (#2018)
+#
+# Content that employers are legally prohibited from requiring or asking for,
+# keyed by the candidate's jurisdiction. Consumed prompt-level by:
+#   - modes/oferta.md  — Block G "Jurisdiction-Prohibited Content" signal (JD text)
+#   - modes/apply.md   — Step 5c form-field warning (application forms)
+#
+# No script reads this file at runtime. Matching is agent-judged against each
+# entry's `matching` guidance — never naive keyword/regex matching. Example of
+# why: "we will never ask for your salary history" in a fraud-warning footer
+# must NOT fire the US-CA entry; a form field requesting current/past salary
+# must.
+#
+# CONTRIBUTION RULE (mandatory): no entry without a citable legal source AND an
+# effective date. The bar is "lawyer-bulletin-grade source required" — a
+# statute/regulation citation plus at least one law-firm client bulletin or
+# official government source. "Heard it somewhere" does not qualify; the
+# candidate's trust in this signal depends on the seed data being right.
+#
+# Schema per entry:
+#   jurisdiction:       key formatted {ISO 3166-1 alpha-2 country}-{region code},
+#                       e.g. CA-ON (Ontario, Canada), US-CA (California, USA)
+#   jurisdiction_name:  human-readable jurisdiction name
+#   prohibited:         what employers are prohibited from requiring/asking
+#   matching:           agent-judgment guidance — when the signal should and
+#                       should NOT fire
+#   legal_basis:        the statute/regulation (cited verbatim in output)
+#   effective:          YYYY-MM-DD the prohibition took effect (cited in output)
+#   sources:            law-firm bulletins / official sources backing the entry
+
+entries:
+  - jurisdiction: CA-ON
+    jurisdiction_name: "Ontario, Canada"
+    prohibited: >-
+      A requirement for "Canadian experience", or an equivalent requirement,
+      in a publicly advertised job posting or an associated application form.
+    matching: >-
+      Fires when the posting/form requires or prefers "Canadian experience"
+      or an equivalent formulation (e.g. "Canadian work experience required",
+      "must have experience in the Canadian market" used as a proxy for
+      work-history location rather than genuine market knowledge). Does NOT
+      fire on legitimate location/authorization content: being legally
+      entitled to work in Canada, being located in Canada, holding a
+      Canada-specific license or credential, or knowledge-of-market
+      requirements that are plausibly genuine for the role. Applies to
+      publicly advertised postings; scope exemptions exist and are not
+      verifiable from the JD — which is one reason the output states facts
+      about the posting text only.
+    legal_basis: >-
+      Ontario Employment Standards Act, 2000 amendments introduced by the
+      Working for Workers Four Act, 2024 and Working for Workers Five Act,
+      2024, together with O. Reg. 476/24
+    effective: "2026-01-01"
+    sources:
+      - "Fasken client bulletin on Ontario's job-posting requirements in force January 1, 2026"
+      - "Littler insight on Ontario's Working for Workers Four/Five Acts job-posting rules (2026)"
+      - "Hicks Morley FTR Now bulletin on the ESA job-posting requirements effective January 1, 2026"
+
+  - jurisdiction: US-CA
+    jurisdiction_name: "California, USA"
+    prohibited: >-
+      Seeking an applicant's salary history — including compensation and
+      benefits history — whether orally, in writing, personally, or through
+      an agent.
+    matching: >-
+      Fires when a posting or application-form field asks what the candidate
+      currently earns or previously earned (current salary, salary history,
+      past compensation, W-2 upload requests used to verify prior pay,
+      benefits history). Does NOT fire on questions about the candidate's
+      salary EXPECTATIONS or desired range (asking expectations is lawful,
+      and California employers must provide a pay scale on request), nor on
+      fraud-warning boilerplate stating the employer will never ask for such
+      information, nor when the candidate volunteers history unprompted.
+    legal_basis: "California Labor Code section 432.3 (AB 168, 2017)"
+    effective: "2018-01-01"
+    sources:
+      - "Ogletree Deakins analysis of California Labor Code 432.3 salary history inquiry ban (AB 168)"
+      - "Jackson Lewis guidance on California's salary history ban effective January 1, 2018"
+
+# Known candidate rows for contributors — NOT entries yet. Each needs its own
+# verified statute citation + effective date + matching-scope check before
+# being promoted to an entry (scopes vary a lot; verify individually):
+#   - Other US salary-history-ban jurisdictions (~20 states plus DC), e.g.
+#     US-NY (NY Labor Law 194-a), US-CO, US-IL, US-MA, US-NJ, US-WA.
+#   - Photo / age / marital-status request restrictions in several EU markets.

@@ -1,11 +1,14 @@
 # Architecture
 
+This file describes the runtime flows. Design principles and the
+system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md).
+
 ## System Overview
 
 ```
                     ┌─────────────────────────────────┐
-                    │         Claude Code Agent        │
-                    │   (reads CLAUDE.md + modes/*.md) │
+                    │         AI Coding CLI Agent      │
+                    │   (reads AGENTS.md + modes/*.md) │
                     └──────────┬──────────────────────┘
                                │
             ┌──────────────────┼──────────────────────┐
@@ -17,14 +20,14 @@
             │                  │                       │
             │           ┌──────▼──────┐          ┌────▼─────┐
             │           │ pipeline.md │          │ N workers│
-            │           │ (URL inbox) │          │ (claude -p)
+            │           │ (URL inbox) │          │ (headless)
             │           └─────────────┘          └────┬─────┘
             │                                          │
      ┌──────▼──────────────────────────────────────────▼──────┐
      │                    Output Pipeline                      │
      │  ┌──────────┐  ┌────────────┐  ┌───────────────────┐  │
      │  │ Report.md│  │  PDF (HTML  │  │ Tracker TSV       │  │
-     │  │ (A-F eval)│  │  → Puppeteer)│  │ (merge-tracker)  │  │
+     │  │ (A-G eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
      │  └──────────┘  └────────────┘  └───────────────────┘  │
      └────────────────────────────────────────────────────────┘
                                │
@@ -39,31 +42,33 @@
 1. **Input**: User pastes JD text or URL
 2. **Extract**: Playwright/WebFetch extracts JD from URL
 3. **Classify**: Detect archetype (1 of 6 types)
-4. **Evaluate**: 6 blocks (A-F):
+4. **Evaluate**: 7 blocks (A-G):
    - A: Role summary
    - B: CV match (gaps + mitigation)
    - C: Level strategy
    - D: Comp research (WebSearch)
    - E: CV personalization plan
    - F: Interview prep (STAR stories)
-5. **Score**: Weighted average across 10 dimensions (1-5)
+   - G: Posting legitimacy (scam / ghost-job signals)
+5. **Score**: Weighted average across 5 dimensions (1-5)
 6. **Report**: Save as `reports/{num}-{company}-{date}.md`
 7. **PDF**: Generate ATS-optimized CV (`generate-pdf.mjs`)
-8. **Track**: Write TSV to `batch/tracker-additions/`, auto-merged
+8. **Track**: New entries via TSV in `batch/tracker-additions/` merged by
+   `merge-tracker.mjs`; status updates to existing rows via `set-status.mjs`
 
 ## Batch Processing
 
 The batch system processes multiple offers in parallel:
 
 ```
-batch-input.tsv    →  batch-runner.sh  →  N × claude -p workers
+batch-input.tsv    →  batch-runner.sh  →  N × headless CLI workers
 (id, url, source)     (orchestrator)       (self-contained prompt)
                            │
                     batch-state.tsv
                     (tracks progress)
 ```
 
-Each worker is a headless Claude instance (`claude -p`) that receives the full `batch-prompt.md` as context. Workers produce:
+Each worker is a headless AI CLI instance — the bundled `batch-runner.sh` currently runs `claude -p` workers only. See the Headless / Batch Mode table in `AGENTS.md`. Workers produce:
 - Report .md
 - PDF
 - Tracker TSV line

@@ -1,12 +1,20 @@
 # Mode: followup -- Follow-up Cadence Tracker
 
+> **Read `voice-dna.md` (if present) and apply it to every generated email/LinkedIn draft.** This mode is standalone — it does NOT load `_shared.md`, so read `voice-dna.md` directly. Follow-up drafts are conversational, so apply the full guardrail: banned words/phrases/patterns, no em-dashes, no negative parallelisms (§3-4) AND conversational voice — contractions, varied rhythm, direct "I"/"you" (§1-2). Never drop or soften a real metric from `cv.md` for style.
+
 ## Purpose
 
 Track follow-up cadence for active applications. Flag overdue follow-ups, extract contacts from notes, and generate tailored follow-up email/LinkedIn drafts using report context.
 
+**Not in scope here:** a same-day follow-up after a recruiter/interviewer
+confirmed a specific call time and then didn't call. That's not an
+elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
+(`/career-ops email noshow`) instead.
+
 ## Inputs
 
 - `data/applications.md` — Application tracker
+- `data/active-interviews.md` — Interview round dates (read by Step 1b)
 - `data/follow-ups.md` — Follow-up history (created on first use)
 - `reports/` — Evaluation reports (for context in drafts)
 - `config/profile.yml` — User profile (name, identity)
@@ -30,6 +38,28 @@ Parse the JSON output. It contains:
 
 If no actionable entries, tell the user:
 > "No active applications to follow up on. Apply to some roles first with `/career-ops` and come back when they're aging."
+
+**Calibration cross-reference:** `node funnel-velocity.mjs --summary` reports which in-flight applications sit beyond the typical first-response window (its `waiting` block) — those rows are natural follow-up candidates; feed them into this cadence view rather than treating the wait itself as a verdict (silence past the window is common, not a rejection). When the user reports a status change here ("they replied", "rejected"), route it through `node set-status.mjs <report#> <state>` and pass `--on YYYY-MM-DD` when they name the real event day.
+
+## Step 1b — Employer Response-Latency Check
+
+Execute:
+
+```bash
+node rejection-latency.mjs
+```
+
+Parse the JSON output. It cross-references `data/active-interviews.md` interview dates with tracker rows still in `Interview` state (matched per application: company + role) and flags applications whose post-interview silence exceeds the **courtesy** threshold (30-day default, configurable via `rejection_latency.courtesy_days` or `--courtesy-days`). If `flags` is empty, skip this step silently.
+
+**Confirmation gate (required before rendering anything from a flag):** a flag's fields come straight from raw tracker/interview-log data, not from anything the user has said in this conversation. Before rendering ANY user-facing content around a flag — the reminder line below, or the `blacklistSuggestion` row — the user must have explicitly stated or confirmed the flag's company, dates (last interview date / days since), and any other field about to be rendered, in the current conversation. This can be as simple as asking "I see {company} flagged at {daysSinceLastInterview} days since your last interview on {lastInterviewDate} — does that match what you remember?" and getting a yes, or the user independently bringing up the same company/dates unprompted. **If the user has not confirmed these details, skip rendering that flag silently** — do not surface the reminder line or the blacklist row from unconfirmed raw tracker data.
+
+Once confirmed, surface one reminder line alongside the Step 2 dashboard:
+
+```text
+[Render in {language.output}: "⏳ {company} — {daysSinceLastInterview} days since your last interview ({lastInterviewDate}) with no recorded response. This exceeds the {thresholdDays}-day courtesy threshold."]
+```
+
+If the user asks what to do about a confirmed flag, show the flag's ready-made `blacklistSuggestion` row and tell them ([Render in {language.output}]) they can copy it into `data/blacklist.md` themselves — this is a suggestion only. When `language.output` is not English, compose the reminder prose — and, if the user keeps their blacklist reasons in another language, the row's Reason cell — from the flag's structured fields (`reasonCode`, `daysSinceLastInterview`, `thresholdDays`, `lastInterviewDate`) instead of relaying the English `reason` string verbatim; the table's column layout and the literal `company` scope value stay fixed (they must match `data/blacklist.md`'s file format). **Never write to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` from this step** (#1742 opt-in guarantee, same suggestion-only bridge as `modes/interview-redflag.md`).
 
 ## Step 2 — Display Dashboard
 
@@ -55,6 +85,15 @@ For each **overdue** or **urgent** entry only:
 1. Read the linked report (`reportPath` from JSON) for company context
 2. Read `cv.md` for proof points
 3. Read `config/profile.yml` for candidate name and identity
+
+**Agency-mediated applications (#1596):** when the entry's `via` field is set (the cadence JSON emits `via: null` for direct applications), the chase target is the **agency contact** (recruiter named in the notes/contacts), not the company — the recruiter owns the client relationship and has their own incentive to respond. Reference the role by the agency's framing.
+
+**When the end employer is unknown (company `?`), this branch REPLACES the framework rules below — do not fall through to them.** There is no company name to mention and nothing company-specific to reference, so instead:
+- Sentence 1 references the role by the **agency's framing** (their listing title + the recruiter's name) **plus when you applied** — the application date stays in the opening exactly as the framework requires; only the company reference is replaced, never with a placeholder company name.
+- Sentence 2's value-add draws on cv.md/report proof points that fit the role as listed — skip the "specific to THAT company" rule.
+- Add the client-name ask: request the end employer's name as a natural part of the follow-up ("so I can prepare properly, could you share which company this role is with?") — that reveal is what unlocks cross-channel dedup in the tracker.
+
+When `via` is set but the employer IS known, use the framework below unchanged except the recipient: address the recruiter, mention the client company by name.
 
 ### Email Follow-up Framework (first follow-up, followupCount == 0)
 
@@ -107,6 +146,10 @@ Do NOT generate another follow-up. Instead suggest:
 > - Trying a different contact via `/career-ops contacto`
 > - Keeping in `Applied` status but deprioritizing"
 
+### Company history context (optional)
+
+Before drafting, check the company's card. Skip this lookup entirely when the tracker's company field is `?` (the unknown-employer marker — there is no meaningful card to fetch). Otherwise run `node company-history.mjs --company <company>`, passing the company name as its own single, quoted argument — never splice it into a longer shell string, since company names can legitimately contain quotes, `$`, backticks, or `;`. If `responsiveness.label` is `silent-on-you`, set expectations rather than discouraging the follow-up: many processes are genuinely just slow, so mention this plainly and suggest capping further time investment in this company if it stays silent after this attempt. The decision to send — and how many more times — stays the user's; never skip or downgrade a follow-up because of this label. Follow-up compliance is never punished.
+
 ## Step 4 — Present Drafts
 
 For each draft, show:
@@ -127,27 +170,50 @@ For each draft, show:
 
 After the user reviews and says they've sent a follow-up, record it:
 
-1. If `data/follow-ups.md` doesn't exist, create it:
-   ```markdown
-   # Follow-up History
+1. If `data/follow-ups.md` doesn't exist, create it (this exact header — the
+   same one the web UI writes; `followup-cadence.mjs` parses these columns):
 
-   | # | App# | Date | Company | Role | Channel | Contact | Notes |
-   |---|------|------|---------|------|---------|---------|-------|
+   ```markdown
+   # Follow-ups
+
+   | num | appNum | date | company | role | channel | contact | notes |
+   |---|---|---|---|---|---|---|---|
    ```
 
 2. Append a row with:
-   - `#` = next sequential number in the follow-ups table
-   - `App#` = application number from tracker
-   - `Date` = today's date
-   - `Company` = company name
-   - `Role` = role title
-   - `Channel` = Email / LinkedIn / Other
-   - `Contact` = who it was sent to
-   - `Notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
+   - `num` = next sequential number in the follow-ups table
+   - `appNum` = application number from tracker
+   - `date` = today's date (YYYY-MM-DD)
+   - `company` = company name
+   - `role` = role title
+   - `channel` = Email / LinkedIn / Phone / Other
+   - `contact` = who it was sent to
+   - `notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
 
 3. Optionally update the Notes column in `data/applications.md` with "Follow-up {N} sent {YYYY-MM-DD}"
 
 **IMPORTANT:** Only record follow-ups the user confirms they actually sent. Never record a draft as sent.
+
+### Pinned next dates & automatic seeding
+
+`data/follow-ups.md` also supports pin lines that override the computed
+schedule for a single application:
+
+```text
+- next #42 2026-07-10 (set 2026-07-02)
+```
+
+`#42` is the application number, the first date is the pinned NEXT follow-up
+date, and `(set …)` is the day the pin was made. Pins take precedence over
+the computed schedule until a follow-up is logged on or after the set-date;
+the latest pin per application wins; deleting the line clears the pin.
+
+Pins may be seeded AUTOMATICALLY when an application turns Applied —
+`node followup-seed.mjs <num>` (run by the `apply` mode's Step 9) appends a
+pin scheduling the first follow-up at apply date + the `applied_first`
+cadence. Seeding is idempotent, and a stale pin left behind by a later
+Rejected/Discarded transition is harmless because the cadence analysis
+ignores non-actionable statuses.
 
 ## Step 6 — Summary
 

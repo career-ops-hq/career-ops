@@ -2,17 +2,68 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Manual re-publish: when a release was tagged but the npm publish failed,
+  # dispatch this workflow to publish the scaffolder at its current version
+  # without cutting a new release.
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
+        id: release
+        if: ${{ github.event_name == 'push' }}
         with:
-          release-type: simple
-          package-name: career-ops
+          config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Publish the npm scaffolder when a release was just created, OR on a
+      # manual dispatch (to recover from a failed publish). Runs in the same job
+      # because a release created via GITHUB_TOKEN does not trigger separate
+      # `on: release` workflows.
+      - uses: actions/checkout@v7
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+      - uses: actions/setup-node@v7
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+      # Trusted Publishing (OIDC): npm >= 11.5.1 authenticates via the workflow's
+      # id-token against the trusted publisher configured on npmjs.com — no token.
+      # setup-node ships an older npm, so upgrade before publishing.
+      - name: Upgrade npm for trusted publishing
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+        run: npm install -g npm@latest
+      - name: Publish scaffolder to npm
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+        run: npm publish --provenance --access public
+        working-directory: scaffolder
+
+      # GitHub marks whichever release was created LAST as "Latest", and in this
+      # manifest the `web` component is created after `career-ops`. Result: the
+      # repository's releases page has never once pointed at the main package —
+      # every career-ops release since the web component was added showed
+      # `web-vX.Y.Z` as the latest version to anyone landing there. Verified
+      # 28-jul: 0 of 20 career-ops releases carried the flag.
+      #
+      # Re-assert it explicitly so ordering stops deciding. Reads the version
+      # from the manifest rather than an action output, so it cannot drift from
+      # what was actually released.
+      - name: Keep the career-ops release marked as Latest
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(jq -r '."."' .release-please-manifest.json)
+          if [ -z "$ver" ] || [ "$ver" = "null" ]; then
+            echo "::error::could not read the career-ops version from .release-please-manifest.json"
+            exit 1
+          fi
+          echo "marking career-ops-v${ver} as Latest"
+          gh release edit "career-ops-v${ver}" --repo "$GITHUB_REPOSITORY" --latest

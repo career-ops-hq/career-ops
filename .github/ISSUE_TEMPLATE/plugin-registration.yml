@@ -1,0 +1,52 @@
+name: Plugin registration
+description: Register your career-ops-plugin-<name> repo so it can be listed as an approved community plugin
+labels: ["plugin-submission", "area:plugins"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **Privacy first.** Never paste your CV, scan results, or other personal data — issues are **public forever**.
+
+        This issue becomes your plugin's **home** (its changelog + compatibility/quarantine board). After it's filed, open a **registry PR** (the plugin template can do this for you on a release tag) to actually list it. See [docs/PLUGINS.md](https://github.com/santifer/career-ops/blob/main/docs/PLUGINS.md).
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/santifer/career-ops/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Repo URL
+      description: Must be named `career-ops-plugin-<name>` (a public GitHub repo you own).
+      placeholder: https://github.com/your-user/career-ops-plugin-greenhouse
+    validations:
+      required: true
+  - type: input
+    id: desc
+    attributes:
+      label: One-line description
+      description: Mission-framed, what it does.
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: Hooks + keys + hosts
+      description: Which hooks (provider/ingest/search/notify/export), which env keys it needs, which hosts it talks to.
+    validations:
+      required: true
+  - type: checkboxes
+    id: attest
+    attributes:
+      label: Attestations
+      options:
+        - label: It is human-in-the-loop — it never auto-submits an application
+          required: true
+        - label: It reads PUBLIC data or the user's OWN account only — no centralized infrastructure
+          required: true
+        - label: MIT-compatible license; no personal data in the repo
+          required: true
+        - label: No commercial / hosted-service / monetization wording — career-ops is free and local-first
+          required: true

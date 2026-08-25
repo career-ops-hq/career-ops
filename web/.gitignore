@@ -1,0 +1,16 @@
+# career-ops web — self-contained ignore (does not touch core root .gitignore)
+/node_modules
+/.next*
+/out
+/dist
+/.turbo
+*.tsbuildinfo
+next-env.d.ts
+.env*.local
+.DS_Store
+
+# local QA artifacts (screenshots live in the workspace root, outside this tree)
+.playwright-mcp/
+
+# agent session memory — internal notes, never in the public repo
+.claude/

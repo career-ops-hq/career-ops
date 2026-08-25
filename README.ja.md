@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops — マルチエージェント求職システム" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops マルチエージェント求職システム" width="800"></a>
 </p>
 
 <p align="center">
@@ -13,37 +17,57 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <br>
-  <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
-  <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
-  <img src="https://img.shields.io/badge/DE-grey?style=flat" alt="DE">
-  <img src="https://img.shields.io/badge/FR-blue?style=flat" alt="FR">
-  <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
-  <img src="https://img.shields.io/badge/JA-red?style=flat" alt="JA">
+  <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
+  &nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+</p>
+
+<p align="center"><sub>掲載メディア</sub></p>
+
+<p align="center">
+  <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops デモ" width="800">
+  <img src="docs/demo.gif" alt="career-ops デモ" width="800">
 </p>
 
 <p align="center"><strong>740件以上の求人を評価 · 100件以上のパーソナライズCVを生成 · 理想のポジションを獲得</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/コミュニティに参加-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/コミュニティに参加-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  &nbsp;
+  <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>エージェントスキル標準に準拠したあらゆるCLIでも動作します</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Gemini CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
 
 ## これは何？
 
-Career-Opsは、あらゆるAIコーディングCLIを本格的な求職コマンドセンターに変えます。スプレッドシートで応募を手動管理する代わりに、AIによる以下のパイプラインが手に入ります:
+career-opsは、あらゆるAIコーディングCLIを本格的な求職コマンドセンターに変えます。スプレッドシートで応募を手動管理する代わりに、AIによる以下のパイプラインが手に入ります:
 
-- **オファーを評価** -- 構造化されたA-Fスコアリングシステム（10項目の重み付け評価軸）
+- **オファーを評価** -- 構造化されたA-H評価（5つの項目が1〜5のスコアに反映される）
 - **テーラーメイドPDFを生成** -- 各求人票に合わせてATS最適化されたCV
 - **求人ポータルを自動スキャン** （Greenhouse、Ashby、Lever、企業ページ）
 - **バッチ処理** -- サブエージェントで10件以上のオファーを並列評価
@@ -59,49 +83,51 @@ career-opsはエージェンティックです: Claude CodeがPlaywrightで求�
 
 ## 機能
 
-| 機能 | 説明 |
-|---------|-------------|
-| **自動パイプライン** | URLを貼るだけで、評価 + PDF + トラッカー記録が完了 |
-| **6ブロック評価** | 役割サマリー、CVマッチ、レベル戦略、報酬調査、パーソナライズ、面接準備（STAR+R） |
-| **面接ストーリーバンク** | 評価を重ねるごとにSTAR+Reflectionストーリーを蓄積 -- あらゆる行動面接質問に答える5〜10のマスターストーリー |
-| **交渉スクリプト** | 給与交渉のフレームワーク、地域ディスカウント反論、競合オファーの活用 |
-| **ATS向けPDF生成** | Space Grotesk + DM Sansデザインのキーワード注入型CV |
-| **ポータルスキャナー** | 45社以上事前設定済み（Anthropic、OpenAI、ElevenLabs、Retool、n8n...) + Ashby、Greenhouse、Lever、Wellfound横断のカスタムクエリ |
-| **バッチ処理** | `claude -p`ワーカーによる並列評価 |
-| **ダッシュボードTUI** | パイプラインを閲覧・フィルター・ソートするターミナルUI |
-| **Human-in-the-Loop** | AIは評価と推奨を行い、決定と実行はあなたが行います。システムが応募を自動送信することは絶対になく、最終判断は常にあなたが下します |
-| **パイプラインの整合性** | 自動マージ、重複排除、ステータス正規化、ヘルスチェック |
+| 機能                     | 説明                                                                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| **自動パイプライン**     | URLを貼るだけで、評価 + PDF + トラッカー記録が完了                                                                               |
+| **6ブロック評価**        | 役割サマリー、CVマッチ、レベル戦略、報酬調査、パーソナライズ、面接準備（STAR+R） -- さらに詐欺やゴーストジョブを検出するブロックGの求人正当性チェック |
+| **面接ストーリーバンク** | 評価を重ねるごとにSTAR+Reflectionストーリーを蓄積 -- あらゆる行動面接質問に答える5〜10のマスターストーリー                       |
+| **交渉スクリプト**       | 給与交渉のフレームワーク、地域ディスカウント反論、競合オファーの活用                                                             |
+| **ATS向けPDF生成**       | Space Grotesk + DM Sansデザインのキーワード注入型CV                                                                              |
+| **ポータルスキャナー**   | 45社以上事前設定済み（Anthropic、OpenAI、ElevenLabs、Retool、n8n...) + Ashby、Greenhouse、Lever、Wellfound横断のカスタムクエリ   |
+| **バッチ処理**           | `claude -p`ワーカーによる並列評価                                                                                                |
+| **ダッシュボードTUI**    | パイプラインを閲覧・フィルター・ソートするターミナルUI                                                                           |
+| **Human-in-the-Loop**    | AIは評価と推奨を行い、決定と実行はあなたが行います。システムが応募を送信することは絶対になく、最終判断は常にあなたが下します <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
+| **パイプラインの整合性** | 自動マージ、重複排除、ステータス正規化、ヘルスチェック                                                                           |
 
 ## クイックスタート
 
+**最速の方法 — コマンド1つ:**
+
 ```bash
-# 1. クローンとインストール
+npx @santifer/career-ops init
+```
+
+> 💡 `npx` は [Node.js](https://nodejs.org) に付属しています — グローバルに何もインストールせず、
+> インストーラーを一度だけ実行します。まだNodeがない場合は、先にインストールしてください。
+> （すでにClaude Code / Gemini / Codex CLIを使っているなら、もう持っています。）
+
+これにより最新リリースが `./career-ops` にクローンされ、依存関係がインストールされます。その後:
+
+```bash
+cd career-ops
+claude   # or gemini / codex / qwen / opencode — ここでAI CLIを起動
+```
+
+**初回起動時、career-opsが対話するだけでセットアップ（CV、プロフィール、対象ロール）をご案内します。手で編集するものは何もありません。**
+
+<details>
+<summary><b>手動でセットアップしたいですか？（git clone）</b></summary>
+
+```bash
 git clone https://github.com/santifer/career-ops.git
 cd career-ops && npm install
-npx playwright install chromium   # PDF生成に必要
-
-# 2. セットアップ確認
-npm run doctor                     # 前提条件をすべて検証
-
-# 3. 設定
-cp config/profile.example.yml config/profile.yml  # 自身の情報に編集
-cp templates/portals.example.yml portals.yml       # 対象企業をカスタマイズ
-
-# 4. CVを追加
-# プロジェクトルートにcv.mdを作成し、CVをマークダウンで記述
-
-# 5. Claudeでパーソナライズ
-claude   # このディレクトリでClaude Codeを起動
-
-# そしてClaudeにシステムを自分向けに調整してもらう:
-# 「アーキタイプをバックエンドエンジニアの役割に変更して」
-# 「モードを日本語に翻訳して」
-# 「これら5社をportals.ymlに追加して」
-# 「貼り付けるこのCVでプロフィールを更新して」
-
-# 6. 使い始める
-# 求人URLを貼るか、/career-opsを実行
+npx playwright install chromium   # PDF生成にのみ必要
+claude   # AI CLIを起動 — 初回起動時にオンボーディングします
 ```
+
+</details>
 
 > **このシステムはClaude自身がカスタマイズする前提で設計されています。** モード、アーキタイプ、スコアリング重み、交渉スクリプト -- すべてClaudeに依頼すれば変更してくれます。Claudeは自分が使うのと同じファイルを読むので、どこを編集すればよいか正確に把握しています。
 
@@ -140,7 +166,7 @@ career-opsは複数のモードを持つ単一のスラッシュコマンドで�
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F 評価        │  マッチ度、ギャップ、報酬調査、STARストーリー
+│  A-H 評価        │  マッチ度、ギャップ、報酬調査、STARストーリー
 │  (cv.mdを読む)   │
 └────────┬─────────┘
          │
@@ -170,9 +196,8 @@ career-opsは複数のモードを持つ単一のスラッシュコマンドで�
 内蔵のターミナルダッシュボードで、パイプラインを視覚的に閲覧できます:
 
 ```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+npm run serve:dashboard   # launch the TUI
+npm run build:dashboard   # optional: build the standalone binary
 ```
 
 機能: 6つのフィルタータブ、4つのソートモード、グループ表示/フラット表示、遅延読み込みプレビュー、インラインステータス変更。

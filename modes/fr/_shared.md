@@ -21,6 +21,8 @@
 
 **REGLE : Ne JAMAIS coder en dur des metriques issues des proof points.** Les lire depuis `cv.md` et `article-digest.md` au moment de l'evaluation.
 **REGLE : Pour les metriques d'articles/projets, `article-digest.md` a priorite sur `cv.md`** (`cv.md` peut contenir des chiffres plus anciens).
+**REGLE : Ne JAMAIS affirmer que le candidat est l'auteur d'un projet, d'un depot, d'une bibliotheque, d'un outil, d'un framework ou d'un artefact open source sans attribution explicite dans `cv.md` ou `article-digest.md`.** La confusion outil-de-travail (le candidat utilise X -> le candidat a construit X) est le schema de fabrication le plus frequent, et il est interdit.
+**REGLE : Les mots-cles se reformulent, ils ne s'inventent jamais.** Reordonner, recadrer, mettre en avant -- mais jamais inventer. Si une affirmation n'est etayee par aucun fichier du perimetre, demander au candidat. Sans reponse, omettre. Le silence sur un sujet vaut mieux qu'un detail fabrique.
 
 ---
 

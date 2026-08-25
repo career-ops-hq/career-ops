@@ -11,7 +11,9 @@ reviews:
       - main
   path_instructions:
     - path: "CLAUDE.md"
-      instructions: "This file controls agent behavior. Review changes very carefully for conflicts with existing instructions."
+      instructions: "This file controls agent behavior (Claude Code). Review changes very carefully for conflicts with existing instructions."
+    - path: "OPENCODE.md"
+      instructions: "This file controls agent behavior (OpenCode). Review changes very carefully for conflicts with existing instructions."
     - path: "modes/_shared.md"
       instructions: "This file controls the scoring system. Any changes affect ALL evaluations. Flag anything that modifies scoring logic."
     - path: "DATA_CONTRACT.md"
