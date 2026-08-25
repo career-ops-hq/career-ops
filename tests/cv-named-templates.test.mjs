@@ -77,6 +77,27 @@ const dir = mkdtempSync(join(tmpdir(), 'cv-named-templates-'));
 const input = join(dir, 'payload.json');
 writeFileSync(input, JSON.stringify(PAYLOAD));
 
+const profileDefault = resolveTemplate('cv');
+if (profileDefault === join(ROOT, 'templates', 'cv-template.jake.html')) {
+  pass('profile default resolves to Jake');
+} else {
+  fail(`profile default resolved to ${profileDefault}, not Jake`);
+}
+
+const defaultOutput = join(dir, 'profile-default.html');
+try {
+  execFileSync(NODE, ['build-cv-html.mjs', input, defaultOutput], { cwd: ROOT, encoding: 'utf-8' });
+  const defaultHtml = readFileSync(defaultOutput, 'utf-8');
+  if (defaultHtml.includes('--font-family: "Liberation Serif"')
+    && defaultHtml.includes('--page-margin: 0.25in;')) {
+    pass('build-cv-html honors the configured Jake template when no override is supplied');
+  } else {
+    fail('build-cv-html ignored the configured Jake template when no override was supplied');
+  }
+} catch (e) {
+  fail(`build-cv-html default-template render crashed — ${e.message}`);
+}
+
 for (const { name, displayName } of NAMED) {
   const file = join(ROOT, 'templates', `cv-template.${name}.html`);
 

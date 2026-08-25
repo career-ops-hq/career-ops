@@ -47,7 +47,7 @@ Examples:
 | Profile config | `config/profile.yml` if it exists | Always; identity, output language, comp range, target roles |
 | Portfolio digest | `article-digest.md` if it exists | Always; proof points and metrics |
 | llms.txt | `llms.txt` if it exists | Always |
-| CV template | `templates/cv-template.html` | For PDF |
+| CV template | `node cv-templates.mjs resolve cv` | For PDF; resolves the configured `cv.template` |
 | PDF renderer | `generate-pdf.mjs` | For PDF |
 | States | `templates/states.yml` | Tracker status labels |
 
@@ -419,7 +419,7 @@ Only generate the PDF when the score from Step 2 is greater than or equal to the
 
 If score is greater than or equal to the threshold:
 
-1. Read `cv.md`, `article-digest.md`, and `templates/cv-template.html`.
+1. Read `cv.md`, `article-digest.md`, and `modes/_custom.md` if it exists. Resolve the CV template with `node cv-templates.mjs resolve cv`; use the returned path for this worker's PDF and do not silently substitute another template.
 2. Extract 15-20 JD keywords.
 3. Use `language.output` for CV prose.
 4. Choose paper format: US/Canada -> `letter`; otherwise `a4`.
@@ -429,7 +429,15 @@ If score is greater than or equal to the threshold:
 8. Reorder experience bullets by relevance.
 9. Build a 6-8 item competency grid.
 10. Inject keywords ethically into existing achievements; never invent skills or metrics.
-11. Write HTML to `output/cv-candidate-{company-slug}.html`.
+11. Build the structured JSON payload described in `modes/pdf.md` and run:
+
+```bash
+node build-cv-html.mjs \
+  /tmp/cv-candidate-{company-slug}.json \
+  output/cv-candidate-{company-slug}.html \
+  {resolved-template-path}
+```
+
 12. Run:
 
 ```bash
@@ -437,7 +445,9 @@ node generate-pdf.mjs \
   output/cv-candidate-{company-slug}.html \
   output/cv-candidate-{company-slug}-{{DATE}}.pdf \
   --format={letter|a4} \
-  --report={{REPORT_NUM}}
+  --report={{REPORT_NUM}} \
+  --max-pages=1 \
+  --strict-pages
 ```
 
 On success, use `pdf_emoji` = `✅` and set `"pdf"` to the output path in the final JSON.
@@ -452,9 +462,9 @@ ATS rules:
 
 Design rules:
 
-- Space Grotesk for headings, DM Sans for body.
-- Self-hosted fonts from `fonts/`.
-- White background, 0.6in margins.
+- The resolved template is authoritative for typography, fonts, margins, colors, spacing, and section layout.
+- Apply `modes/_custom.md` to every worker; never restyle a CV with generic defaults.
+- Keep every Skills category on its own line and keep newly added sections line-separated; do not pipe-join categories or use flex-wrapped skill rows.
 - Keep the output readable and ATS-safe.
 
 ### Step 5 — Tracker TSV Line

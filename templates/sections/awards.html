@@ -7,17 +7,24 @@
                  falls back to empty award-org span (ORG_EMPTY) for table-cell alignment
     YEAR_BLOCK — conditional: award-year span with year text when present;
                  falls back to empty award-year span (YEAR_EMPTY) for alignment
+    BULLETS_BLOCK — conditional: supporting bullet list when present;
+                    omitted when the entry has no supporting bullets
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
 <!--ENTRY-->
 <div class="award-item">
-  <span class="award-title">{{TITLE}}</span>
-  {{ORG_BLOCK}}
-  {{YEAR_BLOCK}}
+  <div class="award-header">
+    <span class="award-title">{{TITLE}}</span>
+    {{ORG_BLOCK}}
+    {{YEAR_BLOCK}}
+  </div>
+  {{BULLETS_BLOCK}}
 </div>
 <!--ORG_BLOCK--><span class="award-org">{{ORG}}</span><!--/ORG_BLOCK-->
 <!--ORG_EMPTY--><span class="award-org"></span><!--/ORG_EMPTY-->
 <!--YEAR_BLOCK--><span class="award-year">{{YEAR}}</span><!--/YEAR_BLOCK-->
 <!--YEAR_EMPTY--><span class="award-year"></span><!--/YEAR_EMPTY-->
+<!--BULLETS_BLOCK--><ul class="award-bullets">{{BULLETS}}</ul><!--/BULLETS_BLOCK-->
+<!--BULLETS_EMPTY--><!--/BULLETS_EMPTY-->
 <!--/ENTRY-->

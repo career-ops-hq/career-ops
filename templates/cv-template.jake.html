@@ -34,7 +34,7 @@ version: 1.0.0
     --font-size: 10.5px;
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
-    --page-margin: 0.5in;
+    --page-margin: 0.25in;
   }
   @page { margin: var(--page-margin); }
 
@@ -54,7 +54,7 @@ version: 1.0.0
   body {
     font-family: var(--font-family);
     font-size: var(--font-size);
-    line-height: 1.42;
+    line-height: 1.24;
     color: #000000;
     background: #ffffff;
     font-variant-ligatures: none;
@@ -84,7 +84,7 @@ version: 1.0.0
   /* === HEADER === */
   .header {
     text-align: center;
-    margin-bottom: 9px;
+    margin-bottom: 5px;
   }
 
   .header h1 {
@@ -109,7 +109,7 @@ version: 1.0.0
 
   /* === SECTIONS ===
      Small caps + a rule directly beneath, matching \titlerule in the original. */
-  .section { margin-bottom: 8px; }
+  .section { margin-bottom: 5px; }
 
   .section-title {
     font-size: 13px;
@@ -118,14 +118,14 @@ version: 1.0.0
     text-transform: lowercase;
     letter-spacing: 0.04em;
     border-bottom: 0.8px solid #000000;
-    padding-bottom: 1px;
-    margin-bottom: 4px;
+    padding-bottom: 0.5px;
+    margin-bottom: 2px;
   }
   /* small-caps needs lowercase source text to render as small caps; the first
      letter is restored to a full cap so headings read "Work Experience". */
   .section-title::first-letter { text-transform: uppercase; }
 
-  .summary-text { margin-top: 2px; }
+  .summary-text { margin-top: 0; }
 
   /* === COMPETENCIES ===
      The original has no tag/pill concept — competencies render as a plain
@@ -145,14 +145,14 @@ version: 1.0.0
      block divs, so the role is floated left and the location's shortened line
      box is right-aligned beside it — this reproduces the original's tabular
      look without needing a wrapper element. */
-  .job { margin-bottom: 7px; }
+  .job { margin-bottom: 4px; }
   .job:last-child { margin-bottom: 0; }
 
   .job-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 10px;
+    gap: 6px;
   }
 
   .job-company {
@@ -179,17 +179,17 @@ version: 1.0.0
 
   .job ul {
     clear: both;   /* required: ends the .job-role float before the bullets */
-    margin-top: 2px;
-    padding-left: 15px;
+    margin-top: 1px;
+    padding-left: 14px;
   }
 
   .job li {
-    margin-bottom: 1.5px;
+    margin-bottom: 0.5px;
     padding-left: 1px;
   }
 
   /* === PROJECTS === */
-  .project { margin-bottom: 5px; }
+  .project { margin-bottom: 3px; }
 
   .project-title {
     font-size: 10.5px;
@@ -203,22 +203,22 @@ version: 1.0.0
     margin-left: 5px;
   }
 
-  .project-desc { margin-top: 1px; }
+  .project-desc { margin-top: 0; }
 
   .project-tech {
     font-size: 10px;
     font-style: italic;
-    margin-top: 1px;
+    margin-top: 0;
   }
 
   /* === EDUCATION === */
-  .edu-item { margin-bottom: 4px; }
+  .edu-item { margin-bottom: 2px; }
 
   .edu-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 10px;
+    gap: 6px;
   }
 
   .edu-title { font-weight: 700; }
@@ -227,7 +227,7 @@ version: 1.0.0
 
   .edu-year { white-space: nowrap; }
 
-  .edu-desc { margin-top: 1px; }
+  .edu-desc { margin-top: 0; }
 
   /* === CERTIFICATIONS === */
   .cert-table,
@@ -237,18 +237,31 @@ version: 1.0.0
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 8px;
-    margin-bottom: 1.5px;
+    gap: 6px;
+    margin-bottom: 0.5px;
   }
 
   .cert-title { font-weight: 700; }
   .cert-org { flex: 1; font-style: italic; }
   .cert-year { white-space: nowrap; }
 
+  .award-item { margin-bottom: 2px; }
+  .award-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .award-title { font-weight: 700; }
+  .award-org { flex: 1; font-style: italic; }
+  .award-year { white-space: nowrap; }
+  .award-bullets { margin: 1px 0 0; padding-left: 14px; }
+  .award-bullets li { margin-bottom: 0.5px; }
+
   /* === SKILLS === */
   .skills-grid { display: block; }
 
-  .skill-item { margin-bottom: 1.5px; }
+  .skill-item { margin-bottom: 0.5px; }
 
   .skill-category { font-weight: 700; }
 
@@ -256,6 +269,7 @@ version: 1.0.0
   .header,
   .edu-item,
   .cert-item,
+  .award-item,
   .competency-tag,
   .skill-item {
     break-inside: avoid;

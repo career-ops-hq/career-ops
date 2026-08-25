@@ -4,8 +4,8 @@
 //
 // The agent reads cv.md + config/profile.yml, tailors the content, and writes a
 // compact JSON payload. This script merges that payload into the resolved CV
-// template (default templates/cv-template.html; pass a path resolved by
-// cv-templates.mjs to honor config-selectable templates, #1691) — it owns every
+// template (the configured cv.template default, or an explicitly supplied
+// path resolved by cv-templates.mjs; #1691) — it owns every
 // tag, class, and the HTML escaping,
 // so the model never has to emit the full document. That moves the PDF step's
 // output tokens from full HTML markup down to the structured JSON payload while
@@ -31,6 +31,7 @@ import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
+import { resolveTemplate } from './cv-templates.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
@@ -502,26 +503,39 @@ function buildAwards(entries, partial) {
     return entries.filter(Boolean).map(e => {
       const org = e.org ? `<span class="award-org">${escapeHtml(e.org)}</span>` : '<span class="award-org"></span>';
       const year = e.year ? `<span class="award-year">${escapeHtml(e.year)}</span>` : '<span class="award-year"></span>';
+      const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean) : [];
+      const bulletMarkup = bullets.length
+        ? `<ul class="award-bullets">${bullets.map(b => `<li>${escapeHtml(String(b))}</li>`).join('')}</ul>`
+        : '';
       return `<div class="award-item">
-      <span class="award-title">${escapeHtml(e.title)}</span>
-      ${org}
-      ${year}
+      <div class="award-header">
+        <span class="award-title">${escapeHtml(e.title)}</span>
+        ${org}
+        ${year}
+      </div>
+      ${bulletMarkup}
     </div>`;
     }).join('\n    ');
   }
 
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
+    const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean) : [];
     const blockValues = new Map([
       // As with certifications, an absent field resolves to the partial's
       // _EMPTY fallback so the table cells stay aligned across rows.
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
       ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
+      ['BULLETS_BLOCK', {
+        value: bullets.map(b => `<li>${escapeHtml(String(b))}</li>`).join(''),
+        present: bullets.length > 0,
+      }],
     ]);
     return fillEntry(entryTemplate, blocks, {
-      TITLE: escapeHtml(e.title || ''),
-      ORG:   escapeHtml(e.org || ''),
-      YEAR:  escapeHtml(e.year || ''),
+      TITLE:   escapeHtml(e.title || ''),
+      ORG:     escapeHtml(e.org || ''),
+      YEAR:    escapeHtml(e.year || ''),
+      BULLETS: bullets.map(b => `<li>${escapeHtml(String(b))}</li>`).join(''),
     }, blockValues);
   }).join('\n    ');
 }
@@ -693,8 +707,8 @@ async function main() {
     console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
     console.error('  node build-cv-html.mjs --test');
     console.error('');
-    console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
-    console.error('  printed by `node cv-templates.mjs resolve cv` to use a selected template.');
+    console.error('  [template.html] defaults to the configured cv.template. Pass a path');
+    console.error('  printed by `node cv-templates.mjs resolve cv` to override it.');
     console.error('');
     console.error('  Section partials (#2183):');
     console.error('  If a sections/ directory exists alongside the template file,');
@@ -721,7 +735,7 @@ async function main() {
 
   const absInput = resolve(inputPath);
   const absOutput = resolve(outputPath);
-  const templatePath = templateArg ? resolve(templateArg) : TEMPLATE_PATH;
+  const templatePath = templateArg ? resolve(templateArg) : resolveTemplate('cv');
 
   if (!existsSync(absInput)) {
     console.error(`Input file not found: ${absInput}`);

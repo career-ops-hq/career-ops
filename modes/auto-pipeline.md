@@ -52,10 +52,10 @@ Include Block G in the saved report. Add **URL:** {url} and **Legitimacy:** {tie
 
 ## Step 3 — Generate PDF
 
-Read `config/profile.yml`. Check `cv.output_format`:
+Read `modes/_custom.md` in full before generating any CV artifact; its formatting and content rules apply to every URL in this run. Read `config/profile.yml`. Check `cv.output_format`:
 
 - If `"latex"`, execute the full pipeline from `modes/latex.md`
-- Otherwise (default), execute the full pipeline from `modes/pdf.md`
+- Otherwise (default), execute the full pipeline from `modes/pdf.md`. The PDF path must resolve and use the configured `cv.template`; do not substitute the base or another named template unless the user explicitly requests it.
 
 ## Step 4 — Draft Application Answers (only if score >= 4.5)
 

@@ -40,7 +40,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 15. Apply the six-second clarity gate from `modes/heuristics/recruiter-side.md`: top third must make target role, strongest fit, and proof obvious
 16. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase (e.g. "John Doe" → "john-doe") → `{candidate}`
 17. Build the render payload (see the **JSON Input Schema** below) from the tailored content — emit compact structured JSON, **not** full HTML markup — and write it to `/tmp/cv-{candidate}-{company}.json`
-18. Run `node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json {html-path} {template}`, where `{html-path}` is the active bundle's `cv/tailored/vNNN/cv.html` or `output/cv-{candidate}-{company}.html` for a one-off CV, and `{template}` is the path printed by **Selecting the template** below (omit it to use the base template). The script owns every tag, CSS class, and HTML escaping. Keep the HTML outside temporary storage because the dashboard's `D` hotkey regenerates from it.
+18. Run `node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json {html-path} {template}`, where `{html-path}` is the active bundle's `cv/tailored/vNNN/cv.html` or `output/cv-{candidate}-{company}.html` for a one-off CV, and `{template}` is the path printed by **Selecting the template** below. If the third argument is omitted, the builder uses the configured `cv.template`; it must not silently revert to a generic template. The script owns every tag, CSS class, and HTML escaping. Keep the HTML outside temporary storage because the dashboard's `D` hotkey regenerates from it.
 19. Run the fact gate against the generated HTML: `node verify-cv-facts.mjs {html-path}`
     - This is a hard gate before PDF rendering.
     - If it fails, stop and fix the generated HTML by removing invented metrics or adding verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`.
@@ -123,11 +123,11 @@ The command prints the absolute path of the template to fill; a non-zero exit me
 
 To show the user their options (e.g. "what CV templates do I have?"), run `node cv-templates.mjs list cv` and present each `displayName`.
 
-`build-cv-html.mjs` fills that resolved template from the JSON payload you build — it owns every tag, CSS class, and the HTML escaping, so you **never emit full HTML markup** and do **not** escape `&`/`<`/`>`/quotes yourself. Pass the resolved path as the third argument (`node build-cv-html.mjs <input.json> <output.html> <template.html>`); omit it to fall back to the base `cv-template.html`. This is the HTML twin of `build-cv-latex.mjs` (see `modes/latex.md`) and cuts the PDF step's output tokens from full markup down to the compact payload below (#557).
+`build-cv-html.mjs` fills that resolved template from the JSON payload you build — it owns every tag, CSS class, and the HTML escaping, so you **never emit full HTML markup** and do **not** escape `&`/`<`/`>`/quotes yourself. Pass the resolved path as the third argument (`node build-cv-html.mjs <input.json> <output.html> <template.html>`); omit it only when you intentionally want the configured `cv.template` default. This is the HTML twin of `build-cv-latex.mjs` (see `modes/latex.md`) and cuts the PDF step's output tokens from full markup down to the compact payload below (#557).
 
 ### JSON Input Schema
 
-Write a JSON file with this structure, then run `node build-cv-html.mjs <input.json> <output.html> [template.html]` (the optional third argument is the template path from **Selecting the template**; omit it for the base `cv-template.html`).
+Write a JSON file with this structure, then run `node build-cv-html.mjs <input.json> <output.html> [template.html]` (the optional third argument is the template path from **Selecting the template**; omit it to use the configured `cv.template`). Keep each Skills category as its own structured item so the selected template can render categories on separate lines; never pipe-join category labels.
 
 ```json
 {
