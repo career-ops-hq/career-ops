@@ -73,7 +73,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), également connu sous le nom de **careerops**) transforme n'importe quelle interface de ligne de commande (CLI) de codage IA en un véritable centre de commandement pour votre recherche d'emploi. Au lieu de suivre manuellement vos candidatures dans un tableau de bord, vous disposez d'un pipeline alimenté par l'IA qui :
 
-- **Évalue les offres** avec une évaluation structurée de A à F (cinq dimensions alimentant un score de 1,0 à 5,0)
+- **Évalue les offres** avec une évaluation structurée de A à H (cinq dimensions alimentant un score de 1 à 5)
 - **Génère des PDF sur mesure** — des CV optimisés pour les systèmes ATS, personnalisés pour chaque description de poste
 - **Scanne automatiquement les portails** (Greenhouse, Ashby, Lever, pages carrières des entreprises)
 - **Traite en lot** — évalue plus de 10 offres en parallèle avec des sous-agents
