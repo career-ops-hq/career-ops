@@ -53,11 +53,15 @@ const NY_DAY = '2026-08-17';
  * `Date` is replaced before the module under test is imported, and the default
  * parameters being tested read the clock at CALL time, so the freeze reaches
  * them.
+ *
+ * `instant` defaults to INSTANT, the day-boundary pair every gate above needs.
+ * A caller pinning a WEEK boundary passes its own — a day apart is not enough
+ * to move an ISO week.
  */
-function inFrozenTz(tz, expr) {
+function inFrozenTz(tz, expr, instant = INSTANT) {
   const preamble =
     `const RealDate = Date;` +
-    `const FROZEN = new RealDate('${INSTANT}');` +
+    `const FROZEN = new RealDate('${instant}');` +
     `globalThis.Date = class extends RealDate {` +
     `  constructor(...a) { if (a.length === 0) { super(FROZEN.getTime()); } else { super(...a); } }` +
     `  static now() { return FROZEN.getTime(); }` +
@@ -145,4 +149,103 @@ test('check-table-freshness --today still overrides, and reports the date it use
   });
   assert.equal(r.error, undefined);
   assert.ok(r.stdout.includes('2026-08-18'), `--today was not honoured: ${r.stdout.slice(0, 200)}`);
+});
+
+
+// ── Reporting windows: which day it is decides which WEEK, and which
+//    threshold has elapsed ──────────────────────────────────────────────
+//
+// Both of these gate a decision the same way scan's cooldown does, and both
+// were still reading the UTC day.
+
+// A Monday 01:30 UTC. In New York it is still the SUNDAY before — so the two
+// readings fall in different ISO weeks, not merely on different days. INSTANT
+// above is a Tuesday/Monday pair inside one week, which cannot see this.
+const WEEK_INSTANT = '2026-08-17T01:30:00Z';
+
+test('the week premise: this instant is a different ISO week in New York', () => {
+  const fmt = (tz) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date(WEEK_INSTANT));
+  assert.equal(fmt('UTC'), '2026-08-17', 'UTC: Monday');
+  assert.equal(fmt('America/New_York'), '2026-08-16', 'New York: the Sunday before');
+});
+
+test('weekly-digest: "this week" is the week the caller is actually in', () => {
+  // Reading getUTCDate() here returned the week that had not started yet, so
+  // every session logged Mon-Sun fell outside inRange() and the digest for the
+  // week just ended came back empty — which reads as a quiet week, not as a
+  // wrong window.
+  const out = inFrozenTz('America/New_York',
+    `const {computeDefaultRange} = await import('${spec('weekly-digest.mjs')}');` +
+    `process.stdout.write(JSON.stringify(computeDefaultRange()));`,
+    WEEK_INSTANT);
+  assert.deepEqual(JSON.parse(out), { from: '2026-08-10', to: '2026-08-16' },
+    'the digest defaulted to a week the user is not in yet');
+});
+
+test('weekly-digest: an explicit `now` is resolved locally too', () => {
+  const out = inFrozenTz('America/New_York',
+    `const {computeDefaultRange} = await import('${spec('weekly-digest.mjs')}');` +
+    `process.stdout.write(JSON.stringify(computeDefaultRange(new Date('${WEEK_INSTANT}'))));`,
+    WEEK_INSTANT);
+  assert.deepEqual(JSON.parse(out), { from: '2026-08-10', to: '2026-08-16' });
+});
+
+test('rejection-latency: the courtesy threshold is measured from the local day', () => {
+  // daysBetween() reduces both operands to their UTC date, so a bare `new Date()`
+  // default counted one extra day all evening. This interview is exactly
+  // courtesyDays old on the LOCAL day and one day over it on the UTC day, and
+  // the gate is `daysAll <= courtesyDays` — so the UTC reading crosses it and
+  // emits a ready-to-copy data/blacklist.md row for a company whose courtesy
+  // window has not actually elapsed, stamped with tomorrow's date.
+  const active = [
+    '| Company | Role | Round | Date | Interviewer | Status | Notes |',
+    '|---|---|---|---|---|---|---|',
+    '| Acme Corp | Backend Engineer | Round 1 | 2026-07-18 | Panel | Done | final round |',
+  ].join('\n');
+  const tracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme Corp | Backend Engineer | 4.2/5 | Interview | ❌ | — | waiting |',
+  ].join('\n');
+
+  const out = inFrozenTz('America/New_York',
+    `const q = await import('${spec('process-quality.mjs')}');const m = await import('${spec('rejection-latency.mjs')}');` +
+    `const rows = q.parseActiveInterviews(${JSON.stringify(active)});` +
+    `const tr = m.parseTrackerInterviewRows(${JSON.stringify(tracker)});` +
+    // No `today` — the default is what is under test.
+    `const r = m.computeRejectionLatency(rows, tr, { courtesyDays: 30 });` +
+    `process.stdout.write(JSON.stringify(r.flags.map(f => [f.company, f.daysSinceLastInterview])));`);
+
+  assert.deepEqual(JSON.parse(out), [],
+    'flagged a company 30 local days after its last round, one day before the courtesy window elapses');
+});
+
+test('rejection-latency still flags once the local window HAS elapsed', () => {
+  // The other side of the same boundary — without it, "never flag at all" would
+  // satisfy the test above just as well.
+  const active = [
+    '| Company | Role | Round | Date | Interviewer | Status | Notes |',
+    '|---|---|---|---|---|---|---|',
+    '| Acme Corp | Backend Engineer | Round 1 | 2026-07-16 | Panel | Done | final round |',
+  ].join('\n');
+  const tracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme Corp | Backend Engineer | 4.2/5 | Interview | ❌ | — | waiting |',
+  ].join('\n');
+
+  const out = inFrozenTz('America/New_York',
+    `const q = await import('${spec('process-quality.mjs')}');const m = await import('${spec('rejection-latency.mjs')}');` +
+    `const rows = q.parseActiveInterviews(${JSON.stringify(active)});` +
+    `const tr = m.parseTrackerInterviewRows(${JSON.stringify(tracker)});` +
+    `const r = m.computeRejectionLatency(rows, tr, { courtesyDays: 30 });` +
+    `process.stdout.write(JSON.stringify(r.flags.map(f => [f.daysSinceLastInterview, f.blacklistSuggestion])));`);
+
+  const flags = JSON.parse(out);
+  assert.equal(flags.length, 1, 'a genuinely elapsed window must still flag');
+  assert.equal(flags[0][0], 32, 'elapsed days counted from the local day');
+  assert.ok(flags[0][1].includes(`| ${NY_DAY} |`),
+    `the blacklist suggestion is dated with the UTC day: ${flags[0][1]}`);
 });
