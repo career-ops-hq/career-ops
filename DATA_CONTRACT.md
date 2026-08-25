@@ -91,6 +91,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/pdf.md` | PDF generation instructions |
 | `modes/cover.md` | Cover letter generation instructions |
 | `modes/latex.md` | LaTeX/Overleaf CV export instructions |
+| `modes/text.md` | Tailored markdown CV instructions |
 | `modes/add.md` | CV addition (project/paper/role) instructions |
 | `modes/scan.md` | Portal scanner instructions |
 | `modes/batch.md` | Batch processing instructions |

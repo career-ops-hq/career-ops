@@ -23,6 +23,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `apply.md` | `apply` | Live application assistant (form filling; never submits) |
 | `pdf.md` | `pdf` | ATS-optimized PDF generation |
 | `latex.md` | `latex` | LaTeX/Overleaf CV export |
+| `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
