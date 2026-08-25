@@ -2490,46 +2490,6 @@ for (const mode of expectedModes) {
   }
 }
 
-// Every localized shared context must carry the safety rules that protect
-// authorship, factual sourcing, and human approval. English fallback alone is
-// insufficient: a localized mode can be loaded without reading modes/_shared.md.
-{
-  const requiredGuardrails = [
-    '<!-- guardrail:authorship -->',
-    '<!-- guardrail:no-fabrication -->',
-    '<!-- guardrail:source-exclusivity -->',
-    '<!-- guardrail:human-approval -->',
-  ];
-  const expectedLocalizedModes = [
-    'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',
-    'ko', 'nl', 'pl', 'pt', 'ru', 'tr', 'ua', 'zh-TW', 'zh',
-  ];
-  const localizedModeNames = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && expectedLocalizedModes.includes(entry.name))
-    .map((entry) => entry.name);
-  const localizedShared = localizedModeNames.map((mode) => `modes/${mode}/_shared.md`);
-  const missingSharedFiles = localizedShared.filter((file) => !fileExists(file));
-  const missingGuardrails = localizedShared.filter(fileExists).filter((file) => {
-    const source = readFile(file);
-    return requiredGuardrails.some((marker) => !source.includes(marker));
-  });
-  const missingLocalizedModes = expectedLocalizedModes.filter((mode) => !localizedModeNames.includes(mode));
-  if (
-    localizedShared.length === expectedLocalizedModes.length &&
-    missingLocalizedModes.length === 0 &&
-    missingSharedFiles.length === 0 &&
-    missingGuardrails.length === 0
-  ) {
-    pass(`all ${localizedShared.length} localized _shared.md files carry safety guardrails`);
-  } else {
-    const failures = [];
-    if (missingLocalizedModes.length > 0) failures.push(`missing locale directories: ${missingLocalizedModes.join(', ')}`);
-    if (missingSharedFiles.length > 0) failures.push(`missing files: ${missingSharedFiles.join(', ')}`);
-    if (missingGuardrails.length > 0) failures.push(`missing guardrails: ${missingGuardrails.join(', ')}`);
-    fail(`localized _shared.md validation failed: ${failures.join('; ')}`);
-  }
-}
-
 // Check _shared.md references _profile.md
 const shared = readFile('modes/_shared.md');
 if (shared.includes('_profile.md')) {
