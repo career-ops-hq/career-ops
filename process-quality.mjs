@@ -35,8 +35,9 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
@@ -358,7 +359,7 @@ const USAGE = `Usage:
   node process-quality.mjs --self-test            # run the built-in fixtures
   node process-quality.mjs --help                 # show this message`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Inside the main-module guard, not at import time: rejection-latency.mjs
   // imports parseActiveInterviews from here, so a top-level check would judge
   // the IMPORTER's argv and reject its flags as unrecognized (#2919).
