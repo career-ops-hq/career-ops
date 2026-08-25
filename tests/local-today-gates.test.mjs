@@ -22,6 +22,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
@@ -145,4 +146,77 @@ test('check-table-freshness --today still overrides, and reports the date it use
   });
   assert.equal(r.error, undefined);
   assert.ok(r.stdout.includes('2026-08-18'), `--today was not honoured: ${r.stdout.slice(0, 200)}`);
+});
+
+// ── The other side of the comparison: who WRITES first_seen ────────────────
+//
+// Everything above pins READERS. But shouldDedupScanHistoryRow measures the
+// recheck window as `daysBetweenIsoDates(firstSeen, today)`, and firstSeen is
+// whatever a scanner stamped into scan-history.tsv. Moving only the reader to
+// the local day did not make that comparison correct — it put the two sides on
+// different clocks, and left one file carrying rows written on both.
+//
+// The invariant is already established for the dashboard's spawned scan child
+// (web/tests/lib/pipeline-local-today.test.mjs asserts `const date =
+// localToday();` reaches appendToScanHistory there). This is the same assertion
+// for the engine-side scanners, which were never covered.
+//
+// Source-level on purpose: the value is a local const inside a scanner's main(),
+// reachable only by running a real scan. What can be checked cheaply is that no
+// call site hands the writer a UTC-derived day — which is the whole defect.
+test('every appendToScanHistory call site is handed a local-day value', () => {
+  const callers = ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs'];
+  const offenders = [];
+
+  for (const file of callers) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    const lines = src.split('\n');
+
+    // The day argument is the only date-shaped argument the writer takes, so a
+    // toISOString() anywhere in a call site's argument list is the bug. This
+    // deliberately does NOT scan the whole file: scan.mjs uses toISOString()
+    // legitimately elsewhere for UTC-midnight round-tripping, which
+    // lib/local-today.mjs's own docstring blesses.
+    lines.forEach((line, i) => {
+      const at = line.indexOf('appendToScanHistory(');
+      if (at === -1) return;
+      if (line.trimStart().startsWith('export async function')) return; // the definition
+      // Everything from the call to end of line, NOT a `([^)]*)` capture: the
+      // offending form is `appendToScanHistory(offers, new Date().toISOString()
+      // .slice(0, 10), 'added')`, and a non-greedy capture stops at the `)` of
+      // `new Date()` — so the argument list reads as `offers, new Date(` and
+      // the very form this exists to catch slips through. (It did, until the
+      // fix was reverted to check.)
+      if (/toISOString/.test(line.slice(at))) {
+        offenders.push(`${file}:${i + 1} — ${line.trim()}`);
+      }
+    });
+
+    // A call site passing a bare `date` identifier is only correct if that
+    // identifier was assigned from localToday(). Catch the assignment too,
+    // otherwise moving the UTC expression one line up defeats the check above.
+    lines.forEach((line, i) => {
+      if (/^\s*const\s+date\s*=/.test(line) && /toISOString/.test(line)) {
+        offenders.push(`${file}:${i + 1} — ${line.trim()}`);
+      }
+    });
+  }
+
+  assert.deepEqual(
+    offenders, [],
+    'scan-history first_seen must be stamped with localToday(), not the UTC day — '
+    + `shouldDedupScanHistoryRow compares it against the LOCAL day (#3070):\n  ${offenders.join('\n  ')}`,
+  );
+});
+
+test('each scanner that writes scan-history imports localToday', () => {
+  // The check above is satisfied by deleting the date argument entirely. This
+  // asserts the replacement is actually present.
+  for (const file of ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs']) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    assert.match(
+      src, /import\s*{[^}]*\blocalToday\b[^}]*}\s*from\s*['"][^'"]*local-today\.mjs['"]/,
+      `${file} writes scan-history.tsv but does not import localToday`,
+    );
+  }
 });
