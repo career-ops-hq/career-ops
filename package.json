@@ -45,6 +45,7 @@
     "tracker": "node tracker.mjs",
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
+    "calibrate": "node calibrate.mjs",
     "upskill": "node upskill.mjs",
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",

@@ -5,6 +5,10 @@
 candidate:
   full_name: "Jane Smith"
   email: "jane@example.com"
+  # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
+  # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
+  # alternate_emails:
+  #   - "jane@previous-employer.example"
   phone: "+1-555-0123"
   # Optional. Used by `/career-ops email` contact blocks in markets where WeChat
   # is an expected recruiting channel. Omit or leave blank if not applicable.
