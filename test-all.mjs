@@ -15968,6 +15968,28 @@ console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
   else fail('cover-resolver unit tests failed (run: node --test test/cover-resolver.test.mjs)');
 }
 
+// ── 60b. The two test/ suites that were registered nowhere (#3247) ──────────
+// tests/ is auto-discovered (#1440); test/ is not, and is included only by an
+// explicit run() here. Registration that can be forgotten was, twice: both
+// suites below were added 2026-07-21 and had never run. Each reports as one
+// aggregate result, so their assertion counts live in the labels — a suite that
+// silently shrinks to zero tests would otherwise still read as a pass.
+// tests/test-dir-registration.test.mjs asserts this list stays complete.
+
+console.log('\n60b. Profile photo (test/profile-photo.test.mjs) — #3247');
+{
+  const unit = run(NODE, ['--test', 'test/profile-photo.test.mjs']);
+  if (unit !== null) pass('profile-photo unit tests pass');
+  else fail('profile-photo unit tests failed (run: node --test test/profile-photo.test.mjs)');
+}
+
+console.log('\n60c. zh-minimal template (test/zh-minimal-template.test.mjs) — #3247');
+{
+  const unit = run(NODE, ['--test', 'test/zh-minimal-template.test.mjs']);
+  if (unit !== null) pass('zh-minimal-template unit tests pass');
+  else fail('zh-minimal-template unit tests failed (run: node --test test/zh-minimal-template.test.mjs)');
+}
+
 // ── 61. INTERVIEW-PREP URL ENTRY (#1816) ────────────────────────
 // Prompt-level slice: prep for a role that was never evaluated. Pins the
 // disambiguation rule (bare URL still routes to auto-pipeline), the
