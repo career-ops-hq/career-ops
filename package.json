@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.28.0",
+  "version": "1.29.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "engines": {
@@ -33,6 +33,7 @@
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "extract": "node browser-extract.mjs",
+    "scan:hn": "node scan-hn.mjs",
     "scan": "node scan.mjs",
     "scan:full": "node scan-ats-full.mjs",
     "scan:seeds": "node scan-ats-full.mjs --seeds yc,a16z",
@@ -44,6 +45,7 @@
     "tracker": "node tracker.mjs",
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
+    "calibrate": "node calibrate.mjs",
     "upskill": "node upskill.mjs",
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",

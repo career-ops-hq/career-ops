@@ -168,7 +168,17 @@ async function cmdRun(args) {
 
   if (hook === 'export') {
     const snapshot = buildSnapshot();
-    const results = await runHook('export', snapshot, { root: ROOT, dryRun });
+    // Export upserts one-by-one over the network (query + create/update per
+    // row), so the default 15s hook timeout only covers a handful of rows.
+    // Scale with tracker size so a growing applications.md doesn't age out.
+    // applications.length only: the bundled Notion export hook reads
+    // snapshot.applications exclusively, and snapshot.pipeline is parsed from
+    // data/pipeline.md's `- [ ]` checklist format by a table parser that can
+    // never match it (a pre-existing, separate bug in buildSnapshot() — always
+    // reads as empty), so counting it here would silently do nothing anyway.
+    const rowCount = snapshot.applications.length;
+    const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
+    const results = await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs });
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
       else console.log(`${r.id} export: failed — ${r.error}`);

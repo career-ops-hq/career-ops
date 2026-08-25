@@ -75,6 +75,18 @@ There's a clear path here — we promote people who show up:
 
 We credit contributors publicly and invite high-signal folks up the ladder. Want to help more? Just say so in an issue.
 
+## Adopting an abandoned PR
+
+Life happens: a PR gets a review, the author moves on, and useful work strands at 80% done. We don't let a bot bury it, and we don't let it rot. Instead it goes through a public, predictable ladder:
+
+1. **Two weeks of silence** after a review round, and a maintainer opts the PR into the ladder (`adoption/track`). You get a friendly ping: still yours, no rush.
+2. **Two more weeks**, a second check-in with the plan spelled out: two further weeks of silence and the work opens up for adoption.
+3. **Only then** a maintainer (never a bot) closes the PR with thanks and opens a companion issue labeled **`adoptable`**, pointing at the branch and listing exactly what's left to do.
+
+**Adopting one** is one of the highest-value first contributions you can make: the diff is mostly done, the review is already written, and the remaining work is scoped. Open a *new* PR that carries the original commits (git preserves the author's credit), or add a `Co-authored-by:` trailer for them. Both of you end up credited: the original author for the work, you for landing it.
+
+**If you're the original author coming back**: the work stays yours to reclaim at any point before someone else finishes it. Just say so on the issue. Any comment or push from you at any ladder step resets the clock completely.
+
 ## Scope: the core vs. the shared layer
 
 career-ops core is **local-first and human-in-the-loop** by design — it runs on your machine and drafts applications for *you* to review and submit. Centralized infrastructure — hosted job aggregation, a shared matching service, proxies or Workers the project would operate — is **not part of the core**: it's heavier than a free local tool should carry, and it's where the project is headed as a *separate, opt-in service*. See the direction here: **[Where career-ops is going](https://github.com/santifer/career-ops/discussions/904)**.

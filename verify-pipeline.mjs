@@ -443,7 +443,12 @@ let syncResult;
 try {
   syncResult = checkTrackerSync({ appsFile: APPS_FILE });
 } catch (err) {
-  warn(`Sync check could not run: ${err.message}`);
+  // A check that could not RUN is a failed check, not a warning. warn() does not affect the exit
+  // code, so a throw here made verify-pipeline print a notice and still exit 0 — and to anything
+  // reading the exit status (CI, a cron wrapper, a pre-push hook) that is indistinguishable from
+  // the invariant holding. We do not know whether the tracker is in sync; we know we failed to
+  // look. The honest report is failure.
+  error(`Sync check could not run — the tracker was NOT verified: ${err.message}`);
 }
 
 if (syncResult) {

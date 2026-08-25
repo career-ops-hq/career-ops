@@ -50,6 +50,7 @@
  */
 
 import dns from 'node:dns';
+import { inProviderFetch, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 
 /**
  * DNS failures that mean *the resolver itself refused or failed*, as opposed
@@ -244,11 +245,40 @@ export function createCachedLookup(realLookup, options = {}) {
   /** @type {Map<string, Function[]>} */
   const inflight = new Map();
 
+  /**
+   * Wrap a lookup callback so a non-public address never reaches the connector
+   * (#3096).
+   *
+   * Applied at ENTRY, so it covers all three ways a result is delivered: a
+   * fresh resolver answer, a cache HIT, and a coalesced waiter. Validating
+   * only the resolver path would leave the cache as the hole — a hostname
+   * resolved outside a provider fetch is cached unvalidated, and the next
+   * provider fetch for that name would be served the private address from
+   * memory without ever reaching the check.
+   *
+   * Only inside a provider request: this lookup is patched process-wide, and
+   * loopback has to keep working for everything else (see _ip-guard.mjs).
+   */
+  function guarded(hostname, callback) {
+    if (!inProviderFetch()) return callback;
+    return (err, ...rest) => {
+      if (err) return callback(err, ...rest);
+      // all:true yields one array of {address, family}; otherwise (address, family).
+      const addresses = Array.isArray(rest[0])
+        ? rest[0].map((entry) => entry && entry.address)
+        : [rest[0]];
+      const bad = addresses.find((address) => isBlockedAddress(address));
+      if (bad !== undefined) return callback(blockedAddressError(hostname, bad));
+      return callback(err, ...rest);
+    };
+  }
+
   function cachedLookup(hostname, options, callback) {
     if (typeof options === 'function') {
       callback = options;
       options = {};
     }
+    callback = guarded(hostname, callback);
     // dns.lookup accepts a bare family number in place of an options object.
     const opts = typeof options === 'number' ? { family: options } : (options ?? {});
     const key = `${hostname}|${opts.family ?? 0}|${opts.all ? 1 : 0}|${opts.hints ?? 0}|${opts.verbatim ?? ''}`;
