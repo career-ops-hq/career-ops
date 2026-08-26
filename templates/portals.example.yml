@@ -386,43 +386,48 @@ title_filter:
     - "Business Systems"
     - "Internal Tools"
     - "Transformation"
-    # -- Healthcare roles --
-    # Adapt for your specialty: "Registered Nurse", "Physician Assistant", "Medical Assistant",
-    # "Healthcare Administrator", "Clinical Research Coordinator", "ICU Nurse", "Pediatric Nurse", etc.
-    - "Registered Nurse"
-    - "RN"
-    - "Physician Assistant"
-    - "Medical Assistant"
-    - "Healthcare Administrator"
-    - "Clinical Research"
-    - "Nurse Practitioner"
-    - "Licensed Practical Nurse"
-    - "LPN"
-    # -- Finance/Operations roles --
-    # Adapt for your specialty: "Financial Analyst", "Financial Planner", "Accountant",
-    # "Operations Manager", "Project Manager", "Business Analyst", "PMO", "Controller", etc.
-    - "Financial Analyst"
-    - "Financial Planner"
-    - "Accountant"
-    - "Operations Manager"
-    - "Project Manager"
-    - "Business Analyst"
-    - "PMO"
-    - "Controller"
-    - "FP&A"
-    - "Treasury"
-    # -- Marketing/Sales/Customer Success roles --
-    # Adapt for your specialty: "Marketing Manager", "Sales Manager", "Customer Success Manager",
-    # "Account Executive", "Business Development", "Growth Marketing", "Product Marketing", etc.
-    - "Marketing Manager"
-    - "Sales Manager"
-    - "Customer Success Manager"
-    - "Account Executive"
-    - "Business Development"
-    - "Growth Marketing"
-    - "Product Marketing"
-    - "Content Marketing"
-    - "Brand Manager"
+    # --- Healthcare example (uncomment your profession, remove the rest) ---
+    # # -- Healthcare roles --
+    # # Adapt for your specialty: "Registered Nurse", "Physician Assistant", "Medical Assistant",
+    # # "Healthcare Administrator", "Clinical Research Coordinator", "ICU Nurse", "Pediatric Nurse", etc.
+    # - "Registered Nurse"
+    # - "RN"
+    # - "Physician Assistant"
+    # - "Medical Assistant"
+    # - "Healthcare Administrator"
+    # - "Clinical Research"
+    # - "Nurse Practitioner"
+    # - "Licensed Practical Nurse"
+    # - "LPN"
+
+    # --- Finance/Operations example (uncomment your profession, remove the rest) ---
+    # # -- Finance/Operations roles --
+    # # Adapt for your specialty: "Financial Analyst", "Financial Planner", "Accountant",
+    # # "Operations Manager", "Project Manager", "Business Analyst", "PMO", "Controller", etc.
+    # - "Financial Analyst"
+    # - "Financial Planner"
+    # - "Accountant"
+    # - "Operations Manager"
+    # - "Project Manager"
+    # - "Business Analyst"
+    # - "PMO"
+    # - "Controller"
+    # - "FP&A"
+    # - "Treasury"
+
+    # --- Marketing/Sales/Customer Success example (uncomment your profession, remove the rest) ---
+    # # -- Marketing/Sales/Customer Success roles --
+    # # Adapt for your specialty: "Marketing Manager", "Sales Manager", "Customer Success Manager",
+    # # "Account Executive", "Business Development", "Growth Marketing", "Product Marketing", etc.
+    # - "Marketing Manager"
+    # - "Sales Manager"
+    # - "Customer Success Manager"
+    # - "Account Executive"
+    # - "Business Development"
+    # - "Growth Marketing"
+    # - "Product Marketing"
+    # - "Content Marketing"
+    # - "Brand Manager"
   negative:
     # [CUSTOMIZE] Add keywords for roles you want to exclude
     - "Junior"
@@ -523,59 +528,62 @@ search_queries:
     query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" ("visa sponsorship" OR "will sponsor")'
     enabled: true
 
-  # -- Healthcare --
-  # Adapt these terms for your healthcare specialty: "Registered Nurse", "Physician Assistant",
-  # "Medical Assistant", "Healthcare Administrator", "Clinical Research Coordinator", etc.
-  # Add location-specific terms like "RN" (Registered Nurse), "LPN" (Licensed Practical Nurse),
-  # or specialization keywords like "ICU", "Pediatrics", "Emergency", "Cardiology".
-  - name: Ashby — Healthcare
-    query: 'site:jobs.ashbyhq.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
-    enabled: true
+  # --- Healthcare example (uncomment your profession, remove the rest) ---
+  # # -- Healthcare --
+  # # Adapt these terms for your healthcare specialty: "Registered Nurse", "Physician Assistant",
+  # # "Medical Assistant", "Healthcare Administrator", "Clinical Research Coordinator", etc.
+  # # Add location-specific terms like "RN" (Registered Nurse), "LPN" (Licensed Practical Nurse),
+  # # or specialization keywords like "ICU", "Pediatrics", "Emergency", "Cardiology".
+  # - name: Ashby — Healthcare
+  #   query: 'site:jobs.ashbyhq.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Healthcare
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Registered Nurse" OR "Physician Assistant" OR "Healthcare Administrator" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Healthcare
+  #   query: 'site:wellfound.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
+  #   enabled: true
 
-  - name: Greenhouse — Healthcare
-    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Registered Nurse" OR "Physician Assistant" OR "Healthcare Administrator" remote'
-    enabled: true
+  # --- Finance/Operations example (uncomment your profession, remove the rest) ---
+  # # -- Finance / Operations --
+  # # Adapt these terms for your finance/ops specialty: "Financial Analyst", "Financial Planner",
+  # # "Accountant", "Operations Manager", "Project Manager", "Business Analyst", "PMO", etc.
+  # # Add industry-specific terms like "FP&A" (Financial Planning & Analysis), "Controller",
+  # # "Treasury", "Risk Management", "Compliance", "Audit", or specialization keywords like
+  # # "Corporate Finance", "Investment Banking", "Private Equity", "Venture Capital".
+  # - name: Ashby — Finance/Operations
+  #   query: 'site:jobs.ashbyhq.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Finance/Operations
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Financial Analyst" OR "FP&A" OR "Operations Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Finance/Operations
+  #   query: 'site:wellfound.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
+  #   enabled: true
 
-  - name: Wellfound — Healthcare
-    query: 'site:wellfound.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
-    enabled: true
-
-  # -- Finance / Operations --
-  # Adapt these terms for your finance/ops specialty: "Financial Analyst", "Financial Planner",
-  # "Accountant", "Operations Manager", "Project Manager", "Business Analyst", "PMO", etc.
-  # Add industry-specific terms like "FP&A" (Financial Planning & Analysis), "Controller",
-  # "Treasury", "Risk Management", "Compliance", "Audit", or specialization keywords like
-  # "Corporate Finance", "Investment Banking", "Private Equity", "Venture Capital".
-  - name: Ashby — Finance/Operations
-    query: 'site:jobs.ashbyhq.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
-    enabled: true
-
-  - name: Greenhouse — Finance/Operations
-    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Financial Analyst" OR "FP&A" OR "Operations Manager" remote'
-    enabled: true
-
-  - name: Wellfound — Finance/Operations
-    query: 'site:wellfound.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
-    enabled: true
-
-  # -- Marketing / Sales / Customer Success --
-  # Adapt these terms for your marketing/sales specialty: "Marketing Manager", "Sales Manager",
-  # "Customer Success Manager", "Account Executive", "Business Development", "Growth Marketing",
-  # "Product Marketing", "Content Marketing", "Brand Manager", etc.
-  # Add channel-specific terms like "Digital Marketing", "Social Media Marketing", "Email Marketing",
-  # "SEO", "SEM", "PPC", "B2B", "B2C", "SaaS", or methodology keywords like "Inbound Marketing",
-  # "Account-Based Marketing", "Demand Generation", "Lead Generation".
-  - name: Ashby — Marketing/Sales
-    query: 'site:jobs.ashbyhq.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
-    enabled: true
-
-  - name: Greenhouse — Marketing/Sales
-    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Marketing Manager" OR "Customer Success Manager" OR "Account Executive" remote'
-    enabled: true
-
-  - name: Wellfound — Marketing/Sales
-    query: 'site:wellfound.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
-    enabled: true
+  # --- Marketing/Sales/Customer Success example (uncomment your profession, remove the rest) ---
+  # # -- Marketing / Sales / Customer Success --
+  # # Adapt these terms for your marketing/sales specialty: "Marketing Manager", "Sales Manager",
+  # # "Customer Success Manager", "Account Executive", "Business Development", "Growth Marketing",
+  # # "Product Marketing", "Content Marketing", "Brand Manager", etc.
+  # # Add channel-specific terms like "Digital Marketing", "Social Media Marketing", "Email Marketing",
+  # # "SEO", "SEM", "PPC", "B2B", "B2C", "SaaS", or methodology keywords like "Inbound Marketing",
+  # # "Account-Based Marketing", "Demand Generation", "Lead Generation".
+  # - name: Ashby — Marketing/Sales
+  #   query: 'site:jobs.ashbyhq.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Marketing/Sales
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Marketing Manager" OR "Customer Success Manager" OR "Account Executive" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Marketing/Sales
+  #   query: 'site:wellfound.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
+  #   enabled: true
 
   # -- Ashby (kept as AI example) --
   - name: Ashby — AI Engineer
