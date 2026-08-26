@@ -30,8 +30,8 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   indicator, plus AI-assisted discovery (bring your own CLI/keys).
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
-- **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
-  preview, settings.
+- **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
+  CV editing with preview, settings.
 
 ## Safety
 
