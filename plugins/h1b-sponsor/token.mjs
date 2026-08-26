@@ -9,7 +9,7 @@
 // Minting is metered per address, so a 429 here is that budget working rather
 // than an outage.
 
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../../lib/is-main-module.mjs';
 import { apiBase, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
@@ -190,7 +190,7 @@ async function main() {
 // suite; an unguarded main() would run on import with the importer's argv,
 // print usage, and set the IMPORTER's exit code to 2 (test-all.mjs imports
 // test files in-process, so that turned the whole suite red).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     const message = displayClean((err && err.message) ? err.message : err);
     process.stderr.write(`could not issue a key (${message})\n`);

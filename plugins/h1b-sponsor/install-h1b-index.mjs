@@ -28,7 +28,7 @@ import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../../lib/is-main-module.mjs';
 import { fetchWithTimeout, readBoundedText } from './lib/api.mjs';
 import { indexPath, metaPath } from './lib/index.mjs';
 
@@ -306,7 +306,7 @@ async function main() {
 // Run the CLI only when invoked as a script: installIndex is imported by the
 // test suite, and an unguarded main() would run on import with the importer's
 // argv and set the importer's exit code.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     process.stderr.write(`could not install the index (${(err && err.message) ? err.message : err})\n`);
     process.exitCode = 1;
