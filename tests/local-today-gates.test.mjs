@@ -239,6 +239,17 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
       }
       return src.length;
     };
+    const codeNeedleIndexes = (needle) => {
+      const indexes = [];
+      for (let i = 0; i < src.length; i++) {
+        if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
+        else if (src[i] === '`') i = skipTemplate(i);
+        else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
+        else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
+        else if (src.startsWith(needle, i)) indexes.push(i);
+      }
+      return indexes;
+    };
     const localDateConsts = new Set();
 
     // First collect any local const aliases known to carry localToday(). A bare
@@ -248,13 +259,10 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
     for (let m; (m = constAssign.exec(src)); ) {
       const start = m.index + m[0].length;
       const expr = src.slice(start, nextCodeSemi(start));
-      if (/\blocalToday\s*\(/.test(expr)) localDateConsts.add(m[1]);
+      if (/^\s*localToday\s*\(\s*\)\s*$/.test(expr)) localDateConsts.add(m[1]);
     }
 
-    for (let from = 0; ; ) {
-      const at = src.indexOf(CALL, from);
-      if (at === -1) break;
-      from = at + 1;
+    for (const at of codeNeedleIndexes(CALL)) {
       if (isIdent(src[at - 1])) continue;
       if (/export\s+async\s+function\s+$/.test(src.slice(Math.max(0, at - 40), at))) continue;
 
@@ -265,7 +273,7 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
       }
       const dateArg = args.split(',').at(1)?.trim();
       const isBareLocalAlias = /^[A-Za-z_$][\w$]*$/.test(dateArg ?? '') && localDateConsts.has(dateArg);
-      const isDirectLocalToday = /^localToday\s*\(/.test(dateArg ?? '');
+      const isDirectLocalToday = /^localToday\s*\(\s*\)$/.test(dateArg ?? '');
       if (dateArg && !isBareLocalAlias && !isDirectLocalToday) {
         offenders.push(`${file}:${lineOf(at)} — appendToScanHistory date argument ${dateArg} is not localToday() or an alias assigned from localToday()`);
       }
