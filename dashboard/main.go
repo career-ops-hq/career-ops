@@ -56,12 +56,19 @@ func (m *appModel) reloadPipelineData() {
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
 	// Count only apps with a score so the header reflects evaluated offers.
-	m.evaluatedCount = 0
+	m.evaluatedCount = countEvaluated(apps)
+}
+
+// countEvaluated returns how many applications carry a score. Single source
+// for the constructor and reloadPipelineData so the two cannot drift.
+func countEvaluated(apps []model.CareerApplication) int {
+	n := 0
 	for _, a := range apps {
 		if a.Score > 0 {
-			m.evaluatedCount++
+			n++
 		}
 	}
+	return n
 }
 
 // enrichArchetypes lazy-loads each app's report-derived archetype (used by
@@ -116,6 +123,8 @@ func newAppModel(careerOpsPath string, width, height int) appModel {
 		theme:            t,
 		progressMetrics:  progressMetrics,
 		dashboardContext: dashboardContext,
+		statsMetrics:     data.ComputeStatsMetrics(apps),
+		evaluatedCount:   countEvaluated(apps),
 		state:            viewCommand,
 		returnState:      viewCommand,
 	}
