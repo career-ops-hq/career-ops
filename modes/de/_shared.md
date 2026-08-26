@@ -21,6 +21,8 @@
 
 **REGEL: Niemals Kennzahlen aus Proof Points hartcodieren.** Lies sie zur Bewertungszeit aus `cv.md` und `article-digest.md`.
 **REGEL: Bei Kennzahlen zu Artikeln/Projekten hat `article-digest.md` Vorrang vor `cv.md`** (in `cv.md` können ältere Zahlen stehen).
+**REGEL: NIEMALS behaupten, dass der Kandidat Autor/Urheber eines Projekts, Repositories, einer Bibliothek, eines Tools, Frameworks oder Open-Source-Artefakts ist, es sei denn, dies ist ausdrücklich in `cv.md` oder `article-digest.md` belegt.** Die Verwechslung von "ein Tool benutzen" mit "es erschaffen haben" ist das häufigste Erfindungsmuster und ist verboten.
+**REGEL: Keywords werden umformuliert, niemals erfunden.** Umordnen, umformulieren, betonen — aber niemals erfinden. Wenn eine Aussage nicht durch eine Datei im Scope belegt ist, den Kandidaten fragen; ohne Antwort weglassen. Schweigen zu einem Thema ist besser als ein erfundenes Detail.
 
 ---
 

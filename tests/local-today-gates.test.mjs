@@ -22,6 +22,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
@@ -53,11 +54,15 @@ const NY_DAY = '2026-08-17';
  * `Date` is replaced before the module under test is imported, and the default
  * parameters being tested read the clock at CALL time, so the freeze reaches
  * them.
+ *
+ * `instant` defaults to INSTANT, the day-boundary pair every gate above needs.
+ * A caller pinning a WEEK boundary passes its own — a day apart is not enough
+ * to move an ISO week.
  */
-function inFrozenTz(tz, expr) {
+function inFrozenTz(tz, expr, instant = INSTANT) {
   const preamble =
     `const RealDate = Date;` +
-    `const FROZEN = new RealDate('${INSTANT}');` +
+    `const FROZEN = new RealDate('${instant}');` +
     `globalThis.Date = class extends RealDate {` +
     `  constructor(...a) { if (a.length === 0) { super(FROZEN.getTime()); } else { super(...a); } }` +
     `  static now() { return FROZEN.getTime(); }` +
@@ -145,4 +150,201 @@ test('check-table-freshness --today still overrides, and reports the date it use
   });
   assert.equal(r.error, undefined);
   assert.ok(r.stdout.includes('2026-08-18'), `--today was not honoured: ${r.stdout.slice(0, 200)}`);
+});
+
+// ── The other side of the comparison: who WRITES first_seen ────────────────
+//
+// Everything above pins READERS. But shouldDedupScanHistoryRow measures the
+// recheck window as `daysBetweenIsoDates(firstSeen, today)`, and firstSeen is
+// whatever a scanner stamped into scan-history.tsv. Moving only the reader to
+// the local day did not make that comparison correct — it put the two sides on
+// different clocks, and left one file carrying rows written on both.
+//
+// The invariant is already established for the dashboard's spawned scan child
+// (web/tests/lib/pipeline-local-today.test.mjs asserts `const date =
+// localToday();` reaches appendToScanHistory there). This is the same assertion
+// for the engine-side scanners, which were never covered.
+//
+// Source-level on purpose: the value is a local const inside a scanner's main(),
+// reachable only by running a real scan. What can be checked cheaply is that no
+// call site hands the writer a UTC-derived day — which is the whole defect.
+test('every appendToScanHistory call site is handed a local-day value', () => {
+  const callers = ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs'];
+  const CALL = 'appendToScanHistory(';
+  const offenders = [];
+
+  for (const file of callers) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+
+    // The day argument is the only date-shaped argument the writer takes, so a
+    // toISOString() anywhere in a call site's argument list is the bug. This
+    // deliberately does NOT scan the whole file: scan.mjs uses toISOString()
+    // legitimately elsewhere for UTC-midnight round-tripping, which
+    // lib/local-today.mjs's own docstring blesses.
+    // Whole-source with balanced parens, NOT line by line, and NOT a
+    // `([^)]*)` capture. Both of the obvious shortcuts miss a real reintroduction:
+    //
+    //   `([^)]*)`   stops at the `)` closing `new Date()`, so the inline form
+    //               `appendToScanHistory(offers, new Date().toISOString()...)`
+    //               reads as `offers, new Date(` and passes. (It did — the
+    //               first draft of this guard let scan-hn.mjs through.)
+    //   per-line    misses a wrapped call, where the offending argument sits on
+    //               a different line from the callee.
+    //
+    // Paren counting here ignores parens inside strings and comments. That is
+    // acceptable for this narrow job — matching the argument list of one known
+    // function in four known files — and a miscount can only widen the slice,
+    // never narrow it, so it cannot hide an offender.
+    const lineOf = (idx) => src.slice(0, idx).split('\n').length;
+
+    for (let from = 0; ; ) {
+      const at = src.indexOf(CALL, from);
+      if (at === -1) break;
+      from = at + 1;
+      if (/export\s+async\s+function\s+$/.test(src.slice(Math.max(0, at - 40), at))) continue;
+
+      const open = at + CALL.length - 1;
+      let depth = 0;
+      let end = src.length;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')' && --depth === 0) { end = i; break; }
+      }
+      const args = src.slice(open + 1, end);
+      if (/toISOString/.test(args)) {
+        offenders.push(`${file}:${lineOf(at)} — appendToScanHistory(${args.replace(/\s+/g, ' ').trim()})`);
+      }
+    }
+
+    // A call site passing a bare `date` identifier is only correct if that
+    // identifier came from localToday(). Catch the assignment too, or moving the
+    // UTC expression one line up defeats the check above. Read to the
+    // terminating `;` so a wrapped assignment is covered as well.
+    const assign = /(?:^|\n)[^\S\n]*const[^\S\n]+date[^\S\n]*=/g;
+    for (let m; (m = assign.exec(src)); ) {
+      const start = m.index + m[0].length;
+      const semi = src.indexOf(';', start);
+      const expr = src.slice(start, semi === -1 ? src.length : semi);
+      if (/toISOString/.test(expr)) {
+        offenders.push(`${file}:${lineOf(m.index + 1)} — const date =${expr.replace(/\s+/g, ' ')};`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    offenders, [],
+    'scan-history first_seen must be stamped with localToday(), not the UTC day — '
+    + `shouldDedupScanHistoryRow compares it against the LOCAL day (#3070):\n  ${offenders.join('\n  ')}`,
+  );
+});
+
+test('each scanner that writes scan-history imports localToday', () => {
+  // The check above is satisfied by deleting the date argument entirely. This
+  // asserts the replacement is actually present.
+  for (const file of ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs']) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    assert.match(
+      src, /import\s*{[^}]*\blocalToday\b[^}]*}\s*from\s*['"][^'"]*local-today\.mjs['"]/,
+      `${file} writes scan-history.tsv but does not import localToday`,
+    );
+  }
+});
+
+
+// ── Reporting windows: which day it is decides which WEEK, and which
+//    threshold has elapsed ──────────────────────────────────────────────
+//
+// Both of these gate a decision the same way scan's cooldown does, and both
+// were still reading the UTC day.
+
+// A Monday 01:30 UTC. In New York it is still the SUNDAY before — so the two
+// readings fall in different ISO weeks, not merely on different days. INSTANT
+// above is a Tuesday/Monday pair inside one week, which cannot see this.
+const WEEK_INSTANT = '2026-08-17T01:30:00Z';
+
+test('the week premise: this instant is a different ISO week in New York', () => {
+  const fmt = (tz) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date(WEEK_INSTANT));
+  assert.equal(fmt('UTC'), '2026-08-17', 'UTC: Monday');
+  assert.equal(fmt('America/New_York'), '2026-08-16', 'New York: the Sunday before');
+});
+
+test('weekly-digest: "this week" is the week the caller is actually in', () => {
+  // Reading getUTCDate() here returned the week that had not started yet, so
+  // every session logged Mon-Sun fell outside inRange() and the digest for the
+  // week just ended came back empty — which reads as a quiet week, not as a
+  // wrong window.
+  const out = inFrozenTz('America/New_York',
+    `const {computeDefaultRange} = await import('${spec('weekly-digest.mjs')}');` +
+    `process.stdout.write(JSON.stringify(computeDefaultRange()));`,
+    WEEK_INSTANT);
+  assert.deepEqual(JSON.parse(out), { from: '2026-08-10', to: '2026-08-16' },
+    'the digest defaulted to a week the user is not in yet');
+});
+
+test('weekly-digest: an explicit `now` is resolved locally too', () => {
+  const out = inFrozenTz('America/New_York',
+    `const {computeDefaultRange} = await import('${spec('weekly-digest.mjs')}');` +
+    `process.stdout.write(JSON.stringify(computeDefaultRange(new Date('${WEEK_INSTANT}'))));`,
+    WEEK_INSTANT);
+  assert.deepEqual(JSON.parse(out), { from: '2026-08-10', to: '2026-08-16' });
+});
+
+test('rejection-latency: the courtesy threshold is measured from the local day', () => {
+  // daysBetween() reduces both operands to their UTC date, so a bare `new Date()`
+  // default counted one extra day all evening. This interview is exactly
+  // courtesyDays old on the LOCAL day and one day over it on the UTC day, and
+  // the gate is `daysAll <= courtesyDays` — so the UTC reading crosses it and
+  // emits a ready-to-copy data/blacklist.md row for a company whose courtesy
+  // window has not actually elapsed, stamped with tomorrow's date.
+  const active = [
+    '| Company | Role | Round | Date | Interviewer | Status | Notes |',
+    '|---|---|---|---|---|---|---|',
+    '| Acme Corp | Backend Engineer | Round 1 | 2026-07-18 | Panel | Done | final round |',
+  ].join('\n');
+  const tracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme Corp | Backend Engineer | 4.2/5 | Interview | ❌ | — | waiting |',
+  ].join('\n');
+
+  const out = inFrozenTz('America/New_York',
+    `const q = await import('${spec('process-quality.mjs')}');const m = await import('${spec('rejection-latency.mjs')}');` +
+    `const rows = q.parseActiveInterviews(${JSON.stringify(active)});` +
+    `const tr = m.parseTrackerInterviewRows(${JSON.stringify(tracker)});` +
+    // No `today` — the default is what is under test.
+    `const r = m.computeRejectionLatency(rows, tr, { courtesyDays: 30 });` +
+    `process.stdout.write(JSON.stringify(r.flags.map(f => [f.company, f.daysSinceLastInterview])));`);
+
+  assert.deepEqual(JSON.parse(out), [],
+    'flagged a company 30 local days after its last round, one day before the courtesy window elapses');
+});
+
+test('rejection-latency still flags once the local window HAS elapsed', () => {
+  // The other side of the same boundary — without it, "never flag at all" would
+  // satisfy the test above just as well.
+  const active = [
+    '| Company | Role | Round | Date | Interviewer | Status | Notes |',
+    '|---|---|---|---|---|---|---|',
+    '| Acme Corp | Backend Engineer | Round 1 | 2026-07-16 | Panel | Done | final round |',
+  ].join('\n');
+  const tracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme Corp | Backend Engineer | 4.2/5 | Interview | ❌ | — | waiting |',
+  ].join('\n');
+
+  const out = inFrozenTz('America/New_York',
+    `const q = await import('${spec('process-quality.mjs')}');const m = await import('${spec('rejection-latency.mjs')}');` +
+    `const rows = q.parseActiveInterviews(${JSON.stringify(active)});` +
+    `const tr = m.parseTrackerInterviewRows(${JSON.stringify(tracker)});` +
+    `const r = m.computeRejectionLatency(rows, tr, { courtesyDays: 30 });` +
+    `process.stdout.write(JSON.stringify(r.flags.map(f => [f.daysSinceLastInterview, f.blacklistSuggestion])));`);
+
+  const flags = JSON.parse(out);
+  assert.equal(flags.length, 1, 'a genuinely elapsed window must still flag');
+  assert.equal(flags[0][0], 32, 'elapsed days counted from the local day');
+  assert.ok(flags[0][1].includes(`| ${NY_DAY} |`),
+    `the blacklist suggestion is dated with the UTC day: ${flags[0][1]}`);
 });
