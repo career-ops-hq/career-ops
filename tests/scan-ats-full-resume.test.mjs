@@ -8,7 +8,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nscan-ats-full — resume machinery');
 
 const mod = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-const { parallelEach, withTimeout, datasetFingerprint } = mod;
+const { parallelEach, withTimeout, datasetFingerprint, domainFilterFingerprint } = mod;
 
 // withTimeout: passes a fast promise through untouched.
 {
@@ -98,8 +98,8 @@ const { parallelEach, withTimeout, datasetFingerprint } = mod;
 const { loadCheckpoint, checkpointCompatible } = mod;
 
 {
-  const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false };
-  const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false };
+  const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false, domainFilterFingerprint: null };
+  const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false, domainFilterFingerprint: null };
   if (checkpointCompatible(cp, opts)) pass('checkpoint compatible with identical settings');
   else fail('identical settings judged incompatible');
 
@@ -111,6 +111,17 @@ const { loadCheckpoint, checkpointCompatible } = mod;
 
   if (!checkpointCompatible(cp, { ...opts, limit: 200 })) pass('limit mismatch rejected');
   else fail('limit mismatch accepted');
+
+  const solanaGate = domainFilterFingerprint(['solana']);
+  const defiGate = domainFilterFingerprint(['defi']);
+  if (solanaGate === domainFilterFingerprint(['  SOLANA  ', 'solana'])) pass('domainFilterFingerprint normalizes case, whitespace, and duplicates');
+  else fail('domainFilterFingerprint normalization drifted');
+
+  if (!checkpointCompatible({ ...cp, domainFilterFingerprint: solanaGate }, { ...opts, domainFilterFingerprint: defiGate })) pass('domain_filter mismatch rejected for resume');
+  else fail('domain_filter mismatch accepted');
+
+  if (!checkpointCompatible(cp, { ...opts, domainFilterFingerprint: solanaGate })) pass('new domain_filter rejects legacy ungated checkpoint');
+  else fail('new domain_filter accepted legacy ungated checkpoint');
 
   if (!checkpointCompatible(null, opts)) pass('null checkpoint rejected');
   else fail('null checkpoint accepted');

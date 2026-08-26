@@ -134,7 +134,8 @@ export function checkpointCompatible(cp, opts) {
     && !opts.shuffle
     && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
     && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
-    && cp.includeUndated === opts.includeUndated;
+    && cp.includeUndated === opts.includeUndated
+    && (cp.domainFilterFingerprint ?? null) === (opts.domainFilterFingerprint ?? null);
 }
 
 // Never throws: this runs from parallelEach's `finally`, so an escaping error
@@ -161,6 +162,21 @@ function writeCheckpoint(cp) {
 // that drift so we can fail loudly instead.
 export function datasetFingerprint(list) {
   return createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 16);
+}
+
+// The domain gate decides whole boards, so resuming a checkpoint under a
+// different `domain_filter` can permanently skip boards the original run would
+// have scanned, or scan boards the original run had declined. Fingerprint the
+// effective list (case/whitespace/duplicates normalized; order ignored because
+// domain_filter is an OR-list) and store it with the checkpoint.
+export function domainFilterFingerprint(domainKeywords) {
+  const normalized = [...new Set((Array.isArray(domainKeywords) ? domainKeywords : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(Boolean)
+    .sort())];
+  if (normalized.length === 0) return null;
+  return createHash('sha1').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
 }
 
 // Dataset entries are external input destined for URL interpolation — reject
@@ -663,6 +679,12 @@ async function filterLive(offers) {
 
 async function main() {
   const opts = parseArgs(process.argv);
+  if (!existsSync(PORTALS_PATH)) {
+    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
+    process.exit(1);
+  }
+  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
+  opts.domainFilterFingerprint = domainFilterFingerprint(config?.domain_filter);
   let checkpoint = null;
   if (opts.resume) {
     const cp = loadCheckpoint();
@@ -671,7 +693,7 @@ async function main() {
       process.exit(1);
     }
     if (!checkpointCompatible(cp, opts)) {
-      console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
+      console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated/domain_filter, or --shuffle is set) — rerun with the original flags/config, or delete the checkpoint to start fresh.');
       process.exit(1);
     }
     checkpoint = cp;
@@ -686,11 +708,6 @@ async function main() {
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
   const progress = (s) => { if (!opts.json) process.stdout.write(s); };
 
-  if (!existsSync(PORTALS_PATH)) {
-    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
-    process.exit(1);
-  }
-  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   const titleFilter = buildTitleFilter(fullTitleFilterConfig);
   const locationFilter = buildLocationFilter(config?.location_filter);
@@ -786,6 +803,7 @@ async function main() {
     ats: opts.ats,
     limit: opts.limit === Infinity ? null : opts.limit,
     includeUndated: opts.includeUndated,
+    domainFilterFingerprint: opts.domainFilterFingerprint,
     completedSources: [...completedSources],
     offers: newOffers,
     savedAt: new Date().toISOString(),
