@@ -143,3 +143,5 @@ public commit with a stated reason.
 - @miguel-fg | Miguel Fierro | 2026-08-21 | "one shouldn't need to apply hundreds of times to get one interview" | id:72409412 | src:https://github.com/santifer/career-ops/discussions/3187 | n:95
 - @elefino | 2026-08-22 | "This is a good thing. I'm going to boost this signal." | id:319961379 | src:https://github.com/santifer/career-ops/discussions/3206 | n:96
 - @chorrell | Christopher Horrell | 2026-08-24 | id:2781 | src:https://github.com/santifer/career-ops/discussions/3275 | n:97
+- @qoodboop | qoodboop | 2026-08-25 | "really good we can focus on something else than doomscrolling hiring contracts" | id:23255979 | src:https://github.com/santifer/career-ops/discussions/3313 | n:98
+- @Nardohsu | 2026-08-25 | "Let's get into the AI world!" | id:25312922 | src:https://github.com/santifer/career-ops/discussions/3336 | n:99
