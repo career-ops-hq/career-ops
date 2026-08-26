@@ -55,7 +55,7 @@ Because a plausible number is not necessarily a verified one. Interview-prep doc
 career-ops therefore uses two trust tiers:
 
 - **Primary, user-authored sources** such as `cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`, and `writing-samples/` are the ground truth for factual claims.
-- **Derived, accumulated sources** such as the story bank and company-specific interview prep can supply narrative and phrasing, but a quantified claim must trace back to a primary source or carry an explicit `**Provenance:**` marker.
+- **Derived, accumulated sources** such as the story bank and company-specific interview prep can supply narrative and phrasing, but a quantified claim must trace back to a primary source or carry a supported marker: `**Provenance:** user-stated YYYY-MM-DD` or `**Provenance:** source: cv.md` counts as verified; `**Provenance:** derived-unverified`, `**Provenance:** user-cannot-confirm`, and arbitrary values do not.
 
 Audit the story bank locally, without an LLM call:
 
