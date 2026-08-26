@@ -29,6 +29,7 @@ import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline } from './scan.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APPLICATIONS_PATH = path.join(ROOT, 'data', 'applications.md');
@@ -371,6 +372,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === (await import('url')).pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
 }
