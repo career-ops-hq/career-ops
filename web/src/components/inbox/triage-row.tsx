@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 
-export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean };
+export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
 
 function agoLabel(age: number | null): string | null {
   if (age == null) return null;
@@ -45,7 +45,7 @@ export function TriageRow({
   onSkip: () => void;
 }) {
   const ago = agoLabel(age);
-  const evaluated = !!scored && (scored.running || scored.score != null);
+  const evaluated = !!scored && (scored.running || scored.score != null || scored.reportN != null);
 
   return (
     <li
@@ -82,12 +82,21 @@ export function TriageRow({
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
       {evaluated ? (
-        <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
+        <Link
+          href={
+            scored!.running || !scored!.reportN
+              ? `/jobs/${scored!.jobId}`
+              : `/pipeline/${scored!.reportN}`
+          }
+          className="flex shrink-0 items-center gap-1.5 text-xs"
+        >
           {scored!.running ? (
             <>
               <Loader2 className="size-3.5 animate-spin text-brand" />
               <span className="text-brand max-sm:hidden">Scoring…</span>
             </>
+          ) : scored!.score == null ? (
+            <Badge tone="muted">Report</Badge>
           ) : (
             <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
           )}

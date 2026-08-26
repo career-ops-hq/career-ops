@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, newCompletedReportNum, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -134,10 +134,10 @@ export async function POST(req: Request) {
     }
   };
   const persists = kind === "evaluate";
-  const reportsBefore = persists ? reportEntries() : [];
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  const reportsBefore = persists ? reportEntries() : [];
 
   // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
   // `exec` blocks reading stdin for additional context, hangs until the kill timer,
@@ -461,7 +461,9 @@ export async function POST(req: Request) {
           return close();
         }
 
-        const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
+        const reportsAfter = persists ? reportEntries() : [];
+        const wroteReport = hasNewCompletedReport(reportsBefore, reportsAfter);
+        const reportN = persists ? newCompletedReportNum(reportsBefore, reportsAfter) : null;
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
@@ -477,7 +479,12 @@ export async function POST(req: Request) {
           // instead of recording a confident score off a half-finished run.
           send({ type: "error", msg: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." });
         } else {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          send({
+            type: "done",
+            tokens: lastTokens,
+            costUsd: lastCostUsd,
+            reportN,
+          });
         }
         close();
       });
