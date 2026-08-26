@@ -57,7 +57,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
 // Third copy of the directory-lock protocol in this repo, and the one #2984
 // missed: that fix declared "one definition, no sibling drift" while patching
@@ -80,6 +80,7 @@ import {
   parseDate,
   addDays,
 } from './followup-cadence.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -819,6 +820,6 @@ async function main() {
 }
 
 // Run (CLI only; guarded so the module is safely importable for tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

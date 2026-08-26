@@ -8399,10 +8399,19 @@ try {
   // only cover the helper — this pins the field on the JSON consumers read, which
   // is where a silently-inferred age would actually do damage.
   {
-    // realpath: on macOS the tmpdir is a symlink, and followup-cadence.mjs's
-    // CLI guard compares import.meta.url (realpath-resolved) against argv[1].
-    // A symlinked path silently suppresses main() and yields empty stdout.
-    const e2eTmp = realpathSync(mkdtempSync(join(tmpdir(), 'co-cadence-e2e-')));
+    // NOT realpathed, deliberately. This used to be, because followup-cadence's
+    // hand-rolled CLI guard compared a realpath-resolved import.meta.url against
+    // a lexical argv[1], so macOS's symlinked tmpdir silently suppressed main()
+    // and yielded empty stdout. lib/is-main-module.mjs canonicalizes both sides
+    // (#3170), so the workaround can go.
+    //
+    // Do NOT read this as coverage of that fix: whether a symlink is involved
+    // at all depends on the platform's tmpdir (it is one on macOS, usually not
+    // on Linux CI), so on most runs this proves nothing about #3170. The
+    // deliberate coverage lives in tests/main-guard-convention.test.mjs, which
+    // creates its own symlink. What this line buys is the absence of a
+    // workaround that would otherwise outlive its reason and mislead a reader.
+    const e2eTmp = mkdtempSync(join(tmpdir(), 'co-cadence-e2e-'));
     try {
       copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
       copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
@@ -8421,6 +8430,10 @@ try {
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
+      // ...and its main-guard now comes from lib/is-main-module.mjs (#3170),
+      // which is what lets the copy answer "am I main?" correctly from a
+      // symlinked tmpdir in the first place.
+      copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(e2eTmp, 'lib', 'is-main-module.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs

@@ -218,29 +218,10 @@ const EXEMPT = new Map([
 // When the last entry goes, delete PENDING, its uses, and this comment. A
 // ratchet that outlives its job is just a permanent hole.
 const PENDING = new Set([
-  'add-entry.mjs',
-  'assessment-log.mjs',
-  'check-table-freshness.mjs',
-  'contacts.mjs',
-
-  'find.mjs',
-  'fix-slugs.mjs',
-  'followup-cadence.mjs',
-  'followup-seed.mjs',
-
-  'intake.mjs',
-  'normalize-statuses.mjs',
-  'paste-reply.mjs',
   'plugin-audit.mjs',
   'plugins.mjs',
-  'reserve-report-num.mjs',
-  'seed-fixture.mjs',
-  'tracker.mjs',
   'update-system.mjs',
-  'upgrade-tests.mjs',
   'validate-plugin-registry.mjs',
-  'validate-untrusted-content-coverage.mjs',
-
 ]);
 
 function entryRefViolations(src) {
