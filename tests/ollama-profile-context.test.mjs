@@ -31,6 +31,9 @@ for (const relativePath of [
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
   'lib/context-budget.mjs',
+  // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
+  // (#3170), so a fixture that carries it has to carry the helper too.
+  'lib/is-main-module.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);

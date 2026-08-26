@@ -69,6 +69,26 @@ if (compileKeyword('automation')(compound) && !compileKeyword('stem:automation')
   fail('the compound case behaves differently from what the template documents');
 }
 
+// The MIRROR case, and the one a reader is likelier to hit: a keyword that
+// genuinely STARTS the unwanted word. `stem:` asks for the LEFT boundary only,
+// so it matches these by design and only `word:` closes them. Asserting both
+// halves per title -- stem: still matches, word: does not -- is what makes this
+// discriminating: an implementation that anchored both sides would pass the
+// first half and fail the second. Both titles are observed corpus entries.
+const startsTheWord = [
+  ['solana', 'Genomic Breeder (Solanaceae)'],
+  ['neutron', 'Senior Neutronics Engineer - Isotope Production'],
+];
+const unclosed = startsTheWord.filter(([kw, title]) => {
+  const l = title.toLowerCase();
+  return !(compileKeyword(`stem:${kw}`)(l) && !compileKeyword(`word:${kw}`)(l));
+});
+if (unclosed.length === 0) {
+  pass('stem: does not close a keyword that STARTS the unwanted word — only word: does');
+} else {
+  fail(`the start-of-word case differs from what the template documents: ${JSON.stringify(unclosed)}`);
+}
+
 // ── 3. Shared plumbing: a bare prefix, escaping, AND-groups ──────────
 if (compileKeyword('stem:')('customer success manager') === false) {
   pass('a bare `stem:` matches nothing rather than everything');

@@ -281,11 +281,12 @@ export default {
           break;
         }
 
+        const rawEntryCount = (String(xml ?? '').match(/<entry\b[^>]*>[\s\S]*?<\/entry>/gi) || []).length;
         const parsed = parseJobBankFeed(xml);
         for (const job of parsed) {
           if (!byUrl.has(job.url)) byUrl.set(job.url, job);
         }
-        if (parsed.length < PAGE_SIZE) break; // short page — end of this keyword's results
+        if (rawEntryCount < PAGE_SIZE) break; // short feed page — end of this keyword's results
       }
       if (!keywordFailed) succeeded++;
     }

@@ -11,10 +11,11 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { isIP } from 'net';
 import { dirname, join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LIMIT = 20;
@@ -1015,7 +1016,7 @@ async function main() {
   else printHuman(result);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`company-funded: ${err.message}`);
     process.exit(1);

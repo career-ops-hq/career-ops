@@ -20,6 +20,21 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 
+// A directory SYMLINK needs SeCreateSymbolicLinkPrivilege on Windows, which a
+// non-elevated shell lacks unless Developer Mode is on. All three links below
+// threw EPERM there, losing every check in this file as one opaque suite
+// failure (#3259). A junction needs no privilege, and it is what test-all.mjs's
+// e2e fixture and generate-pdf-page-budget.test.mjs already use for exactly
+// this reason. The swap is invisible to what this suite asserts: discovery
+// still walks the link, readdirSync still reports isDirectory() === false for
+// it -- the bug #3140 is about -- and stat() through a DANGLING junction throws
+// just as it does through a dangling symlink, which the `gone-away` case
+// depends on. Junctions add two constraints, both already met at all three
+// sites: the target is absolute and on a local volume, since every one is
+// built from mkdtempSync(). The type argument is ignored off Windows.
+const LINK_TYPE = process.platform === 'win32' ? 'junction' : 'dir';
+const linkPlugin = (target, linkPath) => symlinkSync(target, linkPath, LINK_TYPE);
+
 const { discoverPlugins, pluginRoots, loadPlugins } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
 
 console.log('\nplugins/_engine.mjs — symlinked plugin discovery (#3140)');
@@ -65,7 +80,7 @@ try {
   // directory name, which is what a developer linking `career-ops-plugin-demo`
   // in as `demo` actually gets.
   const externalCheckout = writePlugin(join(tmp, 'checkouts', 'career-ops-plugin-demo'), 'demo');
-  symlinkSync(externalCheckout, join(local, 'demo'));
+  linkPlugin(externalCheckout, join(local, 'demo'));
 
   // A plain directory plugin alongside it — the sibling that must keep working.
   writePlugin(join(local, 'regular'), 'regular');
@@ -91,7 +106,7 @@ try {
   // A dangling symlink (the checkout was moved or deleted) must be skipped
   // quietly. Resolving it throws, and an unguarded resolve takes down
   // discovery for every other plugin in the root, not just the dead link.
-  symlinkSync(join(tmp, 'checkouts', 'gone-away'), join(local, 'dangling'));
+  linkPlugin(join(tmp, 'checkouts', 'gone-away'), join(local, 'dangling'));
 
   let afterDangling;
   let threw = null;
@@ -127,7 +142,7 @@ try {
     'linked',
     'export default { ingest: async (ctx) => ({ ran: true, dryRun: ctx.dryRun }) };\n',
   );
-  symlinkSync(linkedCheckout, join(loadLocal, 'linked'));
+  linkPlugin(linkedCheckout, join(loadLocal, 'linked'));
   writePluginConfig(tmpEnabled, 'linked', true);
 
   const firstLoad = await loadPlugins('ingest', { root: tmpEnabled, dryRun: true });

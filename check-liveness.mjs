@@ -26,8 +26,19 @@ import {
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
+const USAGE = `Usage:
+  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] <url1> [url2] ...
+  node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt
+  node check-liveness.mjs --help                  # print this usage block and exit
+  node check-liveness.mjs -h                      # alias for --help`;
+
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    return;
+  }
 
   // Portals like pracuj.pl serve a Cloudflare anti-bot wall to headless Chromium.
   // On a challenge we retry once in a headed browser (which clears it); pass
@@ -41,9 +52,9 @@ async function main() {
   const positional = args.filter((a) => a !== '--no-fallback' && a !== throttleArg);
 
   if (positional.length === 0) {
-    console.error('Usage: node check-liveness.mjs [--no-fallback] [--throttle[=ms]] <url1> [url2] ...');
-    console.error('       node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt');
-    process.exit(1);
+    console.error(USAGE);
+    process.exitCode = 1;
+    return;
   }
 
   let urls;
@@ -106,10 +117,10 @@ async function main() {
   if (browser) await browser.close();
 
   console.log(`\nResults: ${active} active  ${expired} expired  ${uncertain} uncertain  (${viaApi} via API, no browser)`);
-  if (expired > 0 || uncertain > 0) process.exit(1);
+  if (expired > 0 || uncertain > 0) process.exitCode = 1;
 }
 
 main().catch(err => {
   console.error('Fatal:', err.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

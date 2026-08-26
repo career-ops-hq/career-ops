@@ -25,18 +25,33 @@
  *                  anchors that look like individual postings, deduped. For scan
  *                  Level 1 (reading a company's open roles).
  *
+ * Workday (`*.myworkdayjobs.com`) is read through its public CXS JSON endpoint
+ * instead of the rendered page: Workday hydrates the JD into a virtualized DOM
+ * that readDom() below cannot see, so scraping it returned a well-formed result
+ * with an EMPTY `text` — indistinguishable, to a caller, from a posting that
+ * genuinely has no content. Same API family scan.mjs already uses for Workday
+ * boards (providers/workday.mjs); the per-job URL derivation is reused from
+ * liveness-api.mjs so the two cannot drift.
+ *
  * Output: compact JSON to stdout. Exit 0 on success; exit 1 on a hard error,
  * printing `{ "error": "...", "code": "..." }` (so a caller/mode can fall back
- * to the MCP path silently). Reuses liveness-browser.mjs's SSRF host guard and
+ * to the MCP path silently). An empty/near-empty jd-mode extraction is one of
+ * those hard errors (`code: "empty_text"`) rather than a successful-looking
+ * empty JD — the documented silent fallback only fires if the tool actually
+ * reports failure. Reuses liveness-browser.mjs's SSRF host guard and
  * realistic-UA context so it isn't instantly bot-walled.
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { resolveAtsApi } from './liveness-api.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +59,16 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;
 const JD_TEXT_CAP = 12_000;     // plenty for a JD; a fraction of a full snapshot
 const DEFAULT_LISTING_MAX = 200;
+const WORKDAY_TIMEOUT_MS = 10_000;
+
+// Floor below which a jd-mode extraction is treated as failure, not content.
+// A posting page whose main text is a couple of sentences is a render we
+// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
+// cost of being wrong is one silent fallback to the MCP path, whereas the
+// cost of NOT failing is an empty JD evaluated as if it were the posting.
+// Only jd mode gets this guard: an empty `listing` result is legitimate — a
+// company with no open roles.
+const MIN_JD_TEXT_CHARS = 200;
 
 // Anchor labels that are navigation chrome, not job postings. Kept small and
 // lowercase; matched against the trimmed label.
@@ -90,6 +115,166 @@ export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
     title: compactText(raw?.title || '', 300),
     text: compactText(raw?.text || '', textCap),
   };
+}
+
+/**
+ * Map a `*.myworkdayjobs.com` posting URL to its public per-job CXS endpoint,
+ * or null for any other URL.
+ *
+ * Derivation (tenant/shard/site/jobPath -> `/wday/cxs/{tenant}/{site}/job/{path}`)
+ * is delegated to liveness-api.mjs's Workday provider so there is exactly one
+ * copy of it, including its SSRF guard: every path segment taken from the input
+ * URL is charset-validated and ".." -rejected before it reaches the fixed
+ * `{tenant}.{shard}.myworkdayjobs.com` host template.
+ *
+ * @param {string} rawUrl
+ * @returns {string|null}
+ */
+export function workdayCxsUrl(rawUrl) {
+  const ats = resolveAtsApi(rawUrl);
+  return ats && ats.ats === 'workday' ? ats.apiUrl : null;
+}
+
+// Tags whose CLOSE ends a block, so it becomes a line break. `li` is absent on
+// purpose: its OPEN tag already emits the break plus a bullet below, and
+// breaking on both ends double-spaces every list.
+const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/gi;
+
+/**
+ * Description markup -> plain text, keeping block structure as newlines. Pure —
+ * exported for tests.
+ *
+ * Not providers/_html-to-text.mjs's htmlToText: that one is tuned for scan
+ * payloads and hard-caps at 4000 chars while collapsing ALL whitespace
+ * (newlines included) into single spaces. A JD read for evaluation wants the
+ * full body up to `--max-chars`, with its paragraph and bullet breaks intact.
+ * The entity decoder itself IS shared, so the two cannot drift on the thing
+ * that has actually drifted historically (#1555/#1639/#2623).
+ *
+ * Double-decode for the same reason htmlToText does: payloads often carry
+ * entity-escaped markup (`&lt;p&gt;`), and text-level entities only become
+ * decodable once the real tags are stripped.
+ *
+ * @param {unknown} html
+ * @returns {string}
+ */
+export function jdHtmlToText(html) {
+  if (typeof html !== 'string' || !html) return '';
+  const stripped = decodeEntities(html)
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n- ')
+    .replace(BLOCK_END_RE, '\n')
+    .replace(/<[^>]+>/g, ' ');
+  return decodeEntities(stripped)
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Shape a jd-mode result from a Workday CXS job payload, into the SAME
+ * `{ url, title, text }` contract as the scraped path so no caller has to know
+ * which route produced it. Pure — exported for tests.
+ *
+ * Returns null when the payload isn't a job (`jobPostingInfo` missing) or
+ * carries no description, so the caller can fall through to the browser rather
+ * than emit a confidently empty JD.
+ *
+ * `url` is the POSTING url the user passed, not the CXS endpoint: it is what
+ * ends up in reports and the tracker.
+ *
+ * The metadata header is prepended to `text` because each of those fields is
+ * evaluation signal the rendered page shows and the description alone does not
+ * — location for the location filter, `jobReqId` for the tracker's same-title
+ * disambiguation rule, and `canApply: false` as a liveness signal on a posting
+ * still served but no longer accepting applications.
+ *
+ * @param {any} json - parsed CXS response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const info = json && typeof json === 'object' ? json.jobPostingInfo : null;
+  if (!info || typeof info !== 'object') return null;
+
+  const body = jdHtmlToText(info.jobDescription);
+  if (!body) return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const locations = [
+    str(info.location),
+    ...(Array.isArray(info.additionalLocations) ? info.additionalLocations.map(str) : []),
+  ].filter(Boolean);
+
+  const meta = [];
+  if (locations.length) meta.push(`Location: ${locations.join(' | ')}`);
+  if (str(info.timeType)) meta.push(`Job type: ${str(info.timeType)}`);
+  if (str(info.postedOn)) meta.push(`Posted: ${str(info.postedOn)}`);
+  if (str(info.jobReqId)) meta.push(`Req ID: ${str(info.jobReqId)}`);
+  if (info.canApply === false) meta.push('Applications closed (canApply: false)');
+
+  return {
+    url: postingUrl,
+    title: compactText(str(info.title), 300),
+    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+/**
+ * Fetch + shape one Workday posting from its CXS endpoint. Returns null for
+ * ANY inconclusive outcome (blocked host, redirect, non-200, unparseable or
+ * unexpected body, timeout) so the caller falls through to the browser path —
+ * where a removed posting still yields the real "this job is no longer
+ * available" page rather than a hard error.
+ *
+ * @param {string} apiUrl
+ * @param {string} postingUrl
+ * @param {number} textCap
+ * @param {number} timeoutMs
+ */
+async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  // Same host as the already-guarded input, but the guard is cheap and this is
+  // the request that actually leaves the process.
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(timeoutMs, WORKDAY_TIMEOUT_MS));
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error', // a redirect off the derived host is not one to follow
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return normalizeWorkdayJob(await res.json(), postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Write a jd-mode result to stdout, or fail with `empty_text` when the
+ * extraction came back empty enough to be useless.
+ *
+ * A `--max-chars` below the floor is honored rather than made unsatisfiable: a
+ * caller who asks for 50 chars gets 50, not a guaranteed failure.
+ */
+function emitJd(result, maxChars) {
+  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
+  if (result.text.length < floor) {
+    console.error(JSON.stringify({
+      error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
+      code: 'empty_text',
+      url: result.url,
+    }));
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(JSON.stringify(result));
 }
 
 /**
@@ -258,6 +443,20 @@ async function main() {
     process.exit(1);
   }
 
+  // Workday first: its JD lives behind a client-side render the DOM read can't
+  // reach, and the CXS endpoint answers with the full body and no browser at
+  // all. Inconclusive -> fall through to Playwright, unchanged.
+  if (mode === 'jd') {
+    const cxs = workdayCxsUrl(url);
+    if (cxs) {
+      const workdayResult = await fetchWorkdayJd(cxs, url, maxChars, timeout);
+      if (workdayResult) {
+        emitJd(workdayResult, maxChars);
+        return;
+      }
+    }
+  }
+
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -292,10 +491,11 @@ async function main() {
     }
     const raw = await readDom(page);
 
-    const result = mode === 'listing'
-      ? normalizeListing(raw.anchors, finalUrl, max)
-      : normalizeJd(raw, finalUrl, maxChars);
-    process.stdout.write(JSON.stringify(result));
+    if (mode === 'listing') {
+      process.stdout.write(JSON.stringify(normalizeListing(raw.anchors, finalUrl, max)));
+    } else {
+      emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+    }
   } catch (err) {
     console.error(JSON.stringify({ error: `navigation error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' }));
     process.exitCode = 1;
@@ -305,6 +505,6 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }
