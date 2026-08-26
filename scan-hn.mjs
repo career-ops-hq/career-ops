@@ -114,6 +114,8 @@ async function main() {
 
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
+    // LOCAL day, matching scan.mjs (#3070) — this is the first_seen that
+    // shouldDedupScanHistoryRow later measures against localToday().
     await appendToScanHistory(newOffers, localToday(), 'added');
     console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
