@@ -2027,7 +2027,23 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
-  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  // The header is written only on first creation, so a release that appends or inserts a counter
+  // leaves existing files with a header that no longer describes the rows below it. Nothing
+  // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
+  // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
+  // header in place would misalign every historical row instead.
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  } else {
+    const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
+    if (onDisk !== SCAN_RUNS_HEADER) {
+      console.error(
+        `Warning: ${filePath} header has ${onDisk.trim().split('\t').length} columns but this build writes `
+        + `${SCAN_RUNS_HEADER.trim().split('\t').length}. Rows below the header are positionally offset and `
+        + `stats.mjs will exclude them. Move ${filePath} aside to start a fresh file — deleting only the header does NOT recover it, because the file still exists and the next run would read the first data row as the header.`,
+      );
+    }
+  }
   const row = [
     c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
     c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredPostingAge,

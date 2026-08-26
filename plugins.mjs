@@ -23,7 +23,7 @@ import * as yaml from 'js-yaml';
 
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
-  runHook, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
+  runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
@@ -154,7 +154,7 @@ async function cmdRun(args) {
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = await runHook(hook, payload, { root: ROOT, dryRun });
+    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dryRun, pluginId: id }), id);
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     // Additive de-dup: never re-add a URL already in the pipeline.
     const known = existingPipelineUrls();
@@ -178,7 +178,7 @@ async function cmdRun(args) {
     // reads as empty), so counting it here would silently do nothing anyway.
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
-    const results = await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs });
+    const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs, pluginId: id }), id);
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
       else console.log(`${r.id} export: failed — ${r.error}`);
@@ -188,7 +188,7 @@ async function cmdRun(args) {
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
-    const results = await runHook('notify', { message }, { root: ROOT, dryRun });
+    const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dryRun, pluginId: id }), id);
     for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
     return;
   }

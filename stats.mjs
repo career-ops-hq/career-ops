@@ -426,8 +426,17 @@ export function computeRunStats(content) {
   if (idx.timestamp == null || idx.found == null) return null; // unknown schema
   const filterCols = header.filter((h) => h.startsWith('filtered_'));
   const rows = [];
+  // A row WIDER than the header is the dangerous case, and only the narrow one was guarded.
+  // SCAN_RUNS_HEADER is written by appendScanRunSummary only when the file does not yet exist, so
+  // when a release appends or inserts a counter the on-disk header silently stops describing the
+  // rows beneath it. Every name-based lookup then reads a neighbouring column, and the result is a
+  // confident, precise, wrong number rather than an obvious break. Count these and exclude them:
+  // the averages must describe the rows the header can still describe, and the caller has to be
+  // able to see when that is a minority of the file.
+  let driftedRows = 0;
   for (const line of lines.slice(1)) {
     const cols = line.split('\t');
+    if (cols.length > header.length) { driftedRows++; continue; } // header no longer describes this row
     if (cols.length < header.length) continue; // torn row
     if (!/^\d{4}-\d{2}-\d{2}/.test(cols[idx.timestamp] || '')) continue;
     const num = (name) => { const v = Number(cols[idx[name]]); return Number.isNaN(v) ? 0 : v; };
@@ -439,7 +448,14 @@ export function computeRunStats(content) {
       newAdded: num('new_added'),
     });
   }
-  if (rows.length === 0) return null;
+  // Distinguish "no runs recorded" from "every run was excluded as drifted". Returning null for
+  // the second case hides the reason: the caller would report an absent scan section on a file
+  // that is full of rows the header can no longer describe.
+  if (rows.length === 0) {
+    return driftedRows > 0
+      ? { totalRuns: 0, driftedRows, failedRuns: 0, lastRunDate: null, avgFoundPerRun: 0, avgNewPerRun: 0, filterRemovalPct: 0 }
+      : null;
+  }
   // Inclusion by 'completed', not exclusion by known failure names: any
   // status a future scan.mjs writes is excluded from trend averages until
   // this aggregator learns what it means. Rows from pre-status files default
@@ -455,6 +471,7 @@ export function computeRunStats(content) {
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
+    driftedRows,
     failedRuns: rows.length - completed.length,
     lastRunDate: rows.map((r) => r.date).sort().at(-1),
     avgFoundPerRun: completed.length ? round1(sum(completed, 'found') / completed.length) : 0,
@@ -579,9 +596,20 @@ function printSummary(stats) {
     console.log('Follow-ups: — no data (data/follow-ups.md missing)');
   }
   const r = stats.runs;
-  if (r) {
+  if (r && r.totalRuns === 0 && r.driftedRows > 0) {
+    // Every row was excluded, so there is no last run to name and no average worth printing.
+    // Rendering the normal line here would read `0 recorded (last null) | avg 0 found`, which
+    // looks like an empty file rather than an unreadable one.
+    console.log(`Runs:       none readable — all ${r.driftedRows} row(s) in scan-runs.tsv are wider than its header, so their columns cannot be read by name.`);
+    console.log('            Recover by moving scan-runs.tsv aside; the next scan writes a fresh file with a current header.');
+  } else if (r) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
+    if (r.driftedRows > 0) {
+      // Say it rather than quietly averaging whichever rows still line up: those may be a small
+      // and unrepresentative tail of the file.
+      console.log(`            ${r.driftedRows} row(s) excluded — wider than scan-runs.tsv's header, so their columns cannot be read by name. Move the file aside to start a fresh one.`);
+    }
   } else {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
   }
