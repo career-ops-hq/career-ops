@@ -1,0 +1,22 @@
+{
+  "id": "xquik",
+  "name": "career-ops-plugin-xquik",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Find attributable X hiring posts through Xquik and keep only direct job or careers links for human review.",
+  "repo": "https://github.com/kriptoburak/career-ops-plugin-xquik",
+  "sha": "d2032ba6e5474d984914313c693e6d44455fd512",
+  "author": "kriptoburak",
+  "hooks": [
+    "search"
+  ],
+  "requiredEnv": [
+    "XQUIK_API_KEY"
+  ],
+  "allowedHosts": [
+    "xquik.com"
+  ],
+  "skill": true,
+  "registrationIssue": "https://github.com/santifer/career-ops/issues/3265",
+  "addedAt": "2026-08-24"
+}

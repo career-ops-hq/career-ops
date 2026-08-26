@@ -745,6 +745,11 @@ try {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -874,6 +879,11 @@ export const chromium = {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
