@@ -40,12 +40,17 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
-import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(__dirname);
-const workspaceRoot = resolveWorkspaceRoot(trackerPath);
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module uses stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(__dirname);
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
@@ -68,8 +73,15 @@ function refreshRootCache() {
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+    // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor
+    // reads CAREER_OPS_TRACKER at call time, so this keeps refreshRootCache's
+    // re-read-on-change contract while a symlinked data/ no longer escapes.
+    const root = resolveWorkspaceRootFor(__dirname);
+    // resolveWorkspaceRootFor already realpaths the derived root (falling back to
+    // the lexical form only when it cannot be canonicalized), so a second
+    // realpathSync here would be a no-op on the happy path and would throw on the
+    // missing-root path instead of degrading gracefully. Reuse the resolved root.
+    __rootCache = { key, root, canonical: root };
   }
   return __rootCache;
 }
