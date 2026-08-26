@@ -720,6 +720,7 @@ async function main() {
   // gate. buildDomainFilter returns null for an absent or empty list, which is
   // why the summary can tell "off" from "on and nothing was skipped".
   const domainFilter = buildDomainFilter(config?.domain_filter);
+  const atsDomainGateActive = Boolean(domainFilter && opts.ats.length);
   if (!fullTitleFilterConfig?.positive?.length) {
     const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
     console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
@@ -735,7 +736,7 @@ async function main() {
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
   const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
-  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${domainFilter ? ' | domain gate' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
+  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${atsDomainGateActive ? ' | domain gate' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   const { seen: seenUrls } = loadSeenUrls();
   const blacklist = loadBlacklist();
@@ -910,22 +911,25 @@ async function main() {
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
           consecutiveResolverFailures = 0;
-          // Deliberately ahead of the truncation retry and of processJobs: a
-          // gated board is not merely quieter but CHEAPER, since provider
-          // .enrichDate() issues a per-job detail request for undated providers
-          // (icims) and a board dropped here never pays for one. It also means
-          // a gated board is never queued for the sequential retry — nothing
-          // downstream would have kept its postings anyway.
-          if (domainFilter && !boardInDomain(jobs, domainFilter)) {
+          if (jobs.workdayTruncated) {
+            // The first pass is incomplete: defer both the board-level domain
+            // decision and job filtering to the quiet sequential retry below,
+            // where a later page can still admit the board.
+            truncated.push(entry);
+            return;
+          }
+          if (jobs.icimsTruncated) {
+            cappedBoards++;
+            if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
+          }
+          // Only skip boards after a complete fetch. Capped/partial boards are
+          // still processed with the normal per-job filters; skipping them on a
+          // first page with no domain-bearing title would hide later matches.
+          if (atsDomainGateActive && !jobs.icimsTruncated && !boardInDomain(jobs, domainFilter)) {
             domainGatedBoards++;
             domainGatedPostings += jobs.length;
             if (opts.verbose) console.error(`  ⊘ ${name}/${entry.name}: no domain-bearing posting — board skipped`);
             return;
-          }
-          if (jobs.workdayTruncated) truncated.push(entry);
-          if (jobs.icimsTruncated) {
-            cappedBoards++;
-            if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
           }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name, source.provider);
@@ -983,6 +987,12 @@ async function main() {
         try {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
+            if (atsDomainGateActive && !jobs.workdayTruncated && !boardInDomain(jobs, domainFilter)) {
+              domainGatedBoards++;
+              domainGatedPostings += jobs.length;
+              if (opts.verbose) console.error(`  ⊘ ${name}/${entry.name}: no domain-bearing posting — board skipped after retry`);
+              return;
+            }
             await processJobs(jobs, name, source.provider);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
@@ -1062,10 +1072,11 @@ async function main() {
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
-  // Reported whenever the gate RAN, including when it skipped nothing: a zero
-  // there is the useful reading that the domain list admitted every board, and
-  // silence would be indistinguishable from the gate being off.
-  if (domainFilter) {
+  // Reported whenever the ATS gate RAN, including when it skipped nothing: a
+  // zero there is the useful reading that the domain list admitted every board,
+  // and silence would be indistinguishable from the gate being off. Seeds-only
+  // runs do not apply the board gate and must not claim that they did.
+  if (atsDomainGateActive) {
     log(`Domain-gated boards: ${domainGatedBoards} skipped, ${domainGatedPostings} posting${domainGatedPostings === 1 ? '' : 's'} never filtered${domainGatedBoards && !opts.verbose ? ' (--verbose names them)' : ''}`);
   }
   // A paced sweep is slower on purpose. Say so, or the operator reads the
@@ -1168,9 +1179,10 @@ async function main() {
       unreachableBoards: totalErrors,
       cappedBoards,
       // `domainFilterActive` is not derivable from the two counts: zero skipped
-      // boards is equally what an absent domain_filter and a permissive one
-      // produce, and a caller comparing two sweeps needs to know which.
-      domainFilterActive: Boolean(domainFilter),
+      // boards is equally what an absent ATS domain gate and a permissive one
+      // produce, and a caller comparing two sweeps needs to know which. Seeds
+      // do not run the board gate, even when config contains domain_filter.
+      domainFilterActive: atsDomainGateActive,
       domainGatedBoards,
       domainGatedPostings,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },

@@ -98,7 +98,8 @@ const { parallelEach, withTimeout, datasetFingerprint, domainFilterFingerprint }
 const { loadCheckpoint, checkpointCompatible } = mod;
 
 {
-  const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false, domainFilterFingerprint: null };
+  const cpLegacy = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false };
+  const cp = { ...cpLegacy, domainFilterFingerprint: null };
   const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false, domainFilterFingerprint: null };
   if (checkpointCompatible(cp, opts)) pass('checkpoint compatible with identical settings');
   else fail('identical settings judged incompatible');
@@ -120,8 +121,11 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   if (!checkpointCompatible({ ...cp, domainFilterFingerprint: solanaGate }, { ...opts, domainFilterFingerprint: defiGate })) pass('domain_filter mismatch rejected for resume');
   else fail('domain_filter mismatch accepted');
 
-  if (!checkpointCompatible(cp, { ...opts, domainFilterFingerprint: solanaGate })) pass('new domain_filter rejects legacy ungated checkpoint');
-  else fail('new domain_filter accepted legacy ungated checkpoint');
+  if (!checkpointCompatible(cpLegacy, { ...opts, domainFilterFingerprint: solanaGate })) pass('new domain_filter rejects legacy absent-fingerprint checkpoint');
+  else fail('new domain_filter accepted legacy absent-fingerprint checkpoint');
+
+  if (!checkpointCompatible(cp, { ...opts, domainFilterFingerprint: solanaGate })) pass('new domain_filter rejects explicit ungated checkpoint');
+  else fail('new domain_filter accepted explicit ungated checkpoint');
 
   if (!checkpointCompatible(null, opts)) pass('null checkpoint rejected');
   else fail('null checkpoint accepted');
