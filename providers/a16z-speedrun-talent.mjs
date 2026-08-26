@@ -185,12 +185,17 @@ export default {
       //      that rotates mid-sweep is NOT the last page; treating it as one
       //      ended the sweep silently, at a clean exit code — the cap warning
       //      below is gated on max_pages and is never reached from here.
-      //   3. A short page, only as the fallback for feeds that omit
-      //      total_pages entirely. Demoting it (rather than merely reordering
-      //      the two checks) is what fixes #2547: a 49-row page fails the
-      //      total_pages test and would still break out on the next line.
+      //      A non-positive total_pages is not a statement about board size,
+      //      so it counts as absent: a feed reporting 0 alongside 50 real
+      //      rows contradicts itself, and the rows win. Trusting them can
+      //      only cost requests (bounded by rule 1 and max_pages), never jobs.
+      //   3. A short page, only as the fallback for feeds whose total_pages is
+      //      absent or non-positive. Demoting it (rather than merely
+      //      reordering the two checks) is what fixes #2547: a 49-row page
+      //      fails the total_pages test and would still break out on the
+      //      next line.
       if (json.jobs.length === 0) break;
-      if (Number.isInteger(json.total_pages)) {
+      if (Number.isInteger(json.total_pages) && json.total_pages > 0) {
         if (page + 1 >= json.total_pages) break;
       } else if (json.jobs.length < PER_PAGE) {
         break;
