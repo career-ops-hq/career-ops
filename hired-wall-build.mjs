@@ -136,14 +136,14 @@ async function avatarDataUri(handle, { fetchAvatars, fixture }) {
   return `data:image/png;base64,${buf.toString('base64')}`;
 }
 
-/** Word-wrap a quote to fit the card; clamps to 3 lines with an ellipsis. */
+/** Word-wrap a quote to fit the card; clamps to 4 lines with an ellipsis. */
 function wrapQuote(s, max = 34) {
   const words = String(s).split(/\s+/);
   const lines = [''];
   for (const w of words) {
     if ((lines[lines.length - 1] + ' ' + w).trim().length > max) lines.push(w);
     else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim();
-    if (lines.length > 3) { lines.length = 3; lines[2] = lines[2].replace(/.{0,3}$/, '') + '…'; break; }
+    if (lines.length > 4) { lines.length = 4; lines[3] = lines[3].replace(/.{0,3}$/, '') + '…'; break; }
   }
   return lines;
 }
