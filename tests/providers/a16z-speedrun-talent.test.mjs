@@ -208,10 +208,43 @@ try {
   if (underCalls.length === 2 && under.length === 100) pass('fetch() honours total_pages as the terminator even when the feed under-reports (#2547, deliberate)');
   else fail(`under-reported total_pages = ${JSON.stringify({ calls: underCalls.length, jobs: under.length })}`);
 
+  // A non-positive total_pages counts as ABSENT, not as "one page". A feed
+  // reporting 0 (or a negative) alongside 50 real rows contradicts itself, and
+  // `page + 1 >= 0` is true at page 0 — so the metadata branch used to end the
+  // sweep immediately and hand back exactly 50 jobs, the #2419 failure shape,
+  // while the SAME feed with the field omitted swept the full budget. The
+  // assertion is that asymmetry: each non-positive value must produce the same
+  // pages and the same job count as the field-absent control, so the two arms
+  // cannot drift apart later. (CodeRabbit, PR #3358.)
+  const sweep = async (total_pages) => {
+    const calls = [];
+    const ctx = {
+      fetchJson: async (url) => {
+        const page = Number(new URL(url).searchParams.get('page'));
+        calls.push(page);
+        const body = { jobs: Array.from({ length: 50 }, (_, i) => mk(page * 50 + i)) };
+        if (total_pages !== undefined) body.total_pages = total_pages;
+        return body;
+      },
+    };
+    const jobs = await provider.fetch({ max_pages: 6 }, ctx);
+    return { pages: calls.join(','), jobs: jobs.length };
+  };
+  const absent = await sweep(undefined);
+  const zero = await sweep(0);
+  const negative = await sweep(-1);
+  const matchesAbsent = (r) => r.pages === absent.pages && r.jobs === absent.jobs;
+  if (absent.pages === '0,1,2,3,4,5' && absent.jobs === 300 && matchesAbsent(zero) && matchesAbsent(negative)) {
+    pass('fetch() treats total_pages 0 and -1 as absent, sweeping identically to a feed that omits the field');
+  } else {
+    fail(`non-positive total_pages = ${JSON.stringify({ absent, zero, negative })}`);
+  }
+
   // PER_PAGE fallback pinned from both directions when the response omits
-  // page_size/total_pages — the ONLY path on which a short page still ends
-  // iteration (#2547): a full 50-row page continues (fails if PER_PAGE
-  // regresses above 50), a 49-row page stops (fails if it regresses below 50).
+  // page_size/total_pages — the path a short page still ends iteration on
+  // (#2547; shared with the non-positive total_pages case above): a full
+  // 50-row page continues (fails if PER_PAGE regresses above 50), a 49-row
+  // page stops (fails if it regresses below 50).
   const bareCalls = [];
   const bareCtx = {
     fetchJson: async (url) => {
