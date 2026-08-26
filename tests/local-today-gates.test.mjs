@@ -428,9 +428,9 @@ function startsRegex(src, i) {
  * child snippet the repo already uses to drive these writers
  * (web/src/lib/core/pipeline.ts builds one).
  *
- * Regex literals are NOT distinguished from division. A `/.../ ` argument to
- * appendToScanHistory would make the gate fail LOUDLY, which is the safe
- * direction for a sentinel and a signal to revisit this — never a silent pass.
+ * Regex literals are distinguished from division with `startsRegex()`, then
+ * masked as DATA like strings/comments. Without that, a quote or backtick in a
+ * regex literal can open a phantom frame and hide real writer calls.
  *
  * @param {string} src
  * @returns {boolean[]} isCode[i] for every index in src.
@@ -562,13 +562,14 @@ function topLevelArgs({ list, isCode }) {
   return out;
 }
 
-/** Every .mjs source file in the repo, at any depth. */
+/** Every production .mjs source file in the repo, at any depth. */
 function sourceFiles(dir, acc = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    // Vendored code, build output, and the suite's own scratch copy of the repo
-    // (test-all.mjs mkdtemps it under ROOT) would otherwise be walked.
+    // Vendored code, build output, test fixtures, and the suite's own scratch
+    // copy of the repo (test-all.mjs mkdtemps it under ROOT) would otherwise be
+    // walked and mistaken for production scan-history writers.
     if (entry.isDirectory()) {
-      if (/^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)) continue;
+      if (/^(node_modules|\.git|\.next|coverage|dist|build|tests)$/.test(entry.name)) continue;
       if (entry.name.startsWith('.tmp-script-test-')) continue;
       sourceFiles(join(dir, entry.name), acc);
     } else if (entry.name.endsWith('.mjs') && !entry.name.endsWith('.test.mjs')) {
