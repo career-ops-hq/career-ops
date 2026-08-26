@@ -1131,11 +1131,6 @@ search_queries:
 #   provider: jobicy
 #   enabled: true
 #
-# - name: EchoJobs                        # tech jobs aggregated from company ATS boards
-#   provider: echojobs
-#   max_pages: 3                          # 100 jobs/page; raise for deeper coverage
-#   enabled: true
-#
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
 #   provider: manfred
 #   lang: EN                              # EN or ES; the API rejects the call without it
