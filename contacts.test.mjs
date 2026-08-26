@@ -351,15 +351,23 @@ ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
 // the caller's real workspace contains — a contributor with a real phonebook
 // gets the same results as CI.
-// realpathSync: macOS tmpdir() is a symlink (/var/folders → /private/var); Node
-// realpath-resolves the ESM entry but pathToFileURL(argv[1]) doesn't, so an
-// unresolved temp path silently defeats the copied script's main-guard.
-const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
+// NOT realpathed, deliberately. macOS tmpdir() is a symlink (/var/folders →
+// /private/var), and this used to be resolved to keep the copied script's
+// hand-rolled main-guard from silently defeating itself. That guard is now
+// lib/is-main-module.mjs, which realpaths both sides (#3170) — and contacts.mjs
+// canonicalizes internally for its own containment checks (realpath-containment
+// right before the write), so nothing here needs a pre-resolved root.
+//
+// This is removal of a dead workaround, NOT coverage of #3170: whether tmpdir()
+// is a symlink at all is a platform accident (macOS yes, Linux CI usually no).
+// The deliberate coverage is in tests/main-guard-convention.test.mjs.
+const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
   mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -470,11 +478,12 @@ try {
 }
 
 // Empty store: fresh temp root with NO data/contacts.tsv at all.
-const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
+const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
   mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);
