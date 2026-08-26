@@ -462,6 +462,29 @@ title_filter:
 # The scanner extracts title, URL, and company from results.
 
 search_queries:
+  # -- Other professions (examples, disabled by default) --
+  # career-ops works for any field, not just engineering. The AI/engineering
+  # queries further down are one worked example; the entries below show the same
+  # query shape adapted to other professions, so it is the PATTERN that teaches,
+  # not the specialty. To use one, copy it, swap the quoted role terms for your
+  # field, keep the `site:` filters and the location/remote token, then set
+  # enabled: true. Leave the rest disabled so they don't run.
+  - name: Healthcare - Registered Nurse
+    query: 'site:boards.greenhouse.io OR site:jobs.lever.co "Registered Nurse" OR "RN" OR "Nurse Practitioner" ("remote" OR "telehealth")'
+    enabled: false
+
+  - name: Finance & Accounting
+    query: 'site:boards.greenhouse.io OR site:jobs.ashbyhq.com "Financial Analyst" OR "Accountant" OR "FP&A" OR "Controller" remote'
+    enabled: false
+
+  - name: Marketing & Sales
+    query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io "Marketing Manager" OR "Content Marketing" OR "Account Executive" OR "SDR" remote'
+    enabled: false
+
+  - name: Project & Program Management
+    query: 'site:boards.greenhouse.io OR site:jobs.lever.co "Project Manager" OR "Program Manager" OR "PMO" remote'
+    enabled: false
+
   # -- Visa sponsorship (US) --
   # Explicitly hunt for roles that sponsor a US work visa. Pair these with the
   # `visa_filter` block above (require_mention: true) so the scan-side filter
