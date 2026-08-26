@@ -318,8 +318,6 @@ const scripts = [
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
-  { name: 'invite-match.test.mjs', expectExit: 0 },
-  { name: 'jd-similarity.test.mjs', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
@@ -345,15 +343,12 @@ const scripts = [
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
+  //
+  // The nine *.test.mjs that used to sit here moved to tests/ (#3306) and are
+  // auto-discovered. These two remain because they are named test-*.mjs rather
+  // than *.test.mjs, so discovery does not match them.
   { name: 'test-trust-validator.mjs', expectExit: 0 },
   { name: 'test-salary-filter.mjs', expectExit: 0 },
-  { name: 'detect-reposts.test.mjs', expectExit: 0 },
-  { name: 'discover-ats.test.mjs', expectExit: 0 },
-  { name: 'followup-cadence.test.mjs', expectExit: 0 },
-  { name: 'process-quality.test.mjs', expectExit: 0 },
-  { name: 'company-history.test.mjs', expectExit: 0 },
-  { name: 'contacts.test.mjs', expectExit: 0 },
-  { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each

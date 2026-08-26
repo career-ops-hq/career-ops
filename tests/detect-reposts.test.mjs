@@ -17,39 +17,27 @@
  * Run: node detect-reposts.test.mjs
  */
 
-import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from './detect-reposts.mjs';
+import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from '../detect-reposts.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\ndetect-reposts.mjs — repost detection');
+
 
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 // Helper: create a row object with sensible defaults
@@ -1177,7 +1165,7 @@ ok('500 rows across 50 companies completes without throwing', true);
 // ============================================================================
 console.log('\n--- 12. CLI behavior ---');
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'detect-reposts.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'detect-reposts.mjs');
 
 // Test --self-test exit code
 try {
@@ -1362,16 +1350,3 @@ const hOut = execFileSync('node', [scriptPath, '-h'], {
   cwd: dirname(scriptPath),
 });
 ok('-h prints usage', hOut.includes('Usage:'));
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);
