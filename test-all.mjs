@@ -15971,10 +15971,8 @@ try {
 
 console.log('\n59. CV template resolver (cv-templates.mjs)');
 {
-  const unit = run(NODE, ['--test', 'test/cv-templates.test.mjs']);
-  if (unit !== null) pass('cv-templates.mjs unit tests pass');
-  else fail('cv-templates.mjs unit tests failed (run: node --test test/cv-templates.test.mjs)');
-
+  // The unit suite moved to tests/ and is auto-discovered (#3247); what stays
+  // here is the CLI surface, which discovery does not cover.
   const listed = run(NODE, ['cv-templates.mjs', 'list', 'cv']);
   if (listed && listed.includes('"name"')) pass('CLI: list cv returns JSON');
   else fail('CLI: list cv did not return JSON');
@@ -15987,12 +15985,6 @@ console.log('\n59. CV template resolver (cv-templates.mjs)');
   else fail(`CLI: resolve cv (unset) unexpected: ${resolved}`);
 }
 
-console.log('\n59b. Pipeline lock (pipeline-lock.mjs)');
-{
-  const unit = run(NODE, ['--test', 'test/pipeline-lock.test.mjs']);
-  if (unit !== null) pass('pipeline-lock unit tests pass');
-  else fail('pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)');
-}
 
 console.log('\n59c. The exported script budget matches the one run() enforces');
 {
@@ -16024,12 +16016,6 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
   }
 }
 
-console.log('\n60. Cover-letter template resolver (generate-cover-letter.mjs)');
-{
-  const unit = run(NODE, ['--test', 'test/cover-resolver.test.mjs']);
-  if (unit !== null) pass('cover-resolver unit tests pass');
-  else fail('cover-resolver unit tests failed (run: node --test test/cover-resolver.test.mjs)');
-}
 
 // ── 61. INTERVIEW-PREP URL ENTRY (#1816) ────────────────────────
 // Prompt-level slice: prep for a role that was never evaluated. Pins the
