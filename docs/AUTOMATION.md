@@ -1,12 +1,13 @@
-# Automation: recurring scans + a zero-token triage
+# Automation: recurring scans, a zero-token triage, and a follow-up sweep
 
 `career-ops` offers to scan for you on a schedule ("just say *scan every 3 days*"),
 but the actual scheduling is left to your operating system. This page ships the
-recipe: how to run the scanner unattended, and a cheap, zero-token **triage** pass
-that turns a pile of freshly-scanned URLs into a short "worth a look" list — *before*
-you spend any tokens evaluating them.
+recipes: how to run the scanner unattended, a cheap zero-token **triage** pass
+that turns a pile of freshly-scanned URLs into a short "worth a look" list —
+*before* you spend any tokens evaluating them — and an unattended **follow-up
+sweep** that drafts (never sends) chase-up emails for aging applications.
 
-Two independent pieces, smallest first. You can use either on its own.
+Three independent pieces, smallest first. You can use any of them on their own.
 
 - **[1. Schedule the scan](#1-schedule-the-scan)** — run `node scan.mjs` on cron /
   launchd / Windows Task Scheduler. Zero tokens: the scanner only reads public
@@ -15,6 +16,11 @@ Two independent pieces, smallest first. You can use either on its own.
   reads `## Pending` from `data/pipeline.md`, compares each posting against
   `config/profile.yml`, and writes a shortlist you actually open. No web, no JD
   extraction, no PDFs, no subagents.
+- **[3. Automate the follow-up sweep](#3-automate-the-follow-up-sweep)** — a
+  headless `claude -p` call on the same cron/launchd pattern, driven by
+  `scripts/followup-sweep.sh`, that drafts follow-ups for overdue applications
+  to a file for you to review. Costs tokens (it's LLM-driven, not a script),
+  but never sends anything on its own.
 
 > Everything here is **local-first**: your CV, profile, and pipeline stay on your
 > machine — none of your data is uploaded. The scan does reach out to *public*
@@ -154,6 +160,107 @@ Open `data/shortlist.md`, then run a real evaluation only on the "Worth a look" 
 
 That keeps the expensive step — token-spending evaluation — pointed only at postings
 that already cleared a free title/location filter.
+
+---
+
+## 3. Automate the follow-up sweep
+
+Unlike the scan (deterministic, zero-token), a follow-up sweep needs an LLM to
+read `data/applications.md`, decide what's overdue, and draft each email —
+so this piece runs `claude -p` (or your CLI's headless equivalent, see
+`AGENTS.md` → Headless / Batch Mode) instead of a plain Node script.
+
+`scripts/followup-sweep.sh` wraps that call. It:
+
+1. Resolves its own repo root (`REPO="$(cd "$(dirname "${0}")/.." && pwd)"`)
+   so the script works from any checkout path without edits.
+2. Runs `claude -p` with a prompt that drives `modes/followup.md`:
+   read the cadence (`node followup-cadence.mjs`), draft a follow-up for
+   every overdue/urgent entry, and **write the drafts to a dated file**
+   (`output/followup-drafts-{date}.md`) instead of trying to act on them.
+3. Logs start/end to `data/followup-sweep.log` (gitignored).
+4. Fires a native notification (`osascript display notification` on macOS)
+   so you know a fresh batch of drafts is waiting.
+
+**It never sends or submits anything.** The draft-only file is the entire
+output — you read it, pick what's worth sending, and send it yourself (or
+ask your CLI agent to send/record it in a follow-up session). This mirrors
+the Ethical Use rule in `AGENTS.md`: nothing gets submitted without you
+reviewing it first, headless or not.
+
+### macOS — launchd
+
+Save as `~/Library/LaunchAgents/io.career-ops.followup.plist`, then
+`launchctl load ~/Library/LaunchAgents/io.career-ops.followup.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key> <string>io.career-ops.followup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>/path/to/career-ops/scripts/followup-sweep.sh</string>
+  </array>
+  <key>WorkingDirectory</key> <string>/path/to/career-ops</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key> <integer>1</integer>
+      <key>Hour</key>    <integer>9</integer>
+      <key>Minute</key>  <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key> <integer>4</integer>
+      <key>Hour</key>    <integer>9</integer>
+      <key>Minute</key>  <integer>0</integer>
+    </dict>
+  </array>
+  <key>StandardOutPath</key>   <string>/path/to/career-ops/data/followup-sweep.launchd.log</string>
+  <key>StandardErrorPath</key> <string>/path/to/career-ops/data/followup-sweep.launchd.log</string>
+</dict>
+</plist>
+```
+
+Two `StartCalendarInterval` entries (`Weekday` 1 = Monday, 4 = Thursday) run
+it twice a week; add or remove entries for a different cadence. As with the
+scan job above, launchd fires a missed run as soon as the machine wakes —
+enable **Power Nap** (System Settings → Battery, or `sudo pmset -a powernap 1`)
+so a lid-closed Mac still has a chance to fire on schedule instead of only
+catching up whenever you next open it.
+
+### cron (same idea, simpler, no wake-catch-up)
+
+```cron
+0 9 * * 1,4 /path/to/career-ops/scripts/followup-sweep.sh
+```
+
+### Why launchd/cron here, and not the CLI's own scheduler
+
+Claude Code's own in-session scheduling (`/loop`, `CronCreate`-style wakeups)
+is tied to a live session — it dies when the session ends, and typically has
+a hard expiry (e.g. 7 days). For an automation you want to survive
+indefinitely, independent of whether you have a chat window open, hand it to
+the OS scheduler instead and let it invoke the CLI headlessly.
+
+### Gate what a scan-and-score run merges into the tracker
+
+If you also run a scan-and-score agent (custom, or one you've built per
+`AGENTS.md` → Skill Modes), it's worth adding a floor score below which a
+match auto-merges into `data/applications.md`. A workable heuristic: after
+you've accumulated some real outcomes, run
+`node analyze-patterns.mjs | jq .scoreThreshold` — it reports the lowest
+score among your historical positive outcomes. Add a rule to your own
+`modes/_custom.md` (never `modes/_shared.md` — see the Data Contract) like:
+
+> Only write a tracker-addition TSV and merge it for jobs scoring ≥ X/5.
+> Jobs below that still get a full report on file, just no tracker row.
+
+This keeps low-probability matches out of your active pipeline without
+silently discarding the evaluation itself.
 
 ---
 
