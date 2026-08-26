@@ -390,29 +390,30 @@ function buildProjects(entries, partial) {
       const nameHtml = url
         ? `<a href="${url}">${nameText}</a>`
         : nameText;
-      // Prefer a single description; fall back to joining bullets into one line so
-      // a bullets-shaped payload still renders inside the .project-desc block.
-      const descText = e.description
-        || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
-      const desc = descText
-        ? `\n    <div class="project-desc">${escapeHtml(descText)}</div>`
+      const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean) : [];
+      const desc = e.description
+        ? `\n    <div class="project-desc">${escapeHtml(e.description)}</div>`
+        : '';
+      const bulletMarkup = bullets.length
+        ? `\n    <ul class="project-bullets">${bullets.map(b => `<li>${escapeHtml(String(b))}</li>`).join('')}</ul>`
         : '';
       const tech = e.tech
         ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
         : '';
       return `<div class="project">
-    <div class="project-title">${nameHtml}${badge}</div>${desc}${tech}
+    <div class="project-title">${nameHtml}${badge}</div>${desc}${bulletMarkup}${tech}
   </div>`;
     }).join('\n  ');
   }
 
   const { entryTemplate, blocks } = partial;
   return entries.filter(Boolean).map(e => {
-    const descText = e.description
-      || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
+    const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean) : [];
+    const bulletMarkup = bullets.map(b => `<li>${escapeHtml(String(b))}</li>`).join('');
     const blockValues = new Map([
       ['BADGE_BLOCK', { value: escapeHtml(e.badge || ''), present: Boolean(e.badge) }],
-      ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
+      ['DESC_BLOCK',  { value: escapeHtml(e.description || ''), present: Boolean(e.description) }],
+      ['BULLETS_BLOCK', { value: bulletMarkup, present: bullets.length > 0 }],
       ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
     ]);
     const nameText = escapeHtml(e.name || '');
@@ -423,7 +424,8 @@ function buildProjects(entries, partial) {
     return fillEntry(entryTemplate, blocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
-      DESC:  escapeHtml(descText),
+      DESC:  escapeHtml(e.description || ''),
+      BULLETS: bulletMarkup,
       TECH:  escapeHtml(e.tech || ''),
     }, blockValues);
   }).join('\n  ');

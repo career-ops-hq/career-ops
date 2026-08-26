@@ -5,6 +5,7 @@
     NAME         — project name
     BADGE_BLOCK  — conditional: badge span when badge is present; omitted otherwise
     DESC_BLOCK   — conditional: description div when description is present; omitted otherwise
+    BULLETS_BLOCK — conditional: project achievement bullets when present; omitted otherwise
     TECH_BLOCK   — conditional: tech div when tech is present; omitted otherwise
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
@@ -13,9 +14,11 @@
 <div class="project">
   <div class="project-title">{{NAME}}{{BADGE_BLOCK}}</div>
   {{DESC_BLOCK}}
+  {{BULLETS_BLOCK}}
   {{TECH_BLOCK}}
 </div>
 <!--BADGE_BLOCK--><span class="project-badge">{{BADGE}}</span><!--/BADGE_BLOCK-->
 <!--DESC_BLOCK--><div class="project-desc">{{DESC}}</div><!--/DESC_BLOCK-->
+<!--BULLETS_BLOCK--><ul class="project-bullets">{{BULLETS}}</ul><!--/BULLETS_BLOCK-->
 <!--TECH_BLOCK--><div class="project-tech">{{TECH}}</div><!--/TECH_BLOCK-->
 <!--/ENTRY-->
