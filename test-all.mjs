@@ -507,8 +507,8 @@ try {
     const helpR = assessmentCli('--help');
     const hR = assessmentCli('-h');
     if (helpR.status === 0 && hR.status === 0 && helpR.stdout.includes('Usage:')
-        && helpR.stdout.includes('--self-test') && hR.stdout === helpR.stdout
-        && helpR.stderr === '' && hR.stderr === '') {
+      && helpR.stdout.includes('--self-test') && hR.stdout === helpR.stdout
+      && helpR.stderr === '' && hR.stderr === '') {
       pass('assessment-log.mjs --help/-h print the shared usage block and exit 0 (#2797)');
     } else {
       fail(`assessment-log.mjs help handling broken: ${JSON.stringify({ help: { status: helpR.status, stdout: helpR.stdout, stderr: helpR.stderr }, h: { status: hR.status, stdout: hR.stdout, stderr: hR.stderr } })}`);
@@ -517,9 +517,9 @@ try {
     const typoR = assessmentCli('--sumary');
     const misplacedAddFlagR = assessmentCli('--company', 'Acme-Co');
     if (typoR.status === 1 && typoR.stderr.includes('unrecognized flag')
-        && typoR.stderr.includes('--sumary') && typoR.stderr.includes('Valid flags:')
-        && typoR.stderr.includes('Usage:') && typoR.stdout === ''
-        && misplacedAddFlagR.status === 1 && misplacedAddFlagR.stderr.includes('--company')) {
+      && typoR.stderr.includes('--sumary') && typoR.stderr.includes('Valid flags:')
+      && typoR.stderr.includes('Usage:') && typoR.stdout === ''
+      && misplacedAddFlagR.status === 1 && misplacedAddFlagR.stderr.includes('--company')) {
       pass('assessment-log.mjs rejects and names an unrecognized leading-dash flag (#2797)');
     } else {
       fail(`assessment-log.mjs unknown flag handling broken: ${JSON.stringify({ typo: { status: typoR.status, stdout: typoR.stdout, stderr: typoR.stderr }, misplacedAddFlag: { status: misplacedAddFlagR.status, stdout: misplacedAddFlagR.stdout, stderr: misplacedAddFlagR.stderr } })}`);
@@ -531,11 +531,11 @@ try {
     );
     const summaryR = assessmentCli('--summary');
     let added = null;
-    try { added = JSON.parse(addR.stdout); } catch {}
+    try { added = JSON.parse(addR.stdout); } catch { }
     if (addR.status === 0 && added?.added === true
-        && added.row?.[1] === 'Acme-Co' && added.row?.[4] === '-Data-Analysis'
-        && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
-        && summaryR.stdout.includes('Data-Analysis')) {
+      && added.row?.[1] === 'Acme-Co' && added.row?.[4] === '-Data-Analysis'
+      && summaryR.status === 0 && summaryR.stdout.includes('Acme-Co')
+      && summaryR.stdout.includes('Data-Analysis')) {
       pass('assessment-log.mjs preserves add/summary flags and dash-containing values (#2797 regression)');
     } else {
       fail(`assessment-log.mjs existing CLI behavior regressed: ${JSON.stringify({ add: { status: addR.status, stdout: addR.stdout, stderr: addR.stderr }, summary: { status: summaryR.status, stdout: summaryR.stdout, stderr: summaryR.stderr } })}`);
@@ -832,7 +832,7 @@ try {
     fail('resolveAtsApi should return null for an unknown host');
   }
   if (resolveAtsApi('https://boards.greenhouse.io/acme/jobs/not-a-number') === null
-      && resolveAtsApi('http://boards.greenhouse.io/acme/jobs/123') === null) {
+    && resolveAtsApi('http://boards.greenhouse.io/acme/jobs/123') === null) {
     pass('resolveAtsApi rejects non-numeric Greenhouse ids and non-https (SSRF guard)');
   } else {
     fail('resolveAtsApi guard failed (bad id or http accepted)');
@@ -842,8 +842,8 @@ try {
   // (component-by-component) instead of the single-segment SAFE_SEGMENT check.
   const wdApi = resolveAtsApi('https://acme.wd1.myworkdayjobs.com/en-US/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125');
   if (wdApi?.ats === 'workday'
-      && wdApi.apiUrl === 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125'
-      && wdApi.parts?.jobPath === 'Toronto-ON-CAN/Agentic-AI-Engineer_R260010125') {
+    && wdApi.apiUrl === 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125'
+    && wdApi.parts?.jobPath === 'Toronto-ON-CAN/Agentic-AI-Engineer_R260010125') {
     pass('resolveAtsApi maps a Workday posting (with locale prefix) to its per-job CXS API URL');
   } else {
     fail(`Workday API URL wrong: ${JSON.stringify(wdApi)}`);
@@ -851,7 +851,7 @@ try {
   // Same tenant, no locale prefix in the URL.
   const wdApiNoLocale = resolveAtsApi('https://acme.wd5.myworkdayjobs.com/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125');
   if (wdApiNoLocale?.ats === 'workday'
-      && wdApiNoLocale.apiUrl === 'https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125') {
+    && wdApiNoLocale.apiUrl === 'https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON-CAN/Agentic-AI-Engineer_R260010125') {
     pass('resolveAtsApi maps a Workday posting without a locale prefix');
   } else {
     fail(`Workday (no locale) API URL wrong: ${JSON.stringify(wdApiNoLocale)}`);
@@ -876,9 +876,9 @@ try {
   const AS_UUID = '00fd8024-7804-4278-a38b-c9d60d929dbb';
   const asApi = resolveAtsApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}`);
   if (asApi?.ats === 'ashby'
-      && asApi.apiUrl === 'https://api.ashbyhq.com/posting-api/job-board/deepgram'
-      && asApi.parts?.jobId === AS_UUID
-      && typeof asApi.interpret === 'function') {
+    && asApi.apiUrl === 'https://api.ashbyhq.com/posting-api/job-board/deepgram'
+    && asApi.parts?.jobId === AS_UUID
+    && typeof asApi.interpret === 'function') {
     pass('resolveAtsApi maps an Ashby posting to its org job-board API URL');
   } else {
     fail(`Ashby API URL wrong: ${JSON.stringify(asApi)}`);
@@ -902,9 +902,9 @@ try {
   const asUnlisted = classifyAshbyBoard({ jobs: [{ id: AS_UUID, isListed: false }] }, AS_UUID);
   const asBadShape = classifyAshbyBoard({ notJobs: [] }, AS_UUID);
   if (asListed?.result === 'active'
-      && asAbsent?.result === 'expired'
-      && asUnlisted?.result === 'expired'
-      && asBadShape === null) {
+    && asAbsent?.result === 'expired'
+    && asUnlisted?.result === 'expired'
+    && asBadShape === null) {
     pass('classifyAshbyBoard: listed→active, absent/unlisted→expired, bad shape→null');
   } else {
     fail(`classifyAshbyBoard wrong: listed=${JSON.stringify(asListed)} absent=${JSON.stringify(asAbsent)} unlisted=${JSON.stringify(asUnlisted)} badShape=${JSON.stringify(asBadShape)}`);
@@ -952,20 +952,20 @@ try {
     globalThis.fetch = async () => ({ status: 410 });
     const cvLvGone410 = await checkLivenessViaApi(lvUrl);
     if (cvAshbyLive?.result === 'active' && cvAshbyLive?.code === 'ashby_api_ok'
-        && cvAshbyGone?.result === 'expired' && cvAshbyGone?.code === 'ashby_api_unlisted'
-        && cvAshbyMalformed === null
-        && cvGhLive?.result === 'active'
-        && cvGone?.result === 'expired'
-        && cvErr === null
-        && cvWdLive?.result === 'active' && cvWdLive?.code === 'workday_api_ok'
-        && cvWdGone?.result === 'expired' && cvWdGone?.code === 'workday_api_gone') {
+      && cvAshbyGone?.result === 'expired' && cvAshbyGone?.code === 'ashby_api_unlisted'
+      && cvAshbyMalformed === null
+      && cvGhLive?.result === 'active'
+      && cvGone?.result === 'expired'
+      && cvErr === null
+      && cvWdLive?.result === 'active' && cvWdLive?.code === 'workday_api_ok'
+      && cvWdGone?.result === 'expired' && cvWdGone?.code === 'workday_api_gone') {
       pass('checkLivenessViaApi: 200→interpret (Ashby), malformed→null, greenhouse/workday 200→active, 404→expired, fetch error→null');
     } else {
       fail(`checkLivenessViaApi wrong: ashbyLive=${JSON.stringify(cvAshbyLive)} ashbyGone=${JSON.stringify(cvAshbyGone)} malformed=${JSON.stringify(cvAshbyMalformed)} ghLive=${JSON.stringify(cvGhLive)} gone=${JSON.stringify(cvGone)} err=${JSON.stringify(cvErr)} wdLive=${JSON.stringify(cvWdLive)} wdGone=${JSON.stringify(cvWdGone)}`);
     }
     if (cvLvLive?.result === 'active' && cvLvLive?.code === 'lever_api_ok'
-        && cvLvGone === null
-        && cvLvGone410 === null) {
+      && cvLvGone === null
+      && cvLvGone410 === null) {
       pass('checkLivenessViaApi: Lever 200→active, 404/410→null (inconclusive, unlike Greenhouse/Workday — Confidential Postings can 404 on the public API while still live)');
     } else {
       fail(`checkLivenessViaApi (Lever) wrong: live=${JSON.stringify(cvLvLive)} gone404=${JSON.stringify(cvLvGone)} gone410=${JSON.stringify(cvLvGone410)}`);
@@ -997,7 +997,7 @@ try {
     let evalCall = 0;
     return {
       async goto() { return { status: () => status }; },
-      async waitForTimeout() {},
+      async waitForTimeout() { },
       url() { return finalUrl; },
       async evaluate() { evalCall += 1; return evalCall === 1 ? bodyText : applyControls; },
     };
@@ -1046,7 +1046,7 @@ try {
     let evalCall = 0;
     Object.assign(page, {
       async goto() { return { status: () => status }; },
-      async waitForTimeout() {},
+      async waitForTimeout() { },
       url() { return finalUrl; },
       frames() { return [main, ...built]; },
       mainFrame() { return main; },
@@ -1113,9 +1113,9 @@ try {
   }
 
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
-      isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
-      !isChallengeResult({ result: 'expired', code: 'http_gone' }) &&
-      !isChallengeResult({ result: 'active', code: 'apply_control_visible' })) {
+    isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
+    !isChallengeResult({ result: 'expired', code: 'http_gone' }) &&
+    !isChallengeResult({ result: 'active', code: 'apply_control_visible' })) {
     pass('isChallengeResult flags only bot_challenge/access_blocked uncertains');
   } else {
     fail('isChallengeResult misclassified a result');
@@ -1141,7 +1141,7 @@ try {
     getHeadedPage: async () => challengePage(),
   });
   if (stillBlocked.result === 'uncertain' && stillBlocked.code === 'bot_challenge'
-      && /headed retry also blocked/.test(stillBlocked.reason)) {
+    && /headed retry also blocked/.test(stillBlocked.reason)) {
     pass('Persistent challenge stays uncertain after headed retry (never upgraded to expired)');
   } else {
     fail(`Persistent challenge mishandled: ${stillBlocked.result} (${stillBlocked.code})`);
@@ -1246,7 +1246,7 @@ try {
             abort: async () => {
               aborted = true;
             },
-            continue: async () => {}
+            continue: async () => { }
           };
           await routeCallback(mockRoute);
           if (aborted) {
@@ -1255,7 +1255,7 @@ try {
         }
         return { status: () => 200 };
       },
-      async waitForTimeout() {},
+      async waitForTimeout() { },
       url() { return 'https://example.com/redirected'; },
       async evaluate() { return 'body text'; }
     };
@@ -1266,7 +1266,7 @@ try {
     // cannot tell "guard rejected 127.0.0.1" from "host resolved to nothing" —
     // that ambiguity is exactly what hid the broken mock (#2386).
     if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host'
-        && /private target IP 127\.0\.0\.1/.test(redirectResult.reason ?? '')) {
+      && /private target IP 127\.0\.0\.1/.test(redirectResult.reason ?? '')) {
       pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
     } else {
       fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
@@ -1283,7 +1283,7 @@ try {
           let continued = false;
           const mockRoute = {
             request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
-            abort: async () => {},
+            abort: async () => { },
             continue: async () => {
               continued = true;
             }
@@ -1295,7 +1295,7 @@ try {
         }
         return { status: () => 200 };
       },
-      async waitForTimeout() {},
+      async waitForTimeout() { },
       url() { return 'https://example.com'; },
       async evaluate(fn) {
         const fnStr = fn.toString();
@@ -1339,11 +1339,11 @@ try {
               frame: () => (navigation ? main : {}),
             }),
             abort: async () => { abortCount += 1; },
-            continue: async () => {},
+            continue: async () => { },
           });
           return { status: () => 200 };
         },
-        async waitForTimeout() {},
+        async waitForTimeout() { },
         url: () => 'https://careers.example.com/jobs/1',
         async evaluate() {
           this._n = (this._n || 0) + 1;
@@ -1438,7 +1438,7 @@ try {
   async function runGuard(requestUrl) {
     const { browser, state } = makeMockBrowser();
     state.stopAtGoto = true;
-    await archiveUrl(browser, 'https://example.com/job/1').catch(() => {});
+    await archiveUrl(browser, 'https://example.com/job/1').catch(() => { });
     if (!state.routeCallback) return { registered: false };
     let verdict = null;
     await state.routeCallback({
@@ -1530,7 +1530,7 @@ if (!QUICK) {
   try {
     execSync('go version', { stdio: 'ignore' });
     hasGo = true;
-  } catch {}
+  } catch { }
   if (!hasGo) {
     warn('Dashboard build skipped — go compiler not in env');
   } else {
@@ -1542,7 +1542,7 @@ if (!QUICK) {
       goEnv.GOCACHE = join(tmpdir(), 'career-ops-go-build-cache');
     }
     if (goEnv.GOCACHE) {
-      try { mkdirSync(goEnv.GOCACHE, { recursive: true }); } catch (e) {}
+      try { mkdirSync(goEnv.GOCACHE, { recursive: true }); } catch (e) { }
     }
     const goBuild = run('go', ['build', '-o', outPath, '.'], {
       cwd: join(ROOT, 'dashboard'),
@@ -1552,11 +1552,11 @@ if (!QUICK) {
     });
     if (goBuild !== null) {
       pass('Dashboard compiles');
-      try { rmSync(outPath, { force: true }); } catch (e) {}
+      try { rmSync(outPath, { force: true }); } catch (e) { }
     } else {
       fail('Dashboard build failed');
     }
-    try { rmSync(dashboardBuildTmp, { recursive: true, force: true }); } catch (e) {}
+    try { rmSync(dashboardBuildTmp, { recursive: true, force: true }); } catch (e) { }
   }
 } else {
   console.log('\n4. Dashboard build (skipped --quick)');
@@ -1804,8 +1804,8 @@ if (/if \[\[ "\$status" == "completed" \|\| "\$status" == "skipped" \]\]/.test(b
 }
 
 if (/local total=0 completed=0 skipped=0 failed=0 pending=0/.test(batchRunnerSource) &&
-    /skipped\) skipped=\$\(\(skipped \+ 1\)\)/.test(batchRunnerSource) &&
-    /Completed: \$completed \| Skipped: \$skipped \| Failed: \$failed \| Pending: \$pending/.test(batchRunnerSource)) {
+  /skipped\) skipped=\$\(\(skipped \+ 1\)\)/.test(batchRunnerSource) &&
+  /Completed: \$completed \| Skipped: \$skipped \| Failed: \$failed \| Pending: \$pending/.test(batchRunnerSource)) {
   pass('Batch summary reports skipped offers separately from pending');
 } else {
   fail('Batch summary can misreport skipped offers as pending');
@@ -4981,8 +4981,8 @@ try {
   const readAt = dashboardBody.indexOf('os.ReadFile(filePath)');
   const replaceAt = dashboardBody.indexOf('writeFileAtomic(filePath');
   if (acquireAt >= 0 && deferredReleaseAt > acquireAt && readAt > deferredReleaseAt
-      && replaceAt > readAt
-      && !/os\.WriteFile\(filePath,\s*\[\]byte\(strings\.Join\(lines/.test(dashboardBody)) {
+    && replaceAt > readAt
+    && !/os\.WriteFile\(filePath,\s*\[\]byte\(strings\.Join\(lines/.test(dashboardBody)) {
     pass('dashboard tracker update structurally holds the lock across read and atomic replacement');
   } else {
     fail('dashboard tracker update escapes the cross-runtime transaction scope');
@@ -5867,8 +5867,8 @@ try {
   const helpOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--help'], { encoding: 'utf-8' });
   const hOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '-h'], { encoding: 'utf-8' });
   if (helpOut.status === 0 && hOut.status === 0 &&
-      helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('fix-slugs.mjs') &&
-      hOut.stdout === helpOut.stdout) {
+    helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('fix-slugs.mjs') &&
+    hOut.stdout === helpOut.stdout) {
     pass('fix-slugs.mjs --help/-h print usage and exit 0');
   } else {
     fail(`fix-slugs.mjs --help/-h failed => status=${helpOut.status}/${hOut.status}`);
@@ -5884,7 +5884,7 @@ try {
   const missingFileOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file'], { encoding: 'utf-8' });
   const fileFlagNextOut = spawnSync(NODE, [join(ROOT, 'fix-slugs.mjs'), '--file', '--fix'], { encoding: 'utf-8' });
   if (missingFileOut.status === 1 && missingFileOut.stderr.includes('--file requires a value') &&
-      fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
+    fileFlagNextOut.status === 1 && fileFlagNextOut.stderr.includes('--file requires a value')) {
     pass('fix-slugs.mjs rejects missing --file value with exit 1');
   } else {
     fail(`fix-slugs.mjs missing --file value handling => bare: ${missingFileOut.status} nextFlag: ${fileFlagNextOut.status}`);
@@ -6571,9 +6571,9 @@ const todayStr = new Date().toISOString().split('T')[0];
 // dry-run: URL-based company detection across each supported ATS
 for (const [url, expected] of [
   ['https://boards.greenhouse.io/openai/jobs/123', 'openai'],
-  ['https://jobs.ashbyhq.com/ElevenLabs/abc',      'elevenlabs'],
-  ['https://jobs.lever.co/retool/xyz',              'retool'],
-  ['https://jobs.eu.lever.co/retool-eu/xyz',         'retool-eu'],
+  ['https://jobs.ashbyhq.com/ElevenLabs/abc', 'elevenlabs'],
+  ['https://jobs.lever.co/retool/xyz', 'retool'],
+  ['https://jobs.eu.lever.co/retool-eu/xyz', 'retool-eu'],
 ]) {
   const out = run(NODE, ['archive-posting.mjs', '--dry-run', url]);
   const { hostname } = new URL(url);
@@ -6690,8 +6690,8 @@ if (!hasBrowser) {
 
       const recent = existsSync(JDS_DIR)
         ? readdirSync(JDS_DIR)
-            .filter(f => f.endsWith('.pdf'))
-            .filter(f => statSync(join(JDS_DIR, f)).mtimeMs >= startedAt)
+          .filter(f => f.endsWith('.pdf'))
+          .filter(f => statSync(join(JDS_DIR, f)).mtimeMs >= startedAt)
         : [];
 
       if (recent.length === 0) {
@@ -7804,8 +7804,8 @@ try {
   // Existing configs are untouched: no " + " means the old behaviour exactly.
   const legacy = buildTitleFilter({ positive: ['engineering manager'], negative: ['intern'] });
   if (legacy('Engineering Manager, Payments') === true
-      && legacy('Engineering Manager Intern') === false
-      && legacy('Manager, Engineering') === false) {
+    && legacy('Engineering Manager Intern') === false
+    && legacy('Manager, Engineering') === false) {
     pass('an entry without " + " keeps exact substring behaviour (backward compatible)');
   } else {
     fail('a plain keyword changed behaviour — the change is not backward compatible');
@@ -8630,8 +8630,8 @@ try {
   }
   const bullet = parsedLog.find(f => f.appNum === 68);
   if (bullet && bullet.num === null && bullet.date === '2026-07-02' &&
-      bullet.company === 'Intelix.AI (client TBD -- Global FS)' &&
-      bullet.channel === 'Other' && bullet.notes === 'Followed up') {
+    bullet.company === 'Intelix.AI (client TBD -- Global FS)' &&
+    bullet.channel === 'Other' && bullet.notes === 'Followed up') {
     pass('parseFollowupsContent maps bullets to channel Other with company + note split on em-dash');
   } else {
     fail(`bullet parsed wrong: ${JSON.stringify(bullet)}`);
@@ -8761,7 +8761,7 @@ try {
   const before = cadence.analyzeFromContent(retireTracker, '');
   const after = cadence.analyzeFromContent(retireTracker, '- cleared #70 2026-08-04 — no channel');
   if (before.metadata.actionable === 2 && after.metadata.actionable === 1 &&
-      after.metadata.retired === 1 && !after.entries.some(e => e.num === 70)) {
+    after.metadata.retired === 1 && !after.entries.some(e => e.num === 70)) {
     pass('analyzeFromContent: retired application leaves entries and actionable count');
   } else {
     fail(`retire integration wrong: ${JSON.stringify([before.metadata, after.metadata])}`);
@@ -8811,8 +8811,8 @@ try {
   // insertion appends within section and preserves later sections
   const inserted = insertIntoCvSection(sampleCv, 'Projects', '- **FraudShield** (OSS) -- fraud detection');
   if (inserted.includes('- **Existing**') && inserted.includes('- **FraudShield**') &&
-      inserted.indexOf('FraudShield') < inserted.indexOf('## Education') &&
-      inserted.includes('## Education')) {
+    inserted.indexOf('FraudShield') < inserted.indexOf('## Education') &&
+    inserted.includes('## Education')) {
     pass('insertIntoCvSection appends under Projects and keeps Education intact');
   } else {
     fail('insertIntoCvSection placement wrong');
@@ -8839,7 +8839,7 @@ try {
     { cvText: sampleCv, articleText: null },
   );
   if (added.result.cv.status === 'added' && added.result.articleDigest.status === 'created' &&
-      added.cv.includes('FraudShield') && added.articleDigest.includes('## FraudShield')) {
+    added.cv.includes('FraudShield') && added.articleDigest.includes('## FraudShield')) {
     pass('applyAdd adds a new CV entry and creates article-digest.md when absent');
   } else {
     fail(`applyAdd fresh-add => ${JSON.stringify(added.result)}`);
@@ -8912,8 +8912,8 @@ try {
     const helpOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '--help'], { env, encoding: 'utf-8' });
     const hOut = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), '-h'], { env, encoding: 'utf-8' });
     if (helpOut.status === 0 && hOut.status === 0 &&
-        helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('--stdin') &&
-        hOut.stdout === helpOut.stdout) {
+      helpOut.stdout.includes('Usage:') && helpOut.stdout.includes('--stdin') &&
+      hOut.stdout === helpOut.stdout) {
       pass('add-entry CLI --help/-h print usage and exit 0');
     } else {
       fail(`add-entry CLI help handling => ${JSON.stringify({ help: { status: helpOut.status, stdout: helpOut.stdout, stderr: helpOut.stderr }, h: { status: hOut.status, stdout: hOut.stdout, stderr: hOut.stderr } })}`);
@@ -8922,8 +8922,8 @@ try {
     const missingPayloadPath = join(cliTmp, 'missing-payload.json');
     const badFlag = spawnSync(NODE, [join(ROOT, 'add-entry.mjs'), missingPayloadPath, '--sumary'], { env, encoding: 'utf-8' });
     if (badFlag.status === 1 && /unrecognized flag/.test(badFlag.stderr) && badFlag.stderr.includes('--sumary') &&
-        !badFlag.stderr.includes('could not parse payload') &&
-        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      !badFlag.stderr.includes('could not parse payload') &&
+      !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
       pass('add-entry CLI rejects an unrecognized flag before reading or writing payload data');
     } else {
       fail(`add-entry CLI unknown flag handling => ${JSON.stringify({ status: badFlag.status, stdout: badFlag.stdout, stderr: badFlag.stderr })}`);
@@ -8935,7 +8935,7 @@ try {
       input: JSON.stringify(cliPayload),
     });
     if (stdinDryRun.status === 0 && JSON.parse(stdinDryRun.stdout).dryRun === true &&
-        !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
+      !readFileSync(cvPath, 'utf-8').includes('CliProj') && !existsSync(adPath)) {
       pass('add-entry CLI keeps --stdin and --dry-run working together');
     } else {
       fail(`add-entry CLI --stdin --dry-run => ${JSON.stringify({ status: stdinDryRun.status, stdout: stdinDryRun.stdout, stderr: stdinDryRun.stderr })}`);
@@ -8947,7 +8947,7 @@ try {
 
     const realOut = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
     if (realOut.cv.status === 'added' && realOut.articleDigest.status === 'created' &&
-        readFileSync(cvPath, 'utf-8').includes('- **CliProj**') && readFileSync(adPath, 'utf-8').includes('## CliProj')) {
+      readFileSync(cvPath, 'utf-8').includes('- **CliProj**') && readFileSync(adPath, 'utf-8').includes('## CliProj')) {
       pass('add-entry CLI real run writes cv.md + creates article-digest.md');
     } else {
       fail(`add-entry CLI real run => ${JSON.stringify(realOut)}`);
@@ -8971,11 +8971,13 @@ try {
       const cvPath = join(jpTmp, 'cv.md');
       writeFileSync(cvPath, '# CV\n\n## \u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\n\n- \u65E2\u5B58\n\n## \u8077\u52D9\u7D4C\u6B74\n\n- \u65E2\u5B58\n');
       const payloadPath = join(jpTmp, 'p.json');
-      writeFileSync(payloadPath, JSON.stringify({ cv: {
-        section: '\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
-        dedupKey: '\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9',
-        entry: '- **\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9**',
-      } }));
+      writeFileSync(payloadPath, JSON.stringify({
+        cv: {
+          section: '\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+          dedupKey: '\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9',
+          entry: '- **\u30D5\u30E9\u30A6\u30C9\u30B7\u30FC\u30EB\u30C9**',
+        }
+      }));
       const env = { ...process.env, CAREER_OPS_CV: cvPath };
       const out = JSON.parse(execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), payloadPath], { env, encoding: 'utf-8' }));
       out.cv.status === 'added'
@@ -8989,11 +8991,13 @@ try {
 
       // A different heading must not collide via a shared empty key.
       const p2 = join(jpTmp, 'p2.json');
-      writeFileSync(p2, JSON.stringify({ cv: {
-        section: '\u8077\u52D9\u7D4C\u6B74',
-        dedupKey: '\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
-        entry: '- **\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8**',
-      } }));
+      writeFileSync(p2, JSON.stringify({
+        cv: {
+          section: '\u8077\u52D9\u7D4C\u6B74',
+          dedupKey: '\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8',
+          entry: '- **\u5225\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8**',
+        }
+      }));
       execFileSync(NODE, [join(ROOT, 'add-entry.mjs'), p2], { env, encoding: 'utf-8' });
       const finalCv = readFileSync(cvPath, 'utf-8');
       const [projSection, workSection] = finalCv.split('## \u8077\u52D9\u7D4C\u6B74');
@@ -9169,11 +9173,11 @@ try {
     env: { ...process.env, CAREER_OPS_REPORTS_DIR: apiTmp, CAREER_OPS_TRACKER: apiTracker },
   }).trim();
   let apiResult = null;
-  try { apiResult = JSON.parse(apiProbe); } catch {}
+  try { apiResult = JSON.parse(apiProbe); } catch { }
   if (apiResult?.nums?.[0] === 1 && apiResult.formatted === '001'
-      && apiResult.firstToken && apiResult.replacementToken
-      && apiResult.firstToken !== apiResult.replacementToken
-      && apiResult.replacementPreserved && apiResult.replacementCleaned) {
+    && apiResult.firstToken && apiResult.replacementToken
+    && apiResult.firstToken !== apiResult.replacementToken
+    && apiResult.replacementPreserved && apiResult.replacementCleaned) {
     pass('reserve-report-num token ownership prevents stale cleanup from deleting a replacement claim');
   } else {
     fail(`reserve-report-num import API failed: ${apiProbe}`);
@@ -9407,7 +9411,7 @@ try {
   const hugeRelease = reserveRunFail(['--release', '1-9007199254740992'], relTmp);
   const wideRelease = reserveRunFail(['--release', '1-51'], relTmp);
   if (badCount === 1 && hugeCount === 1 && badRelease === 1
-      && hugeRelease === 1 && wideRelease === 1) {
+    && hugeRelease === 1 && wideRelease === 1) {
     pass('invalid counts and unsafe, inverted, or oversized release ranges exit 1');
   } else {
     fail(`validation exits: count0=${badCount}, count999=${hugeCount}, inverted=${badRelease}, unsafe=${hugeRelease}, wide=${wideRelease}`);
@@ -9452,7 +9456,7 @@ try {
       fail('verify-pipeline crashed on duplicate/orphan report fixture');
     } else {
       if (vpOut.includes('Duplicate reports for same company+role') &&
-          vpOut.includes('001-acme-2026-01-04.md') && vpOut.includes('003-acme-2026-01-05.md')) {
+        vpOut.includes('001-acme-2026-01-04.md') && vpOut.includes('003-acme-2026-01-05.md')) {
         pass('duplicate reports for the same company+role are flagged (#1425)');
       } else {
         fail('duplicate company+role reports not flagged');
@@ -9480,8 +9484,8 @@ try {
     rmSync(join(vpReports, '003-acme-2026-01-05.md'));
     const vpClean = run(NODE, ['verify-pipeline.mjs'], { env: vpEnv, stdio: ['pipe', 'pipe', 'pipe'] });
     if (vpClean !== null &&
-        vpClean.includes('No duplicate reports for the same company+role') &&
-        vpClean.includes('No orphan reports')) {
+      vpClean.includes('No duplicate reports for the same company+role') &&
+      vpClean.includes('No orphan reports')) {
       pass('clean tracker+reports fixture passes both report checks');
     } else {
       fail('clean fixture did not pass duplicate/orphan report checks');
@@ -9618,9 +9622,9 @@ try {
       '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
       '| 900 | 2026-02-01 | Acme | Director of Platform | 3.1/5 | Evaluated | ❌ | ' +
-        '[901](reports/901-acme-2026-02-01.md) / [902](reports/902-acme-2026-02-09.md) | re-eval |\n' +
+      '[901](reports/901-acme-2026-02-01.md) / [902](reports/902-acme-2026-02-09.md) | re-eval |\n' +
       '| 950 | 2026-03-05 | Initech | Test Lead | 3.1/5 | Evaluated | ❌ | ' +
-        '[955](reports/955-initech-2026-03-05.md) | row number collides with orphan report 950 |\n' +
+      '[955](reports/955-initech-2026-03-05.md) | row number collides with orphan report 950 |\n' +
       '| 970 | 2026-03-06 | Hooli | Release Manager | 3.1/5 | Evaluated | ❌ | — | legacy row, no markdown link |\n');
 
     const orOut = run(NODE, ['verify-pipeline.mjs'], { env: orEnv, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -9697,7 +9701,7 @@ try {
       }
     }
     if (dupNumOut.includes('Duplicate tracker number #698')
-        && dupNumOut.includes('University of Alberta') && dupNumOut.includes('Esri Canada')) {
+      && dupNumOut.includes('University of Alberta') && dupNumOut.includes('Esri Canada')) {
       pass('duplicate tracker number #698 flagged with both colliding rows named');
     } else {
       fail(`duplicate tracker number not flagged with both rows\n${dupNumOut}`);
@@ -10198,7 +10202,7 @@ try {
     const mixedResult = run(NODE, ['dedup-tracker.mjs', '--help', '--check'], { env });
     const mixedFailure = lastRunFailure();
     if (mixedResult === null && mixedFailure?.status === 1 && /unrecognized flag/i.test(mixedFailure.stderr)
-        && !/Usage:/.test(mixedFailure.stdout || '')) {
+      && !/Usage:/.test(mixedFailure.stdout || '')) {
       pass('dedup-tracker --help --check still rejects the unrecognized flag (#2746)');
     } else {
       fail(`dedup-tracker --help+--check should still error, not exit clean: ${formatRunFailure()}`);
@@ -10280,8 +10284,8 @@ try {
 
       const paymentsRows = out.split('\n').filter(l => l.includes('Backend Engineer, Payments Platform'));
       if (paymentsRows.length === 2
-          && paymentsRows.some(l => l.includes('リクルート'))
-          && paymentsRows.some(l => l.includes('パーソル'))) {
+        && paymentsRows.some(l => l.includes('リクルート'))
+        && paymentsRows.some(l => l.includes('パーソル'))) {
         pass('dedup-tracker keeps two blind rows submitted via different non-Latin agencies (#2393)');
       } else {
         fail(`dedup-tracker collapsed distinct non-Latin agency channels: ${paymentsRows.length} Payments Platform rows`);
@@ -10289,8 +10293,8 @@ try {
 
       const checkoutRows = out.split('\n').filter(l => l.includes('Frontend Engineer, Checkout'));
       if (checkoutRows.length === 2
-          && checkoutRows.some(l => l.includes('リクルート'))
-          && checkoutRows.some(l => l.includes('| — |'))) {
+        && checkoutRows.some(l => l.includes('リクルート'))
+        && checkoutRows.some(l => l.includes('| — |'))) {
         pass('dedup-tracker keeps a via-less blind row separate from a non-Latin agency row (#2393)');
       } else {
         fail(`dedup-tracker collapsed a via-less blind row into an agency channel: ${checkoutRows.length} Checkout rows`);
@@ -10347,8 +10351,8 @@ try {
 
       const backendRows = out.split('\n').filter(l => l.includes('Backend Engineer'));
       if (backendRows.length === 2
-          && backendRows.some(l => l.includes('アクメ株式会社'))
-          && backendRows.some(l => l.includes('グロベックス合同会社'))) {
+        && backendRows.some(l => l.includes('アクメ株式会社'))
+        && backendRows.some(l => l.includes('グロベックス合同会社'))) {
         pass('dedup-tracker keeps two distinct non-Latin companies apart (#2429)');
       } else {
         fail(`dedup-tracker merged distinct non-Latin companies: ${backendRows.length} Backend Engineer rows`);
@@ -10593,9 +10597,9 @@ try {
 
   // No header row → falls back to legacy map; header/separator/stray rows → null.
   if (resolveColumns(['| 9 | … |']) === LEGACY_COLMAP &&
-      parseTrackerRow(legacy[0], LEGACY_COLMAP) === null &&
-      parseTrackerRow(legacy[1], LEGACY_COLMAP) === null &&
-      parseTrackerRow('not a table row', LEGACY_COLMAP) === null) {
+    parseTrackerRow(legacy[0], LEGACY_COLMAP) === null &&
+    parseTrackerRow(legacy[1], LEGACY_COLMAP) === null &&
+    parseTrackerRow('not a table row', LEGACY_COLMAP) === null) {
     pass('tracker-parse falls back to legacy map and rejects header/separator/non-rows');
   } else {
     fail('tracker-parse fallback / non-row rejection wrong');
@@ -10626,10 +10630,10 @@ try {
 
   const byTracker = findMatches(rows, '3', pdfIndex);
   if (byTracker.length === 1 && byTracker[0].company === 'Acme Labs' &&
-      byTracker[0].trackerNum === 3 && byTracker[0].reportNum === '12' &&
-      byTracker[0].reportPath === 'reports/012-acme-labs-2026-06-01.md' &&
-      byTracker[0].status === 'Applied' &&
-      byTracker[0].pdfPath === 'output/cv-acme-labs.pdf') {
+    byTracker[0].trackerNum === 3 && byTracker[0].reportNum === '12' &&
+    byTracker[0].reportPath === 'reports/012-acme-labs-2026-06-01.md' &&
+    byTracker[0].status === 'Applied' &&
+    byTracker[0].pdfPath === 'output/cv-acme-labs.pdf') {
     pass('find.mjs resolves a tracker# to company, report#, canonical status, and PDF path');
   } else {
     fail(`find.mjs tracker# lookup wrong: ${JSON.stringify(byTracker)}`);
@@ -10879,7 +10883,7 @@ try {
         // which CodeQL rightly flags as a tainted pattern to copy.
         const scCells = scRows.length === 1 ? scRows[0].split('|').map(s => s.trim()) : [];
         if (scRows.length === 1 && scCells[5] === '4.7/5'
-            && scCells[8] === 'https://apply.example/1' && scCells[9] === '2026-01-12') {
+          && scCells[8] === 'https://apply.example/1' && scCells[9] === '2026-01-12') {
           pass('update preserved user-entered Apply Link and Follow-up cells');
         } else {
           fail(`custom-column values lost on update: ${scRows[0]}`);
@@ -11026,8 +11030,8 @@ try {
       }
 
       if (initechRows.length === 1
-          && initechRows[0].includes('Staff Data Engineer, Batch Pipelines')
-          && !initechRows[0].includes('Technical Program Manager')) {
+        && initechRows[0].includes('Staff Data Engineer, Batch Pipelines')
+        && !initechRows[0].includes('Technical Program Manager')) {
         pass('tier-2 update preserves the existing role title (only tier-1 may retitle)');
       } else {
         fail(`tier-2 title preservation broken: ${initechRows.join(' // ')}`);
@@ -11383,7 +11387,7 @@ try {
   const std = resolveScoreStatus('Evaluated', '4.2/5');
   const swp = resolveScoreStatus('4.2/5', 'Evaluated');
   if (std && std.score === '4.2/5' && std.status === 'Evaluated' &&
-      swp && swp.score === '4.2/5' && swp.status === 'Evaluated') {
+    swp && swp.score === '4.2/5' && swp.status === 'Evaluated') {
     pass('resolveScoreStatus maps both column orders to the same result');
   } else {
     fail(`resolveScoreStatus order handling: std=${JSON.stringify(std)} swp=${JSON.stringify(swp)}`);
@@ -11406,7 +11410,7 @@ try {
   const backfilled = resolveScoreStatus('—', 'Rejected');
   const backfilledSwapped = resolveScoreStatus('Rejected', '—');
   if (backfilled && backfilled.score === '—' && backfilled.status === 'Rejected' &&
-      backfilledSwapped && backfilledSwapped.score === '—' && backfilledSwapped.status === 'Rejected') {
+    backfilledSwapped && backfilledSwapped.score === '—' && backfilledSwapped.status === 'Rejected') {
     pass('resolveScoreStatus resolves a backfilled em-dash score against a status in either order (#1799)');
   } else {
     fail(`resolveScoreStatus backfilled em-dash handling: std=${JSON.stringify(backfilled)} swp=${JSON.stringify(backfilledSwapped)}`);
@@ -11502,11 +11506,11 @@ try {
     }
 
     try {
-    const result = run(NODE, ['merge-tracker.mjs'], {
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir },
-    });
-    const merged = readFileSync(tracker, 'utf-8');
-    return { result, merged };
+      const result = run(NODE, ['merge-tracker.mjs'], {
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir },
+      });
+      const merged = readFileSync(tracker, 'utf-8');
+      return { result, merged };
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -11516,7 +11520,7 @@ try {
     'match',
     '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme-2026-01-04.md) | ok |',
     '# report\tpdf\thtml\tformat\tdate\n' +
-      '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+    '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
   );
   if (matching.result !== null && matching.merged.includes('| ✅ | [12](../reports/012-acme-2026-01-04.md) |')) {
     pass('merge-tracker flips a stale ❌ PDF cell when pdf-index.tsv has the row report number');
@@ -11528,7 +11532,7 @@ try {
     'miss',
     '| 8 | 2026-01-05 | Globex | Analyst | 3.8/5 | Evaluated | ❌ | [22](../reports/022-globex-2026-01-05.md) | ok |',
     '# report\tpdf\thtml\tformat\tdate\n' +
-      '023\toutput/cv-other.pdf\toutput/cv-other.html\tletter\t2026-01-05\n',
+    '023\toutput/cv-other.pdf\toutput/cv-other.html\tletter\t2026-01-05\n',
   );
   if (nonMatching.result !== null && nonMatching.merged.includes('| ❌ | [22](../reports/022-globex-2026-01-05.md) |')) {
     pass('merge-tracker leaves PDF ❌ when the report number is absent from pdf-index.tsv');
@@ -11550,7 +11554,7 @@ try {
     'new-addition',
     '',
     '# report\tpdf\thtml\tformat\tdate\n' +
-      '041\toutput/cv-umbrella.pdf\toutput/cv-umbrella.html\tletter\t2026-01-07\n',
+    '041\toutput/cv-umbrella.pdf\toutput/cv-umbrella.html\tletter\t2026-01-07\n',
     [{
       name: '001-umbrella.tsv',
       content: '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](../reports/041-umbrella-2026-01-07.md)\tok\n',
@@ -11800,8 +11804,8 @@ try {
     const afterCollision = readFileSync(reservedTracker, 'utf-8');
     const collisionOutput = `${collisionResult.stdout || ''}\n${collisionResult.stderr || ''}`;
     if (collisionResult.status === 0
-        && /^\| 11 \|[^\n]*\| CollisionCo \|/m.test(afterCollision)
-        && /#5[^\n]*(?:already|collision)[^\n]*#11/i.test(collisionOutput)) {
+      && /^\| 11 \|[^\n]*\| CollisionCo \|/m.test(afterCollision)
+      && /#5[^\n]*(?:already|collision)[^\n]*#11/i.test(collisionOutput)) {
       pass('merge-tracker renumbers only a real collision and warns with both IDs');
     } else {
       fail(`merge-tracker collision fallback was not loud and deterministic\n${collisionOutput}\n${afterCollision}`);
@@ -12580,7 +12584,7 @@ try {
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   }
@@ -12603,7 +12607,7 @@ try {
   // waiting on a public example.com request.
   writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
@@ -12659,7 +12663,7 @@ try {
     fail(`--status prerequisite/score handling wrong: ${statusOnly}`);
   }
 
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) {
   fail(`Batch rate-limit pause test crashed: ${e.message}`);
 }
@@ -12680,7 +12684,7 @@ try {
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   }
@@ -12711,7 +12715,7 @@ try {
   // invokes it) so the reconcile path is actually exercised, matching test 13.
   writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
   }
@@ -12738,7 +12742,7 @@ try {
     fail('superseded recovery record was left in place — it would retry the rollback on every subsequent run');
   }
 
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) {
   fail(`Recovery-record reconcile test crashed: ${e.message}`);
 }
@@ -12759,7 +12763,7 @@ try {
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   }
@@ -12771,7 +12775,7 @@ try {
   // terminal, so no worker invokes it.
   writeFileSync(join(fakeBin, 'claude'), '#!/usr/bin/env bash\nexit 0\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
   }
@@ -12810,7 +12814,7 @@ try {
     fail(`reconcile shifted fields on empty columns: status=${status99} completed_at=${completed99} report=${report99} score=${score99} error=${error99} retries=${retries99}`);
   }
 
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) {
   fail(`Recovery-record field-alignment test crashed: ${e.message}`);
 }
@@ -12835,7 +12839,7 @@ function makeTierFixture(profileYml) {
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   }
@@ -12856,7 +12860,7 @@ function makeTierFixture(profileYml) {
   // runner's optional JD prefetch fail fast and use its fallback path.
   writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
+    try { execFileSync(getBash(), ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch { }
   } else {
     execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
@@ -12875,7 +12879,7 @@ try {
   } else {
     fail(`economy spend_tier did not route to haiku: argv=${JSON.stringify(argv)}, out=${JSON.stringify(out.slice(-240))}`);
   }
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) { fail(`Batch spend_tier routing test crashed (economy): ${e.message}`); }
 
 // premium tier
@@ -12890,7 +12894,7 @@ try {
   } else {
     fail(`premium spend_tier did not route to opus: argv=${JSON.stringify(premiumArgv)}, out=${JSON.stringify(premiumOut.slice(-240))}`);
   }
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) { fail(`Batch spend_tier routing test crashed (premium): ${e.message}`); }
 
 // --model override takes precedence over spend_tier
@@ -12905,7 +12909,7 @@ try {
   } else {
     fail(`--model override did not win: argv=${JSON.stringify(overrideArgv)}, out=${JSON.stringify(overrideOut.slice(-240))}`);
   }
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) { fail(`Batch spend_tier routing test crashed (--model override): ${e.message}`); }
 
 // missing spend_tier key defaults to standard
@@ -12920,7 +12924,7 @@ try {
   } else {
     fail(`missing spend_tier did not default to standard: argv=${JSON.stringify(standardDefaultArgv)}, out=${JSON.stringify(standardDefaultOut.slice(-240))}`);
   }
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) { fail(`Batch spend_tier routing test crashed (missing key): ${e.message}`); }
 
 // invalid spend_tier value falls back to standard with a warning
@@ -12935,7 +12939,7 @@ try {
   } else {
     fail(`invalid spend_tier did not fall back to standard: argv=${JSON.stringify(invalidTierArgv)}, out=${JSON.stringify(invalidTierOut.slice(-240))}`);
   }
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) { fail(`Batch spend_tier routing test crashed (invalid value): ${e.message}`); }
 
 // ── 14b. BATCH PRE-SCREEN DISCARD LOG ────────────────────────────
@@ -12978,7 +12982,7 @@ try {
     }
   }
 
-  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { }
 } catch (e) {
   fail(`Batch pre-screen discard log test crashed: ${e.message}`);
 }
@@ -13083,8 +13087,8 @@ try {
   // (b) greeting omitted → no salutation, no leftover token (backward compatible)
   const withoutGreeting = buildHtml(basePayload);
   if (!withoutGreeting.includes('class="greeting"')
-      && !withoutGreeting.includes('{{GREETING_BLOCK}}')
-      && withoutGreeting.includes('OPENING_MARKER')) {
+    && !withoutGreeting.includes('{{GREETING_BLOCK}}')
+    && withoutGreeting.includes('OPENING_MARKER')) {
     pass('Omitted greeting leaves no salutation and no leftover token (backward compatible)');
   } else {
     fail('Omitted greeting did not render cleanly (stray greeting markup or unreplaced token)');
@@ -13875,9 +13879,9 @@ try {
   const jobCrossRole = { company: 'Company A', title: 'Engineering Manager' };
 
   if (cooldownFilterActive(jobSameRole).skip === true &&
-      cooldownFilterActive(jobSubRole).skip === true &&
-      cooldownFilterActive(jobOtherRole).skip === false &&
-      cooldownFilterActive(jobCrossRole).skip === true) {
+    cooldownFilterActive(jobSubRole).skip === true &&
+    cooldownFilterActive(jobOtherRole).skip === false &&
+    cooldownFilterActive(jobCrossRole).skip === true) {
     pass('cooldownFilter active skips same role, substring role, and cross role bucket matches');
   } else {
     fail(`cooldownFilter active: sameRole=${cooldownFilterActive(jobSameRole).skip}, subRole=${cooldownFilterActive(jobSubRole).skip}, otherRole=${cooldownFilterActive(jobOtherRole).skip}, crossRole=${cooldownFilterActive(jobCrossRole).skip}`);
@@ -14108,7 +14112,7 @@ try {
   // suffix matcher only recognizes ASCII "(" / "[", so without the early fold
   // "Engineer （Remote）" keeps its tag and keys as 'engineer remote'.
   if (normalizeRoleForDedup('Engineer （Remote）') === 'engineer'
-      && normalizeRoleForDedup('Engineer ［Berlin］') === 'engineer') {
+    && normalizeRoleForDedup('Engineer ［Berlin］') === 'engineer') {
     pass('normalizeRoleForDedup strips full-width bracketed location/remote tags (NFKC before suffix loop)');
   } else {
     fail(`full-width bracketed suffix not stripped: ${JSON.stringify(normalizeRoleForDedup('Engineer （Remote）'))}`);
@@ -14173,8 +14177,8 @@ try {
 
   // normalizeTextKey's separator arg must not disturb its existing callers.
   if (normalizeTextKey('株式会社アカネ') === '株式会社アカネ'
-      && normalizeTextKey('Acme, Inc.') === 'acmeinc'
-      && normalizeTextKey('Acme, Inc.', ' ') === 'acme inc') {
+    && normalizeTextKey('Acme, Inc.') === 'acmeinc'
+    && normalizeTextKey('Acme, Inc.', ' ') === 'acme inc') {
     pass('normalizeTextKey default stays solid-key; separator arg only affects opt-in callers');
   } else {
     fail('normalizeTextKey separator arg changed default behavior');
@@ -14204,7 +14208,7 @@ try {
   const vm = (m, dirName = 'x') => validateManifest(m, join(__manifestTmp, dirName), dirName);
 
   // Manifest validation (warnings are expected here — suppress to keep output clean).
-  console.warn = () => {};
+  console.warn = () => { };
   if (vm({ ...base, humanInTheLoop: false }) === null) pass('manifest with humanInTheLoop:false is rejected');
   else fail('humanInTheLoop:false should be rejected');
   if (vm({ ...base, hooks: ['apply'] }) === null) pass('manifest with an apply/submit hook is rejected (no auto-submit)');
@@ -14247,7 +14251,7 @@ try {
 
   // (a) BYTE-IDENTICAL no-op when config/plugins.yml is absent — and NO env mutation.
   const beforeGemini = process.env.GEMINI_API_KEY;
-  const map = new Map([['greenhouse', { id: 'greenhouse', fetch() {} }]]);
+  const map = new Map([['greenhouse', { id: 'greenhouse', fetch() { } }]]);
   await mergeProviderPlugins(map, { root: __pluginTmp });
   if (map.size === 1 && map.get('greenhouse')) pass('mergeProviderPlugins is a no-op when config/plugins.yml is absent');
   else fail(`merge should be a no-op without plugins.yml (size=${map.size})`);
@@ -14262,7 +14266,7 @@ try {
   mkdirSync(join(__pluginTmp, 'config'), { recursive: true });
   writeFileSync(join(__pluginTmp, 'config', 'plugins.yml'), 'plugins:\n  demo: { enabled: true }\n');
 
-  console.warn = () => {};
+  console.warn = () => { };
   const mapStub = new Map();
   await mergeProviderPlugins(mapStub, { root: __pluginTmp });
   console.warn = __origWarn;
@@ -14275,8 +14279,8 @@ try {
   else fail('inactive provider plugin should throw an actionable error');
 
   // core-wins: a same-id core provider must NOT be overwritten by a plugin.
-  const mapCore = new Map([['demo', { id: 'demo', __core: true, fetch() {} }]]);
-  console.warn = () => {};
+  const mapCore = new Map([['demo', { id: 'demo', __core: true, fetch() { } }]]);
+  console.warn = () => { };
   await mergeProviderPlugins(mapCore, { root: __pluginTmp });
   console.warn = __origWarn;
   if (mapCore.get('demo').__core === true) pass('a plugin can never shadow a same-id core provider (core wins id collision)');
@@ -14344,7 +14348,7 @@ try {
   const net = await import(pathToFileURL(join(ROOT, 'plugins/_net.mjs')).href);
   if (net.isBlockedIp('169.254.169.254') && net.isBlockedIp('10.0.0.1') && net.isBlockedIp('127.0.0.1') && net.isBlockedIp('::1') && !net.isBlockedIp('8.8.8.8')) pass('isBlockedIp rejects metadata/private/loopback, allows public');
   else fail('isBlockedIp range checks are wrong');
-  console.warn = () => {};
+  console.warn = () => { };
   if (vm({ ...base, allowsLocalhost: true, allowedHosts: [] }) === null) pass('allowsLocalhost requires a non-empty allowedHosts');
   else fail('allowsLocalhost + empty allowedHosts should be rejected');
   if (vm({ ...base, allowedHosts: ['10.0.0.1'] }) === null) pass('an IP-literal allowedHost is rejected (use hostnames)');
@@ -14374,7 +14378,7 @@ try {
   if (lockMod.diffPlugin({ ...lpMan, allowedHosts: ['api.lp.test', 'extra.test'] }, lockMod.readLock(lockTmp).plugins.lp).status === 'surface-widened') pass('lock: a widened allowedHosts = surface-widened (re-consent)');
   else fail('lock: widened surface should require re-consent');
 
-  console.warn = () => {};
+  console.warn = () => { };
   const gateLocal = eng.lockGate(lpMan, lockTmp); // local + drift-nobump → block (the rug-pull defense)
   console.warn = __origWarn;
   if (gateLocal.load === false) pass('lockGate BLOCKS a local plugin whose files changed without a version bump (rug-pull)');
@@ -14489,7 +14493,7 @@ try {
   // (b) broken plugin (malformed manifest) is skipped, not crashed.
   mkdirSync(join(__pluginTmp, 'plugins.local', 'broken'), { recursive: true });
   writeFileSync(join(__pluginTmp, 'plugins.local', 'broken', 'manifest.json'), '{ not valid json');
-  console.warn = () => {};
+  console.warn = () => { };
   const discovered = discoverPlugins(pluginRoots(__pluginTmp));
   console.warn = __origWarn;
   if (Array.isArray(discovered) && !discovered.find(p => p.id === 'broken')) pass('a plugin with a malformed manifest.json is skipped, not crashed');
@@ -14564,8 +14568,8 @@ try {
   fail(`plugin engine tests crashed: ${e.message}`);
 } finally {
   console.warn = __origWarn;
-  if (__pluginTmp) { try { rmSync(__pluginTmp, { recursive: true, force: true }); } catch {} }
-  if (__manifestTmp) { try { rmSync(__manifestTmp, { recursive: true, force: true }); } catch {} }
+  if (__pluginTmp) { try { rmSync(__pluginTmp, { recursive: true, force: true }); } catch { } }
+  if (__manifestTmp) { try { rmSync(__manifestTmp, { recursive: true, force: true }); } catch { } }
 }
 
 // ── 52. INTERVIEW SESSION PRODUCER (#956 / #1242 contract) ──────
@@ -16096,16 +16100,34 @@ try {
   appendScanRunSummary({ ...counters, timestamp: '2026-07-04T09:00:00Z' }, runsFile);
   const runRows = readFileSync(runsFile, 'utf-8').trim().split('\n');
   if (runRows[0] === SCAN_RUNS_HEADER.trim() && runRows.length === 3
-      && runRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')
-      // filtered_blacklist + filtered_visa + filtered_posted_date + filtered_country_eligibility
-      // land in the four trailing columns (last defaults to 0 — not supplied above).
-      && runRows[1].endsWith('\t4\t7\t2\t0')
-      && runRows[2].startsWith('2026-07-04T09:00:00Z\t')) {
+    && runRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')
+    // filtered_blacklist + filtered_visa + filtered_posted_date + filtered_country_eligibility
+    // land in the four trailing columns (last defaults to 0 — not supplied above).
+    && runRows[1].endsWith('\t4\t7\t2\t0')
+    && runRows[2].startsWith('2026-07-04T09:00:00Z\t')) {
     pass('appendScanRunSummary writes the header once, appends one row per run');
   } else {
     fail(`appendScanRunSummary wrong file contents: ${JSON.stringify(runRows)}`);
   }
   rmSync(runsTmp, { recursive: true, force: true });
+
+
+  // Scan-run persistence, missing parent directory: filePath nested inside a
+  // directory that does not exist yet, proving appendScanRunSummary creates its
+  // own parent rather than relying on a folder some earlier step happened to make.
+  {
+    const nestedTmp = mkdtempSync(join(tmpdir(), 'scanruns-nested-'));
+    const nestedFile = join(nestedTmp, 'nested', 'deep', 'scan-runs.tsv');
+    appendScanRunSummary(counters, nestedFile);
+    const nestedRows = readFileSync(nestedFile, 'utf-8').trim().split('\n');
+    if (nestedRows[0] === SCAN_RUNS_HEADER.trim() && nestedRows.length === 2
+      && nestedRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')) {
+      pass('appendScanRunSummary creates a missing nested parent directory and writes header + row');
+    } else {
+      fail(`appendScanRunSummary with missing nested parent: wrong file contents: ${JSON.stringify(nestedRows)}`);
+    }
+    rmSync(nestedTmp, { recursive: true, force: true });
+  }
 
   // computeRunStats: header-name parsing, torn rows skipped, failed runs
   // excluded from averages.
@@ -16122,7 +16144,7 @@ try {
   // found sum (completed only) = 240 → filterRemovalPct = 148/240 = 61.7
   // avgFound = 240/2 = 120; avgNew = (6+10)/2 = 8; failed run excluded from averages
   if (r.totalRuns === 3 && r.failedRuns === 1 && r.lastRunDate === '2026-07-03'
-      && r.avgFoundPerRun === 120 && r.avgNewPerRun === 8 && r.filterRemovalPct === 61.7) {
+    && r.avgFoundPerRun === 120 && r.avgNewPerRun === 8 && r.filterRemovalPct === 61.7) {
     pass('computeRunStats aggregates scan-runs.tsv by header name, skips torn rows (CRLF input)');
   } else {
     fail(`computeRunStats wrong output: ${JSON.stringify(r)}`);
@@ -16143,7 +16165,7 @@ try {
     + '| 2 | 23 | 2026-08-03 | BigCo | Staff Engineer | Email reply | B. Hiring | feedback ask |\n';
   const goodSchema = stats.checkFollowupsSchema(goodFups);
   if (goodSchema.present && goodSchema.sawSeparator && goodSchema.dataRows === 2
-      && goodSchema.parsed === 2 && goodSchema.unparsedLines.length === 0) {
+    && goodSchema.parsed === 2 && goodSchema.unparsedLines.length === 0) {
     pass('checkFollowupsSchema accepts the documented column order');
   } else {
     fail(`checkFollowupsSchema wrong output for a valid table: ${JSON.stringify(goodSchema)}`);
@@ -16157,7 +16179,7 @@ try {
   const wrongSchema = stats.checkFollowupsSchema(wrongOrder);
   const wrongStats = stats.computeFollowupStats(wrongOrder, new Map([[45, 'Applied']]));
   if (wrongSchema.dataRows === 2 && wrongSchema.parsed === 0
-      && wrongSchema.unparsedLines.length === 2 && wrongStats.totalFollowups === 0) {
+    && wrongSchema.unparsedLines.length === 2 && wrongStats.totalFollowups === 0) {
     pass('checkFollowupsSchema flags a wrong column order that computeFollowupStats silently reads as zero');
   } else {
     fail(`checkFollowupsSchema missed a wrong column order: ${JSON.stringify(wrongSchema)} / stats ${JSON.stringify(wrongStats)}`);
@@ -16177,9 +16199,9 @@ try {
   const noDelimiter = stats.checkFollowupsSchema('| num | appNum | date |\n| 1 | 45 | 2026-08-03 |\n');
   const pinsOnly = stats.checkFollowupsSchema('# Follow-Ups Tracker\n\n- next #56 2026-08-24 (set 2026-08-17)\n');
   if (!absent.present && absent.dataRows === 0
-      && headerOnly.present && headerOnly.sawSeparator && headerOnly.dataRows === 0
-      && noDelimiter.present && !noDelimiter.sawSeparator && noDelimiter.pipeLines === 2 && noDelimiter.dataRows === 0
-      && pinsOnly.present && pinsOnly.pipeLines === 0) {
+    && headerOnly.present && headerOnly.sawSeparator && headerOnly.dataRows === 0
+    && noDelimiter.present && !noDelimiter.sawSeparator && noDelimiter.pipeLines === 2 && noDelimiter.dataRows === 0
+    && pinsOnly.present && pinsOnly.pipeLines === 0) {
     pass('checkFollowupsSchema separates absent / header-only / missing-delimiter / pins-only files');
   } else {
     fail(`checkFollowupsSchema conflated empty-ish states: ${JSON.stringify({ absent, headerOnly, noDelimiter, pinsOnly })}`);

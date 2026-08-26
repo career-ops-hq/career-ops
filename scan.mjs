@@ -84,14 +84,6 @@ const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
 const APPLICATIONS_PATH = 'data/applications.md';
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 
-// Ensure required directories exist (fresh setup). Stays literal: the paths that
-// are NOT overridable still live here. The two that are need no equivalent -
-// scan-history creates its own parent before writing, and the pipeline's parent
-// is created by acquirePipelineLock, which runs before the first pipeline write.
-// tests/scan-output-paths.test.mjs pins that, so an override into a directory
-// that does not exist yet keeps working if either of those changes.
-mkdirSync('data', { recursive: true });
-
 const CONCURRENCY = 10;
 
 // Provider loading + routing live in providers/_registry.mjs so the portal
@@ -2028,6 +2020,7 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
   // The header is written only on first creation, so a release that appends or inserts a counter
   // leaves existing files with a header that no longer describes the rows below it. Nothing
   // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
@@ -2882,11 +2875,11 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
-  
+
   const STREAK_THRESHOLD = config.portal_health_threshold || 3;
   const nowStr = new Date().toISOString();
   const healthRecords = [];
-  
+
   // Record each errored target under its real classifyFetchError kind. Before
   // this, only slug_gone/network were recorded and auth (401/403), server
   // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
@@ -2911,7 +2904,7 @@ async function main() {
   const persistentlyDead = [];
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
-  
+
   // All error kinds can reach the 🚨 persistent list (auth/server/unknown
   // included — a WAF that 403s the scanner every run is coverage decay too).
   // Below threshold, only slug_gone/network keep their dedicated warnings;
