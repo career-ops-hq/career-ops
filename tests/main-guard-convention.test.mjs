@@ -177,10 +177,18 @@ const ENTRY_REF = /process\.argv\[1\]|process\.argv\.at\(\s*1\s*\)/;
 // see a multiline specifier list without running past the end of the statement.
 // A same-line-only `[^\n]*?` — the shape test-all.mjs:6255 and the first draft
 // of this test both used — misses both cases.
+//
+// GAP is whitespace and/or block comments: a comment is legal wherever
+// whitespace is, so `import /* note */ './x.mjs';` and `import x from/* c
+// */'./x.mjs';` are both real static imports that a bare `\s*` walks straight
+// past. (The `from` form's leading gap needs no help — `[^;'"]` already
+// swallows it.)
+const GAP = String.raw`(?:\s|\/\*[\s\S]*?\*\/)*`;
+
 const STATIC_RELATIVE_IMPORT = new RegExp(
   [
-    String.raw`^[ \t]*import\s*['"]\.{1,2}\/`,
-    String.raw`^[ \t]*(?:import|export)\b(?:[^;'"]|'[^']*'|"[^"]*")*?\bfrom\s*['"]\.{1,2}\/`,
+    String.raw`^[ \t]*import` + GAP + String.raw`['"]\.{1,2}\/`,
+    String.raw`^[ \t]*(?:import|export)\b(?:[^;'"]|'[^']*'|"[^"]*")*?\bfrom` + GAP + String.raw`['"]\.{1,2}\/`,
   ].join('|'),
   'm',
 );
@@ -293,6 +301,9 @@ test('the #1706 static-import detector sees every spelling', () => {
     "export { a } from './helper.mjs';",
     "export * from '../helper.mjs';",
     "  import './helper.mjs';",                     // indented
+    "import /* note */ './helper.mjs';",            // comment before specifier
+    "import x from/* c */'./helper.mjs';",          // comment after `from`
+    "import /* c */ x from './helper.mjs';",
   ];
   for (const form of caught) {
     assert.ok(STATIC_RELATIVE_IMPORT.test(form), `missed a static relative import:\n${form}`);
