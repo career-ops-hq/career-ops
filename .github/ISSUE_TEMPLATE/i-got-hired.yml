@@ -1,6 +1,7 @@
 name: "I Got Hired!"
 description: Share your success story — you landed a job using career-ops
 labels: ["hired"]
+title: "I got hired 🎉"
 body:
   - type: markdown
     attributes:
