@@ -191,44 +191,86 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
     //   per-line    misses a wrapped call, where the offending argument sits on
     //               a different line from the callee.
     //
-    // Paren counting here ignores parens inside strings and comments. That is
-    // acceptable for this narrow job — matching the argument list of one known
-    // function in four known files — and a miscount can only widen the slice,
-    // never narrow it, so it cannot hide an offender.
+    // The scanner skips strings and comments before counting parens/semicolons,
+    // so fixture text cannot terminate the argument or assignment slice early.
     const lineOf = (idx) => src.slice(0, idx).split('\n').length;
+    const isIdent = (c) => /[$_A-Za-z0-9]/.test(c ?? '');
+    const skipQuoted = (i, quote) => {
+      for (i++; i < src.length; i++) {
+        if (src[i] === '\\') { i++; continue; }
+        if (src[i] === quote) return i;
+      }
+      return src.length - 1;
+    };
+    const skipTemplate = (i) => {
+      for (i++; i < src.length; i++) {
+        if (src[i] === '\\') { i++; continue; }
+        if (src[i] === '`') return i;
+      }
+      return src.length - 1;
+    };
+    const skipLineComment = (i) => {
+      const end = src.indexOf('\n', i + 2);
+      return end === -1 ? src.length - 1 : end;
+    };
+    const skipBlockComment = (i) => {
+      const end = src.indexOf('*/', i + 2);
+      return end === -1 ? src.length - 1 : end + 1;
+    };
+    const nextCodeSemi = (start) => {
+      for (let i = start; i < src.length; i++) {
+        if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
+        else if (src[i] === '`') i = skipTemplate(i);
+        else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
+        else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
+        else if (src[i] === ';') return i;
+      }
+      return src.length;
+    };
+    const matchingParen = (open) => {
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
+        else if (src[i] === '`') i = skipTemplate(i);
+        else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
+        else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
+        else if (src[i] === '(') depth++;
+        else if (src[i] === ')' && --depth === 0) return i;
+      }
+      return src.length;
+    };
+    const localDateConsts = new Set();
+
+    // First collect any local const aliases known to carry localToday(). A bare
+    // date argument is allowed only when it is the literal localToday() call or
+    // one of these aliases; unrelated helpers must not silently pass.
+    const constAssign = /(?:^|\n)[^\S\n]*const[^\S\n]+([$_A-Za-z][$_A-Za-z0-9]*)[^\S\n]*=/g;
+    for (let m; (m = constAssign.exec(src)); ) {
+      const start = m.index + m[0].length;
+      const expr = src.slice(start, nextCodeSemi(start));
+      if (/\blocalToday\s*\(/.test(expr)) localDateConsts.add(m[1]);
+    }
 
     for (let from = 0; ; ) {
       const at = src.indexOf(CALL, from);
       if (at === -1) break;
       from = at + 1;
+      if (isIdent(src[at - 1])) continue;
       if (/export\s+async\s+function\s+$/.test(src.slice(Math.max(0, at - 40), at))) continue;
 
       const open = at + CALL.length - 1;
-      let depth = 0;
-      let end = src.length;
-      for (let i = open; i < src.length; i++) {
-        if (src[i] === '(') depth++;
-        else if (src[i] === ')' && --depth === 0) { end = i; break; }
-      }
-      const args = src.slice(open + 1, end);
+      const args = src.slice(open + 1, matchingParen(open));
       if (/toISOString/.test(args)) {
         offenders.push(`${file}:${lineOf(at)} — appendToScanHistory(${args.replace(/\s+/g, ' ').trim()})`);
       }
-    }
-
-    // A call site passing a bare `date` identifier is only correct if that
-    // identifier came from localToday(). Catch the assignment too, or moving the
-    // UTC expression one line up defeats the check above. Read to the
-    // terminating `;` so a wrapped assignment is covered as well.
-    const assign = /(?:^|\n)[^\S\n]*const[^\S\n]+date[^\S\n]*=/g;
-    for (let m; (m = assign.exec(src)); ) {
-      const start = m.index + m[0].length;
-      const semi = src.indexOf(';', start);
-      const expr = src.slice(start, semi === -1 ? src.length : semi);
-      if (/toISOString/.test(expr)) {
-        offenders.push(`${file}:${lineOf(m.index + 1)} — const date =${expr.replace(/\s+/g, ' ')};`);
+      const dateArg = args.split(',').at(1)?.trim();
+      const isBareLocalAlias = /^[A-Za-z_$][\w$]*$/.test(dateArg ?? '') && localDateConsts.has(dateArg);
+      const isDirectLocalToday = /^localToday\s*\(/.test(dateArg ?? '');
+      if (dateArg && !isBareLocalAlias && !isDirectLocalToday) {
+        offenders.push(`${file}:${lineOf(at)} — appendToScanHistory date argument ${dateArg} is not localToday() or an alias assigned from localToday()`);
       }
     }
+
   }
 
   assert.deepEqual(
