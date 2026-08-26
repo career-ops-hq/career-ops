@@ -51,8 +51,12 @@ func TestAppModelRoutesCommandCenterMessages(t *testing.T) {
 func TestNewAppModelInitializesStatsOnPopulatedRepo(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := filepath.Join(tempDir, "data")
+	reportsDir := filepath.Join(tempDir, "reports")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+		t.Fatalf("mkdir data: %v", err)
+	}
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
 	}
 	tracker := `# Applications Tracker
 
@@ -63,6 +67,14 @@ func TestNewAppModelInitializesStatsOnPopulatedRepo(t *testing.T) {
 `
 	if err := os.WriteFile(filepath.Join(dataDir, "applications.md"), []byte(tracker), 0o644); err != nil {
 		t.Fatalf("write tracker: %v", err)
+	}
+	report := `# Acme Report
+
+**Archetype:** Platform Infrastructure
+**TL;DR:** Strong systems role.
+`
+	if err := os.WriteFile(filepath.Join(reportsDir, "001-acme-2026-06-03.md"), []byte(report), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
 	}
 
 	m := newAppModel(tempDir, 100, 36)
@@ -75,5 +87,15 @@ func TestNewAppModelInitializesStatsOnPopulatedRepo(t *testing.T) {
 	}
 	if m.statsMetrics.QualityBarPct <= 0 {
 		t.Fatalf("expected non-zero quality bar with a 4.0/5 row, got %v", m.statsMetrics.QualityBarPct)
+	}
+	foundReportArchetype := false
+	for _, archetype := range m.statsMetrics.Archetypes {
+		if archetype.Label == "AI Platform & LLMOps" && archetype.Count == 1 {
+			foundReportArchetype = true
+			break
+		}
+	}
+	if !foundReportArchetype {
+		t.Fatalf("expected startup stats to include report-derived AI Platform & LLMOps archetype, got %#v", m.statsMetrics.Archetypes)
 	}
 }

@@ -114,7 +114,7 @@ func newAppModel(careerOpsPath string, width, height int) appModel {
 	dashboardContext := data.LoadDashboardContext(careerOpsPath, apps)
 	t := theme.NewTheme("auto")
 	pm := screens.NewPipelineModel(t, apps, metrics, careerOpsPath, width, height)
-	enrichPipelineReports(&pm, apps, careerOpsPath)
+	enrichArchetypes(careerOpsPath, apps, &pm)
 
 	return appModel{
 		command:          screens.NewCommandModel(t, dashboardContext, width, height),
