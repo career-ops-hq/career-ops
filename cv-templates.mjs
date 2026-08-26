@@ -8,6 +8,7 @@ import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
@@ -277,7 +278,7 @@ export function resolveTemplate(kind, name, opts = {}) {
 }
 
 // ---- CLI ----
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
