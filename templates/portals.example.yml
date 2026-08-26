@@ -1164,6 +1164,12 @@ search_queries:
 #   searchLocation: Ho Chi Minh           # optional — Ho Chi Minh / Hanoi / Da Nang
 #   enabled: true                         # 20 postings/page; 750ms pacing between pages
 #
+# - name: CareerViet                      # broad-coverage VN board, robots.txt allows ClaudeBot/GPTBot
+#   provider: careerviet                  # server-rendered listing; no auth, no JS
+#   searchKeywords: backend               # optional — narrows via the URL slug
+#   searchLocation: Ho Chi Minh           # optional — only Ho Chi Minh's city code is verified live
+#   enabled: true                         # ~50 postings/page; 750ms pacing between pages
+#
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
 #   enabled: true
