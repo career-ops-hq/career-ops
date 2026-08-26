@@ -223,14 +223,9 @@ const PENDING = new Set([
   'application-artifacts.mjs',
   'archive-posting.mjs',
   'assessment-log.mjs',
-  'batch-evaluate-gemini.mjs',
-  'batch/aggregate-tokens.mjs',
-  'browser-extract.mjs',
   'check-table-freshness.mjs',
-  'company-funded.mjs',
   'contacts.mjs',
   'cv-templates.mjs',
-  'discover-ats.mjs',
   'extract-latex-content.mjs',
   'find.mjs',
   'fix-slugs.mjs',
@@ -241,15 +236,11 @@ const PENDING = new Set([
   'img-to-pdf.mjs',
   'intake.mjs',
   'normalize-statuses.mjs',
-  'openrouter-runner.mjs',
   'paste-reply.mjs',
   'patch-latex-content.mjs',
   'plugin-audit.mjs',
   'plugins.mjs',
   'reserve-report-num.mjs',
-  'scan-ats-full.mjs',
-  'scan-hn.mjs',
-  'scan.mjs',
   'seed-fixture.mjs',
   'tracker.mjs',
   'update-system.mjs',
@@ -257,8 +248,7 @@ const PENDING = new Set([
   'validate-plugin-registry.mjs',
   'validate-untrusted-content-coverage.mjs',
   'verify-cv-facts.mjs',
-  'verify-portals.mjs',
-]);
+  ]);
 
 function entryRefViolations(src) {
   const hits = [];

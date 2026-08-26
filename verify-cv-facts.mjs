@@ -307,6 +307,121 @@ export function metricClaims(text) {
   return claims;
 }
 
+// A number counting a word, in ANY script — the language-agnostic SHAPE of the
+// claims COUNT_CLAIM_RE recognises only when the noun happens to be English.
+// Used solely to answer "were there count claims this gate could not read?",
+// never to build a claim: it has no lexicon, so it cannot say what was counted.
+const GENERIC_COUNT_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*)\s*\+?\s*(?:[\p{L}][\p{L}\p{M}-]*[\s]+){0,${MODIFIER_WINDOW}}([\p{L}][\p{L}\p{M}]{2,})`,
+  'giu',
+);
+// A year is not a count. "Led the 2024 migration" is the shape above and none
+// of its meaning, and every CV has several.
+const YEAR_LIKE = /^(?:19|20)\d{2}$/;
+
+/**
+ * Count-shaped spans in `text`, whatever language it is written in.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function countShapedSpans(text) {
+  const clean = stripMarkup(String(text ?? ''));
+
+  // Ranges the language-neutral patterns already own. "$120k and closed a
+  // $90,000 deal" is currency followed by prose, and reads as two counts to a
+  // detector that only knows "digits, then a word" — but those amounts ARE
+  // checked, in every language, so reporting them as unread is a false alarm.
+  // Derived from SIMPLE_CLAIM_PATTERNS rather than re-guessed, so the two
+  // cannot drift.
+  const covered = [];
+  for (const pattern of SIMPLE_CLAIM_PATTERNS) {
+    for (const m of clean.matchAll(pattern)) covered.push([m.index, m.index + m[0].length]);
+  }
+  const alreadyChecked = (i) => covered.some(([from, to]) => i >= from && i < to);
+
+  const out = [];
+  for (const m of clean.matchAll(GENERIC_COUNT_RE)) {
+    if (YEAR_LIKE.test(m[1].replace(/[,.]/g, ''))) continue;
+    // The digits are what a simple pattern would have claimed, so test their
+    // position, not the span's — the span starts at the number either way, but
+    // a currency match starts one character earlier, at the symbol.
+    if (alreadyChecked(m.index) || alreadyChecked(m.index + m[0].indexOf(m[1]))) continue;
+    out.push(m[0].trim());
+  }
+  return out;
+}
+
+/**
+ * Whether this document contains count claims the extractor could not read.
+ *
+ * METRIC_NOUNS is an English word list, and COUNT_CLAIM_RE's modifier window is
+ * `[A-Za-z]`. Percentages, currency and multipliers are language-neutral and
+ * still checked everywhere — but a COUNT is checked only in English, and this
+ * file's own METRIC_NOUNS comment names counts as the class that gets inflated:
+ * "Managed 45 staff against a source saying 20 passed the gate silently, which
+ * is the exact fabrication class this script exists to catch."
+ *
+ * For a CV written in one of the market languages the project ships modes for,
+ * that sentence is true of EVERY count, not only the ones outside the list:
+ *
+ *   ES  "Gestioné 45 empleados en 3 instalaciones."  -> 0 count claims, pass
+ *   DE  "Leitete 45 Mitarbeiter an 3 Standorten."    -> 0 count claims, pass
+ *   JA  "3拠点で45名のスタッフを管理。"                   -> 0 count claims, pass
+ *
+ * AGENTS.md makes non-English output a first-class case (`language.output`
+ * governs "reports, tracker notes, PDFs, cover letters ... any user-visible
+ * prose"), so this is not an edge.
+ *
+ * Reporting it rather than blocking is the same choice jd-skill-gap.mjs's
+ * diagnoseExtraction() and story-provenance-check.mjs's diagnose() make, and
+ * for the reason story-provenance states outright: so "an empty/near-empty
+ * result isn't misread as 'scanned and clean'". Blocking instead would fail
+ * every non-English document, trading a silent gap for a wall.
+ *
+ * DELIBERATELY CONSERVATIVE. It fires only when the document has two or more
+ * count-shaped spans and the extractor produced NO count claim at all — a
+ * document where the lexicon reached something is assumed to be reaching it in
+ * the language it was written in. Under-reporting is the right direction for a
+ * signal added to a gate every generated document already runs.
+ *
+ * TWO KNOWN BLIND SPOTS, stated rather than implied:
+ *
+ *   - Coincidental coverage. French "3 sites" matches the English noun, so one
+ *     recognised count silences the warning for a French CV whose other counts
+ *     are invisible.
+ *   - CJK. This detector needs whitespace: it locates a count by a digit run
+ *     that is not preceded by a letter and is followed by one. Japanese and
+ *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
+ *     so the second number is preceded by a letter and is not seen at all.
+ *     Relaxing the lookbehind to fix that would match digits inside Latin
+ *     identifiers, so it needs script-aware segmentation rather than a looser
+ *     regex — separate work, and the reason this is a partial answer.
+ *
+ * So this closes the silent pass for space-delimited languages (de, es, tr, pt,
+ * it, pl, ru, ...). A ja/zh CV can still reach 'pass' unchecked, which is why
+ * the real answer is a lexicon those languages are in, not a better detector.
+ *
+ * @param {string} targetText
+ * @returns {{reason: string, message: string, spans: string[]}|null}
+ */
+export function diagnoseCoverage(targetText) {
+  const spans = countShapedSpans(targetText);
+  if (spans.length < 2) return null;
+  COUNT_CLAIM_RE.lastIndex = 0;
+  const recognized = [...stripMarkup(String(targetText ?? '')).matchAll(COUNT_CLAIM_RE)];
+  if (recognized.length > 0) return null;
+  return {
+    reason: 'no-count-claims-recognized',
+    message:
+      `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
+      'list is English-only — so no count in this document was checked against your sources. ' +
+      'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
+      'them to allow_metrics in config/cv-facts.json once confirmed.',
+    spans,
+  };
+}
+
 /**
  * Build the allow-list a metric claim is checked against.
  *
@@ -396,12 +511,18 @@ export function verifyFacts(targetText, {
   const warnings = config.warn_phrases
       .filter(Boolean)
       .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+  // Never downgrades a block and never creates one: a document that fails on
+  // real evidence still fails on that, and a coverage gap only turns a would-be
+  // 'pass' into 'warn' so the caller is told the gate could not read it.
+  const coverage = diagnoseCoverage(targetText);
+  const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
-    verdict: invented.length || unsupportedFacts.length || forbidden.length ? 'block' : warnings.length ? 'warn' : 'pass',
+    verdict: blocked ? 'block' : (warnings.length || coverage) ? 'warn' : 'pass',
     invented,
     unsupportedFacts,
     forbidden,
     warnings,
+    coverage,
   };
 }
 
@@ -735,6 +856,10 @@ export function runCli(args = process.argv.slice(2)) {
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
       for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
+      if (result.coverage) {
+        console.error(`  - not checked: ${result.coverage.message}`);
+        for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
+      }
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -754,7 +879,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);

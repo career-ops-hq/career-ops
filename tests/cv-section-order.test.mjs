@@ -33,6 +33,7 @@ const RENDERED_TITLES = {
   SECTION_EDUCATION: 'Education',
   SECTION_CERTIFICATIONS: 'Certifications',
   SECTION_AWARDS: 'Awards & Honors',
+  SECTION_INTERESTS: 'Interests',
   SECTION_SKILLS: 'Skills',
 };
 
@@ -245,14 +246,14 @@ try {
   // Asserted against a written-out vocabulary, not against CV_SECTION_KEYS:
   // checking the message with the same list the message is built from would
   // pass however many sections the implementation actually knows about.
-  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   if (typo.warnings.some(w => EXPECTED_KEYS.every(k => w.includes(k)))) {
-    pass('the unrecognized-name warning lists all eight recognized section keys');
+    pass('the unrecognized-name warning lists all nine recognized section keys');
   } else {
     fail(`the warning should list the recognized keys: ${JSON.stringify(typo.warnings)}`);
   }
   if (EXPECTED_KEYS.every(k => CV_SECTION_KEYS.includes(k)) && CV_SECTION_KEYS.length === EXPECTED_KEYS.length) {
-    pass('CV_SECTION_KEYS is exactly the eight canonical sections the alias table produces');
+    pass('CV_SECTION_KEYS is exactly the nine canonical sections the alias table produces');
   } else {
     fail(`CV_SECTION_KEYS => ${JSON.stringify(CV_SECTION_KEYS)}`);
   }
@@ -655,10 +656,10 @@ try {
   // pass with the other six unreachable.
   const rendered = renderTemplate('cv-template.html');
   const shippedOrder = renderedTitles(rendered);
-  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   const reversed = renderedTitles(reorderCvSections(rendered, [...allKeys].reverse()));
-  if (shippedOrder.length === 8 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
-    pass('every one of the shipped template\'s eight sections is movable (full reversal)');
+  if (shippedOrder.length === 9 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
+    pass('every one of the shipped template\'s nine sections is movable (full reversal)');
   } else {
     fail(`shipped template reversal: before=${JSON.stringify(shippedOrder)} after=${JSON.stringify(reversed)}`);
   }

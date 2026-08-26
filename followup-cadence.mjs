@@ -556,7 +556,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.

@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { parseArgs } from 'util';
 import { fileURLToPath } from 'url';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const DEFAULT_OUTPUT_ROOT = resolve('output');
 const DECISIONS = new Set(['reuse', 'reuse-with-edits', 'regenerate']);
@@ -101,11 +102,37 @@ export function writeReuseDecision(paths, {
   return record;
 }
 
-function usage() {
-  return 'Usage: node application-artifacts.mjs --report N --company NAME --role ROLE [--version N] [--root output] [--init]';
-}
+// --help was swallowed by parseArgs's strict mode and reported as an unknown
+// option (#2774), so the built-in help flag looked like a typo. Handled via
+// lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
+// flags before --help so `--help --bogus` still errors.
+//
+// requireOperand is opted in because this script has no value validation of
+// its own to say anything better: without it `--report --help` consumed the
+// next token, printed usage and exited 0 (the #2961 class), so a malformed
+// flag went unreported.
+const KNOWN_FLAGS = ['--report', '--company', '--role', '--version', '--root', '--init', '--help', '-h'];
+
+// Every flag except --init takes its value as the next argv token.
+const VALUE_FLAGS = ['--report', '--company', '--role', '--version', '--root'];
+
+const USAGE = `Usage:
+  node application-artifacts.mjs --report N --company NAME --role ROLE [--version N] [--root DIR] [--init]
+
+Prints the resolved artifact paths for one application as JSON. The directory
+key is stable for a report/company/role tuple, so the JD, source CV, tailored
+CV, PDF and reuse decision stay together.
+
+  --report N       report number the bundle belongs to (required)
+  --company NAME   company name (required)
+  --role ROLE      role title (required)
+  --version N      tailored-CV version (default: 1)
+  --root DIR       output root (default: output)
+  --init           create the directories as well as printing the paths
+  --help, -h       show this message`;
 
 async function main() {
+  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   const { values } = parseArgs({
     options: {
       report: { type: 'string' },
@@ -118,7 +145,7 @@ async function main() {
     strict: true,
   });
   if (!values.report || !values.company || !values.role) {
-    console.error(usage());
+    console.error(USAGE);
     process.exitCode = 1;
     return;
   }
