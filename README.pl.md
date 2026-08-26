@@ -63,7 +63,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), znany też jako **careerops**) zamienia dowolne AI CLI w pełne centrum dowodzenia poszukiwaniem pracy. Zamiast ręcznego śledzenia aplikacji w arkuszu kalkulacyjnym, dostajesz pipeline zasilany AI, który:
 
-- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–F (pięć wymiarów składających się na wynik 1.0–5.0)
+- **Ocenia oferty** przy pomocy strukturyzowanego systemu A–H (pięć wymiarów składających się na wynik 1–5)
 - **Generuje spersonalizowane PDF** — CV zoptymalizowane pod ATS, dostosowane do każdej oferty
 - **Skanuje portale** automatycznie (Greenhouse, Ashby, Lever, strony firm)
 - **Przetwarza wsadowo** — ocena 10+ ofert równolegle przez sub-agentów
@@ -161,7 +161,7 @@ Wklejasz URL oferty lub jej opis
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Ocena A–F       │  Dopasowanie, luki, badanie wynagrodzenia, historie STAR
+│  Ocena A–H       │  Dopasowanie, luki, badanie wynagrodzenia, historie STAR
 │  (czyta cv.md)   │
 └────────┬─────────┘
          │

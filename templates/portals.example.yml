@@ -297,6 +297,41 @@ title_filter:
   # add the suffix forms you still want gone, the way the negative list below
   # pairs `word:Intern` with `word:Interns` and a plain `Internship`.
   #
+  # Prefix an entry with `stem:` for the half in between. A plain keyword is
+  # loose on BOTH sides, and usually only one of them was meant:
+  #
+  #   agent         Agentforce yes   Agents yes   Reagents yes   <- the default
+  #   stem:agent    Agentforce yes   Agents yes   Reagents NO    <- must START a word
+  #   word:agent    Agentforce NO    Agents NO    Reagents NO    <- the whole word
+  #
+  # So `stem:` is for a keyword that begins a longer word you also want — "Crypto"
+  # reaching "Cryptocurrency", "Fellows" reaching "Fellowship" — without it also
+  # landing in the middle of an unrelated one. It is what separates "Rust
+  # Engineer" from "Zero Trust Engineer" while keeping "Rust Engineering".
+  #
+  # It does NOT cover a keyword that ENDS a longer word instead of starting it:
+  # "Automation" inside the German compound "Gebäudeautomation" still needs the
+  # plain form. That side has no prefix, deliberately — the plain default already
+  # serves it, and nothing has been measured that the pair cannot express.
+  #
+  # Nor does it close the MIRROR case, which is worth knowing before reaching for
+  # it: a keyword that genuinely STARTS the unwanted word. "Solana" does begin
+  # "Solanaceae", "Neutron" begins "Neutronics", "DeFi" begins "Defined" — `stem:`
+  # asks for the left boundary only, so it matches all three on purpose, and only
+  # `word:` closes them. Measured over the 675 observed titles in
+  # tests/fixtures/title-recall-corpus.json, that is where the two prefixes divide:
+  #
+  #   stem: closes      Zero Trust Engineer, NASTAR Course Setter        4 titles
+  #   only word: closes Solanaceae, Neutronics, Software Defined (x3),
+  #                     Product Definer, Product Definition              7 titles
+  #
+  # And `word:` is not free on that same corpus: it also drops 4 titles you
+  # probably wanted — "Engineering Manager, Smart Contracts" and "Engineering
+  # Lead - Crypto and DeFi" among them — because it forbids the suffix too. So
+  # reach for `stem:` when a keyword lands MID-word, and for `word:` when it lands
+  # at the START of a word you did not mean, knowing that costs the plural and
+  # compound forms as well.
+  #
   # Use " + " (with spaces) to require SEVERAL terms in any order:
   #
   #   - "director + engineering"   matches "Director of Engineering",
@@ -1114,11 +1149,6 @@ search_queries:
 #   provider: jobicy
 #   enabled: true
 #
-# - name: EchoJobs                        # tech jobs aggregated from company ATS boards
-#   provider: echojobs
-#   max_pages: 3                          # 100 jobs/page; raise for deeper coverage
-#   enabled: true
-#
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
 #   provider: manfred
 #   lang: EN                              # EN or ES; the API rejects the call without it
@@ -1127,6 +1157,12 @@ search_queries:
 # - name: Senjob                          # Senegal (Dakar) — the first African board
 #   provider: senjob                      # listings only; robots.txt keeps CVs off-limits
 #   enabled: true                         # ~40 postings/page, tech roles are a thin slice
+#
+# - name: ITviec                          # Vietnam's largest IT board (English UI)
+#   provider: itviec                      # server-rendered listing; no auth, no JS
+#   searchKeywords: backend               # optional — narrows via the URL path
+#   searchLocation: Ho Chi Minh           # optional — Ho Chi Minh / Hanoi / Da Nang
+#   enabled: true                         # 20 postings/page; 750ms pacing between pages
 #
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
