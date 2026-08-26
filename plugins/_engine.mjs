@@ -24,7 +24,7 @@
  * all reuse it with no prod-vs-test drift.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
@@ -253,8 +253,24 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
       warnSkip(root, `unreadable — ${err.message}`);
       continue;
     }
+    // A symlink to a plugin repo is a directory for our purposes: plugins.local/
+    // exists so a developer can work on a plugin from its own checkout, and
+    // linking it in is the natural way to do that. Dirent.isDirectory() is false
+    // for a symlink, so those were silently skipped -- no warning, the plugin
+    // simply never appeared in `plugins.mjs list`. statSync resolves the link;
+    // a broken one throws and is treated as not-a-directory rather than crashing
+    // discovery for every other plugin.
+    const isDirLike = (e) => {
+      if (e.isDirectory()) return true;
+      if (!e.isSymbolicLink()) return false;
+      try {
+        return statSync(path.join(root, e.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    };
     const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .filter(e => isDirLike(e) && !e.name.startsWith('_') && !e.name.startsWith('.'))
       .map(e => e.name)
       .sort();
     for (const name of dirs) {
@@ -577,9 +593,10 @@ export function lockGate(manifest, root) {
   }
 }
 
-export async function loadPlugins(kind, { root, dryRun = false }) {
+export async function loadPlugins(kind, { root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(root);
-  const manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
@@ -614,12 +631,12 @@ export async function loadDotenvOnce() {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dryRun?: boolean, timeoutMs?: number }} opts
+ * @param {{ root: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS }) {
+export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
   await loadDotenvOnce();
-  const loaded = await loadPlugins(kind, { root, dryRun });
+  const loaded = await loadPlugins(kind, { root, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
     const invoke = kind === 'search'
@@ -640,6 +657,10 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
     }
   }
   return results;
+}
+
+export function filterResultsForId(results, id) {
+  return results.filter(r => r.id === id);
 }
 
 /**

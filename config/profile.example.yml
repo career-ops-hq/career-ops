@@ -5,6 +5,10 @@
 candidate:
   full_name: "Jane Smith"
   email: "jane@example.com"
+  # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
+  # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
+  # alternate_emails:
+  #   - "jane@previous-employer.example"
   phone: "+1-555-0123"
   # Optional. Used by `/career-ops email` contact blocks in markets where WeChat
   # is an expected recruiting channel. Omit or leave blank if not applicable.
@@ -135,6 +139,30 @@ cv:
   # (e.g. "use the modern template").
   # template: modern
   # For a restrained Chinese technical CV, use: template: zh-minimal
+  #
+  # (Optional) Section order for the generated CV (#2533). The sections you name
+  # are placed into the slots they already occupy, in the order you list them;
+  # every section you leave out stays exactly where the template puts it — so a
+  # section added by a later release lands where upstream put it instead of
+  # breaking this list.
+  #
+  # Moving a section past its neighbours is a rotation, so name the sections it
+  # displaces too. To render Skills before Education with the built-in template
+  # (which ends Education → Certifications → Awards → Skills):
+  #
+  #   sections: [skills, education, certifications, awards]
+  #
+  # Recognized names: summary, competencies, experience, projects, education,
+  # certifications, awards, skills. An unrecognized name is reported and ignored.
+  #
+  # Applies to the HTML output only. With output_format: latex the order comes
+  # from templates/cv-template.tex and this setting does nothing.
+  #
+  # This exists so the order can live in your profile instead of in
+  # templates/cv-template.html, which update-system.mjs restores on every update.
+  # cv.md stays the source of truth: the section-order guard still compares the
+  # rendered CV against it, and still fails if they disagree.
+  # sections: [skills, education, certifications, awards]
 
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #

@@ -324,18 +324,50 @@ try {
   console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
 }
 
+// --help / -h and unknown-flag rejection
+const spawnContacts = (...argv) => spawnSync('node', [scriptPath, ...argv], { encoding: 'utf-8', timeout: 10000 });
+
+const helpR = spawnContacts('--help');
+const hR = spawnContacts('-h');
+ok('--help exits 0', helpR.status === 0);
+ok('-h exits 0', hR.status === 0);
+ok('--help prints Usage:', helpR.stdout.includes('Usage:'));
+ok('-h output matches --help', hR.stdout === helpR.stdout);
+ok('--help writes nothing to stderr', helpR.stderr === '');
+
+const typoR = spawnContacts('--sumary');
+ok('unknown flag exits 1', typoR.status === 1);
+ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
+ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
+ok('unknown flag writes nothing to stdout', typoR.stdout === '');
+
+const helpBogusR = spawnContacts('--help', '--bogus');
+ok('--help --bogus exits 1 (unknown flag checked before --help)', helpBogusR.status === 1);
+ok('--help --bogus names the bad flag in stderr', helpBogusR.stderr.includes('--bogus'));
+ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
+
 // contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
 // copy of the script into a temp dir is a fully isolated career-ops root:
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
 // the caller's real workspace contains — a contributor with a real phonebook
 // gets the same results as CI.
-// realpathSync: macOS tmpdir() is a symlink (/var/folders → /private/var); Node
-// realpath-resolves the ESM entry but pathToFileURL(argv[1]) doesn't, so an
-// unresolved temp path silently defeats the copied script's main-guard.
-const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
+// NOT realpathed, deliberately. macOS tmpdir() is a symlink (/var/folders →
+// /private/var), and this used to be resolved to keep the copied script's
+// hand-rolled main-guard from silently defeating itself. That guard is now
+// lib/is-main-module.mjs, which realpaths both sides (#3170) — and contacts.mjs
+// canonicalizes internally for its own containment checks (realpath-containment
+// right before the write), so nothing here needs a pre-resolved root.
+//
+// This is removal of a dead workaround, NOT coverage of #3170: whether tmpdir()
+// is a symlink at all is a platform accident (macOS yes, Linux CI usually no).
+// The deliberate coverage is in tests/main-guard-convention.test.mjs.
+const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
+  mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -374,6 +406,13 @@ try {
 
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
+
+  // Regression: --vcf=path (attached form) must be honored — the path was
+  // previously ignored because indexOf('--vcf') returned -1 for that token.
+  const eqFormOut = execFileSync('node', [tmpScript, '--vcf=output/eq-form.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
+  ok('--vcf=path (attached =) writes to the specified path', existsSync(join(tmpRoot, 'output/eq-form.vcf')));
+  ok('--vcf=path confirmation message names the eq-form path', eqFormOut.includes('eq-form.vcf'));
+  ok('--vcf=path file contains valid vCard content', readFileSync(join(tmpRoot, 'output/eq-form.vcf'), 'utf-8').includes('BEGIN:VCARD'));
 
   // Path-traversal guard: the escaped target must never be written. Anchor it in
   // a UNIQUE sibling temp dir (outside tmpRoot, i.e. outside the project) so the
@@ -439,9 +478,12 @@ try {
 }
 
 // Empty store: fresh temp root with NO data/contacts.tsv at all.
-const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
+const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);

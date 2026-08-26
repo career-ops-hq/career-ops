@@ -6,9 +6,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
@@ -92,7 +92,17 @@ export async function POST(req: Request) {
     pdfPaths = pathsResult.paths;
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today });
+  // Resolve the posting date HERE rather than asking the agent for it. The
+  // scanner already wrote it from the provider's own `offer.postedAt`, so this
+  // copies a recorded value instead of inviting a guess — and modes/oferta.md is
+  // explicit that a guessed date is worse than an absent one (the POSTED column
+  // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
+  // → the prompt writes no segment at all.
+  const postedAt =
+    kind === "evaluate"
+      ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
+      : undefined;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -195,17 +205,51 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      // pdf keeps 600s because its render+mark phase runs AFTER this timer; a
+      // plain evaluate has no such phase, so it can use almost the whole 800s
+      // budget. 285s was cutting real evaluations off mid-run — reading the mode
+      // and profile, fetching the posting, ~25 Bash calls and a few web searches
+      // routinely run past it — and the SIGTERM then surfaced as "didn't save a
+      // report" (see the close handler), blaming the CLI for a limit we imposed
+      // (#3124). 780s leaves ~20s under maxDuration for a graceful shutdown.
+      const killMs = killMsForKind(kind);
+      // Set by the killer so the close handler can tell "we timed it out" apart
+      // from "the CLI exited on its own" — different failures, different message.
+      let killedByTimeout = false;
       killer = setTimeout(() => {
+        killedByTimeout = true;
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
+      // Declared before send() so send() can clear it the moment it sees the
+      // client disconnect; assigned just below, once close() exists.
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
       const send = (obj: unknown) => {
         if (closed) return;
-        try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
+        try {
+          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          // The client is gone. Stop the heartbeat here rather than waiting for
+          // close(): the child can still run for minutes (maxDuration 800s), and
+          // a user retrying a failed run would otherwise accumulate one live
+          // timer per abandoned request.
+          closed = true;
+          if (heartbeat) clearInterval(heartbeat);
+        }
       };
+      // Time-based keepalive. The stream is silent whenever the agent is thinking
+      // or inside a long tool call, and in pdf mode it is silent for the whole
+      // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
+      // idle gaps on a real pdf run reached 149s — long enough for the browser or
+      // a proxy to drop the connection, after which the client reports
+      // "Connection error" even though the agent finished and the PDF rendered.
+      // It must be a timer, not a hook on incoming text: piggy-backing on agent
+      // output cannot fire during exactly the silences it needs to cover.
+      // Unknown event types are ignored by the client's switch, so old tabs are safe.
+      heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
         if (!closed) {
           closed = true;
+          if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
@@ -216,6 +260,14 @@ export async function POST(req: Request) {
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
+      // every byte, so the response stream goes completely silent for as long as
+      // the model takes to write the CV — a minute or more. Nothing downstream can
+      // tell that from a hung request, and the browser/proxy drops the connection;
+      // the client then reports "Connection error" even though the agent is fine
+      // and the PDF renders correctly server-side. Emit a throttled keepalive so
+      // the stream never idles during the filtered phase. Unknown event types are
+      // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
         const visible = cvFilter ? cvFilter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
@@ -339,6 +391,19 @@ export async function POST(req: Request) {
         // run could still start a brand-new render (and re-touch the tracker)
         // after the stream — and its writeToken guard — is already gone.
         if (closed) return;
+        // A timeout is the ROOT cause behind every "no report / not clean"
+        // symptom the gates below test, so classify it FIRST, for any kind.
+        // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
+        // save a report" and sends the user to re-check a CLI that was working
+        // fine (#3124). code is null here (killed by signal), which the gates
+        // would read as a generic non-clean exit.
+        if (killedByTimeout) {
+          send({
+            type: "error",
+            msg: timeoutMessage(killMs, kind),
+          });
+          return close();
+        }
         // A final JSONL line with no trailing newline stays in `buf` forever
         // otherwise — flush it through the same parser so the usage/result event it
         // usually carries (the last one of a run) isn't lost. Ahead of the pdf branch,

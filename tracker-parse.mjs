@@ -304,9 +304,9 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-export function extractTrackerReportNumbers(reportCell) {
+export function extractTrackerReportNumbers(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return [];
+  if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
 
   const numbers = new Set();
   const numberFromTarget = (rawTarget) => {
@@ -335,6 +335,48 @@ export function extractTrackerReportNumbers(reportCell) {
   if (markdownLinks.length === 0) {
     const pathNum = numberFromTarget(value);
     if (pathNum != null) numbers.add(pathNum);
+  }
+  // A layout with a Report column that simply has no link yet still falls back
+  // to Notes, so a customized tracker behaves the same whether its Report cell
+  // is absent or empty.
+  return numbers.size > 0 ? [...numbers] : scanNotesForReportNumbers(notesCell);
+}
+
+/**
+ * Report numbers named by a report link inside a free-form Notes cell.
+ *
+ * Customized trackers with no dedicated Report column embed the link in Notes
+ * prose instead — the layout merge-tracker.mjs learned to read in 8668ac1, via
+ * its own `extractReportNum(reportStr, notesStr)`. set-status.mjs read only the
+ * Report cell, so `--report N` could not find a row merge-tracker had linked
+ * happily (#3075).
+ *
+ * DELIBERATELY STRICTER than the Report-cell scan above, which is the same
+ * scoping merge-tracker applies. The Report cell holds a report link by
+ * contract, so a loose match there is safe; Notes is prose, and a link like
+ * `[9](../notes/9-thing.md)` satisfies the generic `N-*.md` shape without being
+ * a report at all. Requiring a `reports/` path segment is what keeps an
+ * unrelated markdown link — or a job-posting URL in the same sentence — from
+ * claiming to be a report number.
+ *
+ * @param {string} [notesCell] - Free-form Notes cell.
+ * @returns {number[]} Report numbers, or [] when the cell names none.
+ */
+function scanNotesForReportNumbers(notesCell) {
+  const notes = String(notesCell ?? '').trim();
+  if (!notes) return [];
+  const numbers = new Set();
+  for (const link of parseMarkdownLinks(notes)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    // Absolute URLs are never a local report path, and a posting URL is the
+    // most likely thing to sit next to a report link in the same note.
+    if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) continue;
+    const pathname = target.split(/[?#]/, 1)[0];
+    if (!/(?:^|[\\/])reports[\\/]/i.test(pathname)) continue;
+    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i);
+    if (!match) continue;
+    const num = parseInt(match[1], 10);
+    if (Number.isInteger(num) && num > 0) numbers.add(num);
   }
   return [...numbers];
 }
