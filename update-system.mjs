@@ -2203,11 +2203,18 @@ function dismiss() {
 // pins the semantics behaviourally instead: it invokes this file through a
 // symlink and requires the CLI tail to answer. Keep that in mind when editing —
 // the scan will not catch a regression here; only that behaviour test will.
+//
+// `.native` matches lib/is-main-module.mjs's canonicalize(): it expands Windows
+// 8.3 short names and reports on-disk casing, which the JS realpath leaves
+// alone. Both sides go through the SAME function, which is the property that
+// actually matters — a divergence here would make this copy answer differently
+// from the helper on exactly the platforms the helper was hardened for.
+const canonicalizePath = realpathSync.native ?? realpathSync;
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
 const selfPath = fileURLToPath(import.meta.url);
 let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
 if (process.argv[1] && !isCli) {
-  try { isCli = realpathSync(entryPath) === realpathSync(selfPath); } catch { isCli = false; }
+  try { isCli = canonicalizePath(entryPath) === canonicalizePath(selfPath); } catch { isCli = false; }
 }
 
 if (isCli) {

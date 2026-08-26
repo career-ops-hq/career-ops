@@ -161,6 +161,30 @@ test('isMainModule is true for the file node was pointed at, symlinked or not', 
 
 const ENTRY_REF = /process\.argv\[1\]|process\.argv\.at\(\s*1\s*\)/;
 
+// A STATIC relative import/export in update-system.mjs, in any spelling.
+//
+// #1706 requires that file to be self-loading: a pre-#1245 client checks out
+// that single file and re-execs it, so a static relative import crashes the
+// old→new jump with ERR_MODULE_NOT_FOUND. Dynamic `await import('./x.mjs')` is
+// the sanctioned form and must NOT match — that is the shape #1706 moved to.
+//
+// Two alternatives, because one regex cannot do both:
+//   1. side-effect     `import './x.mjs';`         — no `from` at all
+//   2. everything else `import … from './x.mjs';`  — possibly spanning lines
+//
+// The second consumes anything but a statement terminator (quoted runs matched
+// whole, so a `;` inside a string does not end it early), which is what lets it
+// see a multiline specifier list without running past the end of the statement.
+// A same-line-only `[^\n]*?` — the shape test-all.mjs:6255 and the first draft
+// of this test both used — misses both cases.
+const STATIC_RELATIVE_IMPORT = new RegExp(
+  [
+    String.raw`^[ \t]*import\s*['"]\.{1,2}\/`,
+    String.raw`^[ \t]*(?:import|export)\b(?:[^;'"]|'[^']*'|"[^"]*")*?\bfrom\s*['"]\.{1,2}\/`,
+  ].join('|'),
+  'm',
+);
+
 // A line that is nothing but comment. Block-comment BODIES are covered by the
 // leading `*` of this repo's JSDoc style; a reference sharing a line with code
 // is treated as code, which can only over-report, never under-report.
@@ -257,13 +281,42 @@ test('the convention check can actually see a violation', () => {
   assert.deepEqual(entryRefViolations('// process.argv[1] is explained here\n * and here (JSDoc body)'), [], 'comment lines must be excused');
 });
 
+test('the #1706 static-import detector sees every spelling', () => {
+  // The first draft of this check only matched `from '...'` on ONE line, so a
+  // side-effect import and a multiline specifier list both sailed past it while
+  // it looked like it was guarding. Each form is asserted rather than assumed.
+  const caught = [
+    "import './helper.mjs';",                       // side-effect, no `from`
+    'import x from "./helper.mjs";',
+    "import { a } from './helper.mjs';",
+    "import {\n  a,\n  b,\n} from './helper.mjs';", // multiline specifier list
+    "export { a } from './helper.mjs';",
+    "export * from '../helper.mjs';",
+    "  import './helper.mjs';",                     // indented
+  ];
+  for (const form of caught) {
+    assert.ok(STATIC_RELATIVE_IMPORT.test(form), `missed a static relative import:\n${form}`);
+  }
+
+  const allowed = [
+    "import * as yaml from 'js-yaml';",             // bare specifier
+    "const m = await import('./lazy.mjs');",        // DYNAMIC — the #1706 fix itself
+    "  const m = await import('./lazy.mjs');",
+    "// import './helper.mjs';",                    // comment
+    " * import { a } from './helper.mjs';",         // JSDoc body
+  ];
+  for (const form of allowed) {
+    assert.ok(!STATIC_RELATIVE_IMPORT.test(form), `false positive on:\n${form}`);
+  }
+});
+
 test("update-system.mjs's inlined guard realpaths both sides", (t) => {
   // The #1706 self-loading rule buys it an exemption from the import, not from
   // being correct. Asserted on BEHAVIOUR, not on source text: a source-shape
   // check passes on a rewrite that keeps the words and loses the realpath.
   const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
   assert.ok(
-    !/^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]/m.test(src),
+    !STATIC_RELATIVE_IMPORT.test(src),
     'update-system.mjs grew a static relative import — that breaks the old→new re-exec (#1706)',
   );
 
