@@ -332,7 +332,12 @@ main().catch(err => {
     } else {
       process.stdout.write(`search failed: ${message}\n`);
     }
-    process.exit(1);
+    // process.exit() does not wait for a pending stdout write to flush, so on
+    // a piped stdout (the --json consumer case) it can truncate the envelope
+    // right when a caller most needs it. Setting exitCode and returning lets
+    // the process exit once the event loop drains, after the write completes.
+    process.exitCode = 1;
+    return;
   }
   const payload = { ...notFoundResult(name || 'unknown company'), error: message };
   if (format === 'json') {
@@ -340,5 +345,6 @@ main().catch(err => {
   } else {
     process.stdout.write(`unknown: ${message}\n`);
   }
-  process.exit(1);
+  process.exitCode = 1;
+  return;
 });
