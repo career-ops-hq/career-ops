@@ -89,5 +89,26 @@ are shared helpers and are not loaded as providers.
 | Working Nomads | API | Reads the board-wide `https://www.workingnomads.com/api/exposed_jobs/` JSON feed, then applies scanner filters. |
 | Yourator | API | **operator: 友睿資訊股份有限公司 (Yourator)** — declared per [Source Indexing Policy](../CONTRIBUTING.md#source-indexing-policy) rule 4; the submitting contributor is not affiliated with the board (provenance: the operating entity is named on the site's own [privacy page](https://www.yourator.co/privacy)). Taiwanese job board for startup and digital roles (1,760 listings across 151 employers when sampled on 2026-08-18). Reads the board-wide zero-auth `https://www.yourator.co/api/v4/jobs?page=N` JSON feed (20/page; no key, cookie or `Referer` required). Select with `provider: yourator`. The API exposes no free-text search parameter — `q`/`keyword`/`search`/`term`/`query`/`title` are accepted and silently ignored — and no filter parameter is needed for full coverage, so the provider walks every page until `payload.hasMore` turns false and lets `title_filter` gate the results (rule 5); `max_pages` (default 120) is a safety bound above the observed 88 pages, not a coverage setting. Per rule 2 the emitted URL is each row's `thirdPartyUrl` — the employer's own ATS (teamdoor.io, Greenhouse, Lever, BambooHR, Breezy, self-hosted) — with the board's `utm_*` ad parameters stripped, falling back to the Yourator posting page on the 63.9% of rows that carry none. No absolute timestamp is published (only a relative `lastActiveAt` string), so `postedAt` is always omitted. |
 
+## Evaluated, not supported
+
+These boards were evaluated alongside `providers/careerviet.mjs` and found NOT
+eligible for the zero-auth/no-browser provider contract. Recorded here so a
+future evaluation doesn't repeat the same investigation from scratch.
+
+| Board | Reason | Evaluated |
+| --- | --- | --- |
+| TopDev (topdev.vn) | Search results ARE server-rendered plain HTTPS (confirmed live), but `robots.txt` disallows `ClaudeBot` via Cloudflare's default managed AI-bot block (alongside `GPTBot`, `Google-Extended`, `Bytespider`, etc. — generic boilerplate, not a TopDev-specific choice, but still a named block). | 2026-08-26 |
+| CareerLink (careerlink.vn) | Search results ARE server-rendered plain HTTPS (confirmed live: 47 job links found on a location listing page), but `robots.txt` individually lists `ClaudeBot`, `Claude-Web` and `anthropic-ai` as disallowed — separate from its generic bad-bot list, reading as a deliberate choice rather than boilerplate. | 2026-08-26 |
+| JobsGo (jobsgo.vn) | Listing pages return HTTP 403 behind a Cloudflare managed JS challenge, confirmed under both a declared-bot User-Agent and a browser-impersonating one — no zero-auth path exists without solving the challenge. | 2026-08-27 |
+| ViecOi (viecoi.vn) | Same failure mode as JobsGo: HTTP 403 behind a Cloudflare managed JS challenge, consistent across User-Agents — even `/robots.txt` itself returns the challenge page instead of its contents. | 2026-08-27 |
+| Glassdoor (global, not VN-specific) | A reference scraper implementation for this board (goodjobs, a sibling project) requires Playwright **plus `playwright-stealth`** (active bot-detection evasion) to get any content — out of scope on both technical and ethical grounds, independent of `robots.txt`. | 2026-08-26 |
+| Dice (global, not VN-specific) | Same failure mode as Glassdoor: the same reference implementation needs stealth-mode browser automation despite Dice's own docs describing it as static HTML. | 2026-08-26 |
+
+TopDev and CareerLink are the interesting case: both are technically
+scrapable, but this project treats a `robots.txt` entry naming Claude or
+Anthropic's crawler as the site owner's stated intent, not a literal
+User-Agent string to route around under a different name — even though
+`providers/*.mjs` all identify as `career-ops`, not `ClaudeBot`.
+
 When adding a new provider, add a new non-helper module under `providers/` and
 update this table in the same PR.
