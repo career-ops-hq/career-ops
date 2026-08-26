@@ -23,6 +23,10 @@ import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
+// The vocabulary this CLI accepts is also READ by calibrate.mjs, which cannot
+// import this file (top-level CLI, exits on load). Shared so the two cannot
+// drift — they already had (#3315 shipped a 7-entry copy of these 14).
+import { OUTCOME_MAP } from './lib/outcome-types.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   normalizeCompany,
@@ -56,22 +60,6 @@ function today() {
   return new Date().toISOString().split('T')[0];
 }
 
-const OUTCOME_MAP = {
-  interview_progress: { state: 'Interview', defaultNote: 'Stage updated' },
-  stage_reached: { state: 'Interview', defaultNote: 'Stage updated' },
-  interview: { state: 'Interview', defaultNote: 'Interview stage' },
-  offer_received: { state: 'Offer', defaultNote: 'Offer received' },
-  offer: { state: 'Offer', defaultNote: 'Offer received' },
-  hired: { state: 'Hired', defaultNote: 'Offer accepted' },
-  accepted: { state: 'Hired', defaultNote: 'Offer accepted' },
-  offer_declined: { state: 'Discarded', defaultNote: 'Offer declined by candidate' },
-  declined: { state: 'Discarded', defaultNote: 'Offer declined by candidate' },
-  rejected: { state: 'Rejected', defaultNote: 'Application rejected' },
-  rejection: { state: 'Rejected', defaultNote: 'Application rejected' },
-  no_response: { state: 'Discarded', defaultNote: 'No response / ghosted' },
-  ghosted: { state: 'Discarded', defaultNote: 'No response / ghosted' },
-  interview_only: { state: 'Interview', defaultNote: 'Interview process completed' },
-};
 
 const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options]
 

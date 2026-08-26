@@ -38,7 +38,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
-import { pathToFileURL, fileURLToPath } from 'url';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
@@ -56,6 +56,7 @@ import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './titl
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -3011,7 +3012,7 @@ async function main() {
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
 // `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');

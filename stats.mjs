@@ -21,16 +21,18 @@ import { validateFlags } from './lib/cli-flags.mjs';
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = join(ROOT, 'data', 'applications.md');
 const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
 const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
+const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
 const PORTALS_FILE = join(ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
 
@@ -174,6 +176,76 @@ export function computeFunnel(byStatus) {
     interviewRate: pct(everInterview, everApplied),
     offerRate: pct(everOffer, everApplied),
     smallSample: everApplied < 10,
+  };
+}
+
+// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
+// pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
+// depth 0; the ledger's from/to history is what proves the stages a row passed
+// through before it landed on a terminal snapshot.
+const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
+
+/**
+ * Parse data/status-log.tsv into per-row transition observations. Columns are
+ * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
+ * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
+ * @returns {Array<{num:number, from:string, to:string}>}
+ */
+export function parseStatusLogStages(content) {
+  const out = [];
+  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    const num = parseInt(c[0], 10);
+    if (Number.isNaN(num)) continue;
+    out.push({ num, from: (c[2] || '').trim(), to: (c[3] || '').trim() });
+  }
+  return out;
+}
+
+/**
+ * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
+ * stage X, folding the transition ledger so a row now sitting in a terminal
+ * snapshot still counts for the stages it passed through — an Offer that was
+ * declined (now Discarded) counts into everOffer; a Rejected that reached
+ * Interview counts into everInterview. This resolves the snapshot limitation
+ * computeFunnel() documents (#1428) for every row the ledger covers; a row with
+ * no ledger history falls back to its current status alone, so pre-ledger middle
+ * stages stay lower bounds. A current Rejected still proves everApplied (rank 1)
+ * with no ledger, matching the snapshot math. Same shape as computeFunnel() plus
+ * `basis:'ledger'`.
+ *
+ * @param {Map<number,string>} statusByNum - num → current canonical status.
+ * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
+ */
+export function computeFunnelWithHistory(statusByNum, ledger) {
+  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
+  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
+  for (const [num, status] of statusByNum) {
+    bump(num, STAGE_RANK[status] || (status === 'Rejected' ? 1 : 0));
+  }
+  for (const { num, from, to } of ledger) {
+    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
+    bump(num, STAGE_RANK[from] || 0);
+    bump(num, STAGE_RANK[to] || 0);
+  }
+  let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
+  for (const rank of reached.values()) {
+    if (rank >= 1) everApplied++;
+    if (rank >= 2) everResponded++;
+    if (rank >= 3) everInterview++;
+    if (rank >= 4) everOffer++;
+  }
+  return {
+    everApplied,
+    everResponded,
+    everInterview,
+    everOffer,
+    responseRate: pct(everResponded, everApplied),
+    interviewRate: pct(everInterview, everApplied),
+    offerRate: pct(everOffer, everApplied),
+    smallSample: everApplied < 10,
+    basis: 'ledger',
   };
 }
 
@@ -493,6 +565,7 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
+  statusLogFile = STATUS_LOG_FILE,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -501,6 +574,7 @@ export function computeAllStats({
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
+  const statusLog = read(statusLogFile);
   const trackerBase = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
 
@@ -538,10 +612,17 @@ export function computeAllStats({
         portals: !!portals,
         scanRuns: !!runs,
         portalHealth: !!portalHealth,
+        statusLog: !!statusLog,
       },
     },
     tracker,
-    funnel: tracker ? computeFunnel(tracker.byStatus) : null,
+    // Prefer the ledger-aware funnel once a transition log exists (#1428); fall
+    // back to the pure status snapshot when it does not, so nothing regresses.
+    funnel: !tracker
+      ? null
+      : statusLog
+        ? computeFunnelWithHistory(trackerStatusByNum(apps), parseStatusLogStages(statusLog))
+        : computeFunnel(tracker.byStatus),
     scan,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
@@ -573,7 +654,8 @@ function printSummary(stats) {
   const f = stats.funnel;
   if (f) {
     const small = f.smallSample ? ' (small sample — rates indicative only)' : '';
-    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}`);
+    const basis = f.basis === 'ledger' ? ' · ledger-adjusted (folds status-log history)' : '';
+    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}${basis}`);
   }
   const s = stats.scan;
   if (s) {
@@ -625,7 +707,7 @@ const USAGE = `Usage:
   node stats.mjs --summary   # human-readable table
   node stats.mjs --help|-h   # print this usage block and exit`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   validateFlags(args, KNOWN_FLAGS, USAGE);
