@@ -30,6 +30,24 @@ test("a sibling role at an evaluated employer is NOT suppressed", () => {
   assert.equal(isEvaluated(keys, norm, "Google", "Engineering Manager, Search"), false);
 });
 
+test("Rejected and Discarded tracker rows do not hide sibling roles", () => {
+  // PR #3130 targeted employer-wide suppression from role-scoped outcomes.
+  // The current fix is stronger than a status predicate: all tracker statuses
+  // suppress only the exact company+role pair, so rejected/discarded rows can
+  // never blank an employer's whole board.
+  const keys = evaluatedKeys(
+    [
+      { company: "Globex", role: "Backend Engineer", status: "Rejected" },
+      { company: "Initech", role: "Product Manager", status: "Discarded" },
+    ],
+    norm,
+  );
+  assert.equal(isEvaluated(keys, norm, "Globex", "Backend Engineer"), true);
+  assert.equal(isEvaluated(keys, norm, "Globex", "Frontend Engineer"), false);
+  assert.equal(isEvaluated(keys, norm, "Initech", "Product Manager"), true);
+  assert.equal(isEvaluated(keys, norm, "Initech", "Engineering Manager"), false);
+});
+
 test("the evaluated role itself is still suppressed on a repost", () => {
   // The guard: this is what the suppression is FOR. A fix that stopped
   // suppressing would pass the test above and break the feature.
