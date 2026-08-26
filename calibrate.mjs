@@ -24,9 +24,12 @@
  *     It is excluded from every rate and reported separately as in-flight.
  *   - No percentage is printed on a band below the sample floor. "2 of 3
  *     got interviews" is an anecdote wearing a rate's clothes.
- *   - The outcome journal (data/outcomes/) outranks the tracker status: the
- *     journal records what actually happened (outcome.mjs), the status is a
- *     workflow position. Where both exist, the journal wins.
+ *   - Evidence precedence: the outcome journal (data/outcomes/) wins, then the
+ *     transition ledger (data/status-log.tsv), then the tracker status. The
+ *     journal records what actually happened (outcome.mjs); the ledger records
+ *     the stages a row passed through (set-status.mjs), so a declined offer now
+ *     sitting in Discarded still counts as an offer; the current status is only
+ *     a workflow snapshot and loses that history.
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
@@ -35,6 +38,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { canonicalOutcome } from './lib/outcome-types.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -45,7 +49,11 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // scoring picked a matchable role), and an offer is tier 2. `rejected` and
 // `no_response` are terminal negatives. `interview_only` means the process
 // ended after interviews with no offer — it still reached tier 1.
-const JOURNAL_OUTCOMES = {
+// Keyed by CANONICAL type only. outcome.mjs accepts fourteen spellings and
+// writes whichever one was typed straight into the journal, so every read goes
+// through canonicalOutcome() first — a private list of the seven canonical
+// names silently ignored the other seven (see lib/outcome-types.mjs).
+export const JOURNAL_OUTCOMES = {
   hired: { reachedInterview: true, reachedOffer: true, terminal: true },
   offer_received: { reachedInterview: true, reachedOffer: true, terminal: true },
   offer_declined: { reachedInterview: true, reachedOffer: true, terminal: true },
@@ -89,7 +97,15 @@ export function parseOutcomeJournal(text) {
   const feedback = [];
   for (const entry of entries) {
     const typeMatch = entry.match(/^- \*\*Outcome Type\*\*: *(\S+)/m);
-    if (typeMatch && JOURNAL_OUTCOMES[typeMatch[1]]) latestType = typeMatch[1];
+    // Assigned UNCONDITIONALLY when the field is present, including when it
+    // resolves to null. The last entry is the truth, so a final entry this
+    // vocabulary cannot read must not leave the previous one standing —
+    // `interview_progress` then `withdrawn_by_employer` is not an application
+    // still progressing through interviews. Clearing it falls through to the
+    // tracker status, which is the honest answer for an outcome we cannot read;
+    // keeping the earlier one is the happiest-historical-moment behaviour this
+    // function's contract forbids.
+    if (typeMatch) latestType = canonicalOutcome(typeMatch[1]);
     // Feedback is a blockquote under "Verbatim Feedback"; "None recorded" is
     // the explicit empty marker outcome.mjs writes, not user content.
     const fbMatch = entry.match(/- \*\*Verbatim Feedback\*\*:\n((?:> .*\n?)+)/);
@@ -107,10 +123,11 @@ export function parseOutcomeJournal(text) {
  *
  * @param {Array<{num:number, company:string, score:number|null, status:string}>} rows
  * @param {Map<number, {latestType:string|null, feedback:string[]}>} journals
- * @param {{minBandN?: number}} [opts]
+ * @param {{minBandN?: number, reached?: Map<number, {reachedInterview:boolean, reachedOffer:boolean}>}} [opts]
  */
 export function computeCalibration(rows, journals, opts = {}) {
   const minBandN = opts.minBandN ?? 5;
+  const reached = opts.reached ?? new Map();
 
   const resolved = [];
   const inFlight = [];
@@ -123,13 +140,21 @@ export function computeCalibration(rows, journals, opts = {}) {
       for (const fb of journal.feedback) allFeedback.push({ num: row.num, company: row.company, feedback: fb });
     }
     let verdict = null;
+    const led = reached.get(row.num);
     if (journal?.latestType) {
       verdict = { source: 'journal', type: journal.latestType, ...JOURNAL_OUTCOMES[journal.latestType] };
+    } else if (led && (led.reachedInterview || led.reachedOffer)) {
+      // Ledger evidence: the row passed through interview/offer per its
+      // transition history, so it resolves at that tier even though its current
+      // status is now terminal (a declined offer reads as Discarded, an
+      // interview that ended in rejection reads as Rejected). Offer implies
+      // interview, so reachedInterview is always true on this branch.
+      verdict = { source: 'ledger', type: led.reachedOffer ? 'offer' : 'interview', reachedInterview: true, reachedOffer: !!led.reachedOffer };
     } else {
       const s = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase().replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '');
       if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
       else if (['applied', 'responded'].includes(s)) { inFlight.push(row.num); continue; }
-      else continue; // evaluated / discarded / skip: never applied — outside calibration's population
+      else continue; // evaluated / discarded / skip with no stage history — outside calibration's population
     }
     if (!Number.isFinite(row.score) || row.score <= 0) { unscored.push(row.num); continue; }
     resolved.push({ num: row.num, score: row.score, ...verdict });
@@ -218,6 +243,35 @@ function loadJournals(workspaceRoot) {
     journals.set(parseInt(numMatch[1], 10), parseOutcomeJournal(readFileSync(logPath, 'utf-8')));
   }
   return journals;
+}
+
+/**
+ * Per-row stage-reached evidence from the transition ledger data/status-log.tsv
+ * ({num}\t{date}\t{from}\t{to}\t{source}\t{note}). A row reached interview if any
+ * transition entered OR left Interview/Offer/Hired; reached offer if it entered
+ * OR left Offer/Hired. Offer implies interview. Missing file → empty Map (the
+ * calibration falls back to journals + current status, exactly as before).
+ * @returns {Map<number, {reachedInterview:boolean, reachedOffer:boolean}>}
+ */
+export function loadLedgerReached(workspaceRoot) {
+  const reached = new Map();
+  const logPath = join(workspaceRoot, 'data', 'status-log.tsv');
+  if (!existsSync(logPath)) return reached;
+  const INTERVIEW_PLUS = new Set(['interview', 'offer', 'hired']);
+  const OFFER_PLUS = new Set(['offer', 'hired']);
+  for (const line of readFileSync(logPath, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    const num = parseInt(c[0], 10);
+    if (!Number.isFinite(num)) continue;
+    const from = String(c[2] || '').trim().toLowerCase();
+    const to = String(c[3] || '').trim().toLowerCase();
+    const cur = reached.get(num) || { reachedInterview: false, reachedOffer: false };
+    if (INTERVIEW_PLUS.has(from) || INTERVIEW_PLUS.has(to)) cur.reachedInterview = true;
+    if (OFFER_PLUS.has(from) || OFFER_PLUS.has(to)) { cur.reachedOffer = true; cur.reachedInterview = true; }
+    reached.set(num, cur);
+  }
+  return reached;
 }
 
 function renderHuman(result) {
@@ -313,6 +367,25 @@ function selfTest() {
   const pop = computeCalibration([mk(1, 4.2, 'Evaluated'), mk(2, 2.1, 'Discarded')], new Map(), { minBandN: 2 });
   t('never-applied excluded', pop.resolved === 0 && pop.inFlight === 0);
 
+  // Ledger evidence resolves stage-reached even when the current status is
+  // terminal: a declined offer (now Discarded) counts as reachedOffer, an
+  // interview that ended in Rejected counts as reachedInterview, and a Discarded
+  // row with no ledger history stays outside the population.
+  const led = computeCalibration(
+    [mk(1, 4.6, 'Discarded'), mk(2, 4.5, 'Rejected'), mk(3, 4.2, 'Discarded')],
+    new Map(),
+    { minBandN: 2, reached: new Map([[1, { reachedInterview: true, reachedOffer: true }], [2, { reachedInterview: true, reachedOffer: false }]]) },
+  );
+  const ledHigh = led.bands.find((b) => b.band === '>=4.5');
+  t('ledger resolves declined offer as reachedOffer', ledHigh.offers === 1 && ledHigh.interviews === 2 && led.resolved === 2);
+  t('ledger leaves history-less Discarded excluded', led.bands.find((b) => b.band === '4.0-4.4').n === 0);
+  // A journal still outranks the ledger (explicit /outcome record wins).
+  const ledVsJournal = computeCalibration(
+    [mk(1, 4.6, 'Discarded')], new Map([[1, J('rejected')]]),
+    { minBandN: 1, reached: new Map([[1, { reachedInterview: true, reachedOffer: true }]]) },
+  );
+  t('journal outranks ledger', ledVsJournal.bands.find((b) => b.band === '>=4.5').offers === 0);
+
   if (failures.length) {
     console.error(`❌ calibrate self-test: ${failures.length} failure(s):\n  - ${failures.join('\n  - ')}`);
     process.exit(1);
@@ -346,7 +419,8 @@ if (isMainModule(import.meta.url)) {
   const workspaceRoot = resolveWorkspaceRoot(appsFile);
   const rows = loadTrackerRows(appsFile);
   const journals = loadJournals(workspaceRoot);
-  const result = computeCalibration(rows, journals, { minBandN });
+  const reached = loadLedgerReached(workspaceRoot);
+  const result = computeCalibration(rows, journals, { minBandN, reached });
   if (argv.includes('--json')) console.log(JSON.stringify(result, null, 2));
   else console.log(renderHuman(result));
 }

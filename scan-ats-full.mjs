@@ -36,7 +36,6 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
-import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import path from 'path';
 import * as yaml from 'js-yaml';
@@ -54,6 +53,7 @@ import { localToday } from './lib/local-today.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -1103,7 +1103,7 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);
