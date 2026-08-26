@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=5 level=role role="Product Management Team Lead and Product Owner" geo="Vienna" link="https://github.com/santifer/career-ops/issues/3382" -->
+### Hire #5
+
+> I was fortunate enough to even land two (!) jobs, in a total of 36 applications: - Product Owner role, 106k, at a scale up company, just by using the cv generator, which honestly c
+
+**Product Management Team Lead and Product Owner** · Vienna · [story →](https://github.com/santifer/career-ops/issues/3382)
+
 <!-- hire n=4 level=role role="Senior DevOps Engineer" geo="remote US" link="https://github.com/santifer/career-ops/issues/3387" -->
 ### Hire #4
 
