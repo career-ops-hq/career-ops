@@ -36,6 +36,7 @@ import {
   resolveTrackerPath,
   resolveWorkspaceRoot,
 } from './tracker-utils.mjs';
+import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
 
@@ -198,7 +199,26 @@ matchedRow = candidates[0];
 const companySlug = slugify(matchedRow.company);
 const roleSlug = slugify(matchedRow.role);
 const repoRoot = resolveWorkspaceRoot(appsFile);
-const outcomeDir = join(repoRoot, 'data', 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
+// Reuse this row's existing journal directory when it has one. The name used to
+// be rebuilt from the tracker's CURRENT text every time, so editing the Role
+// cell between two recordings sent the second entry to a different directory
+// and split an append-only journal in half — with every reader keying on the
+// leading `{num}_` and picking whichever it read last. The row NUMBER is the
+// identity; the slugs are a label on it.
+const outcomesRoot = join(repoRoot, 'data', 'outcomes');
+const { name: outcomeDirName, existing: existingOutcomeDirs } =
+  resolveOutcomeDir(outcomesRoot, matchedRow.num, `${matchedRow.num}_${companySlug}_${roleSlug}`);
+const outcomeDir = join(outcomesRoot, outcomeDirName);
+// A split that predates this fix is not repaired automatically — moving a
+// user's recorded artifacts is not this command's job — but it is said out
+// loud, because until it is merged some readers will see only one half.
+if (existingOutcomeDirs.length > 1) {
+  console.error(
+    `⚠ #${matchedRow.num} has ${existingOutcomeDirs.length} outcome directories, so its journal is split: ` +
+    `${existingOutcomeDirs.join(', ')}. Appending to ${outcomeDirName} (most recently written). ` +
+    'Merge the entries into one directory to get a single history.',
+  );
+}
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 

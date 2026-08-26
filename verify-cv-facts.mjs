@@ -14,7 +14,8 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
@@ -887,6 +888,6 @@ export function runCli(args = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = runCli();
 }
