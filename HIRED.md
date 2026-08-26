@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=4 level=role role="Senior DevOps Engineer" geo="remote US" link="https://github.com/santifer/career-ops/issues/3387" -->
+### Hire #4
+
+> Career-ops helped me sort through a ton of listings, helping me narrow down the list to must applies . It helped me craft cover letters, fine tune the resume for the specific job
+
+**Senior DevOps Engineer** · remote US · [story →](https://github.com/santifer/career-ops/issues/3387)
+
 <!-- hire n=3 level=role role="Head of Platform" geo="remote UK" link="https://github.com/santifer/career-ops/issues/3385" -->
 ### Hire #3
 
