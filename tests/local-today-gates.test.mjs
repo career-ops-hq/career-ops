@@ -202,13 +202,6 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
       }
       return src.length - 1;
     };
-    const skipTemplate = (i) => {
-      for (i++; i < src.length; i++) {
-        if (src[i] === '\\') { i++; continue; }
-        if (src[i] === '`') return i;
-      }
-      return src.length - 1;
-    };
     const skipLineComment = (i) => {
       const end = src.indexOf('\n', i + 2);
       return end === -1 ? src.length - 1 : end;
@@ -217,37 +210,55 @@ test('every appendToScanHistory call site is handed a local-day value', () => {
       const end = src.indexOf('*/', i + 2);
       return end === -1 ? src.length - 1 : end + 1;
     };
-    const nextCodeSemi = (start) => {
+    const scanCode = (start, visit, { stopOnBrace = false } = {}) => {
+      let braceDepth = 0;
       for (let i = start; i < src.length; i++) {
         if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
-        else if (src[i] === '`') i = skipTemplate(i);
+        else if (src[i] === '`') i = scanTemplate(i, visit);
         else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
         else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
-        else if (src[i] === ';') return i;
+        else if (stopOnBrace && src[i] === '{') braceDepth++;
+        else if (stopOnBrace && src[i] === '}') {
+          if (braceDepth === 0) return i;
+          braceDepth--;
+        } else if (visit(i) === false) return i;
       }
       return src.length;
+    };
+    const scanTemplate = (open, visit) => {
+      for (let i = open + 1; i < src.length; i++) {
+        if (src[i] === '\\') { i++; continue; }
+        if (src[i] === '`') return i;
+        if (src[i] === '$' && src[i + 1] === '{') {
+          i = scanCode(i + 2, visit, { stopOnBrace: true });
+        }
+      }
+      return src.length - 1;
+    };
+    const nextCodeSemi = (start) => {
+      let semi = src.length;
+      scanCode(start, (i) => {
+        if (src[i] === ';') { semi = i; return false; }
+        return true;
+      });
+      return semi;
     };
     const matchingParen = (open) => {
       let depth = 0;
-      for (let i = open; i < src.length; i++) {
-        if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
-        else if (src[i] === '`') i = skipTemplate(i);
-        else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
-        else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
-        else if (src[i] === '(') depth++;
-        else if (src[i] === ')' && --depth === 0) return i;
-      }
-      return src.length;
+      let close = src.length;
+      scanCode(open, (i) => {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')' && --depth === 0) { close = i; return false; }
+        return true;
+      });
+      return close;
     };
     const codeNeedleIndexes = (needle) => {
       const indexes = [];
-      for (let i = 0; i < src.length; i++) {
-        if (src[i] === "'" || src[i] === '"') i = skipQuoted(i, src[i]);
-        else if (src[i] === '`') i = skipTemplate(i);
-        else if (src[i] === '/' && src[i + 1] === '/') i = skipLineComment(i);
-        else if (src[i] === '/' && src[i + 1] === '*') i = skipBlockComment(i);
-        else if (src.startsWith(needle, i)) indexes.push(i);
-      }
+      scanCode(0, (i) => {
+        if (src.startsWith(needle, i)) indexes.push(i);
+        return true;
+      });
       return indexes;
     };
     const localDateConsts = new Set();
