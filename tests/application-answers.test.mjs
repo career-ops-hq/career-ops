@@ -36,6 +36,9 @@
 // corpus is asserted to actually produce entries before any equality is checked.
 
 import { pass, fail, ROOT } from './helpers.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -44,6 +47,7 @@ console.log('\napplication-answers.mjs — rendered sections parse back into sna
 try {
   const {
     formatApplicationAnswersSection,
+    applicationAnswersVersion,
     parseApplicationAnswersSection,
     upsertApplicationAnswersSection,
   } = await import(pathToFileURL(join(ROOT, 'application-answers.mjs')).href);
@@ -396,6 +400,187 @@ try {
     pass('formatter output is unchanged by the addition of the reader');
   } else {
     fail(`formatter output changed:\n${section}`);
+  }
+
+  // ── 9. answer versions are content-addressed, not lifecycle-addressed ────
+  const normalizedSnapshot = parseApplicationAnswersSection(section, { strict: true });
+  const filledVersion = applicationAnswersVersion({ ...normalizedSnapshot, state: 'filled' });
+  const submittedVersion = applicationAnswersVersion({
+    ...normalizedSnapshot,
+    date: '2030-01-01',
+    state: 'submitted',
+  });
+  const changedVersion = applicationAnswersVersion({
+    ...normalizedSnapshot,
+    freeText: [
+      ...normalizedSnapshot.freeText.slice(0, 1),
+      { ...normalizedSnapshot.freeText[1], answer: 'A materially different answer.' },
+      ...normalizedSnapshot.freeText.slice(2),
+    ],
+  });
+
+  if (
+    /^sha256:[a-f0-9]{64}$/.test(filledVersion) &&
+    filledVersion === submittedVersion &&
+    changedVersion !== filledVersion
+  ) {
+    pass('answer version is stable across date/state changes and changes with answer content');
+  } else {
+    fail(
+      `answer version contract broken: filled=${filledVersion} ` +
+      `submitted=${submittedVersion} changed=${changedVersion}`,
+    );
+  }
+
+  // ── 10. CLI persists, verifies, and seals the exact submitted version ─────
+  const tempRoot = mkdtempSync(join(tmpdir(), 'career-ops-application-answers-'));
+  try {
+    const reportPath = join(tempRoot, 'report.md');
+    const copiedReportPath = join(tempRoot, 'report-copy.md');
+    const inputPath = join(tempRoot, 'answers.json');
+    const changedInputPath = join(tempRoot, 'answers-changed.json');
+    const privateMarker = 'PRIVATE_ANSWER_VALUE_MUST_NOT_REACH_METADATA';
+    const cliSnapshot = {
+      date: '2026-08-18',
+      state: 'filled',
+      freeText: [{ question: 'Private prompt', answer: privateMarker }],
+      selections: [{ question: 'Work mode', selection: 'Remote' }],
+      fieldValues: [],
+      files: [{ field: 'CV', path: 'output/private-cv.pdf', version: 'v1' }],
+    };
+    const changedSnapshot = {
+      ...cliSnapshot,
+      state: 'submitted',
+      freeText: [{ question: 'Private prompt', answer: `${privateMarker}_CHANGED` }],
+    };
+    const baseReport = '# Evaluation: Example - Role\n\n## G) Posting Legitimacy\nActive\n';
+    writeFileSync(reportPath, baseReport, 'utf-8');
+    writeFileSync(inputPath, JSON.stringify(cliSnapshot), 'utf-8');
+    writeFileSync(changedInputPath, JSON.stringify(changedSnapshot), 'utf-8');
+
+    const runCli = (args) => spawnSync(
+      process.execPath,
+      [join(ROOT, 'application-answers.mjs'), ...args],
+      { cwd: ROOT, encoding: 'utf-8' },
+    );
+
+    const filled = runCli(['--report', reportPath, '--input', inputPath, '--state', 'filled']);
+    const filledMeta = filled.status === 0 ? JSON.parse(filled.stdout) : null;
+    const verified = runCli(['--verify', reportPath]);
+    const verifiedMeta = verified.status === 0 ? JSON.parse(verified.stdout) : null;
+    writeFileSync(copiedReportPath, readFileSync(reportPath, 'utf-8'), 'utf-8');
+    const copied = runCli(['--verify', copiedReportPath]);
+    const copiedMeta = copied.status === 0 ? JSON.parse(copied.stdout) : null;
+
+    const metadataSafe = [filled.stdout, verified.stdout, copied.stdout]
+      .every((output) => !output.includes(privateMarker));
+    const writeReadbackMatches =
+      filledMeta?.answer_version_hash === verifiedMeta?.answer_version_hash &&
+      verifiedMeta?.answer_version_hash === copiedMeta?.answer_version_hash &&
+      verifiedMeta?.counts?.free_text === 1 &&
+      verifiedMeta?.counts?.files === 1;
+
+    if (filled.status === 0 && verified.status === 0 && copied.status === 0 &&
+        metadataSafe && writeReadbackMatches) {
+      pass('CLI write/verify/copy readback preserves one version without printing answer values');
+    } else {
+      fail(
+        `CLI metadata/readback contract broken: write=${filled.status} verify=${verified.status} ` +
+        `copy=${copied.status} safe=${metadataSafe} matches=${writeReadbackMatches}`,
+      );
+    }
+
+    const submitted = runCli([
+      '--report', reportPath, '--input', inputPath, '--state', 'submitted', '--date', '2026-08-19',
+    ]);
+    const submittedMeta = submitted.status === 0 ? JSON.parse(submitted.stdout) : null;
+    const sealedReport = readFileSync(reportPath, 'utf-8');
+    const replay = runCli([
+      '--report', reportPath, '--input', inputPath, '--state', 'submitted', '--date', '2030-01-01',
+    ]);
+    const changed = runCli([
+      '--report', reportPath, '--input', changedInputPath, '--state', 'submitted',
+    ]);
+    const downgrade = runCli([
+      '--report', reportPath, '--input', inputPath, '--state', 'filled',
+    ]);
+    const sealedUnchanged = readFileSync(reportPath, 'utf-8') === sealedReport;
+
+    if (
+      submitted.status === 0 &&
+      submittedMeta?.state === 'submitted' &&
+      submittedMeta?.answer_version_hash === verifiedMeta?.answer_version_hash &&
+      replay.status === 0 &&
+      changed.status !== 0 &&
+      downgrade.status !== 0 &&
+      sealedUnchanged &&
+      !changed.stderr.includes(privateMarker)
+    ) {
+      pass('CLI seals a submitted version, permits idempotent replay, and refuses mutation/downgrade');
+    } else {
+      fail(
+        `submitted immutability broken: submit=${submitted.status} replay=${replay.status} ` +
+        `changed=${changed.status} downgrade=${downgrade.status} unchanged=${sealedUnchanged}`,
+      );
+    }
+
+    writeFileSync(reportPath, baseReport, 'utf-8');
+    const refilled = runCli(['--report', reportPath, '--input', inputPath, '--state', 'filled']);
+    const changedTransition = runCli([
+      '--report', reportPath, '--input', changedInputPath, '--state', 'submitted',
+    ]);
+    if (refilled.status === 0 && changedTransition.status !== 0) {
+      pass('CLI requires changed content to be persisted as filled before submitted transition');
+    } else {
+      fail(
+        `filled-to-submitted version gate broken: filled=${refilled.status} ` +
+        `changed-transition=${changedTransition.status}`,
+      );
+    }
+
+    const malformedMarker = 'PRIVATE_MALFORMED_ANSWER_MUST_BE_REDACTED';
+    writeFileSync(reportPath, [
+      baseReport.trimEnd(),
+      '',
+      '## Application Answers',
+      '',
+      '**Date:** 2026-08-18',
+      '**State:** filled',
+      '',
+      '### Free-text answers',
+      '',
+      `> ${malformedMarker}`,
+      '',
+      '### Selections made',
+      '',
+      '- None captured.',
+      '',
+      '### Other field values',
+      '',
+      '- None captured.',
+      '',
+      '### Files used',
+      '',
+      '- None captured.',
+      '',
+    ].join('\n'), 'utf-8');
+    const malformed = runCli(['--verify', reportPath]);
+    if (
+      malformed.status !== 0 &&
+      /1 unreadable entry/.test(malformed.stderr) &&
+      !malformed.stdout.includes(malformedMarker) &&
+      !malformed.stderr.includes(malformedMarker)
+    ) {
+      pass('CLI strict-verification errors report structure without leaking malformed answer text');
+    } else {
+      fail(
+        `CLI strict-verification redaction broken: status=${malformed.status} ` +
+        `stdout-leak=${malformed.stdout.includes(malformedMarker)} ` +
+        `stderr-leak=${malformed.stderr.includes(malformedMarker)}`,
+      );
+    }
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`application answers round-trip tests crashed: ${e.stack || e.message}`);

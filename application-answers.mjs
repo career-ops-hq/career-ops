@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -316,6 +317,64 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   return snapshot;
 }
 
+/**
+ * Derive a content-addressed version for one application-answer snapshot.
+ *
+ * The hash deliberately excludes lifecycle metadata (`date` and `state`). A
+ * filled snapshot can therefore become submitted without changing the answer
+ * version, while any answer, selection, field value, file path, or file
+ * version change produces a new version. Formatting and parsing once first
+ * makes the hash independent of the input aliases accepted by the formatter.
+ */
+export function applicationAnswersVersion(snapshot = {}) {
+  const canonical = parseApplicationAnswersSection(
+    formatApplicationAnswersSection(snapshot),
+    { strict: true },
+  );
+  const content = {
+    freeText: canonical.freeText,
+    selections: canonical.selections,
+    fieldValues: canonical.fieldValues,
+    files: canonical.files,
+  };
+  return `sha256:${createHash('sha256').update(JSON.stringify(content)).digest('hex')}`;
+}
+
+function metadataForSnapshot(report, snapshot) {
+  return {
+    report,
+    present: true,
+    date: snapshot.date,
+    state: snapshot.state,
+    answer_version_hash: applicationAnswersVersion(snapshot),
+    counts: {
+      free_text: snapshot.freeText.length,
+      selections: snapshot.selections.length,
+      field_values: snapshot.fieldValues.length,
+      files: snapshot.files.length,
+    },
+  };
+}
+
+// The library parser names unreadable lines so an interactive caller can
+// repair its own Markdown. The CLI is also used for metadata-only verification,
+// where echoing such a line could disclose an answer. Preserve the structural
+// count while keeping report content out of stdout/stderr.
+function parseApplicationAnswersForCli(reportText) {
+  try {
+    return parseApplicationAnswersSection(reportText, { strict: true });
+  } catch (err) {
+    const unreadable = /^Application Answers section has (\d+) unreadable/.exec(err.message);
+    if (unreadable) {
+      throw new Error(
+        `Application Answers section failed strict verification ` +
+        `(${unreadable[1]} unreadable ${unreadable[1] === '1' ? 'entry' : 'entries'})`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const section = formatApplicationAnswersSection(snapshot).trimEnd();
@@ -355,8 +414,10 @@ function parseArgs(argv) {
 function usage() {
   return [
     'Usage: node application-answers.mjs --report <report.md> --input <answers.json> [--state filled|submitted] [--date YYYY-MM-DD]',
+    '       node application-answers.mjs --verify <report.md>',
     '',
     'The input JSON may contain: freeText, selections, fieldValues, files, date, state.',
+    '--verify reads strictly and prints metadata only; answer values are never printed.',
   ].join('\n');
 }
 
@@ -373,6 +434,27 @@ async function main() {
     console.log(usage());
     return;
   }
+  if (args.verify) {
+    const conflicting = ['report', 'input', 'state', 'date'].filter((key) => args[key]);
+    if (conflicting.length) {
+      throw new Error(`--verify cannot be combined with: ${conflicting.map((key) => `--${key}`).join(', ')}`);
+    }
+    const reportPath = resolve(args.verify);
+    const parsed = parseApplicationAnswersForCli(readFileSync(reportPath, 'utf-8'));
+    if (!parsed) {
+      console.log(JSON.stringify({
+        report: reportPath,
+        present: false,
+        date: null,
+        state: null,
+        answer_version_hash: null,
+        counts: { free_text: 0, selections: 0, field_values: 0, files: 0 },
+      }, null, 2));
+      return;
+    }
+    console.log(JSON.stringify(metadataForSnapshot(reportPath, parsed), null, 2));
+    return;
+  }
   if (!args.report || !args.input) {
     console.error(usage());
     process.exitCode = 1;
@@ -387,11 +469,35 @@ async function main() {
     state: args.state || input.state,
   };
   const reportPath = resolve(args.report);
-  const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
+  const reportText = readFileSync(reportPath, 'utf-8');
+  const existing = parseApplicationAnswersForCli(reportText);
+  let normalized = normalizeApplicationAnswersSnapshot(snapshot);
+
+  if (existing) {
+    const existingVersion = applicationAnswersVersion(existing);
+    const nextVersion = applicationAnswersVersion(normalized);
+
+    if (existing.state === 'submitted') {
+      if (normalized.state !== 'submitted') {
+        throw new Error('Submitted application answers cannot be downgraded to filled');
+      }
+      if (nextVersion !== existingVersion) {
+        throw new Error('Submitted application answers are immutable; preserve them as history');
+      }
+      // Idempotent replay keeps the original lifecycle date as well as content.
+      normalized = normalizeApplicationAnswersSnapshot(existing);
+    } else if (normalized.state === 'submitted' && nextVersion !== existingVersion) {
+      throw new Error(
+        'Persist changed answers as filled before marking that exact answer version submitted',
+      );
+    }
+  }
+
+  const updated = upsertApplicationAnswersSection(reportText, normalized);
   writeFileSync(reportPath, updated, 'utf-8');
 
-  const normalized = normalizeApplicationAnswersSnapshot(snapshot);
-  console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));
+  const readBack = parseApplicationAnswersForCli(updated);
+  console.log(JSON.stringify(metadataForSnapshot(reportPath, readBack), null, 2));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

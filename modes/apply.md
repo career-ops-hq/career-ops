@@ -128,7 +128,7 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 1. Extract company name and role title from the page
 2. Search in `reports/` by company name (case-insensitive grep)
 3. If there is a match → load the full report
-4. If there is a Section H or `## Application Answers` → load previous answers as a base
+4. If there is a Section H or `## Application Answers` → load previous answers as a base. Before reusing an `## Application Answers` section, run `node application-answers.mjs --verify <exact-report>` and stop if strict verification fails. Reuse only the exact matched report; never search another report for answer values.
 5. If there is NO match → notify and offer to run a quick auto-pipeline
 
 ## Step 3 — Detect changes in the role
@@ -218,14 +218,17 @@ Use `application-answers.mjs` when possible to format/upsert the section:
 
 ```bash
 node application-answers.mjs --report reports/NNN-company-role-date.md --input answers.json --state filled
+node application-answers.mjs --verify reports/NNN-company-role-date.md
 ```
+
+Retain the emitted `answer_version_hash` with the local apply-session result. The immediate `--verify` readback must return the same hash and counts before the answers are treated as persisted. The hash is derived from the report content and is not a second answer store.
 
 ## Step 9 — Post-apply (optional)
 
 If the candidate confirms that they submitted the application:
 1. Update status to Applied via the canonical CLI: `node set-status.mjs <report#> Applied` (never hand-edit the table). If the candidate submitted on a different day than today, add `--on YYYY-MM-DD` with the actual submission date — the status-log ledger should record when it happened, not when it was typed in.
 2. Seed the follow-up schedule: run `node followup-seed.mjs {num} --json` (where `{num}` is the tracker row number). If the candidate applied on a different day than today, pass `--date YYYY-MM-DD` with the actual submission date. It's idempotent, so re-running is safe. (`--on` and `--date` are the same concept — the real submission date — each under its own script's flag name; pass the same value to both.)
-3. Refresh the report's `## Application Answers` section with the final field values and `**State:** submitted`
+3. Refresh the report's `## Application Answers` section with `**State:** submitted`, preserving the exact `answer_version_hash` verified in Step 8. If any answer or file changed, persist and verify the changed snapshot as `filled` first; the CLI refuses to mutate a submitted version or combine a content change with the state transition.
 4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach
 
 **Confirmed resume-verification failure at this vendor? Check the rest of the pipeline (#1870).** If the candidate confirms the ATS silently dropped or altered resume content that they had submitted (see the SuccessFactors-family quirk below), don't treat it as a one-off. Tracker rows in `data/applications.md` don't carry a canonical ATS-vendor field, so don't grep the tracker text for a vendor name — it will miss rows silently. Instead, resolve the vendor per row from its linked report's `**URL:**` field:
