@@ -15,6 +15,27 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=5 level=role role="Product Management Team Lead and Product Owner" geo="Vienna" link="https://github.com/santifer/career-ops/issues/3382" -->
+### Hire #5
+
+> I was fortunate enough to even land two (!) jobs, in a total of 36 applications: - Product Owner role, 106k, at a scale up company, just by using the cv generator, which honestly c
+
+**Product Management Team Lead and Product Owner** · Vienna · [story →](https://github.com/santifer/career-ops/issues/3382)
+
+<!-- hire n=4 level=role role="Senior DevOps Engineer" geo="remote US" link="https://github.com/santifer/career-ops/issues/3387" -->
+### Hire #4
+
+> Career-ops helped me sort through a ton of listings, helping me narrow down the list to must applies . It helped me craft cover letters, fine tune the resume for the specific job
+
+**Senior DevOps Engineer** · remote US · [story →](https://github.com/santifer/career-ops/issues/3387)
+
+<!-- hire n=3 level=role role="Head of Platform" geo="remote UK" link="https://github.com/santifer/career-ops/issues/3385" -->
+### Hire #3
+
+> ~5 months ago, I started running my job search through career-ops. Just tallied up what it's tracked end-to-end: • 🔍 1,076 job postings scanned • 🧠 326 run through the full eval
+
+**Head of Platform** · remote UK · [story →](https://github.com/santifer/career-ops/issues/3385)
+
 <!-- hire n=2 level=handle handle=amusto role="AI Solutions Technical Lead" weeks=4 link="https://github.com/santifer/career-ops/issues/3376" -->
 ### Hire #2
 
