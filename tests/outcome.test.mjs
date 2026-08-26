@@ -386,7 +386,19 @@ try {
 
     const victim = join(outsideDir, 'acme.pdf');
     writeFileSync(victim, 'IRREPLACEABLE-USER-DATA');
-    symlinkSync(outsideDir, join(symWs, 'output', 'link'));
+    // A directory SYMLINK needs SeCreateSymbolicLinkPrivilege on Windows, which a
+    // non-elevated shell lacks unless Developer Mode is on, so this call threw
+    // EPERM and took the whole suite -- all 58 checks, this safety guard among
+    // them -- down on a default Windows box. A junction needs no privilege and
+    // is what the repo already uses for the same reason (test-all.mjs's e2e
+    // fixture, generate-pdf-page-budget, contacts, plugin-symlink-discovery
+    // since #3267). It exercises the guard identically: pathIsInsideCanonical()
+    // calls realpathSync, which resolves a junction exactly as it resolves a
+    // symlink, so the escape is still detected. Verified by mutation -- with the
+    // canonicalization removed, this check goes red and the victim file is
+    // actually deleted. The target is absolute and a directory on a local
+    // volume, the two constraints junctions add. Ignored off Windows.
+    symlinkSync(outsideDir, join(symWs, 'output', 'link'), process.platform === 'win32' ? 'junction' : 'dir');
 
     const symRes = JSON.parse(execFileSync(NODE, [
       OUTCOME_SCRIPT, '1', 'rejected', '--cv', join('output', 'link', 'acme.pdf'), '--clean-output', '--json',
