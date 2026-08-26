@@ -76,8 +76,13 @@ const TITLE_LINK_RE = /<a class=["']job_link["'][^>]*title=["']([^"']*)["'][^>]*
 /** Company: the title attribute of the company-name anchor. */
 const COMPANY_RE = /<a class=["']company-name["'][^>]*title=["']([^"']*)["']/i;
 
-/** Location: the first <li> inside the .location block. */
-const LOCATION_RE = /<div class=["']location["']>[\s\S]*?<li>([^<]*)<\/li>/i;
+/**
+ * Location: the first <li> inside the .location block. The gap is bounded to
+ * the block's own content (never crossing its closing </div>) — an unbounded
+ * lazy match would, on a card whose .location renders empty, keep scanning
+ * into the sibling .time block and misread a date as a location.
+ */
+const LOCATION_RE = /<div class=["']location["'][^>]*>(?:(?!<\/div>)[\s\S])*?<li>([^<]*)<\/li>/i;
 
 /**
  * The "Cập nhật" (updated) date sits in its own <li>, sibling to "Hạn nộp"
@@ -229,7 +234,19 @@ export function parseListingPage(html) {
     const title = titleMatch ? decodeEntities(titleMatch[1]).trim() : '';
     const href = titleMatch ? titleMatch[2] : '';
     if (!title || !href) continue;
-    const url = new URL(decodeEntities(href), 'https://careerviet.vn').toString();
+
+    // A malformed href must drop just this card, not throw out of
+    // parseListingPage and fail the whole board. An absolute href resolving
+    // to another host (an ad slot or partner card reusing the same anchor
+    // class) is equally not a careerviet.vn posting — same skip.
+    let url;
+    try {
+      const resolved = new URL(decodeEntities(href), `https://${TRUSTED_HOST}`);
+      if (resolved.protocol !== 'https:' || resolved.hostname !== TRUSTED_HOST) continue;
+      url = resolved.toString();
+    } catch {
+      continue;
+    }
 
     const companyMatch = COMPANY_RE.exec(card);
     const company = companyMatch ? decodeEntities(companyMatch[1]).trim() : '';

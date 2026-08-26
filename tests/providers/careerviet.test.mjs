@@ -128,6 +128,36 @@ try {
   } else {
     fail(`url drift: ${JSON.stringify(full && full.url)}`);
   }
+
+  // A malformed href must drop just that ONE card, never throw out of
+  // parseListingPage and fail the whole page (CodeRabbit, #3378).
+  {
+    const CARD_BAD_HREF = `<div id="job-item-35C90003"><a class="job_link" title="Bad Href Job" href="http://[invalid">Bad Href Job</a></div>`;
+    let threwOnBadHref = false;
+    let parsedBadHref;
+    try {
+      parsedBadHref = parseListingPage(CARD_BAD_HREF);
+    } catch {
+      threwOnBadHref = true;
+    }
+    if (!threwOnBadHref && Array.isArray(parsedBadHref) && parsedBadHref.length === 0) {
+      pass('an unparseable href drops its card instead of throwing out of parseListingPage');
+    } else {
+      fail(`bad href handling drift: threw=${threwOnBadHref}, parsed=${JSON.stringify(parsedBadHref)}`);
+    }
+  }
+
+  // An absolute href to another host must never be emitted as a posting URL —
+  // it isn't a careerviet.vn job no matter what class the anchor carries.
+  {
+    const CARD_OFF_HOST = `<div id="job-item-35C90004"><a class="job_link" title="Off Host Job" href="https://evil.example.com/phish">Off Host Job</a></div>`;
+    const [offHostJob] = parseListingPage(CARD_OFF_HOST);
+    if (!offHostJob) {
+      pass('an off-host href is dropped, never emitted as a posting URL');
+    } else {
+      fail(`off-host href leaked through: ${JSON.stringify(offHostJob)}`);
+    }
+  }
   if (full && full.company === 'CÔNG TY CỔ PHẦN CC1 - HOLDINGS') {
     pass('company comes from the company-name anchor’s title attribute');
   } else {
@@ -158,6 +188,19 @@ try {
     pass('missing company/location/postedAt stay empty instead of leaking across cards');
   } else {
     fail(`cross-card leak: ${JSON.stringify(minimal)}`);
+  }
+
+  // An EMPTY .location block must not let the lazy gap read past its own
+  // </div> into a sibling .time block's deadline <li> (CodeRabbit, #3378).
+  {
+    const CARD_EMPTY_LOCATION = `
+<div class="job-item  " id="job-item-35C90002"><div class="figcaption"><div class="title "><h2><a class="job_link" data-id="35C90002" title="Empty Location Job" href="/vi/tim-viec-lam/empty-location-job.35C90002.html">Empty Location Job</a></h2></div><div class="caption"><div class="location"><em class="mdi mdi-map-marker"></em></div><div class="time"><ul><li><em class="fa fa-clock-o"></em> <span>Hạn nộp<!-- -->: </span><time>10-09-2026</time></li></ul></div></div></div></div>`;
+    const [job] = parseListingPage(CARD_EMPTY_LOCATION);
+    if (job && job.location === '') {
+      pass('an empty .location block yields an empty location, never a deadline date');
+    } else {
+      fail(`location leaked past its own block: ${JSON.stringify(job)}`);
+    }
   }
 
   // ── parsePostedAt(): the board's own DD-MM-YYYY format ──
@@ -217,12 +260,12 @@ try {
 
   const fetched = await careerviet.fetch({}, ctx);
   if (fetched.length === 2) {
-    pass('fetch() stops once a page contributes no new posting');
+    pass('fetch() dedups a posting repeated on the next page');
   } else {
     fail(`fetch() returned ${fetched.length}: ${JSON.stringify(fetched.map((j) => j.url))}`);
   }
   if (requested.length === 2) {
-    pass('fetch() dedups a posting repeated on the next page');
+    pass('fetch() stops once a page contributes no new posting');
   } else {
     fail(`fetch() requested ${requested.length} pages: ${JSON.stringify(requested)}`);
   }
