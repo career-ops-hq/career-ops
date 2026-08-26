@@ -219,25 +219,18 @@ const EXEMPT = new Map([
 // ratchet that outlives its job is just a permanent hole.
 const PENDING = new Set([
   'add-entry.mjs',
-  'application-answers.mjs',
-  'application-artifacts.mjs',
-  'archive-posting.mjs',
   'assessment-log.mjs',
   'check-table-freshness.mjs',
   'contacts.mjs',
-  'cv-templates.mjs',
-  'extract-latex-content.mjs',
+
   'find.mjs',
   'fix-slugs.mjs',
   'followup-cadence.mjs',
   'followup-seed.mjs',
-  'generate-cover-letter.mjs',
-  'generate-latex.mjs',
-  'img-to-pdf.mjs',
+
   'intake.mjs',
   'normalize-statuses.mjs',
   'paste-reply.mjs',
-  'patch-latex-content.mjs',
   'plugin-audit.mjs',
   'plugins.mjs',
   'reserve-report-num.mjs',
@@ -247,8 +240,8 @@ const PENDING = new Set([
   'upgrade-tests.mjs',
   'validate-plugin-registry.mjs',
   'validate-untrusted-content-coverage.mjs',
-  'verify-cv-facts.mjs',
-  ]);
+
+]);
 
 function entryRefViolations(src) {
   const hits = [];
