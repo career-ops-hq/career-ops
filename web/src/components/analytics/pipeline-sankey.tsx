@@ -34,6 +34,7 @@ export function PipelineSankey({
   const graph = buildPipelineSankey(applications, statusLog);
   const layout = layoutSankey(graph, { width: 920, height: 440, padding: { top: 24, right: 188, bottom: 24, left: 100 } });
   const toneById = new Map(layout.nodes.map((n) => [n.id, n.tone]));
+  const labelById = new Map(graph.nodes.map((n) => [n.id, n.label]));
   const firstRank = Math.min(...layout.nodes.map((n) => n.rank));
   const lastRank = Math.max(...layout.nodes.map((n) => n.rank));
 
@@ -62,9 +63,11 @@ export function PipelineSankey({
 
           {layout.links.map((link) => {
             const tone = toneById.get(link.source) ?? "neutral";
+            const sourceLabel = labelById.get(link.source) ?? link.source;
+            const targetLabel = labelById.get(link.target) ?? link.target;
             return (
-              <g key={`${link.source}-${link.target}`} tabIndex={0} aria-label={`${link.value} from ${link.source} to ${link.target}`}>
-                <title>{`${link.value} roles: ${link.source} → ${link.target}`}</title>
+              <g key={`${link.source}-${link.target}`} tabIndex={0} aria-label={`${link.value} from ${sourceLabel} to ${targetLabel}`}>
+                <title>{`${link.value} roles: ${sourceLabel} → ${targetLabel}`}</title>
                 <path d={link.d} className={cn(TONE_LINK[tone] ?? TONE_LINK.neutral, "outline-none")} />
               </g>
             );
@@ -120,8 +123,8 @@ export function PipelineSankey({
         <tbody>
           {graph.links.map((link) => (
             <tr key={`${link.source}-${link.target}`}>
-              <td>{link.source}</td>
-              <td>{link.target}</td>
+              <td>{labelById.get(link.source) ?? link.source}</td>
+              <td>{labelById.get(link.target) ?? link.target}</td>
               <td>{link.value}</td>
             </tr>
           ))}
