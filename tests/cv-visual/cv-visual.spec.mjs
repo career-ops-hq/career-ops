@@ -9,7 +9,7 @@ import { fixtures } from './fixtures.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ARTIFACTS = join(ROOT, 'test-results', 'cv-visual-artifacts');
-const BASELINES = JSON.parse(readFileSync(join(ROOT, 'test/cv-visual/baselines.json'), 'utf8'));
+const BASELINES = JSON.parse(readFileSync(join(ROOT, 'tests/cv-visual/baselines.json'), 'utf8'));
 const TEMPLATE = { name: 'standard', path: resolveTemplate('cv', 'standard') };
 
 /** Count concrete page objects in a generated PDF buffer. */
