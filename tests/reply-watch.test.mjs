@@ -21,11 +21,11 @@ function setupWorkspace() {
   return { tmp, dataDir, trackerFile };
 }
 
-function runReplyWatch(tmp, trackerFile, candidatesFile = null, autoConfirm = false) {
+function runReplyWatch(tmp, trackerFile, candidatesFile = null, input = '') {
   const args = candidatesFile ? [candidatesFile] : [];
-  if (autoConfirm) args.push('--yes');
   return spawnSync(NODE, [SCRIPT, ...args], {
     cwd: tmp,
+    input,
     encoding: 'utf-8',
     timeout: 30000,
     env: { ...process.env, CAREER_OPS_TRACKER: trackerFile }
@@ -42,7 +42,7 @@ test('status-log.tsv is created and appended on a confirmed tracker update', () 
     body_snippet: 'We would like to invite you to interview.',
   }]));
 
-  const res = runReplyWatch(tmp, trackerFile, candFile, true);
+  const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
   assert.equal(res.status, 0, res.stderr);
 
   const trackerContent = readFileSync(trackerFile, 'utf-8');
@@ -68,13 +68,13 @@ test('No status-log entry is written on a no-op re-run', () => {
   }]));
 
   // Run 1
-  runReplyWatch(tmp, trackerFile, candFile, true);
+  runReplyWatch(tmp, trackerFile, candFile, 'y\n');
   const logFile = join(dataDir, 'status-log.tsv');
   const logContent1 = readFileSync(logFile, 'utf-8').trim().split('\n');
   assert.equal(logContent1.length, 1);
 
   // Run 2
-  const res2 = runReplyWatch(tmp, trackerFile, candFile, true);
+  const res2 = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
   assert.equal(res2.status, 0);
 
   const logContent2 = readFileSync(logFile, 'utf-8').trim().split('\n');
@@ -97,7 +97,7 @@ test('Status-log append failure does not abort the tracker update', () => {
   // Make log file a directory so appendFileSync fails
   mkdirSync(logFile);
 
-  const res = runReplyWatch(tmp, trackerFile, candFile, true);
+  const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
   assert.equal(res.status, 0);
   assert.match(res.stderr || res.stdout, /failed to append to status-log\.tsv/);
 
