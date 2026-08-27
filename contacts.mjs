@@ -42,9 +42,10 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
@@ -480,6 +481,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }

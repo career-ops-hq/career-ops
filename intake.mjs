@@ -40,6 +40,7 @@ import {
 } from 'fs';
 import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = process.env.CAREER_OPS_DOCUMENTS_DIR || join(ROOT, 'documents');
@@ -405,7 +406,7 @@ function runSelfTest() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isMain = isMainModule(import.meta.url);
 
 // A function, not a bare `if (isMain)` block, so the success paths can `return`
 // instead of calling process.exit(0). `--text` writes a whole CV to stdout and

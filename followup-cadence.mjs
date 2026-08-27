@@ -13,12 +13,13 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -556,7 +557,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.
@@ -984,7 +991,7 @@ const USAGE = `Usage:
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Must run inside this guard, not at module top level: CADENCE (above) is a
   // module-level singleton built at import time, and test-all.mjs section 12
   // dynamic-imports this module in-process to read it — validating the host
