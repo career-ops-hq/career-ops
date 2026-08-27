@@ -163,8 +163,12 @@ export async function buildSvg(entries, opts = {}) {
     }
     const quote = wrapQuote(e.story ?? '');
     const avatar = e.level === 'handle' ? await avatarDataUri(e.handle, opts) : null;
-    const who = e.level === 'handle' ? `@${e.handle}` : e.role;
-    const sub = [e.level === 'handle' ? e.role : null, e.geo || null].filter(Boolean).join(' · ');
+    // Single-line rows have no wrapping: anything wider than the card was
+    // silently CLIPPED by the viewBox (hire #5's four-word role was). Ellipsize
+    // at ~the character count that fits the ~222px text run at each font size.
+    const oneLine = (s, max) => { const t = String(s ?? ''); return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t; };
+    const who = oneLine(e.level === 'handle' ? `@${e.handle}` : e.role, 33);
+    const sub = oneLine([e.level === 'handle' ? e.role : null, e.geo || null].filter(Boolean).join(' · '), 40);
     cards += `<g><rect x="${x}" y="14" width="${CW}" height="150" rx="10" fill="#161b22" stroke="#30363d"/>
 <text x="${x + 16}" y="44" fill="#DD7627" font-size="22" font-weight="800">“</text>
 ${quote.map((l, k) => `<text x="${x + 34}" y="${44 + k * 19}" fill="#e6edf3" font-size="13" font-style="italic">${esc(l)}</text>`).join('\n')}

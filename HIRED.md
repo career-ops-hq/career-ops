@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=6 level=handle handle=FReptar0 role="Software Engineer – Full Stack (payments) — México" link="https://github.com/santifer/career-ops/issues/3394" -->
+### Hire #6
+
+> I burned out on interviewing in February. Two processes: one big-name company that took me through multiple rounds before rejecting me, and another that sent a confirmation email a
+
+<a href="https://github.com/FReptar0"><img src="https://github.com/FReptar0.png?size=64" width="28" height="28" align="top" alt="@FReptar0"> **@FReptar0**</a> · Software Engineer – Full Stack (payments) — México · [story →](https://github.com/santifer/career-ops/issues/3394)
+
 <!-- hire n=5 level=role role="Product Management Team Lead and Product Owner" geo="Vienna" link="https://github.com/santifer/career-ops/issues/3382" -->
 ### Hire #5
 
