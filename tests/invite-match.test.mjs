@@ -12,26 +12,19 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { matchInvite, normalizeCompanyName, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from './invite-match.mjs';
+import { matchInvite, normalizeCompanyName, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
+import { pass, fail } from './helpers.mjs';
 
-const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'invite-match.mjs');
+console.log('\ninvite-match.mjs — interview invite matching');
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'invite-match.mjs');
+
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 const rows = [
@@ -414,8 +407,3 @@ const mistypedResult = runCli(['--sumary']);
 eq('CLI: mistyped flag (--sumary) exits non-zero (code 1)', mistypedResult.status, 1);
 eq('CLI: mistyped flag stderr names the mistyped flag', mistypedResult.stderr.includes('--sumary'), true);
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log('Failures:', failures.join(', '));
-  process.exit(1);
-}
