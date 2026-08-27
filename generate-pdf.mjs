@@ -72,8 +72,23 @@ const PDF_PAGE_MARGIN = '0.6in';
 // the variable's own value: same cost as the const while nothing changes, and
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
+function rootCacheKey() {
+  const markerPath = resolve(__dirname, '.career-ops-data');
+  let marker = '';
+  try {
+    marker = existsSync(markerPath) ? readFileSync(markerPath, 'utf8').trim() : '';
+  } catch (err) {
+    marker = `<unreadable:${/** @type {any} */ (err)?.code || 'read failed'}>`;
+  }
+  return JSON.stringify({
+    tracker: process.env.CAREER_OPS_TRACKER || '',
+    root: process.env.CAREER_OPS_ROOT || '',
+    dataDir: process.env.CAREER_OPS_DATA_DIR || '',
+    marker,
+  });
+}
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
+  const key = rootCacheKey();
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.

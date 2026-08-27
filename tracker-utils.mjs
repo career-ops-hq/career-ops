@@ -119,8 +119,9 @@ export { resolveTrackerPath } from './path-resolver.mjs';
  * @returns {string} Uncanonicalized tracker path.
  */
 function rawTrackerPath(rootDir) {
-  return process.env.CAREER_OPS_TRACKER
-    ? process.env.CAREER_OPS_TRACKER
+  const envTracker = process.env.CAREER_OPS_TRACKER?.trim();
+  return envTracker
+    ? envTracker
     : existsSync(join(rootDir, 'data/applications.md'))
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');

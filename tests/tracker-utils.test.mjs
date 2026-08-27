@@ -113,6 +113,25 @@ test('resolveWorkspaceRootFor keeps a symlinked data/ inside the repo (#3169)', 
   }
 });
 
+test('resolveWorkspaceRootFor trims CAREER_OPS_TRACKER before root derivation', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-trimmed-tracker-'));
+  const trackerDir = join(root, 'data');
+  const oldTracker = process.env.CAREER_OPS_TRACKER;
+  try {
+    mkdirSync(trackerDir, { recursive: true });
+    const tracker = join(trackerDir, 'applications.md');
+    writeFileSync(tracker, '# tracker\n');
+    process.env.CAREER_OPS_TRACKER = `  ${tracker}  `;
+
+    assert.equal(resolveTrackerPath(root), realpathSync(tracker));
+    assert.equal(resolveWorkspaceRootFor(root), realpathSync(root));
+  } finally {
+    if (oldTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
+    else process.env.CAREER_OPS_TRACKER = oldTracker;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('status input resolves through the canonical states file', () => {
   const states = loadCanonicalStates(fileURLToPath(new URL('../templates/states.yml', import.meta.url)));
   assert.equal(foldStatusInput(' **TEKLİF** '), 'teklif');
