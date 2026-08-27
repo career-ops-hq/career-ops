@@ -213,6 +213,17 @@
 # page. Currently Lever (`descriptionPlain`) supplies descriptions; jobs from
 # providers that don't always pass this filter (they're never silently dropped).
 #
+# Whole-word / stem matching (opt-in, per entry): a plain keyword is a
+# substring, so a negative "java" also rejects "JavaScript" and "ios" rejects
+# "curiosity". Prefix an entry with `word:` or `stem:` — identical semantics to
+# title_filter (see that section above for the full table):
+#   - `word:java`   whole word only — keeps "JavaScript", still blocks a Java shop
+#   - `stem:ios`    left boundary only — keeps "curiosity", still blocks "iOS"
+# A keyword that STARTS the unwanted word ("java" in "javascript") needs
+# `word:`; one that lands MID-word ("ios" in "curiosity") is closed by `stem:`
+# too. Entries without a prefix are unchanged, so existing configs behave
+# exactly as before.
+#
 # Example: keep roles that mention Rust/Go, drop legacy PHP/WordPress shops
 # content_filter:
 #   positive:
