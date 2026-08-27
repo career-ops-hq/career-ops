@@ -4,7 +4,7 @@
 // anchored the containment guard to another test's temp directory for the rest
 // of the process — the guard then refused valid repo paths, intermittently and
 // only under the full suite (occurrence 6 of #3162 named the temp dir outright).
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -69,6 +69,8 @@ try {
   else process.env.CAREER_OPS_ROOT = originalRoot;
   if (originalDataDir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
   else process.env.CAREER_OPS_DATA_DIR = originalDataDir;
+  rmSync(foreign, { recursive: true, force: true });
+  rmSync(alternate, { recursive: true, force: true });
 }
 
 if (failures) process.exitCode = 1;
