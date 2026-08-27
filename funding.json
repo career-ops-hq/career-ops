@@ -1,0 +1,119 @@
+{
+    "version": "v1.1.0",
+    "entity": {
+        "type": "individual",
+        "role": "maintainer",
+        "name": "Santiago Fernández de Valderrama",
+        "email": "hi@santifer.io",
+        "phone": "",
+        "description": "I build and maintain career-ops, the open-source job search agent that runs on the user's own machine. I spent sixteen years running a device repair business in Seville before software took over my life; I built career-ops for my own job search, then open-sourced it under MIT when I no longer needed it. Four months later it has 68,000+ stars, 329 contributors and a community of 4,600+ people. I maintain it on evenings and weekends around other work, and funding buys the project deeper focus: maintenance, security, releases, documentation and independence. The project has generated no revenue to date: adoption has grown far faster than the economic capacity required to sustain it, and the maintenance load is concentrated in one person. Every one of the project's 1,298 merged pull requests was reviewed and merged by that one person (counted 27 Aug 2026).",
+        "webpageUrl": {
+            "url": "https://santifer.io",
+            "wellKnown": "https://santifer.io/.well-known/funding-manifest-urls"
+        }
+    },
+    "projects": [
+        {
+            "guid": "career-ops",
+            "name": "career-ops",
+            "description": "Open-source AI job search agent: scans job portals, evaluates listings into a structured report with a human-in-the-loop scoring rubric, tailors CVs and tracks applications. Runs locally in the user's AI coding CLI with their own API key; no server ever touches their data. Permanently free and MIT-licensed by design: everything runs locally, so there is nothing to paywall. 68,000+ GitHub stars, 13,000+ forks, 329 contributors with 1,298 merged pull requests, and 4,600+ community members; ~11,500 npm installs per month, every month since the npm package launched in June 2026; new contributors joined at 19, 77, 97 and 101 per month from May through August (all counted 27 Aug 2026). In a domain dominated by proprietary, server-side products, career-ops is the open alternative: anyone can run, audit or self-host it, and the user's data never leaves their machine.",
+            "webpageUrl": {
+                "url": "https://career-ops.org",
+                "wellKnown": "https://career-ops.org/.well-known/funding-manifest-urls"
+            },
+            "repositoryUrl": {
+                "url": "https://github.com/santifer/career-ops"
+            },
+            "licenses": [
+                "spdx:MIT"
+            ],
+            "tags": [
+                "ai-agents",
+                "job-search",
+                "career",
+                "automation",
+                "cli",
+                "privacy"
+            ]
+        }
+    ],
+    "funding": {
+        "channels": [
+            {
+                "guid": "github-sponsors",
+                "type": "payment-provider",
+                "address": "https://github.com/sponsors/santifer",
+                "description": "GitHub Sponsors profile dedicated to career-ops. Nine identical monthly tiers ($1 to $1,000) plus one-time options: every tier carries the same description on purpose, because no amount of money influences the project's direction. Zero platform fees; 100% reaches the maintainer."
+            },
+            {
+                "guid": "corporate-direct",
+                "type": "other",
+                "address": "sponsors@career-ops.org",
+                "description": "Direct channel for corporate logo sponsorship: handled with a contract, UTM tracking from day one and a real monthly traffic report. Sponsorship buys clearly-labeled visibility, never influence: no amount of money changes the roadmap or places anything in the product."
+            }
+        ],
+        "plans": [
+            {
+                "guid": "maintainer-half-year",
+                "status": "active",
+                "name": "Six months of sustained maintenance",
+                "description": "Funds six months of dedicated maintainer time (maintenance, security reviews, releases, documentation and community support) plus the project's infrastructure: CI, domains and hosting for public endpoints. career-ops reached 68,000+ stars and 329 contributors maintained on evenings and weekends; this closes the gap between adoption and the capacity required to sustain it.",
+                "amount": 50000,
+                "currency": "USD",
+                "frequency": "one-time",
+                "channels": [
+                    "corporate-direct"
+                ]
+            },
+            {
+                "guid": "maintainer-quarter",
+                "status": "active",
+                "name": "One quarter of focused maintainer time",
+                "description": "Funds three months of dedicated maintainer time plus the project's infrastructure (CI, domains, hosting for public endpoints).",
+                "amount": 25000,
+                "currency": "USD",
+                "frequency": "one-time",
+                "channels": [
+                    "corporate-direct"
+                ]
+            },
+            {
+                "guid": "community-monthly",
+                "status": "active",
+                "name": "Community sponsorship (monthly)",
+                "description": "Any monthly tier from $1 to $1,000, all identical by design. Funds maintainer time: maintenance, security, releases, documentation and keeping the project independent.",
+                "amount": 0,
+                "currency": "USD",
+                "frequency": "monthly",
+                "channels": [
+                    "github-sponsors"
+                ]
+            },
+            {
+                "guid": "community-one-time",
+                "status": "active",
+                "name": "Community sponsorship (one time)",
+                "description": "One-time contributions ($10, $50 or custom) for backers who prefer not to subscribe, or whose cards fail on recurring payments.",
+                "amount": 0,
+                "currency": "USD",
+                "frequency": "one-time",
+                "channels": [
+                    "github-sponsors"
+                ]
+            },
+            {
+                "guid": "corporate-logo",
+                "status": "active",
+                "name": "Corporate logo sponsorship",
+                "description": "Clearly-labeled logo placement for companies, negotiated directly with a contract, UTM tracking and a monthly report of real, measured numbers. Media kit available on request at sponsors@career-ops.org. Visibility only: sponsorship never buys influence over the roadmap.",
+                "amount": 0,
+                "currency": "USD",
+                "frequency": "monthly",
+                "channels": [
+                    "corporate-direct"
+                ]
+            }
+        ],
+        "history": []
+    }
+}
