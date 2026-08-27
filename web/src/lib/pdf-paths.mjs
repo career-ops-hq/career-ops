@@ -21,7 +21,8 @@ export function slugify(s) {
 
 /**
  * @typedef {Object} PdfPaths
- * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
+ * @property {string} payload - Where the backend writes the parsed JSON payload.
+ * @property {string} html - Where build-cv-html.mjs writes the tailored HTML.
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
  */
 
@@ -81,6 +82,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   return {
     ok: true,
     paths: {
+      payload: path.join(scratchDir, `cv-web-${input}.payload.json`),
       html: path.join(scratchDir, `cv-web-${input}.html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },

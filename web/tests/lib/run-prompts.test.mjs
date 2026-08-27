@@ -50,16 +50,22 @@ test("buildPrompt: the pdf prompt never tells the agent to save a file", () => {
   assert.ok(!/\.meta\.json/.test(prompt), "pdf prompt must not name the sidecar path");
 });
 
-test("buildPrompt: the pdf prompt offers both page formats", () => {
-  // Given the marker example once interpolated the parser's FALLBACK, which made
-  // the prompt read "choose letter for a US/Canada company, otherwise letter" —
-  // biasing every CV to one size. The tailoring rule and the fallback are separate.
+test("buildPrompt: the JSON payload offers both page formats", () => {
   const prompt = buildPrompt({ kind: "pdf", ...ARGS });
 
   // Then both spellings are shown, and the rule distinguishes them
-  assert.match(prompt, /format="a4"/);
-  assert.match(prompt, /format="letter"/);
-  assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
+  assert.match(prompt, /page_format to "letter"/);
+  assert.match(prompt, /"a4" otherwise/);
+  assert.match(prompt, /"letter" for a US\/Canada company and "a4" otherwise/i);
+});
+
+test("buildPrompt: the agent emits payload data, never agent-authored HTML", () => {
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS });
+  assert.match(prompt, /complete structured JSON payload/i);
+  assert.match(prompt, /Do not produce HTML/i);
+  assert.match(prompt, /never .*Markdown fences/i);
+  assert.ok(!prompt.includes("cv-template.html"));
+  assert.ok(!prompt.includes("<!DOCTYPE html>"));
 });
 
 test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => {

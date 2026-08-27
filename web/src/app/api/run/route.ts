@@ -10,7 +10,7 @@ import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsFo
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
-import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { renderAndMarkPdf, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
@@ -42,12 +42,16 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
-  const required = needsScript[kind];
-  if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
+  const needsScripts: Record<string, string[]> = {
+    evaluate: ["modes/oferta.md"],
+    "fix-portal": ["verify-portals.mjs"],
+    pdf: ["build-cv-html.mjs", "generate-pdf.mjs"],
+  };
+  const missing = (needsScripts[kind] ?? []).find((required) => !fs.existsSync(path.join(careerOpsRoot(), required)));
+  if (missing) {
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        error: `This needs a complete career-ops checkout (${missing}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
@@ -77,8 +81,8 @@ export async function POST(req: Request) {
 
   // Precompute deterministic scratch + final paths so the agent never chooses
   // its own filenames — the backend owns naming, writing (#2185) and rendering
-  // (#2172). Nothing is cleared first: writeCvHtml rewrites the HTML
-  // from this run's freshly parsed envelope before any render, and the agent is
+  // (#2172). renderAndMarkPdf writes the parsed payload and has build-cv-html.mjs
+  // write fresh HTML before every render, and the agent is
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
   if (kind === "pdf") {
@@ -151,9 +155,9 @@ export async function POST(req: Request) {
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
-  // are the CV now (#2185) — the agent's HTML flows through cvFilter to
-  // writeCvHtml and on to the renderer — and no structural check would catch it,
-  // because the envelope markers and </html> are ASCII and still match. Setting
+  // are the CV now (#2185) — the agent's JSON flows through cvFilter to the
+  // deterministic builder and on to the renderer — and no structural check would
+  // catch the corrupted string. Setting
   // the encoding makes Node hold partial sequences across chunks.
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -238,7 +242,7 @@ export async function POST(req: Request) {
       };
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole
-      // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
+      // <<cv-payload>> envelope (cvFilter swallows every byte). Measured
       // idle gaps on a real pdf run reached 149s — long enough for the browser or
       // a proxy to drop the connection, after which the client reports
       // "Connection error" even though the agent finished and the PDF rendered.
@@ -255,12 +259,12 @@ export async function POST(req: Request) {
           try { controller.close(); } catch { /* */ }
         }
       };
-      // pdf's CV arrives inline in a <<cv-html>> envelope instead of being written
+      // pdf's CV arrives inline in a <<cv-payload>> envelope instead of being written
       // by the agent (#2185). The filter keeps every byte for the backend while
-      // holding the 15-25 KB body out of the run log, which is the agent's
+      // holding the payload body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
-      // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
+      // While the agent emits the <<cv-payload>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
       // tell that from a hung request, and the browser/proxy drops the connection;
@@ -276,13 +280,6 @@ export async function POST(req: Request) {
       const sendWarnings = (warnings: string[]) => {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
-      /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
-        if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
-        return written.ok;
-      };
-
       // One dispatch for every structured CLI: the per-CLI knowledge (which event
       // means text/tool/status/usage) lives in run-cli-support.mjs behind
       // spec.parseEvent, so adding the next such CLI needs no change here.
@@ -295,8 +292,8 @@ export async function POST(req: Request) {
         if (ev?.text) {
           emittedText = true;
           // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a
-          // <<cv-html>> envelope, so parsed text has to reach cvFilter too or the
-          // backend has nothing to save and the 25 KB body floods the run log (#2185).
+          // <<cv-payload>> envelope, so parsed text has to reach cvFilter too or the
+          // backend has nothing to build and the body floods the run log (#2185).
           sendAgentText(ev.text);
         }
         if (ev?.tool) send({ type: "tool", name: ev.tool });
@@ -350,7 +347,7 @@ export async function POST(req: Request) {
       // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
       // successful render, not optimistically — same honesty-gate discipline as
       // the evaluate path below.
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
+      const renderPdf = async (paths: PdfPaths, envelope: CvEnvelope) => {
         send({ type: "status", label: "Rendering PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise (cancel()
@@ -363,10 +360,11 @@ export async function POST(req: Request) {
             execPath: process.execPath,
             root: careerOpsRoot(),
             pdfPaths: paths,
-            format,
+            payload: envelope.payload,
+            format: envelope.format,
             reportNum: input,
           });
-          if (result.kind === "render-failed") {
+          if (result.kind !== "rendered") {
             send({ type: "error", msg: result.error.slice(0, 200) });
             return;
           }
@@ -450,13 +448,10 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
-              return;
-            }
-            // saveCv already streamed the specific reason.
+            // Tracked so cancel() can defer releasing writeToken until this
+            // settles; close() happens once rendering finishes, not here.
+            pdfRenderPromise = renderPdf(pdfPaths, envelope);
+            return;
           }
           return close();
         }
