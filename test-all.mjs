@@ -6598,14 +6598,22 @@ console.log('\n12c. Materialized skill index mode');
     writeFileSync(join(canonicalDir, 'SKILL.md'), '---\nname: career-ops\n---\n');
 
     let staged = '';
+    // Keep the git failure: an unrelated breakage here (git missing from PATH,
+    // a corrupt fixture index) leaves `staged` empty and is then reported as
+    // "the runtime config layer is unpinned", which sends the reader to
+    // GIT_CONFIG_* pinning for a problem that has nothing to do with it. The
+    // assertion below is still the verdict; this only says why it failed.
+    let stagingError = '';
     try {
       gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
       staged = gitRun(['ls-files', '--', '.agents/skills/career-ops/SKILL.md']);
-    } catch {
-      // Left empty: the assertion below is the report.
+    } catch (e) {
+      stagingError = e.message;
     }
     if (staged) {
       pass('injected GIT_CONFIG_* core.excludesFile cannot reach the skill fixture (#2567)');
+    } else if (stagingError) {
+      fail(`injected GIT_CONFIG_* isolation check could not stage the fixture: ${stagingError}`);
     } else {
       fail('injected GIT_CONFIG_* core.excludesFile reached the fixture - the runtime config layer is unpinned (#2567)');
     }
