@@ -196,9 +196,12 @@ export function parseStatusLogStages(content) {
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
     if (!line.trim()) continue;
     const c = line.split('\t');
-    const num = parseInt(c[0], 10);
-    if (Number.isNaN(num)) continue;
-    out.push({ num, from: (c[2] || '').trim(), to: (c[3] || '').trim() });
+    const rawNum = String(c[0] || '').trim();
+    const date = String(c[1] || '').trim();
+    const from = String(c[2] || '').trim();
+    const to = String(c[3] || '').trim();
+    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
+    out.push({ num: Number(rawNum), from, to });
   }
   return out;
 }
