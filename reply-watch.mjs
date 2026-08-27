@@ -28,7 +28,12 @@ const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.j
 const APPS_FILE = resolveTrackerPath(__dirname);
 const FOLLOWUPS_FILE = path.join(__dirname, 'data', 'follow-ups.md');
 
-// Helper to ask a question in the CLI
+/**
+ * Ask one interactive CLI question and resolve with the user's raw answer.
+ *
+ * @param {string} query Prompt text to print before reading stdin.
+ * @returns {Promise<string>} User-entered answer without the trailing newline.
+ */
 function askQuestion(query) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -40,7 +45,13 @@ function askQuestion(query) {
   }));
 }
 
-// Generate custom signal description based on keywords
+/**
+ * Build a compact human-readable signal label from reply text and metadata.
+ *
+ * @param {string} text Subject/body text used for keyword hints.
+ * @param {string|null|undefined} signal Classifier-provided fallback signal.
+ * @returns {string} Display label for the review digest.
+ */
 function getSignalDesc(text, signal) {
   const parts = [];
   if (text.includes('简历通过')) {
@@ -55,7 +66,12 @@ function getSignalDesc(text, signal) {
   return signal || 'none';
 }
 
-// Create a default set of mock candidates if the file doesn't exist
+/**
+ * Create the default fixture candidate file when no input file exists yet.
+ *
+ * @param {string} filePath Destination JSON file for mock candidates.
+ * @returns {void}
+ */
 function ensureCandidatesFile(filePath) {
   if (fs.existsSync(filePath)) return;
 
@@ -95,7 +111,11 @@ function ensureCandidatesFile(filePath) {
   console.log(`Created default mock candidates file at ${filePath}`);
 }
 
-// Load applications tracker rows
+/**
+ * Load application tracker rows from the canonical tracker markdown file.
+ *
+ * @returns {Array<object>} Parsed tracker application rows.
+ */
 function loadTrackerApps() {
   if (!fs.existsSync(APPS_FILE)) {
     return [];
@@ -113,7 +133,11 @@ function loadTrackerApps() {
   return apps;
 }
 
-// Load followups history
+/**
+ * Load follow-up history rows used to match replies to applications.
+ *
+ * @returns {Array<object>} Parsed follow-up rows.
+ */
 function loadFollowups() {
   if (!fs.existsSync(FOLLOWUPS_FILE)) {
     return [];
@@ -142,9 +166,12 @@ function loadFollowups() {
   return followups;
 }
 
-// Apply an approved batch in one locked read/modify/write transaction. Reading
-// after lock acquisition matters because the review prompt can remain open
-// while another process merges or updates tracker rows.
+/**
+ * Collapse multiple reply recommendations into one transition per application.
+ *
+ * @param {Array<object>} recommendations Candidate status recommendations.
+ * @returns {{updates: Array<object>, conflicts: Array<object>}} Safe updates and manual-review conflicts.
+ */
 function groupStatusRecommendations(recommendations) {
   const byApplication = new Map();
   for (const recommendation of recommendations) {
@@ -169,6 +196,16 @@ function groupStatusRecommendations(recommendations) {
   return { updates, conflicts };
 }
 
+/**
+ * Apply an approved batch in one locked read/modify/write transaction.
+ *
+ * Reading after lock acquisition matters because the review prompt can remain
+ * open while another process merges or updates tracker rows.
+ *
+ * @param {Array<object>} updates Approved status updates to apply.
+ * @param {Function|null} onApplied Optional callback for successfully changed rows.
+ * @returns {Promise<object>} Applied/no-op/conflict/missing row sets.
+ */
 async function updateTrackerStatuses(updates, onApplied = null) {
   const trackerTransaction = await openTrackerTransaction(APPS_FILE);
 
