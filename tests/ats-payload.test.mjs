@@ -217,6 +217,44 @@ test('a JSON array is refused — a payload is an object', () => {
   }
 });
 
+test('a string skills field is refused rather than silently discarded (PR #3422)', () => {
+  // The regression this guards: `skills` was normalized to [] before the fold,
+  // so "Python" vanished and stdout carried a well-formed-looking payload with
+  // the skills gone — data loss disguised as a clean result.
+  const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS'], skills: 'Python' }) });
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.stdout, '', 'a refused payload must not reach stdout');
+  assert.match(r.stderr, /unusable payload shape/);
+  assert.match(r.stderr, /`skills` must be an array/);
+});
+
+test('a non-array experience is refused rather than reported as clean', () => {
+  // Otherwise the lints iterate [] and print "No lint findings", which reads
+  // exactly like a genuinely clean payload.
+  const r = run(['-'], { input: JSON.stringify({ experience: { company: 'Acme' } }) });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /`experience` must be an array/);
+});
+
+test('a valid array skills field is preserved through the fold', () => {
+  const r = run(['-'], {
+    input: JSON.stringify({ competencies: ['AWS'], skills: [{ category: 'Languages', items: 'Python' }] }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skills, [
+    { category: 'Core Competencies', items: 'AWS' },
+    { category: 'Languages', items: 'Python' },
+  ]);
+});
+
+test('an absent skills field is still fine', () => {
+  const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS'] }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).skills, [{ category: 'Core Competencies', items: 'AWS' }]);
+});
+
 test('a second positional argument is refused rather than ignored', () => {
   withFixture(DIRTY_PAYLOAD, (file) => {
     const r = run([file, 'extra.json']);

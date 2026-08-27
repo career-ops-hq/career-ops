@@ -1015,6 +1015,22 @@ Findings are **advisory**: the transform still succeeds and the payload on stdou
 is still usable, so the script exits 0 with findings present. Exit 1 is reserved
 for an unreadable or malformed input.
 
+### Input validation
+
+The three fields the script reads are shape-checked at the CLI boundary, and a
+payload that would make the run quietly wrong is **refused, not accommodated** —
+nothing reaches stdout, so a shell redirect cannot capture a half-right artifact.
+
+- `skills` present and not an array — folding into it would discard the value you
+  supplied and hand back a well-formed-looking payload with the skills gone.
+- `experience` present and not an array — the lints would report nothing, which
+  prints as "No lint findings" and reads exactly like a clean payload.
+- `competencies` present and neither an array nor a comma-separated string.
+
+Refusing rather than coercing is deliberate: there is no honest place to put a
+string `skills` value inside `skills[]`, and inventing the structure to hold it
+is the same authoring the lints exist to avoid.
+
 Self-test: `node ats-payload.mjs --self-test`.
 
 ---

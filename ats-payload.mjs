@@ -100,6 +100,64 @@ function categoryKey(name) {
     .toLowerCase();
 }
 
+// ── Payload shape validation ────────────────────────────────────────────────
+
+/**
+ * Check the three fields this script reads, and refuse a payload whose shape
+ * would make the run quietly wrong (CodeRabbit, PR #3422).
+ *
+ * Both failures this catches are silent, and silence is what makes them worse
+ * than a crash:
+ *
+ *   `skills` non-array — `foldCompetencies()` starts from `[]`, so a payload
+ *   carrying `"skills": "Python, Go"` has that value DISCARDED and is handed
+ *   back a well-formed-looking artifact with the skills gone. A transform whose
+ *   entire claim is "pure data movement, nothing invented, fully reversible"
+ *   must not be the thing that loses data, and it must not lose it into output
+ *   that looks correct.
+ *
+ *   `experience` non-array — `lintPayload()` iterates `[]` and reports nothing,
+ *   which prints as "✅ No lint findings" and reads exactly like a clean
+ *   payload. That is the same shape `jd-skill-gap.mjs` added diagnoseExtraction()
+ *   for: an empty result is indistinguishable from a clean bill of health, and
+ *   the caller acts on the wrong one.
+ *
+ * Refusing rather than coercing is the point. There is no honest place to put a
+ * string `skills` value inside `skills[]`, and inventing the structure to hold
+ * it is exactly the authoring this script refuses to do everywhere else — so
+ * the malformed payload is the user's to fix, loudly, before anything is
+ * written.
+ *
+ * A `competencies` STRING is accepted rather than refused: `toItemList()` splits
+ * it on commas, mirroring the string-or-array `items` the builder's `joinItems()`
+ * already takes for a skills category. Absent and `null` both mean "not
+ * supplied" and are always fine.
+ *
+ * @param {object} payload - Parsed CV payload.
+ * @returns {string[]} One message per problem; empty when the shape is usable.
+ */
+export function validatePayloadShape(payload) {
+  const errors = [];
+  const shapeOf = (v) => (Array.isArray(v) ? 'array' : typeof v);
+  const present = (v) => v !== undefined && v !== null;
+
+  if (present(payload.skills) && !Array.isArray(payload.skills)) {
+    errors.push(`\`skills\` must be an array of {category, items} objects, got ${shapeOf(payload.skills)}. `
+      + 'Folding into it would silently discard the value you supplied.');
+  }
+  if (present(payload.competencies)
+      && !Array.isArray(payload.competencies)
+      && typeof payload.competencies !== 'string') {
+    errors.push(`\`competencies\` must be an array of strings (a comma-separated string is also accepted), `
+      + `got ${shapeOf(payload.competencies)}.`);
+  }
+  if (present(payload.experience) && !Array.isArray(payload.experience)) {
+    errors.push(`\`experience\` must be an array of entries, got ${shapeOf(payload.experience)}. `
+      + 'The lints would report nothing, which is indistinguishable from a clean payload.');
+  }
+  return errors;
+}
+
 // ── The transform: fold competencies[] into skills[] ─────────────────────────
 
 /**
@@ -116,6 +174,10 @@ function categoryKey(name) {
  *      UNIONed in place (order preserved, exact duplicates dropped) instead of a
  *      second category being prepended — the case where a payload was re-edited
  *      with some competencies re-added after a first fold.
+ *
+ * Callers are expected to have run `validatePayloadShape()` first: this function
+ * normalizes a non-array `skills` to `[]`, which DISCARDS it. The CLI validates
+ * at its boundary so that path is unreachable there.
  *
  * @param {object} payload - Parsed CV payload. Never mutated.
  * @returns {{payload: object, transform: object}} New payload + what was done.
@@ -421,6 +483,29 @@ function runSelfTest() {
   eq('a payload with no skills key still gets the folded category',
     foldCompetencies({ competencies: ['A'] }).payload.skills.length, 1);
 
+  // ── Shape validation (PR #3422) ──
+  // The exact input CodeRabbit asked to have covered: a present-but-non-array
+  // `skills` alongside competencies to fold. Before the guard this silently
+  // discarded "Python" and returned a clean-looking payload.
+  eq('a string skills field is refused, naming the field',
+    validatePayloadShape({ competencies: ['AWS'], skills: 'Python' }).length, 1);
+  eq('the skills error says the value would be discarded',
+    /skills.*discard/is.test(validatePayloadShape({ competencies: ['AWS'], skills: 'Python' })[0]), true);
+  eq('a non-array experience is refused',
+    validatePayloadShape({ experience: { company: 'Acme' } }).length, 1);
+  eq('an object competencies field is refused',
+    validatePayloadShape({ competencies: { a: 1 } }).length, 1);
+
+  eq('a valid payload passes validation',
+    validatePayloadShape({ competencies: ['AWS'], skills: [{ category: 'L', items: 'Go' }], experience: [] }), []);
+  eq('absent fields pass validation', validatePayloadShape({}), []);
+  eq('null fields mean "not supplied" and pass validation',
+    validatePayloadShape({ skills: null, competencies: null, experience: null }), []);
+  eq('a comma-separated competencies string is accepted, not refused',
+    validatePayloadShape({ competencies: 'AWS, GCP' }), []);
+  eq('and that string still folds into a category',
+    foldCompetencies({ competencies: 'AWS, GCP' }).payload.skills[0].items, 'AWS, GCP');
+
   // ── The lints ──
   const codes = (p) => lintPayload(p).map((f) => f.code);
 
@@ -547,6 +632,16 @@ if (isMainModule(import.meta.url)) {
     }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       console.error(`Error: ${source === '-' ? 'stdin' : source} is not a CV payload object`);
+      process.exit(1);
+    }
+
+    // Before anything is transformed or reported: a payload whose shape would
+    // make the run quietly wrong is refused, not accommodated. Nothing reaches
+    // stdout, so a shell redirect cannot capture a half-right artifact.
+    const shapeErrors = validatePayloadShape(payload);
+    if (shapeErrors.length > 0) {
+      console.error(`Error: ${source === '-' ? 'stdin' : source} has an unusable payload shape:`);
+      for (const message of shapeErrors) console.error(`  - ${message}`);
       process.exit(1);
     }
 
