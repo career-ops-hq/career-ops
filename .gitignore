@@ -7,6 +7,7 @@ data/salary-observations.tsv
 data/pipeline.md
 data/scan-history.tsv
 data/scan-runs.tsv
+data/portal-health.tsv
 data/pdf-index.tsv
 data/agent-inbox.md
 data/reply-candidates.json
@@ -80,6 +81,7 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
+.worktrees/
 node_modules/
 bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
