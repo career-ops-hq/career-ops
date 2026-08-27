@@ -60,6 +60,20 @@ Then open your AI CLI in the folder — the same first-run onboarding applies. U
 
 </details>
 
+### Contributing for the first time
+
+If you want to contribute to career-ops, start with a small, focused change. Bug fixes, documentation, translations, and new zero-auth scanner providers can go straight to a pull request; new features, modes, commands, or architecture changes should start with an issue first.
+
+The basic workflow is:
+
+1. Fork the repository and create a branch from `main`.
+2. Make one focused change and keep personal data such as `cv.md`, `profile.yml`, applications, and reports out of the commit.
+3. Run the relevant checks; for a broad validation, use `node test-all.mjs --quick`.
+4. Commit and push your branch to your fork.
+5. Open a pull request against `santifer/career-ops` and explain what changed and why.
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full contribution guidelines and examples of good first contributions.
+
 ### PDF rendering (one-time)
 
 PDFs are rendered with a headless Chromium. Install it once per machine:

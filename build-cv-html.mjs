@@ -57,6 +57,7 @@ const DEFAULT_SECTION_TITLES = {
   education: 'Education',
   certifications: 'Certifications',
   awards: 'Awards & Honors',
+  interests: 'Interests',
   skills: 'Skills',
 };
 
@@ -205,7 +206,10 @@ function joinItems(items) {
 function parsePartial(source) {
   // Step 1: locate the ENTRY zone.
   const entryZoneMatch = /<!--ENTRY-->([\s\S]*?)<!--\/ENTRY-->/.exec(source);
-  const entryZone = entryZoneMatch ? entryZoneMatch[1] : source;
+  if (!entryZoneMatch) {
+    throw new Error('Malformed partial: missing <!--ENTRY-->...<!--/ENTRY--> tags');
+  }
+  const entryZone = entryZoneMatch[1];
 
   // Step 2: extract named conditional-block definitions from the entry zone.
   const blockRe = /<!--([A-Z][A-Z0-9_]+)-->([\s\S]*?)<!--\/\1-->/g;
@@ -278,8 +282,11 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
     for (const [name, { value, present }] of blockValues) {
       const block = blocks.get(name);
       if (!block) continue;
-      const markup = present ? block.present.replace(`{{${name}}}`, () => value) : block.absent;
-      out = out.replace(`{{${name}}}`, () => markup);
+      const scalarKey = name.endsWith('_BLOCK') ? name.slice(0, -6) : name;
+      const markup = present 
+        ? block.present.replace(new RegExp(`\\{\\{(${name}|${scalarKey})\\}\\}`, 'g'), () => value) 
+        : block.absent;
+      out = out.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), () => markup);
     }
   }
 
@@ -542,6 +549,20 @@ function buildAwards(entries, partial) {
   }).join('\n    ');
 }
 
+// Interests renders as one comma-joined, sentence-cased line rather than a
+// repeating table like certifications/awards, so a partial's entryTemplate
+// (built for one row per entry) doesn't fit — html-only, no partial support,
+// same tradeoff certifications/competencies make for having no LaTeX marker.
+function buildInterests(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return items
+    .filter(Boolean)
+    .map(String)
+    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .map(item => escapeHtml(item))
+    .join(', ');
+}
+
 function buildSkills(categories, partial) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   if (!partial) {
@@ -564,7 +585,7 @@ function buildSkills(categories, partial) {
       ITEMS_TEXT:  escapeHtml(joinItems(c.items)),
     }, blockValues);
   }).join('\n');
-  return items;
+  return `<div class="skills-grid">\n${items}\n  </div>`;
 }
 
 // Rebuild the whole .contact-row block. Its markup uses fixed "|" separators
@@ -632,6 +653,8 @@ function renderReport(payload, partials) {
     CERTIFICATIONS: buildCertifications(payload.certifications, partials.get('certifications')),
     SECTION_AWARDS: escapeHtml(sectionTitles.awards),
     AWARDS: buildAwards(payload.awards, partials.get('awards')),
+    SECTION_INTERESTS: escapeHtml(sectionTitles.interests),
+    INTERESTS: buildInterests(payload.interests),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
   };
@@ -814,6 +837,7 @@ async function runSelfTest() {
       { category: 'Languages', items: 'Python, JavaScript, TypeScript' },
       { category: 'Frameworks', items: ['FastAPI', 'React', 'PyTorch'] },
     ],
+    interests: ['Reading sci-fi & fantasy', 'Hiking', 'Chess'],
   };
 
   if (!existsSync(TEMPLATE_PATH)) {
@@ -839,6 +863,13 @@ async function runSelfTest() {
   }
   if (/Kubernetes & Docker/.test(html)) {
     console.error('Self-test failed: found an unescaped ampersand in output');
+    process.exit(1);
+  }
+
+  // Guard buildInterests(): comma-joined, sentence-cased (only the first item
+  // keeps its capital), and escaped like every other free-text field.
+  if (!html.includes('Reading sci-fi &amp; fantasy, hiking, chess')) {
+    console.error('Self-test failed: Interests did not render as an escaped, comma-joined, sentence-cased line');
     process.exit(1);
   }
 
@@ -905,6 +936,10 @@ async function runSelfTest() {
     console.error('Self-test failed: awards section is missing .award-item class');
     process.exit(1);
   }
+  if (!html.includes('class="skills-grid"')) {
+    console.error('Self-test failed: skills section is missing .skills-grid wrapper');
+    process.exit(1);
+  }
 
   // Guard that partials-based rendering produces the correct field values.
   if (!html.includes('Test Corp') || !html.includes('Test Engineer')) {
@@ -952,7 +987,8 @@ async function runSelfTest() {
     process.exit(1);
   }
   // The partial should emit an empty <span class="cert-org"> for alignment.
-  if (!certHtml.includes('class="cert-org"')) {
+  const orgCount = (certHtml.match(/class="cert-org"/g) || []).length;
+  if (orgCount !== 2) {
     console.error('Self-test failed: cert-org empty-block not emitted for table alignment');
     process.exit(1);
   }

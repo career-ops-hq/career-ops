@@ -22,10 +22,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
+import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -151,6 +153,34 @@ test('check-table-freshness --today still overrides, and reports the date it use
   assert.ok(r.stdout.includes('2026-08-18'), `--today was not honoured: ${r.stdout.slice(0, 200)}`);
 });
 
+// ── The other side of the comparison: who WRITES first_seen ────────────────
+//
+// Everything above pins READERS. But shouldDedupScanHistoryRow measures the
+// recheck window as `daysBetweenIsoDates(firstSeen, today)`, and firstSeen is
+// whatever a scanner stamped into scan-history.tsv. Moving only the reader to
+// the local day did not make that comparison correct — it put the two sides on
+// different clocks, and left one file carrying rows written on both.
+//
+// The invariant is already established for the dashboard's spawned scan child
+// (web/tests/lib/pipeline-local-today.test.mjs asserts `const date =
+// localToday();` reaches appendToScanHistory there). This is the same assertion
+// for the engine-side scanners, which were never covered.
+//
+// Source-level on purpose: the value is a local const inside a scanner's main(),
+// reachable only by running a real scan. What can be checked cheaply is that no
+// call site hands the writer a UTC-derived day — which is the whole defect.
+test('each scanner that writes scan-history imports localToday', () => {
+  // The check above is satisfied by deleting the date argument entirely. This
+  // asserts the replacement is actually present.
+  for (const file of ['scan.mjs', 'scan-ats-full.mjs', 'scan-hn.mjs', 'scan-interamt.mjs']) {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    assert.match(
+      src, /import\s*{[^}]*\blocalToday\b[^}]*}\s*from\s*['"][^'"]*local-today\.mjs['"]/,
+      `${file} writes scan-history.tsv but does not import localToday`,
+    );
+  }
+});
+
 
 // ── Reporting windows: which day it is decides which WEEK, and which
 //    threshold has elapsed ──────────────────────────────────────────────
@@ -248,4 +278,366 @@ test('rejection-latency still flags once the local window HAS elapsed', () => {
   assert.equal(flags[0][0], 32, 'elapsed days counted from the local day');
   assert.ok(flags[0][1].includes(`| ${NY_DAY} |`),
     `the blacklist suggestion is dated with the UTC day: ${flags[0][1]}`);
+});
+
+
+// ── scan-history writers: four scanners, one file, one calendar ───────
+//
+// REPLACES the call-site guard added with the fix in cc241ea (#3070), which
+// this subsumes. That one listed four files and looked for `toISOString` in a
+// call's arguments or in a `const date =` assignment — a denylist over a fixed
+// list. Measured against five reintroduction shapes it caught the first:
+//
+//   inline new Date().toISOString() in the call        CAUGHT
+//   the same day via a differently-named variable      missed
+//   a UTC day built without toISOString (getUTC*)      missed
+//   localToday(<pinned instant>) instead of localToday()  missed
+//   a fifth writer in a subdirectory                   missed
+//
+// So this asks the opposite question — not "does the argument look wrong" but
+// "is the argument localToday()" — over writers discovered by walking the tree.
+// The import check below is cc241ea's and is kept as it was.
+//
+// data/scan-history.tsv is appended to by FOUR scripts through the same
+// exported helper — scan.mjs, scan-ats-full.mjs, scan-hn.mjs and
+// scan-interamt.mjs. #3070 moved scan.mjs to the local day and left the other
+// three on the UTC day, so a single evening west of Greenwich stamps two
+// different dates into the same file.
+//
+// first_seen is not a cosmetic stamp. shouldDedupScanHistoryRow measures it
+// against localToday(), and detect-reposts groups on it — its --min-span guard
+// exists (its own header says so) "for anyone whose sweeps straddle midnight
+// and land one company on two dates", which mixed stamping causes on every
+// evening run rather than only at midnight.
+
+/**
+ * Whether the `/` at `i` opens a regex literal rather than being division.
+ *
+ * The classic heuristic — look at the last significant token before it. A regex
+ * can only appear where a VALUE is expected, so an operator, an opening
+ * bracket, a comma, a semicolon or a value-position keyword before it means
+ * regex; an identifier, a number or a closing paren/bracket means division.
+ * `}` is genuinely ambiguous (block end vs object literal end) and is read as
+ * regex, the usual choice: over-reading here masks a few characters, while
+ * under-reading lets a regex's contents open a phantom string frame, which is
+ * the failure that hides code.
+ */
+function startsRegex(src, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(src[j])) j--;
+  if (j < 0) return true;
+  const prev = src[j];
+  if ('=(,:[!&|?{};+-*%~^<>'.includes(prev)) return true;
+  // A `)` normally ends an expression, so `/` after it is division — except
+  // when it closes a CONTROL condition, where a statement (and so a regex) may
+  // follow: `if (enabled) /"/.test(value);`. Walk back to the matching `(` and
+  // look at the keyword in front of it.
+  if (prev === ')') {
+    let depth = 0;
+    let k = j;
+    for (; k >= 0; k--) {
+      if (src[k] === ')') depth++;
+      else if (src[k] === '(' && --depth === 0) break;
+    }
+    if (k < 0) return false;
+    let w = k - 1;
+    while (w >= 0 && /\s/.test(src[w])) w--;
+    let e = w;
+    while (w >= 0 && /[A-Za-z0-9_$]/.test(src[w])) w--;
+    return ['if', 'while', 'for', 'switch', 'catch', 'with'].includes(src.slice(w + 1, e + 1));
+  }
+  if (/[A-Za-z0-9_$]/.test(prev)) {
+    let k = j;
+    while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k])) k--;
+    const word = src.slice(k + 1, j + 1);
+    return ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+      'case', 'do', 'else', 'yield', 'await'].includes(word);
+  }
+  return false;
+}
+
+/**
+ * A per-character map of which positions in `src` are CODE — string and
+ * template TEXT and comments are not, but a template's `${...}` substitution
+ * is, recursively.
+ *
+ * Not a JavaScript lexer, and deliberately not one: `test-all.mjs` states the
+ * suite runs "on a fresh clone with only Node", so there is no parser
+ * dependency available to a test here. This covers the constructs a
+ * scan-history call is actually written with — the status string argument
+ * (`'added'`, `'skipped_title'`), a commented-out call, and the template-string
+ * child snippet the repo already uses to drive these writers
+ * (web/src/lib/core/pipeline.ts builds one).
+ *
+ * Regex literals are NOT distinguished from division. A `/.../ ` argument to
+ * appendToScanHistory would make the gate fail LOUDLY, which is the safe
+ * direction for a sentinel and a signal to revisit this — never a silent pass.
+ *
+ * @param {string} src
+ * @returns {boolean[]} isCode[i] for every index in src.
+ */
+function codeMask(src) {
+  const mask = new Array(src.length).fill(true);
+  // Bottom frame is the file itself. A `${` pushes a code frame whose parent is
+  // the template it interpolates into; `braces` tracks object/block nesting so
+  // the `}` that CLOSES the substitution is told apart from an inner one.
+  const stack = [{ template: false, braces: 0 }];
+  let i = 0;
+
+  while (i < src.length) {
+    const top = stack[stack.length - 1];
+    const c = src[i];
+    const n = src[i + 1];
+
+    if (top.template) {
+      if (c === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+      if (c === '`') { mask[i++] = false; stack.pop(); continue; }
+      if (c === '$' && n === '{') {
+        mask[i++] = false;
+        mask[i++] = false;
+        stack.push({ template: false, braces: 0 });
+        continue;
+      }
+      mask[i++] = false;
+      continue;
+    }
+
+    if (c === '/' && n === '/') {
+      while (i < src.length && src[i] !== '\n') mask[i++] = false;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      const close = src.indexOf('*/', i + 2);
+      const stop = close === -1 ? src.length : close + 2;
+      while (i < stop) mask[i++] = false;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      mask[i++] = false;                                  // opening quote
+      while (i < src.length) {
+        if (src[i] === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        const closing = src[i] === c;
+        mask[i++] = false;
+        if (closing) break;
+      }
+      continue;
+    }
+    if (c === '`') { mask[i++] = false; stack.push({ template: true }); continue; }
+    if (c === '/' && startsRegex(src, i)) {
+      // A regex literal's contents are DATA. Not masking them let a quote or a
+      // backtick inside one open a phantom string or template frame that then
+      // swallowed real code — scan-hn.mjs carries `/```yaml|```/g`, six
+      // backticks, which is that hazard live in a writer file today.
+      mask[i++] = false;                                  // opening slash
+      let inClass = false;
+      while (i < src.length) {
+        const ch = src[i];
+        if (ch === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        if (ch === '\n') break;                            // unterminated; stop rather than run away
+        if (ch === '[') inClass = true;
+        else if (ch === ']') inClass = false;
+        else if (ch === '/' && !inClass) { mask[i++] = false; break; }
+        mask[i++] = false;
+      }
+      while (i < src.length && /[a-z]/.test(src[i])) mask[i++] = false;   // flags
+      continue;
+    }
+    if (c === '{') { top.braces++; i++; continue; }
+    if (c === '}') {
+      const closesSubstitution = top.braces === 0 && stack.length > 1 && stack[stack.length - 2].template;
+      if (closesSubstitution) { mask[i++] = false; stack.pop(); continue; }
+      if (top.braces > 0) top.braces--;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return mask;
+}
+
+/** Whether every character of `src.slice(from, to)` is code. */
+const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Boolean);
+
+/**
+ * The argument list of every `appendToScanHistory(...)` CALL in `src`,
+ * paren-matched over CODE positions only.
+ *
+ * `(?<!function )` skips the definition in scan.mjs — its own `date` parameter
+ * is not stamped by anything and would read as an offender.
+ */
+function scanHistoryCallArgs(src) {
+  const isCode = codeMask(src);
+  const calls = [];
+  for (const m of src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    if (!isCode[m.index]) continue;            // the name itself is in a string or comment
+    let depth = 0;
+    for (let i = open; i < src.length; i++) {
+      if (!isCode[i]) continue;
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')' && --depth === 0) {
+        calls.push({ list: src.slice(open + 1, i), isCode: isCode.slice(open + 1, i) });
+        break;
+      }
+    }
+  }
+  return calls;
+}
+
+/** Split an argument list on TOP-LEVEL commas that are CODE, not string content. */
+function topLevelArgs({ list, isCode }) {
+  const out = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (!isCode[i]) continue;
+    const c = list[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(list.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(list.slice(start).trim());
+  return out;
+}
+
+/** Every .mjs source file in the repo, at any depth. */
+function sourceFiles(dir, acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // Vendored code, build output, and the suite's own scratch copy of the repo
+    // (test-all.mjs mkdtemps it under ROOT) would otherwise be walked.
+    if (entry.isDirectory()) {
+      if (/^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)) continue;
+      if (entry.name.startsWith('.tmp-script-test-')) continue;
+      sourceFiles(join(dir, entry.name), acc);
+    } else if (entry.name.endsWith('.mjs') && !entry.name.endsWith('.test.mjs')) {
+      acc.push(join(dir, entry.name));
+    }
+  }
+  return acc;
+}
+
+// The census above is only as good as its scanner, and every shape below was
+// found by review rather than by the scanner's own tests. So the scanner gets
+// tested too: masking the wrong region does not make the gate fail, it makes it
+// pass while seeing less — the one failure mode a sentinel must not have.
+test('the call scanner sees code and only code', () => {
+  const call = (src) => scanHistoryCallArgs(src).map((c) => topLevelArgs(c)[1]);
+
+  // Delimiters inside a string argument are not delimiters.
+  assert.deepEqual(call('await appendToScanHistory(buildOffers(")"), localToday());'), ['localToday()']);
+  assert.deepEqual(call('await appendToScanHistory("a,b", localToday());'), ['localToday()']);
+
+  // Comments and template TEXT are not executed, so they hold no calls.
+  assert.deepEqual(call('// appendToScanHistory(o, utc)\nawait appendToScanHistory(o, localToday());'), ['localToday()']);
+  assert.deepEqual(call('const s = `appendToScanHistory(o, utc)`;'), []);
+
+  // …but a substitution is executed, and pipeline.ts drives these writers from
+  // exactly such a snippet.
+  assert.deepEqual(call('const s = `${appendToScanHistory(o, utcDate)}`;'), ['utcDate']);
+  assert.deepEqual(call('const s = `${appendToScanHistory(o, {a:{b:1}} ? d : d)}`;'), ['{a:{b:1}} ? d : d']);
+
+  // A quote or backtick inside a REGEX must not open a phantom string frame and
+  // swallow the call after it. scan-hn.mjs carries /```yaml|```/g today.
+  assert.deepEqual(call("const p = /'/;\nawait appendToScanHistory(o, utcDate);"), ['utcDate']);
+  assert.deepEqual(call('const p = /```yaml|```/g;\nawait appendToScanHistory(o, utcDate);'), ['utcDate']);
+  assert.deepEqual(call('if (enabled) /"/.test(v);\nawait appendToScanHistory(o, utcDate);'), ['utcDate']);
+
+  // …and division must still be division, or the mask eats real code instead.
+  assert.deepEqual(call('const r = a / b; await appendToScanHistory(o, localToday());'), ['localToday()']);
+  assert.deepEqual(call('const r = (a + b) / c; await appendToScanHistory(o, localToday());'), ['localToday()']);
+});
+
+test('the scanner resolves every call the four known writers contain', () => {
+  // The shapes above are synthetic. This is the real files, and it is what
+  // would catch masking that is correct in miniature and wrong at scale.
+  for (const [file, expected] of [['scan.mjs', 5], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+    const src = readFileSync(join(ROOT, file), 'utf-8');
+    const naive = [...src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)].length;
+    assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);
+    assert.equal(scanHistoryCallArgs(src).length, expected, `${file}: the mask hid ${expected - scanHistoryCallArgs(src).length} call(s)`);
+  }
+});
+
+test('every scan-history writer stamps the local day', () => {
+  // DERIVED, not a hard-coded list: any future script that calls
+  // appendToScanHistory is covered the day it is written, at any depth —
+  // `scripts/scan-foo.mjs` counts, not just a direct child of ROOT. That is the
+  // shape tests/lock-rm-contention.test.mjs used to finally pin its own family
+  // shut after two reintroductions.
+  const writers = sourceFiles(ROOT)
+    .map((file) => ({ file, calls: scanHistoryCallArgs(readFileSync(file, 'utf-8')), src: readFileSync(file, 'utf-8') }))
+    .filter((w) => w.calls.length > 0);
+
+  assert.ok(writers.length >= 4, `expected at least the four known scan-history writers, found ${writers.map((w) => w.file).join(', ')}`);
+
+  const offenders = [];
+  for (const { file, calls, src } of writers) {
+    const name = relative(ROOT, file);
+
+    // Identifiers this file binds to localToday() WITH NO ARGUMENTS, so
+    // `const date = localToday()` followed by `appendToScanHistory(offers, date)`
+    // resolves. The empty parens are load-bearing: `localToday(new Date('2026-08-22'))`
+    // is a pinned day, not today, and would otherwise be accepted here.
+    // Masked, not raw: `// const scanDate = localToday()` in a comment would
+    // otherwise bind scanDate here, and a real `appendToScanHistory(offers,
+    // scanDate)` stamping a UTC day would then sail through.
+    //
+    // And EVERY binding of a name has to be localToday(), not just one. There
+    // is no scope analysis here, so a module-level `const date = localToday()`
+    // would otherwise vouch for a function-local `const date = <UTC day>` that
+    // shadows it. Requiring unanimity rejects the shadowed case without needing
+    // to resolve which binding a given call sees.
+    const srcMask = codeMask(src);
+    const bindings = new Map();                            // name -> Set of initializer texts
+    for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]*)/g)) {
+      if (!isCodeRange(srcMask, m.index, m.index + m[0].length)) continue;
+      if (!bindings.has(m[1])) bindings.set(m[1], new Set());
+      bindings.get(m[1]).add(m[2].trim());
+    }
+    const localDayVars = new Set(
+      [...bindings.entries()]
+        .filter(([, inits]) => [...inits].every((init) => /^localToday\s*\(\s*\)\s*;?$/.test(init)))
+        .map(([name]) => name),
+    );
+
+    for (const call of calls) {
+      // ASSERT ON THE ARGUMENT, not on whether localToday appears somewhere in
+      // the file. A writer could call localToday() for something else entirely
+      // and still stamp history with a UTC day — and a denylist of the two
+      // toISOString spellings would not see a day derived any other way
+      // (getUTCFullYear formatting, a helper, an imported constant).
+      const stamped = topLevelArgs(call)[1];
+      if (stamped === undefined || stamped === '') {
+        offenders.push(`${name}: appendToScanHistory called with no date argument`);
+      } else if (!/^localToday\s*\(\s*\)$/.test(stamped) && !localDayVars.has(stamped)) {
+        offenders.push(`${name}: stamps \`${stamped}\`, which is not localToday()`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `scan-history writers disagreeing about what day it is:\n  ${offenders.join('\n  ')}`);
+});
+
+test('two dates for one posting is all detect-reposts needs to call it a repost', () => {
+  // Why the census above is load-bearing. These two rows are ONE posting seen
+  // once, in one evening, by two scanners: the curated portals.yml Workday
+  // entry and the same tenant reached through the reverse-ATS dataset — the
+  // differing-path-case case normalizeUrlForDedup's own docstring describes.
+  // Distinct URLs + distinct dates + span 1 is exactly a repost cluster.
+  const tsv = [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+    'https://acme.wd1.myworkdayjobs.com/en-US/Careers/job/Senior-Backend-Engineer_R123\t2026-08-22\tworkday\tSenior Backend Engineer\tAcme\tadded\tRemote',
+    'https://acme.wd1.myworkdayjobs.com/en-US/careers/job/senior-backend-engineer_R123\t2026-08-23\tworkday\tSenior Backend Engineer\tAcme\tadded\tRemote',
+  ].join('\n');
+
+  const clusters = detectReposts(parseScanHistory(tsv), 90, 1, null);
+  assert.equal(clusters.length, 1, 'the shape mixed stamping produces is a repost cluster');
+  assert.equal(clusters[0].daysSpan, 1);
+
+  // Same two rows on ONE date — what the four scanners now produce — are not a
+  // cluster. This is the assertion that makes the census mean something.
+  const sameDay = tsv.replaceAll('2026-08-23', '2026-08-22');
+  assert.deepEqual(detectReposts(parseScanHistory(sameDay), 90, 1, null), [], 'one evening, one date, no repost');
 });

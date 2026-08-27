@@ -413,6 +413,50 @@ try {
     else fail(`jobbankca.fetch() only slept ${slept}ms total for 2 requests`);
   }
 
+  // A page can contain the full 100 raw Atom entries even when one is
+  // filtered during parsing. Pagination is determined by the upstream page
+  // size, not by how many rows survive local validation.
+  {
+    const entry = (id, title = `role ${id}`) => `<entry>
+      ${title ? `<title><![CDATA[${title}]]></title>` : ''}
+      <link rel="alternate" href="https://www.jobbank.gc.ca/jobsearch/jobposting/${id}"/>
+      <id>${id}</id>
+      <updated>2026-08-20T08:00:00Z</updated>
+      <summary><![CDATA[<strong>Location:</strong> X]]></summary>
+    </entry>`;
+    const feed = (entries) => `<?xml version="1.0"?><feed>${entries.join('')}</feed>`;
+    const fullRawPage = [
+      ...Array.from({ length: 99 }, (_, i) => entry(i)),
+      entry('titleless', ''),
+    ];
+    const laterPage = [entry(100)];
+    const requested = [];
+
+    const fetched = await jobbankca.fetch(
+      { provider: 'jobbankca', name: 'Raw page size test', jobbankca: { keywords: ['developer'] } },
+      {
+        sleep: async () => {},
+        fetchText: async (url) => {
+          requested.push(url);
+          return new URL(url).searchParams.get('page') === '1'
+            ? feed(fullRawPage)
+            : feed(laterPage);
+        },
+      },
+    );
+
+    if (requested.length === 2) {
+      pass('jobbankca.fetch() paginates after a full 100-entry feed page even when one entry is filtered');
+    } else {
+      fail(`jobbankca.fetch() made ${requested.length} request(s) after a full raw page with one filtered entry (expected 2)`);
+    }
+    if (fetched.length === 100 && fetched.some((job) => job.title === 'role 100')) {
+      pass('jobbankca.fetch() returns only valid jobs while retaining jobs from the later page');
+    } else {
+      fail(`jobbankca.fetch() returned ${fetched.length} valid job(s) and later-page job=${fetched.some((job) => job.title === 'role 100')} (expected 100/true)`);
+    }
+  }
+
   // ── fetch(): entry.max_pages configures the run, ctx.maxPages only caps it ──
   {
     const feed = (n) => `<?xml version="1.0"?><feed>${Array.from({ length: n }, (_, i) => `<entry><title><![CDATA[r${i}]]></title><link rel="alternate" href="https://www.jobbank.gc.ca/jobsearch/jobposting/${i}"/><id>${i}</id><updated>2026-08-20T08:00:00Z</updated><summary><![CDATA[x]]></summary></entry>`).join('')}</feed>`;

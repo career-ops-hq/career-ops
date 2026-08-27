@@ -26,6 +26,7 @@ try {
 } catch {}
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 export const PATHS = {
@@ -362,7 +363,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error(err);
     process.exit(1);
