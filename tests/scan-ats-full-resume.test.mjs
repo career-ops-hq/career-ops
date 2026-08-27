@@ -118,6 +118,9 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   if (solanaGate === domainFilterFingerprint(['  SOLANA  ', 'solana'])) pass('domainFilterFingerprint normalizes case, whitespace, and duplicates');
   else fail('domainFilterFingerprint normalization drifted');
 
+  if (checkpointCompatible({ ...cp, domainFilterFingerprint: solanaGate }, { ...opts, domainFilterFingerprint: solanaGate })) pass('matching domain_filter resumes from checkpoint');
+  else fail('matching domain_filter blocked resume');
+
   if (!checkpointCompatible({ ...cp, domainFilterFingerprint: solanaGate }, { ...opts, domainFilterFingerprint: defiGate })) pass('domain_filter mismatch rejected for resume');
   else fail('domain_filter mismatch accepted');
 
