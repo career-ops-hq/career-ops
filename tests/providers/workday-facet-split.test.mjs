@@ -323,6 +323,97 @@ try {
     fail(`clamped fan-out spent ${budgetCalls} requests, expected <= 501`);
   }
 
+
+  // A slice that dies mid-pagination comes back with stopReason 'fetch-error'
+  // and clamped:false — indistinguishable, to the `!result.clamped` early
+  // return, from a slice that finished. Absorbing its partial jobs and calling
+  // the board recovered is the exact failure this feature exists to prevent:
+  // a recovery line printed WITHOUT the "(still incomplete)" tag.
+  const dyingSliceCalls = [];
+  const { result: dyingJobs, errors: dyingErrors } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    dyingSliceCalls.push({ key, offset: body.offset });
+    if (key === '') {
+      return {
+        total: 2000,
+        facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] }],
+        jobPostings: postings('unfaceted', body.offset),
+      };
+    }
+    // Slice 'a' claims two pages, then its second page fails for good.
+    if (key === 'jobFamily=a') {
+      if (body.offset === 0) return { total: 40, facets: [], jobPostings: postings('a', 0) };
+      throw new Error('503 from the WAF');
+    }
+    return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings('b', 0) : [] };
+  }, { includeUndated: true })));
+
+  const dyingRecoveryLine = dyingErrors.find((e) => String(e).includes('offset-clamped at'));
+  if (dyingRecoveryLine && String(dyingRecoveryLine).includes('(still incomplete)')) {
+    pass('workday.fetch() tags the recovery line "(still incomplete)" when a slice died mid-fetch');
+  } else {
+    fail(`slice that failed mid-pagination produced recovery line ${JSON.stringify(dyingRecoveryLine)}, expected it to carry "(still incomplete)"`);
+  }
+
+  if (dyingJobs.workdayTruncated === true) {
+    pass('workday.fetch() tags jobs.workdayTruncated when a slice died mid-fetch, so the sweep retries the tenant');
+  } else {
+    fail('a split whose slice hit fetch-error should tag jobs.workdayTruncated, not report the board complete');
+  }
+
+  // 'cap' is the same shape of partial result: the slice stopped at max_pages
+  // with pages it never fetched, so the board is not fully covered either.
+  const { result: cappedJobs } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    if (key === '') {
+      return {
+        total: 2000,
+        facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] }],
+        jobPostings: postings('unfaceted', body.offset),
+      };
+    }
+    // Slice 'a' has more pages than max_pages (100 * 20 = 2000) allows, and its
+    // facets prove nothing — it stops at the cap, not at the offset clamp.
+    if (key === 'jobFamily=a') return { total: 4000, facets: [], jobPostings: postings('a', body.offset) };
+    return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings('b', 0) : [] };
+  }, { includeUndated: true })));
+
+  if (cappedJobs.workdayTruncated === true) {
+    pass('workday.fetch() tags jobs.workdayTruncated when a slice stopped at the page cap with pages left');
+  } else {
+    fail('a split whose slice hit the page cap should tag jobs.workdayTruncated');
+  }
+
+  // early-stop must stay exempt: a slice that paginated past the --since
+  // window is genuinely done for this sweep, and tagging it would send the
+  // whole tenant back through the retry pass on every incremental scan.
+  const { result: earlyStopJobs } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    if (key === '') {
+      return {
+        total: 2000,
+        facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] }],
+        jobPostings: postings('unfaceted', body.offset, 20).map((p) => ({ ...p, postedOn: 'Posted Today' })),
+      };
+    }
+    // Page 0 is fresh, page 1 is well past the window → early-stop.
+    if (body.offset === 0) return { total: 40, facets: [], jobPostings: postings(key, 0) };
+    return {
+      total: 40,
+      facets: [],
+      jobPostings: postings(key, body.offset).map((p) => ({ ...p, postedOn: 'Posted 300+ Days Ago' })),
+    };
+  }, { includeUndated: true, sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000 })));
+
+  if (earlyStopJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() leaves a slice that early-stopped past the --since window untagged');
+  } else {
+    fail('a slice that stopped past the --since window is complete for the sweep and must not tag workdayTruncated');
+  }
+
   // The unclamped path must not pay for any of this.
   const healthyCalls = [];
   await workday.fetch(ENTRY, mkCtx(async (_url, opts) => {

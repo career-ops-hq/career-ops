@@ -456,6 +456,23 @@ export default {
        */
       const split = async (result, applied, depth, excluded) => {
         absorb(result.jobs);
+        // A slice that stopped early is not a slice that finished. `clamped` is
+        // only ever true for stopReason 'complete', so without this the
+        // `!result.clamped` return below absorbs a slice's partial jobs and
+        // reports the board recovered — the one thing this path exists to
+        // avoid. 'early-stop' (and 'no-date-skip', which only drops postings
+        // the sweep would discard anyway) stay exempt: those slices are
+        // genuinely done for this sweep's purposes.
+        //
+        // 'cap' only counts against an UNCLAMPED query, matching the entry-cap
+        // warning below. A clamped query reports total at the ceiling, which is
+        // exactly maxPages * PAGE_SIZE, so it always ends at the cap — that is
+        // the clamp being detected, not pages going unread, and it is what the
+        // split then recovers. Tagging it would put "(still incomplete)" on
+        // every clamped board and say nothing.
+        if (result.stopReason === 'fetch-error' || (result.stopReason === 'cap' && !result.clamped)) {
+          splitIncomplete = true;
+        }
         if (!result.clamped) return;
 
         if (depth >= MAX_SPLIT_DEPTH) { splitIncomplete = true; return; }
