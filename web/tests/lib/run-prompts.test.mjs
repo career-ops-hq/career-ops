@@ -78,6 +78,14 @@ test("General Role prompt assigns the canonical template exclusively to the back
   assert.match(prompt, /All values are plain text/);
   assert.match(prompt, /unknown fields are rejected/);
 });
+test("General Role prompt forbids status and requires exactly the listed top-level fields", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  assert.match(prompt, /MUST contain exactly the fields listed below and no others/);
+  assert.match(prompt, /Do not add status, title, targetRole, roleSlug, version, metadata/);
+  assert.match(prompt, /VERDICT is OUTSIDE the JSON object/);
+  assert.match(prompt, /Do not wrap the JSON in another object/);
+  assert.match(prompt, /Any unlisted JSON key causes the run to fail/);
+});
 
 test("application PDF prompt keeps the original cv-html envelope contract", () => {
   const prompt = buildPrompt({ kind: "pdf", input: "001", memory: "", today: "2026-08-26" });

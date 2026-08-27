@@ -121,9 +121,14 @@ Your ONLY responsibility is to read the approved sources, compose the structured
 This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
 
 STRICT JSON SCHEMA (unknown fields are rejected):
+The JSON object MUST contain exactly the fields listed below and no others.
+Do not add status, title, targetRole, roleSlug, version, metadata, notes, verdict, summary, result, success, or any other field.
+VERDICT is OUTSIDE the JSON object. Do not put VERDICT inside JSON. Do not wrap the JSON in another object.
+
 {"format":"letter|a4","lang":"string","name":"string","phone":"string","email":"string","linkedin":{"url":"string","display":"string"},"portfolio":{"url":"string","display":"string"},"location":"string","professionalSummary":"string","coreCompetencies":["string"],"workExperience":[{"company":"string","period":"string","role":"string","location":"string","bullets":["string"]}],"projects":[{"title":"string","description":"string","technologies":["string"],"url":"optional string","badge":"optional string"}],"education":[{"title":"string","organization":"string","year":"string","description":"optional string"}],"certifications":[{"title":"string","organization":"string","year":"string"}],"awards":[{"title":"string","organization":"string","year":"string"}],"interests":"string","skills":[{"category":"string","items":["string"]}]}
 
 All values are plain text. Do not put HTML, Markdown, template placeholders, or CSS in any field. The backend escapes text and maps these values into the canonical template deterministically.
+Any unlisted JSON key causes the run to fail.
 
 FINAL OUTPUT CHECK: Emit ${ROLE_JSON_OPEN_MARK} on its own line, then exactly one JSON object matching the schema, then ${ROLE_JSON_CLOSE_MARK} on its own line. Narration before the envelope is ignored; after the closing marker emit EXACTLY one final line and nothing else:
 VERDICT: {5 if the complete structured envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;

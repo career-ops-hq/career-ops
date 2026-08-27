@@ -6,6 +6,7 @@ export const ROLE_JSON_CLOSE_MARK = "<</role-resume-json>>";
 
 const TOP_FIELDS = new Set(["format", "lang", "name", "phone", "email", "linkedin", "portfolio", "location", "professionalSummary", "coreCompetencies", "workExperience", "projects", "education", "certifications", "awards", "interests", "skills"]);
 const REQUIRED_FIELDS = [...TOP_FIELDS];
+export const ROLE_RESUME_TOP_LEVEL_FIELDS = [...REQUIRED_FIELDS];
 const SECTION_LABELS = {
   SECTION_SUMMARY: "Professional Summary",
   SECTION_COMPETENCIES: "Core Competencies",
@@ -93,6 +94,23 @@ export function parseRoleResumeWorkerResponse(rawValue) {
   const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
   if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) return { ok: false, error: "The General Role worker exited without the required final VERDICT line." };
   return { ok: true, content };
+}
+
+/** Key-name-only diagnostics. Never returns JSON values or resume content. */
+export function inspectRoleResumeJsonShape(rawValue) {
+  const raw = typeof rawValue === "string" ? rawValue.replace(/\r\n/g, "\n") : "";
+  const opener = /^<<role-resume-json>>[ \t]*$/m.exec(raw);
+  if (!opener) return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] };
+  const start = opener.index + opener[0].length;
+  const tail = raw.slice(start);
+  const closer = /^<<\/role-resume-json>>[ \t]*$/m.exec(tail);
+  if (!closer) return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] };
+  let value;
+  try { value = JSON.parse(tail.slice(0, closer.index).trim()); } catch { return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] }; }
+  const keys = isObject(value) ? Object.keys(value).sort() : [];
+  const unexpectedKeys = keys.filter((key) => !TOP_FIELDS.has(key));
+  const missingRequiredKeys = REQUIRED_FIELDS.filter((key) => !keys.includes(key));
+  return { parsed: isObject(value), topLevelKeys: keys, unexpectedKeys, unexpectedKeyCount: unexpectedKeys.length, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: REQUIRED_FIELDS.length - missingRequiredKeys.length, missingRequiredKeys };
 }
 
 export const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);

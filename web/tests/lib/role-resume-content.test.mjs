@@ -32,6 +32,9 @@ test("missing required JSON field fails clearly", () => {
   assert.match(parseRoleResumeWorkerResponse(response(value)).error, /field "skills" is required/);
 });
 test("unknown fields fail closed", () => assert.match(parseRoleResumeWorkerResponse(response(content({ html: "<script>" }))).error, /unexpected field "html"/));
+for (const forbidden of ["status", "targetRole", "metadata"]) {
+  test(`top-level ${forbidden} fails closed`, () => assert.match(parseRoleResumeWorkerResponse(response(content({ [forbidden]: "forbidden" }))).error, new RegExp(`unexpected field "${forbidden}"`)));
+}
 test("HTML special characters are escaped and unsafe URLs are removed", () => {
   const rendered = renderRoleResumeTemplate({ root, content: content({ portfolio: { url: "javascript:alert(1)", display: "Bad" } }) }).html;
   assert.match(rendered, /Jane &amp; Doe/); assert.match(rendered, /555 &lt; 1234/); assert.doesNotMatch(rendered, /javascript:/); assert.doesNotMatch(rendered, /Example <Corp>/);
@@ -48,6 +51,10 @@ test("narration and Markdown outside the structured envelope never become resume
 });
 test("invalid JSON fails cleanly", () => assert.match(parseRoleResumeWorkerResponse(`${ROLE_JSON_OPEN_MARK}\n{bad}\n${ROLE_JSON_CLOSE_MARK}\nVERDICT: 5/5 - complete`).error, /invalid JSON/));
 test("final 5/5 VERDICT remains required", () => assert.match(parseRoleResumeWorkerResponse(response().replace("VERDICT: 5/5", "VERDICT: 4/5")).error, /VERDICT/));
+test("VERDICT remains outside the JSON object", () => {
+  const raw = response(); const json = raw.slice(raw.indexOf("{") , raw.lastIndexOf("}") + 1);
+  assert.equal("verdict" in JSON.parse(json), false); assert.match(raw.split("<</role-resume-json>>")[1], /VERDICT: 5\/5/);
+});
 test("two distinct structured envelopes still fail closed", () => {
   const raw = `${response(content())}\n${response(content({ name: "Other" }))}`;
   assert.match(parseRoleResumeWorkerResponse(raw).error, /Found 2 role-resume JSON envelopes/);
