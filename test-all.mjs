@@ -7285,6 +7285,8 @@ try {
   if (
     locationHintFromUrl('https://jobs.ashbyhq.com/snowflake/4fe8d816') === '' &&
     locationHintFromUrl('https://boards.greenhouse.io/acme/jobs/12345') === '' &&
+    locationHintFromUrl('https://app.mokahr.com/social-recruitment/acme/123#/job/4fe8d816') === '' &&
+    locationHintFromUrl('https://acme.jobs.personio.com/job/12345') === '' &&
     locationHintFromUrl('not a url') === '' &&
     locationHintFromUrl('') === '' &&
     locationHintFromUrl(null) === ''
