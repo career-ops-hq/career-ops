@@ -386,6 +386,57 @@ try {
     fail('a split whose slice hit the page cap should tag jobs.workdayTruncated');
   }
 
+  // A slice whose PAGE 0 dies is the dangerous shape: runQuery()'s first fetch
+  // is the one unguarded await on the split path, and split() issues up to
+  // MAX_SPLIT_SLICES of them against a tenant large enough to have tripped the
+  // ceiling — exactly where a WAF or rate limiter lives. Letting that throw
+  // escape drops the whole tenant, including the unfaceted crawl's 2,000
+  // postings already sitting in `out`, which breaks the additive guarantee at
+  // the one moment it matters most.
+  const page0Calls = [];
+  const { result: page0Jobs, errors: page0Errors } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    page0Calls.push({ key, offset: body.offset });
+    if (key === '') {
+      return {
+        total: 2000,
+        facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] }],
+        jobPostings: postings('unfaceted', body.offset),
+      };
+    }
+    // Slice 'a' refuses on its very first request, after every retry.
+    if (key === 'jobFamily=a') throw new Error('403 from the WAF');
+    return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings('b', 0) : [] };
+  }, { includeUndated: true })));
+
+  if (Array.isArray(page0Jobs) && page0Jobs.length >= 2000) {
+    pass('workday.fetch() keeps the unfaceted crawl when a slice fails on page 0 instead of dropping the tenant');
+  } else {
+    fail(`slice failing on page 0 returned ${Array.isArray(page0Jobs) ? page0Jobs.length : typeof page0Jobs} jobs, expected the unfaceted crawl's 2000+ to survive`);
+  }
+
+  // The surviving slices must still be tried: one bad slice is not a reason to
+  // abandon the rest of the partition.
+  if (page0Calls.some((c) => c.key === 'jobFamily=b')) {
+    pass('workday.fetch() keeps splitting the remaining slices after one fails on page 0');
+  } else {
+    fail('a slice failing on page 0 stopped the split from trying the other slices');
+  }
+
+  if (page0Jobs.workdayTruncated === true) {
+    pass('workday.fetch() tags jobs.workdayTruncated when a slice failed on page 0');
+  } else {
+    fail('a split whose slice failed on page 0 should tag jobs.workdayTruncated, not report the board complete');
+  }
+
+  const page0RecoveryLine = page0Errors.find((e) => String(e).includes('offset-clamped at'));
+  if (page0RecoveryLine && String(page0RecoveryLine).includes('(still incomplete)')) {
+    pass('workday.fetch() tags the recovery line "(still incomplete)" when a slice failed on page 0');
+  } else {
+    fail(`slice failing on page 0 produced recovery line ${JSON.stringify(page0RecoveryLine)}, expected it to carry "(still incomplete)"`);
+  }
+
   // early-stop must stay exempt: a slice that paginated past the --since
   // window is genuinely done for this sweep, and tagging it would send the
   // whole tenant back through the retry pass on every incremental scan.

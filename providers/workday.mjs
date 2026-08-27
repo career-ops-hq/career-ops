@@ -485,8 +485,24 @@ export default {
           slicesSpent++;
           await sleep(INTER_PAGE_DELAY_MS, ctx);
           const nextApplied = { ...applied, [facet.facetParameter]: [value.id] };
+          // runQuery()'s page-0 fetch is unguarded — fine for the one page-0 of
+          // an ordinary board, but here it runs once per slice against a tenant
+          // that is by definition large, which is where a WAF or rate limiter
+          // lives. Letting it throw would abandon the whole tenant including
+          // the unfaceted crawl already absorbed into `out`, so a dead slice
+          // becomes an incomplete split and the rest of the partition is still
+          // tried. Same accounting as a slice that died mid-pagination.
+          let sliceResult;
+          try {
+            sliceResult = await runQuery(nextApplied);
+          } catch (err) {
+            const attempts = err.attempts ?? RETRY_POLICY.retries + 1;
+            console.error(`⚠️  workday: ${entry.name} slice ${facet.facetParameter}=${value.id} failed on its first page after ${attempts} attempts: ${err.message}`);
+            splitIncomplete = true;
+            continue;
+          }
           await split(
-            await runQuery(nextApplied),
+            sliceResult,
             nextApplied,
             depth + 1,
             [...excluded, facet.facetParameter],
