@@ -151,18 +151,26 @@ function wrapQuote(s, max = 34) {
 
 export async function buildSvg(entries, opts = {}) {
   const showable = entries.filter((e) => !e.withdrawn && e.level !== 'count').slice(0, 3);
-  const W = 900, H = 178, CW = 288, GAP = 14, X0 = (W - (CW * 3 + GAP * 2)) / 2;
+  const total = entries.length;
+  // "Hay más": deliberadamente mudo — un chevron y el resto exacto en el gris
+  // de la tira, a la derecha. Nada de tarjetas cortadas ni desvanecidos: el
+  // fondo del README es del lector (claro u oscuro) y cualquier fade lava.
+  const peek = total > 3;
+  const W = 900, H = 178, GAP = 14;
+  const CW = peek ? 280 : 288;
+  const X0 = peek ? 4 : (W - (CW * 3 + GAP * 2)) / 2;
   let cards = '';
   for (let i = 0; i < 3; i++) {
     const x = X0 + i * (CW + GAP);
     const e = showable[i];
-    if (!e) {
+    if (!e && i < 3) {
       cards += `<g><rect x="${x}" y="14" width="${CW}" height="150" rx="10" fill="none" stroke="#30363d" stroke-dasharray="5 5"/>
 <text x="${x + CW / 2}" y="86" text-anchor="middle" fill="#8b949e" font-size="13" font-style="italic">The next card is yours.</text>
 <text x="${x + CW / 2}" y="106" text-anchor="middle" fill="#DD7627" font-size="12" font-weight="700">Share your hire →</text></g>`;
       continue;
     }
-    const quote = wrapQuote(e.story ?? '');
+    if (!e) continue;
+    const quote = wrapQuote(e.story ?? '', peek ? 33 : 34);
     const avatar = e.level === 'handle' ? await avatarDataUri(e.handle, opts) : null;
     // Single-line rows have no wrapping: anything wider than the card was
     // silently CLIPPED by the viewBox (hire #5's four-word role was). Ellipsize
@@ -180,6 +188,15 @@ ${avatar
 <text x="${x + 50}" y="${H - 41}" fill="#8b949e" font-size="11">${esc(sub)}</text>
 <text x="${x + 16}" y="${H - 20}" fill="#DD7627" font-size="10.5" font-weight="800" letter-spacing="0.6">HIRE #${e.n}</text>
 ${e.weeks ? `<text x="${x + CW - 16}" y="${H - 20}" text-anchor="end" fill="#3fb950" font-size="10.5" font-weight="700">${e.weeks} weeks</text>` : ''}</g>`;
+  }
+  if (peek) {
+    // El resto es EXACTO siempre (la honestidad es la marca del muro), así que
+    // a 2-3 dígitos la fuente encoge en vez de truncar: "+9"/"+42" a 9.5,
+    // "+997" a 8 — cabe centrado en los 28px de aire hasta el borde.
+    const rest = total - 3;
+    const fs = rest >= 100 ? 8 : rest >= 10 ? 9 : 9.5;
+    cards += `<text x="${W - 12}" y="${H / 2 + 1}" text-anchor="middle" fill="#8b949e" font-size="22" font-weight="600">›</text>
+<text x="${W - 12}" y="${H / 2 + 17}" text-anchor="middle" fill="#8b949e" font-size="${fs}" font-weight="700">+${rest}</text>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
 <rect width="${W}" height="${H}" fill="none"/>
