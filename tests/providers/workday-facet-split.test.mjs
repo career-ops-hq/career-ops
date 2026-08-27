@@ -389,24 +389,38 @@ try {
   // early-stop must stay exempt: a slice that paginated past the --since
   // window is genuinely done for this sweep, and tagging it would send the
   // whole tenant back through the retry pass on every incremental scan.
+  const earlyStopCalls = [];
   const { result: earlyStopJobs } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
     const body = JSON.parse(opts.body);
     const key = sliceKey(body.appliedFacets);
+    if (key !== '') earlyStopCalls.push(key);
     if (key === '') {
       return {
         total: 2000,
         facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] }],
-        jobPostings: postings('unfaceted', body.offset, 20).map((p) => ({ ...p, postedOn: 'Posted Today' })),
+        jobPostings: postings('unfaceted', body.offset),
       };
     }
-    // Page 0 is fresh, page 1 is well past the window → early-stop.
-    if (body.offset === 0) return { total: 40, facets: [], jobPostings: postings(key, 0) };
+    // Each slice claims 10 pages; page 0 is fresh, page 1 is well past the
+    // window → early-stop after 2 requests. The count is asserted below so
+    // this stays a test about early-stop and cannot pass by never reaching it.
+    if (body.offset === 0) return { total: 200, facets: [], jobPostings: postings(key, 0) };
     return {
-      total: 40,
+      total: 200,
       facets: [],
-      jobPostings: postings(key, body.offset).map((p) => ({ ...p, postedOn: 'Posted 300+ Days Ago' })),
+      // Bounded on purpose: parsePostedOn treats "300+ Days Ago" as undated,
+      // which would leave the page dateless and early-stop unreachable.
+      jobPostings: postings(key, body.offset).map((p) => ({ ...p, postedOn: 'Posted 300 Days Ago' })),
     };
   }, { includeUndated: true, sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000 })));
+
+  // 2 slices x (page 0 + the past-the-window page that stops them). Anything
+  // more means early-stop never fired and the assertion below proves nothing.
+  if (earlyStopCalls.length === 4) {
+    pass('workday.fetch() stops a slice at the first page past the --since window instead of paginating its full total');
+  } else {
+    fail(`early-stop slices made ${earlyStopCalls.length} requests, expected 4 (2 slices x 2 pages) — early-stop did not fire`);
+  }
 
   if (earlyStopJobs.workdayTruncated === undefined) {
     pass('workday.fetch() leaves a slice that early-stopped past the --since window untagged');
