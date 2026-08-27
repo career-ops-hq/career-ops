@@ -84,7 +84,7 @@ export function TriageRow({
       {evaluated ? (
         <Link
           href={
-            scored!.running || !scored!.reportN
+            scored!.running || scored!.reportN == null
               ? `/jobs/${scored!.jobId}`
               : `/pipeline/${scored!.reportN}`
           }
