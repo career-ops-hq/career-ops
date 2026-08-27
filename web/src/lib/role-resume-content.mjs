@@ -24,6 +24,10 @@ const text = (value, field) => {
   if (typeof value !== "string") throw new Error(`General Role content field "${field}" must be a string.`);
   return value;
 };
+const nullableText = (value, field) => {
+  if (value !== null) text(value, field);
+  return value;
+};
 const stringArray = (value, field) => {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new Error(`General Role content field "${field}" must be an array of strings.`);
   return value;
@@ -57,15 +61,15 @@ export function validateRoleResumeContent(value) {
     stringArray(item.bullets, `workExperience[${i}].bullets`);
   });
   value.projects.forEach((entry, i) => {
-    const item = exactObject(entry, `projects[${i}]`, ["title", "description", "technologies"], ["url", "badge"]);
+    const item = exactObject(entry, `projects[${i}]`, ["title", "description", "technologies", "url", "badge"]);
     for (const key of ["title", "description"]) text(item[key], `projects[${i}].${key}`);
     stringArray(item.technologies, `projects[${i}].technologies`);
-    for (const key of ["url", "badge"]) if (key in item) text(item[key], `projects[${i}].${key}`);
+    for (const key of ["url", "badge"]) nullableText(item[key], `projects[${i}].${key}`);
   });
   value.education.forEach((entry, i) => {
-    const item = exactObject(entry, `education[${i}]`, ["title", "organization", "year"], ["description"]);
+    const item = exactObject(entry, `education[${i}]`, ["title", "organization", "year", "description"]);
     for (const key of ["title", "organization", "year"]) text(item[key], `education[${i}].${key}`);
-    if ("description" in item) text(item.description, `education[${i}].description`);
+    nullableText(item.description, `education[${i}].description`);
   });
   for (const group of ["certifications", "awards"]) value[group].forEach((entry, i) => {
     const item = exactObject(entry, `${group}[${i}]`, ["title", "organization", "year"]);

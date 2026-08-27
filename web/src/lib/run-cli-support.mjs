@@ -92,6 +92,16 @@ export function isFatalCodexStderr(line) {
   return FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line);
 }
 
+export function isCodexInvalidSchemaError(value) {
+  return /invalid_json_schema|invalid schema for response_format/i.test(String(value ?? ""));
+}
+
+/** Schema rejection text contains schema metadata, not candidate content. */
+export function codexInvalidSchemaMessage(value) {
+  const message = String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
+  return isCodexInvalidSchemaError(message) ? message : "";
+}
+
 /**
  * Whether one Claude Code stderr chunk should be treated as a fatal error.
  *

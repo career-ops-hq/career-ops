@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, codexInvalidSchemaMessage, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -214,9 +214,10 @@ export async function POST(req: Request) {
       // successful run as failed on six of the eight runtimes (#1974).
       const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
       const flagStderrLine = (line: string) => {
-        if (!line.trim() || !isFatalStderr(line)) return;
+        const schemaError = nativeRoleSchema && isCodexInvalidSchemaError(line);
+        if (!line.trim() || (!schemaError && !isFatalStderr(line))) return;
         sawError = true;
-        send({ type: "error", msg: line.trim().slice(0, 200) });
+        send({ type: "error", msg: schemaError ? codexInvalidSchemaMessage(line) : line.trim().slice(0, 200) });
       };
       let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) — local only
       let lastCostUsd: number | null = null;
@@ -346,7 +347,8 @@ export async function POST(req: Request) {
         if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
         if (ev?.error) {
           sawError = true;
-          send({ type: "error", msg: ev.error.slice(0, 200) });
+          const schemaError = nativeRoleSchema ? codexInvalidSchemaMessage(ev.error) : "";
+          send({ type: "error", msg: schemaError || ev.error.slice(0, 200) });
         }
       };
 

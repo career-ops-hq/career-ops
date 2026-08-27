@@ -11,12 +11,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   accumulateTokens,
+  codexInvalidSchemaMessage,
   codexStreamArgs,
   completedReportNames,
   hasNewCompletedReport,
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  isCodexInvalidSchemaError,
   parseClaudeEvent,
   parseCodexEvent,
 } from "../../src/lib/run-cli-support.mjs";
@@ -239,6 +241,13 @@ test("a terminal turn.failed stays an error even when it mentions reconnecting",
 
 test("benign Codex stderr diagnostics are not fatal", () => {
   assert.equal(isFatalCodexStderr("ERROR codex_models_manager::cache: failed to load models cache: schema mismatch"), false);
+});
+
+test("Codex invalid-schema diagnostics are recognized and preserved completely", () => {
+  const message = "invalid_request_error code: invalid_json_schema Invalid schema for response_format 'codex_output_schema': In context=(), 'required' must include every key in properties, including 'url'.";
+  assert.equal(isCodexInvalidSchemaError(message), true);
+  assert.equal(codexInvalidSchemaMessage(message), message);
+  assert.equal(codexInvalidSchemaMessage("ordinary provider error"), "");
 });
 
 test("Codex auth-failure stderr phrases are fatal", () => {

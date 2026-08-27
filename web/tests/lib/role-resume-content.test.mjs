@@ -10,8 +10,8 @@ const content = (overrides = {}) => ({
   portfolio: { url: "", display: "" }, location: "Remote > US", professionalSummary: "Builds secure & reliable systems.",
   coreCompetencies: ["Java & APIs"],
   workExperience: [{ company: "Example <Corp>", period: "2020–Present", role: "Engineer", location: "Remote", bullets: ["Improved A & B"] }],
-  projects: [{ title: "Project", description: "Description", technologies: ["Java"] }],
-  education: [{ title: "Degree", organization: "University", year: "2020" }],
+  projects: [{ title: "Project", description: "Description", technologies: ["Java"], url: null, badge: null }],
+  education: [{ title: "Degree", organization: "University", year: "2020", description: null }],
   certifications: [], awards: [], interests: "Learning & systems", skills: [{ category: "Languages", items: ["Java", "SQL"] }],
   ...overrides,
 });
@@ -37,6 +37,12 @@ test("native raw control/status wrapper cannot pass", () => {
 test("native raw JSON still fails when a required field is absent", () => {
   const value = content(); delete value.professionalSummary;
   assert.match(parseRawRoleResumeJson(JSON.stringify(value)).error, /field "professionalSummary" is required/);
+});
+test("nullable semantic fields accept strings or null and reject other types", () => {
+  assert.equal(parseRawRoleResumeJson(JSON.stringify(content())).ok, true);
+  assert.equal(parseRawRoleResumeJson(JSON.stringify(content({ projects: [{ title: "P", description: "D", technologies: [], url: "https://example.test", badge: "Featured" }], education: [{ title: "D", organization: "U", year: "2020", description: "Coursework" }] }))).ok, true);
+  assert.match(parseRawRoleResumeJson(JSON.stringify(content({ projects: [{ title: "P", description: "D", technologies: [], url: 42, badge: null }] }))).error, /projects\[0\]\.url.*string/);
+  assert.match(parseRawRoleResumeJson(JSON.stringify(content({ education: [{ title: "D", organization: "U", year: "2020", description: false }] }))).error, /education\[0\]\.description.*string/);
 });
 test("backend fills the real template with nine preserved sections and landmarks", () => {
   const rendered = renderRoleResumeTemplate({ root, content: content() });
