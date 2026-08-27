@@ -31,8 +31,10 @@ import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
@@ -735,7 +737,7 @@ async function main() {
 
   const preview = args[0] === '--preview';
   const [inputPath, outputPath, templateArg] = preview
-    ? [args[1], resolve(__dirname, 'output', 'cv-preview.html'), args[2]]
+    ? [args[1], resolve(DATA_ROOT, 'output', 'cv-preview.html'), args[2]]
     : args;
   if (!inputPath || !outputPath) {
     console.error('Usage: node build-cv-html.mjs <input.json> <output.html> [template.html]');

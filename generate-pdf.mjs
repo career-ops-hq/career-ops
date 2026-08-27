@@ -39,18 +39,22 @@ import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const trackerPath = resolveTrackerPath(__dirname);
+const careerOpsRoot = getCareerOpsRoot();
+const trackerPath = resolveTrackerPath(careerOpsRoot);
 // Derive the workspace root from the uncanonicalized tracker path (#3169): a
 // repo that symlinks only its data/ out (the #524 workaround) must still resolve
 // cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
 // target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
-// spelling the rest of the module uses stays canonical as before.
-const workspaceRoot = resolveWorkspaceRootFor(__dirname);
+// spelling the rest of the module uses stays canonical as before. Use the same
+// configurable career-ops root as tracker resolution so CAREER_OPS_ROOT and
+// .career-ops-data remain honored after the main-branch resolver split.
+const workspaceRoot = resolveWorkspaceRootFor(careerOpsRoot);
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
@@ -76,7 +80,7 @@ function refreshRootCache() {
     // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor
     // reads CAREER_OPS_TRACKER at call time, so this keeps refreshRootCache's
     // re-read-on-change contract while a symlinked data/ no longer escapes.
-    const root = resolveWorkspaceRootFor(__dirname);
+    const root = resolveWorkspaceRootFor(getCareerOpsRoot());
     // resolveWorkspaceRootFor already realpaths the derived root (falling back to
     // the lexical form only when it cannot be canonicalized), so a second
     // realpathSync here would be a no-op on the happy path and would throw on the

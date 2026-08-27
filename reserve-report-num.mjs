@@ -23,6 +23,7 @@ import {
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   extractTrackerReportNumbers, parseTrackerRow, resolveColumns,
 } from './tracker-parse.mjs';
@@ -31,7 +32,7 @@ import {
 } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+const ROOT = getCareerOpsRoot();
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;

@@ -106,9 +106,7 @@ export function cell(v) {
  * @param {string} rootDir - The career-ops repository root.
  * @returns {string} Absolute canonical tracker path.
  */
-export function resolveTrackerPath(rootDir) {
-  return canonicalizeTrackerPath(rawTrackerPath(rootDir));
-}
+export { resolveTrackerPath } from './path-resolver.mjs';
 
 /**
  * The tracker path before canonicalization: the lexical location, with no
@@ -212,14 +210,8 @@ export function resolvePdfIndexPath(trackerPath) {
  * @param {string} path - Raw tracker path from config, env, or the default.
  * @returns {string} Absolute canonical path when the file exists, else resolved path.
  */
-export function canonicalizeTrackerPath(path) {
-  const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
-  }
-}
+import { canonicalizeTrackerPath } from './path-resolver.mjs';
+export { canonicalizeTrackerPath };
 
 /**
  * Check whether one absolute path stays inside another directory.

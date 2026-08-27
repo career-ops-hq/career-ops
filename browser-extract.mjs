@@ -47,13 +47,14 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { resolveAtsApi } from './liveness-api.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;

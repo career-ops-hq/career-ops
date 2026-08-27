@@ -35,11 +35,12 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
   ? join(CAREER_OPS, 'data/active-interviews.md')
   : join(CAREER_OPS, 'active-interviews.md');

@@ -25,16 +25,18 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = join(ROOT, 'data', 'applications.md');
-const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
-const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
-const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
-const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
-const PORTALS_FILE = join(ROOT, 'portals.yml');
-const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const SCAN_HISTORY_FILE = join(DATA_ROOT, 'data', 'scan-history.tsv');
+const FOLLOWUPS_FILE = join(DATA_ROOT, 'data', 'follow-ups.md');
+const SCAN_RUNS_FILE = join(DATA_ROOT, 'data', 'scan-runs.tsv');
+const STATUS_LOG_FILE = join(DATA_ROOT, 'data', 'status-log.tsv');
+const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
+const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
