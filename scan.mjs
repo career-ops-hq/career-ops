@@ -229,6 +229,7 @@ export function locationHintFromUrl(url) {
 // semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
+  const requireMatch = locationFilter.require_match === true;
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
@@ -237,7 +238,7 @@ export function buildLocationFilter(locationFilter) {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data).
-    if (lower === '' && hint === '') return true;
+    if (lower === '' && hint === '') return !requireMatch;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never

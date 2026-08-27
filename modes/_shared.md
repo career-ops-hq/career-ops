@@ -161,6 +161,16 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 
 ## Global Rules
 
+### Candidate Location Gate (hard constraint)
+
+The candidate is Atlanta-based and will consider Atlanta roles (including Atlanta
+hybrid/on-site) or roles explicitly confirmed as 100% remote within the United
+States. Exclude San Francisco, New York, Toronto, international roles, relocation-
+required roles, and hybrid roles outside Atlanta. A posting that merely says
+"remote-friendly," "remote possible," or has an ambiguous/missing location is not
+an eligible remote match. Never recommend or package a role until its work
+location satisfies this gate.
+
 ### NEVER
 
 1. Invent experience or metrics

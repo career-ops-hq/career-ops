@@ -82,6 +82,11 @@
 
 ## What Is This
 
+> **Candidate location rule:** For a candidate based in Atlanta, career-ops only
+> recommends Atlanta roles or roles explicitly confirmed as 100% remote within the
+> United States. It excludes out-of-state hybrid, office-based, relocation-required,
+> international, and ambiguous-location roles before recommendation or packaging.
+
 career-ops ([career-ops.org](https://career-ops.org), also known as **careerops**) turns any AI coding CLI into a full job search command center. Instead of manually tracking applications in a spreadsheet, you get an AI-powered pipeline that:
 
 - **Evaluates offers** with a structured evaluation -- blocks A-F scored across 5 weighted dimensions, plus block G, a separate posting-legitimacy assessment that never affects the 1-5 score
