@@ -1,0 +1,126 @@
+# hired-wall — turns a verified "I Got Hired" issue into a permanent entry on
+# the Hired Wall: appends the card to HIRED.md, bumps docs/hired-count.json
+# (what the README badge reads) and regenerates docs/hired-wall.svg (the strip
+# under the hero, three most recent stories, avatars inlined as base64 because
+# GitHub sanitizes external references inside SVGs).
+#
+# The trigger is the MAINTAINER adding the `hired-verified` label: verification
+# is a human act on purpose (template complete, permission box checked, story
+# free of sensitive data — and the #440 rule: doubts are asked in the thread,
+# never doubted in public). The bot only does the bookkeeping after the human
+# judgment, same split as the manifesto ledger.
+#
+# Full automation needs the LEDGER_TOKEN secret (fine-grained PAT, contents
+# read/write — the same one ledger-bot uses). Without it the run still
+# computes everything and leaves a comment for the maintainer to apply.
+name: hired-wall
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  add-to-wall:
+    if: github.event.label.name == 'hired-verified'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: hired-wall
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Parse issue and append entry
+        id: entry
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const issueUrl = context.payload.issue.html_url;
+            const author = context.payload.issue.user.login;
+            // Issue-form bodies render as "### Label\n\nvalue" sections.
+            const section = (label) => {
+              const re = new RegExp(`### ${label}\\s*\\n+([\\s\\S]*?)(?=\\n### |$)`);
+              const m = body.match(re);
+              return m ? m[1].trim().replace(/^_No response_$/, '') : '';
+            };
+            // Permission is the hard gate: the checked box, not the label. Both
+            // template generations count — the pre-wall wording already granted
+            // README + release-notes featuring, which is what the wall is.
+            if (!/\[[xX]\] I'm (happy for this story to appear publicly|okay with my story being featured)/.test(body)) {
+              core.setFailed('Permission checkbox is not checked — not adding to the wall. Ask in the thread.');
+              return;
+            }
+            const anonRaw = section('How should we show you on the wall\\?');
+            // No anonymity section only happens on old-template issues. Someone
+            // who posted a public celebration under their own handle and checked
+            // the featuring box gets full credit — the dropdown exists so people
+            // can choose LESS at submission time, not as a hoop toward more.
+            const level = /count me/.test(anonRaw) ? 'count' : /no handle/.test(anonRaw) ? 'role' : 'handle';
+            const role = section('What role did you land\\?');
+            const geo = section('Where \\(optional\\)');
+            const weeksRaw = section('Time from first scan to offer');
+            const weeks = (weeksRaw.match(/(\d+)\s*week/i) || [])[1] || '';
+            // The story quote: first sentence(s) of their story, clamped. The
+            // full story stays in their issue; the card carries the hook.
+            const story = section('Your story').replace(/\s+/g, ' ').slice(0, 180);
+            core.setOutput('level', level);
+            core.setOutput('handle', level === 'handle' ? author : '');
+            core.setOutput('role', role);
+            core.setOutput('geo', geo);
+            core.setOutput('weeks', weeks);
+            core.setOutput('story', story);
+            core.setOutput('link', issueUrl);
+      - name: Build wall
+        # Every field comes from an UNTRUSTED issue body. It reaches the shell
+        # exclusively through env vars (never ${{ }} inside run:) — inline
+        # interpolation here would be script injection on a runner holding a
+        # contents-write token. Same class CodeQL actions/injection flags.
+        env:
+          E_LEVEL: ${{ steps.entry.outputs.level }}
+          E_HANDLE: ${{ steps.entry.outputs.handle }}
+          E_ROLE: ${{ steps.entry.outputs.role }}
+          E_GEO: ${{ steps.entry.outputs.geo }}
+          E_WEEKS: ${{ steps.entry.outputs.weeks }}
+          E_STORY: ${{ steps.entry.outputs.story }}
+          E_LINK: ${{ steps.entry.outputs.link }}
+        run: |
+          # Idempotence: re-labeling an issue already on the wall is a no-op.
+          if grep -qF "link=\"$E_LINK\"" HIRED.md; then
+            echo "entry already on the wall — rebuild only"
+            node hired-wall-build.mjs --rebuild --fetch-avatars
+          else
+            set -- --add --level "$E_LEVEL" --role "$E_ROLE" --story "$E_STORY" --link "$E_LINK" --fetch-avatars
+            [ -n "$E_HANDLE" ] && set -- "$@" --handle "$E_HANDLE"
+            [ -n "$E_GEO" ] && set -- "$@" --geo "$E_GEO"
+            [ -n "$E_WEEKS" ] && set -- "$@" --weeks "$E_WEEKS"
+            node hired-wall-build.mjs "$@"
+          fi
+      - name: Commit
+        id: commit
+        run: |
+          # Same public face as the manifesto ledger: the wall's bookkeeping
+          # commits belong to @careerops-ledger (whose PAT is LEDGER_TOKEN).
+          git config user.name "careerops-ledger"
+          git config user.email "careerops-ledger@users.noreply.github.com"
+          git add HIRED.md docs/hired-count.json docs/hired-wall.svg
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          N=$(node -e "console.log(JSON.parse(require('fs').readFileSync('docs/hired-count.json','utf8')).count)")
+          git commit -m "chore(hired-wall): hire #$N joins the wall"
+          git push
+          echo "n=$N" >> "$GITHUB_OUTPUT"
+      - name: Tell them their number
+        if: steps.commit.outputs.n
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.payload.issue.number,
+              body: `hire #${{ steps.commit.outputs.n }}: permanent, linked, and yours. Congratulations! 🎉\n\nYour card is live on the [Hired Wall](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/HIRED.md) and in the README.`,
+            });
