@@ -20,9 +20,9 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
 
 // ── ledger round-trip ────────────────────────────────────────────────────────
 {
-  const e = { n: 7, level: 'handle', handle: 'someone', role: 'ML Engineer', geo: 'remote EU', weeks: 6, link: 'https://github.com/santifer/career-ops/issues/9', withdrawn: false };
+  const e = { n: 7, level: 'handle', handle: 'someone', role: 'ML Engineer', sector: 'Fintech', geo: 'remote EU', weeks: 6, link: 'https://github.com/santifer/career-ops/issues/9', withdrawn: false };
   const parsed = parseLedger(ledgerLine(e))[0];
-  if (parsed && parsed.n === 7 && parsed.handle === 'someone' && parsed.weeks === 6 && parsed.role === 'ML Engineer') {
+  if (parsed && parsed.n === 7 && parsed.handle === 'someone' && parsed.weeks === 6 && parsed.role === 'ML Engineer' && parsed.sector === 'Fintech') {
     pass('ledger line round-trips through parseLedger');
   } else fail(`ledger round-trip lost data: ${JSON.stringify(parsed)}`);
 }
