@@ -29,6 +29,7 @@ import {
 import {
   acquireTrackerLock, canonicalizeTrackerPath, resolveTrackerPath, trackerLockDirFor,
 } from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
@@ -350,15 +351,6 @@ async function runCli() {
   }
 }
 
-function isDirectInvocation() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-  }
-}
-
-if (isDirectInvocation()) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = await runCli();
 }

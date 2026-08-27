@@ -343,6 +343,29 @@ const thresholdOut = execFileSync('node', [scriptPath, '--min-threshold', '3'], 
 const thresholdJson = JSON.parse(thresholdOut);
 eq('--min-threshold sets minThreshold in metadata', thresholdJson.metadata.minThreshold, 3);
 
+
+// --- #2982: an unusable --min-threshold must not become the threshold -------
+//
+// This file had NO shape check, so unlike detect-reposts.mjs it did not even
+// fall back: a 21-digit value was ACCEPTED and reported as "minThreshold":
+// 1e+21 — the "metadata reports a value that is not the one in effect" failure
+// detect-reposts documents isSafeInteger as existing to prevent.
+for (const bad of ['abc', '-5', '3.5', '7abc', '999999999999999999999', '9007199254740993']) {
+  const out = execFileSync('node', [scriptPath, '--min-threshold', bad], {
+    encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath),
+  });
+  eq(`--min-threshold ${bad} falls back to 1`, JSON.parse(out).metadata.minThreshold, 1);
+}
+
+// The guard must not swallow real values, including the 0 that means
+// "report every company" and the largest integer that is still exact.
+for (const [good, want] of [['0', 0], ['7', 7], ['9007199254740991', 9007199254740991]]) {
+  const out = execFileSync('node', [scriptPath, '--min-threshold', good], {
+    encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath),
+  });
+  eq(`--min-threshold ${good} is honoured`, JSON.parse(out).metadata.minThreshold, want);
+}
+
 const badThresholdOut = execFileSync('node', [scriptPath, '--min-threshold', 'abc'], {
   encoding: 'utf-8', timeout: 10000,
   cwd: dirname(scriptPath),

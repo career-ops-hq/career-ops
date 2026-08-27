@@ -35,9 +35,11 @@
 // Anti-vacuity: a round-trip suite over an empty corpus passes trivially, so the
 // corpus is asserted to actually produce entries before any equality is checked.
 
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, run, lastRunFailure, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 
 console.log('\napplication-answers.mjs — rendered sections parse back into snapshots');
 
@@ -396,6 +398,93 @@ try {
     pass('formatter output is unchanged by the addition of the reader');
   } else {
     fail(`formatter output changed:\n${section}`);
+  }
+
+  // ── 9. the CLI read path — the seam modes/apply.md actually calls ────────
+  // The prompt layer is CI-blind: an agent mode cannot import the library, it
+  // can only run the CLI. So the recovery contract the apply mode depends on
+  // is pinned here, at the executable seam, even though the mode file itself
+  // cannot be. The contract:
+  //
+  //   --read           prints the parsed snapshot as JSON (null when absent),
+  //                    total on mangled input exactly like the library default
+  //   --read --strict  exits non-zero on a partially unreadable section and
+  //                    names every refused line on stderr
+  //   --strict alone   is refused, not silently ignored — a caller who typed
+  //                    it wanted the refusal semantics somewhere
+  const cliTmp = mkdtempSync(join(tmpdir(), 'application-answers-cli-'));
+  try {
+    const cleanPath = join(cliTmp, 'clean.md');
+    const mangledPath = join(cliTmp, 'mangled.md');
+    const noSectionPath = join(cliTmp, 'no-section.md');
+    writeFileSync(cleanPath, clean, 'utf-8');
+    writeFileSync(mangledPath, mangled, 'utf-8');
+    writeFileSync(noSectionPath, '# Report 001\n\n## Evaluation\n\nBody only.\n', 'utf-8');
+
+    // stderr is piped, not inherited: the strict invocation below fails BY
+    // DESIGN, and its refusal message belongs in lastRunFailure(), not
+    // interleaved with the suite's own output.
+    const cli = (...extra) =>
+      run('node', ['application-answers.mjs', ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const cliChecks = [];
+
+    const cleanOut = cli('--report', cleanPath, '--read');
+    cliChecks.push([
+      cleanOut !== null &&
+        JSON.stringify(JSON.parse(cleanOut)) ===
+        JSON.stringify(parseApplicationAnswersSection(clean)),
+      'clean --read must print exactly what the library parse returns',
+    ]);
+
+    const nullOut = cli('--report', noSectionPath, '--read');
+    cliChecks.push([
+      nullOut === 'null',
+      `--read on a report without the section must print null, got: ${nullOut}`,
+    ]);
+
+    const lenientOut = cli('--report', mangledPath, '--read');
+    cliChecks.push([
+      lenientOut !== null &&
+        JSON.stringify(JSON.parse(lenientOut)) ===
+        JSON.stringify(parseApplicationAnswersSection(mangled)),
+      '--read without --strict must stay total on a mangled section (library default, unchanged)',
+    ]);
+
+    const strictOut = cli('--report', mangledPath, '--read', '--strict');
+    const strictRun = strictOut === null ? lastRunFailure() : null;
+    cliChecks.push([
+      strictOut === null,
+      '--read --strict must exit non-zero on a mangled section',
+    ]);
+    cliChecks.push([
+      strictRun !== null &&
+        /2 unreadable entries/.test(strictRun.stderr) &&
+        strictRun.stderr.includes('Notice period'),
+      `--read --strict stderr must name what it refused, got: ${strictRun && strictRun.stderr}`,
+    ]);
+
+    // The dangerous shape is a full, VALID write invocation with --strict
+    // tacked on: without the guard it would write successfully while silently
+    // ignoring the flag, and the caller who asked for refusal semantics gets
+    // none. Uses a disposable copy so a buggy build cannot dirty the fixtures.
+    const writeVictimPath = join(cliTmp, 'write-victim.md');
+    const writeInputPath = join(cliTmp, 'write-input.json');
+    writeFileSync(writeVictimPath, '# Report 002\n\n## Evaluation\n\nBody only.\n', 'utf-8');
+    writeFileSync(writeInputPath, JSON.stringify({ freeText: [{ question: 'Q', answer: 'A' }] }), 'utf-8');
+    const strictOnWriteOut = cli('--report', writeVictimPath, '--input', writeInputPath, '--state', 'filled', '--strict');
+    cliChecks.push([
+      strictOnWriteOut === null,
+      '--strict on a write invocation must be refused, not silently ignored',
+    ]);
+
+    const cliBroken = cliChecks.filter(([ok]) => !ok).map(([, detail]) => detail);
+    if (cliBroken.length === 0) {
+      pass('CLI --read/--strict expose the parser contract at the seam apply mode calls');
+    } else {
+      fail(`CLI read path broken:\n  ${cliBroken.join('\n  ')}`);
+    }
+  } finally {
+    rmSync(cliTmp, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`application answers round-trip tests crashed: ${e.stack || e.message}`);

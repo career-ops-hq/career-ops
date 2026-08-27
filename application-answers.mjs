@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -340,6 +340,8 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--read') args.read = true;
+    else if (arg === '--strict') args.strict = true;
     else if (arg.startsWith('--')) {
       const value = argv[i + 1];
       if (!value || value.startsWith('--')) {
@@ -355,8 +357,12 @@ function parseArgs(argv) {
 function usage() {
   return [
     'Usage: node application-answers.mjs --report <report.md> --input <answers.json> [--state filled|submitted] [--date YYYY-MM-DD]',
+    '       node application-answers.mjs --report <report.md> --read [--strict]',
     '',
     'The input JSON may contain: freeText, selections, fieldValues, files, date, state.',
+    '--read prints the parsed ## Application Answers snapshot as JSON (null when the section is absent).',
+    '--strict makes --read refuse a partially unreadable section, naming every line it could not parse,',
+    'instead of skipping it. Recovery callers (modes/apply.md) want the refusal; the default stays total.',
   ].join('\n');
 }
 
@@ -371,6 +377,30 @@ async function main() {
   }
   if (args.help) {
     console.log(usage());
+    return;
+  }
+  if (args.strict && !args.read) {
+    console.error(`--strict only applies to --read.\n\n${usage()}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (args.read) {
+    if (args.input || args.state || args.date) {
+      console.error(`--read is read-only and takes no --input, --state or --date.\n\n${usage()}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!args.report) {
+      console.error(usage());
+      process.exitCode = 1;
+      return;
+    }
+    // strict throws with a message naming every unreadable line; main().catch
+    // prints it to stderr and sets a non-zero exit code, which is the contract
+    // modes/apply.md keys on. A report without the section prints null.
+    const reportText = readFileSync(resolve(args.report), 'utf-8');
+    const snapshot = parseApplicationAnswersSection(reportText, { strict: args.strict === true });
+    console.log(JSON.stringify(snapshot, null, 2));
     return;
   }
   if (!args.report || !args.input) {
@@ -394,7 +424,7 @@ async function main() {
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(err.message);
     process.exitCode = 1;

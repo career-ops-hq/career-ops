@@ -69,7 +69,7 @@
 
 career-ops 能將任何 AI 程式碼 CLI 轉化為完整的求職指揮中心。不再需要手動用試算表追蹤應徵紀錄，而是獲得一個 AI 驅動的管道，能夠：
 
-- **評估職缺** — 結構化的 A-F 評估報告（五個維度組成 1.0-5.0 的評分）
+- **評估職缺** — 結構化的 A-H 評估報告（五個維度組成 1-5 的評分）
 - **生成客製化 PDF** — 針對每份職缺描述進行 ATS 最佳化的履歷
 - **自動掃描求職平台**（Greenhouse、Ashby、Lever、企業頁面）
 - **批次處理** — 透過子代理並行評估 10 份以上的職缺
@@ -83,6 +83,10 @@ career-ops 具有代理能力：Claude Code 透過 Playwright 瀏覽求職頁面
 
 這個系統由一位親身使用它評估超過 740 份職缺、生成超過 100 份客製化履歷、並成功獲得 Head of Applied AI 職位的人所打造。[閱讀完整案例研究](https://santifer.io/career-ops-system)。
 
+## CareerOps 宣言
+
+career-ops 是 [CareerOps Manifesto](https://career-ops.org/manifesto?utm_source=readme) 的第一個參考實作。讀一讀，如果它說中了你的想法，就簽署它。你的簽署會成為一次 commit。
+
 ## 功能特色
 
 | 功能             | 說明                                                                                                                   |
@@ -95,7 +99,7 @@ career-ops 具有代理能力：Claude Code 透過 Playwright 瀏覽求職頁面
 | **平台掃描器**   | 預設超過 45 家企業（Anthropic、OpenAI、ElevenLabs、Retool、n8n...）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自訂查詢 |
 | **批次處理**     | 使用 `claude -p` 工作器並行評估                                                                                        |
 | **儀表板 TUI**   | 在終端機 UI 中瀏覽、篩選及排序你的求職管道                                                                             |
-| **人機協作**     | AI 負責評估與建議，你負責決策與行動。系統絕不自動送出應徵 — 最終決定永遠在你手上                                       |
+| **人機協作**     | AI 負責評估與建議，你負責決策與行動。系統絕不送出應徵 — 最終決定永遠在你手上 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                                       |
 | **管道完整性**   | 自動合併、去重、狀態正規化、健康檢查                                                                                   |
 
 ## 快速開始
@@ -135,6 +139,100 @@ claude   # 開啟你的 AI CLI — 首次啟動時會帶你完成設定
 
 完整設定指南請參閱 [docs/SETUP.md](docs/SETUP.md)。
 
+## Antigravity CLI 整合
+
+career-ops 原生支援 Antigravity CLI，方式與支援 Claude Code、OpenCode 相同。所有斜線指令都透過共用的 skill 進入點提供，使用的是同一套 `modes/*.md` 評估邏輯。
+
+Google 已將消費者版的 Gemini CLI 存取轉移到 Antigravity CLI。`GEMINI.md` 現在只是一個不做任何事（no-op）的相容性防護檔，以免 Antigravity 同時讀取 `AGENTS.md` 與 `GEMINI.md` 時重複載入完整的專案指示。
+
+### 原生 Antigravity CLI
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+agy
+
+# 2. Use the unified /career-ops command with subcommands:
+/career-ops "Senior AI Engineer at Anthropic..."
+/career-ops pipeline
+/career-ops scan
+/career-ops pdf
+/career-ops tracker
+```
+
+這個 skill 以開放標準定義在 `.agents/skills/career-ops/SKILL.md`，並為每個支援的 CLI 建立 symlink 或引用（例如 `.claude/`、`.cursor/`、`.qwen/`、`.antigravitycli/`、`.grok/`）。
+
+## Codex 整合
+
+career-ops 透過同一套共用路由支援 Codex，但它的呼叫方式與那些會自動註冊斜線指令的 CLI 不同。完整指南請參閱 [docs/CODEX.md](docs/CODEX.md)。
+
+### 互動式 Codex
+
+```bash
+cd career-ops
+codex
+```
+
+Codex 並不保證能使用斜線指令。如果 `/career-ops` 無法使用，就直接用自然語言請 Codex 執行對應的模式：
+
+```text
+Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
+Run the career-ops scan mode and summarize new matches.
+Run the career-ops pipeline mode for data/pipeline.md.
+Run the career-ops pdf mode for the latest evaluated role.
+Run the career-ops tracker mode and summarize the current statuses.
+```
+
+### 單次執行 Codex（`codex exec`）
+
+```bash
+codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+codex exec "Run career-ops scan mode in this repo and summarize new matches."
+codex exec "Run career-ops pipeline mode for data/pipeline.md."
+codex exec "Run career-ops pdf mode for the latest evaluated role."
+codex exec "Run career-ops tracker mode and summarize the current statuses."
+```
+
+## Grok Build CLI 整合
+
+career-ops 原生支援 Grok Build CLI，方式與支援 Claude Code、OpenCode 相同。`AGENTS.md` 會自動載入為專案規則，所有斜線指令都透過共用的 skill 進入點提供。
+
+### 原生 Grok Build CLI
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+grok
+
+# 2. Use the unified /career-ops command with subcommands:
+/career-ops "Senior AI Engineer at Anthropic..."
+/career-ops pipeline
+/career-ops scan
+/career-ops pdf
+/career-ops tracker
+```
+
+若要以無介面的批次工作器執行，使用 `grok -p "prompt"`（加上 `--yolo` 可自動核准工具執行）。
+
+### 獨立的 Gemini API 腳本（不需安裝 CLI）
+
+```bash
+# 1. Get a free API key at https://aistudio.google.com/apikey
+cp .env.example .env
+# Edit .env, set GEMINI_API_KEY=your_key_here
+
+# 2. Install dependencies
+npm install
+
+# 3. Evaluate a job description
+node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
+node gemini-eval.mjs --file ./jds/my-job.txt
+node agent-inbox.mjs add "..."   # queue a request for the next session
+npm run gemini:eval -- "JD text here"
+```
+
+> **免費方案：** 兩種方式都不需要開通付費。原生 CLI 使用 Google OAuth；API 腳本使用 `gemini-3.6-flash`（速率限制依模型與方案而異，目前的配額請見 Google AI 文件）。
+
 ## 使用方式
 
 career-ops 是一個具有多種模式的單一斜線指令：
@@ -168,7 +266,7 @@ career-ops 是一個具有多種模式的單一斜線指令：
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F 評估        │  匹配度、缺口、薪酬調查、STAR 故事
+│  A-H 評估        │  匹配度、缺口、薪酬調查、STAR 故事
 │  （讀取 cv.md）  │
 └────────┬─────────┘
          │

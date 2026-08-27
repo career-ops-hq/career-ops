@@ -340,3 +340,22 @@ export function hasNewCompletedReport(beforeEntries, afterEntries) {
   }
   return false;
 }
+
+// Graceful-SIGTERM budget (ms) for a run, kept safely under the route's 800s
+// maxDuration. pdf reserves headroom for its post-agent render+mark phase; a
+// plain evaluate has no such phase, so it gets nearly the whole budget. The old
+// 285s evaluate floor killed real evaluations mid-run — ~25 Bash calls plus web
+// searches routinely run longer — and the kill then misreported as "didn't save
+// a report" (#3124).
+export const RUN_MAX_DURATION_S = 800;
+export function killMsForKind(kind) {
+  return kind === "pdf" ? 600_000 : 780_000;
+}
+
+// Message for a run the route stopped at its own time limit. It names the limit,
+// offers a re-run / Claude Code, and DELIBERATELY never says the CLI "didn't save
+// a report": a timeout and a CLI that couldn't write are different failures, and
+// blaming the CLI sends the user to re-check the wrong thing (#3124).
+export function timeoutMessage(killMs, kind) {
+  return `This run passed the ${Math.round(killMs / 1000)}s time limit and was stopped before it could finish — re-run it, or run a very long ${kind} on Claude Code directly. The CLI was working; we cut it off, so it isn't recorded as a result.`;
+}

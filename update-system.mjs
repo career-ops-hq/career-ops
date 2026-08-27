@@ -20,9 +20,9 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'fs';
-import { join, dirname, posix as pathPosix } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, realpathSync } from 'fs';
+import { join, dirname, resolve, posix as pathPosix } from 'path';
+import { fileURLToPath } from 'url';
 
 // NOTE: this file must stay *self-loading* — no static (top-level) relative
 // imports. A pre-#1245 client's apply() self-reexec checks out ONLY
@@ -101,6 +101,7 @@ const SYSTEM_PATHS = [
   'interview-prep/sessions/.gitkeep',
   'interview-prep/sessions/README.md',
   'modes/patterns.md',
+  'modes/calibrate.md',
   'modes/titles.md',
   'modes/upskill.md',
   'modes/intake.md',
@@ -133,6 +134,7 @@ const SYSTEM_PATHS = [
   'modes/ru/interview/',
   'modes/tr/',
   'modes/ua/',
+  'modes/ua/interview/',
   'modes/heuristics/',
   'modes/regional/',
   'modes/zh/',
@@ -145,7 +147,11 @@ const SYSTEM_PATHS = [
   'GEMINI.md',
   'KIMI.md',
   'build-dashboard.mjs',
+  'clean-markers.mjs',
   'generate-pdf.mjs',
+  'hired-share.mjs',
+  'hired-wall-build.mjs',
+  'HIRED.md',
   'theme-style.mjs',
   'generate-latex.mjs',
   'extract-latex-content.mjs',
@@ -154,9 +160,13 @@ const SYSTEM_PATHS = [
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/is-main-module.mjs',
+  'lib/outcome-dir.mjs',
+  'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
+  'scripts/export-ats-text.mjs',
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
@@ -213,6 +223,7 @@ const SYSTEM_PATHS = [
   'liveness-browser.mjs',
   'browser-extract.mjs',
   'analyze-patterns.mjs',
+  'calibrate.mjs',
   'upskill.mjs',
   'skill-extract.mjs',
   'intake.mjs',
@@ -233,6 +244,7 @@ const SYSTEM_PATHS = [
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
+  'linkedin-join.mjs',
   'contacts.test.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
@@ -345,13 +357,13 @@ const SYSTEM_PATHS = [
   'cv-sections-core.mjs',
   'cv-templates.mjs',
   'playwright.cv.config.mjs',
-  'test/cv-templates.test.mjs',
-  'test/cover-resolver.test.mjs',
-  'test/pipeline-lock.test.mjs',
-  'test/profile-photo.test.mjs',
+  'tests/cv-templates.test.mjs',
+  'tests/cover-resolver.test.mjs',
+  'tests/pipeline-lock.test.mjs',
+  'tests/profile-photo.test.mjs',
   'templates/cv-template.zh-minimal.html',
-  'test/zh-minimal-template.test.mjs',
-  'test/cv-visual/',
+  'tests/zh-minimal-template.test.mjs',
+  'tests/cv-visual/',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
@@ -829,6 +841,28 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
     .filter((file) => !remote.has(file))
     .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
     .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
+}
+
+// A stale-file prune candidate can still be load-bearing for a file this same
+// run just decided to KEEP because the user modified it (see
+// `locallyModifiedSystemFiles` + the `preservedPaths` handling in `apply()`) —
+// e.g. a user's custom CV template referencing a font file upstream no longer
+// ships. Deleting the referenced asset out from under a preserved file leaves
+// the preserved file silently broken (missing font, broken image) even though
+// the file itself survived. Scoped to preserved HTML/CSS files' on-disk
+// content, since those are the only preserved file types known to reference
+// other system files by relative path.
+export function isReferencedByPreservedFile(candidatePath, preservedPaths, readFile = (path) => readFileSync(path, 'utf-8')) {
+  const basename = normalizeRepoPath(candidatePath).split('/').pop();
+  if (!basename) return false;
+  return preservedPaths.some((preservedPath) => {
+    if (!/\.(html|css)$/i.test(preservedPath)) return false;
+    try {
+      return readFile(join(ROOT, ...preservedPath.split('/'))).includes(basename);
+    } catch {
+      return false;
+    }
+  });
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
@@ -1459,15 +1493,20 @@ function gitShowRaw(spec) {
  * a failed update into exactly the exposure the file exists to prevent, and
  * doing it silently. Mirrors discover-ats.mjs and followup-seed.mjs.
  *
+ * Lazy-imports `renameSyncWithRetry` (see the top-of-file self-loading note —
+ * a static import of tracker-utils.mjs here would crash a pre-#1245 client's
+ * old→new re-exec the same way a static scaffolder/ import would, #1706).
+ *
  * @param {string} filePath - Absolute path to write.
  * @param {string} content - Full file content.
- * @returns {void}
+ * @returns {Promise<void>}
  */
-function writeGitignoreAtomic(filePath, content) {
+async function writeGitignoreAtomic(filePath, content) {
+  const { renameSyncWithRetry } = await import('./tracker-utils.mjs');
   const tmpPath = `${filePath}.tmp-${process.pid}`;
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     // The original is still intact: the rename either happened or it did not.
     try { rmSync(tmpPath, { force: true }); } catch { /* already gone */ }
@@ -1756,7 +1795,17 @@ async function apply() {
       }
       if (remoteFiles.size > 0) {
         const localFiles = git('ls-files').split('\n').filter(Boolean);
-        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+        // A file just preserved above because THIS install modified it (e.g. a
+        // custom cv-template.*.html no longer shipped upstream) must never also
+        // be deleted here as "stale" — the two checks used to run independently,
+        // so a preserved file with no upstream counterpart was backed up to
+        // .bak by the block above and then unlinked by this one in the same run.
+        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        for (const f of staleCandidates) {
+          if (isReferencedByPreservedFile(f, preservedPaths)) {
+            console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
+            continue;
+          }
           try {
             unlinkSync(join(ROOT, f));
             updated.push(f);
@@ -1768,58 +1817,6 @@ async function apply() {
       }
     } catch (err) {
       console.error(`Stale system-file prune step failed: ${err.message}`);
-    }
-
-    // tests/ and test-fixtures/ are both auto-discovered and EXECUTED
-    // (tests/**/*.test.mjs run directly; test-fixtures/upgrade/<state>/ dirs are
-    // enumerated by seed-fixture.mjs's listStates() and exercised by its
-    // --self-test, which fails if a stale state lacks expected.json/required
-    // files). Stale files left behind by upstream renames would run twice,
-    // crash the suite, or make the self-test iterate a state that no longer
-    // ships upstream. `git checkout` never deletes upstream-removed files (see
-    // the limitation note in rollback below) — prune tracked extras against
-    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked local
-    // experiments in these dirs are never touched.
-    for (const prunePrefix of ['tests/', 'test-fixtures/']) {
-      try {
-        let remoteFiles = new Set();
-        try {
-          remoteFiles = new Set(
-            git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', prunePrefix)
-              .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
-          );
-        } catch {
-          // The dir may not exist in older targets (ls-tree throws) — nothing
-          // to prune. This is the only expected-and-silent failure here.
-        }
-        // An empty set means FETCH_HEAD has no such dir at all (older target, or
-        // ls-tree quietly returning nothing) — pruning against it would delete
-        // every local file under the prefix. Only prune when the remote actually
-        // ships the directory.
-        if (remoteFiles.size > 0) {
-          const localFiles = git('ls-files', '--', prunePrefix).split('\n').filter(Boolean);
-          for (const f of localFiles) {
-            if (!remoteFiles.has(f.replace(/\\/g, '/'))) {
-              // Per-file isolation: one failed unlink (locked file, permissions)
-              // must not abort pruning the rest.
-              try {
-                unlinkSync(join(ROOT, f));
-                // Raw path only: `updated` entries are reused as git pathspecs by
-                // revertPaths() and the scoped commit below. Pushed only after a
-                // successful unlink so failed deletions never enter `updated`.
-                updated.push(f);
-                console.log(`Pruned stale file: ${f}`);
-              } catch (err) {
-                console.error(`Failed to prune stale file ${f}: ${err.message}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // Unexpected failure (e.g. ls-files threw) — surface it instead of
-        // silently skipping the prune step.
-        console.error(`Stale-file prune step failed for ${prunePrefix}: ${err.message}`);
-      }
     }
 
     // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
@@ -1861,13 +1858,13 @@ async function apply() {
         // already carries its own final newline; the guard is only for a blob that
         // somehow lacks one.
         const seed = upstreamGitignore.endsWith('\n') ? upstreamGitignore : `${upstreamGitignore}\n`;
-        writeGitignoreAtomic(gitignorePath, seed);
+        await writeGitignoreAtomic(gitignorePath, seed);
         trackGitignore();
         console.log('Restored .gitignore (it was missing).');
       } else {
         const { text, added } = reconcileGitignore(readFileSync(gitignorePath, 'utf-8'), upstreamGitignore);
         if (added.length > 0) {
-          writeGitignoreAtomic(gitignorePath, text);
+          await writeGitignoreAtomic(gitignorePath, text);
           trackGitignore();
           console.log(`.gitignore: appended ${added.length} missing rule(s): ${added.join(', ')}`);
         }
@@ -2193,7 +2190,34 @@ function dismiss() {
 // Only run the CLI when executed directly, so importing this module
 // (e.g. from test-all.mjs to exercise SEMVER_RE) does not trigger a
 // live update check.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// This is the ONE place that inlines lib/is-main-module.mjs instead of importing
+// it (#3170). #1706 requires this file to be SELF-LOADING: a pre-#1245 client's
+// apply() checks out only update-system.mjs and re-execs it, so any static
+// relative import crashes the old→new jump with ERR_MODULE_NOT_FOUND. The
+// semantics must still match the helper exactly — realpath BOTH sides, because
+// `import.meta.url` is realpath-resolved by Node while argv[1] keeps whatever
+// spelling the caller typed, and a mismatch makes the updater a silent no-op
+// that exits 0. tests/main-guard-convention.test.mjs exempts this file BY NAME
+// from its no-hand-rolled-guard source scan (the #1706 constraint is why), and
+// pins the semantics behaviourally instead: it invokes this file through a
+// symlink and requires the CLI tail to answer. Keep that in mind when editing —
+// the scan will not catch a regression here; only that behaviour test will.
+//
+// `.native` matches lib/is-main-module.mjs's canonicalize(): it expands Windows
+// 8.3 short names and reports on-disk casing, which the JS realpath leaves
+// alone. Both sides go through the SAME function, which is the property that
+// actually matters — a divergence here would make this copy answer differently
+// from the helper on exactly the platforms the helper was hardened for.
+const canonicalizePath = realpathSync.native ?? realpathSync;
+const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const selfPath = fileURLToPath(import.meta.url);
+let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
+if (process.argv[1] && !isCli) {
+  try { isCli = canonicalizePath(entryPath) === canonicalizePath(selfPath); } catch { isCli = false; }
+}
+
+if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {

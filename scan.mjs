@@ -38,7 +38,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
-import { pathToFileURL, fileURLToPath } from 'url';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
@@ -56,6 +56,7 @@ import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './titl
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -2027,7 +2028,23 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
-  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  // The header is written only on first creation, so a release that appends or inserts a counter
+  // leaves existing files with a header that no longer describes the rows below it. Nothing
+  // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
+  // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
+  // header in place would misalign every historical row instead.
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  } else {
+    const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
+    if (onDisk !== SCAN_RUNS_HEADER) {
+      console.error(
+        `Warning: ${filePath} header has ${onDisk.trim().split('\t').length} columns but this build writes `
+        + `${SCAN_RUNS_HEADER.trim().split('\t').length}. Rows below the header are positionally offset and `
+        + `stats.mjs will exclude them. Move ${filePath} aside to start a fresh file — deleting only the header does NOT recover it, because the file still exists and the next run would read the first data row as the header.`,
+      );
+    }
+  }
   const row = [
     c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
     c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredPostingAge,
@@ -2995,7 +3012,7 @@ async function main() {
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
 // `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');

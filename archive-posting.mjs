@@ -26,10 +26,11 @@ import { chromium } from 'playwright';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const JDS_DIR = join(ROOT, 'jds');
@@ -115,11 +116,24 @@ function parseCliArgs(args) {
       dryRun = true;
     } else if (arg.startsWith('--company=')) {
       overrideCompany = arg.slice('--company='.length).trim();
-    } else if (arg === '--company' && args[i + 1]) {
+    } else if (arg === '--company') {
+      // The old `args[i + 1]` truthiness check consumed the NEXT flag as the
+      // company name whenever --company was given with no value (e.g.
+      // `--company --pipeline` set overrideCompany to "--pipeline" and left
+      // pipeline mode off, silently, at exit 0 (#3087)). A value that starts
+      // with `--` is another flag, not a company name.
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--company requires a value.');
+        process.exit(1);
+      }
       overrideCompany = args[++i].trim();
     } else if (arg.startsWith('--role=')) {
       overrideRole = arg.slice('--role='.length).trim();
-    } else if (arg === '--role' && args[i + 1]) {
+    } else if (arg === '--role') {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--role requires a value.');
+        process.exit(1);
+      }
       overrideRole = args[++i].trim();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.slice('--report='.length).trim();
@@ -458,7 +472,7 @@ async function main() {
   if (failed > 0) process.exit(1);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   parseCliArgs(process.argv.slice(2));
   main().catch(err => {
     console.error('❌  Fatal:', err.message);

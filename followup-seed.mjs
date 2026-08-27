@@ -55,9 +55,9 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
 // Third copy of the directory-lock protocol in this repo, and the one #2984
 // missed: that fix declared "one definition, no sibling drift" while patching
@@ -68,6 +68,7 @@ import {
   isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
   sameLockDirectory, lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 import { tmpdir } from 'os';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -79,6 +80,7 @@ import {
   parseDate,
   addDays,
 } from './followup-cadence.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -440,7 +442,7 @@ function writeFileAtomic(filePath, content) {
   const tmpPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;
@@ -818,6 +820,6 @@ async function main() {
 }
 
 // Run (CLI only; guarded so the module is safely importable for tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }
