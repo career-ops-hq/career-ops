@@ -10,39 +10,27 @@
  * Run: node process-quality.test.mjs
  */
 
-import { parseActiveInterviews, extractFriction, aggregateProcessQuality } from './process-quality.mjs';
+import { parseActiveInterviews, extractFriction, aggregateProcessQuality } from '../process-quality.mjs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\nprocess-quality.mjs — recruiting friction');
+
 
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 function table(rows) {
@@ -275,7 +263,7 @@ if (rentsync) {
 // ============================================================================
 console.log('\n--- 10. CLI behavior ---');
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'process-quality.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'process-quality.mjs');
 
 try {
   execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
@@ -399,16 +387,3 @@ for (const { reason } of documentedExamples) {
   const notes = `[process-friction: ${reason}]`;
   eq(`documented example parses: "${reason}"`, extractFriction({ Notes: notes }), { hasFriction: true, reason });
 }
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);

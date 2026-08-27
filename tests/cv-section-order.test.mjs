@@ -746,6 +746,9 @@ try {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
     // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
     // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
     // before parsing an argument.
@@ -880,6 +883,9 @@ export const chromium = {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
     // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
     // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
     // before parsing an argument.

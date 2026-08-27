@@ -315,11 +315,10 @@ const scripts = [
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
-  { name: 'invite-match.test.mjs', expectExit: 0 },
-  { name: 'jd-similarity.test.mjs', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
@@ -345,15 +344,12 @@ const scripts = [
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
+  //
+  // The nine *.test.mjs that used to sit here moved to tests/ (#3306) and are
+  // auto-discovered. These two remain because they are named test-*.mjs rather
+  // than *.test.mjs, so discovery does not match them.
   { name: 'test-trust-validator.mjs', expectExit: 0 },
   { name: 'test-salary-filter.mjs', expectExit: 0 },
-  { name: 'detect-reposts.test.mjs', expectExit: 0 },
-  { name: 'discover-ats.test.mjs', expectExit: 0 },
-  { name: 'followup-cadence.test.mjs', expectExit: 0 },
-  { name: 'process-quality.test.mjs', expectExit: 0 },
-  { name: 'company-history.test.mjs', expectExit: 0 },
-  { name: 'contacts.test.mjs', expectExit: 0 },
-  { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -647,6 +643,63 @@ try {
   rmSync(tmp, { recursive: true, force: true });
 } catch (e) {
   fail(`verify-cv-facts regression tests crashed: ${e.message}`);
+}
+
+// verify-ats.mjs: a clean single-column CV must score high and exit 0; an
+// ATS-hostile CV (table layout + content image + missing headings) must exit 1
+// and surface the specific issues. --json prints the full result on both paths,
+// so we can assert on the reported issues even when the process exits non-zero.
+let atsTmp;
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'career-ops-ats-'));
+  atsTmp = tmp;
+  const cleanCv = join(tmp, 'clean-cv.html');
+  const hostileCv = join(tmp, 'hostile-cv.html');
+
+  writeFileSync(
+    cleanCv,
+    `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<style>body{font-family:'Liberation Sans',Arial,sans-serif;} .section-title{font-weight:700;}</style></head><body>
+<div class="header"><h1>Jane Smith</h1>
+<div class="contact-row"><a href="mailto:jane@example.com">jane@example.com</a> | +1 415 555 0100 | Remote</div></div>
+<div class="section"><div class="section-title">Professional Summary</div><p>Senior backend engineer with a
+decade building reliable, high-throughput distributed systems on Kubernetes, with a focus on observability,
+cost efficiency and clean, well-tested Python services used daily across the organization.</p></div>
+<div class="section"><div class="section-title">Work Experience</div><p>Staff Engineer, Acme Corp
+(2020-present). Built and operated the core payments platform across multiple engineering teams.</p></div>
+<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, 2018.</p></div>
+<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL.</p></div>
+</body></html>`
+  );
+  writeFileSync(
+    hostileCv,
+    `<html><head><style>body{font-family:'Comic Sans MS',cursive;}</style></head><body>
+<table><tr><td><img src="skills.png"></td><td><h1>John</h1></td></tr>
+<tr><td>Experience</td><td>2020</td></tr></table></body></html>`
+  );
+
+  const cleanRes = spawnSync(NODE, ['verify-ats.mjs', cleanCv, '--json'], { cwd: ROOT, encoding: 'utf-8' });
+  const cleanJson = JSON.parse(cleanRes.stdout);
+  if (cleanRes.status === 0 && cleanJson.pass === true && cleanJson.score >= 80) {
+    pass('verify-ats scores a clean single-column CV high and exits 0');
+  } else {
+    fail(`verify-ats mis-scored a clean CV (status=${cleanRes.status}, score=${cleanJson.score})`);
+  }
+
+  const hostileRes = spawnSync(NODE, ['verify-ats.mjs', hostileCv, '--json'], { cwd: ROOT, encoding: 'utf-8' });
+  const hostileJson = JSON.parse(hostileRes.stdout);
+  const messages = hostileJson.issues.map(i => i.message.toLowerCase());
+  const flaggedTable = messages.some(m => m.includes('<table>'));
+  const flaggedSections = messages.some(m => m.includes('education') || m.includes('skills'));
+  if (hostileRes.status === 1 && hostileJson.pass === false && flaggedTable && flaggedSections) {
+    pass('verify-ats fails an ATS-hostile CV and flags the table layout + missing sections');
+  } else {
+    fail(`verify-ats did not properly flag a hostile CV (status=${hostileRes.status}, table=${flaggedTable}, sections=${flaggedSections})`);
+  }
+} catch (e) {
+  fail(`verify-ats regression tests crashed: ${e.message}`);
+} finally {
+  if (atsTmp) rmSync(atsTmp, { recursive: true, force: true });
 }
 
 // ── 3. LIVENESS CLASSIFICATION ──────────────────────────────────
@@ -2613,7 +2666,7 @@ const markersAppearInOrder = (text, markers) => {
   return true;
 };
 if (
-  shared.includes('| _custom.md | `modes/_custom.md` (if exists) |') &&
+  shared.includes('| _custom.md | `{DATA_ROOT}/modes/_custom.md` (if exists) |') &&
   markersAppearInOrder(shared, [
     'Read _profile.md AFTER this file',
     'Read _custom.md (if it exists) AFTER _profile.md',
@@ -4221,10 +4274,12 @@ try {
   fail(`scan.mjs formatPipelineOffer import failed: ${err.message}`);
 }
 
+let fixtureRoot = null;
+let originalCwd = process.cwd();
 try {
-  const { appendToPipeline } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-missing-pipeline-'));
-  const originalCwd = process.cwd();
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-missing-pipeline-'));
+  process.env.CAREER_OPS_ROOT = fixtureRoot;
+  const { appendToPipeline } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href + '?cachebust=' + Date.now());
   try {
     mkdirSync(join(fixtureRoot, 'data'), { recursive: true });
     process.chdir(fixtureRoot);
@@ -4241,10 +4296,14 @@ try {
     }
   } finally {
     process.chdir(originalCwd);
-    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 } catch (err) {
   fail(`scan.mjs fresh-install pipeline test crashed: ${err.message}`);
+} finally {
+  delete process.env.CAREER_OPS_ROOT;
+  if (fixtureRoot) {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 }
 
 try {
@@ -4268,7 +4327,13 @@ try {
     process.env.CAREER_OPS_PIPELINE_LOCK_RETRY_MS = '20';
     const held = await acquirePipelineLock(pipelinePath);
     try {
-      await appendToPipeline([{ url: 'https://jobs.example.com/1', company: 'Acme', title: 'Engineer' }]);
+      // Explicit fixture path: appendToPipeline's default is anchored to
+      // CAREER_OPS_ROOT at module load, so the chdir above no longer aims it
+      // at this fixture the way the old cwd-relative default did.
+      await appendToPipeline(
+        [{ url: 'https://jobs.example.com/1', company: 'Acme', title: 'Engineer' }],
+        { pipelinePath },
+      );
       fail('appendToPipeline() proceeded while another holder had the pipeline lock — no shared exclusion');
     } catch (e) {
       if (e instanceof LockTimeoutError) pass('appendToPipeline() shares pipeline-lock.mjs — correctly blocked on a lock held elsewhere (LockTimeoutError)');
@@ -4344,7 +4409,14 @@ try {
     );
     process.chdir(fixtureRoot);
     const { loadSeenUrls } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
-    const { seen } = loadSeenUrls();
+    // Explicit fixture paths: scan.mjs's defaults are anchored to
+    // CAREER_OPS_ROOT (frozen at module load), so the chdir above no longer
+    // retargets them the way the old cwd-relative string defaults allowed.
+    const { seen } = loadSeenUrls({}, {
+      scanHistoryPath: join(fixtureRoot, 'data', 'scan-history.tsv'),
+      pipelinePath: join(fixtureRoot, 'data', 'pipeline.md'),
+      applicationsPath: join(fixtureRoot, 'data', 'applications.md'),
+    });
     if (seen.has(normalizeUrlForDedup(bare)) && seen.has(normalizeUrlForDedup(withLang))) {
       pass('scan.mjs loadSeenUrls dedups a history row against a cosmetic query-suffix variant (#2065)');
     } else {
@@ -6243,21 +6315,21 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
       fail(`relativeImportSpecifiers mismatch: got ${JSON.stringify(specs)}`);
     }
 
-    // #1706: update-system.mjs must be SELF-LOADING — no static (top-level)
-    // relative imports. A pre-#1245 client's apply() self-reexec checks out
-    // ONLY update-system.mjs before re-execing it, so a static top-level
-    // relative import crashes that re-exec with ERR_MODULE_NOT_FOUND on the
-    // old→new jump. Relative modules must be pulled in lazily instead. Matched
-    // line-anchored (not via relativeImportSpecifiers, whose loose regex also
-    // matches such specifiers inside prose/comments) so only real top-level
-    // import/export statements count.
-    const liveSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
-    const staticRelativeImport = /^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]|^\s*import\s*['"]\.[^'"]*['"]/m;
-    if (!staticRelativeImport.test(liveSource)) {
-      pass('update-system.mjs has no static relative imports — self-loading (#1706)');
-    } else {
-      fail('update-system.mjs has a static relative import that breaks old→new re-exec (#1706)');
-    }
+    // The #1706 "update-system.mjs must be SELF-LOADING" source check used to
+    // live here. It now lives in tests/main-guard-convention.test.mjs, beside
+    // the exemption that depends on it, and it is auto-discovered from here so
+    // nothing is lost by the move.
+    //
+    // Moved rather than duplicated because the copy that stood here was WEAKER,
+    // and silently so: its single-line `from '...'` match walked past a
+    // multiline specifier list and past a comment between the keyword and the
+    // specifier (`import /* c */ './x.mjs';`) — both real static relative
+    // imports that break the old→new re-exec. Two checks for one rule at two
+    // strengths is how a guard rots; the surviving one carries a self-test
+    // pinning ten caught spellings against five allowed ones.
+    //
+    // The behavioural backstop below is untouched and remains definitive: it
+    // imports update-system.mjs standalone, so it catches any spelling at all.
   } catch (e) {
     fail(`relativeImportSpecifiers test crashed: ${e.message}`);
   }
@@ -8423,6 +8495,9 @@ try {
       // ...and tracker-utils imports the shared lock-contention helpers
       // (#2777 fix), so the fixture carries that import too.
       copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(e2eTmp, 'pipeline-lock.mjs'));
+      // ...and followup-cadence resolves user-layer paths via path-resolver.mjs
+      // (CAREER_OPS_ROOT), so the fixture carries that too.
+      copyFileSync(join(ROOT, 'path-resolver.mjs'), join(e2eTmp, 'path-resolver.mjs'));
       // ...and followup-cadence now resolves "today" as the LOCAL calendar day
       // via lib/local-today.mjs (#3070), so the fixture carries that too.
       mkdirSync(join(e2eTmp, 'lib'), { recursive: true });
@@ -15575,6 +15650,163 @@ try {
   fail(`offer-prep posture freeze crashed: ${e.message}`);
 }
 
+// ── 20. PATH RESOLUTION LAYER AND OVERRIDES ───────────────────
+
+console.log('\n20. Path resolution layer and overrides');
+
+try {
+  const { getCareerOpsRoot } = await import(pathToFileURL(join(ROOT, 'path-resolver.mjs')).href);
+
+  // 1. Unset env vars should resolve to codebase root (ROOT)
+  const originalRoot = process.env.CAREER_OPS_ROOT;
+  const originalDataDir = process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_ROOT;
+  delete process.env.CAREER_OPS_DATA_DIR;
+
+  try {
+    const defaultRoot = getCareerOpsRoot();
+    if (defaultRoot === ROOT) {
+      pass('getCareerOpsRoot() defaults to codebase root when environment variables are unset');
+    } else {
+      fail(`getCareerOpsRoot() returned ${defaultRoot}, expected ${ROOT}`);
+    }
+
+    // 2. CAREER_OPS_ROOT should override the resolved path
+    const testOverridePath = join(ROOT, 'test-override-path');
+    process.env.CAREER_OPS_ROOT = testOverridePath;
+    const overriddenRoot = getCareerOpsRoot();
+    if (overriddenRoot === testOverridePath) {
+      pass('getCareerOpsRoot() respects process.env.CAREER_OPS_ROOT override');
+    } else {
+      fail(`getCareerOpsRoot() returned ${overriddenRoot}, expected ${testOverridePath}`);
+    }
+    delete process.env.CAREER_OPS_ROOT;
+
+    // 3. CAREER_OPS_DATA_DIR should override the resolved path
+    process.env.CAREER_OPS_DATA_DIR = testOverridePath;
+    const overriddenDataDirRoot = getCareerOpsRoot();
+    if (overriddenDataDirRoot === testOverridePath) {
+      pass('getCareerOpsRoot() respects process.env.CAREER_OPS_DATA_DIR override');
+    } else {
+      fail(`getCareerOpsRoot() returned ${overriddenDataDirRoot}, expected ${testOverridePath}`);
+    }
+  } finally {
+    // Restore original env vars
+    if (originalRoot) process.env.CAREER_OPS_ROOT = originalRoot;
+    else delete process.env.CAREER_OPS_ROOT;
+
+    if (originalDataDir) process.env.CAREER_OPS_DATA_DIR = originalDataDir;
+    else delete process.env.CAREER_OPS_DATA_DIR;
+  }
+
+  // 4. Test doctor.mjs respects target directory or target override when CAREER_OPS_ROOT is set
+  const tempTarget = mkdtempSync(join(ROOT, 'co-temp-target-'));
+  try {
+    process.env.CAREER_OPS_ROOT = tempTarget;
+    const r = JSON.parse(run(NODE, ['doctor.mjs', '--json']) || '{}');
+    if (r.onboardingNeeded === true && r.missing.includes('cv.md')) {
+      pass('doctor.mjs respects CAREER_OPS_ROOT default root check');
+    } else {
+      fail(`doctor.mjs with CAREER_OPS_ROOT override failed: ${JSON.stringify(r)}`);
+    }
+  } finally {
+    delete process.env.CAREER_OPS_ROOT;
+  }
+
+  // 4b. Test doctor.mjs respects CAREER_OPS_DATA_DIR override
+  try {
+    process.env.CAREER_OPS_DATA_DIR = tempTarget;
+    const r = JSON.parse(run(NODE, ['doctor.mjs', '--json']) || '{}');
+    if (r.onboardingNeeded === true && r.missing.includes('cv.md')) {
+      pass('doctor.mjs respects CAREER_OPS_DATA_DIR override check');
+    } else {
+      fail(`doctor.mjs with CAREER_OPS_DATA_DIR override failed: ${JSON.stringify(r)}`);
+    }
+  } finally {
+    delete process.env.CAREER_OPS_DATA_DIR;
+    rmSync(tempTarget, { recursive: true, force: true });
+  }
+
+  // 5. Test normalize-statuses respects CAREER_OPS_ROOT and does not touch main repo tracker
+  const tempRoot = mkdtempSync(join(ROOT, 'co-temp-root-'));
+  const tempTrackerDir = join(tempRoot, 'data');
+  mkdirSync(tempTrackerDir, { recursive: true });
+  const tempTracker = join(tempTrackerDir, 'applications.md');
+  const dummyContent = `
+# Applications
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-07-01 | TestCo | Engineer | 4.0 | **Applied** | ❌ | - | - |
+`;
+  writeFileSync(tempTracker, dummyContent, 'utf-8');
+
+
+  try {
+    process.env.CAREER_OPS_ROOT = tempRoot;
+    run(NODE, ['normalize-statuses.mjs']);
+    const updated = readFileSync(tempTracker, 'utf-8');
+    if (updated.includes('| Applied |') && !updated.includes('**Applied**')) {
+      pass('normalize-statuses.mjs respects CAREER_OPS_ROOT and modifies the correct tracker file');
+    } else {
+      fail(`normalize-statuses.mjs did not modify target tracker correctly, content: ${updated}`);
+    }
+
+  } finally {
+    delete process.env.CAREER_OPS_ROOT;
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+
+  // 6. Test .career-ops-data marker file resolution
+  const tempMarkerRoot = mkdtempSync(join(ROOT, 'co-temp-marker-'));
+  const markerFile = join(ROOT, '.career-ops-data');
+  const originalRootEnv = process.env.CAREER_OPS_ROOT;
+  const originalDataDirEnv = process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_ROOT;
+  delete process.env.CAREER_OPS_DATA_DIR;
+
+  const originalMarkerExists = existsSync(markerFile);
+  let originalMarkerContent = '';
+  if (originalMarkerExists) {
+    try { originalMarkerContent = readFileSync(markerFile, 'utf-8'); } catch {}
+  }
+
+  try {
+    writeFileSync(markerFile, tempMarkerRoot, 'utf-8');
+    const { getCareerOpsRoot: getRootWithMarker } = await import(pathToFileURL(join(ROOT, 'path-resolver.mjs')).href + '?cachebust=' + Date.now());
+    const resolved = getRootWithMarker();
+    if (resolved === tempMarkerRoot) {
+      pass('getCareerOpsRoot() respects .career-ops-data marker file');
+    } else {
+      fail(`getCareerOpsRoot() with marker returned ${resolved}, expected ${tempMarkerRoot}`);
+    }
+  } finally {
+    try {
+      if (originalMarkerExists) {
+        writeFileSync(markerFile, originalMarkerContent, 'utf-8');
+      } else {
+        unlinkSync(markerFile);
+      }
+    } catch {}
+    if (originalRootEnv) process.env.CAREER_OPS_ROOT = originalRootEnv;
+    if (originalDataDirEnv) process.env.CAREER_OPS_DATA_DIR = originalDataDirEnv;
+    rmSync(tempMarkerRoot, { recursive: true, force: true });
+  }
+
+  // 7. Test resolveTrackerPathForWrite
+  const { resolveTrackerPathForWrite: getWriteTracker } = await import(pathToFileURL(join(ROOT, 'path-resolver.mjs')).href + '?cachebust=' + Date.now());
+  const expectedWritePath = join(ROOT, 'data/applications.md');
+  const actualWritePath = getWriteTracker(ROOT);
+  if (actualWritePath === expectedWritePath) {
+    pass('resolveTrackerPathForWrite() returns the canonical data/applications.md path deterministically');
+  } else {
+    fail(`resolveTrackerPathForWrite() returned ${actualWritePath}, expected ${expectedWritePath}`);
+  }
+
+} catch (e) {
+  fail(`Path resolution layer test crashed: ${e.message}`);
+}
+
 console.log('\n56. Fingerprint core — JD cross-listing detection (#1597)');
 try {
   const { fingerprintText, similarity, findCrossListings, normalizeJdText, FINGERPRINT_MIN_TEXT } =
@@ -16252,6 +16484,68 @@ try {
   fail(`test layout guard: ${e.message}`);
 }
 
+console.log('\n62. User path drift-guard (no codebase-root path resolution for user-layer files)');
+try {
+  const USER_SEGMENTS = [
+    'data', 'reports', 'output',
+    'cv.md', 'article-digest.md', 'portals.yml',
+    'config/profile.yml',
+    'applications.md', 'pipeline.md', 'active-interviews.md', 'follow-ups.md',
+    'scan-history.tsv', 'scan-runs.tsv', 'salary-observations.tsv',
+    'assessments.tsv', 'pdf-index.tsv', 'batch-state.tsv',
+  ];
+  const segAlt = USER_SEGMENTS.map(s => s.replace(/\./g, () => '\\.').replace(/\//g, () => '[/\\\\]')).join('|');
+
+  const listScripts = (dir) => {
+    const out = [];
+    for (const name of readdirSync(dir)) {
+      if (name === 'node_modules' || name.startsWith('.')) continue;
+      const p = join(dir, name);
+      const statResult = statSync(p);
+      if (statResult.isDirectory()) continue;
+      if (!name.endsWith('.mjs')) continue;
+      if (/-tests?\.mjs$/.test(name) || /\.test\.mjs$/.test(name)) continue;
+      out.push(p);
+    }
+    return out;
+  };
+
+  const violations = [];
+
+  for (const file of listScripts(ROOT)) {
+    const src = readFileSync(file, 'utf8');
+    const lines = src.split('\n');
+
+    const codeRootVars = new Set();
+    for (const m of src.matchAll(/const\s+(\w+)\s*=\s*dirname\(fileURLToPath\(import\.meta\.url\)\)/g)) codeRootVars.add(m[1]);
+    for (const m of src.matchAll(/const\s+(\w+)\s*=\s*process\.cwd\(\)/g)) codeRootVars.add(m[1]);
+    if (codeRootVars.size === 0) continue;
+
+    const varAlt = [...codeRootVars].join('|');
+    const joinRe = new RegExp(`\\b(?:join|resolve)\\(\\s*(?:${varAlt})\\s*,\\s*'(?:${segAlt})`, 'g');
+
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) return;
+      let m;
+      joinRe.lastIndex = 0;
+      while ((m = joinRe.exec(line)) !== null) {
+        violations.push({ file: file.replace(ROOT + '\\', '').replace(ROOT + '/', ''), line: i + 1, root: m[1], code: trimmed.slice(0, 90) });
+      }
+    });
+  }
+
+  if (violations.length === 0) {
+    pass('all user-layer paths resolve through getCareerOpsRoot() (no silent split)');
+  } else {
+    fail(`${violations.length} user-layer path(s) built from the CODEBASE root instead of getCareerOpsRoot():\n` +
+      violations.map(v => `    ${v.file}:L${v.line} (${v.root}) ${v.code}`).join('\n')
+    );
+  }
+} catch (e) {
+  fail(`user path drift-guard check crashed: ${e.message}`);
+}
+
 // ── STATED-COMP TRACKING (#1852) ────────────────────────────────
 // salary-gap.mjs's own --self-test (invoked above via the CLI-check table)
 // covers stated-observation parsing, backward compatibility, and the
@@ -16259,7 +16553,7 @@ try {
 // interview/plan reads it back before generating prep, interview-prep does
 // the same for the initial pass, and interview/debrief writes it.
 
-console.log('\n62. Stated-comp tracking wired into interview modes (#1852)');
+console.log('\n63. Stated-comp tracking wired into interview modes (#1852)');
 
 try {
   const planMode = readFile('modes/interview/plan.md');

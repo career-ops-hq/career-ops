@@ -161,7 +161,7 @@ async function main() {
   if (!report) { console.error(`--report is required (or use --status).\n\n${USAGE}`); process.exitCode = 1; return; }
   const hire = hires.find((h) => h.report === String(report).replace(/[^\d]/g, ''));
   if (!hire) {
-    console.error(`No tracker row with state Hired and report #${report}. Record the outcome first: node outcome.mjs --report ${report} hired`);
+    console.error(`No tracker row with state Hired and report #${report}. Record the outcome first: node outcome.mjs ${report} hired`);
     process.exitCode = 1; return;
   }
 

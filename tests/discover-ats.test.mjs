@@ -29,32 +29,28 @@ import {
   parseWorkdayHint,
   buildWorkdayCandidates,
   resolveCompany,
-} from './discover-ats.mjs';
+} from '../discover-ats.mjs';
 import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\ndiscover-ats.mjs — ATS board discovery');
+
 
 function ok(label, cond) {
-  if (cond) { passed++; } else { failed++; failures.push(label); console.log(`  FAIL: ${label}`); }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) { passed++; } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 // ============================================================================
@@ -388,7 +384,7 @@ ok('wrong-typed workday hint → field dropped', !('workday' in wrongType.compan
 // ============================================================================
 console.log('\n--- 7. CLI behavior ---');
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'discover-ats.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'discover-ats.mjs');
 
 // --self-test exits 0
 try {
@@ -482,16 +478,3 @@ try {
   workdayVendorOk = false;
 }
 ok('--vendors workday accepted', workdayVendorOk);
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);
