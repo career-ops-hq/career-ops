@@ -54,6 +54,18 @@ test('collectMjsFiles recurses, filters, skips and sorts', () => {
   }
 });
 
+test('a missing root throws rather than reporting an empty, passing scan', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
+  try {
+    // The whole point of the module: a gate that checks nothing must never
+    // read as a gate that passed. Returning [] here would make section 1 print
+    // "0 .mjs files" and go green (#3419).
+    assert.throws(() => collectMjsFiles(join(dir, 'does-not-exist')), { code: 'ENOENT' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('SKIP_DIRS excludes generated and user content, so the count is checkout-independent', () => {
   for (const name of ['.git', 'node_modules', 'output', 'data', 'coverage', 'test-results']) {
     assert.ok(SKIP_DIRS.has(name), `${name} must stay excluded`);
