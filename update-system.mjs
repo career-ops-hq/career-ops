@@ -350,6 +350,7 @@ const SYSTEM_PATHS = [
   'TRADEMARK.md',
   'LICENSE',
   'CITATION.cff',
+  'funding.json',
   '.editorconfig',
   '.github/',
   'package.json',
