@@ -26,39 +26,27 @@ import {
   buildCompanyCards,
   getCompanyCard,
   renderSummary,
-} from './company-history.mjs';
+} from '../company-history.mjs';
 import { writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\ncompany-history.mjs — per-company evidence card');
+
 
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 // Tracker-row fixture — mirrors the shape parseTrackerRow() produces.
@@ -76,7 +64,7 @@ function cluster(company, role, repostCount, firstSeen, lastSeen, daysSpan, appe
   return { company, role, repostCount, firstSeen, lastSeen, daysSpan, appearances };
 }
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'company-history.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'company-history.mjs');
 const NOW = new Date('2026-07-09T00:00:00Z');
 
 // ============================================================================
@@ -406,16 +394,3 @@ for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-hist
       e.status === 1 && /expects a (non-empty )?value/.test(String(e.stderr)));
   }
 }
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);
