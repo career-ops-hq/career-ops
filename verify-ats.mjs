@@ -23,6 +23,7 @@
 import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs'; 
 
 const DEFAULT_MIN_SCORE = 70;
 
@@ -639,7 +640,7 @@ function printHuman(result, file, minScore) {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   if (args.includes('--self-test')) {
