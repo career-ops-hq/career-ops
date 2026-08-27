@@ -15,26 +15,40 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
-<!-- hire n=5 level=role role="Product Management Team Lead and Product Owner" geo="Vienna" link="https://github.com/santifer/career-ops/issues/3382" -->
+<!-- hire n=7 level=handle handle=logumani2112 role="Backend Developer (.NET)" sector="IT Services Company" weeks=4 link="https://github.com/santifer/career-ops/issues/440" -->
+### Hire #7
+
+> I used career-ops to track and evaluate multiple job opportunities effectively. The A-F evaluation scoring helped me focus on the most relevant roles instead of applying randomly.
+
+<a href="https://github.com/logumani2112"><img src="https://github.com/logumani2112.png?size=64" width="28" height="28" align="top" alt="@logumani2112"> **@logumani2112**</a> · Backend Developer (.NET) · 4 weeks · [story →](https://github.com/santifer/career-ops/issues/440)
+
+<!-- hire n=6 level=handle handle=FReptar0 role="Software Engineer – Full Stack (payments) — México" sector="Fintech startup" link="https://github.com/santifer/career-ops/issues/3394" -->
+### Hire #6
+
+> I burned out on interviewing in February. Two processes: one big-name company that took me through multiple rounds before rejecting me, and another that sent a confirmation email a
+
+<a href="https://github.com/FReptar0"><img src="https://github.com/FReptar0.png?size=64" width="28" height="28" align="top" alt="@FReptar0"> **@FReptar0**</a> · Software Engineer – Full Stack (payments) — México · [story →](https://github.com/santifer/career-ops/issues/3394)
+
+<!-- hire n=5 level=role role="Product Management Team Lead and Product Owner" sector="Startup / Scale-up" geo="Vienna" link="https://github.com/santifer/career-ops/issues/3382" -->
 ### Hire #5
 
 > I was fortunate enough to even land two (!) jobs, in a total of 36 applications: - Product Owner role, 106k, at a scale up company, just by using the cv generator, which honestly c
 
-**Product Management Team Lead and Product Owner** · Vienna · [story →](https://github.com/santifer/career-ops/issues/3382)
+**Product Management Team Lead and Product Owner** · Startup / Scale-up · Vienna · [story →](https://github.com/santifer/career-ops/issues/3382)
 
-<!-- hire n=4 level=role role="Senior DevOps Engineer" geo="remote US" link="https://github.com/santifer/career-ops/issues/3387" -->
+<!-- hire n=4 level=role role="Senior DevOps Engineer" sector="Fintech" geo="remote US" link="https://github.com/santifer/career-ops/issues/3387" -->
 ### Hire #4
 
 > Career-ops helped me sort through a ton of listings, helping me narrow down the list to must applies . It helped me craft cover letters, fine tune the resume for the specific job
 
-**Senior DevOps Engineer** · remote US · [story →](https://github.com/santifer/career-ops/issues/3387)
+**Senior DevOps Engineer** · Fintech · remote US · [story →](https://github.com/santifer/career-ops/issues/3387)
 
-<!-- hire n=3 level=role role="Head of Platform" geo="remote UK" link="https://github.com/santifer/career-ops/issues/3385" -->
+<!-- hire n=3 level=role role="Head of Platform" sector="Financial Services" geo="remote UK" link="https://github.com/santifer/career-ops/issues/3385" -->
 ### Hire #3
 
 > ~5 months ago, I started running my job search through career-ops. Just tallied up what it's tracked end-to-end: • 🔍 1,076 job postings scanned • 🧠 326 run through the full eval
 
-**Head of Platform** · remote UK · [story →](https://github.com/santifer/career-ops/issues/3385)
+**Head of Platform** · Financial Services · remote UK · [story →](https://github.com/santifer/career-ops/issues/3385)
 
 <!-- hire n=2 level=handle handle=amusto role="AI Solutions Technical Lead" weeks=4 link="https://github.com/santifer/career-ops/issues/3376" -->
 ### Hire #2
