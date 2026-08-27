@@ -213,12 +213,11 @@ async function updateTrackerStatuses(updates, onApplied = null) {
   }
 }
 
-const KNOWN_FLAGS = ['--help', '-h', '--yes', '-y'];
-const USAGE = 'Usage: node reply-watch.mjs [path/to/candidates.json] [--yes]';
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = 'Usage: node reply-watch.mjs [path/to/candidates.json]';
 
 async function main() {
   const args = process.argv.slice(2);
-  const yesFlag = args.includes('--yes') || args.includes('-y');
 
   const positional = args.filter(a => !a.startsWith('-'));
   validateFlags(args, KNOWN_FLAGS, USAGE);
@@ -309,10 +308,7 @@ async function main() {
       const count = r.count > 1 ? ` (${r.count} replies)` : '';
       console.log(`  #${r.num} ${r.company} (${r.role}): ${r.oldStatus} → ${r.newStatus}${count}`);
     });
-    let answer = 'y';
-    if (!yesFlag) {
-      answer = await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N): `);
-    }
+    const answer = await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N): `);
     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
       const statusLogFile = path.join(path.dirname(APPS_FILE), 'status-log.tsv');
       const todayStr = localToday();
