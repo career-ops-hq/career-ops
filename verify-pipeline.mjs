@@ -344,7 +344,7 @@ for (const e of entries) {
   }
   for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
   for (const lt of linkTargets) {
-    const m = lt[1].split('/').pop().match(/^(\d+)-/);
+    const m = lt[1].split(/[\\/]/).pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.1](https://github.com/santifer/career-ops/compare/web-v0.8.0...web-v0.8.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **web:** classify a tracker-lock filesystem failure as itself, not as contention ([#3138](https://github.com/santifer/career-ops/issues/3138)) ([cf880eb](https://github.com/santifer/career-ops/commit/cf880eb55945019663e1b423499041097cb24ccd))
+* **web:** key company logos with the Unicode-aware normalizer so non-Latin names don't collide ([#3134](https://github.com/santifer/career-ops/issues/3134)) ([7b9f858](https://github.com/santifer/career-ops/commit/7b9f8588f57d3313265c49f37d2055bb533a7d08))
+* **web:** salvage truncated JSON at each prefix's own depth, not one global pad ([#3142](https://github.com/santifer/career-ops/issues/3142)) ([a308bc5](https://github.com/santifer/career-ops/commit/a308bc5cc96197f3ed84ac75493d75c45a770f02))
+* **web:** stop hiding an employer's whole board after one evaluation ([b56cde5](https://github.com/santifer/career-ops/commit/b56cde551d84ad5c28d7ea8b99edcc450a2b8b4c))
+* **web:** stop killing evaluate runs at 285s and misreporting the kill ([#3124](https://github.com/santifer/career-ops/issues/3124)) ([8a245ed](https://github.com/santifer/career-ops/commit/8a245edd677598aa539e74c7565be44b7676e4ab))
+
 ## [0.8.0](https://github.com/santifer/career-ops/compare/web-v0.7.1...web-v0.8.0) (2026-08-25)
 
 

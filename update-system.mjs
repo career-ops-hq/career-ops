@@ -20,9 +20,9 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
-import { join, dirname, posix as pathPosix } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, realpathSync } from 'fs';
+import { join, dirname, resolve, posix as pathPosix } from 'path';
+import { fileURLToPath } from 'url';
 
 // NOTE: this file must stay *self-loading* — no static (top-level) relative
 // imports. A pre-#1245 client's apply() self-reexec checks out ONLY
@@ -73,6 +73,7 @@ const SYSTEM_PATHS = [
   'modes/oferta.md',
   'modes/pdf.md',
   'modes/ats.md',
+  'modes/text.md',
   'modes/pdf/',
   'modes/cover.md',
   'modes/email.md',
@@ -233,13 +234,13 @@ const SYSTEM_PATHS = [
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',
-  'discover-ats.test.mjs',
+  'tests/discover-ats.test.mjs',
   'check-table-freshness.mjs',
   'fingerprint-core.mjs',
   'process-quality.mjs',
-  'process-quality.test.mjs',
+  'tests/process-quality.test.mjs',
   'company-history.mjs',
-  'company-history.test.mjs',
+  'tests/company-history.test.mjs',
   'rejection-latency.mjs',
   'salary-gap.mjs',
   'negotiation-roi.mjs',
@@ -247,13 +248,13 @@ const SYSTEM_PATHS = [
   'assessment-log.mjs',
   'contacts.mjs',
   'linkedin-join.mjs',
-  'contacts.test.mjs',
+  'tests/contacts.test.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
   'followup-cadence.mjs',
-  'followup-cadence.test.mjs',
+  'tests/followup-cadence.test.mjs',
   'invite-match.mjs',
-  'invite-match.test.mjs',
+  'tests/invite-match.test.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
   'followup-seed-tests.mjs',
@@ -267,9 +268,9 @@ const SYSTEM_PATHS = [
   'evals/',
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
-  'jd-similarity.test.mjs',
+  'tests/jd-similarity.test.mjs',
   'test-all.mjs',
-  'detect-reposts.test.mjs',
+  'tests/detect-reposts.test.mjs',
   'test-salary-filter.mjs',
   'test-trust-validator.mjs',
   'tracker-columns-tests.mjs',
@@ -282,7 +283,7 @@ const SYSTEM_PATHS = [
   'validate-system-paths-coverage.mjs',
   'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
-  'reply-matcher.test.mjs',
+  'tests/reply-matcher.test.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
@@ -2192,7 +2193,34 @@ function dismiss() {
 // Only run the CLI when executed directly, so importing this module
 // (e.g. from test-all.mjs to exercise SEMVER_RE) does not trigger a
 // live update check.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// This is the ONE place that inlines lib/is-main-module.mjs instead of importing
+// it (#3170). #1706 requires this file to be SELF-LOADING: a pre-#1245 client's
+// apply() checks out only update-system.mjs and re-execs it, so any static
+// relative import crashes the old→new jump with ERR_MODULE_NOT_FOUND. The
+// semantics must still match the helper exactly — realpath BOTH sides, because
+// `import.meta.url` is realpath-resolved by Node while argv[1] keeps whatever
+// spelling the caller typed, and a mismatch makes the updater a silent no-op
+// that exits 0. tests/main-guard-convention.test.mjs exempts this file BY NAME
+// from its no-hand-rolled-guard source scan (the #1706 constraint is why), and
+// pins the semantics behaviourally instead: it invokes this file through a
+// symlink and requires the CLI tail to answer. Keep that in mind when editing —
+// the scan will not catch a regression here; only that behaviour test will.
+//
+// `.native` matches lib/is-main-module.mjs's canonicalize(): it expands Windows
+// 8.3 short names and reports on-disk casing, which the JS realpath leaves
+// alone. Both sides go through the SAME function, which is the property that
+// actually matters — a divergence here would make this copy answer differently
+// from the helper on exactly the platforms the helper was hardened for.
+const canonicalizePath = realpathSync.native ?? realpathSync;
+const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const selfPath = fileURLToPath(import.meta.url);
+let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
+if (process.argv[1] && !isCli) {
+  try { isCli = canonicalizePath(entryPath) === canonicalizePath(selfPath); } catch { isCli = false; }
+}
+
+if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
