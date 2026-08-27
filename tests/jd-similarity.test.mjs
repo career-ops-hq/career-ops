@@ -1,15 +1,16 @@
-import { hardMismatch, jaccardSimilarity, recommendCvReuse, tokenize } from './jd-similarity.mjs';
+import { hardMismatch, jaccardSimilarity, recommendCvReuse, tokenize } from '../jd-similarity.mjs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-let passed = 0;
-let failed = 0;
+import { pass, fail } from './helpers.mjs';
 
-function ok(label, condition) {
-  if (condition) passed++;
-  else { failed++; console.error(`FAIL: ${label}`); }
+console.log('\njd-similarity.mjs — JD similarity and CV reuse');
+
+function ok(label, cond) {
+  if (cond) pass(label);
+  else fail(label);
 }
 
 ok('tokenization is case-insensitive', tokenize('React react TypeScript').size === 2);
@@ -29,7 +30,7 @@ ok('seniority matching uses whole words', hardMismatch('International React Engi
 ok('leadership does not imply lead seniority', hardMismatch('Leadership platform role', 'Senior platform role') === false);
 
 try {
-  execFileSync(process.execPath, [fileURLToPath(new URL('./jd-similarity.mjs', import.meta.url)), '/tmp/does-not-exist-jd.txt', '/tmp/does-not-exist-cv.txt'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync(process.execPath, [fileURLToPath(new URL('../jd-similarity.mjs', import.meta.url)), '/tmp/does-not-exist-jd.txt', '/tmp/does-not-exist-cv.txt'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   ok('CLI reports missing files cleanly', false);
 } catch (error) {
   ok('CLI reports missing files cleanly', /Unable to read input files/.test(error.stderr));
@@ -37,7 +38,7 @@ try {
 
 // --- CLI flag parsing ---
 
-const cliPath = fileURLToPath(new URL('./jd-similarity.mjs', import.meta.url));
+const cliPath = fileURLToPath(new URL('../jd-similarity.mjs', import.meta.url));
 const runCli = (...args) =>
   execFileSync(process.execPath, [cliPath, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -87,5 +88,3 @@ try {
   rmSync(tmpDir, { recursive: true, force: true });
 }
 
-console.log(`jd-similarity: ${passed} passed, ${failed} failed`);
-if (failed) process.exit(1);

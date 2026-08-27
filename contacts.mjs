@@ -63,7 +63,13 @@ const USAGE = `Usage:
   node contacts.mjs --self-test         # run the in-memory test suite
   node contacts.mjs --help              # print this usage block and exit`;
 
-const args = process.argv.slice(2);
+// Only the CLI has flags. When this module is imported, process.argv belongs to
+// whoever imported it — so parsing it here validated the *host's* flags against
+// this script's, and `import { parseContacts } from './contacts.mjs'` inside a
+// process started with any unrecognized flag died at import with
+// "unrecognized flag(s)". Invisible while the suite ran in its own process;
+// surfaced the moment it moved to tests/ and was imported by test-all (#3306).
+const args = isMainModule(import.meta.url) ? process.argv.slice(2) : [];
 validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
