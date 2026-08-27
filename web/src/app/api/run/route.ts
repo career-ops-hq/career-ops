@@ -13,7 +13,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, validateRoleResumeHtmlStructure, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRoleResumeJsonShape, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
+import { createRawRoleResumeFilter, createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -121,7 +121,8 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt });
+  const nativeRoleSchema = kind === "role-resume" && cliId === "codex";
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -140,7 +141,8 @@ export async function POST(req: Request) {
   const capturesCv = kind === "pdf" || kind === "role-resume";
   const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
   const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile });
+  const roleOutputSchema = nativeRoleSchema ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json") : undefined;
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -285,7 +287,9 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "role-resume" ? createRoleResumeJsonFilter() : kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const cvFilter = kind === "role-resume"
+        ? (nativeRoleSchema ? createRawRoleResumeFilter() : createRoleResumeJsonFilter())
+        : kind === "pdf" ? createCvEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -467,7 +471,7 @@ export async function POST(req: Request) {
           // but it is not the sole content channel: some runs finish without an
           // item.completed/agent_message carrying the final body.
           if (codexFinalFile) {
-            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw, { kind });
+            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw, { kind: nativeRoleSchema ? "role-resume-raw" : kind });
             if (kind === "role-resume" && recovered.text) {
               emittedText = true;
               textEvents += 1;
@@ -480,7 +484,8 @@ export async function POST(req: Request) {
           }
           if (process.env.NODE_ENV !== "production") {
             const raw = cvFilter?.rawText() ?? "";
-            const roleSchema = kind === "role-resume" ? formatRoleResumeSchemaDiagnostics(inspectRoleResumeJsonShape(recovered.effectiveText)) : null;
+            const roleWorkerText = nativeRoleSchema ? (recovered.text || jsonlRaw) : recovered.effectiveText;
+            const roleSchema = kind === "role-resume" ? formatRoleResumeSchemaDiagnostics(nativeRoleSchema ? inspectRawRoleResumeJsonShape(roleWorkerText) : inspectRoleResumeJsonShape(roleWorkerText)) : null;
             console.debug("[career-ops worker completion]", {
               cliId,
               executable: path.basename(binPath),
@@ -525,9 +530,12 @@ export async function POST(req: Request) {
           // only writer. pdfRunOutcome owns the decision and the message.
           let envelope: CvEnvelope | { ok: false; error: string } | undefined;
           if (kind === "role-resume") {
-            const structured = recovered.conflict
+            const roleWorkerText = nativeRoleSchema ? (recovered.text || jsonlRaw) : recovered.effectiveText;
+            const structured = recovered.conflict && !nativeRoleSchema
               ? { ok: false, error: recovered.error || "Codex returned conflicting role-resume output." }
-              : parseRoleResumeWorkerResponse(recovered.effectiveText || cvFilter?.rawText() || "");
+              : nativeRoleSchema
+                ? parseRawRoleResumeJson(roleWorkerText)
+                : parseRoleResumeWorkerResponse(roleWorkerText || cvFilter?.rawText() || "");
             if (!structured.ok) envelope = { ok: false, error: structured.error || "Invalid General Role content." };
             else {
               try {

@@ -86,6 +86,13 @@ test("General Role prompt forbids status and requires exactly the listed top-lev
   assert.match(prompt, /Do not wrap the JSON in another object/);
   assert.match(prompt, /Any unlisted JSON key causes the run to fail/);
 });
+test("native Codex General Role prompt requests raw schema JSON without envelope or verdict", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", nativeRoleSchema: true });
+  assert.match(prompt, /constrained by Codex --output-schema/);
+  assert.match(prompt, /Return exactly one raw JSON object/);
+  assert.doesNotMatch(prompt, /<<role-resume-json>>/);
+  assert.doesNotMatch(prompt, /VERDICT: \{5/);
+});
 
 test("application PDF prompt keeps the original cv-html envelope contract", () => {
   const prompt = buildPrompt({ kind: "pdf", input: "001", memory: "", today: "2026-08-26" });
@@ -96,6 +103,13 @@ test("route fact-gates backend-rendered role HTML before saving", () => {
   const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
   assert.ok(route.indexOf("renderRoleResumeTemplate") < route.indexOf("if (await saveCv"));
   assert.match(route, /if \(kind === "role-resume"\)[\s\S]*validateRoleResumeHtml\(envelope\.html/);
+});
+test("route enables native Codex schema only for General Role workers", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  assert.match(route, /nativeRoleSchema = kind === "role-resume" && cliId === "codex"/);
+  assert.match(route, /role-resume\.schema\.json/);
+  assert.match(route, /outputSchema: roleOutputSchema/);
+  assert.match(route, /nativeRoleSchema[\s\S]*parseRawRoleResumeJson\(roleWorkerText\)/);
 });
 
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";

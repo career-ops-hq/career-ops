@@ -435,6 +435,12 @@ test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
 
 test("role-resume Codex workers are read-only and ephemeral", () => { const args = codexStreamArgs("prompt", "role-resume"); assert.deepEqual(args.slice(0, 7), ["exec", "--json", "--color", "never", "--sandbox", "read-only", "--ephemeral"]); assert.equal(args.at(-1), "prompt"); });
 test("role-resume Codex receives the entire generated prompt as one positional argument", () => { const prompt = "Target Role: Application Developer\nNOW PERFORM THE TASK\n" + "x".repeat(20_000); const args = codexStreamArgs(prompt, "role-resume"); assert.equal(args.at(-1), prompt); });
+test("role-resume Codex receives the native output schema while preserving terminal capture", () => {
+  const args = codexStreamArgs("prompt", "role-resume", { outputSchema: "role-resume.schema.json", outputLastMessage: "final.txt" });
+  assert.deepEqual(args.slice(args.indexOf("--output-schema"), args.indexOf("--output-last-message")), ["--output-schema", "role-resume.schema.json"]);
+  assert.deepEqual(args.slice(args.indexOf("--output-last-message"), -1), ["--output-last-message", "final.txt"]);
+  assert.equal(args.at(-1), "prompt");
+});
 test("application pdf Codex argv remains unchanged", () => { assert.deepEqual(codexStreamArgs("prompt", "pdf"), ["exec", "--json", "--color", "never", "prompt"]); });
 test("application and General Role PDFs share Codex terminal-output capture", () => {
   for (const kind of ["pdf", "role-resume"]) {

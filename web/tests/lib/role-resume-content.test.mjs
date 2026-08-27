@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { formatRoleResumeSchemaDiagnostics, inspectRoleResumeJsonShape, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
+import { formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
 
 const root = new URL("../../..", import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, "$1");
 const content = (overrides = {}) => ({
@@ -20,6 +20,23 @@ const response = (value = content(), prefix = "") => `${prefix}${ROLE_JSON_OPEN_
 test("General Role worker returns structured JSON only", () => {
   const parsed = parseRoleResumeWorkerResponse(response());
   assert.equal(parsed.ok, true); assert.equal(parsed.content.name, "Jane & Doe");
+});
+test("native schema-constrained raw JSON validates and reaches the canonical renderer", () => {
+  const parsed = parseRawRoleResumeJson(JSON.stringify(content()));
+  assert.equal(parsed.ok, true);
+  const html = renderRoleResumeTemplate({ root, content: parsed.content }).html;
+  assert.equal((html.match(/class="section-title"/g) || []).length, 9);
+});
+test("native raw control/status wrapper cannot pass", () => {
+  const raw = JSON.stringify({ message: "done", output_constraints: {}, status: "success", system_notice: "notice" });
+  assert.match(parseRawRoleResumeJson(raw).error, /unexpected field "message"/);
+  const diagnostic = formatRoleResumeSchemaDiagnostics(inspectRawRoleResumeJsonShape(raw));
+  assert.equal(diagnostic.presentRequiredKeyCount, 0);
+  assert.equal(diagnostic.unexpectedKeysCsv, "message,output_constraints,status,system_notice");
+});
+test("native raw JSON still fails when a required field is absent", () => {
+  const value = content(); delete value.professionalSummary;
+  assert.match(parseRawRoleResumeJson(JSON.stringify(value)).error, /field "professionalSummary" is required/);
 });
 test("backend fills the real template with nine preserved sections and landmarks", () => {
   const rendered = renderRoleResumeTemplate({ root, content: content() });

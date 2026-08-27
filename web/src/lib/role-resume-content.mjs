@@ -96,6 +96,19 @@ export function parseRoleResumeWorkerResponse(rawValue) {
   return { ok: true, content };
 }
 
+export function parseRawRoleResumeJson(rawValue) {
+  const raw = typeof rawValue === "string" ? rawValue.trim() : "";
+  let content;
+  try { content = JSON.parse(raw); } catch { return { ok: false, error: "The schema-constrained General Role worker returned invalid raw JSON." }; }
+  try { validateRoleResumeContent(content); } catch (error) { return { ok: false, error: error.message }; }
+  return { ok: true, content };
+}
+
+export function createRawRoleResumeFilter() {
+  let raw = "";
+  return { push(chunk) { raw += String(chunk ?? ""); return ""; }, flush() { return ""; }, result() { return parseRawRoleResumeJson(raw); }, rawText() { return raw; } };
+}
+
 /** Key-name-only diagnostics. Never returns JSON values or resume content. */
 export function inspectRoleResumeJsonShape(rawValue) {
   const raw = typeof rawValue === "string" ? rawValue.replace(/\r\n/g, "\n") : "";
@@ -107,6 +120,16 @@ export function inspectRoleResumeJsonShape(rawValue) {
   if (!closer) return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] };
   let value;
   try { value = JSON.parse(tail.slice(0, closer.index).trim()); } catch { return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] }; }
+  const keys = isObject(value) ? Object.keys(value).sort() : [];
+  const unexpectedKeys = keys.filter((key) => !TOP_FIELDS.has(key));
+  const missingRequiredKeys = REQUIRED_FIELDS.filter((key) => !keys.includes(key));
+  return { parsed: isObject(value), topLevelKeys: keys, unexpectedKeys, unexpectedKeyCount: unexpectedKeys.length, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: REQUIRED_FIELDS.length - missingRequiredKeys.length, missingRequiredKeys };
+}
+
+export function inspectRawRoleResumeJsonShape(rawValue) {
+  const raw = typeof rawValue === "string" ? rawValue.trim() : "";
+  let value;
+  try { value = JSON.parse(raw); } catch { return { parsed: false, topLevelKeys: [], unexpectedKeys: [], unexpectedKeyCount: 0, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: 0, missingRequiredKeys: [...REQUIRED_FIELDS] }; }
   const keys = isObject(value) ? Object.keys(value).sort() : [];
   const unexpectedKeys = keys.filter((key) => !TOP_FIELDS.has(key));
   const missingRequiredKeys = REQUIRED_FIELDS.filter((key) => !keys.includes(key));

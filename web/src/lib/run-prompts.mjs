@@ -53,7 +53,7 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
-export function buildPrompt({ kind, input, memory, today, postedAt }) {
+export function buildPrompt({ kind, input, memory, today, postedAt, nativeRoleSchema = false }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -84,7 +84,7 @@ After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete
     let parsed;
     try { parsed = JSON.parse(input); } catch { throw new Error("General Role Resume plan must be valid JSON."); }
     const plan = validateRoleResumePlanShape(parsed);
-    return `OUTPUT FORMAT IS MANDATORY. Return structured JSON only inside the ${ROLE_JSON_OPEN_MARK} / ${ROLE_JSON_CLOSE_MARK} contract below. Do not generate HTML or reproduce templates/cv-template.html.
+    return `OUTPUT FORMAT IS MANDATORY. ${nativeRoleSchema ? "Your final response is constrained by Codex --output-schema. Return only the raw JSON object with no markers, narration, Markdown, or VERDICT text." : `Return structured JSON only inside the ${ROLE_JSON_OPEN_MARK} / ${ROLE_JSON_CLOSE_MARK} contract below.`} Do not generate HTML or reproduce templates/cv-template.html.
 
 You are generating the CONTENT for a reusable General Role Resume in a non-interactive WEB worker that is already inside Career-Ops. Complete the resume in THIS SAME RUN. Do not merely acknowledge these instructions or describe what you will do.
 
@@ -104,8 +104,8 @@ NOW PERFORM THE TASK:
 4. Build complete structured resume content for the approved role family and supported focus areas. The backend owns templates/cv-template.html and its two-page styling.
 5. Return every schema field below. Optional content collections may be empty arrays, but fields may not be omitted.
 6. Use only claims supported by cv.md. Do not invent or upgrade adjacent experience.
-7. Emit the structured JSON envelope exactly once.
-8. Continue until both the envelope and final VERDICT line have been emitted. Do not ask questions.
+7. ${nativeRoleSchema ? "Emit the raw schema-valid JSON object as the entire final response." : "Emit the structured JSON envelope exactly once."}
+8. ${nativeRoleSchema ? "Continue until the complete JSON object has been emitted." : "Continue until both the envelope and final VERDICT line have been emitted."} Do not ask questions.
 
 This is a content-only step. The backend owns every file and all rendering.
 
@@ -116,22 +116,21 @@ HARD BOUNDARY — NEVER do any of these:
 - Do not render a PDF, save HTML, choose an output path, return localhost/job links, update Career-Ops, or ask whether Career-Ops should be updated.
 - Do not modify cv.md, config/profile.yml, modes/_profile.md, or any profile/application file.
 
-Your ONLY responsibility is to read the approved sources, compose the structured resume content in memory, and emit it through the web envelope. Use cv.md as the source of truth.
+Your ONLY responsibility is to read the approved sources, compose the structured resume content in memory, and ${nativeRoleSchema ? "return the raw schema-constrained JSON object" : "emit it through the web envelope"}. Use cv.md as the source of truth.
 
 This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
 
 STRICT JSON SCHEMA (unknown fields are rejected):
 The JSON object MUST contain exactly the fields listed below and no others.
 Do not add status, title, targetRole, roleSlug, version, metadata, notes, verdict, summary, result, success, or any other field.
-VERDICT is OUTSIDE the JSON object. Do not put VERDICT inside JSON. Do not wrap the JSON in another object.
+${nativeRoleSchema ? "Do not add VERDICT: native schema validation is the completion verdict. Do not wrap the JSON in another object." : "VERDICT is OUTSIDE the JSON object. Do not put VERDICT inside JSON. Do not wrap the JSON in another object."}
 
 {"format":"letter|a4","lang":"string","name":"string","phone":"string","email":"string","linkedin":{"url":"string","display":"string"},"portfolio":{"url":"string","display":"string"},"location":"string","professionalSummary":"string","coreCompetencies":["string"],"workExperience":[{"company":"string","period":"string","role":"string","location":"string","bullets":["string"]}],"projects":[{"title":"string","description":"string","technologies":["string"],"url":"optional string","badge":"optional string"}],"education":[{"title":"string","organization":"string","year":"string","description":"optional string"}],"certifications":[{"title":"string","organization":"string","year":"string"}],"awards":[{"title":"string","organization":"string","year":"string"}],"interests":"string","skills":[{"category":"string","items":["string"]}]}
 
 All values are plain text. Do not put HTML, Markdown, template placeholders, or CSS in any field. The backend escapes text and maps these values into the canonical template deterministically.
 Any unlisted JSON key causes the run to fail.
 
-FINAL OUTPUT CHECK: Emit ${ROLE_JSON_OPEN_MARK} on its own line, then exactly one JSON object matching the schema, then ${ROLE_JSON_CLOSE_MARK} on its own line. Narration before the envelope is ignored; after the closing marker emit EXACTLY one final line and nothing else:
-VERDICT: {5 if the complete structured envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+FINAL OUTPUT CHECK: ${nativeRoleSchema ? "Return exactly one raw JSON object matching the native output schema and nothing else." : `Emit ${ROLE_JSON_OPEN_MARK} on its own line, then exactly one JSON object matching the schema, then ${ROLE_JSON_CLOSE_MARK} on its own line. Narration before the envelope is ignored; after the closing marker emit EXACTLY one final line and nothing else:\nVERDICT: {5 if the complete structured envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
