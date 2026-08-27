@@ -340,15 +340,6 @@ const scripts = [
   // starts taking half a minute still fails loudly instead of inheriting a
   // budget sized for this one.
   { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
-  // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
-  // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
-  // both quick and full mode like their siblings above.
-  //
-  // The nine *.test.mjs that used to sit here moved to tests/ (#3306) and are
-  // auto-discovered. These two remain because they are named test-*.mjs rather
-  // than *.test.mjs, so discovery does not match them.
-  { name: 'test-trust-validator.mjs', expectExit: 0 },
-  { name: 'test-salary-filter.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
