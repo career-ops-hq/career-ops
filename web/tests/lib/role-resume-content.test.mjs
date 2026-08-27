@@ -48,6 +48,10 @@ test("narration and Markdown outside the structured envelope never become resume
 });
 test("invalid JSON fails cleanly", () => assert.match(parseRoleResumeWorkerResponse(`${ROLE_JSON_OPEN_MARK}\n{bad}\n${ROLE_JSON_CLOSE_MARK}\nVERDICT: 5/5 - complete`).error, /invalid JSON/));
 test("final 5/5 VERDICT remains required", () => assert.match(parseRoleResumeWorkerResponse(response().replace("VERDICT: 5/5", "VERDICT: 4/5")).error, /VERDICT/));
+test("two distinct structured envelopes still fail closed", () => {
+  const raw = `${response(content())}\n${response(content({ name: "Other" }))}`;
+  assert.match(parseRoleResumeWorkerResponse(raw).error, /Found 2 role-resume JSON envelopes/);
+});
 test("the canonical template placeholder inventory remains mapped", () => {
   const template = fs.readFileSync(new URL("../../../templates/cv-template.html", import.meta.url), "utf8");
   const rendered = renderRoleResumeTemplate({ root, content: content() }).html;

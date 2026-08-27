@@ -461,14 +461,18 @@ export async function POST(req: Request) {
 
         if (kind === "pdf" || kind === "role-resume") {
           const jsonlRaw = cvFilter?.rawText() ?? "";
-          let recovered = { text: "", addition: "", byteCount: 0, containsOpenMark: false, containsVerdict: false, looksMarkdown: false, duplicate: false };
+          let recovered = { text: "", addition: "", effectiveText: jsonlRaw, byteCount: 0, containsOpenMark: false, containsVerdict: false, looksMarkdown: false, duplicate: false, replaced: false, conflict: false, normalizedSuffixEqual: false, envelopesEquivalent: false, error: undefined as string | undefined };
           // Codex exposes its authoritative terminal assistant response through
           // --output-last-message. JSONL still drives live status/tool updates,
           // but it is not the sole content channel: some runs finish without an
           // item.completed/agent_message carrying the final body.
           if (codexFinalFile) {
-            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw);
-            if (recovered.addition) {
+            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw, { kind });
+            if (kind === "role-resume" && recovered.text) {
+              emittedText = true;
+              textEvents += 1;
+            }
+            if (recovered.addition && kind !== "role-resume") {
               emittedText = true;
               textEvents += 1;
               sendAgentText(recovered.addition + "\n");
@@ -482,16 +486,25 @@ export async function POST(req: Request) {
               launcher: path.extname(binPath).toLowerCase() || "direct",
               kind,
               promptLength: prompt.length,
-              promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes("<<cv-html") },
+              promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes(kind === "role-resume" ? "<<role-resume-json>>" : "<<cv-html") },
               exitCode: code,
               outputSignals: {
                 jsonlOpenMark: jsonlRaw.includes("<<cv-html"),
+                jsonlBytes: Buffer.byteLength(jsonlRaw, "utf8"),
                 jsonlLooksMarkdown: /(?:^|\n)#\s+\S|\*\*[^*]+\*\*/.test(jsonlRaw),
                 recoveredBytes: recovered.byteCount,
                 recoveredOpenMark: recovered.containsOpenMark,
                 recoveredVerdict: recovered.containsVerdict,
                 recoveredLooksMarkdown: recovered.looksMarkdown,
                 recoveredDuplicate: recovered.duplicate,
+                recoveredReplacedJsonl: recovered.replaced,
+                recoveredConflict: recovered.conflict,
+                normalizedFinalEqualsJsonlSuffix: recovered.normalizedSuffixEqual,
+                structuredEnvelopesEquivalent: recovered.envelopesEquivalent,
+                jsonlRoleOpeners: (jsonlRaw.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                recoveredRoleOpeners: (recovered.text.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                mergedRoleOpeners: (recovered.effectiveText.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                mergedBytes: Buffer.byteLength(recovered.effectiveText, "utf8"),
                 mergedOpenMark: raw.includes("<<cv-html"),
                 mergedCloseMark: raw.includes("<</cv-html>>"),
                 mergedVerdict: /VERDICT:/.test(raw),
@@ -510,7 +523,9 @@ export async function POST(req: Request) {
           // only writer. pdfRunOutcome owns the decision and the message.
           let envelope: CvEnvelope | { ok: false; error: string } | undefined;
           if (kind === "role-resume") {
-            const structured = parseRoleResumeWorkerResponse(cvFilter?.rawText() ?? "");
+            const structured = recovered.conflict
+              ? { ok: false, error: recovered.error || "Codex returned conflicting role-resume output." }
+              : parseRoleResumeWorkerResponse(recovered.effectiveText || cvFilter?.rawText() || "");
             if (!structured.ok) envelope = { ok: false, error: structured.error || "Invalid General Role content." };
             else {
               try {
