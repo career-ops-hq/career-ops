@@ -616,25 +616,45 @@ search_queries:
 
   # -- Remote-friendly Europe boards --
 
-  - name: Remotive — Tech Roles
-    query: 'site:remotive.com "Engineer" OR "Developer" OR "Manager" Europe'
+  - name: Remotive — AI/DevRel/SA/FDE
+    query: 'site:remotive.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed" OR "DevRel" Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Remotive — Tech Roles
+  #   query: 'site:remotive.com "Engineer" OR "Developer" OR "Manager" Europe'
+  #   enabled: true
 
-  - name: WeWorkRemotely — Tech & Operations
-    query: 'site:weworkremotely.com "Engineer" OR "Manager" OR "Operations" OR "Sales"'
+  - name: WeWorkRemotely — AI & DX
+    query: 'site:weworkremotely.com "AI" OR "DevRel" OR "Solutions Engineer" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: WeWorkRemotely — Tech & Operations
+  #   query: 'site:weworkremotely.com "Engineer" OR "Manager" OR "Operations" OR "Sales"'
+  #   enabled: true
 
-  - name: Working Nomads — Tech & Business
-    query: 'site:workingnomads.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  - name: Working Nomads — AI/DevRel/SA
+    query: 'site:workingnomads.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Working Nomads — Tech & Business
+  #   query: 'site:workingnomads.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
-  - name: EU Remote Jobs — General
-    query: 'site:euremotejobs.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  - name: EU Remote Jobs — AI/DevRel/SA
+    query: 'site:euremotejobs.com "AI" OR "DevRel" OR "Solutions Architect" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: EU Remote Jobs — General
+  #   query: 'site:euremotejobs.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
-  - name: RemoteOK — General
-    query: 'site:remoteok.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  - name: RemoteOK — AI/DevRel/SA
+    query: 'site:remoteok.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: RemoteOK — General
+  #   query: 'site:remoteok.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
   # -- Specialized boards (keep AI examples for pattern) --
 
@@ -646,35 +666,67 @@ search_queries:
     query: 'site:fwddeploy.com "Forward Deployed" OR "Deployed Engineer" remote Europe OR EMEA'
     enabled: true
 
-  - name: YC Jobs — General Startup Roles
-    query: 'site:ycombinator.com/jobs OR site:workatastartup.com "Engineer" OR "Manager" OR "Sales" remote'
+  - name: YC Jobs — DevRel/SA/FDE/Founding
+    query: 'site:ycombinator.com/jobs OR site:workatastartup.com "Forward Deployed" OR "Developer Advocate" OR "Founding Engineer" OR "Solutions Architect" remote'
     enabled: true
+
+  - name: YC Jobs — Applied AI
+    query: 'site:workatastartup.com "Applied AI" OR "AI Engineer" OR "AI Agent" remote Europe'
+    enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: YC Jobs — General Startup Roles
+  #   query: 'site:ycombinator.com/jobs OR site:workatastartup.com "Engineer" OR "Manager" OR "Sales" remote'
+  #   enabled: true
 
   # -- Spanish market specialized (high-value for Madrid/Barcelona-based candidates) --
 
   - name: Manfred — Tech Senior España
-    query: 'site:getmanfred.com/en/job-offers "Engineer" OR "Manager" OR "Sales" OR "Founding"'
+    query: 'site:getmanfred.com/en/job-offers "Solutions Architect" OR "DevRel" OR "Forward Deployed" OR "AI Engineer" OR "Founding"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Manfred — Tech Senior España (General)
+  #   query: 'site:getmanfred.com/en/job-offers "Engineer" OR "Manager" OR "Sales" OR "Founding"'
+  #   enabled: true
 
-  - name: Manfred — Remote Senior
-    query: 'site:getmanfred.com "remote" "Senior" OR "Staff" OR "Lead"'
+  - name: Manfred — Remote AI/Senior
+    query: 'site:getmanfred.com "remote" "AI" OR "Senior" OR "Staff" OR "Lead"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Manfred — Remote Senior (General)
+  #   query: 'site:getmanfred.com "remote" "Senior" OR "Staff" OR "Lead"'
+  #   enabled: true
 
   - name: Tecnoempleo — España IT
-    query: 'site:tecnoempleo.com "Engineer" OR "Architect" OR "Manager" OR "Founding Engineer"'
+    query: 'site:tecnoempleo.com "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Tecnoempleo — España IT (General)
+  #   query: 'site:tecnoempleo.com "Engineer" OR "Architect" OR "Manager" OR "Founding Engineer"'
+  #   enabled: true
 
   - name: Tecnoempleo — Remoto Senior
-    query: 'site:tecnoempleo.com "remoto" OR "remote" Senior "Engineer" OR "Architect" OR "Lead"'
+    query: 'site:tecnoempleo.com "remoto" OR "remote" Senior "AI" OR "Architect" OR "Lead"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Tecnoempleo — Remoto Senior (General)
+  #   query: 'site:tecnoempleo.com "remoto" OR "remote" Senior "Engineer" OR "Architect" OR "Lead"'
+  #   enabled: true
 
   - name: JobFluent — Spain startups
-    query: 'site:jobfluent.com Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+    query: 'site:jobfluent.com Madrid OR Barcelona "AI" OR "Engineer" OR "Solutions" OR "DevRel"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: JobFluent — Spain startups (General)
+  #   query: 'site:jobfluent.com Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+  #   enabled: true
 
   - name: Welcome to the Jungle — Spain tech
-    query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+    query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Welcome to the Jungle — Spain tech (General)
+  #   query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+  #   enabled: true
 
   # -- DevRel-specific boards (AI/DevTools example) --
 
@@ -696,21 +748,37 @@ search_queries:
 
   # -- European / global aggregators --
 
-  - name: Himalayas — Remote Tech
-    query: 'site:himalayas.app "Engineer" OR "Manager" OR "Developer" OR "Founding" Europe'
+  - name: Himalayas — Remote AI/Dev-tools
+    query: 'site:himalayas.app "AI Engineer" OR "Solutions Architect" OR "Developer Advocate" OR "Forward Deployed" OR "Founding Engineer" Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Himalayas — Remote Tech
+  #   query: 'site:himalayas.app "Engineer" OR "Manager" OR "Developer" OR "Founding" Europe'
+  #   enabled: true
 
   - name: Jooble — España Tech Senior
-    query: 'site:jooble.org "Engineer" OR "Manager" OR "Developer" Madrid OR remote España'
+    query: 'site:jooble.org "AI Engineer" OR "Solutions Architect" OR "DevRel" Madrid OR remote España'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Jooble — España Tech Senior (General)
+  #   query: 'site:jooble.org "Engineer" OR "Manager" OR "Developer" Madrid OR remote España'
+  #   enabled: true
 
-  - name: EU Data Jobs — Data Europe
-    query: 'site:eudatajobs.com "Data" "Engineer" OR "Architect" OR "Analyst" remote Europe'
+  - name: EU Data Jobs — AI/ML Europe
+    query: 'site:eudatajobs.com "AI" OR "ML" OR "Data" "Engineer" OR "Architect" remote Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: EU Data Jobs — Data Europe
+  #   query: 'site:eudatajobs.com "Data" "Engineer" OR "Architect" OR "Analyst" remote Europe'
+  #   enabled: true
 
-  - name: HN Who's Hiring — Remote Tech
-    query: 'site:news.ycombinator.com OR site:hnrss.org "Engineer" OR "Manager" OR "Developer" remote'
+  - name: HN Who's Hiring — Remote AI
+    query: 'site:news.ycombinator.com OR site:hnrss.org "AI Engineer" OR "Forward Deployed" OR "DevRel" OR "Founding Engineer" remote'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: HN Who's Hiring — Remote Tech
+  #   query: 'site:news.ycombinator.com OR site:hnrss.org "Engineer" OR "Manager" OR "Developer" remote'
+  #   enabled: true
 
   # -- Türkiye / Turkey job portals --
   # WebSearch queries for Turkish job boards (no public ATS APIs).
