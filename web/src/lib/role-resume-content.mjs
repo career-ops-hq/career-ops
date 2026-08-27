@@ -113,6 +113,20 @@ export function inspectRoleResumeJsonShape(rawValue) {
   return { parsed: isObject(value), topLevelKeys: keys, unexpectedKeys, unexpectedKeyCount: unexpectedKeys.length, requiredKeyCount: REQUIRED_FIELDS.length, presentRequiredKeyCount: REQUIRED_FIELDS.length - missingRequiredKeys.length, missingRequiredKeys };
 }
 
+export function formatRoleResumeSchemaDiagnostics(shape) {
+  const safe = shape && typeof shape === "object" ? shape : {};
+  const csv = (value) => Array.isArray(value) ? value.filter((key) => typeof key === "string").join(",") : "";
+  return {
+    parsed: safe.parsed === true,
+    topLevelKeysCsv: csv(safe.topLevelKeys),
+    unexpectedKeysCsv: csv(safe.unexpectedKeys),
+    unexpectedKeyCount: Number.isSafeInteger(safe.unexpectedKeyCount) ? safe.unexpectedKeyCount : 0,
+    requiredKeyCount: Number.isSafeInteger(safe.requiredKeyCount) ? safe.requiredKeyCount : REQUIRED_FIELDS.length,
+    presentRequiredKeyCount: Number.isSafeInteger(safe.presentRequiredKeyCount) ? safe.presentRequiredKeyCount : 0,
+    missingRequiredKeysCsv: csv(safe.missingRequiredKeys),
+  };
+}
+
 export const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const safeUrl = (value) => {
   if (!value) return "";

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { parseRoleResumeWorkerResponse, renderRoleResumeTemplate, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
+import { formatRoleResumeSchemaDiagnostics, inspectRoleResumeJsonShape, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
 
 const root = new URL("../../..", import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, "$1");
 const content = (overrides = {}) => ({
@@ -63,4 +63,13 @@ test("the canonical template placeholder inventory remains mapped", () => {
   const template = fs.readFileSync(new URL("../../../templates/cv-template.html", import.meta.url), "utf8");
   const rendered = renderRoleResumeTemplate({ root, content: content() }).html;
   assert.equal(new Set(template.match(/{{[A-Z0-9_]+}}/g)).size, 29); assert.doesNotMatch(rendered, /{{[A-Z0-9_]+}}/);
+});
+test("schema diagnostics emit key names as CSV without field values", () => {
+  const wrapped = response({ status: "secret status value", result: "secret result value", content: { name: "private name" } });
+  const diagnostic = formatRoleResumeSchemaDiagnostics(inspectRoleResumeJsonShape(wrapped));
+  assert.equal(diagnostic.topLevelKeysCsv, "content,result,status");
+  assert.equal(diagnostic.unexpectedKeysCsv, "content,result,status");
+  assert.match(diagnostic.missingRequiredKeysCsv, /format/);
+  const serialized = JSON.stringify(diagnostic);
+  for (const value of ["secret status value", "secret result value", "private name"]) assert.doesNotMatch(serialized, new RegExp(value));
 });

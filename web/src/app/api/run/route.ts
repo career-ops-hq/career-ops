@@ -13,7 +13,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, validateRoleResumeHtmlStructure, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { createRoleResumeJsonFilter, inspectRoleResumeJsonShape, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
+import { createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRoleResumeJsonShape, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -480,7 +480,7 @@ export async function POST(req: Request) {
           }
           if (process.env.NODE_ENV !== "production") {
             const raw = cvFilter?.rawText() ?? "";
-            const roleSchema = kind === "role-resume" ? inspectRoleResumeJsonShape(recovered.effectiveText) : null;
+            const roleSchema = kind === "role-resume" ? formatRoleResumeSchemaDiagnostics(inspectRoleResumeJsonShape(recovered.effectiveText)) : null;
             console.debug("[career-ops worker completion]", {
               cliId,
               executable: path.basename(binPath),
