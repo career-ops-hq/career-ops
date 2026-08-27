@@ -195,7 +195,7 @@ export function parseCodexEvent(line) {
     // Newline-terminate each message: Codex sends complete messages with NO
     // trailing newline ("hello", not "hello\n"), so consecutive messages would
     // otherwise concatenate mid-line downstream. That glued narration into one
-    // run-on log line AND broke pdf mode outright — the <<cv-html>> markers are
+    // run-on log line AND broke pdf mode outright — the <<cv-payload>> markers are
     // line-anchored by design (cv-envelope.mjs, fail-closed), so an envelope
     // message following unterminated narration parsed as "no envelope" and the
     // honesty gate failed a run whose CV was fully emitted.

@@ -72,7 +72,7 @@ function scopeFrom(allowed) {
  * canonical artifacts (reserve-report-num.mjs / merge-tracker.mjs /
  * verify-portals.mjs), so they need Write + Bash. `readOnly` kinds produce their
  * result through the response stream and need no write tool at all — pdf emits
- * its CV in a `<<cv-html>>` envelope the backend persists (#2185), and research
+ * its CV in a `<<cv-payload>>` envelope the backend persists (#2185), and research
  * only reports.
  *
  * @type {{persisting: ToolScope, readOnly: ToolScope}}

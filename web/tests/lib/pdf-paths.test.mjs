@@ -29,7 +29,7 @@ function makeRoot({ profileYaml } = {}) {
   return root;
 }
 
-test("resolvePdfPaths: happy path builds html + finalPdf from report + profile", () => {
+test("resolvePdfPaths: happy path builds payload + html + finalPdf from report + profile", () => {
   // Given a root with a resolvable report and a named candidate
   const root = makeRoot();
   const findReportFile = (input) => (input === "018" ? join(root, "reports", "018-acme-2026-07-01.md") : null);
@@ -39,6 +39,7 @@ test("resolvePdfPaths: happy path builds html + finalPdf from report + profile",
 
     // Then it returns deterministic scratch + final paths using the candidate/company slugs
     assert.equal(result.ok, true);
+    assert.equal(result.paths.payload, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.payload.json"));
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
     assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
   } finally {
