@@ -52,7 +52,7 @@ try {
     process.env.CAREER_OPS_ROOT = alternate;
     const canonicalAlternate = realpathSync(alternate);
     const rel = mod.workspaceRelativeManifestPath(join(canonicalAlternate, 'output', 'alternate-root-probe.html'));
-    if (rel === join('output', 'alternate-root-probe.html')) {
+    if (rel === 'output/alternate-root-probe.html') {
       pass('workspace cache refreshes when CAREER_OPS_ROOT changes after import');
     } else {
       fail(`alternate root resolved to "${rel}" — root cache ignored CAREER_OPS_ROOT`);
