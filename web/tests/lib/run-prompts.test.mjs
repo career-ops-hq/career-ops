@@ -9,6 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
 import { CV_ENVELOPE_INSTRUCTION, parseCvEnvelope, validateRoleResumeWorkerResponse } from "../../src/lib/cv-envelope.mjs";
 
@@ -26,9 +27,24 @@ test("general role prompt carries the shared CV envelope contract", () => { cons
 test("general role prompt prohibits agent-side writes rendering and updates", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); for (const phrase of ["Do not create, edit, move, or save files", "Do not run Bash", "Do not render a PDF", "ask whether Career-Ops should be updated"]) assert.match(prompt, new RegExp(phrase, "i")); assert.match(prompt, /non-interactive[\s\S]{0,20}web worker/i); });
 test("general role prompt excludes JD and company work", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /NO job description, employer, company, or posting/); assert.match(prompt, /Skip JD keyword-gap processing and company research/); });
 test("a general-role worker envelope parses through the existing contract", () => { const parsed = parseCvEnvelope('<<cv-html format="letter">>\n<!DOCTYPE html><html><body>Application Developer</body></html>\n<</cv-html>>\nVERDICT: 5/5 — complete'); assert.equal(parsed.ok, true); assert.match(parsed.html, /Application Developer/); });
-const ROLE_HTML = `<!DOCTYPE html><html><body>${["Summary", "Experience", "Skills", "Education"].map((name) => `<div class="section-title">${name}</div><div>Content</div>`).join("")}</body></html>`;
+const ROLE_HTML = fs.readFileSync(new URL("../../../templates/cv-template.html", import.meta.url), "utf8")
+  .replace(/{{PHOTO}}/g, "")
+  .replace(/{{[^}]+}}/g, "Filled");
 const roleResponse = (html = ROLE_HTML, verdict = "VERDICT: 5/5 - complete") => `<<cv-html format="letter">>\n${html}\n<</cv-html>>\n${verdict}`;
 test("complete General Role worker response passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse()).ok, true));
+test("real populated CV template structure passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML)).ok, true));
+test("fewer than the template's nine sections fails clearly", () => {
+  const shortened = ROLE_HTML.replace(/<div class="section-title">Filled<\/div>/, "");
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(shortened)).error, /8 template sections; expected 9/);
+});
+test("an unresolved template placeholder fails specifically", () => {
+  const unresolved = ROLE_HTML.replace("<div class=\"summary-text\">Filled</div>", '<div class="summary-text">{{SUMMARY}}</div>');
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(unresolved)).error, /unresolved template placeholder: {{SUMMARY}}/);
+});
+test("alternate HTML with section-title lookalikes fails template structure validation", () => {
+  const alternate = `<!DOCTYPE html><html><body>${Array.from({ length: 9 }, (_, i) => `<h2 class="section-title">${i}</h2>`).join("")}</body></html>`;
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(alternate)).error, /alternate HTML/);
+});
 for (const separator of ["—", "–", "-"]) {
   test(`General Role VERDICT accepts ${separator === "—" ? "em dash" : separator === "–" ? "en dash" : "hyphen"}`, () => {
     assert.equal(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, `VERDICT: 5/5 ${separator} complete`)).ok, true);
@@ -47,6 +63,21 @@ test("General Role response requires the final VERDICT", () => assert.match(vali
 test("General Role response rejects a non-success VERDICT score", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "VERDICT: 4/5 — incomplete")).error, /VERDICT/));
 test("application PDF envelope parsing remains independent of General Role VERDICT validation", () => {
   assert.equal(parseCvEnvelope(`<<cv-html format="letter">>\n${ROLE_HTML}\n<</cv-html>>`).ok, true);
+});
+
+test("General Role prompt blocks router, onboarding, doctor, and update workflows", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  for (const forbiddenInstruction of [/run (?:the )?career-ops skill/i, /invoke (?:the )?career-ops skill/i, /run doctor/i, /run update-system/i, /check for updates/i]) {
+    assert.doesNotMatch(prompt, forbiddenInstruction);
+  }
+  assert.match(prompt, /Do NOT invoke or announce any skill, skill router/i);
+  assert.match(prompt, /onboarding\/setup flow, doctor check, version\/update check/i);
+});
+test("General Role prompt requires the actual nine-section template structure", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  assert.match(prompt, /Preserve its HTML\/CSS structure and all nine class="section-title" elements/);
+  assert.match(prompt, /Replace every {{\.\.\.}} placeholder/);
+  assert.match(prompt, /Do not invent alternate HTML markup/);
 });
 
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";

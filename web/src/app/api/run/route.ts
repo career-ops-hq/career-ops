@@ -18,7 +18,7 @@ import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseApprovedRoleResumeInput, reserveRoleResumeDirectory, roleResumePaths } from "@/lib/role-resumes.mjs";
 import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
-import { recoverCodexFinalOutput } from "@/lib/codex-final-output.mjs";
+import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -459,16 +459,18 @@ export async function POST(req: Request) {
         };
 
         if (kind === "pdf" || kind === "role-resume") {
+          const jsonlRaw = cvFilter?.rawText() ?? "";
+          let recovered = { text: "", addition: "", byteCount: 0, containsOpenMark: false, containsVerdict: false, looksMarkdown: false, duplicate: false };
           // Codex exposes its authoritative terminal assistant response through
           // --output-last-message. JSONL still drives live status/tool updates,
           // but it is not the sole content channel: some runs finish without an
           // item.completed/agent_message carrying the final body.
           if (codexFinalFile) {
-            const finalText = recoverCodexFinalOutput(codexFinalFile, cvFilter?.rawText() ?? "");
-            if (finalText) {
+            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw);
+            if (recovered.addition) {
               emittedText = true;
               textEvents += 1;
-              sendAgentText(finalText + "\n");
+              sendAgentText(recovered.addition + "\n");
             }
           }
           if (process.env.NODE_ENV !== "production") {
@@ -481,7 +483,18 @@ export async function POST(req: Request) {
               promptLength: prompt.length,
               promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes("<<cv-html") },
               exitCode: code,
-              outputSignals: { opener: raw.includes("<<cv-html"), closer: raw.includes("<</cv-html>>"), verdict: /VERDICT:/.test(raw) },
+              outputSignals: {
+                jsonlOpenMark: jsonlRaw.includes("<<cv-html"),
+                jsonlLooksMarkdown: /(?:^|\n)#\s+\S|\*\*[^*]+\*\*/.test(jsonlRaw),
+                recoveredBytes: recovered.byteCount,
+                recoveredOpenMark: recovered.containsOpenMark,
+                recoveredVerdict: recovered.containsVerdict,
+                recoveredLooksMarkdown: recovered.looksMarkdown,
+                recoveredDuplicate: recovered.duplicate,
+                mergedOpenMark: raw.includes("<<cv-html"),
+                mergedCloseMark: raw.includes("<</cv-html>>"),
+                mergedVerdict: /VERDICT:/.test(raw),
+              },
               stdoutChunks,
               parsedEvents,
               textEvents,

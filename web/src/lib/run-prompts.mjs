@@ -83,7 +83,11 @@ After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete
     let parsed;
     try { parsed = JSON.parse(input); } catch { throw new Error("General Role Resume plan must be valid JSON."); }
     const plan = validateRoleResumePlanShape(parsed);
-    return `You are generating the CONTENT for a reusable General Role Resume in a non-interactive Career-Ops WEB worker. Complete the resume in THIS SAME RUN. Do not merely acknowledge these instructions, describe what you will do, or stop after loading a skill. Do not invoke the Career-Ops skill router or hand control to an interactive mode; the complete task and required content rules are below.
+    return `OUTPUT FORMAT IS MANDATORY. Markdown resume output is invalid. Do not output # headings, Markdown bullets, Markdown bold syntax, or a prose resume outside the envelope. ${CV_ENVELOPE_INSTRUCTION}
+
+You are generating the CONTENT for a reusable General Role Resume in a non-interactive WEB worker that is already inside Career-Ops. Complete the resume in THIS SAME RUN. Do not merely acknowledge these instructions or describe what you will do.
+
+WORKER ISOLATION: Do NOT invoke or announce any skill, skill router, interactive mode, onboarding/setup flow, doctor check, version/update check, repository-discovery workflow, or installation workflow. Do not search for alternate Career-Ops instructions. This prompt is the complete worker contract.
 
 APPROVED PLAN
 - Target Role: ${plan.targetRole}
@@ -96,7 +100,7 @@ NOW PERFORM THE TASK:
 1. Read cv.md.
 2. Read config/profile.yml and modes/_profile.md.
 3. Read modes/pdf.md only for relevant content and formatting rules; do not enter its interactive workflow.
-4. Read and fill templates/cv-template.html.
+4. Read templates/cv-template.html and use that exact template. Preserve its HTML/CSS structure and all nine class="section-title" elements. Replace every {{...}} placeholder; use an empty string where an optional section has no supported content.
 5. Build the complete ATS-friendly resume, maximum two pages, for the approved role family and supported focus areas.
 6. Use only claims supported by cv.md. Do not invent or upgrade adjacent experience.
 7. Emit the complete populated HTML through the shared envelope contract below.
@@ -115,9 +119,9 @@ Your ONLY responsibility is to read the approved sources, compose the final HTML
 
 This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
 
-Build a maximum two-page ATS-friendly resume using only claims supported by cv.md. Fill the existing Career-Ops CV HTML template completely. ${CV_ENVELOPE_INSTRUCTION}
+Build a maximum two-page ATS-friendly resume using only claims supported by cv.md. Fill the existing Career-Ops CV HTML template completely. Do not invent alternate HTML markup, rename template classes, remove section wrappers, or leave unresolved placeholders.
 
-Emit the complete HTML envelope EXACTLY ONCE. Do not narrate file creation or rendering because you perform neither. An acknowledgement-only response is a failed run. After the envelope, emit EXACTLY one final line and nothing else:
+FINAL OUTPUT CHECK: Markdown is invalid. Emit the complete HTML envelope EXACTLY ONCE, using the populated template and shared contract stated at the beginning. Emit no prose before the envelope and no prose after it except the final VERDICT line. An acknowledgement-only response is a failed run. After the envelope, emit EXACTLY one final line and nothing else:
 VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-portal") {

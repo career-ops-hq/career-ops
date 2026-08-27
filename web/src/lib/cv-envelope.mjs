@@ -150,9 +150,26 @@ export function validateRoleResumeWorkerResponse(text) {
   if (!/^\s*<!doctype html>/i.test(envelope.html) || !/<html\b/i.test(envelope.html)) {
     return { ok: false, error: "The General Role worker did not return a complete HTML document." };
   }
+  const unresolved = envelope.html.match(/{{[^}]+}}/);
+  if (unresolved) {
+    return { ok: false, error: `The General Role worker left an unresolved template placeholder: ${unresolved[0]}.` };
+  }
   const sections = envelope.html.match(/class=["'][^"']*\bsection-title\b[^"']*["']/gi) || [];
-  if (sections.length < 4 || /{{[^}]+}}/.test(envelope.html)) {
-    return { ok: false, error: "The General Role worker returned HTML without the expected completed CV sections." };
+  if (sections.length !== 9) {
+    return { ok: false, error: `The General Role worker returned ${sections.length} template sections; expected 9.` };
+  }
+  const templateLandmarks = [
+    /<div\s+class=["'][^"']*\bpage\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bheader\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcontact-row\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bsummary-text\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcompetencies-grid\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcert-table\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\baward-table\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\binterests-line\b[^"']*["']/i,
+  ];
+  if (!templateLandmarks.every((pattern) => pattern.test(envelope.html))) {
+    return { ok: false, error: "The General Role worker returned alternate HTML instead of the Career-Ops CV template structure." };
   }
   const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
   if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) {
