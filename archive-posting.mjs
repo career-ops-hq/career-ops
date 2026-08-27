@@ -27,14 +27,16 @@ import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const JDS_DIR = join(ROOT, 'jds');
-const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
+const DATA_ROOT = getCareerOpsRoot();
+const JDS_DIR = join(DATA_ROOT, 'jds');
+const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
 
 const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
 const VALUE_FLAGS = ['--company', '--role', '--report'];
