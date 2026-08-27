@@ -279,10 +279,14 @@ export function loadLedgerReached(workspaceRoot) {
   for (const line of readFileSync(logPath, 'utf-8').split(/\r?\n/)) {
     if (!line.trim()) continue;
     const c = line.split('\t');
-    const num = parseInt(c[0], 10);
-    if (!Number.isFinite(num)) continue;
-    const from = String(c[2] || '').trim().toLowerCase();
-    const to = String(c[3] || '').trim().toLowerCase();
+    const rawNum = String(c[0] || '').trim();
+    const date = String(c[1] || '').trim();
+    const rawFrom = String(c[2] || '').trim();
+    const rawTo = String(c[3] || '').trim();
+    if (!/^\d+$/.test(rawNum) || !date || !rawFrom || !rawTo) continue;
+    const num = Number(rawNum);
+    const from = rawFrom.toLowerCase();
+    const to = rawTo.toLowerCase();
     const cur = reached.get(num) || { reachedInterview: false, reachedOffer: false };
     if (INTERVIEW_PLUS.has(from) || INTERVIEW_PLUS.has(to)) cur.reachedInterview = true;
     if (OFFER_PLUS.has(from) || OFFER_PLUS.has(to)) { cur.reachedOffer = true; cur.reachedInterview = true; }

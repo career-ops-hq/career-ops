@@ -63,15 +63,21 @@ jobs:
             // can choose LESS at submission time, not as a hoop toward more.
             const level = /count me/.test(anonRaw) ? 'count' : /no handle/.test(anonRaw) ? 'role' : 'handle';
             const role = section('What role did you land\\?');
+            const sector = section('Company type');
             const geo = section('Where \\(optional\\)');
             const weeksRaw = section('Time from first scan to offer');
-            const weeks = (weeksRaw.match(/(\d+)\s*week/i) || [])[1] || '';
+            // "N weeks" verbatim; "N months" folds to weeks (×4) so the card's
+            // one unit stays honest-ish rather than the field going blank.
+            const wm = weeksRaw.match(/(\d+)\s*week/i);
+            const mm = weeksRaw.match(/(\d+)\s*month/i);
+            const weeks = wm ? wm[1] : (mm ? String(Number(mm[1]) * 4) : '');
             // The story quote: first sentence(s) of their story, clamped. The
             // full story stays in their issue; the card carries the hook.
             const story = section('Your story').replace(/\s+/g, ' ').slice(0, 180);
             core.setOutput('level', level);
             core.setOutput('handle', level === 'handle' ? author : '');
             core.setOutput('role', role);
+            core.setOutput('sector', sector);
             core.setOutput('geo', geo);
             core.setOutput('weeks', weeks);
             core.setOutput('story', story);
@@ -85,6 +91,7 @@ jobs:
           E_LEVEL: ${{ steps.entry.outputs.level }}
           E_HANDLE: ${{ steps.entry.outputs.handle }}
           E_ROLE: ${{ steps.entry.outputs.role }}
+          E_SECTOR: ${{ steps.entry.outputs.sector }}
           E_GEO: ${{ steps.entry.outputs.geo }}
           E_WEEKS: ${{ steps.entry.outputs.weeks }}
           E_STORY: ${{ steps.entry.outputs.story }}
@@ -97,6 +104,7 @@ jobs:
           else
             set -- --add --level "$E_LEVEL" --role "$E_ROLE" --story "$E_STORY" --link "$E_LINK" --fetch-avatars
             [ -n "$E_HANDLE" ] && set -- "$@" --handle "$E_HANDLE"
+            [ -n "$E_SECTOR" ] && set -- "$@" --sector "$E_SECTOR"
             [ -n "$E_GEO" ] && set -- "$@" --geo "$E_GEO"
             [ -n "$E_WEEKS" ] && set -- "$@" --weeks "$E_WEEKS"
             node hired-wall-build.mjs "$@"
