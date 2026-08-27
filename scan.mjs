@@ -70,27 +70,32 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
+import { getCareerOpsRoot } from './path-resolver.mjs';
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
+const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
-const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
-const APPLICATIONS_PATH = 'data/applications.md';
-const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
+const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup). Stays literal: the paths that
-// are NOT overridable still live here. The two that are need no equivalent -
-// scan-history creates its own parent before writing, and the pipeline's parent
-// is created by acquirePipelineLock, which runs before the first pipeline write.
-// tests/scan-output-paths.test.mjs pins that, so an override into a directory
-// that does not exist yet keeps working if either of those changes.
-mkdirSync('data', { recursive: true });
+// Ensure required directories exist (fresh setup). Stays rooted in the user-data
+// directory; override parents are created by their writers before first write.
+const targetDataDir = path.join(DATA_ROOT, 'data');
+try {
+  mkdirSync(targetDataDir, { recursive: true });
+} catch (err) {
+  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
+  process.exit(1);
+}
 
 const CONCURRENCY = 10;
 
@@ -1254,11 +1259,20 @@ export function collectSeenUrls(sources = {}, policy = {}) {
   return { seen, recheckEligible };
 }
 
-export function loadSeenUrls(policy = {}) {
+// Path options mirror mergeIntoPipeline's seam below: the defaults are the
+// CAREER_OPS_ROOT-anchored module constants, and a caller with its own lane
+// (or a test with a fixture) passes explicit paths. Before CAREER_OPS_ROOT the
+// defaults were cwd-relative strings, so callers could retarget them by
+// chdir'ing; an anchored default needs a real parameter instead.
+export function loadSeenUrls(policy = {}, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
   return collectSeenUrls({
-    scanHistoryText: readIfExists(SCAN_HISTORY_PATH),
-    pipelineText: readIfExists(PIPELINE_PATH),
-    applicationsText: readIfExists(APPLICATIONS_PATH),
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+    applicationsText: readIfExists(applicationsPath),
   }, policy);
 }
 
@@ -1861,10 +1875,16 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  *   Company canonicalizer for the role keys.
  * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
-export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer) {
-  const scanHistoryText = readIfExists(SCAN_HISTORY_PATH);
-  const pipelineText = readIfExists(PIPELINE_PATH);
-  const applicationsText = readIfExists(APPLICATIONS_PATH);
+// Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
+// paths for a caller with its own lane or a test with a fixture.
+export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
+  const scanHistoryText = readIfExists(scanHistoryPath);
+  const pipelineText = readIfExists(pipelinePath);
+  const applicationsText = readIfExists(applicationsPath);
   const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
   const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize);
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
@@ -1890,16 +1910,18 @@ const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
-export async function appendToPipeline(offers) {
+// Same seam as loadSeenUrls above: the default is the CAREER_OPS_ROOT-anchored
+// module constant; a caller with its own lane (or a fixture) passes the path.
+export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
 
-  await withPipelineLock(PIPELINE_PATH, async () => {
+  await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(PIPELINE_PATH)) {
-      writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
+    if (!existsSync(pipelinePath)) {
+      writeFileSync(pipelinePath, PIPELINE_SKELETON, 'utf-8');
     }
 
-    let text = readFileSync(PIPELINE_PATH, 'utf-8');
+    let text = readFileSync(pipelinePath, 'utf-8');
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1923,7 +1945,7 @@ export async function appendToPipeline(offers) {
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(PIPELINE_PATH, text, 'utf-8');
+    writeFileSync(pipelinePath, text, 'utf-8');
   });
 }
 

@@ -63,10 +63,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // `web` sits alongside `set-status` because it is the same class of event: a
 // status change made in the web app is recorded as the user makes it, not
 // reconstructed afterwards. Only the door differs.
-const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual']);
+// `reply-watch` is the same class: the user confirms the update interactively;
+// the transition is observed at that moment, not reconstructed later.
+const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual', 'reply-watch']);
 // Sources whose dates are trusted for day-math. backfill/manual are parsed and
 // counted but excluded: they are reconstructed after the fact, not observed.
-const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction']);
+const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watch']);
 
 // The hops a candidate can measure from their own tracker. Applied→Rejected is
 // tracked separately from the forward hops — a "days to terminal" number that
@@ -520,6 +522,24 @@ function selfTest() {
   const webVelocity = computeVelocity(foldObservations(web.observations), TODAY);
   check(webVelocity.appliedToResponded.n === 1,
     `velocity: a web transition reaches the hop figures (expected n=1, got ${webVelocity.appliedToResponded.n})`);
+
+  // reply-watch is the same event class as set-status/web: the user confirms the
+  // update interactively and it is recorded at that moment (not reconstructed
+  // after the fact the way backfill/manual are). A reply-watch transition that is
+  // excluded from day-math silently empties the velocity figures for users who
+  // manage their inbox through reply-watch. Its own fixture so the counts above
+  // stay pinned and this source is covered independently.
+  const REPLY_WATCH_FIXTURE = [
+    '1\t2026-06-01\tEvaluated\tApplied\treply-watch\t',
+    '1\t2026-06-09\tApplied\tResponded\treply-watch\t',
+  ].join('\n');
+  const rw = parseStatusLog(REPLY_WATCH_FIXTURE, states);
+  check(rw.unknownSources.length === 0, `parser: reply-watch is a recognized source (got ${rw.unknownSources.length} unknown)`);
+  check(rw.observations.length === 2 && rw.observations.every(o => o.dayMath === true),
+    'parser: reply-watch observations are trusted for day-math');
+  const rwVelocity = computeVelocity(foldObservations(rw.observations), TODAY);
+  check(rwVelocity.appliedToResponded.n === 1,
+    `velocity: a reply-watch transition reaches the hop figures (expected n=1, got ${rwVelocity.appliedToResponded.n})`);
 
   // -- fold --
   const timelines = foldObservations(observations);

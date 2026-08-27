@@ -14,13 +14,15 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
-  loadCanonicalStates, resolveCanonicalState,} from './tracker-utils.mjs';
+  openTrackerTransaction, rebuildRow,
+  loadCanonicalStates, resolveCanonicalState,
+} from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
