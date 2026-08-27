@@ -118,7 +118,9 @@ HARD BOUNDARY — NEVER do any of these:
 
 Your ONLY responsibility is to read the approved sources, compose the structured resume content in memory, and ${nativeRoleSchema ? "return the raw schema-constrained JSON object" : "emit it through the web envelope"}. Use cv.md as the source of truth.
 
-This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
+This General Role Resume intentionally has NO job description, employer, company, or posting. A job description is NOT required: this is not an application-specific resume, and the APPROVED PLAN is the complete targeting input. Build a reusable General Role resume directly from cv.md. Never ask for a JD or more information. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
+
+Do not return a placeholder, refusal, setup notice, request for a job description, or empty resume. This run must contain the user's actual source-grounded resume content. Empty arrays are permitted by the JSON schema only when cv.md truly contains no supported content; they are not a shortcut. Populate all supported experience, education, certifications, skills, and projects from cv.md.
 
 STRICT JSON SCHEMA (unknown fields are rejected):
 The JSON object MUST contain exactly the fields listed below and no others.

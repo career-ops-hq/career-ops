@@ -13,7 +13,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, validateRoleResumeHtmlStructure, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { createRawRoleResumeFilter, createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
+import { createRawRoleResumeFilter, createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, roleResumeSourceRequirements, validateRoleResumeCompleteness } from "@/lib/role-resume-content.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -541,11 +541,16 @@ export async function POST(req: Request) {
             if (!structured.ok) envelope = { ok: false, error: structured.error || "Invalid General Role content." };
             else {
               try {
-                const rendered = renderRoleResumeTemplate({ root: careerOpsRoot(), content: structured.content });
-                const structure = validateRoleResumeHtmlStructure(rendered.html);
-                envelope = structure.ok
-                  ? { ok: true, html: rendered.html, format: rendered.format, warnings: [] }
-                  : { ok: false, error: structure.error || "Backend-generated role-resume HTML failed template validation." };
+                const sourceRequirements = roleResumeSourceRequirements(fs.readFileSync(path.join(careerOpsRoot(), "cv.md"), "utf8"));
+                const completeness = validateRoleResumeCompleteness(structured.content, sourceRequirements);
+                if (!completeness.ok) envelope = { ok: false, error: completeness.error };
+                else {
+                  const rendered = renderRoleResumeTemplate({ root: careerOpsRoot(), content: structured.content });
+                  const structure = validateRoleResumeHtmlStructure(rendered.html);
+                  envelope = structure.ok
+                    ? { ok: true, html: rendered.html, format: rendered.format, warnings: [] }
+                    : { ok: false, error: structure.error || "Backend-generated role-resume HTML failed template validation." };
+                }
               } catch (error) {
                 envelope = { ok: false, error: error instanceof Error ? error.message : "Backend role-resume template rendering failed." };
               }

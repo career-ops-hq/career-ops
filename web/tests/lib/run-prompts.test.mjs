@@ -93,6 +93,13 @@ test("native Codex General Role prompt requests raw schema JSON without envelope
   assert.doesNotMatch(prompt, /<<role-resume-json>>/);
   assert.doesNotMatch(prompt, /VERDICT: \{5/);
 });
+test("General Role prompt makes the approved plan sufficient without a JD or placeholders", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", nativeRoleSchema: true });
+  assert.match(prompt, /A job description is NOT required/);
+  assert.match(prompt, /Never ask for a JD or more information/);
+  assert.match(prompt, /actual source-grounded resume content/);
+  assert.match(prompt, /Empty arrays[\s\S]*are not a shortcut/);
+});
 
 test("application PDF prompt keeps the original cv-html envelope contract", () => {
   const prompt = buildPrompt({ kind: "pdf", input: "001", memory: "", today: "2026-08-26" });
@@ -110,6 +117,16 @@ test("route enables native Codex schema only for General Role workers", () => {
   assert.match(route, /role-resume\.schema\.json/);
   assert.match(route, /outputSchema: roleOutputSchema/);
   assert.match(route, /nativeRoleSchema[\s\S]*parseRawRoleResumeJson\(roleWorkerText\)/);
+});
+test("route blocks incomplete General Role content before template rendering and fact gate remains later", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  const completenessAt = route.indexOf("validateRoleResumeCompleteness(structured.content");
+  const renderAt = route.indexOf("renderRoleResumeTemplate({ root:", completenessAt);
+  const saveAt = route.indexOf("if (await saveCv", renderAt);
+  const factGateAt = route.indexOf("validateRoleResumeHtml(envelope.html");
+  assert.ok(completenessAt > -1 && renderAt > completenessAt && saveAt > renderAt);
+  assert.ok(factGateAt > -1);
+  assert.match(route, /if \(!completeness\.ok\) envelope = \{ ok: false, error: completeness\.error \};[\s\S]*else \{[\s\S]*renderRoleResumeTemplate/);
 });
 
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";

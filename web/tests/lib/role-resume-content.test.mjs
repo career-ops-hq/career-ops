@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
+import { formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, roleResumeSourceRequirements, validateRoleResumeCompleteness, ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "../../src/lib/role-resume-content.mjs";
 
 const root = new URL("../../..", import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, "$1");
 const content = (overrides = {}) => ({
@@ -16,6 +16,19 @@ const content = (overrides = {}) => ({
   ...overrides,
 });
 const response = (value = content(), prefix = "") => `${prefix}${ROLE_JSON_OPEN_MARK}\n${JSON.stringify(value)}\n${ROLE_JSON_CLOSE_MARK}\nVERDICT: 5/5 — complete`;
+const completeContent = (overrides = {}) => content({
+  name: "Jane Doe",
+  professionalSummary: "Senior software engineer building reliable enterprise backend services, integrations, and scalable production systems across complex regulated environments.",
+  coreCompetencies: ["Java", "REST APIs", "Backend Services", "System Design", "Production Reliability", "Performance Engineering"],
+  workExperience: [{ company: "Example Corp", period: "2020–Present", role: "Senior Engineer", location: "Remote", bullets: ["Built supported backend services.", "Resolved complex production issues."] }],
+  projects: [{ title: "Platform Modernization", description: "Modernized a supported enterprise platform.", technologies: ["Java", "Docker"], url: null, badge: null }],
+  education: [{ title: "Degree", organization: "University", year: "2020", description: null }],
+  certifications: [{ title: "Certification", organization: "Issuer", year: "2021" }],
+  awards: [], interests: "",
+  skills: [{ category: "Languages", items: ["Java", "JavaScript"] }, { category: "Platforms", items: ["Docker", "Kubernetes"] }],
+  ...overrides,
+});
+const sourceRequirements = { projects: true, education: true, certifications: true };
 
 test("General Role worker returns structured JSON only", () => {
   const parsed = parseRoleResumeWorkerResponse(response());
@@ -43,6 +56,36 @@ test("nullable semantic fields accept strings or null and reject other types", (
   assert.equal(parseRawRoleResumeJson(JSON.stringify(content({ projects: [{ title: "P", description: "D", technologies: [], url: "https://example.test", badge: "Featured" }], education: [{ title: "D", organization: "U", year: "2020", description: "Coursework" }] }))).ok, true);
   assert.match(parseRawRoleResumeJson(JSON.stringify(content({ projects: [{ title: "P", description: "D", technologies: [], url: 42, badge: null }] }))).error, /projects\[0\]\.url.*string/);
   assert.match(parseRawRoleResumeJson(JSON.stringify(content({ education: [{ title: "D", organization: "U", year: "2020", description: false }] }))).error, /education\[0\]\.description.*string/);
+});
+test("default-like empty content fails semantic completeness", () => {
+  assert.match(validateRoleResumeCompleteness(content({ name: "", professionalSummary: "", coreCompetencies: [], workExperience: [], projects: [], education: [], certifications: [], skills: [] }), sourceRequirements).error, /name is empty/);
+});
+test("workflow/refusal summary fails explicitly", () => {
+  assert.match(validateRoleResumeCompleteness(completeContent({ professionalSummary: "Please provide the job description or specify the career-ops task you want completed." }), sourceRequirements).error, /refusal instead of a professional summary/);
+});
+test("empty competencies and work experience fail clearly", () => {
+  assert.match(validateRoleResumeCompleteness(completeContent({ coreCompetencies: [] }), sourceRequirements).error, /coreCompetencies has 0/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience: [] }), sourceRequirements).error, /workExperience is empty/);
+});
+test("work experience requires two substantive bullets", () => {
+  const workExperience = [{ company: "Example", role: "Engineer", period: "2020", location: "Remote", bullets: ["Only one", " "] }];
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience }), sourceRequirements).error, /bullets has 1/);
+});
+test("source-backed projects education and certifications cannot disappear", () => {
+  assert.match(validateRoleResumeCompleteness(completeContent({ projects: [] }), sourceRequirements).error, /projects is empty/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ education: [] }), sourceRequirements).error, /education is empty/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ certifications: [] }), sourceRequirements).error, /certifications is empty/);
+});
+test("skills require two populated categories", () => {
+  assert.match(validateRoleResumeCompleteness(completeContent({ skills: [] }), sourceRequirements).error, /skills has 0 categories/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ skills: [{ category: "Languages", items: ["Java"] }, { category: "Platforms", items: ["Docker", "Kubernetes"] }] }), sourceRequirements).error, /items has 1/);
+});
+test("valid populated content passes while awards and interests remain optional", () => {
+  assert.deepEqual(validateRoleResumeCompleteness(completeContent({ awards: [], interests: "" }), sourceRequirements), { ok: true });
+});
+test("source requirements are derived from section presence without exposing content", () => {
+  assert.deepEqual(roleResumeSourceRequirements("# CV\n## Selected Projects\n- One\n## Education\n- Degree\n## Certifications\n- Cert"), sourceRequirements);
+  assert.deepEqual(roleResumeSourceRequirements("# CV\n## Experience\n- Work"), { projects: false, education: false, certifications: false });
 });
 test("backend fills the real template with nine preserved sections and landmarks", () => {
   const rendered = renderRoleResumeTemplate({ root, content: content() });

@@ -82,6 +82,74 @@ export function validateRoleResumeContent(value) {
   return value;
 }
 
+const REFUSAL_SUMMARY_RE = /please provide the job description|specify the career-ops task|\bi cannot\b|\bi need more information\b|provide more information|cannot complete|unable to complete/i;
+const nonEmpty = (value) => typeof value === "string" && value.trim().length > 0;
+
+/** Source-presence policy derived from headings only; never exposes source text. */
+export function roleResumeSourceRequirements(markdown) {
+  const source = typeof markdown === "string" ? markdown.replace(/\r\n/g, "\n") : "";
+  const hasSection = (heading) => {
+    const match = new RegExp(`^#{1,6}\\s+${heading}\\s*$`, "im").exec(source);
+    if (!match) return false;
+    const body = source.slice(match.index + match[0].length).split(/^#{1,6}\s+/m, 1)[0];
+    return /[\p{L}\p{N}]/u.test(body);
+  };
+  return {
+    projects: hasSection("(?:Selected\\s+)?(?:Infrastructure\\s+)?Projects?"),
+    education: hasSection("Education"),
+    certifications: hasSection("Certifications?|Certificates?"),
+  };
+}
+
+/**
+ * Semantic gate after schema validation and before any HTML/file operation.
+ * @returns {{ok: true} | {ok: false, error: string}}
+ */
+export function validateRoleResumeCompleteness(content, requirements = {}) {
+  const fail = (reason) => ({ ok: false, error: `General Role resume content was structurally valid but incomplete: ${reason}` });
+  if (!nonEmpty(content?.name)) return fail("name is empty.");
+  const summary = typeof content?.professionalSummary === "string" ? content.professionalSummary.trim() : "";
+  if (REFUSAL_SUMMARY_RE.test(summary)) return fail("professionalSummary contained a refusal instead of a professional summary.");
+  if (summary.length < 80) return fail(`professionalSummary is too short (${summary.length} characters; minimum 80).`);
+  const competencies = (content?.coreCompetencies || []).filter(nonEmpty);
+  if (competencies.length < 6) return fail(`coreCompetencies has ${competencies.length} non-empty entries; minimum 6.`);
+  if (!Array.isArray(content?.workExperience) || content.workExperience.length < 1) return fail("workExperience is empty.");
+  for (let i = 0; i < content.workExperience.length; i += 1) {
+    const entry = content.workExperience[i];
+    for (const field of ["company", "role", "period"]) if (!nonEmpty(entry[field])) return fail(`workExperience[${i}].${field} is empty.`);
+    const bullets = (entry.bullets || []).filter(nonEmpty);
+    if (bullets.length < 2) return fail(`workExperience[${i}].bullets has ${bullets.length} non-empty entries; minimum 2.`);
+  }
+  if (requirements.projects && (!Array.isArray(content?.projects) || content.projects.length < 1)) return fail("projects is empty although cv.md contains project experience.");
+  if (requirements.education && (!Array.isArray(content?.education) || content.education.length < 1)) return fail("education is empty although cv.md contains education.");
+  if (requirements.certifications && (!Array.isArray(content?.certifications) || content.certifications.length < 1)) return fail("certifications is empty although cv.md contains certifications.");
+  for (let i = 0; i < content.projects.length; i += 1) {
+    if (!nonEmpty(content.projects[i].title)) return fail(`projects[${i}].title is empty.`);
+    if (!nonEmpty(content.projects[i].description)) return fail(`projects[${i}].description is empty.`);
+  }
+  for (let i = 0; i < content.education.length; i += 1) {
+    for (const field of ["title", "organization", "year"]) if (!nonEmpty(content.education[i][field])) return fail(`education[${i}].${field} is empty.`);
+  }
+  for (let i = 0; i < content.certifications.length; i += 1) {
+    if (!nonEmpty(content.certifications[i].title)) return fail(`certifications[${i}].title is empty.`);
+  }
+  if (!Array.isArray(content?.skills) || content.skills.length < 2) return fail(`skills has ${content?.skills?.length || 0} categories; minimum 2.`);
+  for (let i = 0; i < content.skills.length; i += 1) {
+    const entry = content.skills[i];
+    if (!nonEmpty(entry.category)) return fail(`skills[${i}].category is empty.`);
+    const items = (entry.items || []).filter(nonEmpty);
+    if (items.length < 2) return fail(`skills[${i}].items has ${items.length} non-empty entries; minimum 2.`);
+  }
+  const substantiveCount = [content.name, summary, ...competencies,
+    ...content.workExperience.flatMap((entry) => [entry.company, entry.role, entry.period, ...entry.bullets]),
+    ...content.projects.flatMap((entry) => [entry.title, entry.description, ...entry.technologies]),
+    ...content.education.flatMap((entry) => [entry.title, entry.organization, entry.year]),
+    ...content.certifications.flatMap((entry) => [entry.title, entry.organization, entry.year]),
+    ...content.skills.flatMap((entry) => [entry.category, ...entry.items])].filter(nonEmpty).length;
+  if (substantiveCount < 18) return fail(`total substantive field count is ${substantiveCount}; minimum 18.`);
+  return { ok: true };
+}
+
 export function parseRoleResumeWorkerResponse(rawValue) {
   const raw = typeof rawValue === "string" ? rawValue.replace(/\r\n/g, "\n") : "";
   const openers = [...raw.matchAll(/^<<role-resume-json>>[ \t]*$/gm)];
