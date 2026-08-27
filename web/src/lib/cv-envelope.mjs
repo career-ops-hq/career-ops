@@ -142,7 +142,7 @@ export function validateRoleResumeWorkerResponse(text) {
   const raw = typeof text === "string" ? text : "";
   const envelope = parseCvEnvelope(raw);
   if (!envelope.ok) {
-    if (!raw.includes(OPEN_MARK) && /\b(?:understood|i(?:'|â€™)?ll|i will|will return|will produce)\b/i.test(raw)) {
+    if (!raw.includes(OPEN_MARK) && /\b(?:understood|i(?:'|’)?ll|i will|will return|will produce)\b/i.test(raw)) {
       return { ok: false, error: "Codex exited before producing resume content." };
     }
     return envelope;
@@ -155,7 +155,7 @@ export function validateRoleResumeWorkerResponse(text) {
     return { ok: false, error: "The General Role worker returned HTML without the expected completed CV sections." };
   }
   const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
-  if (!/^VERDICT:\s*5\/5\s+[â€”-]\s+\S/i.test(finalLine)) {
+  if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) {
     return { ok: false, error: "The General Role worker exited without the required final VERDICT line." };
   }
   return envelope;

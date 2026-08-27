@@ -29,12 +29,25 @@ test("a general-role worker envelope parses through the existing contract", () =
 const ROLE_HTML = `<!DOCTYPE html><html><body>${["Summary", "Experience", "Skills", "Education"].map((name) => `<div class="section-title">${name}</div><div>Content</div>`).join("")}</body></html>`;
 const roleResponse = (html = ROLE_HTML, verdict = "VERDICT: 5/5 - complete") => `<<cv-html format="letter">>\n${html}\n<</cv-html>>\n${verdict}`;
 test("complete General Role worker response passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse()).ok, true));
-test("acknowledgement-only General Role response fails with the early-exit message", () => assert.deepEqual(validateRoleResumeWorkerResponse("Understood. I'll return the requested content."), { ok: false, error: "Codex exited before producing resume content." }));
+for (const separator of ["—", "–", "-"]) {
+  test(`General Role VERDICT accepts ${separator === "—" ? "em dash" : separator === "–" ? "en dash" : "hyphen"}`, () => {
+    assert.equal(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, `VERDICT: 5/5 ${separator} complete`)).ok, true);
+  });
+}
+for (const acknowledgement of ["I’ll return the requested content.", "I'll return the requested content."]) {
+  test(`acknowledgement-only response fails cleanly: ${acknowledgement.slice(0, 4)}`, () => {
+    assert.deepEqual(validateRoleResumeWorkerResponse(acknowledgement), { ok: false, error: "Codex exited before producing resume content." });
+  });
+}
 test("empty and multiple General Role envelopes fail closed", () => {
   assert.equal(validateRoleResumeWorkerResponse('<<cv-html format="letter">>\n\n<</cv-html>>\nVERDICT: 5/5 - complete').ok, false);
   assert.equal(validateRoleResumeWorkerResponse(`${roleResponse()}\n${roleResponse()}`).ok, false);
 });
 test("General Role response requires the final VERDICT", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "done")).error, /VERDICT/));
+test("General Role response rejects a non-success VERDICT score", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "VERDICT: 4/5 — incomplete")).error, /VERDICT/));
+test("application PDF envelope parsing remains independent of General Role VERDICT validation", () => {
+  assert.equal(parseCvEnvelope(`<<cv-html format="letter">>\n${ROLE_HTML}\n<</cv-html>>`).ok, true);
+});
 
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
