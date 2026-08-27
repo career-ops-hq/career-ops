@@ -11,7 +11,7 @@ Career-ops users evaluating US roles who need to know whether a specific employe
 Given a company name, the plugin:
 
 1. Resolves the name to a single best-matching DOL employer entity. If no candidate matches the name closely enough, the result is unknown rather than a guess.
-2. Pulls that entity's LCA and PERM records, built from DOL's FY2020 through FY2026-Q2 disclosure files.
+2. Pulls that entity's LCA and PERM records, built from DOL's FY2020 through FY2026-Q3 disclosure files.
 3. Computes a tier (see below) from filing volume, recency, GC evidence, and secondary-entity share.
 4. Returns the tier plus the counts the tier was derived from.
 
