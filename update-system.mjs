@@ -200,6 +200,7 @@ const SYSTEM_PATHS = [
   'cv-sync-check.mjs',
   'verify-cv-facts.mjs',
   'verify-ats.mjs',
+  'ats-payload.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
 
