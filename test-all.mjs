@@ -318,8 +318,6 @@ const scripts = [
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
-  { name: 'invite-match.test.mjs', expectExit: 0 },
-  { name: 'jd-similarity.test.mjs', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
   { name: 'tracker-columns-tests.mjs', expectExit: 0 },
@@ -345,15 +343,12 @@ const scripts = [
   // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
   // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
   // both quick and full mode like their siblings above.
+  //
+  // The nine *.test.mjs that used to sit here moved to tests/ (#3306) and are
+  // auto-discovered. These two remain because they are named test-*.mjs rather
+  // than *.test.mjs, so discovery does not match them.
   { name: 'test-trust-validator.mjs', expectExit: 0 },
   { name: 'test-salary-filter.mjs', expectExit: 0 },
-  { name: 'detect-reposts.test.mjs', expectExit: 0 },
-  { name: 'discover-ats.test.mjs', expectExit: 0 },
-  { name: 'followup-cadence.test.mjs', expectExit: 0 },
-  { name: 'process-quality.test.mjs', expectExit: 0 },
-  { name: 'company-history.test.mjs', expectExit: 0 },
-  { name: 'contacts.test.mjs', expectExit: 0 },
-  { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -6243,21 +6238,21 @@ console.log('\n12b. Skill entrypoint bootstrap (npx / old releases)');
       fail(`relativeImportSpecifiers mismatch: got ${JSON.stringify(specs)}`);
     }
 
-    // #1706: update-system.mjs must be SELF-LOADING — no static (top-level)
-    // relative imports. A pre-#1245 client's apply() self-reexec checks out
-    // ONLY update-system.mjs before re-execing it, so a static top-level
-    // relative import crashes that re-exec with ERR_MODULE_NOT_FOUND on the
-    // old→new jump. Relative modules must be pulled in lazily instead. Matched
-    // line-anchored (not via relativeImportSpecifiers, whose loose regex also
-    // matches such specifiers inside prose/comments) so only real top-level
-    // import/export statements count.
-    const liveSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
-    const staticRelativeImport = /^\s*(?:import|export)\b[^\n]*?\bfrom\s*['"]\.[^'"]*['"]|^\s*import\s*['"]\.[^'"]*['"]/m;
-    if (!staticRelativeImport.test(liveSource)) {
-      pass('update-system.mjs has no static relative imports — self-loading (#1706)');
-    } else {
-      fail('update-system.mjs has a static relative import that breaks old→new re-exec (#1706)');
-    }
+    // The #1706 "update-system.mjs must be SELF-LOADING" source check used to
+    // live here. It now lives in tests/main-guard-convention.test.mjs, beside
+    // the exemption that depends on it, and it is auto-discovered from here so
+    // nothing is lost by the move.
+    //
+    // Moved rather than duplicated because the copy that stood here was WEAKER,
+    // and silently so: its single-line `from '...'` match walked past a
+    // multiline specifier list and past a comment between the keyword and the
+    // specifier (`import /* c */ './x.mjs';`) — both real static relative
+    // imports that break the old→new re-exec. Two checks for one rule at two
+    // strengths is how a guard rots; the surviving one carries a self-test
+    // pinning ten caught spellings against five allowed ones.
+    //
+    // The behavioural backstop below is untouched and remains definitive: it
+    // imports update-system.mjs standalone, so it catches any spelling at all.
   } catch (e) {
     fail(`relativeImportSpecifiers test crashed: ${e.message}`);
   }

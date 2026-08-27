@@ -18,39 +18,27 @@
  * Run: node contacts.test.mjs
  */
 
-import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from './contacts.mjs';
+import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from '../contacts.mjs';
 import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\ncontacts.mjs — phonebook and vCard export');
+
 
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 const row = (cells) => cells.join('\t');
@@ -314,7 +302,7 @@ ok('the LATER occurrence wins', dupVcf.includes('fresh line') && !dupVcf.include
 // ============================================================================
 console.log('\n--- 9. CLI behavior ---');
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'contacts.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'contacts.mjs');
 
 try {
   execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
@@ -366,8 +354,8 @@ const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
   mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -482,8 +470,8 @@ const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
   mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);
@@ -493,16 +481,3 @@ try {
 } finally {
   rmSync(emptyRoot, { recursive: true, force: true });
 }
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);

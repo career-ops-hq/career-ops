@@ -127,7 +127,7 @@ spend_tier: standard
 #   margin:       "0.5in"                # page margin (@page)
 
 cv:
-  output_format: "html" # "html" (default) or "latex"
+  output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
   # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
@@ -156,7 +156,8 @@ cv:
   # certifications, awards, skills. An unrecognized name is reported and ignored.
   #
   # Applies to the HTML output only. With output_format: latex the order comes
-  # from templates/cv-template.tex and this setting does nothing.
+  # from templates/cv-template.tex, and with output_format: text it comes from
+  # cv.md; this setting does nothing in either case.
   #
   # This exists so the order can live in your profile instead of in
   # templates/cv-template.html, which update-system.mjs restores on every update.
