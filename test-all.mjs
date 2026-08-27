@@ -57,6 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { collectMjsFiles } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -222,14 +223,29 @@ console.log('\n🧪 career-ops test suite\n');
 
 console.log('1. Syntax checks');
 
-const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
+// RECURSIVE, and sharing its walk with `npm run lint` (#3419). This read the
+// repository root non-recursively, which covered 121 of the ~575 .mjs files
+// here and printed a `syntax OK` line for each one — so the 263 files under
+// tests/ were absent from a log that looked complete. It also narrowed by one
+// every time a file moved out of the root, silently: #3306 moved eleven suites
+// into tests/ and #3388 nine, and the shortfall was only noticed later as a
+// two-check arithmetic discrepancy in #3411. Both scopes now come from the
+// same collector, so neither can drift from the other again.
+const mjsFiles = collectMjsFiles(ROOT).map(f => f.slice(ROOT.length + 1).replace(/\\/g, '/'));
+
+// State the scope in one line. The per-file `syntax OK` output is what hid the
+// old shortfall: a number the reader can compare against `npm run lint`'s own
+// total makes a narrowing visible at a glance instead of requiring someone to
+// diff two runs' pass labels.
+console.log(`  (${mjsFiles.length} .mjs files, recursive from the repository root)`);
 
 // `node --check` parses a file and exits; it runs no user code, touches no
 // shared state, and its result depends on nothing but that one file. Spawning
-// the 100+ root scripts one at a time was pure process-startup latency, so they
-// go through a bounded pool instead (#2387). Results are collected by index and
-// reported afterwards in the original readdir order, so the log stays
-// byte-identical to the sequential version regardless of completion order.
+// the files one at a time was pure process-startup latency, so they go through
+// a bounded pool instead (#2387) — which is also what keeps the recursive scope
+// above a wall-clock non-event. Results are collected by index and reported
+// afterwards in collector order, so the log stays byte-identical to the
+// sequential version regardless of completion order.
 const SYNTAX_POOL_SIZE = 8;
 const execFileAsync = promisify(execFile);
 const syntaxOk = new Array(mjsFiles.length);
