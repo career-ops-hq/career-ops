@@ -353,6 +353,9 @@ const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(tmpRoot, 'path-resolver.mjs'));
   mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
@@ -469,6 +472,9 @@ try {
 const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(emptyRoot, 'path-resolver.mjs'));
   mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
