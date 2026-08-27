@@ -12,7 +12,8 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, validateRoleResumeWorkerResponse, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { createCvEnvelopeFilter, validateRoleResumeHtmlStructure, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { createRoleResumeJsonFilter, parseRoleResumeWorkerResponse, renderRoleResumeTemplate } from "@/lib/role-resume-content.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -284,7 +285,7 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "pdf" || kind === "role-resume" ? createCvEnvelopeFilter() : null;
+      const cvFilter = kind === "role-resume" ? createRoleResumeJsonFilter() : kind === "pdf" ? createCvEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -507,9 +508,22 @@ export async function POST(req: Request) {
           // The artifact check moved from the filesystem to the stream (#2185):
           // whether pdfPaths.html exists says nothing now that the backend is its
           // only writer. pdfRunOutcome owns the decision and the message.
-          const envelope = kind === "role-resume"
-            ? validateRoleResumeWorkerResponse(cvFilter?.rawText() ?? "")
-            : cvFilter?.result();
+          let envelope: CvEnvelope | { ok: false; error: string } | undefined;
+          if (kind === "role-resume") {
+            const structured = parseRoleResumeWorkerResponse(cvFilter?.rawText() ?? "");
+            if (!structured.ok) envelope = { ok: false, error: structured.error || "Invalid General Role content." };
+            else {
+              try {
+                const rendered = renderRoleResumeTemplate({ root: careerOpsRoot(), content: structured.content });
+                const structure = validateRoleResumeHtmlStructure(rendered.html);
+                envelope = structure.ok
+                  ? { ok: true, html: rendered.html, format: rendered.format, warnings: [] }
+                  : { ok: false, error: structure.error || "Backend-generated role-resume HTML failed template validation." };
+              } catch (error) {
+                envelope = { ok: false, error: error instanceof Error ? error.message : "Backend role-resume template rendering failed." };
+              }
+            }
+          } else envelope = cvFilter?.result() as CvEnvelope | { ok: false; error: string } | undefined;
           const outcome = pdfRunOutcome({
             envelope,
             noOutputMessage: noOutputError(),
@@ -519,7 +533,7 @@ export async function POST(req: Request) {
           });
           if (!outcome.ok) {
             send({ type: "error", msg: outcome.message });
-          } else if (!pdfPaths || envelope?.ok !== true) {
+          } else if (!pdfPaths || envelope?.ok !== true || !("html" in envelope) || !("format" in envelope) || !("warnings" in envelope)) {
             // Unreachable: pdfRunOutcome validated both via hasPaths/envelope.ok.
             // Kept for narrowing, but it must REPORT rather than fall through to a
             // bare close() — a stream that ends with neither error nor done is the

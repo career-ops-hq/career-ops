@@ -10,6 +10,7 @@
  */
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 import { validateRoleResumePlanShape } from "./role-resumes.mjs";
+import { ROLE_JSON_OPEN_MARK, ROLE_JSON_CLOSE_MARK } from "./role-resume-content.mjs";
 
 /**
  * Is this company name safe to interpolate into a shell command inside a prompt?
@@ -83,7 +84,7 @@ After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete
     let parsed;
     try { parsed = JSON.parse(input); } catch { throw new Error("General Role Resume plan must be valid JSON."); }
     const plan = validateRoleResumePlanShape(parsed);
-    return `OUTPUT FORMAT IS MANDATORY. Markdown resume output is invalid. Do not output # headings, Markdown bullets, Markdown bold syntax, or a prose resume outside the envelope. ${CV_ENVELOPE_INSTRUCTION}
+    return `OUTPUT FORMAT IS MANDATORY. Return structured JSON only inside the ${ROLE_JSON_OPEN_MARK} / ${ROLE_JSON_CLOSE_MARK} contract below. Do not generate HTML or reproduce templates/cv-template.html.
 
 You are generating the CONTENT for a reusable General Role Resume in a non-interactive WEB worker that is already inside Career-Ops. Complete the resume in THIS SAME RUN. Do not merely acknowledge these instructions or describe what you will do.
 
@@ -100,10 +101,10 @@ NOW PERFORM THE TASK:
 1. Read cv.md.
 2. Read config/profile.yml and modes/_profile.md.
 3. Read modes/pdf.md only for relevant content and formatting rules; do not enter its interactive workflow.
-4. Read templates/cv-template.html and use that exact template. Preserve its HTML/CSS structure and all nine class="section-title" elements. Replace every {{...}} placeholder; use an empty string where an optional section has no supported content.
-5. Build the complete ATS-friendly resume, maximum two pages, for the approved role family and supported focus areas.
+4. Build complete structured resume content for the approved role family and supported focus areas. The backend owns templates/cv-template.html and its two-page styling.
+5. Return every schema field below. Optional content collections may be empty arrays, but fields may not be omitted.
 6. Use only claims supported by cv.md. Do not invent or upgrade adjacent experience.
-7. Emit the complete populated HTML through the shared envelope contract below.
+7. Emit the structured JSON envelope exactly once.
 8. Continue until both the envelope and final VERDICT line have been emitted. Do not ask questions.
 
 This is a content-only step. The backend owns every file and all rendering.
@@ -115,14 +116,17 @@ HARD BOUNDARY — NEVER do any of these:
 - Do not render a PDF, save HTML, choose an output path, return localhost/job links, update Career-Ops, or ask whether Career-Ops should be updated.
 - Do not modify cv.md, config/profile.yml, modes/_profile.md, or any profile/application file.
 
-Your ONLY responsibility is to read the approved sources, compose the final HTML in memory, and emit it through the web envelope. Use cv.md as the source of truth.
+Your ONLY responsibility is to read the approved sources, compose the structured resume content in memory, and emit it through the web envelope. Use cv.md as the source of truth.
 
 This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
 
-Build a maximum two-page ATS-friendly resume using only claims supported by cv.md. Fill the existing Career-Ops CV HTML template completely. Do not invent alternate HTML markup, rename template classes, remove section wrappers, or leave unresolved placeholders.
+STRICT JSON SCHEMA (unknown fields are rejected):
+{"format":"letter|a4","lang":"string","name":"string","phone":"string","email":"string","linkedin":{"url":"string","display":"string"},"portfolio":{"url":"string","display":"string"},"location":"string","professionalSummary":"string","coreCompetencies":["string"],"workExperience":[{"company":"string","period":"string","role":"string","location":"string","bullets":["string"]}],"projects":[{"title":"string","description":"string","technologies":["string"],"url":"optional string","badge":"optional string"}],"education":[{"title":"string","organization":"string","year":"string","description":"optional string"}],"certifications":[{"title":"string","organization":"string","year":"string"}],"awards":[{"title":"string","organization":"string","year":"string"}],"interests":"string","skills":[{"category":"string","items":["string"]}]}
 
-FINAL OUTPUT CHECK: Markdown is invalid. Emit the complete HTML envelope EXACTLY ONCE, using the populated template and shared contract stated at the beginning. Emit no prose before the envelope and no prose after it except the final VERDICT line. An acknowledgement-only response is a failed run. After the envelope, emit EXACTLY one final line and nothing else:
-VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+All values are plain text. Do not put HTML, Markdown, template placeholders, or CSS in any field. The backend escapes text and maps these values into the canonical template deterministically.
+
+FINAL OUTPUT CHECK: Emit ${ROLE_JSON_OPEN_MARK} on its own line, then exactly one JSON object matching the schema, then ${ROLE_JSON_CLOSE_MARK} on its own line. Narration before the envelope is ignored; after the closing marker emit EXACTLY one final line and nothing else:
+VERDICT: {5 if the complete structured envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):

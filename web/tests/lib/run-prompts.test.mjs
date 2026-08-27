@@ -18,12 +18,11 @@ const rolePlan = (overrides = {}) => JSON.stringify({ targetRole: "Application D
 test("buildPrompt joins multiple canonical supported focus areas", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: Java, REST APIs/); assert.match(prompt, /Target Role: Application Developer/i); });
 test("exact Application Developer prompt carries the complete approved generation task", () => {
   const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
-  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "Read cv.md", "config/profile.yml", "modes/_profile.md", "modes/pdf.md", "templates/cv-template.html", "maximum two pages", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
-  assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION));
+  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "Read cv.md", "config/profile.yml", "modes/_profile.md", "modes/pdf.md", "templates/cv-template.html", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:", "<<role-resume-json>>"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
 });
 test("Application Developer with an empty supported array reaches the worker prompt", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: [] }), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: none selected/); });
 test("malformed role plan fails clearly rather than throwing a TypeError", () => { assert.throws(() => buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: undefined }), memory: "", today: "2026-08-26" }), (error) => error instanceof Error && error.name === "Error" && /supportedFocusAreas.*array/.test(error.message) && !/TypeError/.test(error.name)); });
-test("general role prompt carries the shared CV envelope contract", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION)); assert.match(prompt, /Emit the complete HTML envelope EXACTLY ONCE/); });
+test("general role prompt uses structured JSON instead of the application HTML contract", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.doesNotMatch(prompt, /<<cv-html/); assert.match(prompt, /<<role-resume-json>>/); assert.match(prompt, /Do not generate HTML/); });
 test("general role prompt prohibits agent-side writes rendering and updates", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); for (const phrase of ["Do not create, edit, move, or save files", "Do not run Bash", "Do not render a PDF", "ask whether Career-Ops should be updated"]) assert.match(prompt, new RegExp(phrase, "i")); assert.match(prompt, /non-interactive[\s\S]{0,20}web worker/i); });
 test("general role prompt excludes JD and company work", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /NO job description, employer, company, or posting/); assert.match(prompt, /Skip JD keyword-gap processing and company research/); });
 test("a general-role worker envelope parses through the existing contract", () => { const parsed = parseCvEnvelope('<<cv-html format="letter">>\n<!DOCTYPE html><html><body>Application Developer</body></html>\n<</cv-html>>\nVERDICT: 5/5 — complete'); assert.equal(parsed.ok, true); assert.match(parsed.html, /Application Developer/); });
@@ -73,11 +72,22 @@ test("General Role prompt blocks router, onboarding, doctor, and update workflow
   assert.match(prompt, /Do NOT invoke or announce any skill, skill router/i);
   assert.match(prompt, /onboarding\/setup flow, doctor check, version\/update check/i);
 });
-test("General Role prompt requires the actual nine-section template structure", () => {
+test("General Role prompt assigns the canonical template exclusively to the backend", () => {
   const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
-  assert.match(prompt, /Preserve its HTML\/CSS structure and all nine class="section-title" elements/);
-  assert.match(prompt, /Replace every {{\.\.\.}} placeholder/);
-  assert.match(prompt, /Do not invent alternate HTML markup/);
+  assert.match(prompt, /backend owns templates\/cv-template\.html/);
+  assert.match(prompt, /All values are plain text/);
+  assert.match(prompt, /unknown fields are rejected/);
+});
+
+test("application PDF prompt keeps the original cv-html envelope contract", () => {
+  const prompt = buildPrompt({ kind: "pdf", input: "001", memory: "", today: "2026-08-26" });
+  assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION)); assert.match(prompt, /<<cv-html/); assert.doesNotMatch(prompt, /<<role-resume-json>>/);
+});
+
+test("route fact-gates backend-rendered role HTML before saving", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  assert.ok(route.indexOf("renderRoleResumeTemplate") < route.indexOf("if (await saveCv"));
+  assert.match(route, /if \(kind === "role-resume"\)[\s\S]*validateRoleResumeHtml\(envelope\.html/);
 });
 
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";

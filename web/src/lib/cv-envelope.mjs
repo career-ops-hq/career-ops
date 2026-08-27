@@ -147,14 +147,24 @@ export function validateRoleResumeWorkerResponse(text) {
     }
     return envelope;
   }
-  if (!/^\s*<!doctype html>/i.test(envelope.html) || !/<html\b/i.test(envelope.html)) {
-    return { ok: false, error: "The General Role worker did not return a complete HTML document." };
+  const structure = validateRoleResumeHtmlStructure(envelope.html);
+  if (!structure.ok) return structure;
+  const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
+  if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) {
+    return { ok: false, error: "The General Role worker exited without the required final VERDICT line." };
   }
-  const unresolved = envelope.html.match(/{{[^}]+}}/);
+  return envelope;
+}
+
+export function validateRoleResumeHtmlStructure(html) {
+  if (!/^\s*<!doctype html>/i.test(html) || !/<html\b/i.test(html)) {
+    return { ok: false, error: "The General Role resume is not a complete HTML document." };
+  }
+  const unresolved = html.match(/{{[^}]+}}/);
   if (unresolved) {
     return { ok: false, error: `The General Role worker left an unresolved template placeholder: ${unresolved[0]}.` };
   }
-  const sections = envelope.html.match(/class=["'][^"']*\bsection-title\b[^"']*["']/gi) || [];
+  const sections = html.match(/class=["'][^"']*\bsection-title\b[^"']*["']/gi) || [];
   if (sections.length !== 9) {
     return { ok: false, error: `The General Role worker returned ${sections.length} template sections; expected 9.` };
   }
@@ -168,14 +178,10 @@ export function validateRoleResumeWorkerResponse(text) {
     /<div\s+class=["'][^"']*\baward-table\b[^"']*["']/i,
     /<div\s+class=["'][^"']*\binterests-line\b[^"']*["']/i,
   ];
-  if (!templateLandmarks.every((pattern) => pattern.test(envelope.html))) {
+  if (!templateLandmarks.every((pattern) => pattern.test(html))) {
     return { ok: false, error: "The General Role worker returned alternate HTML instead of the Career-Ops CV template structure." };
   }
-  const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
-  if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) {
-    return { ok: false, error: "The General Role worker exited without the required final VERDICT line." };
-  }
-  return envelope;
+  return { ok: true };
 }
 
 /**
