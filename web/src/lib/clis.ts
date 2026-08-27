@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
+import { findCliBin } from "./cli-launcher.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -23,7 +24,7 @@ export type CliSpec = {
    * claude, by claude-invocation.mjs's `claudeCliArgs`, which spells its own
    * `--output-format stream-json`). Pairing one CLI's parser with a plain-text
    * invocation yields a silent stream of unparseable lines. */
-  streamArgs?: (prompt: string) => string[];
+  streamArgs?: (prompt: string, kind?: string, options?: { outputLastMessage?: string }) => string[];
   /** Structured-output CLIs only: parse one stdout line into dashboard events.
    * Absent → the route streams stdout as raw text (the default for every CLI
    * without its own structured output format). */
@@ -101,33 +102,8 @@ function searchDirs(): string[] {
 // On Windows, executables carry an extension (claude.exe, claude.cmd, ...).
 // Mirror the shell's PATHEXT resolution so a native-installer claude.exe is
 // found, not just an extensionless npm shim. On POSIX, "" keeps the bare name.
-function binCandidates(bin: string): string[] {
-  if (process.platform !== "win32") return [bin];
-  const pathext = process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD";
-  const exts = pathext
-    .split(";")
-    .map((e) => e.trim())
-    .filter(Boolean)
-    // Only include extensions that `child_process.spawn()` can execute directly.
-    .filter((e) => [".com", ".exe", ".bat", ".cmd"].includes(e.toLowerCase()));
-
-  // Try the bare name too (some environments provide an extensionless shim).
-  return [bin, ...exts.map((ext) => bin + ext)];
-}
-
 export function findBin(bin: string, dirs = searchDirs()): string | null {
-  for (const dir of dirs) {
-    for (const candidate of binCandidates(bin)) {
-      const p = path.join(dir, candidate);
-      try {
-        fs.accessSync(p, fs.constants.X_OK);
-        return p;
-      } catch {
-        /* not here */
-      }
-    }
-  }
-  return null;
+  return findCliBin(bin, dirs);
 }
 
 export function detectClis() {

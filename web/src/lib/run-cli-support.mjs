@@ -154,8 +154,8 @@ const GENERIC_FATAL_STDERR_RE =
  * @param {string} prompt
  * @returns {string[]}
  */
-export function codexStreamArgs(prompt) {
-  return ["exec", "--json", "--color", "never", prompt];
+export function codexStreamArgs(prompt, kind, options = {}) {
+  return ["exec", "--json", "--color", "never", ...(kind === "role-resume" ? ["--sandbox", "read-only", "--ephemeral"] : []), ...(options.outputLastMessage ? ["--output-last-message", options.outputLastMessage] : []), prompt];
 }
 
 /**

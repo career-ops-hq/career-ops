@@ -10,6 +10,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
+import { CV_ENVELOPE_INSTRUCTION, parseCvEnvelope, validateRoleResumeWorkerResponse } from "../../src/lib/cv-envelope.mjs";
+
+const rolePlan = (overrides = {}) => JSON.stringify({ targetRole: "Application Developer", roleSlug: "application-developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: ["Java", "REST APIs"], unsupportedFocusAreas: ["AWS"], version: "v001", ...overrides });
+
+test("buildPrompt joins multiple canonical supported focus areas", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: Java, REST APIs/); assert.match(prompt, /Target Role: Application Developer/i); });
+test("exact Application Developer prompt carries the complete approved generation task", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "Read cv.md", "config/profile.yml", "modes/_profile.md", "modes/pdf.md", "templates/cv-template.html", "maximum two pages", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
+  assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION));
+});
+test("Application Developer with an empty supported array reaches the worker prompt", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: [] }), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: none selected/); });
+test("malformed role plan fails clearly rather than throwing a TypeError", () => { assert.throws(() => buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: undefined }), memory: "", today: "2026-08-26" }), (error) => error instanceof Error && error.name === "Error" && /supportedFocusAreas.*array/.test(error.message) && !/TypeError/.test(error.name)); });
+test("general role prompt carries the shared CV envelope contract", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION)); assert.match(prompt, /Emit the complete HTML envelope EXACTLY ONCE/); });
+test("general role prompt prohibits agent-side writes rendering and updates", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); for (const phrase of ["Do not create, edit, move, or save files", "Do not run Bash", "Do not render a PDF", "ask whether Career-Ops should be updated"]) assert.match(prompt, new RegExp(phrase, "i")); assert.match(prompt, /non-interactive[\s\S]{0,20}web worker/i); });
+test("general role prompt excludes JD and company work", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /NO job description, employer, company, or posting/); assert.match(prompt, /Skip JD keyword-gap processing and company research/); });
+test("a general-role worker envelope parses through the existing contract", () => { const parsed = parseCvEnvelope('<<cv-html format="letter">>\n<!DOCTYPE html><html><body>Application Developer</body></html>\n<</cv-html>>\nVERDICT: 5/5 — complete'); assert.equal(parsed.ok, true); assert.match(parsed.html, /Application Developer/); });
+const ROLE_HTML = `<!DOCTYPE html><html><body>${["Summary", "Experience", "Skills", "Education"].map((name) => `<div class="section-title">${name}</div><div>Content</div>`).join("")}</body></html>`;
+const roleResponse = (html = ROLE_HTML, verdict = "VERDICT: 5/5 - complete") => `<<cv-html format="letter">>\n${html}\n<</cv-html>>\n${verdict}`;
+test("complete General Role worker response passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse()).ok, true));
+test("acknowledgement-only General Role response fails with the early-exit message", () => assert.deepEqual(validateRoleResumeWorkerResponse("Understood. I'll return the requested content."), { ok: false, error: "Codex exited before producing resume content." }));
+test("empty and multiple General Role envelopes fail closed", () => {
+  assert.equal(validateRoleResumeWorkerResponse('<<cv-html format="letter">>\n\n<</cv-html>>\nVERDICT: 5/5 - complete').ok, false);
+  assert.equal(validateRoleResumeWorkerResponse(`${roleResponse()}\n${roleResponse()}`).ok, false);
+});
+test("General Role response requires the final VERDICT", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "done")).error, /VERDICT/));
+
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 

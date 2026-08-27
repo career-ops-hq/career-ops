@@ -78,11 +78,24 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   }
   const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
   fs.mkdirSync(scratchDir, { recursive: true });
+  let finalPdf = path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`);
+  try {
+    const padded = String(Number(input)).padStart(3, "0");
+    const appDir = fs.readdirSync(path.join(root, "output"), { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.startsWith(`${padded}-`));
+    if (appDir) {
+      const tailored = path.join(root, "output", appDir.name, "cv", "tailored");
+      let versions = [];
+      try { versions = fs.readdirSync(tailored); } catch { /* first nested version */ }
+      const max = versions.reduce((n, name) => /^v\d+$/.test(name) ? Math.max(n, Number(name.slice(1))) : n, 0);
+      const next = `v${String(max + 1).padStart(3, "0")}`;
+      finalPdf = path.join(tailored, next, "cv.pdf");
+    }
+  } catch { /* preserve legacy flat output when application output is unavailable */ }
   return {
     ok: true,
     paths: {
       html: path.join(scratchDir, `cv-web-${input}.html`),
-      finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
+      finalPdf,
     },
   };
 }

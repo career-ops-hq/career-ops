@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const ui = fs.readFileSync(new URL("../../src/components/create-resume-view.tsx", import.meta.url), "utf8");
+const store = fs.readFileSync(new URL("../../src/components/jobs/job-store.tsx", import.meta.url), "utf8");
+const docs = fs.readFileSync(new URL("../../src/components/documents-view.tsx", import.meta.url), "utf8");
+const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+test("Documents groups general and application resumes", () => { assert.match(docs, /General Role Resumes/); assert.match(docs, /Application Documents/); });
+test("general generation requires preview approval", () => { assert.match(ui, /if \(!plan\) return/); assert.match(ui, /Approve &amp; Generate/); assert.match(route, /parseApprovedRoleResumeInput/); assert.match(route, /status: 400/); });
+test("general resumes do not trigger cover letters", () => { assert.match(store, /if \(opts\.kind === "pdf"\)/); assert.doesNotMatch(store, /opts\.kind === "role-resume"\)[\s\S]{0,160}cover-letter\/init/); });
+test("application resumes preserve normal cover workflow", () => { assert.match(ui, /kind: "pdf"/); assert.match(store, /cover-letter\/init/); });
+test("general and application resumes share the backend envelope path", () => { assert.match(route, /kind === "pdf" \|\| kind === "role-resume"/); assert.match(route, /createCvEnvelopeFilter/); assert.match(route, /validateRoleResumeHtml/); });
+test("approved UI payload sends the complete canonical preview plan", () => { assert.match(ui, /const approvedPlan = \{ targetRole: plan\.targetRole, roleSlug: plan\.roleSlug, positioning: plan\.positioning, supportedFocusAreas: plan\.supportedFocusAreas, unsupportedFocusAreas: plan\.unsupportedFocusAreas, version: plan\.version, approved: true \}/); assert.match(ui, /JSON\.stringify\(approvedPlan\)/); });

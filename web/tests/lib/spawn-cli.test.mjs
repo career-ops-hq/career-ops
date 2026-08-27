@@ -6,7 +6,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
+import { CODEX_WINDOWS_LAUNCH_ERROR } from "../../src/lib/cli-launcher.mjs";
 
 test("spawnHeadlessCli closes stdin so a headless CLI can start", async () => {
   // Given: a child that only speaks once its stdin has reached EOF — a stand-in
@@ -68,4 +74,29 @@ test("spawnHeadlessCli tolerates a caller that passes stdio itself", async () =>
   assert.equal(child.stdin, null);
   assert.equal(code, 0);
   assert.equal(stdout, "OK");
+});
+
+test("Windows Codex spawn failure surfaces a clear launcher error", async () => {
+  const fakeSpawn = () => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+    queueMicrotask(() => { const error = new Error("spawn codex.cmd ENOENT"); error.code = "ENOENT"; child.emit("error", error); });
+    return child;
+  };
+  const child = spawnHeadlessCli("C:\\npm\\codex.cmd", ["exec", "prompt"], { env: { ComSpec: "C:\\Windows\\cmd.exe" } }, { platform: "win32", spawnFn: fakeSpawn });
+  const error = await new Promise((resolve) => child.once("error", resolve));
+  assert.equal(error.message, CODEX_WINDOWS_LAUNCH_ERROR);
+});
+
+test("a real Windows cmd shim streams output and preserves its exit code", { skip: process.platform !== "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "co-codex-shim-"));
+  const shim = path.join(dir, "codex.cmd");
+  fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" -e "process.stdout.write(process.argv.slice(1).join('|'))" %*\r\nexit /b 7\r\n`);
+  try {
+    const child = spawnHeadlessCli(shim, ["alpha", "beta"], { cwd: dir, env: process.env });
+    let output = ""; child.stdout.on("data", (chunk) => { output += chunk; });
+    const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(output, "alpha|beta");
+    assert.equal(code, 7);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

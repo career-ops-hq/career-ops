@@ -433,6 +433,17 @@ test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   assert.deepEqual(args, ["exec", "--json", "--color", "never", "PROMPT"]);
 });
 
+test("role-resume Codex workers are read-only and ephemeral", () => { const args = codexStreamArgs("prompt", "role-resume"); assert.deepEqual(args.slice(0, 7), ["exec", "--json", "--color", "never", "--sandbox", "read-only", "--ephemeral"]); assert.equal(args.at(-1), "prompt"); });
+test("role-resume Codex receives the entire generated prompt as one positional argument", () => { const prompt = "Target Role: Application Developer\nNOW PERFORM THE TASK\n" + "x".repeat(20_000); const args = codexStreamArgs(prompt, "role-resume"); assert.equal(args.at(-1), prompt); });
+test("application pdf Codex argv remains unchanged", () => { assert.deepEqual(codexStreamArgs("prompt", "pdf"), ["exec", "--json", "--color", "never", "prompt"]); });
+test("application and General Role PDFs share Codex terminal-output capture", () => {
+  for (const kind of ["pdf", "role-resume"]) {
+    const args = codexStreamArgs("prompt", kind, { outputLastMessage: "final.txt" });
+    assert.deepEqual(args.slice(args.indexOf("--output-last-message"), -1), ["--output-last-message", "final.txt"]);
+    assert.equal(args.at(-1), "prompt");
+  }
+});
+
 test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
   // Two halves of one contract, asserted separately BY NECESSITY: proving the
   // linkage for real would mean running codex, which a unit test cannot do. So

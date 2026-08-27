@@ -4,17 +4,21 @@
 // sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
-import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { createCvEnvelopeFilter, validateRoleResumeWorkerResponse, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { parseApprovedRoleResumeInput, reserveRoleResumeDirectory, roleResumePaths } from "@/lib/role-resumes.mjs";
+import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
+import { recoverCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +37,10 @@ export async function POST(req: Request) {
   }
   const resolved = resolveCli(cliId);
   if (!resolved) {
-    return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
+    const error = process.platform === "win32" && cliId === "codex"
+      ? "Codex CLI could not be launched on Windows. A codex.cmd, codex.exe, or runnable codex.ps1 launcher was not found."
+      : `CLI '${cliId}' not found`;
+    return new Response(JSON.stringify({ error }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
@@ -42,7 +49,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", "role-resume": "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -66,7 +73,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "role-resume") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -81,6 +88,8 @@ export async function POST(req: Request) {
   // from this run's freshly parsed envelope before any render, and the agent is
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
+  let rolePlan: any;
+  let promptInput = input;
   if (kind === "pdf") {
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
     if (!pathsResult.ok) {
@@ -90,6 +99,15 @@ export async function POST(req: Request) {
       });
     }
     pdfPaths = pathsResult.paths;
+  }
+  if (kind === "role-resume") {
+    try {
+      rolePlan = parseApprovedRoleResumeInput(careerOpsRoot(), input);
+      pdfPaths = roleResumePaths(careerOpsRoot(), rolePlan);
+      promptInput = JSON.stringify(rolePlan);
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Invalid role-resume request." }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
   }
 
   // Resolve the posting date HERE rather than asking the agent for it. The
@@ -102,7 +120,7 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt });
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -118,7 +136,10 @@ export async function POST(req: Request) {
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const capturesCv = kind === "pdf" || kind === "role-resume";
+  const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
+  const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -196,6 +217,9 @@ export async function POST(req: Request) {
       };
       let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) — local only
       let lastCostUsd: number | null = null;
+      let stdoutChunks = 0;
+      let parsedEvents = 0;
+      let textEvents = 0;
       // pdf-mode's agent only tailors content now (rendering moved to the
       // backend, #2172) — but its killMs still has to leave real headroom
       // inside the route's overall maxDuration (800s): the render+mark phase
@@ -205,7 +229,7 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      const killMs = kind === "pdf" || kind === "role-resume" ? 600_000 : 285_000;
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
@@ -241,6 +265,7 @@ export async function POST(req: Request) {
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
+          if (codexFinalDir) { try { fs.rmSync(codexFinalDir, { recursive: true, force: true }); } catch { /* best effort */ } }
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -248,7 +273,7 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const cvFilter = kind === "pdf" || kind === "role-resume" ? createCvEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -266,7 +291,13 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
+      const saveCv = async (paths: PdfPaths, envelope: CvEnvelope) => {
+        if (kind === "role-resume") {
+          const facts = await validateRoleResumeHtml(envelope.html, careerOpsRoot());
+          if (!facts.ok) { send({ type: "error", msg: `Fact validation failed: ${facts.error}`.slice(0, 300) }); return false; }
+          sendWarnings(facts.warnings || []);
+          try { reserveRoleResumeDirectory(paths); } catch { send({ type: "error", msg: "That role-resume version already exists; refresh and try again." }); return false; }
+        }
         const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
         if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
         return written.ok;
@@ -280,9 +311,11 @@ export async function POST(req: Request) {
       // it carries.
       const processParsedLine = (line: string) => {
         if (!spec.parseEvent) return;
+        parsedEvents += 1;
         const ev = spec.parseEvent(line);
         if (ev?.text) {
           emittedText = true;
+          textEvents += 1;
           // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a
           // <<cv-html>> envelope, so parsed text has to reach cvFilter too or the
           // backend has nothing to save and the 25 KB body floods the run log (#2185).
@@ -303,6 +336,7 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (chunk: string) => {
         if (closed) return;
+        stdoutChunks += 1;
         if (!spec.parseEvent) {
           emittedText = true;
           sendAgentText(chunk);
@@ -347,7 +381,7 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
-          const result = await renderAndMarkPdf({
+          const result = kind === "role-resume" ? await renderRoleResumePdf({ spawnFn: spawn, execPath: process.execPath, root: careerOpsRoot(), pdfPaths: paths, format, plan: rolePlan }) : await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
@@ -356,12 +390,12 @@ export async function POST(req: Request) {
             reportNum: input,
           });
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: (result.error || "PDF rendering failed.").slice(0, 200) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
           // surface here rather than only in a server log nobody sees.
-          sendWarnings(result.warnings);
+          sendWarnings("warnings" in result ? (result.warnings || []) : []);
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } catch (e) {
           send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
@@ -371,7 +405,7 @@ export async function POST(req: Request) {
       };
 
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
+      child.on("close", async (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
         // A client disconnect can fire cancel() (which kills `child`) before
@@ -400,7 +434,35 @@ export async function POST(req: Request) {
           return null;
         };
 
-        if (kind === "pdf") {
+        if (kind === "pdf" || kind === "role-resume") {
+          // Codex exposes its authoritative terminal assistant response through
+          // --output-last-message. JSONL still drives live status/tool updates,
+          // but it is not the sole content channel: some runs finish without an
+          // item.completed/agent_message carrying the final body.
+          if (codexFinalFile) {
+            const finalText = recoverCodexFinalOutput(codexFinalFile, cvFilter?.rawText() ?? "");
+            if (finalText) {
+              emittedText = true;
+              textEvents += 1;
+              sendAgentText(finalText + "\n");
+            }
+          }
+          if (process.env.NODE_ENV !== "production") {
+            const raw = cvFilter?.rawText() ?? "";
+            console.debug("[career-ops worker completion]", {
+              cliId,
+              executable: path.basename(binPath),
+              launcher: path.extname(binPath).toLowerCase() || "direct",
+              kind,
+              promptLength: prompt.length,
+              promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes("<<cv-html") },
+              exitCode: code,
+              outputSignals: { opener: raw.includes("<<cv-html"), closer: raw.includes("<</cv-html>>"), verdict: /VERDICT:/.test(raw) },
+              stdoutChunks,
+              parsedEvents,
+              textEvents,
+            });
+          }
           // Release any text the filter was still holding, so the log keeps the
           // agent's closing narration and its VERDICT line.
           const tail = cvFilter?.flush();
@@ -408,7 +470,9 @@ export async function POST(req: Request) {
           // The artifact check moved from the filesystem to the stream (#2185):
           // whether pdfPaths.html exists says nothing now that the backend is its
           // only writer. pdfRunOutcome owns the decision and the message.
-          const envelope = cvFilter?.result();
+          const envelope = kind === "role-resume"
+            ? validateRoleResumeWorkerResponse(cvFilter?.rawText() ?? "")
+            : cvFilter?.result();
           const outcome = pdfRunOutcome({
             envelope,
             noOutputMessage: noOutputError(),
@@ -426,7 +490,7 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
+            if (await saveCv(pdfPaths, envelope)) {
               // Tracked so cancel() can defer releasing writeToken until this
               // settles; close() happens once rendering finishes, not here.
               pdfRenderPromise = renderPdf(pdfPaths, envelope.format);

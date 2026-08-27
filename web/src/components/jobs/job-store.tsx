@@ -144,8 +144,18 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf" || opts.kind === "role-resume")) {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
+            }
+            // Web-only application-document automation. This initializes a
+            // review-required cover workflow after a successful tailored CV;
+            // it never renders a PDF or bypasses cover.md approval gates.
+            if (opts.kind === "pdf") {
+              fetch("/api/documents/cover-letter/init", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ applicationId: opts.input }),
+              }).catch(() => {});
             }
           }
         };

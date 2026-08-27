@@ -93,13 +93,17 @@ export function writeCvHtml({ pdfPaths, html }) {
  */
 export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, format, reportNum }) {
   return new Promise((resolve) => {
+    fs.mkdirSync(path.dirname(finalPdf), { recursive: true });
+    if (fs.existsSync(finalPdf)) return resolve({ ok: false, stderr: `Refusing to overwrite existing PDF: ${finalPdf}` });
+    const args = [path.join(root, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, "--allow-reorder"];
+    if (reportNum) args.splice(4, 0, `--report=${reportNum}`);
     const child = spawnFn(
       execPath,
       // --allow-reorder: a real cv.md's section order can legitimately diverge
       // from the template's fixed markup order, so this guard would otherwise
       // hard-fail every web-triggered render — same bypass a human already
       // applies manually via the CLI when this diverges.
-      [path.join(root, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
+      args,
       { cwd: root },
     );
     let stderr = "";
@@ -107,6 +111,16 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
     child.on("close", (code) => resolve({ ok: code === 0, stderr: stderr.trim() }));
     child.on("error", (e) => resolve({ ok: false, stderr: `PDF rendering failed to start: ${e.message}` }));
   });
+}
+
+export async function renderRoleResumePdf({ spawnFn, execPath, root, pdfPaths, format, plan }) {
+  const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format });
+  if (!render.ok) return { kind: "render-failed", error: render.stderr || "PDF rendering or fact-gate validation failed." };
+  if (!fs.existsSync(pdfPaths.finalPdf)) return { kind: "render-failed", error: "The PDF renderer exited successfully but did not create the expected role-resume PDF." };
+  const createdAt = new Date().toISOString();
+  fs.writeFileSync(pdfPaths.changes, `# ${plan.targetRole} ${plan.version}\n\n- Positioned for ${plan.positioning}.\n- Emphasized only CV-supported focus areas: ${plan.supportedFocusAreas.join(", ") || "none selected"}.\n- Excluded unsupported preferences: ${plan.unsupportedFocusAreas.join(", ") || "none"}.\n`, { encoding: "utf8", flag: "wx" });
+  fs.writeFileSync(pdfPaths.metadata, JSON.stringify({ type: "general-role", targetRole: plan.targetRole, version: plan.version, createdAt, source: "cv.md", factGate: "passed" }, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  return { kind: "rendered", warnings: [] };
 }
 
 /**

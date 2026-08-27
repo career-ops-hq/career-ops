@@ -9,6 +9,7 @@
  * drift). kind "research" stays read-only.
  */
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
+import { validateRoleResumePlanShape } from "./role-resumes.mjs";
 
 /**
  * Is this company name safe to interpolate into a shell command inside a prompt?
@@ -78,6 +79,47 @@ Target: ${input}`;
 
 After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
+  if (kind === "role-resume") {
+    let parsed;
+    try { parsed = JSON.parse(input); } catch { throw new Error("General Role Resume plan must be valid JSON."); }
+    const plan = validateRoleResumePlanShape(parsed);
+    return `You are generating the CONTENT for a reusable General Role Resume in a non-interactive Career-Ops WEB worker. Complete the resume in THIS SAME RUN. Do not merely acknowledge these instructions, describe what you will do, or stop after loading a skill. Do not invoke the Career-Ops skill router or hand control to an interactive mode; the complete task and required content rules are below.
+
+APPROVED PLAN
+- Target Role: ${plan.targetRole}
+- roleSlug: ${plan.roleSlug}
+- Version: ${plan.version}
+- Approved positioning: ${plan.positioning}
+- CV-supported focus areas: ${plan.supportedFocusAreas.join(", ") || "none selected"}
+
+NOW PERFORM THE TASK:
+1. Read cv.md.
+2. Read config/profile.yml and modes/_profile.md.
+3. Read modes/pdf.md only for relevant content and formatting rules; do not enter its interactive workflow.
+4. Read and fill templates/cv-template.html.
+5. Build the complete ATS-friendly resume, maximum two pages, for the approved role family and supported focus areas.
+6. Use only claims supported by cv.md. Do not invent or upgrade adjacent experience.
+7. Emit the complete populated HTML through the shared envelope contract below.
+8. Continue until both the envelope and final VERDICT line have been emitted. Do not ask questions.
+
+This is a content-only step. The backend owns every file and all rendering.
+
+HARD BOUNDARY — NEVER do any of these:
+- Do not create, edit, move, or save files or directories.
+- Do not run Bash or any shell command to generate, validate, save, or render the resume.
+- Do not run generate-pdf.mjs, verify-cv-facts.mjs, npm, setup, doctor, update-system, or any update/install workflow.
+- Do not render a PDF, save HTML, choose an output path, return localhost/job links, update Career-Ops, or ask whether Career-Ops should be updated.
+- Do not modify cv.md, config/profile.yml, modes/_profile.md, or any profile/application file.
+
+Your ONLY responsibility is to read the approved sources, compose the final HTML in memory, and emit it through the web envelope. Use cv.md as the source of truth.
+
+This General Role Resume has NO job description, employer, company, or posting. Skip JD keyword-gap processing and company research. Do not invent an employer, posting, ATS keywords, or requirements. Tailor only to the APPROVED PLAN above.
+
+Build a maximum two-page ATS-friendly resume using only claims supported by cv.md. Fill the existing Career-Ops CV HTML template completely. ${CV_ENVELOPE_INSTRUCTION}
+
+Emit the complete HTML envelope EXACTLY ONCE. Do not narrate file creation or rendering because you perform neither. An acknowledgement-only response is a failed run. After the envelope, emit EXACTLY one final line and nothing else:
+VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+  }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
@@ -138,4 +180,3 @@ VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 Posting URL: ${input}`;
 }
-
