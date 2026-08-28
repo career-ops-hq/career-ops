@@ -10,6 +10,7 @@ import {
   pdfRunOutcome,
   writeCvPayload,
   spawnBuildCvHtml,
+  resolveConfiguredCvTemplate,
   spawnGeneratePdf,
   markTrackerReady,
   cleanupPdfScratch,
@@ -34,6 +35,8 @@ function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null }
 function makeRoot(profile = null) {
   const root = mkdtempSync(join(tmpdir(), "co-pdfrender-"));
   mkdirSync(join(root, "config"), { recursive: true });
+  mkdirSync(join(root, "templates"), { recursive: true });
+  writeFileSync(join(root, "templates", "cv-template.html"), "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}");
   if (profile !== null) writeFileSync(join(root, "config", "profile.yml"), profile);
   return root;
 }
@@ -119,11 +122,11 @@ test("spawnBuildCvHtml invokes the canonical builder and drains output", async (
     calls.push({ execPath, args, opts });
     return fakeChild({ stdout: "large report", stderr: "warning", exitCode: 0 });
   };
-  const result = await spawnBuildCvHtml({ spawnFn, execPath: "node", root: "/root", payload: "/tmp/in.json", html: "/tmp/out.html" });
+  const result = await spawnBuildCvHtml({ spawnFn, execPath: "node", root: "/root", payload: "/tmp/in.json", html: "/tmp/out.html", template: "/root/templates/cv-template.modern.html" });
   assert.equal(result.ok, true);
   assert.equal(result.stdout, "large report");
   assert.equal(result.stderr, "warning");
-  assert.deepEqual(calls[0].args, ["/root/build-cv-html.mjs", "/tmp/in.json", "/tmp/out.html"]);
+  assert.deepEqual(calls[0].args, ["/root/build-cv-html.mjs", "/tmp/in.json", "/tmp/out.html", "/root/templates/cv-template.modern.html"]);
   assert.equal(calls[0].opts.cwd, "/root");
 });
 
@@ -135,6 +138,21 @@ test("spawnBuildCvHtml converts nonzero, emitted error, and synchronous throw to
   assert.match(emitted.stderr, /failed to start: ENOENT/);
   const thrown = await spawnBuildCvHtml({ spawnFn: () => { throw new Error("EACCES"); }, execPath: "node", root: "/r", payload: "p", html: "h" });
   assert.match(thrown.stderr, /failed to start: EACCES/);
+});
+
+test("spawnBuildCvHtml times out and terminates a hung child", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const result = await spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /timed out after 5ms/);
+  assert.deepEqual(signals, ["SIGTERM"]);
 });
 
 test("the web payload path delegates to the canonical builder and escapes text exactly once", async () => {
@@ -241,23 +259,78 @@ function router(routes, calls) {
   return (execPath, args, opts) => {
     const script = args[0].split("/").pop();
     calls.push(script);
-    return fakeChild(routes[script] ?? {});
+    const fallback = script === "cv-templates.mjs"
+      ? { stdout: `${join(opts.cwd, "templates", "cv-template.html")}\n` }
+      : {};
+    return fakeChild(routes[script] ?? fallback);
   };
 }
+
+test("resolveConfiguredCvTemplate delegates to the canonical resolver", async () => {
+  const calls = [];
+  const result = await resolveConfiguredCvTemplate({
+    spawnFn: (execPath, args, opts) => {
+      calls.push({ execPath, args, opts });
+      return fakeChild({ stdout: "/repo/templates/cv-template.modern.html\n" });
+    },
+    execPath: "node", root: "/repo",
+  });
+  assert.deepEqual(result, { ok: true, template: "/repo/templates/cv-template.modern.html", stderr: "" });
+  assert.deepEqual(calls[0].args, ["/repo/cv-templates.mjs", "resolve", "cv"]);
+  assert.equal(calls[0].opts.cwd, "/repo");
+});
 
 test("renderAndMarkPdf runs write → build → render → mark and cleans scratch", async () => {
   const root = makeRoot();
   const pdfPaths = paths(root);
   const calls = [];
   try {
+    writeFileSync(pdfPaths.html, "stale html");
     const result = await renderAndMarkPdf({
       spawnFn: router({ "mark-pdf-ready.mjs": { stdout: '{"changed":true}' } }, calls),
       execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
     });
     assert.equal(result.kind, "rendered");
-    assert.deepEqual(calls, ["build-cv-html.mjs", "generate-pdf.mjs", "mark-pdf-ready.mjs"]);
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs", "generate-pdf.mjs", "mark-pdf-ready.mjs"]);
     assert.equal(existsSync(pdfPaths.payload), false);
     assert.equal(existsSync(pdfPaths.html), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("renderAndMarkPdf honors the profile-selected CV template", async () => {
+  const root = makeRoot("cv:\n  template: modern\n");
+  const pdfPaths = paths(root);
+  writeFileSync(join(root, "templates", "cv-template.modern.html"), "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}");
+  const calls = [];
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn: (execPath, args, opts) => {
+        calls.push({ execPath, args, opts });
+        if (args[0].endsWith("cv-templates.mjs")) {
+          return fakeChild({ stdout: `${join(root, "templates", "cv-template.modern.html")}\n` });
+        }
+        return fakeChild(args[0].endsWith("mark-pdf-ready.mjs") ? { stdout: '{"changed":true}' } : {});
+      },
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(calls[1].args[3], join(root, "templates", "cv-template.modern.html"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unknown configured CV template fails before build, render, or mark", async () => {
+  const root = makeRoot("cv:\n  template: missing\n");
+  const pdfPaths = paths(root);
+  const calls = [];
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "cv-templates.mjs": { exitCode: 1, stderr: "Template not found for kind=cv name=missing" } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "build-failed");
+    assert.match(result.error, /configured CV template.*not found/i);
+    assert.deepEqual(calls, ["cv-templates.mjs"]);
+    assert.equal(existsSync(pdfPaths.payload), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -272,7 +345,7 @@ test("builder failure prevents render and mark, surfaces stderr, and cleans", as
     });
     assert.equal(result.kind, "build-failed");
     assert.match(result.error, /candidate\.name/);
-    assert.deepEqual(calls, ["build-cv-html.mjs"]);
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs"]);
     assert.equal(existsSync(pdfPaths.payload), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -282,13 +355,14 @@ test("render failure prevents mark and still cleans", async () => {
   const pdfPaths = paths(root);
   const calls = [];
   try {
+    writeFileSync(pdfPaths.html, "stale html");
     const result = await renderAndMarkPdf({
       spawnFn: router({ "generate-pdf.mjs": { exitCode: 1, stderr: "browser failed" } }, calls),
       execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
     });
     assert.equal(result.kind, "render-failed");
     assert.match(result.error, /browser failed/);
-    assert.deepEqual(calls, ["build-cv-html.mjs", "generate-pdf.mjs"]);
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs", "generate-pdf.mjs"]);
     assert.equal(existsSync(pdfPaths.payload), false);
     assert.equal(existsSync(pdfPaths.html), false);
   } finally { rmSync(root, { recursive: true, force: true }); }

@@ -74,7 +74,7 @@ Target: ${input}`;
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Produce the complete structured JSON payload documented in modes/pdf.md. Do not produce HTML, template placeholders, or escaped HTML entities; build-cv-html.mjs owns all HTML generation and escaping. ${CV_ENVELOPE_INSTRUCTION}
-4. Emit the envelope EXACTLY ONCE. The platform writes the payload, builds HTML with the base template, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
+4. Emit the envelope EXACTLY ONCE. The platform writes the payload, resolves the CV template configured in profile.yml, builds HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete JSON payload envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }

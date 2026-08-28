@@ -1,11 +1,13 @@
-import test from "node:test";
-import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pass, fail, ROOT, rmSync } from "./helpers.mjs";
 
-const ROOT = resolve(import.meta.dirname, "..");
+function check(condition, message) {
+  if (condition) pass(message);
+  else fail(message);
+}
 
 function run(payload) {
   const dir = mkdtempSync(join(tmpdir(), "co-cv-payload-"));
@@ -19,27 +21,23 @@ function run(payload) {
   return { dir, output, result };
 }
 
-test("build-cv-html rejects missing core fields before writing HTML", () => {
-  const cases = [
-    [{}, /candidate must be an object/i],
-    [{ candidate: {} }, /candidate\.name is required/i],
-    [{ candidate: { name: "Jane" } }, /summary is required/i],
-  ];
-
-  for (const [payload, message] of cases) {
+for (const [label, payload, message] of [
+  ["missing candidate", {}, /candidate must be an object/i],
+  ["missing candidate.name", { candidate: {} }, /candidate\.name is required/i],
+  ["missing summary", { candidate: { name: "Jane" } }, /summary is required/i],
+]) {
     const { dir, output, result } = run(payload);
     try {
-      assert.notEqual(result.status, 0, JSON.stringify(payload));
-      assert.match(result.stderr, message);
-      assert.equal(existsSync(output), false, "invalid payload must not leave HTML behind");
+      check(result.status !== 0, `build-cv-html rejects ${label}`);
+      check(message.test(result.stderr), `${label} reports the required field`);
+      check(!existsSync(output), `${label} leaves no HTML behind`);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
-});
 
-test("build-cv-html accepts the minimal valid payload with optional sections omitted", () => {
+{
   const { dir, output, result } = run({ candidate: { name: "Jane" }, summary: "Builder" });
   try {
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(existsSync(output), true);
+    check(result.status === 0, `build-cv-html accepts a minimal valid payload${result.stderr ? `: ${result.stderr.trim()}` : ""}`);
+    check(existsSync(output), "minimal valid payload writes HTML");
   } finally { rmSync(dir, { recursive: true, force: true }); }
-});
+}
