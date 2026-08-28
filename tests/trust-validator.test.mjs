@@ -1,7 +1,10 @@
 // @ts-check
 /**
  * tests/trust-validator.test.mjs — Comprehensive test suite for trust validation.
- * Run: node tests/trust-validator.test.mjs   (or: node test-all.mjs --only trust-validator)
+ * Run: node test-all.mjs --only trust-validator
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Tests cover:
  *   - buildTrustValidator: disabled/enabled, config merging

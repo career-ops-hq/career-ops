@@ -4,7 +4,10 @@
  * Focuses on the `responded` branch, where the first follow-up after a recruiter
  * reply must be scheduled with `responded_initial`, not `responded_subsequent`.
  *
- * Run: node tests/followup-cadence.test.mjs   (or: node test-all.mjs --only followup-cadence)
+ * Run: node test-all.mjs --only followup-cadence
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { dirname, join } from 'path';

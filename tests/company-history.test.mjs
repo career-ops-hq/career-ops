@@ -11,7 +11,10 @@
  * loading real files from disk via the exported loaders, and CLI smoke
  * tests.
  *
- * Run: node tests/company-history.test.mjs   (or: node test-all.mjs --only company-history)
+ * Run: node test-all.mjs --only company-history
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import {

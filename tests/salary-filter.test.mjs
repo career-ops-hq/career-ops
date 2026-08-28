@@ -1,7 +1,10 @@
 // @ts-check
 /**
  * tests/salary-filter.test.mjs — Comprehensive test suite for salary filter and Ashby compensation parsing.
- * Run: node tests/salary-filter.test.mjs   (or: node test-all.mjs --only salary-filter)
+ * Run: node test-all.mjs --only salary-filter
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Tests cover:
  *   - buildSalaryFilter: range overlap, currency matching, edge cases, validation

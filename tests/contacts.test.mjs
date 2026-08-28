@@ -15,7 +15,10 @@
  * Expected vCard strings are built in code on purpose — a committed .vcf
  * fixture would be corrupted by git autocrlf on Windows.
  *
- * Run: node tests/contacts.test.mjs   (or: node test-all.mjs --only contacts)
+ * Run: node test-all.mjs --only contacts
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from '../contacts.mjs';

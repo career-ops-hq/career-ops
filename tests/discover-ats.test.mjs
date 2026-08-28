@@ -13,7 +13,10 @@
  * - CLI behavior (--self-test, default preview never writes, --write opt-in,
  *   unknown --vendors, --help) via execFileSync — no live network.
  *
- * Run: node tests/discover-ats.test.mjs   (or: node test-all.mjs --only discover-ats)
+ * Run: node test-all.mjs --only discover-ats
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Issue #1864 — github.com/santifer/career-ops
  */
