@@ -145,14 +145,79 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   const signals = [];
-  child.kill = (signal) => { signals.push(signal); return true; };
+  let sawTerm;
+  const termSent = new Promise((resolve) => { sawTerm = resolve; });
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGTERM") sawTerm();
+    return true;
+  };
+  const resultPromise = spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+  });
+  await termSent;
+  let resolved = false;
+  void resultPromise.then(() => { resolved = true; });
+  await Promise.resolve();
+  assert.equal(resolved, false, "timeout waits for the child close event before cleanup can begin");
+  child.emit("close", null);
+  const result = await resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /timed out after 5ms/);
+  assert.deepEqual(signals, ["SIGTERM"]);
+});
+
+test("spawnBuildCvHtml escalates a timed-out child that ignores SIGTERM", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null));
+    return true;
+  };
   const result = await spawnBuildCvHtml({
     spawnFn: () => child,
     execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
   });
   assert.equal(result.ok, false);
   assert.match(result.stderr, /timed out after 5ms/);
-  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  let sawTerm;
+  const termSent = new Promise((resolve) => { sawTerm = resolve; });
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGTERM") {
+      queueMicrotask(() => child.emit("error", new Error("kill EPERM")));
+      sawTerm();
+    } else {
+      queueMicrotask(() => child.emit("close", null));
+    }
+    return signal === "SIGKILL";
+  };
+  const resultPromise = spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+  });
+  await termSent;
+  await Promise.resolve();
+  let resolved = false;
+  void resultPromise.then(() => { resolved = true; });
+  await Promise.resolve();
+  assert.equal(resolved, false, "signal error does not release scratch cleanup");
+  const result = await resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /timed out after 5ms/);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
 test("the web payload path delegates to the canonical builder and escapes text exactly once", async () => {

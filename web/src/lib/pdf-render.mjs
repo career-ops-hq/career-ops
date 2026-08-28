@@ -19,6 +19,7 @@ import * as yaml from "js-yaml";
 import { pdfScratchPrefix } from "./pdf-paths.mjs";
 
 export const DEFAULT_PDF_CHILD_TIMEOUT_MS = 120_000;
+const PDF_CHILD_KILL_GRACE_MS = 1_000;
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -160,11 +161,14 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEF
   return new Promise((resolve) => {
     let settled = false;
     let timeoutId;
-    /** Settle the child-process result once and cancel its outstanding timeout. */
+    let killTimeoutId;
+    let timeoutResult;
+    /** Settle the child-process result once and cancel its outstanding timers. */
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutId);
+      clearTimeout(killTimeoutId);
       resolve(result);
     };
     let child;
@@ -178,11 +182,21 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEF
     let stderr = "";
     child.stdout?.on("data", (d) => { stdout += d.toString(); });
     child.stderr?.on("data", (d) => { stderr += d.toString(); });
-    child.on("close", (code) => finish({ ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() }));
-    child.on("error", (e) => finish({ ok: false, stderr: `${startError}: ${e.message}` }));
+    child.on("close", (code) => finish(timeoutResult ?? { ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() }));
+    child.on("error", (e) => {
+      // A ChildProcess can emit error when signal delivery fails as well as
+      // when spawn fails. Once timed out, only close proves it is safe for the
+      // caller to clean scratch files; keep the SIGKILL escalation armed.
+      if (timeoutResult) return;
+      finish({ ok: false, stderr: `${startError}: ${e.message}` });
+    });
     timeoutId = setTimeout(() => {
-      finish({ ok: false, stderr: `${startError}: timed out after ${timeoutMs}ms` });
-      try { child.kill?.("SIGTERM"); } catch { /* already settled as a timeout */ }
+      timeoutResult = { ok: false, stderr: `${startError}: timed out after ${timeoutMs}ms` };
+      try { child.kill?.("SIGTERM"); } catch { /* escalate below */ }
+      if (settled) return;
+      killTimeoutId = setTimeout(() => {
+        try { child.kill?.("SIGKILL"); } catch { /* close still owns settlement */ }
+      }, Math.min(PDF_CHILD_KILL_GRACE_MS, timeoutMs));
     }, timeoutMs);
   });
 }
