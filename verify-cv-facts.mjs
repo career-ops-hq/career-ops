@@ -82,7 +82,7 @@ const MODIFIER_WINDOW = 4;
 // handled by the modifier window) and "50kg users" (k not at a boundary) both keep
 // their existing behaviour and still normalize to "50".
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
+  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -823,6 +823,29 @@ function runSelfTest() {
     'a unit beginning with a suffix letter is unaffected',
     [...metricClaims('Shipped 50kg servers')],
     ['50 servers']
+  );
+  // Nearest-noun precedence (not farthest): COUNT_CLAIM_RE's modifier-window
+  // quantifier must be lazy. When two METRIC_NOUNS both sit within the
+  // window, a greedy quantifier binds the number to the FARTHEST one it can
+  // still reach — "15+ years scaling teams and platforms" extracted as
+  // "15 teams" instead of "15 years", purely because "teams" also happens
+  // to be in range. Same true "15 years" claim, worded two different ways,
+  // extracting to two different results — exactly the shape that makes a
+  // fabrication gate block a truthful, unedited CV line.
+  equal(
+    'two METRIC_NOUNS in the window: binds to the nearer noun, not the farther one',
+    [...metricClaims('15+ years scaling teams and platforms')],
+    ['15 years']
+  );
+  equal(
+    'nearest-noun precedence holds for a second real-shaped sentence',
+    [...metricClaims('20+ years leading engineering organizations')],
+    ['20 years']
+  );
+  equal(
+    'two genuine claims in one sentence are both still extracted correctly',
+    [...metricClaims('led 12 engineers across 3 teams')],
+    ['12 engineers', '3 teams']
   );
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
