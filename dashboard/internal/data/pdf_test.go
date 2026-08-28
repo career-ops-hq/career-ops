@@ -148,6 +148,16 @@ func TestResolvePDFsMultiWordCompany(t *testing.T) {
 	}
 }
 
+func TestResolvePDFsDoesNotMatchCompanyPrefix(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "output/cv-jane-doe-metabase-2026-06-05.pdf", "pdf")
+
+	app := model.CareerApplication{Company: "Meta"}
+	if got := ResolvePDFs(root, app, LoadPDFManifest(root)); len(got) != 0 {
+		t.Fatalf("expected Meta not to match Metabase's PDF, got %v", got)
+	}
+}
+
 func TestResolvePDFsNoMatch(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-05.pdf", "pdf")
