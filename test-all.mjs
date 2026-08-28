@@ -12510,6 +12510,29 @@ if (!sqliteAvailable) {
         fail('sync modified the corrupted markdown (must only diagnose)');
       }
 
+      // A numeric prefix is not a valid application number. parseInt() used to
+      // accept `9junk` as 9, so --check reported the source as clean and the
+      // index could attach this row (and its status history) to the wrong ID.
+      const malformedId = clean +
+        '| 9junk | 2026-01-06 | Prefix Co | PM | 3.5/5 | Applied | ❌ | — | malformed id |\n';
+      writeFileSync(md, malformedId);
+      if (trackerRun(['sync', '--check']) === null) {
+        pass('sync --check rejects an application ID with a numeric prefix');
+      } else {
+        fail('sync --check accepted a numeric-prefix application ID');
+      }
+      const repairedId = JSON.parse(trackerRun(['query', '--company', 'Prefix Co', '--json']) || '[]');
+      if (repairedId.length === 1 && repairedId[0].id === 3) {
+        pass('malformed application ID is reassigned instead of coerced to its numeric prefix');
+      } else {
+        fail(`malformed application ID was not safely reassigned: ${JSON.stringify(repairedId)}`);
+      }
+      if (trackerRun(['query', '--id', '1junk', '--json']) === null && trackerRun(['history', '--id', '1junk']) === null) {
+        pass('query/history reject numeric-prefix --id values');
+      } else {
+        fail('query/history accepted a numeric-prefix --id value');
+      }
+
       // 3. Staleness: query after an md edit must auto-resync (no stale reads).
       writeFileSync(md, clean +
         '| 3 | 2026-01-07 | Delta | Analyst | 4.5/5 | Applied | ✅ | [3](../reports/003-delta-2026-01-07.md) | new |\n');

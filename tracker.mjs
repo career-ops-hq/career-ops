@@ -158,6 +158,13 @@ function normalizeStatus(raw, states) {
 const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+function parseApplicationId(raw) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
 // "鈥?" / "鈥�" variants. Only short placeholder cells are repaired — free-text
 // notes are preserved as-is rather than risk corrupting real content.
@@ -262,8 +269,8 @@ function parseTracker(states) {
       status = canonical;
     }
 
-    let id = parseInt(idRaw, 10);
-    if (!Number.isInteger(id) || id <= 0 || usedIds.has(id)) {
+    let id = parseApplicationId(idRaw);
+    if (id === null || usedIds.has(id)) {
       id = 0; // assign after the pass, once maxId is known
       diag.badId++;
     } else {
@@ -296,7 +303,7 @@ function reportDiagnostics(diag) {
   if (diag.mojibake) console.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
   if (diag.scoreInStatus) console.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
   if (diag.unknownStatus) console.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
-  if (diag.badId) console.error(`  ${diag.badId} missing/duplicate id(s), reassigned in the index`);
+  if (diag.badId) console.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
   if (diag.badDate) console.error(`  ${diag.badDate} malformed date(s), kept as-is`);
   if (diag.strayPipes) console.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
   console.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
@@ -408,8 +415,12 @@ async function query(args) {
     if (!DATE_RE.test(since)) { console.error('Error: --since must be YYYY-MM-DD'); process.exit(1); }
     where.push('date >= ?'); params.push(since);
   }
-  const id = flagValue(args, '--id');
-  if (id) { where.push('id = ?'); params.push(parseInt(id, 10)); }
+  const idRaw = flagValue(args, '--id');
+  if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
+    const id = parseApplicationId(idRaw);
+    if (id === null) { console.error('Error: --id must be a positive integer'); process.exit(1); }
+    where.push('id = ?'); params.push(id);
+  }
 
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
@@ -431,8 +442,8 @@ async function history(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   ensureFresh(db, loadStates());
-  const id = parseInt(flagValue(args, '--id') || '', 10);
-  if (!Number.isInteger(id)) { console.error('Error: history requires --id N'); process.exit(1); }
+  const id = parseApplicationId(flagValue(args, '--id'));
+  if (id === null) { console.error('Error: history requires --id N (a positive integer)'); process.exit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
   console.log(`#${app.id} ${app.company} — ${app.role}`);
