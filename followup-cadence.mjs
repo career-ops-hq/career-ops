@@ -13,16 +13,18 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
@@ -31,8 +33,21 @@ const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
-const appliedDaysIdx = args.indexOf('--applied-days');
-const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
+// flagValue (not indexOf) so `--applied-days=10` is honored too — indexOf()
+// can't see the `=` form and used to silently discard it, falling back to the
+// default cadence for a value the caller did supply (#2401/#2402 defect class).
+const appliedDaysRaw = flagValue(args, '--applied-days');
+
+// Whole-string match, not a bare parseInt: parseInt('1.5', 10) is 1 and
+// parseInt('10days', 10) is 10 — both truncate a bad value into a plausible
+// one instead of rejecting it, which is the exact silent-wrong-answer shape
+// this file is being fixed to close. Exported so a value's actual numeric
+// effect can be asserted directly, rather than only "the CLI didn't error".
+const APPLIED_DAYS_RE = /^\d+$/;
+export function parseAppliedDaysOverride(raw) {
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+}
+const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
@@ -542,7 +557,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.
@@ -563,7 +584,43 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's own addresses, so a note that mentions them is not reported as somebody to chase.
+ *
+ * Tracker notes routinely cite your own mailbox while recording where a search ran — e.g. "searched
+ * both accounts (personal + me@work.example) for this thread" written to establish that a reply was
+ * NOT received. extractContacts has no concept of self, so it reads that as a repliable human and
+ * the row advertises a contact that cannot be written to. That is worse than reporting no contact:
+ * it makes an un-chaseable row look actionable.
+ *
+ * Read from config/profile.yml rather than hardcoded, so it stays correct per profile. Fails open —
+ * an absent or unreadable profile yields an empty set, because a missing profile must never start
+ * deleting real contacts.
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  // Only iterate an actual array. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // down entirely over a cosmetic config mistake, which is the opposite of the fail-open behaviour
+  // this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -634,7 +691,8 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // A note citing your own mailbox is not a person to follow up with.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
@@ -923,6 +981,7 @@ function printSummary(result) {
 // ── CLI flags + help ────────────────────────────────────────────────
 
 const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
@@ -932,18 +991,30 @@ const USAGE = `Usage:
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-  } else {
-    const result = analyze();
+if (isMainModule(import.meta.url)) {
+  // Must run inside this guard, not at module top level: CADENCE (above) is a
+  // module-level singleton built at import time, and test-all.mjs section 12
+  // dynamic-imports this module in-process to read it — validating the host
+  // process's own argv there would false-positive on the test runner's flags.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-    if (summaryMode) {
-      printSummary(result);
-    } else {
-      console.log(JSON.stringify(result, null, 2));
-    }
-
-    if (result.error) process.exit(1);
+  // positiveInteger() (used to build CADENCE above) treats a NaN/negative value
+  // as "absent" and silently keeps the default — exactly the wrong-answer-at-
+  // exit-0 shape this fix exists to close. A value that was actually SUPPLIED
+  // must fail loudly instead of being swallowed the same way a bad flag NAME
+  // used to be.
+  if (appliedDaysRaw !== undefined && !(Number.isFinite(appliedDaysOverride) && appliedDaysOverride >= 0)) {
+    console.error(`Error: --applied-days requires a non-negative integer, got "${appliedDaysRaw}"`);
+    process.exit(1);
   }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }

@@ -15,6 +15,17 @@ Two layers — full list in `DATA_CONTRACT.md`:
 
 **THE RULE: When the user asks to customize facts or targeting (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. When they ask for procedural house rules, custom workflows, output preferences, or automations, write to `modes/_custom.md` (copy it from `modes/_custom.template.md` if missing). NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
+**Path Resolution Override & Precedence:**
+The User Layer location (Data Root) is resolved dynamically using the following precedence order:
+1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` overrides the root path (resolved relative to the repository root if it is a relative path).
+2. **Marker File:** If no environment variable is set, a `.career-ops-data` file in the repository root containing an absolute or relative path to the user data directory is used.
+3. **Repository Default:** If neither is present, the repository root directory itself is used.
+
+**Tracker Path & Canonical Writes:**
+- **Explicit override:** `CAREER_OPS_TRACKER` environment variable overrides the applications tracker file path. Relative paths are resolved relative to the repository root directory.
+- **Reading:** If no override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Writing:** All write operations (first-run creation or merge operations) target the canonical location `{DATA_ROOT}/data/applications.md` (or the explicit `CAREER_OPS_TRACKER` override).
+
 ## Source-of-Truth Boundary (CRITICAL)
 
 User-facing content (CV, cover letters, application emails, form answers, recruiter outreach) is generated **exclusively** from these files plus statements the user makes directly in the current conversation. The list is tiered by trust level (#2947) — read both tiers before generating content, but treat them differently for quantified claims:
@@ -67,10 +78,14 @@ On the first message of each session, run silently:
 node update-system.mjs check
 ```
 
-If `{"status": "update-available", "local": ..., "remote": ..., "changelog": ...}` → tell the user:
-> "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+If `{"status": "update-available", "reason": ..., "local": ..., "remote": ..., "changelog": ...}` → tell the user:
 
-If yes → `node update-system.mjs apply`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
+- If `reason` is `system-files-changed`:
+  > "career-ops system files differ from v{local}. Re-apply v{local} to restore them? Your data (CV, profile, tracker, reports) will NOT be touched."
+- Otherwise:
+  > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+
+If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
 
 ## What is career-ops
 
@@ -127,8 +142,11 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill classifier vs `cv.md`: existing / supportedByResume / gap; never auto-adds claims to `cv.md` (JSON or `--summary`) |
 | `contacts.mjs` | Job-search phonebook → vCard 3.0 exporter — stable UIDs so re-imports update instead of duplicating on platforms that honor vCard UID (JSON, `--summary`, `--vcf`, `--caller-id`) |
+| `linkedin-join.mjs` | Warm-intro finder — joins a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?"; zero-token, offline, read-only. Operational only: never a scoring input, never a content source (JSON, `--summary`, `--company <name>`, `--tsv`) |
 | `data/contacts.tsv` | Job-search contact list — recruiters/hiring managers/peers saved from `contacto` (user layer, gitignored third-party PII) |
+| `data/Connections.csv` | LinkedIn connections export (user layer, gitignored third-party PII; read by `linkedin-join.mjs`, safe to delete after use) |
 | `outcome.mjs` | Record application outcome, archive artifacts, and sync tracker (`node outcome.mjs <selector> <type>`) |
+| `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}` |
@@ -145,7 +163,13 @@ Some users enable plugins (external integrations). If an enabled plugin ships a 
 node doctor.mjs --json
 ```
 
-Output: `{"onboardingNeeded": <bool>, "missing": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists customization files (`modes/_profile.md` or `modes/_custom.md`) doctor copied from `modes/_profile.template.md` / `modes/_custom.template.md`.
+Output: `{"onboardingNeeded": <bool>, "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists personalization files doctor copied from their templates on this run — `modes/_profile.md`, `modes/_custom.md` or `modes/_brief.md`, from `modes/_profile.template.md` / `modes/_custom.template.md` / `modes/_brief.template.md`.
+
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content. Because doctor auto-copies `modes/_profile.md` and `modes/_brief.md`, they always exist — the existence check can never catch this. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (career-ops works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
+
+> "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
+
+`modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
 **If `onboardingNeeded` is true, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
@@ -298,6 +322,7 @@ Two separate axes:
 | Wants to debrief after a real interview and close gaps | `interview/debrief` |
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
+| Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
@@ -313,6 +338,7 @@ Two separate axes:
 | Wants a fast first-pass filter before full evaluation | `triage` |
 | Batch processes offers | `batch` |
 | Asks about rejection patterns, wants to improve targeting, or wants to match interview answers to best-fit roles | `patterns` |
+| Wants to know whether the evaluation scores are predicting their real outcomes (interviews/offers) | `calibrate` — advisory report over `/outcome` data; never changes scoring |
 | Receives an offer/contract and wants help understanding it before signing | `offer-prep` — clause walk with neutral tags + lawyer question list; describes, never judges; no verdicts, no online research; optional draft-only negotiation reply from the "Items to raise" list |
 | Wants to broaden the search with adjacent job titles suggested from the CV | `titles` |
 | Asks what skills to learn, wants a skill-gap analysis of their pipeline | `upskill` |
@@ -400,6 +426,20 @@ Headless worker command per CLI:
 **Prefer `--report=N` when archiving for a tracked row.** A capture named only from the date and the scraped company and role can be found again only by rebuilding that exact string, so it stops resolving the day after it is written — precisely when the posting has gone dead and the capture is the only remaining record. `jd-capture.mjs` looks captures up by report number instead, matching padded and unpadded prefixes (`064-`, `64-`, `01-`), and `outcome.mjs` uses it before falling back to re-archiving a live URL.
 
 A capture is copied into `data/outcomes/` under its own extension (`posting.pdf`, `posting.txt`, `posting.md`), never renamed to `.pdf`.
+
+### Celebrating a hire (the Hired Wall)
+
+When the user records a `hired` or `accepted` outcome, celebrate FIRST — a landed job is the whole point of this tool — and then offer, once:
+
+> That's the whole point of everything we did here. Congratulations! 🎉
+>
+> One optional thing: career-ops keeps a public wall of people who landed jobs with it. If you want yours there, I'll draft it from what we already know (role, weeks, what helped). You'll see the exact text, and nothing leaves this machine unless you submit it yourself on GitHub. Want the draft? If not, I won't bring this one up again.
+
+If they say yes: run `node hired-share.mjs --report N --anonymity <their choice> --story "<their words>" --open` — it prints the exact payload, opens a prefilled GitHub issue, and the user reviews and submits it themselves. Ask their anonymity level explicitly (handle / role-only / count-only); never default to the most exposed. Offer a 2-sentence draft story built only from tracker data, and let them rewrite it. If they say "not now": `node hired-share.mjs --report N --mark later`. If they say no: `--mark never`, and honor it — that hire is never brought up again.
+
+**Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
+
+**Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
 - **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 

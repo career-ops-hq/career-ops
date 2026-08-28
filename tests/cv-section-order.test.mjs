@@ -7,11 +7,11 @@
 // Assertions run against rendered HTML rather than source patterns: the reorder
 // has to survive nested markup, comments, absent optional sections and a second
 // application, and none of that is observable from the source text.
-import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nCV section order from config/profile.yml (#2533)');
@@ -33,6 +33,7 @@ const RENDERED_TITLES = {
   SECTION_EDUCATION: 'Education',
   SECTION_CERTIFICATIONS: 'Certifications',
   SECTION_AWARDS: 'Awards & Honors',
+  SECTION_INTERESTS: 'Interests',
   SECTION_SKILLS: 'Skills',
 };
 
@@ -245,14 +246,14 @@ try {
   // Asserted against a written-out vocabulary, not against CV_SECTION_KEYS:
   // checking the message with the same list the message is built from would
   // pass however many sections the implementation actually knows about.
-  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   if (typo.warnings.some(w => EXPECTED_KEYS.every(k => w.includes(k)))) {
-    pass('the unrecognized-name warning lists all eight recognized section keys');
+    pass('the unrecognized-name warning lists all nine recognized section keys');
   } else {
     fail(`the warning should list the recognized keys: ${JSON.stringify(typo.warnings)}`);
   }
   if (EXPECTED_KEYS.every(k => CV_SECTION_KEYS.includes(k)) && CV_SECTION_KEYS.length === EXPECTED_KEYS.length) {
-    pass('CV_SECTION_KEYS is exactly the eight canonical sections the alias table produces');
+    pass('CV_SECTION_KEYS is exactly the nine canonical sections the alias table produces');
   } else {
     fail(`CV_SECTION_KEYS => ${JSON.stringify(CV_SECTION_KEYS)}`);
   }
@@ -655,10 +656,10 @@ try {
   // pass with the other six unreachable.
   const rendered = renderTemplate('cv-template.html');
   const shippedOrder = renderedTitles(rendered);
-  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   const reversed = renderedTitles(reorderCvSections(rendered, [...allKeys].reverse()));
-  if (shippedOrder.length === 8 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
-    pass('every one of the shipped template\'s eight sections is movable (full reversal)');
+  if (shippedOrder.length === 9 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
+    pass('every one of the shipped template\'s nine sections is movable (full reversal)');
   } else {
     fail(`shipped template reversal: before=${JSON.stringify(shippedOrder)} after=${JSON.stringify(reversed)}`);
   }
@@ -733,7 +734,10 @@ try {
 {
   const outputRoot = join(ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
-  const sandbox = mkdtempSync(join(outputRoot, 'section-order-batch-'));
+  // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
+  // caller's spelling while import.meta.url is realpathed, so a symlinked
+  // output/ makes generate-pdf.mjs's isMain guard false and the spawn a no-op (#3165).
+  const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'section-order-batch-')));
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
@@ -742,6 +746,20 @@ try {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+
+    // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
+    // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
+    // the sandbox's REALPATH, so a checkout with a symlinked output/ never
+    // reaches it and the spawned generate-pdf dies before parsing argv (#3165).
+    linkRepoPackage(sandbox, 'js-yaml');
     mkdirSync(join(sandbox, 'data'), { recursive: true });
     writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
@@ -853,7 +871,10 @@ export const chromium = {
 {
   const outputRoot = join(ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
-  const sandbox = mkdtempSync(join(outputRoot, 'section-order-anchor-'));
+  // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
+  // caller's spelling while import.meta.url is realpathed, so a symlinked
+  // output/ makes generate-pdf.mjs's isMain guard false and the spawn a no-op (#3165).
+  const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'section-order-anchor-')));
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
@@ -862,6 +883,20 @@ export const chromium = {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+
+    // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
+    // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
+    // the sandbox's REALPATH, so a checkout with a symlinked output/ never
+    // reaches it and the spawned generate-pdf dies before parsing argv (#3165).
+    linkRepoPackage(sandbox, 'js-yaml');
 
     // The external workspace: tracker, profile, CV and documents all live here,
     // and NOT beside the script. This is the shape CAREER_OPS_TRACKER creates.

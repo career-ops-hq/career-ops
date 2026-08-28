@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, existsSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -20,14 +20,19 @@ import * as yaml from 'js-yaml';
 // but EEXIST as fatal, killing a writer and losing its item.
 import {
   isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
+  lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
  * Minimum age before directory age alone may condemn an ownerless lock or
- * recover guard. See `lockCanRecover` for why the age check needs a floor.
+ * recover guard. See `lockRecoveryVerdict` for why the age check needs a floor.
+ *
+ * Re-exported rather than redeclared: the floor is applied inside that function
+ * now, so a local copy would be a constant this file no longer enforces — free
+ * to drift from the one that actually decides.
  */
-export const OWNERLESS_GRACE_MS = 1_000;
+export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
 
 /**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
@@ -101,14 +106,7 @@ export function cell(v) {
  * @param {string} rootDir - The career-ops repository root.
  * @returns {string} Absolute canonical tracker path.
  */
-export function resolveTrackerPath(rootDir) {
-  const raw = process.env.CAREER_OPS_TRACKER
-    ? process.env.CAREER_OPS_TRACKER
-    : existsSync(join(rootDir, 'data/applications.md'))
-      ? join(rootDir, 'data/applications.md')
-      : join(rootDir, 'applications.md');
-  return canonicalizeTrackerPath(raw);
-}
+export { resolveTrackerPath } from './path-resolver.mjs';
 
 /**
  * Resolve the workspace root that owns a tracker, i.e. where `reports/` and
@@ -160,28 +158,87 @@ export function resolvePdfIndexPath(trackerPath) {
  * @param {string} path - Raw tracker path from config, env, or the default.
  * @returns {string} Absolute canonical path when the file exists, else resolved path.
  */
-export function canonicalizeTrackerPath(path) {
-  const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
-  }
-}
+import { canonicalizeTrackerPath } from './path-resolver.mjs';
+export { canonicalizeTrackerPath };
 
 /**
  * Check whether one absolute path stays inside another directory.
  *
  * This protects recursive lock cleanup from accepting paths that escape the
  * system temp directory through `..` segments or unrelated absolute roots.
+ * Also the shared boundary check for outcome.mjs's --clean-output (#2653,
+ * #2911), where an output/ path must be validated before ever being deleted.
  *
  * @param {string} childPath - Candidate path to validate.
  * @param {string} parentDir - Required parent directory boundary.
+ * @param {{relative: Function, isAbsolute: Function, sep: string}} [pathMod] -
+ *   Path primitives to use, defaulting to the platform's own. Tests pass
+ *   `path.win32` or `path.posix` to deterministically exercise one platform's
+ *   separator and absolute-path rules (drive letters, UNC paths) regardless
+ *   of the host OS running the suite.
  * @returns {boolean} True when childPath is inside parentDir or equal to it.
  */
-function pathIsInside(childPath, parentDir) {
-  const relativePath = relative(parentDir, childPath);
-  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
+export function pathIsInside(childPath, parentDir, pathMod = { relative, isAbsolute, sep }) {
+  const relativePath = pathMod.relative(parentDir, childPath);
+  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${pathMod.sep}`) && !pathMod.isAbsolute(relativePath));
+}
+
+/**
+ * Walk up to the nearest ancestor that exists on disk.
+ *
+ * `lstatSync`, not `statSync`: a symlink must count as existing in its own
+ * right, so the caller canonicalizes the link itself rather than walking past
+ * it to a parent that looks contained.
+ *
+ * @param {string} pathValue - Absolute candidate path.
+ * @returns {string} The candidate, or its nearest existing ancestor.
+ */
+function nearestExistingPath(pathValue) {
+  let candidate = pathValue;
+  while (true) {
+    try {
+      lstatSync(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = dirname(candidate);
+      if (parent === candidate) throw error;
+      candidate = parent;
+    }
+  }
+}
+
+/**
+ * Check containment both lexically AND canonically (symlinks resolved).
+ *
+ * `pathIsInside` compares strings, which is right for a boundary that is only
+ * ever about spelling (the lock-name guard) and for the injected-`pathMod`
+ * tests that exercise win32/posix rules on paths that do not exist. It is NOT
+ * enough before deleting: `resolve()` never follows symlinks, so an `output/`
+ * containing a link to somewhere else lets a path spell itself as contained
+ * while pointing outside — and the deletion is unrecoverable.
+ *
+ * Mirrors `isWorkspaceOutputPath` in generate-pdf.mjs, which guards the far
+ * lower-stakes *write* path. Lives here so a third copy is not needed; that
+ * one should be migrated onto this rather than left to drift (see #2911).
+ *
+ * @param {string} childPath - Candidate path to validate.
+ * @param {string} parentDir - Required parent directory boundary.
+ * @returns {boolean} True only when the path is inside both lexically and after
+ *   resolving symlinks. False if canonicalization fails for any reason.
+ */
+export function pathIsInsideCanonical(childPath, parentDir) {
+  const parent = resolve(parentDir);
+  const child = resolve(childPath);
+  if (!pathIsInside(child, parent)) return false;
+
+  try {
+    const canonicalParent = realpathSync(parent);
+    const canonicalChild = realpathSync(nearestExistingPath(child));
+    return pathIsInside(canonicalChild, canonicalParent);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -227,27 +284,6 @@ function sleep(ms) {
 }
 
 /**
- * Determine whether a process id still belongs to a live process.
- *
- * The tracker lock stores the owner PID in `owner.json`. When another process
- * finds an existing lock, this check lets it distinguish a valid live owner from
- * a crashed process that left a stale lock directory behind. `EPERM` counts as
- * alive because the process exists even if the current user cannot signal it.
- *
- * @param {number} pid - Process id recorded by the lock owner.
- * @returns {boolean} True when the process appears to still exist.
- */
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
-
-/**
  * Read lock ownership metadata from a tracker lock directory.
  *
  * The metadata contains the owner PID, a unique release token, the acquisition
@@ -270,45 +306,12 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
-/**
- * Decide whether an existing lock can be safely recovered.
- *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * That age fallback needs a floor. Two directories are ownerless by
- * construction, not by accident: a lock between its `mkdirSync` and its
- * `owner.json` write, and the recover guard, which never carries `owner.json`
- * at all. Judging those on `age > staleMs` alone lets a caller with an
- * aggressive staleMs delete a directory created microseconds ago — either
- * stealing a winner's lock inside its acquisition window, or evicting a live
- * guard and putting two callers inside the decide-then-delete window the guard
- * exists to serialize. OWNERLESS_GRACE_MS is a lower bound on that patience,
- * never a cap: a larger caller staleMs still wins, and a genuinely abandoned
- * directory still ages out, so a crash while holding the guard cannot disable
- * recovery for good.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery, floored at OWNERLESS_GRACE_MS.
- * @returns {boolean} True when the caller may remove and recreate the lock.
- */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS);
-  } catch (err) {
-    // Mirrors pipeline-lock: only ENOENT means "vanished, nothing to
-    // recover". A Windows EPERM/EBUSY mid-flight stat is "could not look",
-    // and treating it as recoverable lets a caller delete a live lock
-    // created microseconds ago (#2777, third face).
-    return err?.code === 'ENOENT';
-  }
-}
+// The recovery judgment comes from pipeline-lock rather than a second copy of
+// it. "Mirrors pipeline-lock" was the previous arrangement, and mirroring is
+// precisely what drifts: this copy still answered a bare boolean, so "the
+// directory was gone when I looked" reached the caller as a licence to DELETE
+// whatever is at that path now — a lock a rival acquirer may have created in
+// between, whose winner then dies with ENOENT writing its own owner.json.
 
 /**
  * Acquire an exclusive filesystem lock for one tracker mutation.
@@ -443,7 +446,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
           // verified above, so a contended rm (Windows EPERM/EBUSY while
           // another process stats the directory) must not kill a caller whose
           // work already succeeded — the orphaned lock ages out via
-          // lockCanRecover. Injected removeLock hooks (fault tests) keep
+          // lockRecoveryVerdict. Injected removeLock hooks (fault tests) keep
           // their errors: only the known contention codes are swallowed.
           try {
             removeLock(lockDir);
@@ -477,14 +480,21 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
         // the guard is mid-flight right now, and reasoning about the age of a
         // directory we cannot even stat reliably would evict a live guard.
-        if (guardErr.code === 'EEXIST' && lockCanRecover(recoverGuardDir, staleMs)) {
+        // STALE only: a guard already gone needs no eviction, and evicting on
+        // that answer deletes the guard another caller has just taken.
+        if (guardErr.code === 'EEXIST'
+          && lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
           rmLockArtifactSync(recoverGuardDir);
         }
       }
 
       if (hasRecoverGuard) {
         try {
-          if (lockCanRecover(lockDir, staleMs)) {
+          // STALE only. VANISHED means the lock was absent when we looked, and
+          // by the time this line runs another acquirer may have won the mkdir
+          // and be partway through writing owner.json — deleting on that answer
+          // destroys a live lock and kills its winner with ENOENT.
+          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
             if (rmLockArtifactSync(lockDir)) {
               staleRecovered = true;
               continue;

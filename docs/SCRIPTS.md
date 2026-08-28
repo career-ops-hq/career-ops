@@ -25,7 +25,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run update` | `update-system.mjs apply` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
-| `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD |
+| `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD; Workday postings are read from their public CXS JSON endpoint instead of the client-rendered page, and an empty jd extraction exits 1 with `code: empty_text` |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
@@ -52,6 +52,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
 | `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
+| `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
 
 ---
 
@@ -379,7 +380,7 @@ Read-only per-company evidence-card aggregator. Joins `data/applications.md` (tr
 Each card covers two independent fact axes, never combined into a single verdict:
 
 - **`responsiveness`** — has this company ever responded to you, or gone silent on an Applied row past the silence window? A rejection counts as a response (it's an answer, not silence). Labels: `responded-before`, `silent-on-you`, `mixed`, `no-history`. Rows younger than the silence window are **pending** — right-censored, never labeled silent. Facts older than 365 days are **stale** and excluded from label computation unless `--include-stale` is passed. Follow-ups sent never change the label — they only annotate a silent fact's `confidence` (`confirmed-by-followups` vs `unconfirmed`).
-- **`postingChurn`** — does this company repost the same role repeatedly (evergreen requisition / re-opened search), sourced from `detect-reposts.mjs` clusters over `data/scan-history.tsv`. Labels: `reposts-detected`, `none-detected`, `no-scan-data`.
+- **`postingChurn`** — does this company repost the same role repeatedly (evergreen requisition / re-opened search), sourced from `detect-reposts.mjs` clusters over `data/scan-history.tsv`. Labels: `reposts-detected`, `none-detected`, `no-scan-data`, `aggregator-not-evaluated`. The last two both mean the check did not run — `no-scan-data` because there is no scan history, `aggregator-not-evaluated` because the company is marked `aggregator: true` in `portals.yml` (a multi-employer board, where an identical title is a different employer's job, so the "same company + same title = same opening" assumption fails). Neither is the same claim as `none-detected`, which means the check ran and found nothing.
 
 The script deliberately reports **facts, not verdicts** — output is always descriptive and past-tense ("silent 34d since 2026-05-01"), never "ghosted" or "risk". Every silent fact carries a dated `clearInstruction` (the exact `set-status.mjs` command to run if the company actually did respond and it just wasn't logged), and every card with a silent fact is accompanied by an innocent-explanations line: high-volume inboxes, evergreen requisitions, re-opened searches, and the candidate's own unlogged responses all produce the same raw signals as genuine silence. Before trusting the output against real data, run a dry read (`node company-history.mjs --summary`) and sanity-check a few cards where you already know the real story.
 
@@ -526,7 +527,9 @@ npm run rollback
 
 ## liveness
 
-Tests whether job posting URLs are still live. Two rungs: a zero-token ATS API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday), falling back to headless Chromium (`liveness-browser.mjs`) for non-ATS pages or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
+Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
+
+The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
 

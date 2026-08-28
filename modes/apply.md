@@ -128,7 +128,23 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 1. Extract company name and role title from the page
 2. Search in `reports/` by company name (case-insensitive grep)
 3. If there is a match → load the full report
-4. If there is a Section H or `## Application Answers` → load previous answers as a base
+4. If there is a `## Application Answers` section → recover it through the strict reader, never by re-reading the rendered markdown as prose:
+
+   ```bash
+   node application-answers.mjs --report reports/NNN-company-role-date.md --read --strict
+   ```
+
+   - **Exit 0** → the JSON on stdout is the base snapshot of previous answers. `null` means the report has no section; treat it as a fresh application.
+   - **Non-zero exit** → the section is partially unreadable and strict mode refused it, naming every unreadable line on stderr. Do NOT fall back to reading the section as prose, and do NOT proceed with a partial base — a silently dropped answer looks like an answer the candidate never gave, and an absorbed one corrupts an answer they did give. Show the candidate the named lines and ask whether to fix the report first or continue without the affected answers.
+   - A **Section H** (`## H) Draft Application Answers`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes:
+
+     ```bash
+     node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
+     ```
+
+     - Prints `{"freeText": [...]}`, or `null` when the report has no Block H. There is no `--strict` counterpart: an empty `freeText` means the block exists but did not follow the convention, which is an expected outcome and not a corrupted report.
+     - Prefer `## Application Answers` when both exist. Block H is what the evaluation *drafted*, not what the candidate actually sent.
+     - An empty `freeText` on a Block H that clearly has content is the one case to fall back to prose. Say that is what you are doing.
 5. If there is NO match → notify and offer to run a quick auto-pipeline
 
 ## Step 3 — Detect changes in the role

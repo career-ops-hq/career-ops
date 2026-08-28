@@ -13,10 +13,8 @@
  * Default tier is 'mid' if no keywords match.
  */
 
-import path from 'path';
-import { fileURLToPath } from 'url';
-
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 /**
  * Classifies a job title into exactly one seniority tier.
@@ -96,17 +94,49 @@ export function classifyTier(title) {
     }
   ];
 
-  // Guard (a): "Associate [*] Director/VP/Chief/Principal/Partner/Head-of" resolves
-  // to senior. The `associate` prefix qualifies the seniority band of a senior role;
-  // it does not demote it to entry-level. Works for both a direct compound
-  // ("Associate Director") and a broad one ("Associate Creative Director"). Checked
-  // before the position loop because `associate` always precedes the senior noun,
-  // so the leftmost-marker rule would fire on `associate` at index 0 and return entry.
+  // Guard (a): "Associate <senior noun>" resolves to senior. The `associate`
+  // prefix qualifies the seniority band of a senior role; it does not demote it
+  // to entry-level. Checked before the position loop because `associate` always
+  // precedes the senior noun, so the leftmost-marker rule would fire on
+  // `associate` at index 0 and return entry.
+  //
+  // The noun list is CLOSED, and has to stay that way: in plenty of fields
+  // `associate` genuinely does mark the junior variant, and those must keep
+  // resolving to entry — Associate Attorney, Associate Editor, Associate
+  // Producer, Associate Manager, Associate Consultant. A generic "associate
+  // never demotes" rule breaks every one of them.
+  //
+  // The academic ranks are on the list because `associate` names a RANK there
+  // rather than a junior variant: Associate Professor is the rung above
+  // Assistant Professor, and Dean/Provost/Chancellor/Superintendent head an
+  // institution (#3178). The criterion is institution-level head, not
+  // office-level deputy — which is why Registrar, Bursar and Librarian stay
+  // off, along with Rector (a parish `associate rector` IS the junior one).
   const associateAt = cleanTitle.search(/\bassociate\b/i);
   if (associateAt >= 0) {
-    const afterAssociate = cleanTitle.slice(associateAt + 'associate'.length);
-    if (/\b(director|vice\s+president|vp|principal|partner|chief|head\s+of)\b/i.test(afterAssociate)) {
-      return 'senior';
+    // A junior marker that LEADS the title still decides it. "Intern, Associate
+    // Dean of Student Life" is an internship in a dean's office, not a
+    // deanship — the same doctrine the position loop below applies to
+    // "Summer Intern, Director of Product". Without this the guard returns
+    // early and inverts the very harm #3178 is about, on the same board.
+    const juniorAt = cleanTitle.search(/\b(?:intern(?:ship)?|trainee|co-op|graduate|junior|entry(?:-level)?)\b/i);
+    if (juniorAt < 0 || juniorAt > associateAt) {
+      const afterAssociate = cleanTitle.slice(associateAt + 'associate'.length);
+      // WHITESPACE only, and at most two words of gap. Both bounds carry
+      // weight. Any comma or dash after `associate` means `associate` is the
+      // role and what follows is a separate clause: "Research Associate -
+      // Professor Smith Laboratory" and "Administrative Associate, Office of
+      // the Dean" are junior roles that a to-end-of-string search reads as
+      // senior. The two-word cap then stops "Office of the Dean" and real
+      // employers named for a noun on this list — Dean & Company (whose entry
+      // title is literally "Associate Consultant"), Dean Foods, Dean Witter,
+      // Provost Umphrey. It also keeps the legal pair honest: bare `counsel`
+      // is off the list because a firm's associate IS the junior lawyer, and
+      // without the bound "Associate Counsel, Office of the General Counsel"
+      // would match `general counsel` from the department name.
+      if (/^\s+(?:[a-z]+\s+){0,2}(director|vice\s+president|vp|principal|partner|chief|head\s+of|professor|dean|provost|chancellor|superintendent|general\s+counsel)\b/i.test(afterAssociate)) {
+        return 'senior';
+      }
     }
   }
 
@@ -162,8 +192,7 @@ export function classifyTier(title) {
 export default classifyTier;
 
 // CLI and inline test mode
-const isDirect = process.argv[1] &&
-  (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)));
+const isDirect = isMainModule(import.meta.url);
 
 // The title is the only positional, so `--help` was classified as a job title
 // and answered `mid` at exit 0 (#2852). Validated up front via

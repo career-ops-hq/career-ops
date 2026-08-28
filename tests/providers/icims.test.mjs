@@ -212,3 +212,52 @@ const mkCtx = (pages) => ({
     else fail(`JSON-LD with ${label}: postedAt ${job.postedAt}`);
   }
 }
+
+// Location enrichment. Several tenants render the search card with no location
+// span, so the list-page location arrives empty. An empty location cannot match
+// a location_filter block term, so a US-only board reaches the results with no
+// country attached — measured 2026-08-13, all six iCIMS matches in a sweep were
+// US postings that arrived that way. The detail page already being fetched for
+// the date also carries jobLocation.address.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-17","jobLocation":[{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"US","addressLocality":"Annapolis Junction","addressRegion":"MD","postalCode":"UNAVAILABLE"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  // Spelled out, not "US": location_filter matches the words written in
+  // portals.yml, where the block term is "United States".
+  if (job.location === 'Annapolis Junction, MD, United States') pass('enrichDate fills an empty location from jobLocation');
+  else fail(`location: ${job.location}`);
+}
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"CA","addressLocality":"Toronto","addressRegion":"ON"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'N/A' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Toronto, ON, Canada') pass('enrichDate replaces an N/A location, single jobLocation object');
+  else fail(`location: ${job.location}`);
+}
+// iCIMS writes the literal string UNAVAILABLE into address fields it has no
+// value for; joining it unchecked yields "UNAVAILABLE, MD, United States".
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"address":{"addressCountry":"US","addressLocality":"UNAVAILABLE","addressRegion":"MD"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'MD, United States') pass('enrichDate drops UNAVAILABLE address parts');
+  else fail(`location: ${job.location}`);
+}
+// A location the list page did supply is authoritative: enrichment never
+// overwrites it.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"address":{"addressCountry":"US","addressLocality":"Phoenix","addressRegion":"AZ"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'Mississauga, ON' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Mississauga, ON') pass('enrichDate leaves a populated location untouched');
+  else fail(`location overwritten: ${job.location}`);
+}
+// No jobLocation at all: the job keeps whatever it had, enrichment stays silent.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-17"}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === '') pass('enrichDate leaves location empty when jobLocation is absent');
+  else fail(`location: ${job.location}`);
+}
