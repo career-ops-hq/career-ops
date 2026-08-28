@@ -1025,7 +1025,18 @@ nothing reaches stdout, so a shell redirect cannot capture a half-right artifact
   supplied and hand back a well-formed-looking payload with the skills gone.
 - `experience` present and not an array — the lints would report nothing, which
   prints as "No lint findings" and reads exactly like a clean payload.
-- `competencies` present and neither an array nor a comma-separated string.
+- `competencies` present and neither an array nor a comma-separated string, or an
+  array holding a member with no scalar value (an object, array or `null`) — that
+  member would be dropped rather than folded, thinning the section silently.
+- the existing category the fold would merge into holding such a member in its
+  `items`, for the same reason. Checked only when a fold will actually happen, so
+  a payload that would pass through untouched is never rejected for it.
+
+The line is drawn at what is *lost*, not at what is not a string: a numeric or
+boolean member is coerced by `String()` and keeps its value, which is what
+`build-cv-html.mjs` does with it too (numeric years and dates must render, not
+vanish — `tests/cv-numeric-scalars.test.mjs`). Rejecting those would make this
+script stricter than the builder it feeds.
 
 Refusing rather than coercing is deliberate: there is no honest place to put a
 string `skills` value inside `skills[]`, and inventing the structure to hold it

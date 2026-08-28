@@ -255,6 +255,49 @@ test('an absent skills field is still fine', () => {
   assert.deepEqual(JSON.parse(r.stdout).skills, [{ category: 'Core Competencies', items: 'AWS' }]);
 });
 
+test('a mixed-type competencies array is refused rather than silently thinned', () => {
+  // The reported input: the container is an array, so the earlier container
+  // check passed, while toItemList() dropped the object and the fold emitted
+  // `items: "AWS"` — one competency gone from a payload that looked fine.
+  const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS', { name: 'Kubernetes' }] }) });
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.equal(r.stdout, '', 'a refused payload must not reach stdout');
+  assert.match(r.stderr, /`competencies` has 1 member\(s\) with no scalar value/);
+  assert.match(r.stderr, /\[1\] \(object\)/);
+});
+
+test('a numeric competency is accepted, not refused', () => {
+  // The guard is drawn at what is LOST, not at what is non-string: String()
+  // carries a numeric scalar through, and build-cv-html.mjs renders it
+  // (tests/cv-numeric-scalars.test.mjs). Rejecting it would make this script
+  // stricter than the builder it feeds.
+  const r = run(['-'], { input: JSON.stringify({ competencies: ['AWS', 2024] }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).skills[0].items, 'AWS, 2024');
+});
+
+test('a non-scalar in the skills category the fold merges into is refused', () => {
+  const r = run(['-'], {
+    input: JSON.stringify({
+      competencies: ['A'],
+      skills: [{ category: 'Core Competencies', items: ['X', { y: 1 }] }],
+    }),
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /Merging the competencies into it would drop them/);
+});
+
+test('a skills category the fold never touches is not policed for it', () => {
+  const r = run(['-'], {
+    input: JSON.stringify({
+      competencies: ['A'],
+      skills: [{ category: 'Languages', items: ['X', { y: 1 }] }],
+    }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
 test('a second positional argument is refused rather than ignored', () => {
   withFixture(DIRTY_PAYLOAD, (file) => {
     const r = run([file, 'extra.json']);

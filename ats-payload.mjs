@@ -100,6 +100,44 @@ function categoryKey(name) {
     .toLowerCase();
 }
 
+/** The label the fold uses for the category it writes. A payload carrying its
+ *  own localized `sections.competencies` keeps it — relabelling the user's
+ *  section title would be inventing text rather than moving it. */
+function resolveCompetenciesCategory(payload) {
+  return (typeof payload?.sections?.competencies === 'string'
+    && payload.sections.competencies.trim())
+    || DEFAULT_COMPETENCIES_TITLE;
+}
+
+/**
+ * Members `toItemList()` DROPS rather than coerces, reported with their index.
+ *
+ * The line is drawn at what is actually lost, not at what is not a string.
+ * `toItemList()` passes every scalar through `String()`, so a numeric or boolean
+ * member survives with its value intact — and that is a deliberate, tested
+ * position in this repo, not an accident: `build-cv-html.mjs`'s `escapeHtml()`
+ * used to `return ''` for anything non-string, which silently dropped numeric
+ * years and dates from shipped CVs (see tests/cv-numeric-scalars.test.mjs), and
+ * `buildCompetencies()` renders `escapeHtml(String(tag))` for exactly that
+ * reason. Rejecting a numeric member here would make this script stricter than
+ * the builder it feeds and refuse a payload that renders correctly today.
+ *
+ * Objects, arrays, `null` and `undefined` have no scalar value to carry, are
+ * dropped outright, and are what this exists to catch.
+ *
+ * @param {unknown[]} list - Array whose members would go through toItemList().
+ * @returns {Array<{index: number, type: string}>} One entry per dropped member.
+ */
+function lostMembers(list) {
+  const lost = [];
+  list.forEach((value, index) => {
+    if (value === null || value === undefined || typeof value === 'object') {
+      lost.push({ index, type: Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value });
+    }
+  });
+  return lost;
+}
+
 // ── Payload shape validation ────────────────────────────────────────────────
 
 /**
@@ -155,6 +193,43 @@ export function validatePayloadShape(payload) {
     errors.push(`\`experience\` must be an array of entries, got ${shapeOf(payload.experience)}. `
       + 'The lints would report nothing, which is indistinguishable from a clean payload.');
   }
+
+  // Member level, same defect one layer down (CodeRabbit, PR #3422). The array
+  // container being right is not enough: `["AWS", {"name":"Kubernetes"}]` passed
+  // every check above while toItemList() dropped the object on the way through,
+  // so the fold emitted `items: "AWS"` and the second competency was gone from a
+  // payload that looked fine.
+  const describe = (lost) => lost.map((l) => `[${l.index}] (${l.type})`).join(', ');
+  if (Array.isArray(payload.competencies)) {
+    const lost = lostMembers(payload.competencies);
+    if (lost.length > 0) {
+      errors.push(`\`competencies\` has ${lost.length} member(s) with no scalar value to move: `
+        + `${describe(lost)}. They would be dropped rather than folded. `
+        + 'Strings are expected; numbers and booleans are coerced.');
+    }
+  }
+
+  // The same loss in the field the fold WRITES to. When a competency category
+  // already exists, the fold re-joins its items through toItemList() to union
+  // them, and a non-scalar member there disappears exactly the same way.
+  //
+  // Guarded on a fold actually happening, and on the one category it would touch,
+  // so a payload this script would otherwise pass through untouched is never
+  // rejected for a field it was never going to rewrite.
+  if (toItemList(payload.competencies).length > 0 && Array.isArray(payload.skills)) {
+    const category = resolveCompetenciesCategory(payload);
+    const target = payload.skills.find(
+      (entry) => entry && typeof entry === 'object' && categoryKey(entry.category) === categoryKey(category),
+    );
+    if (target && Array.isArray(target.items)) {
+      const lost = lostMembers(target.items);
+      if (lost.length > 0) {
+        errors.push(`the existing \`${category}\` skills category has ${lost.length} member(s) in \`items\` `
+          + `with no scalar value: ${describe(lost)}. Merging the competencies into it would drop them.`);
+      }
+    }
+  }
+
   return errors;
 }
 
@@ -185,9 +260,7 @@ export function validatePayloadShape(payload) {
 export function foldCompetencies(payload) {
   const source = payload && typeof payload === 'object' ? payload : {};
   const competencies = toItemList(source.competencies);
-  const category = (typeof source.sections?.competencies === 'string'
-    && source.sections.competencies.trim())
-    || DEFAULT_COMPETENCIES_TITLE;
+  const category = resolveCompetenciesCategory(source);
 
   if (competencies.length === 0) {
     return {
@@ -505,6 +578,47 @@ function runSelfTest() {
     validatePayloadShape({ competencies: 'AWS, GCP' }), []);
   eq('and that string still folds into a category',
     foldCompetencies({ competencies: 'AWS, GCP' }).payload.skills[0].items, 'AWS, GCP');
+
+  // Member level (PR #3422, second pass). The reported input: the array
+  // container is right, but a member has no scalar value and toItemList() drops
+  // it, so the fold emitted `items: "AWS"` and lost the second competency.
+  const mixed = { competencies: ['AWS', { name: 'Kubernetes' }] };
+  eq('a mixed-type competencies array is refused', validatePayloadShape(mixed).length, 1);
+  eq('the error names the offending index and type',
+    /\[1\] \(object\)/.test(validatePayloadShape(mixed)[0]), true);
+  eq('and that member really was being dropped before the guard',
+    foldCompetencies(mixed).payload.skills[0].items, 'AWS');
+  eq('a null member is refused too',
+    validatePayloadShape({ competencies: ['AWS', null] }).length, 1);
+  eq('a nested-array member is refused too',
+    validatePayloadShape({ competencies: ['AWS', ['GCP']] }).length, 1);
+
+  // The line is at what is LOST, not at what is non-string. A numeric scalar
+  // survives String() with its value intact, and build-cv-html.mjs renders it
+  // (tests/cv-numeric-scalars.test.mjs) — rejecting it here would make this
+  // script stricter than the builder it feeds.
+  eq('a numeric competency is accepted, not refused',
+    validatePayloadShape({ competencies: ['AWS', 2024] }), []);
+  eq('and it keeps its value through the fold',
+    foldCompetencies({ competencies: ['AWS', 2024] }).payload.skills[0].items, 'AWS, 2024');
+  eq('a boolean competency is accepted too',
+    validatePayloadShape({ competencies: [true] }), []);
+
+  // The same loss in the field the fold writes to, guarded on a fold happening.
+  eq('a non-scalar in the merged-into skills category is refused',
+    validatePayloadShape({
+      competencies: ['A'],
+      skills: [{ category: 'Core Competencies', items: ['X', { y: 1 }] }],
+    }).length, 1);
+  eq('an untouched skills category is not policed for it',
+    validatePayloadShape({
+      competencies: ['A'],
+      skills: [{ category: 'Languages', items: ['X', { y: 1 }] }],
+    }), []);
+  eq('and neither is it when no fold will happen',
+    validatePayloadShape({
+      skills: [{ category: 'Core Competencies', items: ['X', { y: 1 }] }],
+    }), []);
 
   // ── The lints ──
   const codes = (p) => lintPayload(p).map((f) => f.code);
