@@ -49,7 +49,7 @@
  */
 
 /**
- * A single `tracked_companies` entry from `portals.yml`.
+ * A single portal entry from `portals.yml` — `tracked_companies` or `job_boards`.
  *
  * Provider-specific fields are opaque to scan.mjs and validated by the
  * provider itself. Examples in current providers: `api`, `careers_url`.

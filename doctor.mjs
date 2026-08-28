@@ -491,10 +491,10 @@ function checkAutoDir(name) {
   }
 }
 
-// --strict only: probe the ATS slug of every tracked company in portals.yml so
-// a typo'd slug (which 404s silently on scans) surfaces here. Skipped gracefully
-// when portals.yml is absent. Delegates to verify-portals.mjs so there is one
-// slug-probing implementation. Network-bound, hence opt-in.
+// --strict only: probe every portals.yml entry (tracked_companies and job_boards)
+// so a typo'd slug (which 404s silently on scans) surfaces here. Skipped
+// gracefully when portals.yml is absent. Delegates to verify-portals.mjs so there
+// is one slug-probing implementation. Network-bound, hence opt-in.
 async function checkPortalSlugs(root) {
   const portalsPath = join(root, 'portals.yml');
   if (!existsSync(portalsPath)) {

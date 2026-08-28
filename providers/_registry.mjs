@@ -51,12 +51,12 @@ export async function loadProviders(dir) {
 }
 
 /**
- * Resolve which provider handles a tracked_companies entry.
+ * Resolve which provider handles a portals.yml entry (tracked_companies or job_boards).
  *   1. Explicit `provider:` field wins (skips detect()).
  *   2. local-parser when parser.command + script are configured (before API detect).
  *   3. Otherwise each provider's detect() runs in load order; first hit wins.
  *
- * @param {object} entry - tracked_companies entry.
+ * @param {object} entry - portals.yml entry (tracked_companies or job_boards).
  * @param {Map<string, object>} providers - id→provider Map from loadProviders().
  * @param {{skipIds?: string[]}} [opts] - Provider ids to skip (e.g. 'local-parser'
  *   so a network-only health check never execs a configured local command).
