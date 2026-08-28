@@ -102,7 +102,30 @@ function runUpdater(fixture, cmd) {
   }
 }
 
-// ── 3. apply: refuses before the first side effect ──
+// ── 3. check: nested layout beats a dismissed local update flag ──
+{
+  const fixture = makeNestedFixture();
+  try {
+    writeFileSync(join(fixture.nested, '.update-dismissed'), 'dismissed by operator\n');
+    const res = runUpdater(fixture, 'check');
+    let body;
+    try { body = JSON.parse(res.stdout); } catch { body = {}; }
+    if (res.status === 0 && body.status === 'not-a-git-toplevel' && body.local && body.toplevel) {
+      pass('check reports not-a-git-toplevel before honoring .update-dismissed in a nested install');
+    } else {
+      fail(`check on a dismissed nested install exited ${res.status} with stdout ${JSON.stringify(res.stdout.slice(0, 200))}`);
+    }
+    if (!existsSync(join(fixture.dir, '.git', 'FETCH_HEAD'))) {
+      pass('dismissed nested check still leaves the outer repo\'s FETCH_HEAD alone');
+    } else {
+      fail('dismissed nested check fetched into the outer repository');
+    }
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+}
+
+// ── 4. apply: refuses before the first side effect ──
 {
   const fixture = makeNestedFixture();
   try {
@@ -133,7 +156,7 @@ function runUpdater(fixture, cmd) {
   }
 }
 
-// ── 4. rollback: same precondition ──
+// ── 5. rollback: same precondition ──
 {
   const fixture = makeNestedFixture();
   try {

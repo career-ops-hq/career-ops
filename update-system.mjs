@@ -1386,21 +1386,22 @@ function curlGet(url, extraArgs = []) {
 }
 
 async function check() {
-  // Respect dismiss flag
-  if (existsSync(join(ROOT, '.update-dismissed'))) {
-    console.log(JSON.stringify({ status: 'dismissed' }));
-    return;
-  }
-
-  // Before any git call: on an install nested inside a foreign repository the
-  // rev-parse below reads the OUTER repo's HEAD and the drift fetch writes the
-  // OUTER repo's FETCH_HEAD, so check reports a phantom system-files-changed
-  // forever on a byte-identical install (#3334). Report the layout as its own
-  // status instead; agents ignore unknown statuses by contract (AGENTS.md),
-  // and apply() refuses the same layout with the actionable message.
+  // Before any git call or local-state shortcut: on an install nested inside a
+  // foreign repository the rev-parse below reads the OUTER repo's HEAD and the
+  // drift fetch writes the OUTER repo's FETCH_HEAD, so check reports a phantom
+  // system-files-changed forever on a byte-identical install (#3334). Report the
+  // layout as its own status even when the install also has .update-dismissed;
+  // agents ignore unknown statuses by contract (AGENTS.md), and apply() refuses
+  // the same layout with the actionable message.
   const foreignToplevel = gitToplevelMismatch();
   if (foreignToplevel) {
     console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
+    return;
+  }
+
+  // Respect dismiss flag only after layout safety is established.
+  if (existsSync(join(ROOT, '.update-dismissed'))) {
+    console.log(JSON.stringify({ status: 'dismissed' }));
     return;
   }
 
