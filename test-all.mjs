@@ -222,14 +222,49 @@ console.log('\n🧪 career-ops test suite\n');
 
 console.log('1. Syntax checks');
 
-const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
+// This gate presented itself as the suite's syntax check while reading ONE
+// directory: readdirSync does not recurse, so it saw 125 of the repo's 582
+// tracked .mjs files and never opened tests/, providers/, web/, lib/, plugins/,
+// scripts/ or scaffolder/ (#3419). Nothing announced the gap, because a gate
+// that covers less looks exactly like a gate that found nothing wrong.
+//
+// git decides the set instead. It recurses, it excludes node_modules and every
+// untracked scratch file without a denylist to maintain, and it is the same
+// source the coverage guards further down this file already trust. A file that
+// is not tracked does not ship, so it is not this gate's business.
+//
+// -z, and split on NUL: git C-quotes any path containing a quote, a backslash or
+// a non-ASCII byte, and a quoted name would be handed to `node --check` as a
+// literal filename that does not exist — the trap 79152e7 fixed for git status.
+//
+// An empty list is a FAILURE, never a quiet narrowing. That is this repo's
+// settled reading (#2240, and the comment on the coverage-guard probe below): a
+// guard that cannot look must never pass. Running from a tree git cannot see is
+// exactly how a sibling guard printed "OK: 0 tracked files covered" while five
+// unregistered files shipped.
+const NUL = String.fromCharCode(0);
+let mjsFiles = [];
+try {
+  mjsFiles = execSync(`git ls-files -z -- "*.mjs"`, {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split(NUL)
+    .filter(Boolean);
+} catch (err) {
+  fail(`syntax gate: git ls-files failed (${String(err.message).split('\n')[0]}) — it inspected nothing`);
+}
+if (mjsFiles.length === 0) {
+  fail('syntax gate: git ls-files returned no .mjs files — this gate could not inspect anything');
+}
 
 // `node --check` parses a file and exits; it runs no user code, touches no
 // shared state, and its result depends on nothing but that one file. Spawning
 // the 100+ root scripts one at a time was pure process-startup latency, so they
 // go through a bounded pool instead (#2387). Results are collected by index and
-// reported afterwards in the original readdir order, so the log stays
-// byte-identical to the sequential version regardless of completion order.
+// reported afterwards in git's own order, so the log stays byte-identical to the
+// sequential version regardless of completion order.
 const SYNTAX_POOL_SIZE = 8;
 const execFileAsync = promisify(execFile);
 const syntaxOk = new Array(mjsFiles.length);
