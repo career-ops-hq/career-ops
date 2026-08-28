@@ -77,7 +77,7 @@ test("spawnHeadlessCli tolerates a caller that passes stdio itself", async () =>
 });
 
 test("explicit stdin prompt mode writes the large prompt exactly once and closes stdin", async () => {
-  const prompt = "MASTER CV SOURCE\n" + "x".repeat(12_000);
+  const prompt = "MANUAL JOB EVALUATION\n" + "x".repeat(60_000);
   let received = "";
   const script = 'process.stdin.setEncoding("utf8");process.stdin.on("data",d=>process.stdout.write(d));';
   const child = spawnHeadlessCli(process.execPath, ["-e", script, "-"], { cwd: process.cwd(), env: process.env }, { stdinMode: "pipe", stdinInput: prompt });
@@ -118,10 +118,10 @@ test("a real Windows cmd shim streams output and preserves its exit code", { ski
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a Windows codex.cmd shim receives a large role prompt through stdin", { skip: process.platform !== "win32" }, async () => {
+test("a Windows codex.cmd shim receives a 60KB worker prompt through stdin", { skip: process.platform !== "win32" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "co-codex-stdin-"));
   const shim = path.join(dir, "codex.cmd");
-  const prompt = "MASTER CV SOURCE\n" + "x".repeat(12_000);
+  const prompt = "MANUAL JOB EVALUATION\n" + "x".repeat(60_000);
   fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" -e "process.stdin.pipe(process.stdout)" %*\r\n`);
   try {
     const child = spawnHeadlessCli(shim, ["exec", "-"], { cwd: dir, env: process.env }, { stdinMode: "pipe", stdinInput: prompt });

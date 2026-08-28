@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   accumulateTokens,
   codexInvalidSchemaMessage,
+  codexNoOutputMessage,
   codexStreamArgs,
   completedReportNames,
   hasNewCompletedReport,
@@ -444,6 +445,22 @@ test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
 
 test("role-resume Codex workers are read-only and ephemeral", () => { const args = codexStreamArgs("prompt", "role-resume", { promptViaStdin: true }); assert.deepEqual(args.slice(0, 7), ["exec", "--json", "--color", "never", "--sandbox", "read-only", "--ephemeral"]); assert.equal(args.at(-1), "-"); });
 test("large role-resume prompt is not present in argv when stdin mode is used", () => { const prompt = "Target Role: Application Developer\n" + "x".repeat(20_000); const args = codexStreamArgs(prompt, "role-resume", { promptViaStdin: true }); assert.equal(args.at(-1), "-"); assert.equal(args.includes(prompt), false); assert.ok(args.join(" ").length < 500); });
+test("large manual evaluation prompt uses the same small Codex stdin argv", () => {
+  const prompt = "Manual Job Description\n" + "x".repeat(60_000);
+  const args = codexStreamArgs(prompt, "evaluate", { promptViaStdin: true });
+  assert.deepEqual(args, ["exec", "--json", "--color", "never", "-"]);
+  assert.equal(args.includes(prompt), false);
+  assert.ok(args.join(" ").length < 100);
+});
+test("ordinary non-manual evaluation retains its established argv contract", () => {
+  assert.deepEqual(codexStreamArgs("ordinary URL", "evaluate"), ["exec", "--json", "--color", "never", "ordinary URL"]);
+});
+test("Codex no-output diagnostics distinguish command size, launcher, and safe stderr", () => {
+  assert.match(codexNoOutputMessage({ code: null, spawnErrorCode: "E2BIG", manualJob: true }), /evaluation prompt was too large/);
+  assert.equal(codexNoOutputMessage({ code: null, spawnErrorCode: "ENOENT" }), "Codex CLI launcher could not be found.");
+  assert.match(codexNoOutputMessage({ code: 1, stderr: "error: unexpected argument '-'" }), /unexpected argument/);
+  assert.doesNotMatch(codexNoOutputMessage({ code: 1, stderr: "GitHub Staff Software Engineer private posting text" }), /GitHub/);
+});
 test("role-resume Codex receives the native output schema while preserving terminal capture", () => {
   const args = codexStreamArgs("prompt", "role-resume", { outputSchema: "role-resume.schema.json", outputLastMessage: "final.txt", promptViaStdin: true });
   assert.deepEqual(args.slice(args.indexOf("--output-schema"), args.indexOf("--output-last-message")), ["--output-schema", "role-resume.schema.json"]);

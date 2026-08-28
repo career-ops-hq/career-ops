@@ -102,6 +102,28 @@ export function codexInvalidSchemaMessage(value) {
   return isCodexInvalidSchemaError(message) ? message : "";
 }
 
+/** A safe, concise launch diagnostic for a Codex process that emitted no
+ * assistant output. Stderr is surfaced only for recognisable CLI/provider
+ * diagnostics; arbitrary stderr can contain echoed command input.
+ * @param {{code?: number | null, stderr?: string, spawnErrorCode?: string, manualJob?: boolean}} [options]
+ */
+export function codexNoOutputMessage({ code = null, stderr = "", spawnErrorCode = "", manualJob = false } = {}) {
+  if (spawnErrorCode === "E2BIG") {
+    return manualJob
+      ? "Codex could not start because the evaluation prompt was too large for the Windows launcher."
+      : "Codex could not start because the command was too large for the Windows launcher.";
+  }
+  if (spawnErrorCode === "ENOENT") return "Codex CLI launcher could not be found.";
+  const safeLine = String(stderr)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reverse()
+    .find((line) => /^(?:error:|invalid_request_error\b|failed to\b|unknown (?:argument|option)\b|unexpected (?:argument|option)\b|not logged in\b|authentication required\b|unauthorized\b|invalid api key\b|please run codex login\b)/i.test(line));
+  const base = `Codex exited before producing output (exit code ${code ?? "unknown"}).`;
+  return safeLine ? `${base} ${safeLine.slice(0, 240)}` : base;
+}
+
 /**
  * Whether one Claude Code stderr chunk should be treated as a fatal error.
  *

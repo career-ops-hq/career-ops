@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, codexInvalidSchemaMessage, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, codexInvalidSchemaMessage, codexNoOutputMessage, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -39,7 +39,8 @@ export async function POST(req: Request) {
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  if (kind === "evaluate" && input.trim().startsWith("{") && !parseManualJobInput(input)) {
+  const manualJob = kind === "evaluate" ? parseManualJobInput(input) : null;
+  if (kind === "evaluate" && input.trim().startsWith("{") && !manualJob) {
     return new Response(JSON.stringify({ error: "Invalid manual job payload." }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
   const resolved = resolveCli(cliId);
@@ -150,7 +151,11 @@ export async function POST(req: Request) {
   const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
   const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
   const roleOutputSchema = nativeRoleSchema ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json") : undefined;
-  const promptViaStdin = cliId === "codex" && kind === "role-resume";
+  // codex.cmd is launched through cmd.exe on Windows, whose command line is far
+  // smaller than the maximum accepted pasted JD. Reuse the explicit Codex `-`
+  // stdin contract for manual evaluations; ordinary evaluation remains on its
+  // established argv path.
+  const promptViaStdin = cliId === "codex" && (kind === "role-resume" || !!manualJob);
   const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
@@ -216,6 +221,7 @@ export async function POST(req: Request) {
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
       let stderrBuf = "";
+      let stderrTail = "";
       // Fallback for a CLI with no CliSpec.stderrIsFatal of its own. Moved into
       // run-cli-support.mjs beside the per-CLI classifiers so it has a reachable
       // test: as an inline regex in this closure nothing could assert it, which
@@ -384,6 +390,7 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (chunk: string) => {
         stderrBytes += Buffer.byteLength(chunk);
+        stderrTail = (stderrTail + chunk).slice(-2_000);
         // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
         // raw chunk both misses an error split across two of them and can match a
         // fragment that is not the word it looks like. sawError feeds pdfRunOutcome,
@@ -439,8 +446,16 @@ export async function POST(req: Request) {
         }
       };
 
-      child.on("error", (e: NodeJS.ErrnoException) => { spawnErrorCode = e.code || "UNKNOWN"; spawnErrorMessage = e.message; send({ type: "error", msg: e.message }); close(); });
-      child.on("close", async (code) => {
+      child.on("error", (e: NodeJS.ErrnoException) => {
+        spawnErrorCode = e.code || "UNKNOWN";
+        spawnErrorMessage = e.message;
+        const msg = cliId === "codex"
+          ? codexNoOutputMessage({ code: null, stderr: "", spawnErrorCode, manualJob: !!manualJob })
+          : e.message;
+        send({ type: "error", msg });
+        close();
+      });
+      child.on("close", async (code, signal) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
         // A client disconnect can fire cancel() (which kills `child`) before
@@ -477,10 +492,25 @@ export async function POST(req: Request) {
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return cliId === "codex" ? `Codex exited before producing output (exit code ${code ?? "unknown"}).` : `The CLI exited before producing output (exit code ${code ?? "unknown"}).`;
+          if (!emittedText && !sawError && !cleanExit) return cliId === "codex" ? codexNoOutputMessage({ code, stderr: stderrTail, spawnErrorCode, manualJob: !!manualJob }) : `The CLI exited before producing output (exit code ${code ?? "unknown"}).`;
           if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
           return null;
         };
+
+        if (process.env.NODE_ENV !== "production" && cliId === "codex" && manualJob) {
+          console.debug("[career-ops manual evaluation launch]", {
+            kind,
+            manualJob: true,
+            promptBytes: Buffer.byteLength(prompt, "utf8"),
+            argvCharacters: args.reduce((total, value) => total + String(value).length + 1, 0),
+            launcher: path.basename(binPath),
+            launcherExtension: path.extname(binPath).toLowerCase() || "direct",
+            exitCode: code,
+            signal: signal || null,
+            spawnErrorCode,
+            stderrBytes,
+          });
+        }
 
         if (kind === "pdf" || kind === "role-resume") {
           const jsonlRaw = cvFilter?.rawText() ?? "";
