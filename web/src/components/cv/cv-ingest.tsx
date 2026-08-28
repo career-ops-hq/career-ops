@@ -90,13 +90,22 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   }, []);
 
   const ingestText = (text: string) => {
-    const id = cliId();
-    if (!id) {
-      setErr("needs-cli");
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setErr("That looks empty — paste your CV instead.");
       setPhase("error");
       return;
     }
-    void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, cliId: id }) });
+    // Pasted text is already readable. Same path as a .md/.txt drop — no CLI.
+    // (PDF/DOCX still need a CLI below.)
+    const id = cliId();
+    if (!id) {
+      setSeed(null);
+      setMd(trimmed);
+      setPhase("review");
+      return;
+    }
+    void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id }) });
   };
 
   const ingestFile = (file: File) => {
@@ -110,6 +119,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             setPhase("error");
             return;
           }
+          setSeed(null);
           setMd(t.trim());
           setPhase("review");
         })
@@ -220,7 +230,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           (err === "needs-cli" ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-700 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
-              <span>To read a PDF, connect your AI CLI — or paste your CV text above (no setup needed).</span>
+              <span>To read a PDF or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
               <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-500/30 dark:text-amber-200">
                 Connect your AI CLI <ArrowRight className="size-3.5" />
               </Link>

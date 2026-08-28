@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,6 +10,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// Windows keeps a handle open on a just-exited child's files for a short
+// window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
+// though every assertion passed — `force: true` suppresses ENOENT, not EPERM.
+// Node retries exactly that error class (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM)
+// with linear backoff when given maxRetries, so default it here. An explicit
+// option still wins, and a removal that keeps failing still throws. Same
+// wrapper test-all.mjs applies to its own call sites (#3066), shared so the
+// suites under tests/ cannot drift from it.
+export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+
+/**
+ * The per-script budget run() applies when a caller does not override it.
+ *
+ * Deliberately NOT substituted into the `timeout: 30000` literal inside run()
+ * below. The comment there explains why that execFileSync call is kept
+ * byte-identical: editing the line makes CodeQL re-attribute its long-standing
+ * "uncontrolled command line" finding to whichever PR touched it. Exported so
+ * callers can reason about the budget — how close a script came to it, say —
+ * rather than hard-coding the number in a second file. The two are linked by
+ * this comment, not by the compiler: change one, change the other.
+ */
+export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
 
 let passed = 0;
 let failed = 0;
@@ -212,6 +235,17 @@ export function lastRunFailure() {
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
  *
+ * Over-long streams keep BOTH ENDS rather than the head. A failing script's
+ * diagnostic line can be at either end: an early case that blew up, or — for
+ * the suites here, which print a tick per assertion — the `Results:` summary
+ * and the newest cases at the very bottom. Keeping only the head means the
+ * later a case was added, the more certain it is to be truncated away, which
+ * is exactly backwards for something read only when a run goes red.
+ *
+ * That is not hypothetical: `agent-inbox-tests.mjs` grew past this cap, and a
+ * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
+ * verdict — the assertion added specifically to attribute that failure (#3035).
+ *
  * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
  * @returns {string}
  */
@@ -219,8 +253,32 @@ export function formatRunFailure(maxChars = 2000) {
   if (!lastFailure) return '';
   const clip = (s) => {
     const t = String(s ?? '').trim();
-    if (!t) return '';
-    return t.length > maxChars ? `${t.slice(0, maxChars)}\n    ... (${t.length - maxChars} more chars)` : t;
+    if (!t || t.length <= maxChars) return t;
+    // The marker's own width comes OUT of the budget rather than on top of it,
+    // so maxChars is a promise about the string this returns. (Appending the
+    // marker after slicing to maxChars, as this did before, put every clipped
+    // stream over its documented cap.)
+    const mark = (n) => `\n    ... (${n} more chars elided)\n`;
+    // The dropped count is printed inside the marker, so the marker's width
+    // depends on the budget and the budget depends on its width. Break the
+    // circle with the widest that count can ever be — t.length — which can only
+    // over-reserve, never under.
+    const budget = maxChars - mark(t.length).length;
+    // Degenerate cap, narrower than the marker itself: honour the number rather
+    // than emit a marker that alone overruns it.
+    if (budget <= 0) return t.slice(0, maxChars);
+    // Weighted to the tail, which is where a suite that prints per-assertion
+    // puts its summary, but never zero head — an early stack trace is the
+    // other common shape and dropping it entirely would just invert the bug.
+    //
+    // Math.floor(budget * 0.35) rounds to 0 below budget 3, which would hand
+    // the whole allowance to the tail and quietly reinstate exactly that
+    // inversion. Floor the head at one character whenever there is room for
+    // two. A one-character budget is genuinely single-sided — there is no way
+    // to keep both ends of a string in one character — so it keeps the tail.
+    const head = budget >= 2 ? Math.max(1, Math.floor(budget * 0.35)) : 0;
+    const tail = budget - head;
+    return `${t.slice(0, head)}${mark(t.length - budget)}${t.slice(t.length - tail)}`;
   };
   const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
   const out = clip(lastFailure.stdout);
@@ -268,6 +326,51 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
     }
   }
   return out;
+}
+
+/**
+ * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
+ * reach `ROOT/node_modules` from.
+ *
+ * The PDF sandboxes are created under `ROOT/output` and run a copy of
+ * generate-pdf.mjs, whose siblings theme-style.mjs and tracker-utils.mjs both
+ * `import * as yaml from 'js-yaml'`. That specifier resolves by walking parent
+ * directories up into `ROOT/node_modules`, and the walk starts from the
+ * importer's REALPATH, because --preserve-symlinks is off by default. On a
+ * checkout whose `output/` is symlinked out of the repo -- the layout people
+ * adopt as the manual workaround for #524 -- the walk begins outside the repo,
+ * never reaches `ROOT/node_modules`, and every spawned script dies with
+ * ERR_MODULE_NOT_FOUND before parsing a single argument. The suite then reports
+ * 20 behaviour regressions in assertions that never ran (#3165).
+ *
+ * Relocating those sandboxes to `tmpdir()` does NOT fix this: tmpdir is outside
+ * the repo too. They work today only because `ROOT/output` happens to be
+ * physically inside it, which is the assumption worth removing rather than
+ * relocating. Linking the package into the sandbox's own `node_modules` --
+ * beside the `playwright` stub each sandbox already writes there -- makes the
+ * sandbox self-sufficient wherever it physically lives.
+ *
+ * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
+ * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @returns {string} Path to the package as seen from inside the sandbox.
+ */
+export function linkRepoPackage(sandboxDir, pkgName) {
+  const source = join(ROOT, 'node_modules', pkgName);
+  const dest = join(sandboxDir, 'node_modules', pkgName);
+  if (existsSync(dest)) return dest;
+  if (!existsSync(source)) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  }
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    // 'junction' is ignored on POSIX, and on Windows it is the one link type
+    // granted without Developer Mode or elevation -- the privilege whose absence
+    // aborted a whole suite in #2828. The copy below is the last resort.
+    symlinkSync(source, dest, 'junction');
+  } catch {
+    cpSync(source, dest, { recursive: true });
+  }
+  return dest;
 }
 
 let bashCache = null;
@@ -417,4 +520,49 @@ export async function captureConsoleErrors(fn) {
   } finally {
     console.error = original;
   }
+}
+
+/**
+ * Build a git environment nothing ambient can reach into.
+ *
+ * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
+ * close the RUNTIME layer: GIT_CONFIG_COUNT with its KEY_n / VALUE_n pairs is
+ * applied AFTER every config file, so an ambient `core.excludesFile` injected
+ * that way overrides even the one a fixture sets for itself, and the isolation
+ * silently stops holding - the exact leak this pinning exists to close,
+ * arriving through the one door left open (#2567).
+ *
+ * COUNT is set to 0 rather than deleting the variables: it is a single
+ * authoritative value, and git reads KEY_n / VALUE_n only up to COUNT, so any
+ * stragglers are inert without having to enumerate them.
+ *
+ * `base` exists so a regression case can hand in a parent environment
+ * carrying the injection. Every caller shares this one construction on purpose:
+ * a test that hand-rolled its own env would keep passing if the pin were
+ * dropped here, which is how the gap got in.
+ */
+export function hermeticGitEnv(gitConfigPath, base = process.env) {
+  const env = {
+    ...base,
+    GIT_CONFIG_COUNT: '0',
+    GIT_CONFIG_GLOBAL: gitConfigPath,
+    GIT_CONFIG_SYSTEM: gitConfigPath,
+  };
+  // These two DO have to be enumerated, because COUNT governs KEY_n / VALUE_n
+  // and nothing else, and neither of them is a config FILE that GLOBAL/SYSTEM
+  // could shadow. Both survive all three pins above:
+  //
+  //   GIT_CONFIG_PARAMETERS  the channel git uses to hand `-c` down to a
+  //                          subprocess, so it reaches every git invocation.
+  //                          Measured: with it set, a commit made through this
+  //                          env took its author from the ambient value.
+  //   GIT_CONFIG             redirects the `git config` command, reads AND
+  //                          writes. The fixtures in test-all.mjs call `git config` to
+  //                          set themselves up, so with it set that write lands
+  //                          in the ambient file instead of the fixture: the
+  //                          setting never takes effect, and the suite mutates
+  //                          a file outside its own temp dir.
+  delete env.GIT_CONFIG_PARAMETERS;
+  delete env.GIT_CONFIG;
+  return env;
 }

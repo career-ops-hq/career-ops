@@ -21,28 +21,30 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { checkFollowupsSchema } from './stats.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
-const APPS_FILE = process.env.CAREER_OPS_TRACKER
-  ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 // CAREER_OPS_REPORTS overrides the reports dir (used by tests, mirrors CAREER_OPS_TRACKER).
-const REPORTS_DIR = process.env.CAREER_OPS_REPORTS || join(CAREER_OPS, 'reports');
-const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
-  ? join(CAREER_OPS, 'templates/states.yml')
-  : join(CAREER_OPS, 'states.yml');
+const REPORTS_DIR = process.env.CAREER_OPS_REPORTS
+  ? resolve(CAREER_OPS, process.env.CAREER_OPS_REPORTS)
+  : join(CAREER_OPS, 'reports');
+const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
+  ? join(CODE_ROOT, 'templates/states.yml')
+  : join(CODE_ROOT, 'states.yml');
 
 // Ensure required directories exist (fresh setup)
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
@@ -343,7 +345,7 @@ for (const e of entries) {
   }
   for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
   for (const lt of linkTargets) {
-    const m = lt[1].split('/').pop().match(/^(\d+)-/);
+    const m = lt[1].split(/[\\/]/).pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }
@@ -442,7 +444,12 @@ let syncResult;
 try {
   syncResult = checkTrackerSync({ appsFile: APPS_FILE });
 } catch (err) {
-  warn(`Sync check could not run: ${err.message}`);
+  // A check that could not RUN is a failed check, not a warning. warn() does not affect the exit
+  // code, so a throw here made verify-pipeline print a notice and still exit 0 — and to anything
+  // reading the exit status (CI, a cron wrapper, a pre-push hook) that is indistinguishable from
+  // the invariant holding. We do not know whether the tracker is in sync; we know we failed to
+  // look. The honest report is failure.
+  error(`Sync check could not run — the tracker was NOT verified: ${err.message}`);
 }
 
 if (syncResult) {
@@ -463,6 +470,40 @@ if (syncResult) {
     ok(syncResult.summary.total > 0
       ? 'applications.md and active-interviews.md are in sync'
       : 'No active-interviews.md rows to sync-check');
+  }
+}
+
+// --- Check 14: data/follow-ups.md table schema (#2971) ---
+// stats.mjs (computeFollowupStats) and followup-cadence.mjs both read this table
+// positionally, in the shape modes/followup.md documents, and both skip any row
+// whose num/appNum cells don't parse as integers. A table written with a
+// different column order therefore reports as ZERO follow-ups in both tools,
+// silently — indistinguishable from a file where nothing has been logged yet.
+// Follow-up compliance is exactly the number a user consults to decide whether
+// their follow-ups are working, so a silent zero is actively misleading. This is
+// the only place that difference is visible.
+//
+// Path resolution deliberately matches the two consumers (CAREER_OPS/data/...)
+// rather than APPS_FILE's directory: the check exists to predict what they will
+// do, so it has to read the same file they read.
+const FOLLOWUPS_FILE = join(CAREER_OPS, 'data', 'follow-ups.md');
+const FOLLOWUPS_COLUMNS = '| num | appNum | date | company | role | channel | contact | notes |';
+if (!existsSync(FOLLOWUPS_FILE)) {
+  ok('No follow-ups.md yet — nothing to schema-check');
+} else {
+  const fups = checkFollowupsSchema(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+  if (fups.pipeLines === 0) {
+    ok('follow-ups.md has no table rows yet');
+  } else if (!fups.sawSeparator) {
+    error(`follow-ups.md has table rows but no header delimiter row, so every row is skipped — expected ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.dataRows === 0) {
+    ok('follow-ups.md has no logged follow-ups yet');
+  } else if (fups.parsed === 0) {
+    error(`follow-ups.md: none of its ${fups.dataRows} row(s) parse, so stats.mjs and followup-cadence.mjs will both report zero follow-ups — expected column order ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.unparsedLines.length > 0) {
+    warn(`follow-ups.md: ${fups.unparsedLines.length} of ${fups.dataRows} rows will be skipped by stats.mjs and followup-cadence.mjs (line${fups.unparsedLines.length === 1 ? '' : 's'} ${fups.unparsedLines.join(', ')}) — expected ${FOLLOWUPS_COLUMNS}`);
+  } else {
+    ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
   }
 }
 

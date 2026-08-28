@@ -35,17 +35,57 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
 // --- CLI args ---
 const args = process.argv.slice(2);
+
+// #2854: --help was never checked and an unrecognized/mistyped flag (e.g.
+// `--sumary`) silently fell through instead of failing fast — same shape as
+// scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745) and
+// dedup-tracker.mjs (#2744/#2746), shared via lib/cli-flags.mjs's
+// validateFlags() (#2775). Order matters: the unrecognized-flag check runs
+// BEFORE the --help check, so `--help --bogus` still errors instead of
+// printing usage and exiting 0.
+const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--help', '-h'];
+const USAGE = `Usage:
+  node invite-match.mjs < invite.txt          # JSON to stdout
+  node invite-match.mjs --file invite.txt     # read invite text from a file
+  node invite-match.mjs --summary             # human-readable summary instead of JSON
+  node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
+  node invite-match.mjs --self-test           # run the built-in self-test suite
+  node invite-match.mjs --help                # print this usage block and exit
+  node invite-match.mjs -h                    # same as --help`;
+
+// Only when invoked as a CLI, not when another script (scan.mjs,
+// detect-reposts.mjs) imports a helper like normalizeCompanyName — otherwise
+// invite-match's flag vocabulary would be validated against the IMPORTING
+// script's own process.argv and reject its perfectly valid flags (e.g.
+// detect-reposts.mjs --window). Same condition as the "Run" guard at the
+// bottom of this file.
+//
+// --file/--id are NOT listed as valueFlags: both are read below via the
+// existing hand-rolled `args.indexOf(...)` lookups (untouched — including
+// their deliberate "a following recognized flag counts as a missing value"
+// guard), which only understand the space-separated `--flag value` form.
+// Declaring them as valueFlags would make validateFlags silently accept
+// `--file=x`/`--id=5` as known, but that form would then fall straight
+// through the untouched indexOf lookups below and be dropped — the same
+// silent-ignore failure mode this issue exists to close, just moved to a
+// different spelling. Leaving them out means that form is rejected loudly
+// as an unrecognized flag instead.
+if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+}
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const fileIdx = args.indexOf('--file');
@@ -384,7 +424,13 @@ export function extractPlatform(text) {
  * Whether the call platform detected in `text` is a CONFIRMED AI-interviewer
  * platform (#2673) — the candidate has a live conversation with an AI
  * system rather than a human panel. Currently true only for Alex/Apriora,
- * whose host is single-purpose and always AI-led by product design.
+ * and only when Alex is the pattern that WINS the same ordered scan
+ * extractPlatform() runs: the host is not exclusively AI-led, since Alex also
+ * sells a "Coordinator" product that sends invites for human-conducted rounds,
+ * so an invite carrying both a human link and an alex.com link resolves to the
+ * human platform and answers false here. See the comment above
+ * PLATFORM_URL_PATTERNS, which this line used to contradict by calling the
+ * host "single-purpose and always AI-led by product design" (#2676).
  * HireVue is deliberately excluded even though it's detected by
  * extractPlatform(): it's a multi-modal platform (on-demand recorded,
  * live human-conducted, and a separate AI Interviewer product all share the
@@ -1071,7 +1117,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   } else {
